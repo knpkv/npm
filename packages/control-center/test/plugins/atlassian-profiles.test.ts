@@ -52,7 +52,10 @@ describe("AtlassianProfiles", () => {
             profile("jira-legacy-copy", { expiresAt: 1 }),
             profile("jira-only-secret", { id: "account-2@cloud-2" })
           ]
-          : [profile("confluence-legacy-copy")]
+          : [
+            profile("confluence-legacy-copy"),
+            profile("confluence-fallback-secret", { id: "account-3@cloud-3", scopes: CONFLUENCE_SCOPES })
+          ]
         yield* fileSystem.writeFileString(
           path.join(storePath, "profiles.json"),
           JSON.stringify({ activeProfileId: "account-1@cloud-1", profiles })
@@ -110,6 +113,15 @@ describe("AtlassianProfiles", () => {
         accountEmail: "avery@example.com",
         status: "valid",
         providers: ["confluence"]
+      }, {
+        profileId: "legacy:confluence:account-3@cloud-3",
+        name: "account-3@cloud-3 @ team.atlassian.net",
+        siteUrl: "https://team.atlassian.net/",
+        cloudId: "cloud-1",
+        accountName: "Avery Bell",
+        accountEmail: "avery@example.com",
+        status: "valid",
+        providers: ["confluence"]
       }])
       assert.notInclude(JSON.stringify(discovered), "secret")
 
@@ -140,10 +152,10 @@ describe("AtlassianProfiles", () => {
       )
       assert.strictEqual(namespacedLegacy?.token.access_token, "confluence-legacy-copy")
 
-      const unsupportedCanonical = yield* loadAtlassianProfile("confluence", "account-3@cloud-3").pipe(
+      const legacyFallback = yield* loadAtlassianProfile("confluence", "account-3@cloud-3").pipe(
         Effect.provideService(HomeDirectoryTag, homeDirectory),
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
-      assert.isNull(unsupportedCanonical)
+      assert.strictEqual(legacyFallback?.token.access_token, "confluence-fallback-secret")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

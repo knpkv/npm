@@ -103,6 +103,35 @@ const makeConcurrentProviderClient = (): HttpClient.HttpClient => {
   })
 }
 
+const makeProductScopedProviderClient = (
+  cloudId: string,
+  tokenScopes: ReadonlyArray<string>
+): HttpClient.HttpClient =>
+  HttpClient.make((request) => {
+    const body = request.url.endsWith("/oauth/token")
+      ? {
+        access_token: `access-${cloudId}`,
+        refresh_token: `refresh-${cloudId}`,
+        expires_in: 3_600,
+        scope: tokenScopes.join(" "),
+        token_type: "Bearer"
+      }
+      : request.url.endsWith("/accessible-resources")
+      ? [{
+        id: cloudId,
+        name: `Acme ${cloudId}`,
+        url: `https://${cloudId}.atlassian.net/`,
+        scopes: tokenScopes
+      }]
+      : { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+      )
+    )
+  })
+
 describe("AtlassianOAuthGrants", () => {
   it.effect("requires the same shared OAuth app in both destination stores", () =>
     Effect.gen(function*() {
@@ -439,6 +468,115 @@ describe("AtlassianOAuthGrants", () => {
       )
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, makeConcurrentProviderClient()),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("prevents a product-scoped grant from replacing another product token for the same profile", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-product-scope-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME)
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const jiraToken: OAuthToken = {
+        access_token: "jira-access",
+        refresh_token: "jira-refresh",
+        expires_at: 4_102_444_800_000,
+        scope: JIRA_SCOPES.join(" "),
+        cloud_id: "cloud-1",
+        site_url: "https://cloud-1.atlassian.net/",
+        user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+      }
+      const jiraProfile = yield* saveProfileToken(CONTROL_CENTER_AUTH_STORE_NAME, jiraToken).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const rejected = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-1").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(rejected))
+
+      const profiles = yield* loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.lengthOf(profiles.profiles, 1)
+      assert.strictEqual(profiles.profiles[0]?.id, jiraProfile.id)
+      assert.deepStrictEqual(profiles.profiles[0]?.token, jiraToken)
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, makeProductScopedProviderClient("cloud-1", CONFLUENCE_SCOPES)),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("saves a product-scoped grant for the same account on a different cloud", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-product-cloud-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME)
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const jiraToken: OAuthToken = {
+        access_token: "jira-access",
+        refresh_token: "jira-refresh",
+        expires_at: 4_102_444_800_000,
+        scope: JIRA_SCOPES.join(" "),
+        cloud_id: "cloud-1",
+        site_url: "https://cloud-1.atlassian.net/",
+        user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+      }
+      const jiraProfile = yield* saveProfileToken(CONTROL_CENTER_AUTH_STORE_NAME, jiraToken).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const profiles = yield* loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.lengthOf(profiles.profiles, 2)
+      assert.include(profiles.profiles.map(({ id }) => id), jiraProfile.id)
+      assert.include(profiles.profiles.map(({ id }) => id), completed.profileId)
+      assert.deepStrictEqual(profiles.profiles.find(({ id }) => id === jiraProfile.id)?.token, jiraToken)
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, makeProductScopedProviderClient("cloud-2", CONFLUENCE_SCOPES)),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

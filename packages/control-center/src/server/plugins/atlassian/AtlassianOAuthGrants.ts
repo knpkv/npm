@@ -24,6 +24,7 @@ import {
   loadProfiles,
   type OAuthConfig,
   type OAuthToken,
+  profileIdFromToken,
   saveOAuthConfig,
   saveProfileToken,
   writeSecureFile
@@ -79,6 +80,10 @@ interface AuthorizationGrant extends GrantOwner {
   readonly redirectUri: string
 }
 
+interface ExchangeGrant extends Omit<AuthorizationGrant, "_tag"> {
+  readonly _tag: "exchange"
+}
+
 interface SiteSelectionGrant extends GrantOwner {
   readonly _tag: "site-selection"
   readonly config: OAuthConfig
@@ -90,7 +95,7 @@ interface SiteSelectionGrant extends GrantOwner {
   readonly user: UserInfo
 }
 
-type PendingGrant = AuthorizationGrant | SiteSelectionGrant
+type PendingGrant = AuthorizationGrant | ExchangeGrant | SiteSelectionGrant
 type PendingGrants = ReadonlyMap<AtlassianOAuthGrantId, PendingGrant>
 
 /** Inputs bound to the owner session that starts or resumes an OAuth grant. */
@@ -155,6 +160,11 @@ const callbackPort = (publicOrigin: string): number => {
 const sameOAuthConfig = (left: OAuthConfig, right: OAuthConfig): boolean =>
   left.clientId === right.clientId && left.clientSecret === right.clientSecret
 
+const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boolean => {
+  const replacementScopes = new Set(replacement.scope.split(/\s+/).filter((scope) => scope.length > 0))
+  return stored.scope.split(/\s+/).filter((scope) => scope.length > 0).every((scope) => replacementScopes.has(scope))
+}
+
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
   const [jiraConfig, confluenceConfig] = yield* Effect.all([
     loadOAuthConfig(JIRA_AUTH_STORE_NAME),
@@ -167,7 +177,8 @@ const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthCon
 
 const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(function*(
   storeName: string,
-  sharedConfig: OAuthConfig
+  sharedConfig: OAuthConfig,
+  token: OAuthToken
 ) {
   const [currentConfig, profiles] = yield* Effect.all([
     loadOAuthConfig(storeName),
@@ -175,6 +186,10 @@ const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(
   ], { concurrency: 1 })
   const hasMatchingConfig = currentConfig !== null && sameOAuthConfig(currentConfig, sharedConfig)
   if (profiles.profiles.length > 0 && !hasMatchingConfig) return yield* unavailable()
+  const existingProfile = profiles.profiles.find((profile) => profile.id === profileIdFromToken(token))
+  if (existingProfile !== undefined && !preservesStoredScopes(existingProfile.token, token)) {
+    return yield* unavailable()
+  }
   return {
     storeName,
     shouldWriteConfig: !hasMatchingConfig
@@ -196,6 +211,35 @@ const takeGrant = Effect.fn("AtlassianOAuthGrants.takeGrant")(function*(
     }
     active.delete(grantId)
     return [grant, active]
+  })
+})
+
+const beginExchange = Effect.fn("AtlassianOAuthGrants.beginExchange")(function*(
+  grants: Ref.Ref<PendingGrants>,
+  grantId: AtlassianOAuthGrantId,
+  owner: AtlassianOAuthGrantOwner
+) {
+  const nowMilliseconds = yield* Clock.currentTimeMillis
+  return yield* Ref.modify(grants, (current): readonly [AuthorizationGrant | null, PendingGrants] => {
+    const active = activeGrants(current, nowMilliseconds)
+    const grant = active.get(grantId)
+    if (grant === undefined || grant._tag !== "authorization" || !sameOwner(grant, owner)) return [null, active]
+    active.set(grantId, { ...grant, _tag: "exchange" })
+    return [grant, active]
+  })
+})
+
+const removeExchange = Effect.fn("AtlassianOAuthGrants.removeExchange")(function*(
+  grants: Ref.Ref<PendingGrants>,
+  grantId: AtlassianOAuthGrantId,
+  createdAtMilliseconds: number
+) {
+  yield* Ref.update(grants, (current) => {
+    const grant = current.get(grantId)
+    if (grant?._tag !== "exchange" || grant.createdAtMilliseconds !== createdAtMilliseconds) return current
+    const next = new Map(current)
+    next.delete(grantId)
+    return next
   })
 })
 
@@ -266,7 +310,7 @@ const restoreGrantAfterSaveFailure = Effect.fn("AtlassianOAuthGrants.restoreAfte
   const nowMilliseconds = yield* Clock.currentTimeMillis
   yield* Ref.update(grants, (current) => {
     const active = activeGrants(current, nowMilliseconds)
-    if (!isExpired(grant, nowMilliseconds)) active.set(grantId, grant)
+    if (!isExpired(grant, nowMilliseconds) && active.size < MAXIMUM_PENDING_GRANTS) active.set(grantId, grant)
     return active
   })
 })
@@ -288,14 +332,13 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const providerHttpLayer = Layer.succeed(HttpClient.HttpClient, httpClient)
   const scheduleExpiry = (
     grantId: AtlassianOAuthGrantId,
-    createdAtMilliseconds: number,
-    phase: PendingGrant["_tag"]
+    createdAtMilliseconds: number
   ): Effect.Effect<void> =>
     Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(
       Effect.andThen(
         Ref.update(grants, (current) => {
           const grant = current.get(grantId)
-          if (grant?._tag === phase && grant.createdAtMilliseconds === createdAtMilliseconds) {
+          if (grant?.createdAtMilliseconds === createdAtMilliseconds) {
             const next = new Map(current)
             next.delete(grantId)
             return next
@@ -347,7 +390,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
       return [true, active]
     })
     if (!didInsert) return yield* new ApplicationConflict()
-    yield* scheduleExpiry(grantId, createdAtMilliseconds, "authorization")
+    yield* scheduleExpiry(grantId, createdAtMilliseconds)
 
     return {
       _tag: "ready",
@@ -368,43 +411,53 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     grantId,
     code
   ) {
-    const pending = yield* takeGrant(grants, grantId, owner, "authorization")
-    if (pending === null || pending._tag !== "authorization") return yield* new ApplicationResourceNotFound()
-    const tokens = yield* exchangeCodeForTokens(code, pending.config, {
-      port: callbackPort(new URL(pending.redirectUri).origin),
-      redirectUri: pending.redirectUri,
-      codeVerifier: pending.codeVerifier
-    }).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
-    const tokenExchangeAtMilliseconds = yield* Clock.currentTimeMillis
-    const [sites, user] = yield* Effect.all([
-      getAccessibleResources(tokens.access_token),
-      getUserInfo(tokens.access_token)
-    ]).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
-    const supportedSites = sites.filter((site) => supportsProducts(site, pending.providers))
-    const safeSites = yield* decodeSites(supportedSites)
+    const pending = yield* beginExchange(grants, grantId, owner)
+    if (pending === null) return yield* new ApplicationResourceNotFound()
+    const exchanged = yield* Effect.gen(function*() {
+      const tokens = yield* exchangeCodeForTokens(code, pending.config, {
+        port: callbackPort(new URL(pending.redirectUri).origin),
+        redirectUri: pending.redirectUri,
+        codeVerifier: pending.codeVerifier
+      }).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
+      const tokenExchangeAtMilliseconds = yield* Clock.currentTimeMillis
+      const [sites, user] = yield* Effect.all([
+        getAccessibleResources(tokens.access_token),
+        getUserInfo(tokens.access_token)
+      ]).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
+      const supportedSites = sites.filter((site) => supportsProducts(site, pending.providers))
+      const safeSites = yield* decodeSites(supportedSites)
+      return { safeSites, sites: supportedSites, tokenExchangeAtMilliseconds, tokens, user }
+    }).pipe(Effect.tapError(() => removeExchange(grants, grantId, pending.createdAtMilliseconds)))
     const createdAtMilliseconds = yield* Clock.currentTimeMillis
-    yield* Ref.update(grants, (current) => {
+    const didTransition = yield* Ref.modify(grants, (current): readonly [boolean, PendingGrants] => {
       const active = activeGrants(current, createdAtMilliseconds)
+      const reserved = active.get(grantId)
+      if (
+        reserved?._tag !== "exchange" ||
+        reserved.createdAtMilliseconds !== pending.createdAtMilliseconds ||
+        !sameOwner(reserved, owner)
+      ) return [false, active]
       active.set(grantId, {
         _tag: "site-selection",
         ...owner,
         config: pending.config,
         createdAtMilliseconds,
         providers: pending.providers,
-        sites: supportedSites,
-        tokenExpiresAtMilliseconds: tokenExchangeAtMilliseconds + tokens.expires_in * 1_000,
-        tokens,
-        user
+        sites: exchanged.sites,
+        tokenExpiresAtMilliseconds: exchanged.tokenExchangeAtMilliseconds + exchanged.tokens.expires_in * 1_000,
+        tokens: exchanged.tokens,
+        user: exchanged.user
       })
-      return active
+      return [true, active]
     })
-    yield* scheduleExpiry(grantId, createdAtMilliseconds, "site-selection")
-    const accountEmail = user.email.trim()
+    if (!didTransition) return yield* new ApplicationResourceNotFound()
+    yield* scheduleExpiry(grantId, createdAtMilliseconds)
+    const accountEmail = exchanged.user.email.trim()
     return {
       grantId,
-      accountName: user.name,
+      accountName: exchanged.user.name,
       accountEmail: accountEmail.length === 0 ? null : accountEmail,
-      sites: safeSites
+      sites: exchanged.safeSites
     }
   })
 
@@ -438,7 +491,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
           Effect.mapError(unavailable)
         )
         return yield* Effect.gen(function*() {
-          const plan = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config)
+          const plan = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config, token)
           if (plan.shouldWriteConfig) yield* saveOAuthConfig(plan.storeName, pending.config)
           return yield* saveProfileToken(plan.storeName, token)
         }).pipe(
