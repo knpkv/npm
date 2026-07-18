@@ -26,6 +26,7 @@ import {
 import { SessionCookieAuth, SessionMutationAuth } from "./session.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
 const MAXIMUM_SECRET_VALUE_LENGTH = 16_384
 
@@ -190,6 +191,25 @@ export const PluginServiceCatalogEntry = Schema.Struct({
 /** Decoded safe metadata for one fixed first-party service. */
 export type PluginServiceCatalogEntry = typeof PluginServiceCatalogEntry.Type
 
+/** One local AWS CLI profile available to first-party AWS adapters. */
+export const DiscoveredAwsProfile = Schema.Struct({
+  profile: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  region: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)))
+}).annotate({ identifier: "DiscoveredAwsProfile" })
+
+/** Decoded local AWS profile metadata; credentials never cross this contract. */
+export type DiscoveredAwsProfile = typeof DiscoveredAwsProfile.Type
+
+/** Bounded local AWS profile discovery response. */
+export const AwsProfileDiscoveryResponse = Schema.Array(DiscoveredAwsProfile).check(
+  Schema.makeFilter((profiles) => profiles.length <= MAXIMUM_DISCOVERED_AWS_PROFILES, {
+    expected: `at most ${MAXIMUM_DISCOVERED_AWS_PROFILES} discovered AWS profiles`
+  })
+)
+
+/** Decoded bounded AWS profile discovery response. */
+export type AwsProfileDiscoveryResponse = typeof AwsProfileDiscoveryResponse.Type
+
 /** Bounded plugin-navigation and portfolio response retained for v1 clients. */
 export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
   Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
@@ -347,6 +367,11 @@ const overview = HttpApiEndpoint.get("overview", "/overview", {
   error: pluginReadErrors
 }).middleware(SessionCookieAuth)
 
+const discoverAwsProfiles = HttpApiEndpoint.get("discoverAwsProfiles", "/discovery/aws-profiles", {
+  success: AwsProfileDiscoveryResponse,
+  error: pluginReadErrors
+}).middleware(SessionCookieAuth)
+
 const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
   payload: CreatePluginConnectionRequest,
   success: CreatePluginConnectionResponse,
@@ -408,6 +433,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
   .add(
     list,
     overview,
+    discoverAwsProfiles,
     createConnection,
     setConnectionEnabled,
     health,

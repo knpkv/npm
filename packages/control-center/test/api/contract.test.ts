@@ -225,6 +225,7 @@ describe("ControlCenterApi contract", () => {
       [
         ["list", "GET", "/api/v1/plugins"],
         ["overview", "GET", "/api/v1/plugins/overview"],
+        ["discoverAwsProfiles", "GET", "/api/v1/plugins/discovery/aws-profiles"],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
@@ -333,6 +334,7 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(PluginsApiGroup.endpoints), {
       list: [SessionCookieAuth.key],
       overview: [SessionCookieAuth.key],
+      discoverAwsProfiles: [SessionCookieAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],

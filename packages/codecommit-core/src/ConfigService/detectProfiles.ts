@@ -4,13 +4,14 @@
 import { Array as Arr, Effect, HashMap, pipe } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { ConfigPaths, parseAwsConfig } from "./internal.js"
+import { ConfigPaths, type DetectedProfile, parseAwsConfig } from "./internal.js"
 
-export const detectProfiles = Effect.gen(function*() {
+/** Discover AWS CLI profiles from one explicit home directory. */
+export const discoverAwsProfiles = Effect.fn("ConfigService.discoverAwsProfiles")(function*(
+  home: string
+): Effect.fn.Return<ReadonlyArray<DetectedProfile>, never, FileSystem.FileSystem | Path.Path> {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const paths = yield* ConfigPaths
-  const home = yield* paths.homePath
   const configPath = path.join(home, ".aws", "config")
   const credsPath = path.join(home, ".aws", "credentials")
 
@@ -25,11 +26,17 @@ export const detectProfiles = Effect.gen(function*() {
     Arr.reduce(
       HashMap.empty<string, typeof profiles[number]>(),
       (map, p) =>
-        HashMap.has(map, p.name) && p.region === "us-east-1"
+        HashMap.has(map, p.name) && (p.region === undefined || p.region === "us-east-1")
           ? map
           : HashMap.set(map, p.name, p)
     ),
     HashMap.values,
     Arr.fromIterable
   )
+})
+
+export const detectProfiles = Effect.gen(function*() {
+  const paths = yield* ConfigPaths
+  const home = yield* paths.homePath
+  return yield* discoverAwsProfiles(home)
 }).pipe(Effect.withSpan("ConfigService.detectProfiles"))

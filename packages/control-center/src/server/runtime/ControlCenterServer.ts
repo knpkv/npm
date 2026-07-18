@@ -1,6 +1,8 @@
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import type * as Path from "effect/Path"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
@@ -128,7 +130,13 @@ const liveApplicationServices = (
 ): Layer.Layer<
   ControlCenterCoreApplicationServices,
   never,
-  Crypto.Crypto | DomainEventWakeups | HttpClient.HttpClient | Persistence | SecretStore
+  | Crypto.Crypto
+  | DomainEventWakeups
+  | FileSystem.FileSystem
+  | HttpClient.HttpClient
+  | Path.Path
+  | Persistence
+  | SecretStore
 > =>
   Layer.mergeAll(
     authorizedSharesLayer,
@@ -164,7 +172,14 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
-    ApplicationRequirements | Crypto.Crypto | DomainEventWakeups | HttpClient.HttpClient | Persistence | SecretStore
+    | ApplicationRequirements
+    | Crypto.Crypto
+    | DomainEventWakeups
+    | FileSystem.FileSystem
+    | HttpClient.HttpClient
+    | Path.Path
+    | Persistence
+    | SecretStore
   > = options.applicationServices ?? liveApplicationServices(
     options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null,
     options.firstPartyPluginRuntime ?? false

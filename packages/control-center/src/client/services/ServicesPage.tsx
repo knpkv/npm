@@ -6,6 +6,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useS
 import { useNavigate, useSearchParams } from "react-router"
 
 import type {
+  AwsProfileDiscoveryResponse,
   CreatePluginConnectionValue,
   PluginConnectionSummary,
   PluginConnectionTestResult,
@@ -26,6 +27,12 @@ type ConnectionTestState =
   | { readonly _tag: "request-failed" }
 
 type ConnectionEnablementState = "changing" | "request-failed"
+
+type AwsProfilesState =
+  | { readonly _tag: "idle" }
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "failed" }
+  | { readonly _tag: "ready"; readonly profiles: AwsProfileDiscoveryResponse }
 
 type ConnectionsState =
   | { readonly _tag: "idle" }
@@ -185,11 +192,15 @@ const setupValue = (field: PluginServiceCatalogEntry["configurationFields"][numb
 }
 
 const SetupForm = ({
+  awsProfiles,
+  awsProfilesState,
   catalog,
   isSubmitting,
   onCancel,
   onSubmit
 }: {
+  readonly awsProfiles: AwsProfileDiscoveryResponse
+  readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly catalog: PluginServiceCatalogEntry
   readonly isSubmitting: boolean
   readonly onCancel: () => void
@@ -200,6 +211,15 @@ const SetupForm = ({
   const [values, setValues] = useState<ReadonlyMap<string, string>>(
     new Map(catalog.configurationFields.map((field) => [field.key, field.defaultValue ?? ""]))
   )
+  const selectedAwsProfile = values.get("profile")
+
+  useEffect(() => {
+    const detectedRegion = awsProfiles.find(({ profile }) => profile === selectedAwsProfile)?.region
+    if (detectedRegion === null || detectedRegion === undefined) return
+    setValues((current) =>
+      current.get("region") === detectedRegion ? current : new Map(current).set("region", detectedRegion)
+    )
+  }, [awsProfiles, selectedAwsProfile])
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
@@ -220,6 +240,10 @@ const SetupForm = ({
     })
   }
 
+  const updateValue = (key: string, value: string): void => {
+    setValues((current) => new Map(current).set(key, value))
+  }
+
   return (
     <form className={styles.setupForm} onSubmit={submit}>
       <Field label="Connection name" required size="compact">
@@ -232,6 +256,17 @@ const SetupForm = ({
           />
         )}
       </Field>
+      {catalog.providerId === "codecommit" || catalog.providerId === "codepipeline" ? (
+        <Text tone="secondary" variant="meta">
+          {awsProfilesState === "loading"
+            ? "Discovering local AWS profiles…"
+            : awsProfilesState === "ready"
+              ? `${awsProfiles.length} local AWS ${awsProfiles.length === 1 ? "profile" : "profiles"} detected`
+              : awsProfilesState === "failed"
+                ? "Profile discovery unavailable. Enter a profile manually."
+                : "AWS profiles are discovered locally by the Control Center server."}
+        </Text>
+      ) : null}
       {catalog.configurationFields.map((field) => (
         <Field
           description={field.description}
@@ -248,7 +283,10 @@ const SetupForm = ({
               max={field.maximum ?? undefined}
               maxLength={field.kind === "integer" ? undefined : field.kind === "secret" ? 16_384 : 4_096}
               min={field.minimum ?? undefined}
-              onChange={(event) => setValues((current) => new Map(current).set(field.key, event.currentTarget.value))}
+              list={
+                field.key === "profile" && awsProfiles.length > 0 ? `${catalog.providerId}-aws-profiles` : undefined
+              }
+              onChange={(event) => updateValue(field.key, event.currentTarget.value)}
               type={
                 field.kind === "secret"
                   ? "password"
@@ -263,6 +301,13 @@ const SetupForm = ({
           )}
         </Field>
       ))}
+      {awsProfiles.length > 0 ? (
+        <datalist id={`${catalog.providerId}-aws-profiles`}>
+          {awsProfiles.map(({ profile, region }) => (
+            <option key={profile} label={region ?? "Region not configured"} value={profile} />
+          ))}
+        </datalist>
+      ) : null}
       {setupError === null ? null : (
         <Text as="p" className={styles.setupError} role="alert" variant="body">
           {setupError}
@@ -281,6 +326,8 @@ const SetupForm = ({
 }
 
 const CatalogCard = ({
+  awsProfiles,
+  awsProfilesState,
   canConfigure,
   catalog,
   isOpen,
@@ -290,6 +337,8 @@ const CatalogCard = ({
   onOpen,
   onSubmit
 }: {
+  readonly awsProfiles: AwsProfileDiscoveryResponse
+  readonly awsProfilesState: AwsProfilesState["_tag"]
   readonly canConfigure: boolean
   readonly catalog: PluginServiceCatalogEntry
   readonly isOpen: boolean
@@ -317,7 +366,14 @@ const CatalogCard = ({
       {catalog.description}
     </Text>
     {isOpen ? (
-      <SetupForm catalog={catalog} isSubmitting={isSubmitting} onCancel={onCancel} onSubmit={onSubmit} />
+      <SetupForm
+        awsProfiles={awsProfiles}
+        awsProfilesState={awsProfilesState}
+        catalog={catalog}
+        isSubmitting={isSubmitting}
+        onCancel={onCancel}
+        onSubmit={onSubmit}
+      />
     ) : (
       <div className={styles.cardAction}>
         <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
@@ -381,6 +437,7 @@ export const ServicesPage = ({
   const sessionKey = browserReadableSessionKey(sessionState)
   const [requestRevision, setRequestRevision] = useState(0)
   const [connectionsState, setConnectionsState] = useState<ConnectionsState>({ _tag: "idle" })
+  const [awsProfilesState, setAwsProfilesState] = useState<AwsProfilesState>({ _tag: "idle" })
   const [testStates, setTestStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionTestState>>(new Map())
   const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
     new Map()
@@ -390,6 +447,7 @@ export const ServicesPage = ({
   const testRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const createRequest = useRef<AbortController | null>(null)
   const enablementRequests = useRef(new Map<PluginConnectionId, AbortController>())
+  const awsProfileRequest = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -412,15 +470,42 @@ export const ServicesPage = ({
   }, [invalidateSession, requestRevision, sessionKey, transport])
 
   useEffect(() => {
+    if (sessionKey === null || (openProvider !== "codecommit" && openProvider !== "codepipeline")) return
+    awsProfileRequest.current?.abort()
+    const request = new AbortController()
+    awsProfileRequest.current = request
+    setAwsProfilesState({ _tag: "loading" })
+    const discoverAwsProfiles = transport.discoverAwsProfiles
+    if (discoverAwsProfiles === undefined) {
+      setAwsProfilesState({ _tag: "failed" })
+      return () => request.abort()
+    }
+    discoverAwsProfiles(request.signal).then(
+      (profiles) => {
+        if (!request.signal.aborted) setAwsProfilesState({ _tag: "ready", profiles })
+      },
+      (failure) => {
+        if (request.signal.aborted) return
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        setAwsProfilesState({ _tag: "failed" })
+      }
+    )
+    return () => request.abort()
+  }, [invalidateSession, openProvider, sessionKey, transport])
+
+  useEffect(() => {
     setTestStates(new Map())
     setEnablementStates(new Map())
     setOpenProvider(null)
     setSubmittingProvider(null)
+    setAwsProfilesState({ _tag: "idle" })
     return () => {
       for (const request of testRequests.current.values()) request.abort()
       testRequests.current.clear()
       createRequest.current?.abort()
       createRequest.current = null
+      awsProfileRequest.current?.abort()
+      awsProfileRequest.current = null
       for (const request of enablementRequests.current.values()) request.abort()
       enablementRequests.current.clear()
     }
@@ -662,6 +747,8 @@ export const ServicesPage = ({
             return [
               ...cards,
               <CatalogCard
+                awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
+                awsProfilesState={awsProfilesState._tag}
                 canConfigure={canConfigure}
                 catalog={catalog}
                 isOpen={openProvider === catalog.providerId}

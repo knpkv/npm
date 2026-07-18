@@ -915,6 +915,39 @@ describe("Control Center API handlers", () => {
       )
     }))
 
+  it.effect("discovers credential-free AWS profile metadata for workspace owners", () =>
+    Effect.gen(function*() {
+      const expected = [
+        { profile: "default", region: null },
+        { profile: "production", region: "eu-west-1" }
+      ]
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        discoverAwsProfiles: () => Effect.succeed(expected),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.discoverAwsProfiles()
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
   it.effect("runs owner connection setup through the session and CSRF-protected handler", () =>
     Effect.gen(function*() {
       const expected = Schema.decodeUnknownSync(CreatePluginConnectionResponse)({

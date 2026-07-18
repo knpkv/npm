@@ -3,6 +3,8 @@ import { assert, describe, it } from "@effect/vitest"
 import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
+import type * as FileSystem from "effect/FileSystem"
+import type * as Path from "effect/Path"
 import * as TestClock from "effect/testing/TestClock"
 
 import {
@@ -215,7 +217,11 @@ const currentRelease = Schema.decodeSync(Release)({
 })
 
 const withApplication = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, Crypto.Crypto | Database | DomainEventWakeups | Persistence | SecretStore>
+  use: Effect.Effect<
+    Success,
+    Failure,
+    Crypto.Crypto | Database | DomainEventWakeups | FileSystem.FileSystem | Path.Path | Persistence | SecretStore
+  >
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-application-")

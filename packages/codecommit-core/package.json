@@ -8,6 +8,7 @@
     ".": "./src/index.ts",
     "./Domain.js": "./src/Domain.ts",
     "./CacheService.js": "./src/CacheService/index.ts",
+    "./ConfigService.js": "./src/ConfigService/index.ts",
     "./ReadClient.js": "./src/ReadClient/index.ts",
     "./SandboxService.js": "./src/SandboxService/index.ts",
     "./*.js": "./src/*.ts"
@@ -18,6 +19,7 @@
     "types": "dist/dts/index.d.ts",
     "exports": {
       ".": "./dist/index.js",
+      "./ConfigService.js": "./dist/ConfigService/index.js",
       "./ReadClient.js": "./dist/ReadClient/index.js",
       "./*.js": "./dist/*.js"
     }

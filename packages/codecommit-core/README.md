@@ -79,6 +79,12 @@ Key patterns:
 
 Loads/saves `~/.codecommit/config.json`. Auto-detects AWS profiles. Publishes config changes to EventsHub.
 
+Consumers that only need the shared AWS profile catalogue can use
+`discoverAwsProfiles(homeDirectory)` from `@knpkv/codecommit-core/ConfigService.js`.
+It reads the standard AWS config and credentials files, deduplicates profile
+names, and returns safe profile/region metadata only; credential values are
+never returned.
+
 ## Deep Imports
 
 Client-side code must use deep imports to avoid pulling in server-only deps:
