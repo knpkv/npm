@@ -26,8 +26,8 @@ import {
   deliveryGraphInspectionLayer,
   liveEventsLayer,
   mediaReadsLayer,
-  pluginAdministrationLayer,
-  pluginAdministrationLayerWithConnections,
+  pluginAdministrationOAuthLayer,
+  pluginAdministrationOAuthLayerWithConnections,
   portfolioSnapshotsLayer,
   relationshipRepairProposalsLayer,
   type ReleaseAgentRuntimeOptions,
@@ -126,7 +126,8 @@ export type ControlCenterServerError<ApplicationError = never> =
 
 const liveApplicationServices = (
   pluginConnections: PluginConnectionMapV1 | null,
-  firstPartyPluginRuntime: boolean
+  firstPartyPluginRuntime: boolean,
+  publicOrigin: string
 ): Layer.Layer<
   ControlCenterCoreApplicationServices,
   never,
@@ -141,15 +142,15 @@ const liveApplicationServices = (
   Layer.mergeAll(
     authorizedSharesLayer,
     pluginConnections !== null
-      ? pluginAdministrationLayerWithConnections(pluginConnections)
+      ? pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin)
       : firstPartyPluginRuntime
       ? Layer.unwrap(
         Effect.map(
           PluginConnectionMap,
-          pluginAdministrationLayerWithConnections
+          (connections) => pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin)
         )
       ).pipe(Layer.provide(firstPartyPluginConnectionMapLayer))
-      : pluginAdministrationLayer,
+      : pluginAdministrationOAuthLayer(publicOrigin),
     deliveryGraphInspectionLayer,
     portfolioSnapshotsLayer,
     timelineExportAuditsLayer,
@@ -182,7 +183,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     | SecretStore
   > = options.applicationServices ?? liveApplicationServices(
     options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null,
-    options.firstPartyPluginRuntime ?? false
+    options.firstPartyPluginRuntime ?? false,
+    options.bindConfig.publicOrigin
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer

@@ -42,6 +42,8 @@ import {
 export interface ExchangeCodeOptions {
   /** Local callback server port (for redirect_uri) */
   readonly port: number
+  /** Exact callback URL used by the authorization request. */
+  readonly redirectUri?: string | undefined
   /** PKCE code verifier (if PKCE was used in auth request) */
   readonly codeVerifier?: string | undefined
 }
@@ -63,7 +65,7 @@ export const exchangeCodeForTokens = (
       client_id: config.clientId,
       client_secret: config.clientSecret,
       code,
-      redirect_uri: `http://localhost:${options.port}/callback`
+      redirect_uri: options.redirectUri ?? `http://localhost:${options.port}/callback`
     }
     if (options.codeVerifier) tokenBody.code_verifier = options.codeVerifier
     const request = yield* HttpClientRequest.post(TOKEN_URL).pipe(

@@ -1,0 +1,25 @@
+.page {
+  display: grid;
+  gap: var(--rly-space-6);
+  margin: 0 auto;
+  max-width: 44rem;
+  padding: var(--rly-space-8) var(--rly-space-4);
+}
+
+.heading,
+.sites {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.site {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-4);
+  justify-content: space-between;
+}
+
+.identity {
+  display: grid;
+  gap: var(--rly-space-2);
+}

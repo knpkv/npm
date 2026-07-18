@@ -230,6 +230,17 @@ describe("ControlCenterApi contract", () => {
         ["overview", "GET", "/api/v1/plugins/overview"],
         ["discoverAwsProfiles", "GET", "/api/v1/plugins/discovery/aws-profiles"],
         ["discoverAtlassianProfiles", "GET", "/api/v1/plugins/discovery/atlassian-profiles"],
+        ["createAtlassianOAuthGrant", "POST", "/api/v1/plugins/oauth/atlassian/grants"],
+        [
+          "exchangeAtlassianOAuthGrant",
+          "POST",
+          "/api/v1/plugins/oauth/atlassian/grants/:grantId/exchange"
+        ],
+        [
+          "completeAtlassianOAuthGrant",
+          "POST",
+          "/api/v1/plugins/oauth/atlassian/grants/:grantId/complete"
+        ],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
@@ -340,6 +351,9 @@ describe("ControlCenterApi contract", () => {
       overview: [SessionCookieAuth.key],
       discoverAwsProfiles: [SessionCookieAuth.key],
       discoverAtlassianProfiles: [SessionCookieAuth.key],
+      createAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
+      exchangeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
+      completeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],

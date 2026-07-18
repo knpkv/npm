@@ -46,6 +46,10 @@ import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
+import {
+  type AtlassianOAuthGrantOperations,
+  makeAtlassianOAuthGrants
+} from "../plugins/atlassian/AtlassianOAuthGrants.js"
 import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
@@ -1001,7 +1005,9 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
 
 /** Construct the secret-free plugin administration adapter over durable host state. */
 export const makePluginAdministrationWithConnections = Effect.fn("PluginAdministration.makeWithConnections")(function*(
-  pluginConnections: PluginConnectionMapV1 | null
+  pluginConnections: PluginConnectionMapV1 | null,
+  publicOrigin = "http://127.0.0.1:4173",
+  atlassianOAuthGrants?: AtlassianOAuthGrantOperations
 ) {
   const persistence = yield* Persistence
   const cryptoService = yield* Crypto.Crypto
@@ -1039,6 +1045,16 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       if (profiles.length > MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES) return yield* unavailable()
       return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
+    ...(atlassianOAuthGrants === undefined
+      ? {}
+      : {
+        startAtlassianOAuthGrant: ({ sessionId, workspaceId }) =>
+          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin),
+        exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
+          atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
+        completeAtlassianOAuthGrant: ({ cloudId, grantId, sessionId, workspaceId }) =>
+          atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+      }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(
         persistence,
@@ -1152,12 +1168,33 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
 /** Construct administration reads when no provider runtime registry is configured. */
 export const makePluginAdministration = makePluginAdministrationWithConnections(null)
 
+/** Construct administration with the process-local browser OAuth grant manager enabled. */
+export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration.makeWithOAuth")(function*(
+  pluginConnections: PluginConnectionMapV1 | null,
+  publicOrigin: string
+) {
+  const grants = yield* makeAtlassianOAuthGrants()
+  return yield* makePluginAdministrationWithConnections(pluginConnections, publicOrigin, grants)
+})
+
 /** Live plugin administration layer. */
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration)
 
+/** Live administration layer with browser Atlassian OAuth grants. */
+export const pluginAdministrationOAuthLayer = (publicOrigin: string) =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin))
+
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
-export const pluginAdministrationLayerWithConnections = (pluginConnections: PluginConnectionMapV1) =>
-  Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections))
+export const pluginAdministrationLayerWithConnections = (
+  pluginConnections: PluginConnectionMapV1,
+  publicOrigin?: string
+) => Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections, publicOrigin))
+
+/** Live administration layer backed by provider runtimes and browser Atlassian OAuth grants. */
+export const pluginAdministrationOAuthLayerWithConnections = (
+  pluginConnections: PluginConnectionMapV1,
+  publicOrigin: string
+) => Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections

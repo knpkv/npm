@@ -2,6 +2,7 @@ import { Button, Field, Text } from "@knpkv/rly/primitives"
 import { type FormEvent, type ReactElement, useEffect, useState } from "react"
 
 import type {
+  AtlassianOAuthGrantStartResponse,
   AtlassianProfileDiscoveryResponse,
   DiscoveredAtlassianProfile,
   PluginServiceCatalogEntry
@@ -36,6 +37,7 @@ export const AtlassianAccountSetupForm = ({
   catalogs,
   isSubmitting,
   onCancel,
+  onStartOAuth,
   onSubmit,
   profiles,
   profilesState,
@@ -44,6 +46,7 @@ export const AtlassianAccountSetupForm = ({
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isSubmitting: boolean
   readonly onCancel: () => void
+  readonly onStartOAuth: () => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
   readonly profilesState: "failed" | "idle" | "loading" | "ready"
@@ -62,6 +65,8 @@ export const AtlassianAccountSetupForm = ({
   const [probePageId, setProbePageId] = useState("")
   const [email, setEmail] = useState("")
   const [apiToken, setApiToken] = useState("")
+  const [isStartingOAuth, setIsStartingOAuth] = useState(false)
+  const [oauthCallbackUrl, setOAuthCallbackUrl] = useState<string | null>(null)
   const [setupError, setSetupError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -153,6 +158,27 @@ export const AtlassianAccountSetupForm = ({
     })
   }
 
+  const startOAuth = (): void => {
+    setSetupError(null)
+    setOAuthCallbackUrl(null)
+    setIsStartingOAuth(true)
+    void onStartOAuth().then(
+      (result) => {
+        if (result._tag === "configuration-required") {
+          setOAuthCallbackUrl(result.callbackUrl)
+          setSetupError("OAuth needs a one-time local client configuration before sign-in.")
+          setIsStartingOAuth(false)
+          return
+        }
+        window.location.assign(result.authorizationUrl)
+      },
+      () => {
+        setSetupError("Control Center could not start Atlassian sign-in. Try again.")
+        setIsStartingOAuth(false)
+      }
+    )
+  }
+
   const discoveryMessage =
     profilesState === "loading"
       ? "Finding local Atlassian OAuth profiles…"
@@ -191,10 +217,19 @@ export const AtlassianAccountSetupForm = ({
       </Field>
       {authenticationMode === "oauth" ? (
         <>
+          <Button loading={isStartingOAuth} onClick={startOAuth} type="button" variant="primary">
+            Sign in with Atlassian
+          </Button>
+          {oauthCallbackUrl === null ? null : (
+            <Text as="p" tone="secondary" variant="meta">
+              Add <code>{oauthCallbackUrl}</code> as the callback URL, then run <code>jira auth configure</code> or
+              <code> confluence auth configure</code> on this machine.
+            </Text>
+          )}
           <Field label="OAuth profile" required size="compact">
             {(controlProps) => (
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
-                <option value="">Choose a local profile</option>
+                <option value="">Choose a profile already on this machine</option>
                 {profiles.map((profile) => (
                   <option
                     disabled={!isUsableProfile(profile, setupIntent)}

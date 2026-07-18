@@ -9,8 +9,11 @@ export {
   listPluginConnectionSummaries,
   makePluginAdministration,
   makePluginAdministrationWithConnections,
+  makePluginAdministrationWithOAuth,
   pluginAdministrationLayer,
-  pluginAdministrationLayerWithConnections
+  pluginAdministrationLayerWithConnections,
+  pluginAdministrationOAuthLayer,
+  pluginAdministrationOAuthLayerWithConnections
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
 export {

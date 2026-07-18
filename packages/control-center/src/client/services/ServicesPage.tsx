@@ -5,6 +5,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useS
 import { useNavigate, useSearchParams } from "react-router"
 
 import type {
+  AtlassianOAuthGrantStartResponse,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionValue,
@@ -241,6 +242,7 @@ const CatalogCard = ({
   isSubmitting,
   onCancel,
   onOpen,
+  onStartAtlassianOAuth,
   onSubmit,
   onSubmitAtlassian,
   onSubmitAws
@@ -258,6 +260,7 @@ const CatalogCard = ({
   readonly isRecovery: boolean
   readonly onCancel: () => void
   readonly onOpen: () => void
+  readonly onStartAtlassianOAuth: () => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
   readonly onSubmitAtlassian: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly onSubmitAws: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
@@ -297,6 +300,7 @@ const CatalogCard = ({
             catalogs={catalogs}
             isSubmitting={isSubmitting}
             onCancel={onCancel}
+            onStartOAuth={onStartAtlassianOAuth}
             onSubmit={onSubmitAtlassian}
             profiles={atlassianProfiles}
             profilesState={atlassianProfilesState}
@@ -808,6 +812,12 @@ export const ServicesPage = ({
                       setAtlassianSetupIntent(missingAtlassianIntent)
                     }
                     setOpenProvider(catalog.providerId)
+                  }}
+                  onStartAtlassianOAuth={() => {
+                    const start = transport.startAtlassianOAuthGrant
+                    if (start === undefined) return Promise.reject(new Error("Atlassian OAuth is unavailable"))
+                    const request = new AbortController()
+                    return start(request.signal)
                   }}
                   onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
                   onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}

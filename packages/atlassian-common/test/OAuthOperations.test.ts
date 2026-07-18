@@ -127,6 +127,22 @@ describe("OAuthOperations", () => {
         expect(body.code_verifier).toBe("my-verifier")
       }))
 
+    it.effect("uses the same application callback URL during exchange", () =>
+      Effect.gen(function*() {
+        const { capturedRequests, mockClient } = createMockHttpClient([{ status: 200, body: validTokenBody }])
+        const redirectUri = "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+
+        yield* exchangeCodeForTokens("auth-code", oauthConfig, { port: 4173, redirectUri }).pipe(
+          provide(mockClient)
+        )
+
+        const request = capturedRequests[0]!
+        const body = yield* request.body._tag === "Uint8Array"
+          ? Effect.succeed(JSON.parse(new TextDecoder().decode(request.body.body)))
+          : Effect.succeed({})
+        expect(body.redirect_uri).toBe(redirectUri)
+      }))
+
     // Token exchange failures (invalid code, expired code) must surface as OAuthError with step="token"
     it.effect("returns OAuthError with step=token on HTTP 400", () =>
       Effect.gen(function*() {

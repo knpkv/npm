@@ -931,6 +931,33 @@ describe("ServicesPage connection tests", () => {
     expect(create.mock.calls[0]?.[0].providerId).toBe("confluence")
   })
 
+  it("starts OAuth from the Atlassian form and reports the exact callback setup", async () => {
+    const startAtlassianOAuthGrant = vi.fn().mockResolvedValue({
+      _tag: "configuration-required",
+      callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=confluence")
+    await act(async () => undefined)
+    const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Sign in with Atlassian")
+    )
+
+    await act(async () => signIn?.click())
+
+    expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
+    expect(host.textContent).toContain("OAuth needs a one-time local client configuration")
+    expect(host.textContent).toContain("http://127.0.0.1:4173/services/oauth/atlassian/callback")
+  })
+
   it("adds an intentional second Atlassian account when both products already exist", async () => {
     const connectionIds = [
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000163"),

@@ -94,6 +94,8 @@ export interface BuildAuthUrlOptions {
   readonly state: string
   /** Local callback server port */
   readonly port: number
+  /** Exact callback URL for an existing application server. */
+  readonly redirectUri?: string | undefined
   /** OAuth2 scopes */
   readonly scopes: ReadonlyArray<string>
   /** PKCE code_challenge (S256). Omit to skip PKCE. */
@@ -110,7 +112,7 @@ export const buildAuthUrl = (options: BuildAuthUrlOptions): string => {
     audience: "api.atlassian.com",
     client_id: options.clientId,
     scope: options.scopes.join(" "),
-    redirect_uri: `http://localhost:${options.port}/callback`,
+    redirect_uri: options.redirectUri ?? `http://localhost:${options.port}/callback`,
     state: options.state,
     response_type: "code",
     prompt: "consent"

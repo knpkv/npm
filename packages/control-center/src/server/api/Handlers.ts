@@ -311,6 +311,68 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
           }))
+        .handle("createAtlassianOAuthGrant", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const startAtlassianOAuthGrant = plugins.startAtlassianOAuthGrant
+            if (startAtlassianOAuthGrant === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* startAtlassianOAuthGrant({
+              workspaceId: session.workspaceId,
+              sessionId: session.sessionId
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("exchangeAtlassianOAuthGrant", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const exchangeAtlassianOAuthGrant = plugins.exchangeAtlassianOAuthGrant
+            if (exchangeAtlassianOAuthGrant === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* exchangeAtlassianOAuthGrant({
+              workspaceId: session.workspaceId,
+              sessionId: session.sessionId,
+              grantId: params.grantId,
+              code: payload.code
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("completeAtlassianOAuthGrant", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const completeAtlassianOAuthGrant = plugins.completeAtlassianOAuthGrant
+            if (completeAtlassianOAuthGrant === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* completeAtlassianOAuthGrant({
+              workspaceId: session.workspaceId,
+              sessionId: session.sessionId,
+              grantId: params.grantId,
+              cloudId: payload.cloudId
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("createConnection", ({ payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

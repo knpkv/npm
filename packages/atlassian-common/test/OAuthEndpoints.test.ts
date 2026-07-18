@@ -90,6 +90,20 @@ describe("OAuthEndpoints", () => {
       expect(parsed.searchParams.get("prompt")).toBe("consent")
     })
 
+    it("uses an application callback URL when supplied", () => {
+      const url = buildAuthUrl({
+        clientId: "cid",
+        state: "state-123",
+        port: 4173,
+        redirectUri: "http://127.0.0.1:4173/services/oauth/atlassian/callback",
+        scopes: ["read:me"]
+      })
+
+      expect(new URL(url).searchParams.get("redirect_uri")).toBe(
+        "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      )
+    })
+
     // PKCE is optional — omitting codeChallenge must not add params (backwards compat)
     it("omits PKCE params when codeChallenge not provided", () => {
       const url = buildAuthUrl({
