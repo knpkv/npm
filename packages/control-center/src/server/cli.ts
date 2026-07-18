@@ -217,11 +217,18 @@ const program = Effect.scoped(
       Effect.onInterrupt(() =>
         writeStdoutLine("Control Center draining.").pipe(
           Effect.andThen(lifecycle.drainWithin("10 seconds")),
-          Effect.flatMap((drained) =>
-            drained
-              ? writeStdoutLine("Control Center drained.")
-              : writeStderrLine("Control Center drain deadline reached.")
-          )
+          Effect.flatMap((result) => {
+            switch (result._tag) {
+              case "Drained":
+                return writeStdoutLine("Control Center drained.")
+              case "DeadlineExceeded":
+                return writeStderrLine("Control Center drain deadline reached.")
+              case "HooksFailed":
+                return writeStderrLine(
+                  `Control Center drain hooks failed: ${result.hookIds.join(", ")}.`
+                )
+            }
+          })
         )
       )
     )

@@ -57,6 +57,7 @@ import {
   controlCenterBootstrapLayer,
   type ControlCenterBootstrapOptions
 } from "./Bootstrap.js"
+import { databaseDrainLayer } from "./DatabaseDrain.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
 import { firstPartyPluginConnectionMapLayer } from "./FirstPartyPluginRuntime.js"
 import {
@@ -170,6 +171,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer
+  const databaseDrain = databaseDrainLayer.pipe(Layer.provide(database))
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence),
     Layer.provide(domainEventWakeups)
@@ -194,7 +196,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     authentication,
     applicationServices,
     releaseAgent,
-    liveEventRuntime
+    liveEventRuntime,
+    databaseDrain
   )
   const routes = Layer.mergeAll(
     controlCenterApiLayerWithLifecycle,

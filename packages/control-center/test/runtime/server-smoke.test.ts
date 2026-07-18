@@ -421,6 +421,7 @@ describe("Control Center closed runtime", () => {
       FROM sessions
       WHERE session_id = ${paired.session.sessionId}`
       assert.deepStrictEqual(afterDrain, beforeDrain)
+      assert.deepStrictEqual(yield* lifecycle.drainWithin("10 seconds"), { _tag: "Drained" })
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

@@ -1,3 +1,4 @@
+import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import type * as Duration from "effect/Duration"
@@ -17,15 +18,40 @@ export class ServerDraining extends Schema.TaggedErrorClass<ServerDraining>()(
   {}
 ) {}
 
+/** Two live subsystems attempted to own the same drain hook identity. */
+export class ServerDrainHookConflict extends Schema.TaggedErrorClass<ServerDrainHookConflict>()(
+  "ServerDrainHookConflict",
+  { hookId: Schema.String }
+) {}
+
+/** A secret-free result for the complete work-and-flush drain sequence. */
+export type ServerDrainResult =
+  | { readonly _tag: "Drained" }
+  | { readonly _tag: "DeadlineExceeded" }
+  | { readonly _tag: "HooksFailed"; readonly hookIds: ReadonlyArray<string> }
+
+interface ServerDrainHook {
+  readonly hookId: string
+  readonly run: Effect.Effect<void>
+}
+
+interface DrainTransition {
+  readonly drainHooks: ReadonlyArray<ServerDrainHook> | null
+  readonly mutationBarrierReady: boolean
+  readonly workBarrierReady: boolean
+}
+
 interface ServerLifecycleState {
   readonly activeBackgroundJobs: number
   readonly activeMutationFiberIds: ReadonlySet<number>
   readonly activeMutations: number
   readonly activeStreams: number
+  readonly drainHooks: ReadonlyMap<string, ServerDrainHook>
   readonly phase: ServerLifecyclePhase
 }
 
 type MutationAdmission = "acquired" | "nested" | "rejected"
+type DrainHookRegistration = "conflict" | "draining" | "registered"
 
 interface ServerLifecycleService {
   /** Move to draining exactly once and wake every drain observer. */
@@ -36,8 +62,8 @@ interface ServerLifecycleService {
   readonly awaitMutationsDrained: Effect.Effect<void>
   /** Complete after drain begins and every admitted mutation or background job has finished. */
   readonly awaitWorkDrained: Effect.Effect<void>
-  /** Begin drain and report whether admitted mutations finished before the deadline. */
-  readonly drainWithin: (duration: Duration.Input) => Effect.Effect<boolean>
+  /** Begin drain and report the complete work-and-flush result before the deadline. */
+  readonly drainWithin: (duration: Duration.Input) => Effect.Effect<ServerDrainResult>
   /** Current lifecycle phase for diagnostics and deterministic tests. */
   readonly phase: Effect.Effect<ServerLifecyclePhase>
   /** Reject new mutations after drain, while retaining admitted work until it exits. */
@@ -48,6 +74,10 @@ interface ServerLifecycleService {
   readonly runBackground: <A, E, R>(
     effect: Effect.Effect<A, E, R>
   ) => Effect.Effect<A, E | ServerDraining, R>
+  /** Retain one named, infallible flush hook for this server scope. */
+  readonly registerDrainHook: (
+    hook: ServerDrainHook
+  ) => Effect.Effect<void, ServerDrainHookConflict | ServerDraining, Scope.Scope>
   /** Atomically retain a long-lived stream only while the process is accepting work. */
   readonly acquireStream: Effect.Effect<void, ServerDraining, Scope.Scope>
 }
@@ -58,26 +88,34 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
     activeMutationFiberIds: new Set(),
     activeMutations: 0,
     activeStreams: 0,
+    drainHooks: new Map(),
     phase: "accepting"
   })
   const drainStarted = yield* Deferred.make<void>()
   const mutationsDrained = yield* Deferred.make<void>()
   const workDrained = yield* Deferred.make<void>()
+  const drainHookSnapshot = yield* Deferred.make<ReadonlyArray<ServerDrainHook>>()
+  const drainHooksCompleted = yield* Deferred.make<ReadonlyArray<string>>()
 
   const hasActiveWork = (current: ServerLifecycleState): boolean =>
     current.activeMutations > 0 || current.activeBackgroundJobs > 0
 
-  const beginDrain = Ref.modify(state, (current) => {
+  const beginDrain = Ref.modify(state, (current): [DrainTransition, ServerLifecycleState] => {
     const barriers = {
       mutationBarrierReady: current.activeMutations === 0,
       workBarrierReady: !hasActiveWork(current)
     }
-    if (current.phase === "draining") return [barriers, current]
+    if (current.phase === "draining") return [{ ...barriers, drainHooks: null }, current]
     const draining: ServerLifecycleState = { ...current, phase: "draining" }
-    return [barriers, draining]
+    return [{ ...barriers, drainHooks: [...current.drainHooks.values()] }, draining]
   }).pipe(
-    Effect.flatMap(({ mutationBarrierReady, workBarrierReady }) =>
+    Effect.flatMap(({ drainHooks, mutationBarrierReady, workBarrierReady }) =>
       Deferred.succeed(drainStarted, undefined).pipe(
+        Effect.andThen(
+          drainHooks === null
+            ? Effect.void
+            : Deferred.succeed(drainHookSnapshot, drainHooks)
+        ),
         Effect.andThen(mutationBarrierReady ? Deferred.succeed(mutationsDrained, undefined) : Effect.void),
         Effect.andThen(workBarrierReady ? Deferred.succeed(workDrained, undefined) : Effect.void)
       )
@@ -157,9 +195,62 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
 
   const drainWithin = (duration: Duration.Input) =>
     beginDrain.pipe(
-      Effect.andThen(Deferred.await(workDrained).pipe(Effect.timeoutOption(duration))),
-      Effect.map(Option.isSome)
+      Effect.andThen(Deferred.await(drainHooksCompleted).pipe(Effect.timeoutOption(duration))),
+      Effect.map(Option.match({
+        onNone: (): ServerDrainResult => ({ _tag: "DeadlineExceeded" }),
+        onSome: (hookIds): ServerDrainResult =>
+          hookIds.length === 0 ? { _tag: "Drained" } : { _tag: "HooksFailed", hookIds }
+      }))
     )
+
+  const registerDrainHook = (
+    hook: ServerDrainHook
+  ): Effect.Effect<void, ServerDrainHookConflict | ServerDraining, Scope.Scope> =>
+    Effect.acquireRelease(
+      Effect.gen(function*() {
+        const result = yield* Ref.modify(state, (current): [DrainHookRegistration, ServerLifecycleState] => {
+          if (current.phase === "draining") return ["draining", current]
+          if (current.drainHooks.has(hook.hookId)) return ["conflict", current]
+          const drainHooks = new Map(current.drainHooks)
+          drainHooks.set(hook.hookId, hook)
+          return ["registered", { ...current, drainHooks }]
+        })
+        switch (result) {
+          case "registered":
+            return
+          case "conflict":
+            return yield* new ServerDrainHookConflict({ hookId: hook.hookId })
+          case "draining":
+            return yield* new ServerDraining()
+        }
+      }),
+      () =>
+        Ref.update(state, (current) => {
+          if (current.phase === "draining") return current
+          const drainHooks = new Map(current.drainHooks)
+          drainHooks.delete(hook.hookId)
+          return { ...current, drainHooks }
+        })
+    )
+
+  yield* Deferred.await(drainStarted).pipe(
+    Effect.andThen(Deferred.await(workDrained)),
+    Effect.andThen(Deferred.await(drainHookSnapshot)),
+    Effect.flatMap((hooks) =>
+      Effect.forEach(
+        Array.from(hooks).sort((left, right) => left.hookId.localeCompare(right.hookId)),
+        (hook) =>
+          hook.run.pipe(
+            Effect.as(null),
+            Effect.catchCause((cause) => Cause.hasInterrupts(cause) ? Effect.interrupt : Effect.succeed(hook.hookId))
+          ),
+        { concurrency: 1 }
+      )
+    ),
+    Effect.map((results) => results.filter((hookId): hookId is string => hookId !== null)),
+    Effect.flatMap((hookIds) => Deferred.succeed(drainHooksCompleted, hookIds)),
+    Effect.forkScoped
+  )
 
   return {
     beginDrain,
@@ -182,6 +273,7 @@ const makeServerLifecycle = Effect.fn("ServerLifecycle.make")(function*() {
         () => effect,
         () => releaseBackgroundJob
       ),
+    registerDrainHook,
     acquireStream: Effect.acquireRelease(acquireStreamPermit, () => releaseStream)
   } satisfies ServerLifecycleService
 })
