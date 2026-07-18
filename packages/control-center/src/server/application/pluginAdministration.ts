@@ -1,10 +1,14 @@
+import { discoverAwsProfiles } from "@knpkv/codecommit-core/ConfigService.js"
 import * as Clock from "effect/Clock"
+import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -52,6 +56,7 @@ import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError }
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PLUGIN_CONNECTIONS = 100
+const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
 
@@ -814,9 +819,25 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
   const cryptoService = yield* Crypto.Crypto
   const wakeups = yield* DomainEventWakeups
   const secrets = yield* SecretStore
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
+    discoverAwsProfiles: Effect.fn("PluginAdministration.discoverAwsProfiles")(function*() {
+      const home = yield* Config.string("HOME").pipe(
+        Config.orElse(() => Config.string("USERPROFILE")),
+        Effect.mapError(() => unavailable())
+      )
+      const profiles = yield* discoverAwsProfiles(home).pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path)
+      )
+      if (profiles.length > MAXIMUM_DISCOVERED_AWS_PROFILES) return yield* unavailable()
+      return profiles
+        .map(({ name, region }) => ({ profile: name, region: region ?? null }))
+        .sort((left, right) => left.profile.localeCompare(right.profile))
+    }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(persistence, cryptoService, wakeups, secrets, pluginConnections, workspaceId, request),
     setConnectionEnabled: ({ isEnabled, pluginConnectionId, workspaceId }) =>

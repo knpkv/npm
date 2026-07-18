@@ -4,7 +4,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { SystemError } from "effect/PlatformError"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
-import { ConfigService, ConfigServiceLive } from "../src/ConfigService/index.js"
+import { ConfigService, ConfigServiceLive, discoverAwsProfiles } from "../src/ConfigService/index.js"
 
 const MockPath = Path.layer
 
@@ -65,6 +65,23 @@ const run = <A>(files: Record<string, string>, effect: Effect.Effect<A, unknown,
 }
 
 describe("ConfigService", () => {
+  it("discovers and deduplicates profiles for another server package", async () => {
+    const mock = makeMockFS({
+      [`${TEST_HOME}/.aws/config`]: "[profile production]\nregion = eu-west-1\n[profile shared]\nregion = us-east-1",
+      [`${TEST_HOME}/.aws/credentials`]: "[shared]\nregion = eu-central-1\n[personal]\naws_access_key_id = redacted"
+    })
+    const profiles = await Effect.runPromise(
+      discoverAwsProfiles(TEST_HOME).pipe(Effect.provide(Layer.mergeAll(mock.layer, MockPath)))
+    )
+
+    expect(profiles).toHaveLength(3)
+    expect(profiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "production", region: "eu-west-1" }),
+      expect.objectContaining({ name: "shared", region: "eu-central-1" }),
+      expect.objectContaining({ name: "personal" })
+    ]))
+  })
+
   it("returns empty accounts when no file exists", () =>
     run(
       {},

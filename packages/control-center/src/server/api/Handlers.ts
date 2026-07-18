@@ -278,6 +278,20 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             )
             return { catalog: listFirstPartyServiceMetadata(), connections }
           }))
+        .handle("discoverAwsProfiles", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const discoverAwsProfiles = plugins.discoverAwsProfiles
+            if (discoverAwsProfiles === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* discoverAwsProfiles().pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+          }))
         .handle("createConnection", ({ payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

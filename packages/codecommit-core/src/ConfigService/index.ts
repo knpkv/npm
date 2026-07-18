@@ -19,6 +19,7 @@ import { save } from "./save.js"
 import type { ConfigValidationResult } from "./validate.js"
 import { validate } from "./validate.js"
 
+export { discoverAwsProfiles } from "./detectProfiles.js"
 export { AccountConfig, defaultSandboxConfig, DetectedProfile, SandboxConfig, TuiConfig } from "./internal.js"
 export { ConfigValidationResult } from "./validate.js"
 

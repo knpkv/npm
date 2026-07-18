@@ -197,6 +197,69 @@ describe("ServicesPage connection tests", () => {
     expect(currentLocation).toBe("/services")
   })
 
+  it("discovers AWS profiles and fills the selected profile region", async () => {
+    const discoverAwsProfiles = vi.fn().mockResolvedValue([
+      { profile: "default", region: "us-east-1" },
+      { profile: "production", region: "eu-west-1" }
+    ])
+    const codeCommit = catalogEntry("codecommit")
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        {
+          ...codeCommit,
+          configurationFields: [
+            ...codeCommit.configurationFields,
+            {
+              key: "region",
+              label: "Region",
+              description: "Detected AWS region.",
+              kind: "text",
+              scope: "adapter",
+              required: true,
+              defaultValue: "us-east-1",
+              isReadOnly: false,
+              minimum: null,
+              maximum: null
+            }
+          ]
+        },
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: []
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsProfiles,
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+
+    expect(discoverAwsProfiles).toHaveBeenCalledWith(expect.any(AbortSignal))
+    expect(host.querySelectorAll("datalist option")).toHaveLength(2)
+    const profile = host.querySelector<HTMLInputElement>('input[list="codecommit-aws-profiles"]')
+    expect(profile).not.toBeNull()
+    if (profile !== null) {
+      const setInputValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+      if (setInputValue === undefined) throw new Error("Expected the input value setter")
+      await act(async () => {
+        setInputValue.call(profile, "production")
+        profile.dispatchEvent(new Event("input", { bubbles: true }))
+      })
+    }
+    expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toEqual([
+      "codecommit",
+      "production",
+      "eu-west-1"
+    ])
+  })
+
   it("does not present stale disabled health as current for an enabled connection", async () => {
     const enabledWithStaleHealth = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),

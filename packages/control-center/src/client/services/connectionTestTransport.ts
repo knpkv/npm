@@ -6,6 +6,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type {
+  AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   PluginConnectionSummary,
@@ -17,6 +18,8 @@ import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.
 
 /** Browser boundary for connection administration reads and live tests. */
 export interface ConnectionTestTransport {
+  /** Optional only for injected legacy/test transports; the browser transport always discovers profiles. */
+  readonly discoverAwsProfiles?: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly overview: (signal: AbortSignal) => Promise<PluginOverviewResponse>
   readonly create: (
     request: CreatePluginConnectionRequest,
@@ -33,6 +36,14 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
+  discoverAwsProfiles: (signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.plugins.discoverAwsProfiles()
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   overview: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

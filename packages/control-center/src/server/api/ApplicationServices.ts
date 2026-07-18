@@ -20,6 +20,7 @@ import type {
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
+  AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   PatchPluginConfigurationRequest,
@@ -100,6 +101,7 @@ export interface PluginAdministrationService {
   readonly list: (
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<PluginConnectionSummary>, ApplicationServiceUnavailable>
+  readonly discoverAwsProfiles?: () => Effect.Effect<AwsProfileDiscoveryResponse, ApplicationServiceUnavailable>
   readonly connectAndTest?: (input: {
     readonly workspaceId: WorkspaceId
     readonly request: CreatePluginConnectionRequest
