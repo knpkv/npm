@@ -1047,10 +1047,14 @@ describe("application adapters", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationServiceUnavailable)
-      const record = yield* (yield* Persistence).pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
+      const persistence = yield* Persistence
+      const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.isFalse(record.isEnabled)
       assert.isNotNull(record.providerAccountId)
       assert.isNotNull(record.followedResourceId)
+      if (record.followedResourceId === null) return assert.fail("setup rollback lost its resource binding")
+      const resource = yield* persistence.providerAccounts.getResource(WORKSPACE_ID, record.followedResourceId)
+      assert.isFalse(resource.isEnabled)
     })))
 
   it.effect("rejects missing and unknown catalog fields before creating metadata", () =>

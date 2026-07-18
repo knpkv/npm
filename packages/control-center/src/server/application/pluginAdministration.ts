@@ -272,6 +272,24 @@ const requireConnection = (
   pluginConnectionId: PluginConnectionId
 ) => mapPersistenceRead(persistence.pluginConnections.get(workspaceId, pluginConnectionId))
 
+const setBoundResourceEnabled = Effect.fn("PluginAdministration.setBoundResourceEnabled")(function*(
+  persistence: Persistence["Service"],
+  workspaceId: WorkspaceId,
+  followedResourceId: PluginConnectionRecord["followedResourceId"],
+  isEnabled: boolean,
+  updatedAt: PluginConnectionRecord["updatedAt"]
+) {
+  if (followedResourceId === null) return
+  const resource = yield* persistence.providerAccounts.getResource(workspaceId, followedResourceId)
+  if (resource.isEnabled === isEnabled) return
+  yield* persistence.providerAccounts.updateResourceMetadata(workspaceId, followedResourceId, {
+    displayName: resource.displayName,
+    isEnabled,
+    expectedRevision: resource.revision,
+    updatedAt
+  })
+})
+
 const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnabled")(function*(
   persistence: Persistence["Service"],
   cryptoService: Crypto.Crypto,
@@ -293,17 +311,7 @@ const setConnectionEnabled = Effect.fn("PluginAdministration.setConnectionEnable
         expectedRevision: current.revision,
         updatedAt
       })
-      if (current.followedResourceId !== null) {
-        const resource = yield* persistence.providerAccounts.getResource(workspaceId, current.followedResourceId)
-        if (resource.isEnabled !== isEnabled) {
-          yield* persistence.providerAccounts.updateResourceMetadata(workspaceId, current.followedResourceId, {
-            displayName: resource.displayName,
-            isEnabled,
-            expectedRevision: resource.revision,
-            updatedAt
-          })
-        }
-      }
+      yield* setBoundResourceEnabled(persistence, workspaceId, current.followedResourceId, isEnabled, updatedAt)
       yield* appendPortfolioInvalidation({
         workspaceId,
         pluginConnectionId,
@@ -828,12 +836,21 @@ const disableAfterSetupFailure = (
   workspaceId: WorkspaceId,
   connection: PluginConnectionRecord
 ): Effect.Effect<void> =>
-  persistence.pluginConnections.updateMetadata(workspaceId, connection.pluginConnectionId, {
-    displayName: connection.displayName,
-    isEnabled: false,
-    expectedRevision: connection.revision,
-    updatedAt: connection.updatedAt
-  }).pipe(
+  persistence.transact(Effect.gen(function*() {
+    yield* persistence.pluginConnections.updateMetadata(workspaceId, connection.pluginConnectionId, {
+      displayName: connection.displayName,
+      isEnabled: false,
+      expectedRevision: connection.revision,
+      updatedAt: connection.updatedAt
+    })
+    yield* setBoundResourceEnabled(
+      persistence,
+      workspaceId,
+      connection.followedResourceId,
+      false,
+      connection.updatedAt
+    )
+  })).pipe(
     Effect.asVoid,
     Effect.catch(() => Effect.void)
   )
