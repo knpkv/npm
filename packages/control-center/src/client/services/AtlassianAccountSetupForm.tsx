@@ -1,5 +1,5 @@
 import { Button, Field, Text } from "@knpkv/rly/primitives"
-import { type FormEvent, type ReactElement, useEffect, useState } from "react"
+import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
 import type {
   AtlassianOAuthGrantStartResponse,
@@ -46,7 +46,7 @@ export const AtlassianAccountSetupForm = ({
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isSubmitting: boolean
   readonly onCancel: () => void
-  readonly onStartOAuth: () => Promise<AtlassianOAuthGrantStartResponse>
+  readonly onStartOAuth: (signal: AbortSignal) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
   readonly profilesState: "failed" | "idle" | "loading" | "ready"
@@ -68,6 +68,9 @@ export const AtlassianAccountSetupForm = ({
   const [isStartingOAuth, setIsStartingOAuth] = useState(false)
   const [oauthCallbackUrl, setOAuthCallbackUrl] = useState<string | null>(null)
   const [setupError, setSetupError] = useState<string | null>(null)
+  const startRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => () => startRequest.current?.abort(), [])
 
   useEffect(() => {
     if (authenticationMode !== "oauth" || profileId.length > 0) return
@@ -162,8 +165,12 @@ export const AtlassianAccountSetupForm = ({
     setSetupError(null)
     setOAuthCallbackUrl(null)
     setIsStartingOAuth(true)
-    void onStartOAuth().then(
+    startRequest.current?.abort()
+    const request = new AbortController()
+    startRequest.current = request
+    void onStartOAuth(request.signal).then(
       (result) => {
+        if (request.signal.aborted) return
         if (result._tag === "configuration-required") {
           setOAuthCallbackUrl(result.callbackUrl)
           setSetupError("OAuth needs a one-time local client configuration before sign-in.")
@@ -173,6 +180,7 @@ export const AtlassianAccountSetupForm = ({
         window.location.assign(result.authorizationUrl)
       },
       () => {
+        if (request.signal.aborted) return
         setSetupError("Control Center could not start Atlassian sign-in. Try again.")
         setIsStartingOAuth(false)
       }

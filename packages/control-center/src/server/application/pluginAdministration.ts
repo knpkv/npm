@@ -12,6 +12,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
@@ -81,6 +82,7 @@ type PluginAdministrationOAuthRequirements =
   | HttpClient.HttpClient
   | Path.Path
   | Persistence
+  | Scope.Scope
   | SecretStore
 
 const isAtlassianProvider = (
@@ -1192,7 +1194,7 @@ export const pluginAdministrationLayer = Layer.effect(PluginAdministration, make
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
   publicOrigin: string
-): Layer.Layer<PluginAdministration, never, PluginAdministrationOAuthRequirements> =>
+): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin))
 
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
@@ -1205,7 +1207,7 @@ export const pluginAdministrationLayerWithConnections = (
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin: string
-): Layer.Layer<PluginAdministration, never, PluginAdministrationOAuthRequirements> =>
+): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
 
 /** Internal factual projection reused by the portfolio adapter. */

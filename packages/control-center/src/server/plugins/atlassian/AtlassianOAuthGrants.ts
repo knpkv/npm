@@ -14,12 +14,18 @@ import {
   type UserInfo
 } from "@knpkv/atlassian-common/auth"
 import {
+  CONFLUENCE_REQUIRED_SCOPES,
+  getAuthPath,
+  getOAuthConfigPath,
+  getProfilesPath,
   HomeDirectoryLive,
+  JIRA_REQUIRED_SCOPES,
   loadOAuthConfig,
   type OAuthConfig,
   type OAuthToken,
   saveOAuthConfig,
-  saveProfileToken
+  saveProfileToken,
+  writeSecureFile
 } from "@knpkv/atlassian-common/config"
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
@@ -30,6 +36,7 @@ import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
@@ -53,6 +60,10 @@ const MAXIMUM_PENDING_GRANTS = 20
 const MAXIMUM_ACCESSIBLE_SITES = 100
 const AUTH_STORE_NAMES: ReadonlyArray<string> = ["jira-cli", "confluence-to-markdown"]
 const ATLASSIAN_SCOPES = Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES]))
+const REQUIRED_SHARED_SITE_SCOPES = [
+  ...JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
+  ...CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
+]
 
 interface GrantOwner {
   readonly sessionId: SessionId
@@ -104,6 +115,13 @@ export interface AtlassianOAuthGrantOperations {
     DiscoveredAtlassianProfile,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
+  /** Internal observability used to prove scheduled secret expiry. */
+  readonly pendingGrantCount: Effect.Effect<number>
+}
+
+interface StoredFileSnapshot {
+  readonly content: string | null
+  readonly path: string
 }
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
@@ -161,6 +179,40 @@ const decodeSites = Effect.fn("AtlassianOAuthGrants.decodeSites")(function*(site
     }).pipe(Effect.mapError(unavailable)))
 })
 
+const supportsSharedProducts = (site: AccessibleResource): boolean =>
+  REQUIRED_SHARED_SITE_SCOPES.every((scope) => site.scopes.includes(scope))
+
+const captureFile = Effect.fn("AtlassianOAuthGrants.captureFile")(function*(filePath: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const exists = yield* fileSystem.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)))
+  return {
+    path: filePath,
+    content: exists ? yield* fileSystem.readFileString(filePath) : null
+  } satisfies StoredFileSnapshot
+})
+
+const captureAuthStore = Effect.fn("AtlassianOAuthGrants.captureAuthStore")(function*(storeName: string) {
+  const paths = yield* Effect.all([
+    getOAuthConfigPath(storeName),
+    getProfilesPath(storeName),
+    getAuthPath(storeName)
+  ])
+  return yield* Effect.forEach(paths, captureFile)
+})
+
+const restoreFile = Effect.fn("AtlassianOAuthGrants.restoreFile")(function*(snapshot: StoredFileSnapshot) {
+  const fileSystem = yield* FileSystem.FileSystem
+  if (snapshot.content !== null) return yield* writeSecureFile(snapshot.path, snapshot.content)
+  const exists = yield* fileSystem.exists(snapshot.path).pipe(Effect.catch(() => Effect.succeed(false)))
+  if (exists) yield* fileSystem.remove(snapshot.path)
+})
+
+const restoreAuthStores = Effect.fn("AtlassianOAuthGrants.restoreAuthStores")(function*(
+  snapshots: ReadonlyArray<ReadonlyArray<StoredFileSnapshot>>
+) {
+  yield* Effect.forEach(snapshots.flat(), restoreFile, { concurrency: 1 })
+})
+
 const restoreGrantAfterSaveFailure = Effect.fn("AtlassianOAuthGrants.restoreAfterSaveFailure")(function*(
   grants: Ref.Ref<PendingGrants>,
   grantId: AtlassianOAuthGrantId,
@@ -180,6 +232,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const fileSystem = yield* FileSystem.FileSystem
   const httpClient = yield* HttpClient.HttpClient
   const path = yield* Path.Path
+  const scope = yield* Scope.Scope
   const grants = yield* Ref.make<PendingGrants>(new Map())
   const localStorageLayer = Layer.mergeAll(
     HomeDirectoryLive,
@@ -187,6 +240,26 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     Layer.succeed(Path.Path, path)
   )
   const providerHttpLayer = Layer.succeed(HttpClient.HttpClient, httpClient)
+  const scheduleExpiry = (
+    grantId: AtlassianOAuthGrantId,
+    createdAtMilliseconds: number,
+    phase: PendingGrant["_tag"]
+  ): Effect.Effect<void> =>
+    Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(
+      Effect.andThen(
+        Ref.update(grants, (current) => {
+          const grant = current.get(grantId)
+          if (grant?._tag === phase && grant.createdAtMilliseconds === createdAtMilliseconds) {
+            const next = new Map(current)
+            next.delete(grantId)
+            return next
+          }
+          return current
+        })
+      ),
+      Effect.forkIn(scope),
+      Effect.asVoid
+    )
 
   const start: AtlassianOAuthGrantOperations["start"] = Effect.fn("AtlassianOAuthGrants.start")(function*(
     owner,
@@ -226,6 +299,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
       return [true, active]
     })
     if (!didInsert) return yield* new ApplicationConflict()
+    yield* scheduleExpiry(grantId, createdAtMilliseconds, "authorization")
 
     return {
       _tag: "ready",
@@ -257,7 +331,8 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
       getAccessibleResources(tokens.access_token),
       getUserInfo(tokens.access_token)
     ]).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
-    const safeSites = yield* decodeSites(sites)
+    const supportedSites = sites.filter(supportsSharedProducts)
+    const safeSites = yield* decodeSites(supportedSites)
     const createdAtMilliseconds = yield* Clock.currentTimeMillis
     yield* Ref.update(grants, (current) => {
       const active = activeGrants(current, createdAtMilliseconds)
@@ -266,12 +341,13 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         ...owner,
         config: pending.config,
         createdAtMilliseconds,
-        sites,
+        sites: supportedSites,
         tokens,
         user
       })
       return active
     })
+    yield* scheduleExpiry(grantId, createdAtMilliseconds, "site-selection")
     const accountEmail = user.email.trim()
     return {
       grantId,
@@ -304,12 +380,22 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         email: pending.user.email
       }
     }
+    const snapshots = yield* Effect.forEach(AUTH_STORE_NAMES, captureAuthStore).pipe(
+      Effect.provide(localStorageLayer),
+      Effect.mapError(unavailable)
+    )
     const profiles = yield* Effect.forEach(AUTH_STORE_NAMES, (storeName) =>
       Effect.gen(function*() {
         yield* saveOAuthConfig(storeName, pending.config)
         return yield* saveProfileToken(storeName, token)
       }), { concurrency: 1 }).pipe(
         Effect.provide(localStorageLayer),
+        Effect.tapError(() =>
+          restoreAuthStores(snapshots).pipe(
+            Effect.provide(localStorageLayer),
+            Effect.catch(() => Effect.void)
+          )
+        ),
         Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
         Effect.mapError(unavailable),
         Effect.uninterruptible
@@ -329,5 +415,10 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     }
   })
 
-  return { start, exchange, complete } satisfies AtlassianOAuthGrantOperations
+  return {
+    start,
+    exchange,
+    complete,
+    pendingGrantCount: Ref.get(grants).pipe(Effect.map((current) => current.size))
+  } satisfies AtlassianOAuthGrantOperations
 })

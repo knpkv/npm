@@ -260,7 +260,7 @@ const CatalogCard = ({
   readonly isRecovery: boolean
   readonly onCancel: () => void
   readonly onOpen: () => void
-  readonly onStartAtlassianOAuth: () => Promise<AtlassianOAuthGrantStartResponse>
+  readonly onStartAtlassianOAuth: (signal: AbortSignal) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
   readonly onSubmitAtlassian: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly onSubmitAws: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
@@ -813,11 +813,10 @@ export const ServicesPage = ({
                     }
                     setOpenProvider(catalog.providerId)
                   }}
-                  onStartAtlassianOAuth={() => {
+                  onStartAtlassianOAuth={(signal) => {
                     const start = transport.startAtlassianOAuthGrant
                     if (start === undefined) return Promise.reject(new Error("Atlassian OAuth is unavailable"))
-                    const request = new AbortController()
-                    return start(request.signal)
+                    return start(signal)
                   }}
                   onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
                   onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}

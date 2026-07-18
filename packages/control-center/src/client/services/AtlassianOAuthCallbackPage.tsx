@@ -158,6 +158,7 @@ export const AtlassianOAuthCallbackPage = ({
               </Text>
             </div>
             <Button
+              disabled={state._tag === "saving"}
               loading={state._tag === "saving" && state.cloudId === site.cloudId}
               onClick={() => complete(state.grant, site.cloudId)}
               variant="primary"

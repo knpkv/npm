@@ -7,6 +7,7 @@ import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  type AtlassianOAuthGrantStartResponse,
   CreatePluginConnectionResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
@@ -956,6 +957,48 @@ describe("ServicesPage connection tests", () => {
     expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
     expect(host.textContent).toContain("OAuth needs a one-time local client configuration")
     expect(host.textContent).toContain("http://127.0.0.1:4173/services/oauth/atlassian/callback")
+  })
+
+  it("cancels a pending OAuth start when the setup form closes", async () => {
+    let resolveStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined
+    let startSignal: AbortSignal | undefined
+    const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
+      (signal) => {
+        startSignal = signal
+        return new Promise((resolve) => {
+          resolveStart = resolve
+        })
+      }
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=confluence")
+    await act(async () => undefined)
+    const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Sign in with Atlassian")
+    )
+    await act(async () => signIn?.click())
+    const cancel = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Cancel")
+    )
+    const previousLocation = window.location.href
+    await act(async () => cancel?.click())
+    expect(startSignal?.aborted).toBe(true)
+    await act(async () =>
+      resolveStart?.({
+        _tag: "ready",
+        authorizationUrl: "https://auth.atlassian.com/authorize?state=unused",
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      })
+    )
+    expect(window.location.href).toBe(previousLocation)
   })
 
   it("adds an intentional second Atlassian account when both products already exist", async () => {

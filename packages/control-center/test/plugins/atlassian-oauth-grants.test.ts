@@ -1,11 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
@@ -24,7 +26,7 @@ const providerClient = HttpClient.make((request) => {
       access_token: "access-secret",
       refresh_token: "refresh-secret",
       expires_in: 3_600,
-      scope: "read:jira-work read:page:confluence offline_access",
+      scope: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
       token_type: "Bearer"
     }
     : request.url.endsWith("/accessible-resources")
@@ -33,13 +35,13 @@ const providerClient = HttpClient.make((request) => {
         id: "cloud-1",
         name: "Acme Europe",
         url: "https://acme.atlassian.net/",
-        scopes: ["read:jira-work"]
+        scopes: [...JIRA_SCOPES]
       },
       {
         id: "cloud-2",
         name: "Acme Labs",
         url: "https://labs.atlassian.net/",
-        scopes: ["read:jira-work"]
+        scopes: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES]
       }
     ]
     : { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
@@ -90,7 +92,7 @@ describe("AtlassianOAuthGrants", () => {
       const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
-      assert.deepStrictEqual(exchanged.sites.map(({ cloudId }) => cloudId), ["cloud-1", "cloud-2"])
+      assert.deepStrictEqual(exchanged.sites.map(({ cloudId }) => cloudId), ["cloud-2"])
       assert.notInclude(JSON.stringify(exchanged), "secret")
 
       const confluenceStore = path.join(configHome, "atlassian", "confluence-to-markdown")
@@ -101,6 +103,12 @@ describe("AtlassianOAuthGrants", () => {
         )
       )
       assert.isTrue(Result.isFailure(failedSave))
+      assert.strictEqual(
+        yield* fileSystem.readFileString(path.join(jiraStore, "oauth.json")),
+        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
+      )
+      assert.isFalse(yield* fileSystem.exists(path.join(jiraStore, "profiles.json")))
+      assert.isFalse(yield* fileSystem.exists(path.join(jiraStore, "auth.json")))
       yield* fileSystem.remove(confluenceStore)
 
       const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
@@ -124,6 +132,40 @@ describe("AtlassianOAuthGrants", () => {
         )
       )
       assert.isTrue(Result.isFailure(replay))
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("purges abandoned provider tokens when their grant expires", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-expiry-" })
+      const configHome = path.join(home, "config")
+      const jiraStore = path.join(configHome, "atlassian", "jira-cli")
+      yield* fileSystem.makeDirectory(jiraStore, { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(jiraStore, "oauth.json"),
+        JSON.stringify({ clientId: "client-id", clientSecret: "client-secret" })
+      )
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(yield* grants.pendingGrantCount, 1)
+      yield* TestClock.adjust("10 minutes")
+      assert.strictEqual(yield* grants.pendingGrantCount, 0)
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),
