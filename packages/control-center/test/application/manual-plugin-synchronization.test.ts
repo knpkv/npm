@@ -112,6 +112,9 @@ const pageFor = (fixture: typeof fixtures[number], title = fixture.title) =>
     }]
   })
 
+const emptyPage = (checkpointAfterPage: string, hasMore: boolean) =>
+  Schema.decodeSync(PluginSyncPageV1)({ checkpointAfterPage, events: [], hasMore })
+
 const withApplication = <Success, Failure>(
   use: Effect.Effect<Success, Failure, Crypto.Crypto | Persistence | DomainEventWakeups>
 ) =>
@@ -358,7 +361,7 @@ describe("manual plugin synchronization", () => {
       }
     })))
 
-  it.effect("keeps persistence failures unavailable and reconciles their open attempt after restart", () =>
+  it.effect("keeps state reads observational and recovers a stale attempt on the next owner sync", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
@@ -396,21 +399,35 @@ describe("manual plugin synchronization", () => {
       assert.isNull(openAttempts[0]?.outcome)
 
       const afterRestart = yield* makeManualPluginSynchronization(connections, drivers)
-      const reconciled = yield* afterRestart.state({
+      const observed = yield* afterRestart.state({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: fixture.pluginConnectionId
       })
-      assert.strictEqual(reconciled.result, "interrupted")
-      assert.strictEqual(reconciled.pagesCommitted, 0)
+      assert.strictEqual(observed.result, "running")
+      const stillOpen = yield* persistence.pluginRuntime.listSyncAttempts(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.isNull(stillOpen[0]?.outcome)
+
+      const recovered = yield* afterRestart.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+      assert.strictEqual(recovered.result, "synchronized")
+      assert.strictEqual(recovered.pagesCommitted, 1)
       const completedAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
         WORKSPACE_ID,
         fixture.pluginConnectionId,
         streamKey
       )
+      assert.lengthOf(completedAttempts, 2)
       assert.strictEqual(completedAttempts[0]?.outcome, "interrupted")
+      assert.strictEqual(completedAttempts[1]?.outcome, "synchronized")
     })))
 
-  it.effect("rejects overlapping synchronization while reporting the active attempt as running", () =>
+  it.effect("keeps cross-instance state reads observational while rejecting same-service overlap", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
@@ -432,6 +449,7 @@ describe("manual plugin synchronization", () => {
           )
       }])
       const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+      const observer = yield* makeManualPluginSynchronization(connections, drivers)
       const input = {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: fixture.pluginConnectionId
@@ -441,7 +459,7 @@ describe("manual plugin synchronization", () => {
         Effect.forkChild({ startImmediately: true })
       )
       yield* Deferred.await(providerEntered)
-      const active = yield* synchronization.state(input)
+      const active = yield* observer.state(input)
       assert.strictEqual(active.result, "running")
       const overlapping = yield* synchronization.synchronize(input).pipe(Effect.result)
       assert.isTrue(Result.isFailure(overlapping))
@@ -464,5 +482,77 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(sequential.result, "synchronized")
       assert.strictEqual(sequential.pagesCommitted, 0)
       assert.strictEqual(yield* Ref.get(providerCalls), 2)
+    })))
+
+  it.effect("completes the hundredth provider page as successful bounded progress", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const pages = Array.from(
+        { length: 100 },
+        (_, index) => emptyPage(`checkpoint-${index + 1}`, true)
+      )
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () => Stream.fromIterable(pages)
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const bounded = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(bounded.result, "synchronized")
+      assert.strictEqual(bounded.pagesCommitted, 100)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.strictEqual(stream.revision, 100)
+      assert.strictEqual(stream.checkpointJson, "\"checkpoint-100\"")
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.strictEqual(runtime.health._tag, "healthy")
+    })))
+
+  it.effect("rejects provider output emitted after a terminal page", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromIterable([
+            emptyPage("terminal-checkpoint", false),
+            emptyPage("unexpected-checkpoint", false)
+          ])
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const malformed = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(malformed.result, "source-unavailable")
+      assert.strictEqual(malformed.pagesCommitted, 1)
+      const attempts = yield* persistence.pluginRuntime.listSyncAttempts(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.strictEqual(attempts[0]?.outcome, "source-unavailable")
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.strictEqual(runtime.health._tag, "unavailable")
+      if (runtime.health._tag === "unavailable") {
+        assert.strictEqual(runtime.health.failureClass, "malformed-response")
+      }
     })))
 })

@@ -885,6 +885,54 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result, expected)
     }))
 
+  it.effect("lets an approver read synchronization state without entering mutation authorization", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeSync(PluginSynchronizationState)({
+        pluginConnectionId,
+        providerId: "codecommit",
+        streamKey: "pull-requests",
+        lastAttemptAt: "2026-07-14T10:03:00.000Z",
+        lastSuccessAt: null,
+        result: "running",
+        pagesCommitted: 0
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        synchronization: (input) =>
+          input.workspaceId === approverSession.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(expected)
+            : Effect.die("synchronization state read crossed its authenticated scope"),
+        synchronizeConnection: () => Effect.die("state read entered manual synchronization"),
+        testConnection: () => Effect.die("not used")
+      })
+      const approverSessionLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const rejectingMutationLayer = Layer.succeed(SessionMutationAuth, {
+        csrfToken: () => Effect.die("state read entered mutation authorization")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(approverSessionLayer),
+        Layer.provide(rejectingMutationLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.synchronization({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        approverSessionLayer,
+        rejectingMutationLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
   it.effect("lets a workspace owner enable a connection through the generated client", () =>
     Effect.gen(function*() {
       const expected = Schema.decodeSync(PluginConnectionSummary)({
