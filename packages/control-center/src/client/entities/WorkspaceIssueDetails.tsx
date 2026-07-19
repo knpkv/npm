@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react"
 
 import type { WorkspaceIssuePresentation } from "./presentWorkspaceIssue.js"
 import styles from "./WorkspaceIssueDetails.module.css"
+import { WorkspaceRichText } from "./WorkspaceRichText.js"
 
 const Section = ({
   children,
@@ -33,9 +34,7 @@ const RichText = ({ empty, value }: { readonly empty: string; readonly value: st
   value === null ? (
     <Text tone="secondary">{empty}</Text>
   ) : (
-    <Text as="p" className={styles.richText} variant="body-large">
-      {value}
-    </Text>
+    <WorkspaceRichText className={styles.richText} value={value} />
   )
 
 /** Render a complete, read-only synchronized issue as a quiet working document. */
@@ -131,9 +130,7 @@ export const WorkspaceIssueDetails = ({ issue }: { readonly issue: WorkspaceIssu
                 <Person person={comment.author} size="compact" />
                 {comment.time === null ? null : <time>{comment.time}</time>}
               </div>
-              <Text as="p" className={styles.commentBody}>
-                {comment.body ?? "Comment body unavailable."}
-              </Text>
+              <WorkspaceRichText className={styles.commentBody} value={comment.body ?? "Comment body unavailable."} />
             </li>
           ))}
         </ol>

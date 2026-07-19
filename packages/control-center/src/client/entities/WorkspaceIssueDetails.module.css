@@ -27,13 +27,44 @@
 
 .richText,
 .commentBody {
-  margin: var(--rly-space-0);
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
 }
 
 .richText {
+  font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+    var(--rly-type-body-large-font);
   max-inline-size: 58ch;
+}
+
+.richText > :first-child,
+.commentBody > :first-child {
+  margin-block-start: var(--rly-space-0);
+}
+
+.richText > :last-child,
+.commentBody > :last-child {
+  margin-block-end: var(--rly-space-0);
+}
+
+.richText pre,
+.commentBody pre {
+  background: var(--rly-color-surface-2);
+  border-radius: var(--rly-radius-field);
+  max-inline-size: 100%;
+  overflow: auto;
+  padding: var(--rly-space-16);
+}
+
+.richText blockquote,
+.commentBody blockquote {
+  border-inline-start: 2px solid var(--rly-color-border-2);
+  margin-inline: var(--rly-space-0);
+  padding-inline-start: var(--rly-space-16);
+}
+
+.richText a,
+.commentBody a {
+  color: var(--rly-color-service-jira);
 }
 
 .criteria {

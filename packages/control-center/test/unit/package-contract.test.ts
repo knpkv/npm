@@ -29,6 +29,7 @@ const validManifest = {
     effect: "4.0.0-beta.98",
     react: "^19.2.7",
     "react-dom": "^19.2.7",
+    "react-markdown": "^10.1.0",
     "react-router": "^8.2.0"
   },
   engines: { node: ">=24" },

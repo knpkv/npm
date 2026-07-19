@@ -70,6 +70,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "effect",
     "react",
     "react-dom",
+    "react-markdown",
     "react-router"
   ]
   if (!sameKeys(manifest.dependencies, [...runtimeKeys].sort())) {
