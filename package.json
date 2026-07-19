@@ -4,6 +4,8 @@
   "packageManager": "pnpm@11.13.0",
   "scripts": {
     "clean": "node scripts/clean.mjs",
+    "precommit": "tsx packages/control-center/scripts/run-precommit.ts",
+    "verify:full": "pnpm format && pnpm lint && pnpm check && pnpm test",
     "skills:sync": "node scripts/sync-skills.mjs write",
     "skills:check": "node scripts/sync-skills.mjs check",
     "codegen": "pnpm --recursive --parallel --filter \"./packages/**/*\" run codegen",

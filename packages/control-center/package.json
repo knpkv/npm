@@ -47,7 +47,7 @@
     "benchmark": "pnpm benchmark:contracts && pnpm benchmark:runtime",
     "benchmark:contracts": "tsx scripts/runBenchmark.ts",
     "benchmark:runtime": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json playwright test e2e/real-runtime.spec.ts --grep \"measures warmed\" --config playwright.config.ts && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json tsx scripts/validateRuntimeBenchmarkReport.ts",
-    "build": "pnpm validate:boundaries && rimraf dist && vite build --mode client && vite build --mode server && tsc -b tsconfig.server.json --force && pnpm validate:dist",
+    "build": "tsx scripts/run-build.ts",
     "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo node_modules/.cache",
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
