@@ -194,6 +194,12 @@ index 6260ee29771e0f65821d9c087364cc6e492ea547..b8939d179494a988c8ebb9ae015f52d4
  }
  /**
   * Provides a custom retry policy to all AWS API calls in the effect.
+@@ -87,4 +87,4 @@ export const makeDefault = (lastError) => ({
+         }
+         return Duration.toMillis(duration);
+-    })), Schedule.both(Schedule.recurs(5)), jittered),
++    })), (schedule) => Schedule.max([schedule, Schedule.recurs(5)]), jittered),
+ });
 diff --git a/src/auth.ts b/src/auth.ts
 index 3b82e493c01523fb01e74fa70c2df9612499caae..615a017e9c58ed7a1fc6a863c5351991bcff48a8 100644
 --- a/src/auth.ts
@@ -300,3 +306,12 @@ index 9337cfd618b89042ff3c2de89f5fa5ad6dd53b99..4c2588d1c608bf48278c6d7291fa231b
    "distilled-aws/Retry",
  ) {}
  
+@@ -144,7 +144,7 @@ export const makeDefault: Factory = (lastError) => ({
+         return Duration.toMillis(duration);
+       }),
+     ),
+-    Schedule.both(Schedule.recurs(5)),
++    (schedule) => Schedule.max([schedule, Schedule.recurs(5)]),
+     jittered,
+   ),
+ });
