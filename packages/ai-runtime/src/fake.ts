@@ -2,6 +2,7 @@
 import { Effect, Stream } from "effect"
 
 import type { AgentProviderError, AgentRunRequest, AgentRuntimeEvent } from "./model.js"
+import { captureAgentRunRequest } from "./requestSnapshot.js"
 import { layerAgentRuntime } from "./runtime.js"
 
 export interface DeterministicAgentScript {
@@ -17,9 +18,10 @@ export const makeDeterministicAgent = (
   const adapter = {
     run: (request: AgentRunRequest): Stream.Stream<AgentRuntimeEvent, AgentProviderError> =>
       Stream.unwrap(Effect.sync(() => {
-        const resolved = typeof script === "function" ? script(request) : script
+        const snapshot = captureAgentRunRequest(request)
+        const resolved = typeof script === "function" ? script(snapshot) : script
         const events = Stream.fromIterable(resolved.events)
-        requests.push(request)
+        requests.push(snapshot)
         return resolved.failure === undefined
           ? events
           : events.pipe(Stream.concat(Stream.fail(resolved.failure)))
