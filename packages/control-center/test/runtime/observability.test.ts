@@ -11,6 +11,7 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { controlCenterTelemetryLayer } from "../../src/server/observability.js"
 
 interface CapturedRequest {
+  readonly contentType: string | null
   readonly url: string
 }
 
@@ -31,7 +32,10 @@ const HttpClientLayer = Layer.effectContext(
     const httpClient = HttpClient.makeWith(
       Effect.fnUntraced(function*(requestEffect) {
         const request = yield* requestEffect
-        yield* Ref.update(requests, (current) => [...current, { url: request.url }])
+        yield* Ref.update(requests, (current) => [
+          ...current,
+          { contentType: request.headers["content-type"] ?? null, url: request.url }
+        ])
         return HttpClientResponse.fromWeb(request, new Response())
       }),
       preprocessRequest
@@ -67,6 +71,7 @@ describe("Control Center observability", () => {
       Effect.provide(
         testLayer({
           OTEL_EXPORTER_OTLP_ENDPOINT: "http://127.0.0.1:27686",
+          OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
           OTEL_LOGS_EXPORTER: "otlp",
           OTEL_TRACES_EXPORTER: "otlp",
           OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: "1",
@@ -90,7 +95,65 @@ describe("Control Center observability", () => {
       Effect.provide(
         testLayer({
           OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://127.0.0.1:43110/ingest/otlp/v1/logs/control-center",
+          OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
           OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://127.0.0.1:43110/ingest/otlp/v1/traces/control-center",
+          OTEL_LOGS_EXPORTER: "otlp",
+          OTEL_TRACES_EXPORTER: "otlp",
+          OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: "1",
+          OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "1"
+        })
+      )
+    ))
+
+  it.effect("uses the standard OTLP endpoint and protobuf protocol defaults", () =>
+    Effect.gen(function*() {
+      yield* Effect.logInfo("Default OTLP log probe")
+      yield* Effect.void.pipe(Effect.withSpan("default-otlp.trace-probe"))
+
+      const capturedRequests = yield* CapturedRequests
+      const requests = yield* capturedRequests.requests
+
+      assert.deepInclude(requests, {
+        contentType: "application/x-protobuf",
+        url: "http://localhost:4318/v1/logs"
+      })
+      assert.deepInclude(requests, {
+        contentType: "application/x-protobuf",
+        url: "http://localhost:4318/v1/traces"
+      })
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          OTEL_LOGS_EXPORTER: "otlp",
+          OTEL_TRACES_EXPORTER: "otlp",
+          OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: "1",
+          OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "1"
+        })
+      )
+    ))
+
+  it.effect("honors signal-specific OTLP HTTP protocols", () =>
+    Effect.gen(function*() {
+      yield* Effect.logInfo("Mixed protocol log probe")
+      yield* Effect.void.pipe(Effect.withSpan("mixed-protocol.trace-probe"))
+
+      const capturedRequests = yield* CapturedRequests
+      const requests = yield* capturedRequests.requests
+
+      assert.deepInclude(requests, {
+        contentType: "application/json",
+        url: "http://collector.test/v1/logs"
+      })
+      assert.deepInclude(requests, {
+        contentType: "application/x-protobuf",
+        url: "http://collector.test/v1/traces"
+      })
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+          OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+          OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
           OTEL_LOGS_EXPORTER: "otlp",
           OTEL_TRACES_EXPORTER: "otlp",
           OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: "1",

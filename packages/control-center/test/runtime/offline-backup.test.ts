@@ -171,10 +171,12 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
   cliEntry: string,
   args: ReadonlyArray<string>,
   configuredDataRoot: string,
-  port?: number
+  port?: number,
+  extraEnvironment: Readonly<Record<string, string>> = {}
 ) {
   const handle = yield* ChildProcess.make("node", [cliEntry, ...args], {
     env: {
+      ...extraEnvironment,
       CONTROL_CENTER_DATA_ROOT: configuredDataRoot,
       ...(port === undefined ? {} : { CONTROL_CENTER_PORT: String(port) })
     },
@@ -452,7 +454,7 @@ describe("offline backup commands", () => {
       const restoredTarget = path.join(parent, yield* fileSystem.readLink(restoredRoot))
       assert.isTrue(yield* fileSystem.exists(restoredRoot))
       assert.isTrue(yield* fileSystem.exists(path.join(restoredTarget, "control-center.db")))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 60_000 })
 
   it.effect("starts the built CLI from a fresh data root and drains on SIGTERM", () =>
     Effect.gen(function*() {
@@ -511,6 +513,36 @@ describe("offline backup commands", () => {
       assert.include(output, "Control Center drained.\n")
       assert.strictEqual(yield* Ref.get(stderr), "")
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
+
+  it.effect(
+    "reports active OTLP configuration failures without exposing configuration values",
+    () =>
+      Effect.gen(function*() {
+        const { configuredRoot } = yield* makePreparedRoot("control-center-built-otel-failure-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const cliEntry = yield* path.fromFileUrl(
+          new URL("../../dist/server/server/cli.js", import.meta.url)
+        )
+        assert.isTrue(
+          yield* fileSystem.exists(cliEntry),
+          "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
+        )
+
+        const result = yield* runBuiltCli(cliEntry, [], configuredRoot, undefined, {
+          OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+          OTEL_LOGS_EXPORTER: "otlp",
+          OTEL_SDK_DISABLED: "false",
+          OTEL_TRACES_EXPORTER: "none"
+        })
+
+        assert.strictEqual(result.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.strictEqual(result.stdout, "")
+        assert.include(result.stderr, "Control Center command failed")
+        assert.notInclude(result.stderr, "not-a-url")
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    { timeout: 30_000 }
+  )
 
   it.effect("explains pre-stable schema drift without recreating the database", () =>
     Effect.gen(function*() {

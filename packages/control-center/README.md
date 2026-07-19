@@ -49,6 +49,7 @@ For example, start [motel](https://github.com/kitlangton/motel), then run Contro
 
 ```sh
 OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:27686 \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
 OTEL_LOGS_EXPORTER=otlp \
 OTEL_TRACES_EXPORTER=otlp \
 pnpm --filter @knpkv/control-center start
@@ -59,6 +60,7 @@ To use [Lensflare](https://lensflare.dev/), create or select a dataset in its lo
 ```sh
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:43110/ingest/otlp/v1/logs/<dataset-slug> \
 OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:43110/ingest/otlp/v1/traces/<dataset-slug> \
+OTEL_EXPORTER_OTLP_PROTOCOL=http/json \
 OTEL_LOGS_EXPORTER=otlp \
 OTEL_TRACES_EXPORTER=otlp \
 pnpm --filter @knpkv/control-center start
@@ -66,7 +68,7 @@ pnpm --filter @knpkv/control-center start
 
 Lensflare's optional MCP endpoint for querying the captured telemetry is `http://127.0.0.1:43110/mcp`; it is separate from the ingest endpoints above.
 
-For a standard OTLP base endpoint, logs are sent to `/v1/logs` and traces to `/v1/traces`. `OTEL_SERVICE_NAME` may override the default `control-center` service name, while the standard signal-specific endpoint and header variables can target another compatible collector. Exporters flush their bounded batches when the scoped Control Center runtime shuts down; collector outages do not fail application work.
+When an exporter is enabled without an endpoint, Control Center uses the OpenTelemetry defaults: `http://localhost:4318`, `/v1/logs` and `/v1/traces`, with `http/protobuf`. Set `OTEL_EXPORTER_OTLP_PROTOCOL=http/json` for JSON-only collectors, or use the standard signal-specific protocol variables when the two signals differ. `OTEL_SERVICE_NAME` may override the default `control-center` service name, while the standard signal-specific endpoint and header variables can target another compatible collector. Exporters flush their bounded batches when the scoped Control Center runtime shuts down; collector outages do not fail application work.
 
 `SIGINT` and `SIGTERM` begin graceful drain before scoped runtime resources close. The server rejects new authenticated mutations and live-event streams with a retryable `503`, closes existing live-event streams, and gives already-admitted mutations or startup background jobs up to ten seconds to finish. After that work and existing streams clear, one stable snapshot of named subsystem hooks runs sequentially. The governed worker appends immutable shutdown expirations for its still-live recovery claims so another process can reclaim them immediately; then the local SQLite hook checkpoints and truncates the WAL. Hook defects are reported by secret-free hook identity, and the hard deadline still bounds the complete work-and-flush sequence. Mutation-only callers retain a separate barrier that does not wait for startup background jobs or flush hooks. Startup release synchronization and governed-action recovery share the full-work admission barrier.
 

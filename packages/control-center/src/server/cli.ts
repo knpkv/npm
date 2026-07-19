@@ -281,9 +281,9 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
 
 NodeRuntime.runMain(
   program.pipe(
+    Effect.provide(ControlCenterObservabilityLive),
     Effect.catchCause(reportProgramFailure),
-    Effect.provide(NodeServices.layer),
-    Effect.provide(ControlCenterObservabilityLive)
+    Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }
 )
