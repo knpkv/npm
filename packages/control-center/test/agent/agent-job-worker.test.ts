@@ -1,0 +1,315 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, describe, it } from "@effect/vitest"
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  AgentRunId,
+  type AgentRuntimeEvent,
+  type AgentRuntimeService,
+  makeAgentRuntime
+} from "@knpkv/ai-runtime"
+import { DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
+import * as TestClock from "effect/testing/TestClock"
+
+import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { AgentJobWorker, agentJobWorkerLayer } from "../../src/server/agent/AgentJobWorker.js"
+import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import {
+  AgentEventCursor,
+  AgentLeaseOwner,
+  AgentLeaseToken,
+  AgentThreadEventPageSize
+} from "../../src/server/persistence/repositories/agentJobModels.js"
+import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
+import { makePersistenceTestConfig } from "../persistence/fixtures.js"
+
+const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
+const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
+const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+const PROVIDER_ID = AgentProviderId.make("deterministic")
+const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
+const LEASE_OWNER = AgentLeaseOwner.make("agent-worker-test")
+const CURSOR_ZERO = AgentEventCursor.make(0)
+const PAGE_SIZE = AgentThreadEventPageSize.make(128)
+const STARTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
+
+const completedEvents: ReadonlyArray<AgentRuntimeEvent> = [
+  { _tag: "started", providerRunRef: "provider-run-1", sessionRef: null },
+  { _tag: "output", channel: "assistant", text: "Durable answer" },
+  { _tag: "usage", inputTokens: 12, outputTokens: 3 },
+  { _tag: "completed", outcome: "success", sessionRef: null }
+]
+
+const setupFoundation = Effect.gen(function*() {
+  const database = yield* Database
+  yield* database.sql`INSERT INTO workspaces (
+    workspace_id, display_name, revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, 'Agent worker', 1, '2026-07-19T09:00:00.000Z',
+    '2026-07-19T09:00:00.000Z'
+  )`
+  yield* database.sql`INSERT INTO releases (
+    workspace_id, release_id, current_revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${RELEASE_ID}, 1, '2026-07-19T09:00:00.000Z',
+    '2026-07-19T09:00:00.000Z'
+  )`
+})
+
+const enqueue = Effect.gen(function*() {
+  const jobs = yield* AgentJobRepository
+  yield* jobs.enqueue({
+    workspaceId: WORKSPACE_ID,
+    releaseId: RELEASE_ID,
+    jobId: JOB_ID,
+    providerId: PROVIDER_ID,
+    model: "deterministic-model",
+    access: "read-only",
+    prompt: "Explain the release",
+    contextFingerprint: FINGERPRINT,
+    subjectRevision: "release-revision-7",
+    createdAt: STARTED_AT
+  })
+})
+
+const replay = Effect.gen(function*() {
+  const jobs = yield* AgentJobRepository
+  return yield* jobs.threadAfter({
+    workspaceId: WORKSPACE_ID,
+    releaseId: RELEASE_ID,
+    after: CURSOR_ZERO,
+    limit: PAGE_SIZE
+  })
+})
+
+const withDatabaseConfig = <Success, Failure>(
+  config: {
+    readonly blobRoot: string
+    readonly busyTimeoutMilliseconds: number
+    readonly databaseUrl: string
+    readonly maxConnections: number
+  },
+  runtime: AgentRuntimeService,
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
+) => {
+  const database = databaseLayer(config)
+  const jobs = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+  const registry = agentRuntimeRegistryLayer((providerId) =>
+    providerId === PROVIDER_ID
+      ? Effect.succeed(runtime)
+      : Effect.fail(
+        new AgentProviderError({
+          providerId,
+          phase: "configuration",
+          message: "No deterministic provider configured.",
+          retryable: false
+        })
+      )
+  )
+  const worker = agentJobWorkerLayer({
+    leaseOwner: LEASE_OWNER,
+    leaseDuration: "5 minutes"
+  }).pipe(
+    Layer.provide(registry),
+    Layer.provideMerge(jobs)
+  )
+  return use.pipe(Effect.provide(worker), Effect.scoped)
+}
+
+const withWorker = <Success, Failure>(
+  runtime: AgentRuntimeService,
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
+) =>
+  Effect.gen(function*() {
+    const config = yield* makePersistenceTestConfig("control-center-agent-worker-")
+    return yield* withDatabaseConfig(config, runtime, use)
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+
+describe("agent job worker", () => {
+  it.effect("claims and executes one queued job through the selected runtime", () => {
+    const requests = new Array<Parameters<AgentRuntimeService["run"]>[0]>()
+    const runtime = makeAgentRuntime({
+      run: (request) =>
+        Stream.suspend(() => {
+          requests.push(request)
+          return Stream.fromIterable(completedEvents)
+        })
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.strictEqual(requests.length, 1)
+        assert.strictEqual(requests[0]?.runId, AgentRunId.make(JOB_ID))
+        assert.strictEqual(requests[0]?.context.workspaceId, WORKSPACE_ID)
+      })
+    )
+  })
+
+  it.effect("does not duplicate a claim when run-once calls race", () => {
+    let runtimeCalls = 0
+    const runtime = makeAgentRuntime({
+      run: () =>
+        Stream.suspend(() => {
+          runtimeCalls += 1
+          return Stream.fromIterable(completedEvents)
+        })
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+        const worker = yield* AgentJobWorker
+
+        const results = yield* Effect.all(
+          [worker.runOnce(WORKSPACE_ID), worker.runOnce(WORKSPACE_ID)],
+          { concurrency: "unbounded" }
+        )
+
+        assert.strictEqual(runtimeCalls, 1)
+        assert.deepStrictEqual(
+          results.map(({ _tag }) => _tag).sort(),
+          ["completed", "idle"]
+        )
+      })
+    )
+  })
+
+  it.effect("persists a provider failure and releases the terminal lease", () => {
+    const providerFailure = new AgentProviderError({
+      providerId: PROVIDER_ID,
+      phase: "execution",
+      message: "Deterministic provider failure",
+      retryable: true
+    })
+    const runtime = makeAgentRuntime({
+      run: () => Stream.make(completedEvents[0]!).pipe(Stream.concat(Stream.fail(providerFailure)))
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const database = yield* Database
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const rows = yield* database.sql<{
+          readonly errorJson: string
+          readonly leaseCount: number
+          readonly outcome: string
+          readonly state: string
+        }>`SELECT attempt.error_json AS errorJson, attempt.outcome, job.state,
+        (SELECT COUNT(*) FROM agent_job_leases lease
+          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
+        FROM agent_jobs job
+        JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id AND attempt.job_id = job.job_id
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
+
+        assert.deepStrictEqual(result, { _tag: "failed", jobId: JOB_ID })
+        assert.strictEqual(rows[0]?.state, "failed")
+        assert.strictEqual(rows[0]?.outcome, "failed")
+        assert.strictEqual(rows[0]?.leaseCount, 0)
+        assert.include(rows[0]?.errorJson ?? "", "Deterministic provider failure")
+        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-failed")
+      })
+    )
+  })
+
+  it.effect("completes a recovered cancellation without invoking the provider", () => {
+    let runtimeCalls = 0
+    const runtime = makeAgentRuntime({
+      run: () => {
+        runtimeCalls += 1
+        return Stream.fromIterable(completedEvents)
+      }
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+        const original = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          leaseOwner: LEASE_OWNER,
+          leaseToken: Schema.decodeSync(AgentLeaseToken)("e".repeat(64)),
+          claimedAt: STARTED_AT,
+          leaseExpiresAt: DateTime.addDuration(STARTED_AT, "1 minute")
+        })
+        assert.isTrue(Option.isSome(original))
+        yield* jobs.requestCancellation({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          requestedAt: DateTime.addDuration(STARTED_AT, "30 seconds")
+        })
+        yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.addDuration(STARTED_AT, "2 minutes")))
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "cancelled" })
+        assert.strictEqual(runtimeCalls, 0)
+        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
+      })
+    )
+  })
+
+  it.effect("replays the ordered terminal thread after the SQLite database is reopened", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-agent-worker-replay-")
+      const runtime = makeAgentRuntime({ run: () => Stream.fromIterable(completedEvents) })
+      yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+
+      yield* withDatabaseConfig(
+        config,
+        runtime,
+        Effect.gen(function*() {
+          yield* setupFoundation
+          yield* enqueue
+          const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+          assert.strictEqual(result._tag, "completed")
+        })
+      )
+
+      yield* withDatabaseConfig(
+        config,
+        runtime,
+        Effect.gen(function*() {
+          const page = yield* replay
+          assert.deepStrictEqual(
+            page.events.map(({ eventKind, eventSequence }) => ({ eventKind, eventSequence })),
+            [
+              { eventKind: "user-message", eventSequence: 1 },
+              { eventKind: "job-queued", eventSequence: 2 },
+              { eventKind: "job-started", eventSequence: 3 },
+              { eventKind: "assistant-output", eventSequence: 4 },
+              { eventKind: "usage", eventSequence: 5 },
+              { eventKind: "job-completed", eventSequence: 6 }
+            ]
+          )
+          assert.isTrue(Option.isNone(
+            yield* (yield* AgentJobRepository).claimNext({
+              workspaceId: WORKSPACE_ID,
+              leaseOwner: LEASE_OWNER,
+              leaseToken: Schema.decodeSync(AgentLeaseToken)("f".repeat(64)),
+              claimedAt: STARTED_AT,
+              leaseExpiresAt: DateTime.addDuration(STARTED_AT, "5 minutes")
+            })
+          ))
+        })
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+})

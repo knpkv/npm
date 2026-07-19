@@ -1,0 +1,236 @@
+/** Run-once durable agent job execution behind one small server-owned interface. @module */
+import {
+  AgentContextMismatchError,
+  AgentProviderError,
+  AgentRunId,
+  type AgentRunRequest,
+  type AgentRuntimeError,
+  type AgentRuntimeEvent,
+  AgentRuntimeProtocolError
+} from "@knpkv/ai-runtime"
+import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
+import type * as Duration from "effect/Duration"
+import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
+import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
+import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+
+import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
+import {
+  type AgentLeaseOwner,
+  AgentLeaseToken,
+  type ClaimedAgentJob
+} from "../persistence/repositories/agentJobModels.js"
+import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
+import { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
+
+/** Worker lease policy fixed when the server composes the module. */
+export interface AgentJobWorkerOptions {
+  readonly leaseDuration: Duration.Input
+  readonly leaseOwner: AgentLeaseOwner
+}
+
+/** One run-once observation: no work, or one durably terminal job. */
+export type AgentJobWorkerRunResult =
+  | { readonly _tag: "idle" }
+  | {
+    readonly _tag: "completed"
+    readonly jobId: JobId
+    readonly outcome: "success" | "cancelled" | "max-steps"
+  }
+  | { readonly _tag: "failed"; readonly jobId: JobId }
+
+const AgentRuntimeFailure = Schema.Union([
+  AgentContextMismatchError,
+  AgentProviderError,
+  AgentRuntimeProtocolError
+])
+const isAgentRuntimeFailure = Schema.is(AgentRuntimeFailure)
+
+const normalizeRuntimeFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  failure: AgentRuntimeError
+): AgentProviderError => {
+  if (failure._tag === "AgentProviderError") {
+    return new AgentProviderError({
+      providerId,
+      phase: failure.phase,
+      message: failure.message,
+      retryable: failure.retryable
+    })
+  }
+  if (failure._tag === "AgentContextMismatchError") {
+    return new AgentProviderError({
+      providerId,
+      phase: "protocol",
+      message: "Agent continuation context did not match the claimed job.",
+      retryable: false
+    })
+  }
+  return new AgentProviderError({
+    providerId,
+    phase: "protocol",
+    message: `Agent runtime protocol failed (${failure.reason}).`,
+    retryable: false
+  })
+}
+
+const makeAgentJobWorker = Effect.gen(function*() {
+  const cryptoService = yield* Crypto.Crypto
+  const jobs = yield* AgentJobRepository
+  const runtimes = yield* AgentRuntimeRegistry
+
+  const failClaim = Effect.fn("AgentJobWorker.failClaim")(function*(
+    claim: ClaimedAgentJob,
+    error: AgentProviderError
+  ) {
+    const failedAt = yield* DateTime.now
+    yield* jobs.failAttempt({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId,
+      attemptSequence: claim.attemptSequence,
+      leaseToken: claim.leaseToken,
+      error,
+      failedAt
+    })
+    return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
+  })
+
+  const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
+    if (claim.cancellationRequested) {
+      const occurredAt = yield* DateTime.now
+      yield* jobs.appendEvent({
+        workspaceId: claim.workspaceId,
+        jobId: claim.jobId,
+        attemptSequence: claim.attemptSequence,
+        leaseToken: claim.leaseToken,
+        event: { _tag: "completed", outcome: "cancelled", sessionRef: claim.sessionRef },
+        occurredAt
+      })
+      return {
+        _tag: "completed",
+        jobId: claim.jobId,
+        outcome: "cancelled"
+      } satisfies AgentJobWorkerRunResult
+    }
+
+    const selected = yield* runtimes.select(claim.providerId).pipe(Effect.result)
+    if (Result.isFailure(selected)) {
+      return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
+    }
+
+    const terminal = yield* Ref.make<Extract<AgentRuntimeEvent, { readonly _tag: "completed" }> | null>(null)
+    const continuation: AgentRunRequest["continuation"] = claim.sessionRef === null
+      ? { _tag: "fresh" }
+      : {
+        _tag: "resume",
+        sessionRef: claim.sessionRef,
+        contextFingerprint: claim.context.fingerprint
+      }
+    const request: AgentRunRequest = {
+      runId: AgentRunId.make(claim.jobId),
+      providerId: claim.providerId,
+      model: claim.model,
+      access: claim.access,
+      prompt: claim.prompt,
+      context: claim.context,
+      continuation
+    }
+    const execution = yield* selected.success.run(request).pipe(
+      Stream.runForEach((event) => {
+        if (event._tag === "completed") return Ref.set(terminal, event)
+        return DateTime.now.pipe(
+          Effect.flatMap((occurredAt) =>
+            jobs.appendEvent({
+              workspaceId: claim.workspaceId,
+              jobId: claim.jobId,
+              attemptSequence: claim.attemptSequence,
+              leaseToken: claim.leaseToken,
+              event,
+              occurredAt
+            })
+          ),
+          Effect.asVoid
+        )
+      }),
+      Effect.result
+    )
+    if (Result.isFailure(execution)) {
+      const failure = execution.failure
+      if (isAgentRuntimeFailure(failure)) {
+        return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, failure))
+      }
+      return yield* Effect.fail(failure)
+    }
+
+    const completed = yield* Ref.get(terminal)
+    if (completed === null) {
+      return yield* failClaim(
+        claim,
+        normalizeRuntimeFailure(
+          claim.providerId,
+          new AgentRuntimeProtocolError({ reason: "missing-terminal-event" })
+        )
+      )
+    }
+    const occurredAt = yield* DateTime.now
+    yield* jobs.appendEvent({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId,
+      attemptSequence: claim.attemptSequence,
+      leaseToken: claim.leaseToken,
+      event: completed,
+      occurredAt
+    })
+    return {
+      _tag: "completed",
+      jobId: claim.jobId,
+      outcome: completed.outcome
+    } satisfies AgentJobWorkerRunResult
+  })
+
+  return (options: AgentJobWorkerOptions) => ({
+    runOnce: Effect.fn("AgentJobWorker.runOnce")(function*(workspaceId: WorkspaceId) {
+      const claimedAt = yield* DateTime.now
+      const leaseToken = AgentLeaseToken.make(
+        Encoding.encodeHex(yield* cryptoService.randomBytes(32))
+      )
+      const claim = yield* jobs.claimNext({
+        workspaceId,
+        leaseOwner: options.leaseOwner,
+        leaseToken,
+        claimedAt,
+        leaseExpiresAt: DateTime.addDuration(claimedAt, options.leaseDuration)
+      })
+      return Option.isNone(claim)
+        ? { _tag: "idle" } satisfies AgentJobWorkerRunResult
+        : yield* executeClaim(claim.value)
+    })
+  })
+})
+
+export interface AgentJobWorkerService {
+  readonly runOnce: (
+    workspaceId: WorkspaceId
+  ) => ReturnType<ReturnType<Effect.Success<typeof makeAgentJobWorker>>["runOnce"]>
+}
+
+/** Deep run-once module owning claim, selection, execution, and terminal persistence. */
+export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWorkerService>()(
+  "@knpkv/control-center/server/agent/AgentJobWorker"
+) {}
+
+/** Captures worker policy while acquiring persistence, crypto, and runtime selection. */
+export const agentJobWorkerLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
+  Layer.effect(
+    AgentJobWorker,
+    makeAgentJobWorker.pipe(Effect.map((make) => AgentJobWorker.of(make(options))))
+  )
