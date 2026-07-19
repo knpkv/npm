@@ -561,7 +561,7 @@ const syncProject = (
             nextPageToken: checkpoint.nextPageToken,
             remainingPages: configuration.maximumPages,
             remainingResults: configuration.pageSize * configuration.maximumPages,
-            seenPageTokens: new Set()
+            seenPageTokens: checkpoint.nextPageToken === null ? new Set() : new Set([checkpoint.nextPageToken])
           },
           (state) =>
             Effect.gen(function*() {

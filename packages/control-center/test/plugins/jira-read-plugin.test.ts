@@ -944,6 +944,49 @@ describe("JiraReadPlugin", () => {
       })
     }))
 
+  it.effect("rejects a provider cursor echoed by a resumed Jira page", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")))
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Effect.succeed({
+            issues: [
+              request.nextPageToken === null
+                ? issue
+                : {
+                  ...issue,
+                  id: "10043",
+                  key: "PAY-43",
+                  fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+                }
+            ],
+            nextPageToken: "page-2"
+          })
+      })
+      const configured = { ...configuration, maximumPages: 1, pageSize: 1 }
+      const synchronize = (checkpoint: string | null) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const initial = yield* synchronize(null)
+      const boundedCheckpoint = initial[0]?.checkpointAfterPage ?? null
+      assert.isNotNull(boundedCheckpoint)
+      const resumed = yield* synchronize(boundedCheckpoint).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(resumed))
+      if (Result.isFailure(resumed)) {
+        assert.strictEqual(resumed.failure._tag, "PluginMalformedResponseFailure")
+        if (resumed.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(resumed.failure.diagnosticCode, "jira-sync-page-cursor-repeated")
+        }
+      }
+    }))
+
   it.effect("rejects an invalid persisted watermark before searching Jira", () =>
     Effect.gen(function*() {
       const searchCalls = yield* Ref.make(0)
