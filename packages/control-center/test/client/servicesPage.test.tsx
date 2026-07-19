@@ -1502,8 +1502,61 @@ describe("ServicesPage connection tests", () => {
       expect(startAtlassianOAuthGrant.mock.calls[0]?.[1]).toBeInstanceOf(AbortSignal)
       expect(host.textContent).toContain("OAuth needs a one-time local client configuration")
       expect(host.textContent).toContain("http://127.0.0.1:4173/services/oauth/atlassian/callback")
+      expect(host.textContent).toContain("OAuth client ID")
+      expect(host.textContent).toContain("OAuth client secret")
+      expect(host.textContent).not.toContain("jira auth configure")
+      expect(host.textContent).not.toContain("confluence auth configure")
     }
   )
+
+  it("stores OAuth app credentials through Control Center and continues sign-in", async () => {
+    const previousLocation = window.location.href
+    const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
+      (_providers, _signal, configuration) =>
+        Promise.resolve(
+          configuration === undefined
+            ? {
+                _tag: "configuration-required",
+                callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+              }
+            : {
+                _tag: "ready",
+                authorizationUrl: new URL("#control-center-owned-oauth", previousLocation).href,
+                callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+              }
+        )
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=jira")
+    await act(async () => undefined)
+    const button = (text: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
+
+    await act(async () => button("Sign in with Atlassian")?.click())
+    const clientId = host.querySelector<HTMLInputElement>('input[maxlength="500"]')
+    const clientSecret = host.querySelector<HTMLInputElement>('input[type="password"][maxlength="16384"]')
+    expect(clientId).not.toBeNull()
+    expect(clientSecret).not.toBeNull()
+    if (clientId === null || clientSecret === null) return
+
+    await setControlValue(clientId, " control-center-client ")
+    await setControlValue(clientSecret, "control-center-secret")
+    await act(async () => button("Save OAuth app and continue")?.click())
+
+    expect(startAtlassianOAuthGrant).toHaveBeenCalledTimes(2)
+    expect(startAtlassianOAuthGrant.mock.calls[1]?.[2]).toEqual({
+      clientId: "control-center-client",
+      clientSecret: "control-center-secret"
+    })
+  })
 
   it("cancels a pending OAuth start when the setup form closes", async () => {
     let resolveStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined

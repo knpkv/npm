@@ -118,7 +118,8 @@ export interface AtlassianOAuthGrantOperations {
   readonly start: (
     owner: AtlassianOAuthGrantOwner,
     publicOrigin: string,
-    providers: AtlassianOAuthProviderIntent
+    providers: AtlassianOAuthProviderIntent,
+    configuration?: OAuthConfig
   ) => Effect.Effect<AtlassianOAuthGrantStartResponse, ApplicationConflict | ApplicationServiceUnavailable>
   readonly exchange: (
     owner: AtlassianOAuthGrantOwner,
@@ -178,13 +179,31 @@ const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boo
 }
 
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
-  const [jiraConfig, confluenceConfig] = yield* Effect.all([
+  const [controlCenterConfig, jiraConfig, confluenceConfig] = yield* Effect.all([
+    loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME),
     loadOAuthConfig(JIRA_AUTH_STORE_NAME),
     loadOAuthConfig(CONFLUENCE_AUTH_STORE_NAME)
   ], { concurrency: 1 })
+  if (controlCenterConfig !== null) return controlCenterConfig
   return jiraConfig !== null && confluenceConfig !== null && sameOAuthConfig(jiraConfig, confluenceConfig)
     ? jiraConfig
     : null
+})
+
+const configureControlCenterOAuth = Effect.fn("AtlassianOAuthGrants.configureControlCenterOAuth")(function*(
+  configuration: OAuthConfig
+) {
+  const [currentConfig, profiles] = yield* Effect.all([
+    loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME),
+    loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME)
+  ], { concurrency: 1 })
+  if (currentConfig !== null) {
+    if (!sameOAuthConfig(currentConfig, configuration)) return yield* new ApplicationConflict()
+    return currentConfig
+  }
+  if (profiles.profiles.length > 0) return yield* unavailable()
+  yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, configuration)
+  return configuration
 })
 
 const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(function*(
@@ -416,13 +435,16 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const start: AtlassianOAuthGrantOperations["start"] = Effect.fn("AtlassianOAuthGrants.start")(function*(
     owner,
     publicOrigin,
-    providers
+    providers,
+    configuration
   ) {
     const redirectUri = callbackUrl(publicOrigin)
-    const config = yield* loadSharedOAuthConfig().pipe(
-      Effect.provide(localStorageLayer),
-      Effect.mapError(unavailable)
-    )
+    const config = yield* (configuration === undefined
+      ? loadSharedOAuthConfig().pipe(Effect.mapError(unavailable))
+      : profileStoreLock.withPermit(configureControlCenterOAuth(configuration))).pipe(
+        Effect.provide(localStorageLayer),
+        Effect.mapError((error) => error._tag === "ApplicationConflict" ? error : unavailable())
+      )
     if (config === null) return { _tag: "configuration-required", callbackUrl: redirectUri }
 
     const stateBytes = yield* cryptoService.randomBytes(32).pipe(Effect.mapError(unavailable))

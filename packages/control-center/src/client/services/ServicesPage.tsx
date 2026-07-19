@@ -5,6 +5,7 @@ import { type FormEvent, type ReactElement, useCallback, useEffect, useRef, useS
 import { useNavigate, useSearchParams } from "react-router"
 
 import type {
+  AtlassianOAuthClientConfiguration,
   AtlassianOAuthGrantStartResponse,
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
@@ -342,7 +343,8 @@ const CatalogCard = ({
   readonly onOpen: () => void
   readonly onStartAtlassianOAuth: (
     providers: AtlassianOAuthProviderIntent,
-    signal: AbortSignal
+    signal: AbortSignal,
+    configuration?: AtlassianOAuthClientConfiguration
   ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (displayName: string, values: ReadonlyArray<CreatePluginConnectionValue>) => Promise<boolean>
   readonly onSubmitAtlassian: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
@@ -985,10 +987,10 @@ export const ServicesPage = ({
                     }
                     setOpenProvider(catalog.providerId)
                   }}
-                  onStartAtlassianOAuth={(providers, signal) => {
+                  onStartAtlassianOAuth={(providers, signal, configuration) => {
                     const start = transport.startAtlassianOAuthGrant
                     if (start === undefined) return Promise.reject(new Error("Atlassian OAuth is unavailable"))
-                    return start(providers, signal)
+                    return start(providers, signal, configuration)
                   }}
                   onSubmit={(displayName, values) => createConnection(catalog, displayName, values)}
                   onSubmitAtlassian={(drafts) => createConnections(drafts, catalog.providerId)}

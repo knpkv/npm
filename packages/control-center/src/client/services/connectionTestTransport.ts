@@ -6,6 +6,7 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type {
+  AtlassianOAuthClientConfiguration,
   AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   AtlassianOAuthGrantStartResponse,
@@ -31,7 +32,8 @@ export interface ConnectionTestTransport {
   readonly discoverAtlassianProfiles?: (signal: AbortSignal) => Promise<AtlassianProfileDiscoveryResponse>
   readonly startAtlassianOAuthGrant?: (
     providers: AtlassianOAuthProviderIntent,
-    signal: AbortSignal
+    signal: AbortSignal,
+    configuration?: AtlassianOAuthClientConfiguration
   ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly exchangeAtlassianOAuthGrant?: (
     grantId: AtlassianOAuthGrantId,
@@ -63,11 +65,13 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
-  startAtlassianOAuthGrant: (providers, signal) =>
+  startAtlassianOAuthGrant: (providers, signal, configuration) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
-        return yield* client.plugins.createAtlassianOAuthGrant({ payload: { providers } })
+        return yield* client.plugins.createAtlassianOAuthGrant({
+          payload: { providers, ...(configuration === undefined ? {} : { configuration }) }
+        })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
