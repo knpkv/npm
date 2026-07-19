@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
+import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import {
   AgentId,
   EnvironmentId,
@@ -10,7 +11,7 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { type NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import { NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -488,6 +489,107 @@ describe("normalized plugin page materialization", () => {
         assert.isFalse(details.commentsTruncated)
         assert.deepStrictEqual(details.truncatedFields, [])
         assert.isTrue(inspection.isSourceCurrent)
+      })
+    ))
+
+  it.effect("produces presentation-ready inspection from a provider-normalized Jira issue", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const events = yield* normalizeJiraIssueEvents({
+          issue: {
+            id: "10042",
+            key: "PAY-42",
+            fields: {
+              summary: "Protect payment retries",
+              updated: "2026-07-19T09:01:00.000Z",
+              description: {
+                type: "doc",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "Persist retry state." }] },
+                  {
+                    type: "heading",
+                    attrs: { level: 2 },
+                    content: [{ type: "text", text: "Acceptance Criteria" }]
+                  },
+                  {
+                    type: "bulletList",
+                    content: [{
+                      type: "listItem",
+                      content: [{
+                        type: "paragraph",
+                        content: [{ type: "text", text: "Retry survives restart." }]
+                      }]
+                    }]
+                  }
+                ]
+              },
+              environment: "Payments production",
+              status: { id: "3", name: "In Review" },
+              assignee: {
+                accountId: "ari",
+                displayName: "Ari Chen",
+                avatarUrls: { "48x48": "https://avatar.example/ari.png" },
+                active: true
+              }
+            }
+          },
+          comments: {
+            values: [{
+              id: "c1",
+              author: { accountId: "ari", displayName: "Ari Chen", active: true },
+              body: "Ready for review.",
+              created: "2026-07-18T10:00:00.000Z",
+              updated: "2026-07-18T10:00:00.000Z"
+            }],
+            total: 1,
+            truncated: false
+          },
+          changelogs: {
+            values: [],
+            total: 0,
+            truncated: false
+          },
+          observedAt: T1,
+          webBaseUrl: new URL("https://jira.example/")
+        })
+        const page = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "provider-normalized-issue",
+          hasMore: false,
+          events: events.map((event) => Schema.encodeSync(NormalizedPluginEventV1)(event))
+        })
+        yield* materializeNormalizedPluginPage(
+          {
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: PLUGIN_ID,
+            providerId: "jira",
+            streamKey: MATERIALIZED_STREAM,
+            expectedRevision: 0,
+            committedAt: T2,
+            successfulHealth: { _tag: "healthy", checkedAt: T2 }
+          },
+          page
+        )
+
+        const index = yield* items()
+        const entityId = index.items[0]?.projection.entityId
+        if (entityId === undefined) return yield* Effect.die("expected normalized Jira issue")
+        const inspectionService = yield* makeDeliveryGraphInspection
+        const inspection = yield* inspectionService.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+        const presentationInput = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+        assert.strictEqual(presentationInput.entity.projection.displayKey, "PAY-42")
+        assert.strictEqual(presentationInput.entity.projection.title, "PAY-42 · Protect payment retries")
+        assert.strictEqual(presentationInput.source.sourceUrl, "https://jira.example/browse/PAY-42")
+        const details = presentationInput.entity.projection.details
+        if (details._tag !== "issue") return yield* Effect.die("expected presentation-ready Jira issue details")
+        assert.strictEqual(
+          details.description,
+          "Persist retry state.\n\n## Acceptance Criteria\n\n- Retry survives restart."
+        )
+        assert.strictEqual(details.acceptanceCriteria, "- Retry survives restart.")
+        assert.strictEqual(details.environment, "Payments production")
+        assert.strictEqual(details.collaborators?.[0]?.displayName, "Ari Chen")
+        assert.strictEqual(details.comments?.[0]?.body, "Ready for review.")
       })
     ))
 
