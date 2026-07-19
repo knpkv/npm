@@ -431,8 +431,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
     yield* sql`DELETE FROM agent_job_leases
       WHERE workspace_id = ${options.workspaceId}
-        AND job_id = ${options.jobId}
-        AND attempt_sequence = ${options.attemptSequence}`
+        AND job_id = ${options.jobId}`
   })
 
   const decodeRuntimePayload = Effect.fn("AgentJobRepository.decodeRuntimePayload")(function*(

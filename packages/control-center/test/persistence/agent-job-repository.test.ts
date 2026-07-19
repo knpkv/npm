@@ -357,6 +357,24 @@ describe("agent job repository", () => {
       })
       assert.strictEqual(currentAttempt.attemptSequence, recovered.value.attemptSequence)
       assert.strictEqual(currentAttempt.eventKind, "usage")
+
+      const activeLeaseCount = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM agent_job_leases
+        WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}`
+      assert.deepStrictEqual(activeLeaseCount, [{ count: 2 }])
+
+      yield* repository.appendEvent({
+        workspaceId: WORKSPACE_ID,
+        jobId: JOB_ID,
+        attemptSequence: recovered.value.attemptSequence,
+        leaseToken: SECOND_TOKEN,
+        event: { _tag: "completed", outcome: "success", sessionRef: SESSION_REF },
+        occurredAt: T5
+      })
+      const terminalLeaseCount = yield* database.sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM agent_job_leases
+        WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}`
+      assert.deepStrictEqual(terminalLeaseCount, [{ count: 0 }])
     })))
 
   it.effect("rejects backdated events after the trusted clock passes lease expiry", () =>
