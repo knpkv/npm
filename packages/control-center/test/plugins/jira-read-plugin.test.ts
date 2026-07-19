@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -8,9 +9,11 @@ import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
-import { ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import {
   JiraReadPluginConfiguration,
@@ -33,6 +36,9 @@ const issueReference = (vendorImmutableId: string): ReadPluginEntityRequestV1 =>
     entityType: "jira.issue",
     vendorImmutableId
   })
+
+const syncRequest = (checkpoint: string | null = null) =>
+  Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "project-issues", checkpoint })
 
 const issue = {
   id: "10042",
@@ -119,7 +125,12 @@ const changelogs = [
 ]
 
 const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvider => ({
-  getCurrentUser: Effect.succeed({ accountId: "ari", displayName: "Ari Chen", active: true }),
+  getCurrentUser: Effect.succeed({
+    accountId: "ari",
+    displayName: "Ari Chen",
+    active: true,
+    timeZone: "UTC"
+  }),
   getServerInfo: Effect.succeed({
     baseUrl: "https://acme.atlassian.net",
     serverTitle: "Acme Jira"
@@ -140,6 +151,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
       maxResults: request.maxResults,
       total: changelogs.length
     }),
+  searchProjectIssues: () => Effect.succeed({ issues: [], nextPageToken: null }),
   ...overrides
 })
 
@@ -551,6 +563,554 @@ describe("JiraReadPlugin", () => {
         }
       }
       assert.strictEqual(yield* Ref.get(childCalls), 0)
+    }))
+
+  it.effect("paginates one project with stable checkpoints and normalizes issues, people, releases, and evidence", () =>
+    Effect.gen(function*() {
+      const searches = yield* Ref.make<
+        ReadonlyArray<{
+          readonly projectId: string
+          readonly nextPageToken: string | null
+          readonly watermark: { readonly updatedAt: string; readonly issueKey: string | null } | null
+        }>
+      >([])
+      const secondIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: {
+          ...issue.fields,
+          summary: "Bound retry attempts",
+          updated: "2026-07-17T09:31:00.000Z"
+        }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(searches, (current) => [...current, request]).pipe(
+            Effect.as(
+              request.watermark !== null
+                ? { issues: [secondIssue], nextPageToken: null }
+                : request.nextPageToken === null
+                ? { issues: [issue], nextPageToken: "page-2" }
+                : { issues: [secondIssue], nextPageToken: null }
+            )
+          )
+      })
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest()))),
+          Effect.map((collectedPages) => [...collectedPages])
+        )
+      )
+
+      assert.lengthOf(pages, 2)
+      assert.isTrue(pages[0]?.hasMore)
+      assert.isFalse(pages[1]?.hasMore)
+      assert.include(pages[1]?.checkpointAfterPage ?? "", "PAY-43")
+      assert.deepStrictEqual((yield* Ref.get(searches)).map(({ projectId }) => projectId), ["10", "10"])
+      assert.deepStrictEqual(
+        pages[0]?.events.flatMap((event) => event._tag === "UpsertEntity" ? [event.entityType] : []),
+        ["jira.issue", "release"]
+      )
+      assert.sameMembers(
+        pages[0]?.events.map(({ _tag }) => _tag) ?? [],
+        [
+          "UpsertEntity",
+          "UpsertPerson",
+          "UpsertPerson",
+          "UpsertPerson",
+          "AppendEvidence",
+          "UpsertEntity",
+          "AppendEvidence",
+          "ProposeRelationship"
+        ]
+      )
+      const releaseEventIds = pages.flatMap(({ events }) =>
+        events.flatMap((event) =>
+          event._tag === "UpsertEntity" && event.entityType === "release"
+            ? [event.eventId]
+            : []
+        )
+      )
+      assert.lengthOf(releaseEventIds, 2)
+      assert.notStrictEqual(releaseEventIds[0], releaseEventIds[1])
+
+      const replay = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            Stream.runCollect(connection.sync(syncRequest(pages[1]?.checkpointAfterPage ?? null)))
+          ),
+          Effect.map((collectedPages) => [...collectedPages])
+        )
+      )
+      assert.lengthOf(replay, 1)
+      assert.deepStrictEqual(replay[0]?.events, [])
+      assert.deepStrictEqual((yield* Ref.get(searches))[2]?.watermark, {
+        updatedAt: "2026-07-17T09:31:00.000Z",
+        issueKey: "PAY-43"
+      })
+    }))
+
+  it.effect("compares resumed watermarks after normalizing equivalent Jira timestamp offsets", () =>
+    Effect.gen(function*() {
+      const laterIssueAtSameInstant = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: {
+          ...issue.fields,
+          summary: "Continue the same update batch",
+          updated: "2026-07-17T09:30:00.000+0000"
+        }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [laterIssueAtSameInstant], nextPageToken: null })
+      })
+      const checkpoint = "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}"
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint))))
+        )
+      )
+
+      assert.lengthOf(pages, 1)
+      assert.isNotEmpty(pages[0]?.events ?? [])
+      assert.include(pages[0]?.checkpointAfterPage ?? "", "PAY-43")
+      assert.include(pages[0]?.checkpointAfterPage ?? "", "2026-07-17T09:30:00.000Z")
+    }))
+
+  it.effect("accepts provider-ordered ties whose immutable numeric IDs decrease", () =>
+    Effect.gen(function*() {
+      const firstIssue = {
+        ...issue,
+        id: "10000",
+        key: "PAY-9",
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      }
+      const secondIssue = {
+        ...issue,
+        id: "9999",
+        key: "PAY-10",
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [firstIssue, secondIssue], nextPageToken: null })
+      })
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+
+      assert.lengthOf(pages, 2)
+      assert.isTrue(
+        pages[1]?.events.some(
+          (event) => event._tag === "UpsertEntity" && event.vendorImmutableId === "9999"
+        )
+      )
+    }))
+
+  it.effect("searches incremental Jira pages in the authenticated user's time zone", () =>
+    Effect.gen(function*() {
+      const requestedTimeZones = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        getCurrentUser: Effect.succeed({
+          accountId: "ari",
+          displayName: "Ari Chen",
+          active: true,
+          timeZone: "America/Los_Angeles"
+        }),
+        searchProjectIssues: (request) =>
+          Ref.update(requestedTimeZones, (timeZones) => [...timeZones, request.timeZone]).pipe(
+            Effect.as({ issues: [], nextPageToken: null })
+          )
+      })
+
+      yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(requestedTimeZones), ["America/Los_Angeles"])
+    }))
+
+  it.effect("revisions mutable fix-version evidence identities with the Jira issue", () =>
+    Effect.gen(function*() {
+      const searchCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Ref.getAndUpdate(searchCalls, (count) => count + 1).pipe(
+            Effect.map((count) => ({
+              issues: [{
+                ...issue,
+                fields: {
+                  ...issue.fields,
+                  updated: count === 0
+                    ? "2026-07-17T09:30:00.000Z"
+                    : "2026-07-17T09:31:00.000Z"
+                }
+              }],
+              nextPageToken: null
+            }))
+          )
+      })
+      const readEvidenceId = PluginConnection.pipe(
+        Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest()))),
+        Effect.map((pages) =>
+          pages.flatMap(({ events }) => events).find(
+            (event) => event._tag === "AppendEvidence" && event.summary.startsWith("Jira fix version")
+          )
+        ),
+        Effect.flatMap((event) =>
+          event?._tag === "AppendEvidence"
+            ? Effect.succeed(event.evidenceId)
+            : Effect.die("expected Jira fix-version evidence")
+        )
+      )
+
+      const firstEvidenceId = yield* withConnection(provider, readEvidenceId)
+      const secondEvidenceId = yield* withConnection(provider, readEvidenceId)
+
+      assert.notStrictEqual(firstEvidenceId, secondEvidenceId)
+      assert.include(firstEvidenceId, "2026-07-17T09:30:00.000Z")
+      assert.include(secondEvidenceId, "2026-07-17T09:31:00.000Z")
+    }))
+
+  it.effect("persists a provider cursor when skipped rows exhaust the invocation bound", () =>
+    Effect.gen(function*() {
+      const pageTokens = yield* Ref.make<ReadonlyArray<string | null>>([])
+      const oldIssue = (id: string) => ({
+        ...issue,
+        id,
+        key: `PAY-${id}`,
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      })
+      const newerIssue = oldIssue("10043")
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(pageTokens, (tokens) => [...tokens, request.nextPageToken]).pipe(
+            Effect.as(
+              request.nextPageToken === null
+                ? { issues: [oldIssue("10040"), oldIssue("10041")], nextPageToken: "page-2" }
+                : { issues: [newerIssue], nextPageToken: null }
+            )
+          )
+      })
+      const checkpoint = JSON.stringify({
+        version: 3,
+        updatedAt: "2026-07-17T09:30:00.000Z",
+        issueKey: "PAY-10042",
+        queryUpdatedAt: "2026-07-17T09:30:00.000Z",
+        queryIssueKey: "PAY-10042",
+        nextPageToken: null,
+        cursorExpiresAt: null
+      })
+      const configured = { ...configuration, maximumPages: 1, pageSize: 2 }
+      const synchronize = (resumeFrom: string) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(resumeFrom)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const skipped = yield* synchronize(checkpoint)
+      assert.lengthOf(skipped, 1)
+      assert.deepStrictEqual(skipped[0]?.events, [])
+      assert.isFalse(skipped[0]?.hasMore)
+      assert.include(skipped[0]?.checkpointAfterPage ?? "", "page-2")
+
+      const resumed = yield* synchronize(skipped[0]?.checkpointAfterPage ?? checkpoint)
+      assert.isNotEmpty(resumed[0]?.events ?? [])
+      assert.include(resumed[0]?.checkpointAfterPage ?? "", "PAY-10043")
+      assert.deepStrictEqual(yield* Ref.get(pageTokens), [null, "page-2"])
+    }))
+
+  it.effect("migrates quiet legacy watermarks without inventing an issue key", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [], nextPageToken: null })
+      })
+      const legacyCheckpoints = [
+        "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}",
+        "{\"version\":2,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\",\"nextPageToken\":null}"
+      ]
+
+      for (const legacyCheckpoint of legacyCheckpoints) {
+        const pages = yield* withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(legacyCheckpoint)))),
+            Effect.map((collectedPages) => [...collectedPages])
+          )
+        )
+
+        assert.lengthOf(pages, 1)
+        assert.deepStrictEqual(pages[0]?.events, [])
+        assert.isFalse(pages[0]?.hasMore)
+        assert.include(pages[0]?.checkpointAfterPage ?? "", "2026-07-17T09:30:00.000Z")
+        assert.include(pages[0]?.checkpointAfterPage ?? "", "\"issueKey\":null")
+      }
+    }))
+
+  it.effect("binds a bounded provider cursor to its original query and drops it after expiry", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")))
+      const searches = yield* Ref.make<
+        ReadonlyArray<{
+          readonly projectId: string
+          readonly nextPageToken: string | null
+          readonly watermark: { readonly updatedAt: string; readonly issueKey: string | null } | null
+          readonly maxResults: number
+          readonly timeZone: string
+        }>
+      >([])
+      const nextIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(searches, (current) => [...current, request]).pipe(
+            Effect.as(
+              request.nextPageToken === null && request.watermark === null
+                ? { issues: [issue], nextPageToken: "page-2" }
+                : { issues: [nextIssue], nextPageToken: null }
+            )
+          )
+      })
+      const configured = { ...configuration, maximumPages: 1, pageSize: 1 }
+      const synchronize = (checkpoint: string | null) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const initial = yield* synchronize(null)
+      const boundedCheckpoint = initial[0]?.checkpointAfterPage ?? null
+      assert.isNotNull(boundedCheckpoint)
+      assert.isFalse(initial[0]?.hasMore)
+
+      yield* synchronize(boundedCheckpoint)
+      assert.deepStrictEqual((yield* Ref.get(searches))[1], {
+        projectId: "10",
+        watermark: null,
+        nextPageToken: "page-2",
+        maxResults: 1,
+        timeZone: "UTC"
+      })
+
+      yield* TestClock.adjust("8 days")
+      yield* synchronize(boundedCheckpoint)
+      assert.deepStrictEqual((yield* Ref.get(searches))[2], {
+        projectId: "10",
+        watermark: {
+          updatedAt: "2026-07-17T09:30:00.000Z",
+          issueKey: "PAY-42"
+        },
+        nextPageToken: null,
+        maxResults: 1,
+        timeZone: "UTC"
+      })
+
+      yield* synchronize(
+        "{\"version\":2,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\",\"nextPageToken\":\"legacy-page-2\"}"
+      )
+      assert.deepStrictEqual((yield* Ref.get(searches))[3], {
+        projectId: "10",
+        watermark: {
+          updatedAt: "2026-07-17T09:30:00.000Z",
+          issueKey: null
+        },
+        nextPageToken: null,
+        maxResults: 1,
+        timeZone: "UTC"
+      })
+    }))
+
+  it.effect("rejects a provider cursor echoed by a resumed Jira page", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")))
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Effect.succeed({
+            issues: [
+              request.nextPageToken === null
+                ? issue
+                : {
+                  ...issue,
+                  id: "10043",
+                  key: "PAY-43",
+                  fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+                }
+            ],
+            nextPageToken: "page-2"
+          })
+      })
+      const configured = { ...configuration, maximumPages: 1, pageSize: 1 }
+      const synchronize = (checkpoint: string | null) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const initial = yield* synchronize(null)
+      const boundedCheckpoint = initial[0]?.checkpointAfterPage ?? null
+      assert.isNotNull(boundedCheckpoint)
+      const resumed = yield* synchronize(boundedCheckpoint).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(resumed))
+      if (Result.isFailure(resumed)) {
+        assert.strictEqual(resumed.failure._tag, "PluginMalformedResponseFailure")
+        if (resumed.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(resumed.failure.diagnosticCode, "jira-sync-page-cursor-repeated")
+        }
+      }
+    }))
+
+  it.effect("rejects an invalid persisted watermark before searching Jira", () =>
+    Effect.gen(function*() {
+      const searchCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Ref.update(searchCalls, (count) => count + 1).pipe(Effect.as({
+            issues: [],
+            nextPageToken: null
+          }))
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            Stream.runCollect(
+              connection.sync(syncRequest("{\"version\":1,\"updatedAt\":\"not-a-date\",\"issueId\":\"10042\"}"))
+            )
+          )
+        )
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+      }
+      assert.strictEqual(yield* Ref.get(searchCalls), 0)
+    }))
+
+  it.effect("uses host time for observation while retaining a newer Jira update as the checkpoint revision", () =>
+    Effect.gen(function*() {
+      const observedAt = DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const providerUpdatedAt = "2026-07-19T10:00:01.000Z"
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              ...issue,
+              fields: { ...issue.fields, updated: providerUpdatedAt }
+            }],
+            nextPageToken: null
+          })
+      })
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+      const issueEvent = pages[0]?.events.find(
+        (event) => event._tag === "UpsertEntity" && event.entityType === "jira.issue"
+      )
+      assert.strictEqual(issueEvent?._tag, "UpsertEntity")
+      if (issueEvent?._tag !== "UpsertEntity") return yield* Effect.die("expected normalized Jira issue")
+      assert.strictEqual(DateTime.formatIso(issueEvent.observedAt), "2026-07-19T10:00:00.000Z")
+      assert.strictEqual(issueEvent.revision, providerUpdatedAt)
+      assert.include(pages[0]?.checkpointAfterPage ?? "", providerUpdatedAt)
+    }))
+
+  it.effect("rejects a cross-project search result before reading comments or history", () =>
+    Effect.gen(function*() {
+      const childCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              ...issue,
+              fields: { ...issue.fields, project: { id: "20", key: "OPS", name: "Operations" } }
+            }],
+            nextPageToken: null
+          }),
+        getComments: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({})),
+        getChangelogs: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({}))
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-sync-issue-project-mismatch")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(childCalls), 0)
+    }))
+
+  it.effect("interrupts an in-flight project search when synchronization is cancelled", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const provider = baseProvider({
+        searchProjectIssues: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+      })
+      const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configuration)
+      const fiber = yield* PluginConnection.pipe(
+        Effect.flatMap((connection) => Stream.runDrain(connection.sync(syncRequest()))),
+        Effect.provide(runtime.layer),
+        Effect.scoped,
+        Effect.forkChild
+      )
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+    }))
+
+  it.live("fails a project search that exceeds its configured request timeout", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.never
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runDrain(connection.sync(syncRequest())))
+        ),
+        { ...configuration, operationTimeoutMillis: 1_000 }
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "PluginTimeoutFailure")
     }))
 
   it.effect("interrupts an in-flight provider page when the scoped read is cancelled", () =>

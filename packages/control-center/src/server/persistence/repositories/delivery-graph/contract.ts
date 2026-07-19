@@ -87,6 +87,10 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     entityId: EntityId,
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
   },
+  nodeRelationships: {
+    nodeId: GraphNodeId,
+    limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
+  },
   releaseSlice: {
     releaseId: ReleaseId,
     environmentId: Schema.NullOr(EnvironmentId),
@@ -118,6 +122,12 @@ export const PersistedEntityProjection = Schema.Struct({
 const EvidenceBundle = Schema.Struct({
   evidence: EvidenceItem,
   claims: Schema.Array(EvidenceClaim)
+})
+
+const NodeRelationships = Schema.Struct({
+  nodeId: GraphNodeId,
+  truncated: Schema.Boolean,
+  relationships: Schema.Array(DeliveryRelationship)
 })
 
 const ReleaseSlice = Schema.Struct({
@@ -209,6 +219,7 @@ export const DeliveryGraphReadResult = Schema.TaggedUnion({
   relationship: { value: DeliveryRelationship },
   relationshipHistory: { value: Schema.Array(DeliveryRelationship) },
   entitySlice: { value: EntitySlice },
+  nodeRelationships: { value: NodeRelationships },
   releaseSlice: { value: ReleaseSlice },
   workspaceEntityProjections: { value: WorkspaceEntityProjections },
   releaseSummary: { value: ReleaseRelationshipSummary }

@@ -7,10 +7,11 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
-import type { ProviderId } from "../../src/domain/sourceRevision.js"
+import { type ProviderId, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { ApplicationServiceUnavailable } from "../../src/server/api/ApplicationServices.js"
 import {
+  firstPartyManualPluginSyncDrivers,
   makeManualPluginSyncDriverRegistry,
   makeManualPluginSynchronization
 } from "../../src/server/application/manualPluginSynchronization.js"
@@ -19,6 +20,8 @@ import { PersistenceOperationError } from "../../src/server/persistence/errors.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { makeJiraReadPluginRuntimeFromProvider } from "../../src/server/plugins/jira/JiraReadPlugin.js"
+import type { JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection, type PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
@@ -28,6 +31,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000203")
 const SYNCHRONIZED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:00.000Z")
 const PAGE_COMMITTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:01:00.000Z")
+const PROVIDER_OBSERVED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:01.000Z")
 
 const fixtures = [
   {
@@ -74,6 +78,20 @@ const fixtures = [
       billable: true,
       approvalState: "pending"
     }
+  },
+  {
+    providerId: "jira",
+    pluginConnectionId: Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000207"),
+    streamKey: "project-issues",
+    checkpoint: "jira-complete",
+    entityType: "jira.issue",
+    vendorImmutableId: "10042",
+    title: "PAY-42 · Protect payment retries",
+    attributes: {
+      key: "PAY-42",
+      status: { name: "In Review" },
+      priority: { name: "High" }
+    }
   }
 ] satisfies ReadonlyArray<{
   readonly providerId: ProviderId
@@ -96,14 +114,18 @@ const descriptor = (providerId: ProviderId) => ({
   capabilities: [{ capabilityId: "sync.incremental", supportedVersions: [1], requirement: "required" }]
 })
 
-const pageFor = (fixture: typeof fixtures[number], title = fixture.title) =>
+const pageFor = (
+  fixture: typeof fixtures[number],
+  title = fixture.title,
+  observedAt = SYNCHRONIZED_AT
+) =>
   Schema.decodeSync(PluginSyncPageV1)({
     checkpointAfterPage: fixture.checkpoint,
     hasMore: false,
     events: [{
       _tag: "UpsertEntity",
       eventId: `${fixture.providerId}-entity-1`,
-      observedAt: DateTime.formatIso(SYNCHRONIZED_AT),
+      observedAt: DateTime.formatIso(observedAt),
       revision: "revision-1",
       entityType: fixture.entityType,
       vendorImmutableId: fixture.vendorImmutableId,
@@ -170,6 +192,112 @@ const setupFixture = Effect.fn("ManualPluginSynchronizationTest.setupFixture")(f
 })
 
 describe("manual plugin synchronization", () => {
+  it("registers Jira only after its first-party adapter negotiates incremental synchronization", () => {
+    const driver = firstPartyManualPluginSyncDrivers.get("jira")
+    assert.isTrue(Option.isSome(driver))
+    if (Option.isSome(driver)) assert.strictEqual(driver.value.streamKey, "project-issues")
+  })
+
+  it.effect("commits a Jira page at or after observations made after the initial health sample", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "jira")
+      if (fixture === undefined) return yield* Effect.die("jira fixture not found")
+      const { connections, persistence } = yield* setupFixture(fixture)
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            TestClock.adjust("1 second").pipe(
+              Effect.as(pageFor(fixture, fixture.title, PROVIDER_OBSERVED_AT))
+            )
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(synchronized.result, "synchronized")
+      assert.strictEqual(synchronized.pagesCommitted, 1)
+      const entity = yield* persistence.entities.findBySourceIdentity(WORKSPACE_ID, {
+        pluginConnectionId: fixture.pluginConnectionId,
+        providerId: "jira",
+        vendorImmutableId: VendorImmutableId.make(fixture.vendorImmutableId)
+      })
+      assert.strictEqual(DateTime.formatIso(entity.sourceRevision.lastObservedAt), "2026-07-19T12:00:01.000Z")
+      assert.strictEqual(DateTime.formatIso(entity.sourceRevision.synchronizedAt), "2026-07-19T12:00:01.000Z")
+    })))
+
+  it.effect("accepts a bounded Jira invocation as terminal while persisting its durable cursor", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "jira")
+      if (fixture === undefined) return yield* Effect.die("jira fixture not found")
+      const { persistence } = yield* setupFixture(fixture)
+      const provider: JiraReadProvider = {
+        getCurrentUser: Effect.succeed({
+          accountId: "ari",
+          displayName: "Ari Chen",
+          active: true,
+          timeZone: "UTC"
+        }),
+        getServerInfo: Effect.succeed({ baseUrl: "https://acme.atlassian.net", serverTitle: "Acme Jira" }),
+        getProject: () => Effect.succeed({ id: "10", key: "PAY", name: "Payments" }),
+        getIssue: () => Effect.succeed(Option.none()),
+        getComments: (_issueId, request) =>
+          Effect.succeed({ comments: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({ values: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              id: "10042",
+              key: "PAY-42",
+              fields: {
+                summary: "Protect payment retries",
+                updated: "2026-07-17T09:30:00.000Z",
+                project: { id: "10", key: "PAY", name: "Payments" }
+              }
+            }],
+            nextPageToken: "provider-page-2"
+          })
+      }
+      const runtime = makeJiraReadPluginRuntimeFromProvider(provider, {
+        webBaseUrl: "https://acme.atlassian.net",
+        siteId: "cloud-acme",
+        projectId: "10",
+        pageSize: 1,
+        maximumPages: 1,
+        operationTimeoutMillis: 5_000
+      }, "cloud-acme")
+      const connections: PluginConnectionMapV1 = {
+        contextEffect: ({ pluginConnectionId }) =>
+          pluginConnectionId === fixture.pluginConnectionId
+            ? Layer.build(runtime.layer)
+            : Effect.die("fixture connection not found"),
+        invalidate: () => Effect.void
+      }
+      const synchronization = yield* makeManualPluginSynchronization(connections)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(synchronized.result, "synchronized")
+      assert.strictEqual(synchronized.pagesCommitted, 1)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        Schema.decodeSync(PluginStreamKey)(fixture.streamKey)
+      )
+      assert.include(stream.checkpointJson ?? "", "provider-page-2")
+    })))
+
   it.effect("materializes each supported fixture connection once and exposes replay-safe attempt state", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
@@ -264,7 +392,7 @@ describe("manual plugin synchronization", () => {
       if (itemRead._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
       assert.deepStrictEqual(
         itemRead.value.items.map(({ projection }) => projection.entityType).sort(),
-        ["pipeline-execution", "pull-request", "time-entry"]
+        ["issue", "pipeline-execution", "pull-request", "time-entry"]
       )
       const timelineBeforeReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
@@ -277,7 +405,7 @@ describe("manual plugin synchronization", () => {
       })).filter(({ sourceKind }) => sourceKind === "plugin-sync")
       assert.deepStrictEqual(
         timelineBeforeReplay.map(({ service }) => service).sort(),
-        ["clockify", "codecommit", "codepipeline"]
+        ["clockify", "codecommit", "codepipeline", "jira"]
       )
 
       for (const fixture of fixtures) {
@@ -298,7 +426,7 @@ describe("manual plugin synchronization", () => {
         limit: 100
       })
       if (replayedItems._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
-      assert.strictEqual(replayedItems.value.totalCount, 3)
+      assert.strictEqual(replayedItems.value.totalCount, 4)
       const timelineAfterReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
         actorKind: "plugin",

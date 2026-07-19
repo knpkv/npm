@@ -31,6 +31,65 @@ export interface JiraPageRequest {
   readonly maxResults: number
 }
 
+/** Stable provider-independent lower bound for one incremental project query. @internal */
+export interface JiraIssueWatermark {
+  readonly updatedAt: string
+  readonly issueKey: string | null
+}
+
+/** One bounded project search request. @internal */
+export interface JiraProjectIssuePageRequest {
+  readonly projectId: string
+  readonly watermark: JiraIssueWatermark | null
+  readonly nextPageToken: string | null
+  readonly maxResults: number
+  readonly timeZone: string
+}
+
+const JiraProviderIdentifier = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+)
+/**
+ * Leave room for both issue-key watermarks and timestamps inside the 2,048-character
+ * durable plugin checkpoint while accepting Jira cursors beyond identifier bounds.
+ */
+export const JiraProviderPageToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(800),
+  Schema.makeFilter((value) => JSON.stringify(value).length <= 802, {
+    expected: "an opaque Jira page token that fits the durable checkpoint envelope"
+  })
+)
+const JiraProviderIssueId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
+)
+const JiraProjectIssue = Schema.Struct({
+  id: JiraProviderIssueId,
+  key: JiraProviderIdentifier,
+  fields: Schema.Record(Schema.String, Schema.Json)
+})
+
+/** Schema-decoded issue shape crossing the bounded project iteration boundary. @internal */
+export type JiraProjectIssue = typeof JiraProjectIssue.Type
+
+const JiraProjectIssuePageResponse = Schema.Struct({
+  issues: Schema.Array(JiraProjectIssue),
+  isLast: Schema.optionalKey(Schema.Boolean),
+  nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderPageToken))
+})
+
+/** Schema-decoded page shape crossing the bounded project iteration boundary. @internal */
+export interface JiraProjectIssuePage {
+  readonly issues: ReadonlyArray<JiraProjectIssue>
+  readonly nextPageToken: string | null
+}
+
 /** Narrow provider surface required by the production issue-read adapter. @internal */
 export interface JiraReadProvider {
   readonly getCurrentUser: Effect.Effect<JiraApi.User, PluginFailure>
@@ -47,6 +106,9 @@ export interface JiraReadProvider {
     issueId: string,
     request: JiraPageRequest
   ) => Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure>
+  readonly searchProjectIssues: (
+    request: JiraProjectIssuePageRequest
+  ) => Effect.Effect<JiraProjectIssuePage, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -135,6 +197,62 @@ const ISSUE_FIELDS = [
   "subtasks"
 ]
 
+const escapeJqlString = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")
+
+const twoDigits = (value: number): string => String(value).padStart(2, "0")
+
+const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
+  request: JiraProjectIssuePageRequest
+): Effect.fn.Return<string, PluginMalformedResponseFailure> {
+  const project = `project = "${escapeJqlString(request.projectId)}"`
+  if (request.watermark === null) return `${project} ORDER BY updated ASC, key ASC`
+  const updated = yield* Effect.fromOption(
+    DateTime.make(request.watermark.updatedAt),
+    () =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-watermark-invalid"
+      })
+  )
+  const zoned = yield* Effect.fromOption(
+    DateTime.makeZoned(updated, { timeZone: request.timeZone }),
+    () =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-time-zone-invalid"
+      })
+  )
+  const parts = DateTime.toParts(zoned)
+  const updatedAt = `${String(parts.year).padStart(4, "0")}-${twoDigits(parts.month)}-${twoDigits(parts.day)} ${
+    twoDigits(parts.hour)
+  }:${twoDigits(parts.minute)}`
+  return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, key ASC`
+})
+
+const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
+  response: unknown
+): Effect.fn.Return<JiraProjectIssuePage, PluginMalformedResponseFailure> {
+  const decoded = yield* Schema.decodeUnknownEffect(JiraProjectIssuePageResponse)(response).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-response-invalid"
+      })
+    )
+  )
+  const nextPageToken = decoded.nextPageToken ?? null
+  if (
+    (decoded.isLast === false && nextPageToken === null) ||
+    (decoded.isLast === true && nextPageToken !== null)
+  ) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-search-project-issues",
+      diagnosticCode: "jira-project-search-cursor-invalid"
+    })
+  }
+  return { issues: decoded.issues, nextPageToken }
+})
+
 /** Build the production provider boundary from the shared generated Jira client. @internal */
 export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
@@ -160,5 +278,22 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     providerCall(
       "jira-get-changelogs",
       client.getChangeLogs(issueId, { params: request })
+    ),
+  searchProjectIssues: (request) =>
+    projectJql(request).pipe(
+      Effect.flatMap((jql) =>
+        providerCall(
+          "jira-search-project-issues",
+          client.searchIssuesUsingJql({
+            params: {
+              jql,
+              maxResults: request.maxResults,
+              fields: ISSUE_FIELDS,
+              ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
+            }
+          })
+        )
+      ),
+      Effect.flatMap(decodeProjectIssuePage)
     )
 })

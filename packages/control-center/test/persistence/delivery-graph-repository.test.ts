@@ -527,7 +527,9 @@ const sixIssueBatch = {
       targetNodeId,
       targetNodeKind: "issue",
       scope: { _tag: "release", releaseId: RELEASE_ID },
-      lifecycle: { _tag: "verified", effectiveAt: CREATED_AT },
+      lifecycle: index === 1
+        ? { _tag: "proposed", effectiveAt: CREATED_AT }
+        : { _tag: "verified", effectiveAt: CREATED_AT },
       confidence: {
         _tag: "unknown",
         rationale: "The fixture does not persist the provider observation as immutable evidence."
@@ -838,6 +840,40 @@ describe("DeliveryGraphRepository", () => {
         if (summary._tag === "releaseSummary") {
           assert.deepStrictEqual(summary.value, {
             issues: 6,
+            pipelineExecutions: 1,
+            pullRequests: 2
+          })
+        }
+
+        const retiredRelationship = sixIssueBatch.relationships[0]
+        if (retiredRelationship === undefined) {
+          return yield* Effect.die("Expected release relationship fixture")
+        }
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [{
+            ...retiredRelationship,
+            revision: 2,
+            supersedesRevision: 1,
+            lifecycle: {
+              _tag: "superseded",
+              effectiveAt: UPDATED_AT,
+              reason: "Release membership no longer applies."
+            },
+            recordedAt: UPDATED_AT
+          }]
+        })
+        const summaryWithoutRetiredRelationship = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSummary",
+          releaseId: RELEASE_ID
+        })
+        assert.strictEqual(summaryWithoutRetiredRelationship._tag, "releaseSummary")
+        if (summaryWithoutRetiredRelationship._tag === "releaseSummary") {
+          assert.deepStrictEqual(summaryWithoutRetiredRelationship.value, {
+            issues: 5,
             pipelineExecutions: 1,
             pullRequests: 2
           })

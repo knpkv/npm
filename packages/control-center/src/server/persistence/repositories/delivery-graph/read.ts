@@ -542,6 +542,44 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           }
         })
       }
+      case "nodeRelationships": {
+        const identityRows = yield* sql`SELECT relationship_id AS relationshipId FROM (
+            SELECT revision.relationship_id
+            FROM relationship_revisions revision
+            INNER JOIN relationship_heads head
+              ON head.workspace_id = revision.workspace_id
+             AND head.relationship_id = revision.relationship_id
+             AND head.current_revision = revision.revision
+            WHERE revision.workspace_id = ${workspaceId}
+              AND revision.source_node_id = ${query.nodeId}
+              AND revision.lifecycle NOT IN ('rejected', 'superseded')
+            UNION
+            SELECT revision.relationship_id
+            FROM relationship_revisions revision
+            INNER JOIN relationship_heads head
+              ON head.workspace_id = revision.workspace_id
+             AND head.relationship_id = revision.relationship_id
+             AND head.current_revision = revision.revision
+            WHERE revision.workspace_id = ${workspaceId}
+              AND revision.target_node_id = ${query.nodeId}
+              AND revision.lifecycle NOT IN ('rejected', 'superseded')
+          )
+          ORDER BY relationship_id
+          LIMIT ${query.limit + 1}`
+        const identities = yield* decodeRows(Schema.Struct({ relationshipId: RelationshipId }), identityRows)
+        const relationships = yield* Effect.forEach(
+          identities.slice(0, query.limit),
+          ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
+        )
+        return DeliveryGraphReadResult.make({
+          _tag: "nodeRelationships",
+          value: {
+            nodeId: query.nodeId,
+            truncated: identities.length > query.limit,
+            relationships
+          }
+        })
+      }
       case "releaseSlice": {
         const identityLimit = query.limit + 1
         const identityRows = query.environmentId === null
@@ -554,6 +592,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               WHERE revision.workspace_id = ${workspaceId}
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id IS NULL
+                AND revision.lifecycle NOT IN ('rejected', 'superseded')
               ORDER BY revision.recorded_at DESC
               LIMIT ${identityLimit}`
           : yield* sql`SELECT revision.relationship_id AS relationshipId
@@ -565,6 +604,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               WHERE revision.workspace_id = ${workspaceId}
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id = ${query.environmentId}
+                AND revision.lifecycle NOT IN ('rejected', 'superseded')
               ORDER BY revision.recorded_at DESC
               LIMIT ${identityLimit}`
         const identities = yield* decodeRows(Schema.Struct({ relationshipId: RelationshipId }), identityRows)
@@ -879,6 +919,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             WHERE revision.workspace_id = ${workspaceId}
               AND revision.release_id = ${query.releaseId}
               AND revision.environment_id IS NULL
+              AND revision.lifecycle NOT IN ('rejected', 'superseded')
           ), endpoints AS (
             SELECT source_node_id AS node_id, source_node_kind AS endpoint_kind
             FROM current_relationships
