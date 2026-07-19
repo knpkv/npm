@@ -18,7 +18,7 @@ describe("Control Center build phases", () => {
     const declarations = controlCenterBuildPhases.find(({ label }) => label === "emit server declarations")
 
     expect(clean?.args).toContain("node_modules/.cache/tsconfig.server.tsbuildinfo")
-    expect(declarations).toMatchObject({ args: ["-p", "tsconfig.server.json"], command: "tsc" })
+    expect(declarations).toMatchObject({ args: ["-b", "tsconfig.server.json"], command: "tsc" })
     expect(declarations?.args).not.toContain("--force")
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { planPrecommit } from "../../scripts/precommit-plan.js"
+import { parseStagedNameStatus, planPrecommit } from "../../scripts/precommit-plan.js"
 
 describe("pre-commit plan", () => {
   it("formats documentation-only commits without building the workspace", () => {
@@ -34,6 +34,31 @@ describe("pre-commit plan", () => {
       { args: ["verify:full"], command: "pnpm", label: "run full repository gate" }
     ])
     expect(planPrecommit(["package.json", "packages/control-center/src/index.ts"]).mode).toBe("full")
+  })
+
+  it("runs the full gate for executable documentation application content", () => {
+    expect(planPrecommit(["packages/docs/src/content/docs/broken.mdx"]).mode).toBe("full")
+    expect(planPrecommit(["docs/control-center-build-feedback.md"]).mode).toBe("docs")
+  })
+
+  it("retains both sides of renames for scope selection and formats only the destination", () => {
+    const crossing = parseStagedNameStatus(
+      "R100\0packages/control-center/src/server/old.ts\0docs/old.ts\0"
+    )
+    expect(crossing).toEqual({
+      stagedFiles: ["packages/control-center/src/server/old.ts", "docs/old.ts"],
+      formattableFiles: ["docs/old.ts"]
+    })
+    expect(planPrecommit(crossing?.stagedFiles ?? [], crossing?.formattableFiles ?? []).mode).toBe(
+      "control-center"
+    )
+
+    const internal = parseStagedNameStatus(
+      "R100\0packages/control-center/src/a.ts\0packages/control-center/src/b.ts\0"
+    )
+    expect(planPrecommit(internal?.stagedFiles ?? [], internal?.formattableFiles ?? []).mode).toBe(
+      "control-center"
+    )
   })
 
   it("does no work when Git reports no staged files", () => {

@@ -27,7 +27,7 @@ export const controlCenterBuildPhases: ReadonlyArray<BuildPhase> = [
     label: "bundle server"
   },
   {
-    args: ["-p", "tsconfig.server.json"],
+    args: ["-b", "tsconfig.server.json"],
     command: "tsc",
     label: "emit server declarations"
   },

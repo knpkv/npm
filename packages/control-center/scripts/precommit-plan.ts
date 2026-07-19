@@ -15,6 +15,41 @@ const normalizePath = (file: string): string => file.replaceAll("\\", "/").repla
 const isDocumentationPath = (file: string): boolean =>
   file.endsWith(".md") || file.endsWith(".mdx") || file.startsWith("docs/")
 
+const isDocumentationApplicationPath = (file: string): boolean => file.startsWith("packages/docs/")
+
+export type StagedPathSelection = {
+  readonly formattableFiles: ReadonlyArray<string>
+  readonly stagedFiles: ReadonlyArray<string>
+}
+
+/** Decode Git's NUL-delimited name-status format, retaining both sides of renames for scope checks. */
+export const parseStagedNameStatus = (output: string): StagedPathSelection | null => {
+  const tokens = output.split("\0").filter((token) => token.length > 0)
+  const formattableFiles = new Array<string>()
+  const stagedFiles = new Array<string>()
+
+  for (let index = 0; index < tokens.length;) {
+    const status = tokens[index++]
+    if (status === undefined) return null
+    const kind = status.charAt(0)
+    if (kind === "R" || kind === "C") {
+      const source = tokens[index++]
+      const destination = tokens[index++]
+      if (source === undefined || destination === undefined) return null
+      if (kind === "R") stagedFiles.push(source)
+      stagedFiles.push(destination)
+      formattableFiles.push(destination)
+      continue
+    }
+    const file = tokens[index++]
+    if (file === undefined) return null
+    stagedFiles.push(file)
+    if (kind !== "D") formattableFiles.push(file)
+  }
+
+  return { formattableFiles, stagedFiles }
+}
+
 const stagedFormat = (files: ReadonlyArray<string>): PrecommitCommand => ({
   args: ["exec", "prettier", "--check", "--ignore-unknown", "--", ...files],
   command: "pnpm",
@@ -32,7 +67,7 @@ export const planPrecommit = (
   ).sort()
   if (files.length === 0) return { commands: [], mode: "none", reason: "no staged files" }
 
-  if (files.every(isDocumentationPath)) {
+  if (files.every(isDocumentationPath) && !files.some(isDocumentationApplicationPath)) {
     return {
       commands: formatFiles.length === 0 ? [] : [stagedFormat(formatFiles)],
       mode: "docs",

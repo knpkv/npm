@@ -5,7 +5,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Path from "effect/Path"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { planPrecommit, type PrecommitCommand } from "./precommit-plan.js"
+import { parseStagedNameStatus, planPrecommit, type PrecommitCommand } from "./precommit-plan.js"
 
 class PrecommitError extends Data.TaggedError("PrecommitError")<{
   readonly reason: string
@@ -39,18 +39,16 @@ const program = Effect.gen(function*() {
     Effect.mapError(() => new PrecommitError({ reason: "could not resolve the workspace root" }))
   )
   const workspaceRoot = path.dirname(path.dirname(path.dirname(path.dirname(scriptPath))))
-  const readStagedPaths = (diffFilter: string) =>
-    spawner.string(
-      ChildProcess.make("git", ["diff", "--cached", "--name-only", "-z", `--diff-filter=${diffFilter}`, "--"], {
-        cwd: workspaceRoot,
-        stderr: "inherit"
-      })
-    ).pipe(Effect.mapError(() => new PrecommitError({ reason: "could not read staged paths" })))
-  const stagedOutput = yield* readStagedPaths("ACDMR")
-  const formattableOutput = yield* readStagedPaths("ACMR")
-  const stagedFiles = stagedOutput.split("\0").filter((file) => file.length > 0)
-  const formattableFiles = formattableOutput.split("\0").filter((file) => file.length > 0)
-  const plan = planPrecommit(stagedFiles, formattableFiles)
+  const stagedOutput = yield* spawner.string(
+    ChildProcess.make(
+      "git",
+      ["diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMR", "--"],
+      { cwd: workspaceRoot, stderr: "inherit" }
+    )
+  ).pipe(Effect.mapError(() => new PrecommitError({ reason: "could not read staged paths" })))
+  const staged = parseStagedNameStatus(stagedOutput)
+  if (staged === null) return yield* new PrecommitError({ reason: "could not decode staged paths" })
+  const plan = planPrecommit(staged.stagedFiles, staged.formattableFiles)
 
   yield* Console.log(`[pre-commit] mode=${plan.mode}: ${plan.reason}`)
   for (const [index, step] of plan.commands.entries()) {
