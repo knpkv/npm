@@ -150,6 +150,39 @@ const makeProductScopedProviderClient = (
     )
   })
 
+const splitProductProviderClient = HttpClient.make((request) => {
+  const body = request.url.endsWith("/oauth/token")
+    ? {
+      access_token: "access-split-products",
+      refresh_token: "refresh-split-products",
+      expires_in: 3_600,
+      scope: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
+      token_type: "Bearer"
+    }
+    : request.url.endsWith("/accessible-resources")
+    ? [
+      {
+        id: "shared-cloud",
+        name: "Acme",
+        url: "https://acme.atlassian.net/",
+        scopes: [...JIRA_SCOPES]
+      },
+      {
+        id: "shared-cloud",
+        name: "Acme",
+        url: "https://acme.atlassian.net/",
+        scopes: [...CONFLUENCE_SCOPES]
+      }
+    ]
+    : { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+  return Effect.succeed(
+    HttpClientResponse.fromWeb(
+      request,
+      new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } })
+    )
+  )
+})
+
 describe("AtlassianOAuthGrants", () => {
   it.effect("configures its own OAuth app without Jira or Confluence CLI stores", () =>
     Effect.gen(function*() {
@@ -435,6 +468,39 @@ describe("AtlassianOAuthGrants", () => {
       assert.deepStrictEqual(completed.providers, ["jira"])
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("combines product-specific resource rows for one Atlassian cloud site", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-split-site-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code")
+
+      assert.deepStrictEqual(exchanged.sites, [{
+        cloudId: "shared-cloud",
+        name: "Acme",
+        siteUrl: "https://acme.atlassian.net/"
+      }])
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, splitProductProviderClient),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))
