@@ -34,6 +34,68 @@ const profile = (accessToken: string, options: {
 })
 
 describe("AtlassianProfiles", () => {
+  it.effect("uses a valid legacy profile when the matching canonical profile is expired", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-profiles-" })
+      const stores: ReadonlyArray<readonly [string, string, number]> = [
+        ["control-center", "expired-canonical-secret", 1],
+        ["jira-cli", "valid-legacy-secret", 4_102_444_800_000]
+      ]
+      for (const [storeName, accessToken, expiresAt] of stores) {
+        const storePath = path.join(home, ".config", "atlassian", storeName)
+        yield* fileSystem.makeDirectory(storePath, { recursive: true })
+        yield* fileSystem.writeFileString(
+          path.join(storePath, "profiles.json"),
+          JSON.stringify({
+            activeProfileId: "account-1@cloud-1",
+            profiles: [profile(accessToken, { expiresAt })]
+          })
+        )
+      }
+
+      const loaded = yield* loadAtlassianProfile("jira", "account-1@cloud-1").pipe(
+        Effect.provideService(HomeDirectoryTag, { get: () => Effect.succeed(home) }),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown({ XDG_CONFIG_HOME: path.join(home, ".config") })
+        )
+      )
+      assert.strictEqual(loaded?.token.access_token, "valid-legacy-secret")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("keeps a valid canonical profile ahead of a matching valid legacy profile", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-profiles-" })
+      const stores: ReadonlyArray<readonly [string, string]> = [
+        ["control-center", "valid-canonical-secret"],
+        ["jira-cli", "valid-legacy-secret"]
+      ]
+      for (const [storeName, accessToken] of stores) {
+        const storePath = path.join(home, ".config", "atlassian", storeName)
+        yield* fileSystem.makeDirectory(storePath, { recursive: true })
+        yield* fileSystem.writeFileString(
+          path.join(storePath, "profiles.json"),
+          JSON.stringify({
+            activeProfileId: "account-1@cloud-1",
+            profiles: [profile(accessToken)]
+          })
+        )
+      }
+
+      const loaded = yield* loadAtlassianProfile("jira", "account-1@cloud-1").pipe(
+        Effect.provideService(HomeDirectoryTag, { get: () => Effect.succeed(home) }),
+        Effect.provideService(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown({ XDG_CONFIG_HOME: path.join(home, ".config") })
+        )
+      )
+      assert.strictEqual(loaded?.token.access_token, "valid-canonical-secret")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("uses one canonical profile for both providers without treating legacy copies as shared", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem

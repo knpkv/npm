@@ -12,7 +12,7 @@ import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { AtlassianOAuthGrantId } from "../../src/api/plugins.js"
+import { AtlassianOAuthGrantId, type AtlassianOAuthProviderIntent } from "../../src/api/plugins.js"
 import { SessionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { makeAtlassianOAuthGrants } from "../../src/server/plugins/atlassian/AtlassianOAuthGrants.js"
 
@@ -384,6 +384,106 @@ describe("AtlassianOAuthGrants", () => {
         )
       )
       assert.isTrue(Result.isFailure(replay))
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("caps canonical profiles while allowing the boundary insert and updates", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-profile-cap-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const canonicalStore = yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME)
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+
+      yield* Effect.forEach(
+        Array.from({ length: 99 }, (_, index) => index),
+        (index) => {
+          const token: OAuthToken = {
+            access_token: `existing-access-${index}`,
+            refresh_token: `existing-refresh-${index}`,
+            expires_at: 4_102_444_800_000,
+            scope: [...JIRA_SCOPES, ...CONFLUENCE_SCOPES].join(" "),
+            cloud_id: `existing-cloud-${index}`,
+            site_url: `https://existing-${index}.atlassian.net/`,
+            user: {
+              account_id: `existing-account-${index}`,
+              name: `Existing User ${index}`,
+              email: `existing-${index}@example.com`
+            }
+          }
+          return saveProfileToken(CONTROL_CENTER_AUTH_STORE_NAME, token).pipe(
+            Effect.provide(HomeDirectoryLive),
+            Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+          )
+        },
+        { concurrency: 1 }
+      )
+
+      const grants = yield* makeAtlassianOAuthGrants()
+      const prepareGrant = Effect.fn("test.prepareAtlassianOAuthCapacityGrant")(function*(
+        providers: AtlassianOAuthProviderIntent
+      ) {
+        const started = yield* grants.start(owner, "http://127.0.0.1:4173", providers).pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+        assert.strictEqual(started._tag, "ready")
+        if (started._tag !== "ready") return yield* Effect.die("OAuth grant did not start")
+        const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+          new URL(started.authorizationUrl).searchParams.get("state")
+        )
+        return yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      })
+
+      const boundaryGrant = yield* prepareGrant(["jira", "confluence"])
+      const boundaryProfile = yield* grants.complete(owner, boundaryGrant.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const boundaryProfiles = yield* loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.lengthOf(boundaryProfiles.profiles, 100)
+
+      const updateGrant = yield* prepareGrant(["jira", "confluence"])
+      const updatedProfile = yield* grants.complete(owner, updateGrant.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(updatedProfile.profileId, boundaryProfile.profileId)
+      const updatedProfiles = yield* loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.lengthOf(updatedProfiles.profiles, 100)
+
+      const beforeOverflow = yield* Effect.all([
+        fileSystem.readFileString(path.join(canonicalStore, "oauth.json")),
+        fileSystem.readFileString(path.join(canonicalStore, "profiles.json")),
+        fileSystem.readFileString(path.join(canonicalStore, "auth.json"))
+      ])
+      const overflowGrant = yield* prepareGrant(["jira"])
+      const rejected = yield* Effect.result(
+        grants.complete(owner, overflowGrant.grantId, "cloud-1").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) assert.strictEqual(rejected.failure._tag, "ApplicationServiceUnavailable")
+      const afterOverflow = yield* Effect.all([
+        fileSystem.readFileString(path.join(canonicalStore, "oauth.json")),
+        fileSystem.readFileString(path.join(canonicalStore, "profiles.json")),
+        fileSystem.readFileString(path.join(canonicalStore, "auth.json"))
+      ])
+      assert.deepStrictEqual(afterOverflow, beforeOverflow)
+      assert.strictEqual(yield* grants.pendingGrantCount, 1)
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),

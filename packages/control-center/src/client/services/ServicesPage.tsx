@@ -108,18 +108,18 @@ const resolvedAtlassianSetupIntent = (
   profilesState: AtlassianProfilesState
 ): AtlassianSetupIntent => {
   if (intent.requestedOAuthProviders !== null) return intent
-  if (
-    hasConnectedProductOutsideSetup(connections, intent.providers) &&
-    (profilesState._tag === "idle" || profilesState._tag === "loading")
-  ) {
+  const hasOutsideConnection = hasConnectedProductOutsideSetup(connections, intent.providers)
+  if (hasOutsideConnection && (profilesState._tag === "idle" || profilesState._tag === "loading")) {
     return intent
   }
   const profiles = profilesState._tag === "ready" ? profilesState.profiles : []
   return {
     ...intent,
-    requestedOAuthProviders: hasCanonicalProfileForConnectedProduct(connections, profiles, intent.providers)
-      ? allAtlassianProducts
-      : intent.providers
+    requestedOAuthProviders:
+      (hasOutsideConnection && profilesState._tag === "failed") ||
+      hasCanonicalProfileForConnectedProduct(connections, profiles, intent.providers)
+        ? allAtlassianProducts
+        : intent.providers
   }
 }
 

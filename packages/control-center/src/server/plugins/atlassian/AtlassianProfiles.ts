@@ -105,8 +105,11 @@ export const loadAtlassianProfile = Effect.fn("AtlassianProfiles.load")(function
   }
 
   const canonical = yield* loadProfile(CONTROL_CENTER_AUTH_STORE_NAME, profileId)
-  if (canonical !== null && supportsProvider(canonical, provider)) return canonical
+  if (canonical !== null && supportsProvider(canonical, provider) && !isTokenExpired(canonical.token, 0)) {
+    return canonical
+  }
 
   const legacy = yield* loadProfile(legacyProfileStores[provider], profileId)
-  return legacy !== null && supportsProvider(legacy, provider) ? legacy : null
+  if (legacy !== null && supportsProvider(legacy, provider)) return legacy
+  return canonical !== null && supportsProvider(canonical, provider) ? canonical : null
 })

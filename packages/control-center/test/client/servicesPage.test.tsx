@@ -75,6 +75,25 @@ const atlassianOAuthStartCases: ReadonlyArray<{
     route: "/services?enable=jira"
   }
 ]
+const unavailableAtlassianDiscoveryCases: ReadonlyArray<{
+  readonly connections: ReadonlyArray<PluginConnectionSummary>
+  readonly label: string
+  readonly providers: AtlassianOAuthProviderIntent
+  readonly route: string
+}> = [
+  {
+    connections: [confluenceConnection],
+    label: "preserves a connected sibling's scopes",
+    providers: ["jira", "confluence"],
+    route: "/services?enable=jira"
+  },
+  {
+    connections: [],
+    label: "keeps an explicit standalone product request scoped",
+    providers: ["jira"],
+    route: "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=jira"
+  }
+]
 const atlassianOAuthCallbackCases: ReadonlyArray<{
   readonly heading: string
   readonly label: string
@@ -1144,6 +1163,37 @@ describe("ServicesPage connection tests", () => {
     expect(window.location.href).toBe(authorizationUrl)
     window.history.replaceState(null, "", previousLocation)
   })
+
+  it.each(unavailableAtlassianDiscoveryCases)(
+    "$label when Atlassian profile discovery is unavailable",
+    async ({ connections, providers, route }) => {
+      const startAtlassianOAuthGrant = vi
+        .fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>()
+        .mockResolvedValue({
+          _tag: "configuration-required",
+          callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+        })
+      const transport: ConnectionTestTransport = {
+        create: vi.fn(),
+        discoverAtlassianProfiles: () => Promise.reject(new Error("Atlassian profile discovery unavailable")),
+        makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+        overview: () => Promise.resolve({ ...overview, connections }),
+        setEnabled: vi.fn(),
+        startAtlassianOAuthGrant,
+        test: vi.fn()
+      }
+      const host = await renderServices(transport, route)
+      await act(async () => undefined)
+      const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes("Sign in with Atlassian")
+      )
+
+      await act(async () => signIn?.click())
+
+      expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
+      expect(startAtlassianOAuthGrant.mock.calls[0]?.[0]).toEqual(providers)
+    }
+  )
 
   it("keeps an explicit different-cloud OAuth return product-scoped", async () => {
     const startAtlassianOAuthGrant = vi

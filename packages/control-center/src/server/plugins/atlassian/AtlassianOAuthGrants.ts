@@ -64,6 +64,7 @@ const ATLASSIAN_CALLBACK_PATH = "/services/oauth/atlassian/callback"
 const GRANT_TTL_MILLISECONDS = 10 * 60 * 1_000
 const MAXIMUM_PENDING_GRANTS = 20
 const MAXIMUM_ACCESSIBLE_SITES = 100
+const MAXIMUM_CANONICAL_PROFILES = 100
 const JIRA_AUTH_STORE_NAME = "jira-cli"
 const CONFLUENCE_AUTH_STORE_NAME = "confluence-to-markdown"
 
@@ -194,6 +195,9 @@ const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(
   const hasMatchingConfig = currentConfig !== null && sameOAuthConfig(currentConfig, sharedConfig)
   if (profiles.profiles.length > 0 && !hasMatchingConfig) return yield* unavailable()
   const existingProfile = profiles.profiles.find((profile) => profile.id === profileIdFromToken(token))
+  if (existingProfile === undefined && profiles.profiles.length >= MAXIMUM_CANONICAL_PROFILES) {
+    return yield* unavailable()
+  }
   if (existingProfile !== undefined && !preservesStoredScopes(existingProfile.token, token)) {
     return yield* unavailable()
   }
@@ -536,13 +540,17 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     const token = tokenForSite(pending.tokens, pending.tokenExpiresAtMilliseconds, pending.user, site)
     const profile = yield* profileStoreLock.withPermit(
       Effect.gen(function*() {
+        const plan = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config, token).pipe(
+          Effect.provide(localStorageLayer),
+          Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
+          Effect.mapError(unavailable)
+        )
         const snapshots = yield* Effect.forEach([CONTROL_CENTER_AUTH_STORE_NAME], captureAuthStore).pipe(
           Effect.provide(localStorageLayer),
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
           Effect.mapError(unavailable)
         )
         return yield* Effect.gen(function*() {
-          const plan = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config, token)
           if (plan.shouldWriteConfig) yield* saveOAuthConfig(plan.storeName, pending.config)
           return yield* saveProfileToken(plan.storeName, token)
         }).pipe(
