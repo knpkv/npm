@@ -46,13 +46,79 @@ const historicalJiraDescriptor = {
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }
 
+const historicalConfluenceOAuthDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.confluence",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "Confluence Cloud",
+  configurationFields: [
+    {
+      _tag: "url",
+      key: "siteBaseUrl",
+      label: "Site URL",
+      description: "HTTPS Confluence Cloud tenant root URL under atlassian.net.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "authMode",
+      label: "Authentication",
+      description: "OAuth profile or API token fallback.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "oauthProfileId",
+      label: "OAuth profile",
+      description: "Shared local Atlassian OAuth profile identifier.",
+      required: false
+    },
+    {
+      _tag: "text",
+      key: "email",
+      label: "Account email",
+      description: "Atlassian account email used only for API token fallback.",
+      required: false
+    },
+    {
+      _tag: "secret-reference",
+      key: "apiToken",
+      label: "API token",
+      description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+      required: false,
+      secretKind: "token"
+    },
+    {
+      _tag: "text",
+      key: "siteId",
+      label: "Site ID",
+      description: "Stable Atlassian site identity used for connection isolation.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "spaceId",
+      label: "Space ID",
+      description: "Confluence space visible through this connection.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "probePageId",
+      label: "Health page ID",
+      description: "Readable page used for a bounded connection health check.",
+      required: true
+    }
+  ],
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}
+
 const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
-  const descriptor = providerId === "jira" ? historicalJiraDescriptor : confluencePagePluginDescriptor
+  const descriptor = providerId === "jira" ? historicalJiraDescriptor : historicalConfluenceOAuthDescriptor
   return {
     ...descriptor,
-    capabilities: providerId === "confluence"
-      ? descriptor.capabilities.filter(({ capabilityId }) => capabilityId !== "sync.incremental")
-      : descriptor.capabilities,
+    capabilities: descriptor.capabilities,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
       if (providerId === "jira" && (field.key === "siteId" || field.key === "projectId")) return []
       if (field.key === "authMode" || field.key === "oauthProfileId") return []
@@ -116,6 +182,30 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
+  it("keeps the historical Confluence descriptor independent of future current fields", () => {
+    const futureCurrent = {
+      ...confluencePagePluginDescriptor,
+      configurationFields: [
+        ...confluencePagePluginDescriptor.configurationFields,
+        {
+          _tag: "text",
+          key: "futureField",
+          label: "Future field",
+          description: "A field added after the historical descriptor was persisted.",
+          required: false
+        }
+      ]
+    }
+
+    assert.isTrue(futureCurrent.configurationFields.some(({ key }) => key === "futureField"))
+    assert.isFalse(historicalConfluenceOAuthDescriptor.configurationFields.some(({ key }) => key === "futureField"))
+    assert.deepStrictEqual(historicalConfluenceOAuthDescriptor.capabilities, [{
+      capabilityId: "entity.read",
+      supportedVersions: [1],
+      requirement: "required"
+    }])
+  })
+
   it.effect("loads compatible historical descriptors while rejecting pre-scope Jira descriptors", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-legacy-")
@@ -365,12 +455,7 @@ describe("first-party plugin runtime", () => {
             testCase.providerId === "jira"
               ? jiraReadPluginDescriptor
               : testCase.historicalDescriptor === true
-              ? {
-                ...confluencePagePluginDescriptor,
-                capabilities: confluencePagePluginDescriptor.capabilities.filter(
-                  ({ capabilityId }) => capabilityId !== "sync.incremental"
-                )
-              }
+              ? historicalConfluenceOAuthDescriptor
               : confluencePagePluginDescriptor,
             0,
             CREATED_AT

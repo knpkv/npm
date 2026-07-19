@@ -90,7 +90,7 @@ export const RawConfluenceWatcherPage = Schema.Struct({
     type: boundedString(100),
     contentId: Schema.Int.check(Schema.isGreaterThan(0)),
     watcher: Schema.Struct({
-      accountId: boundedString(512)
+      accountId: Schema.NullOr(boundedString(512))
     })
   })).check(Schema.isMaxLength(50)),
   start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -128,7 +128,7 @@ export type RawConfluenceCurrentUser = typeof RawConfluenceCurrentUser.Type
 /** Bounded Confluence user returned by current-user and bulk-user reads. @internal */
 export const RawConfluenceUser = Schema.Struct({
   accountId: boundedString(512),
-  displayName: boundedString(200),
+  displayName: Schema.optionalKey(Schema.NullOr(boundedString(200))),
   accountStatus: Schema.optionalKey(Schema.Literals(["active", "inactive", "closed", "unknown"])),
   isExternalCollaborator: Schema.optionalKey(Schema.Boolean)
 })

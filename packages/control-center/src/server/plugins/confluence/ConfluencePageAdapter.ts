@@ -74,7 +74,8 @@ const MAXIMUM_CONTRIBUTORS = 502
 const MAXIMUM_CHECKPOINT_LENGTH = 2_048
 const ConfluencePageEntityType = "confluence-page"
 const CONFLUENCE_PAGE_STREAM_KEY = "pages"
-const COMPLETE_CHECKPOINT = "complete"
+const LEGACY_COMPLETE_CHECKPOINT = "complete"
+const COMPLETE_CHECKPOINT_PREFIX = "complete:"
 const NEXT_CHECKPOINT_PREFIX = "next:"
 const BOUNDED_CHECKPOINT_PREFIX = "bounded:"
 const RESTART_INITIAL_CHECKPOINT = "restart:initial"
@@ -243,7 +244,12 @@ const cursorFromNextLink = (
 const syncCursorFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"]
 ): Effect.Effect<string | null, PluginConfigurationFailure> => {
-  if (checkpoint === null || checkpoint === COMPLETE_CHECKPOINT) return Effect.succeed(null)
+  if (checkpoint === null || checkpoint === LEGACY_COMPLETE_CHECKPOINT) return Effect.succeed(null)
+  if (checkpoint.startsWith(COMPLETE_CHECKPOINT_PREFIX)) {
+    return /^[0-9a-f]{64}$/u.test(checkpoint.slice(COMPLETE_CHECKPOINT_PREFIX.length))
+      ? Effect.succeed(null)
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
   if (checkpoint === RESTART_INITIAL_CHECKPOINT) return Effect.succeed(null)
   for (const prefix of [NEXT_CHECKPOINT_PREFIX, BOUNDED_CHECKPOINT_PREFIX, RESTART_CURSOR_PREFIX]) {
     if (!checkpoint.startsWith(prefix)) continue
@@ -255,9 +261,9 @@ const syncCursorFromCheckpoint = (
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
 }
 
-const checkpointAfterPage = (cursor: string | null, bounded: boolean): string =>
+const checkpointAfterPage = (cursor: string | null, bounded: boolean, inventoryDigest: string): string =>
   cursor === null
-    ? COMPLETE_CHECKPOINT
+    ? `${COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}`
     : `${bounded ? BOUNDED_CHECKPOINT_PREFIX : NEXT_CHECKPOINT_PREFIX}${cursor}`
 
 const checkpointBeforePage = (cursor: string | null): string =>
@@ -372,7 +378,10 @@ const contributorsFromUsers = (
   const accountIds = [...roles.keys()].sort()
   return accountIds.map((accountId) => {
     const user = users.get(accountId)
-    const resolved = user?.accountStatus !== undefined && user.accountStatus !== "unknown"
+    const resolved = user?.displayName !== undefined &&
+      user.displayName !== null &&
+      user.accountStatus !== undefined &&
+      user.accountStatus !== "unknown"
     return {
       accountId,
       displayName: user?.displayName ?? "Confluence user",
@@ -439,26 +448,67 @@ interface SyncAttributesInput {
   readonly watcherInventory: { readonly complete: boolean; readonly pagesFetched: number }
 }
 
-const fitVersionMessages = (attributes: SyncAttributesInput): SyncAttributesInput => {
+const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput => {
   if (jsonByteLength(attributes) <= MaximumPluginPayloadBytes) return attributes
   const versions: Array<NormalizedVersion> = attributes.versions.map((version) => ({
     ...version,
     message: null
   }))
-  const compacted: SyncAttributesInput = {
+  const contributors = [...attributes.contributors]
+  const attachments = [...attributes.attachments]
+  let compacted: SyncAttributesInput = {
     ...attributes,
     versions,
+    contributors,
+    attachments,
     versionHistory: { ...attributes.versionHistory, complete: false }
   }
-  let remainingBytes = MaximumPluginPayloadBytes - jsonByteLength(compacted)
-  if (remainingBytes <= 0) return compacted
-  for (let index = 0; index < attributes.versions.length; index++) {
-    const version = attributes.versions[index]
-    if (version?.message === null || version?.message === undefined) continue
-    const messageBytes = jsonByteLength(version.message) - jsonByteLength(null)
-    if (messageBytes > remainingBytes) continue
-    versions[index] = { ...version }
-    remainingBytes -= messageBytes
+  let compactedBytes = jsonByteLength(compacted)
+
+  while (compactedBytes > MaximumPluginPayloadBytes && versions.length > 0) {
+    let historicalIndex = -1
+    for (let index = versions.length - 1; index >= 0; index--) {
+      if (versions[index]?.number !== attributes.currentVersion) {
+        historicalIndex = index
+        break
+      }
+    }
+    const [removed] = versions.splice(historicalIndex >= 0 ? historicalIndex : versions.length - 1, 1)
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (versions.length > 0 ? 1 : 0)
+  }
+  while (compactedBytes > MaximumPluginPayloadBytes && contributors.length > 0) {
+    let lowerPriorityIndex = -1
+    for (let index = contributors.length - 1; index >= 0; index--) {
+      const contributor = contributors[index]
+      if (contributor !== undefined && !contributor.roles.includes("owner") && !contributor.roles.includes("author")) {
+        lowerPriorityIndex = index
+        break
+      }
+    }
+    const [removed] = contributors.splice(
+      lowerPriorityIndex >= 0 ? lowerPriorityIndex : contributors.length - 1,
+      1
+    )
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (contributors.length > 0 ? 1 : 0)
+    if (removed.roles.includes("watcher")) {
+      if (compacted.watcherInventory.complete) compactedBytes += 1
+      compacted = {
+        ...compacted,
+        watcherInventory: { ...compacted.watcherInventory, complete: false }
+      }
+    }
+  }
+  while (compactedBytes > MaximumPluginPayloadBytes && attachments.length > 0) {
+    const removed = attachments.pop()
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (attachments.length > 0 ? 1 : 0)
+    if (compacted.attachmentInventory.complete) compactedBytes += 1
+    compacted = {
+      ...compacted,
+      attachmentInventory: { ...compacted.attachmentInventory, complete: false }
+    }
   }
   return compacted
 }
@@ -468,6 +518,7 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
   pageId: string
 ): Effect.fn.Return<WatcherInventory, PluginFailure> {
   const accountIds = new Set<string>()
+  let allWatcherIdentitiesVisible = true
   let pagesFetched = 0
   let start = 0
   while (pagesFetched < MAXIMUM_WATCHER_PAGES) {
@@ -491,10 +542,16 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
       if (String(contentId) !== pageId) {
         return yield* malformed("confluence-page-watchers", "confluence-watcher-page-mismatch")
       }
+      if (watcher.accountId === null) {
+        allWatcherIdentitiesVisible = false
+        continue
+      }
       accountIds.add(watcher.accountId)
     }
     pagesFetched += 1
-    if (page.size < page.limit) return { accountIds: [...accountIds], complete: true, pagesFetched }
+    if (page.size < page.limit) {
+      return { accountIds: [...accountIds], complete: allWatcherIdentitiesVisible, pagesFetched }
+    }
     start += page.size
   }
   return { accountIds: [...accountIds], complete: false, pagesFetched }
@@ -625,7 +682,7 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
     Effect.fn("ConfluencePage.normalizeSyncPage")(function*(context) {
       const { history, inventory, page, versions, watchers } = context
       const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
-      const attributesInput = fitVersionMessages({
+      const attributesInput = fitSyncAttributes({
         schemaVersion: 1,
         status: page.status,
         spaceId: page.spaceId,
@@ -698,7 +755,11 @@ const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(func
         })
       }
       if (isRunbookCandidate(page.title)) {
-        const evidenceId = `confluence-runbook:${page.id}:v${revision}`
+        const evidenceIdentityDigest = yield* digestSyncIdentity(input.cryptoService, {
+          pageId: page.id,
+          revision
+        })
+        const evidenceId = `confluence-runbook:${evidenceIdentityDigest}`
         events.push({
           _tag: "AppendEvidence",
           eventId: evidenceId,
@@ -774,6 +835,7 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   input: MakeConfluencePageAdapterInput,
   cursor: string | null,
   pageNumber: number,
+  previousInventoryDigest: string | null,
   seenCursors: Set<string>
 ) {
   const raw = yield* providerCall(input.client.getSpacePages(input.configuration.spaceId, cursor))
@@ -798,17 +860,23 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   }
   if (following !== null) seenCursors.add(following)
   const events = yield* normalizeSyncEvents(input, pages)
+  const inventoryDigest = yield* digestSyncIdentity(input.cryptoService, {
+    events,
+    previousInventoryDigest
+  })
   const bounded = following !== null && pageNumber >= MAXIMUM_SPACE_PAGES_PER_SYNC
   const hasMore = following !== null && !bounded
   const normalized = yield* splitSyncPage({
     events,
-    logicalCheckpoint: checkpointAfterPage(following, bounded),
+    logicalCheckpoint: checkpointAfterPage(following, bounded, inventoryDigest),
     logicalHasMore: hasMore,
     restartCheckpoint: checkpointBeforePage(cursor)
   })
   return {
     normalized,
-    nextState: hasMore ? Option.some({ cursor: following, pageNumber: pageNumber + 1 }) : Option.none()
+    nextState: hasMore
+      ? Option.some({ cursor: following, inventoryDigest, pageNumber: pageNumber + 1 })
+      : Option.none()
   }
 })
 
@@ -1008,13 +1076,19 @@ export const makeConfluencePageAdapter = (
         syncCursorFromCheckpoint(request.checkpoint).pipe(
           Effect.map((cursor) => {
             if (cursor !== null) seenCursors.add(cursor)
+            const initialState: {
+              readonly cursor: string | null
+              readonly inventoryDigest: string | null
+              readonly pageNumber: number
+            } = { cursor, inventoryDigest: null, pageNumber: 1 }
             return Stream.paginate(
-              { cursor, pageNumber: 1 },
+              initialState,
               Effect.fn("ConfluencePage.streamSpacePages")(function*(state) {
                 const result = yield* readSpaceSyncPage(
                   input,
                   state.cursor,
                   state.pageNumber,
+                  state.inventoryDigest,
                   seenCursors
                 )
                 return [result.normalized, result.nextState]

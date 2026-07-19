@@ -327,33 +327,130 @@ const historicalJiraDescriptors = [
   jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
 ]
 
-const confluenceDescriptorWithoutSync = () => ({
-  ...confluencePagePluginDescriptor,
-  capabilities: confluencePagePluginDescriptor.capabilities.filter(
-    ({ capabilityId }) => capabilityId !== "sync.incremental"
-  )
-})
-
-const legacyConfluenceDescriptor = () => {
-  const descriptor = confluenceDescriptorWithoutSync()
-  return {
-    ...descriptor,
-    configurationFields: descriptor.configurationFields.flatMap((field) => {
-      if (field.key === "authMode" || field.key === "oauthProfileId") return []
-      if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
-      return [{
-        ...field,
-        description: "Atlassian account email used for Confluence Cloud basic authentication.",
-        required: true
-      }]
-    })
-  }
-}
+const historicalConfluenceDescriptors = [{
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.confluence",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "Confluence Cloud",
+  configurationFields: [
+    {
+      _tag: "url",
+      key: "siteBaseUrl",
+      label: "Site URL",
+      description: "HTTPS Confluence Cloud tenant root URL under atlassian.net.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "authMode",
+      label: "Authentication",
+      description: "OAuth profile or API token fallback.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "oauthProfileId",
+      label: "OAuth profile",
+      description: "Shared local Atlassian OAuth profile identifier.",
+      required: false
+    },
+    {
+      _tag: "text",
+      key: "email",
+      label: "Account email",
+      description: "Atlassian account email used only for API token fallback.",
+      required: false
+    },
+    {
+      _tag: "secret-reference",
+      key: "apiToken",
+      label: "API token",
+      description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+      required: false,
+      secretKind: "token"
+    },
+    {
+      _tag: "text",
+      key: "siteId",
+      label: "Site ID",
+      description: "Stable Atlassian site identity used for connection isolation.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "spaceId",
+      label: "Space ID",
+      description: "Confluence space visible through this connection.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "probePageId",
+      label: "Health page ID",
+      description: "Readable page used for a bounded connection health check.",
+      required: true
+    }
+  ],
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}, {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.confluence",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "Confluence Cloud",
+  configurationFields: [
+    {
+      _tag: "url",
+      key: "siteBaseUrl",
+      label: "Site URL",
+      description: "HTTPS Confluence Cloud tenant root URL under atlassian.net.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "email",
+      label: "Account email",
+      description: "Atlassian account email used for Confluence Cloud basic authentication.",
+      required: true
+    },
+    {
+      _tag: "secret-reference",
+      key: "apiToken",
+      label: "API token",
+      description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+      required: true,
+      secretKind: "token"
+    },
+    {
+      _tag: "text",
+      key: "siteId",
+      label: "Site ID",
+      description: "Stable Atlassian site identity used for connection isolation.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "spaceId",
+      label: "Space ID",
+      description: "Confluence space visible through this connection.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "probePageId",
+      label: "Health page ID",
+      description: "Readable page used for a bounded connection health check.",
+      required: true
+    }
+  ],
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}]
 
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
-    return [confluencePagePluginDescriptor, confluenceDescriptorWithoutSync(), legacyConfluenceDescriptor()]
+    return [confluencePagePluginDescriptor, ...historicalConfluenceDescriptors]
   }
   return [expectedDescriptor(providerId)]
 }

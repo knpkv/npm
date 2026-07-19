@@ -538,19 +538,26 @@ describe("Confluence page adapter", () => {
       }
     }))
 
-  it.effect("accepts privacy-redacted watchers and minimal attachment versions", () =>
+  it.effect("skips privacy-redacted watcher identities and keeps visible watcher roles", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(defaultClient({
         getPageWatchers: () =>
           Effect.succeed({
-            results: [{
-              type: "watch",
-              contentId: Number(PAGE_ID),
-              watcher: { accountId: "account-watcher", displayName: "" }
-            }],
+            results: [
+              {
+                type: "watch",
+                contentId: Number(PAGE_ID),
+                watcher: { accountId: "account-watcher", displayName: "" }
+              },
+              {
+                type: "watch",
+                contentId: Number(PAGE_ID),
+                watcher: { accountId: null }
+              }
+            ],
             start: 0,
             limit: 50,
-            size: 1
+            size: 2
           }),
         getPageAttachments: () =>
           Effect.succeed({
@@ -573,7 +580,87 @@ describe("Confluence page adapter", () => {
         id: "attachment-minimal-version",
         version: 1
       }])
-      assert.deepStrictEqual(attributes.watcherInventory, { complete: true, pagesFetched: 1 })
+      assert.include(
+        attributes.contributors.find(({ accountId }) => accountId === "account-watcher")?.roles ?? [],
+        "watcher"
+      )
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 1 })
+      assert.isFalse(
+        pages.flatMap(({ events }) => events).some(
+          (event) => event._tag === "UpsertPerson" && event.vendorPersonId === null
+        )
+      )
+    }))
+
+  it.effect("compacts maximum-length version and contributor identities within the payload bound", () =>
+    Effect.gen(function*() {
+      const accountId = (index: number) => `${String(index).padStart(4, "0")}${"a".repeat(508)}`
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        message: "bounded message",
+        authorId: accountId(index)
+      }))
+      let pageNumber = 0
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageVersions: () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          }),
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName: "Visible contributor",
+              accountStatus: "active"
+            }))
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.isFalse(attributes.versionHistory.complete)
+      assert.isBelow(attributes.versions.length + attributes.contributors.length, 1_002)
+      assert.isAtMost(jsonBytes(attributes), MaximumPluginPayloadBytes)
+    }))
+
+  it.effect("keeps privacy-redacted bulk profiles unresolved without suppressing visible people", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) =>
+              accountId === "account-author"
+                ? { accountId, accountStatus: "active" }
+                : { accountId, displayName: `Visible ${accountId}`, accountStatus: "active" }
+            )
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const events = pages.flatMap(({ events }) => events)
+      const entity = events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepInclude(
+        attributes.contributors.find(({ accountId }) => accountId === "account-author"),
+        { displayName: "Confluence user", resolved: false }
+      )
+      assert.isFalse(
+        events.some((event) => event._tag === "UpsertPerson" && event.vendorPersonId === "account-author")
+      )
+      assert.isTrue(
+        events.some((event) => event._tag === "UpsertPerson" && event.vendorPersonId === "account-owner")
+      )
     }))
 
   it.effect("rejects pages from another space before reading their attachments", () =>
@@ -626,7 +713,7 @@ describe("Confluence page adapter", () => {
         })
       ).pipe(Stream.runCollect)
       assert.strictEqual(resumed.length, 1)
-      assert.strictEqual(resumed[0]?.checkpointAfterPage, "complete")
+      assert.match(resumed[0]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.deepStrictEqual(cursors, ["c5"])
     }))
 
@@ -662,7 +749,8 @@ describe("Confluence page adapter", () => {
         Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "pages", checkpoint: "next:c1" })
       ).pipe(Stream.runCollect)
       assert.deepStrictEqual(cursors, ["c1", "c2"])
-      assert.deepStrictEqual(advanced.map(({ checkpointAfterPage }) => checkpointAfterPage), ["next:c2", "complete"])
+      assert.strictEqual(advanced[0]?.checkpointAfterPage, "next:c2")
+      assert.match(advanced[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
     }))
 
   it.effect("reserves the longest checkpoint prefix when accepting resumed cursors", () =>
@@ -683,7 +771,7 @@ describe("Confluence page adapter", () => {
         })
       ).pipe(Stream.runCollect)
       assert.deepStrictEqual(validCalls, [maximumCursor])
-      assert.strictEqual(valid[0]?.checkpointAfterPage, "complete")
+      assert.match(valid[0]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
 
       const overlongCursor = "c".repeat(2_048 - "bounded:".length)
       const invalid = yield* adapter.connection.sync(
@@ -735,6 +823,27 @@ describe("Confluence page adapter", () => {
       assert.notDeepEqual(changed, initial)
     }))
 
+  it.effect("hashes runbook evidence identity for maximum-length Confluence page ids", () =>
+    Effect.gen(function*() {
+      const pageId = "9".repeat(512)
+      const page = {
+        ...currentPage,
+        id: pageId,
+        _links: { webui: `/wiki/spaces/PAY/pages/${pageId}` }
+      }
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: () => Effect.succeed({ results: [page.version] })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const evidence = pages.flatMap(({ events }) => events).filter((event) => event._tag === "AppendEvidence")
+      assert.lengthOf(evidence, 1)
+      assert.isAtMost(evidence[0]?.eventId.length ?? Number.POSITIVE_INFINITY, 512)
+      assert.isAtMost(evidence[0]?.evidenceId.length ?? Number.POSITIVE_INFINITY, 512)
+      assert.deepInclude(evidence[0]?.data, { pageId })
+    }))
+
   it.effect("splits attachment-heavy provider pages without losing restart safety", () =>
     Effect.gen(function*() {
       const sourcePages = Array.from({ length: 20 }, (_, index) => ({
@@ -773,7 +882,7 @@ describe("Confluence page adapter", () => {
         assert.strictEqual(page.hasMore, true)
         assert.strictEqual(page.checkpointAfterPage, "restart:initial")
       }
-      assert.strictEqual(pages.at(-1)?.checkpointAfterPage, "complete")
+      assert.match(pages.at(-1)?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.strictEqual(
         pages.flatMap(({ events }) => events).filter(({ _tag }) => _tag === "UpsertEntity").length,
         sourcePages.length
