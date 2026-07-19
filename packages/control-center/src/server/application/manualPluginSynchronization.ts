@@ -45,6 +45,21 @@ const MAXIMUM_PAGES_PER_INVOCATION = 100
 const SYNCHRONIZATION_CLAIM_LIFETIME_MINUTES = 15
 const SOURCE_UNAVAILABLE_OUTCOME = "source-unavailable"
 const SYNCHRONIZED_OUTCOME = "synchronized"
+type SuccessfulPluginHealth = Extract<PluginHealthType, { readonly _tag: "healthy" | "degraded" }>
+
+const successfulHealthAt = (
+  health: SuccessfulPluginHealth,
+  checkedAt: UtcTimestamp
+): SuccessfulPluginHealth =>
+  health._tag === "healthy"
+    ? { _tag: "healthy", checkedAt }
+    : {
+      ...health,
+      checkedAt,
+      retryAt: health.retryAt !== null && DateTime.Order(checkedAt, health.retryAt) <= 0
+        ? health.retryAt
+        : null
+    }
 
 /** One provider-neutral manual synchronization driver with a fixed logical stream identity. */
 export interface ManualPluginSyncDriver {
@@ -358,7 +373,7 @@ export const makeManualPluginSynchronization = Effect.fn(
     bound: BoundManualSync,
     authority: PluginSynchronizationAuthority,
     connection: PluginConnectionV1,
-    health: Extract<PluginHealthType, { readonly _tag: "healthy" | "degraded" }>
+    health: SuccessfulPluginHealth
   ) {
     const checkpoint = yield* initialCheckpoint(bound)
     const request = yield* Schema.decodeUnknownEffect(PluginSyncRequestV1)({
@@ -371,7 +386,7 @@ export const makeManualPluginSynchronization = Effect.fn(
     const revision = Result.isSuccess(initialStream) ? initialStream.success.revision : 0
     return yield* Stream.runFoldEffect(
       bound.driver.sync(connection, request).pipe(Stream.take(MAXIMUM_PAGES_PER_INVOCATION)),
-      () => ({ isTerminal: false, pagesSeen: 0, pagesCommitted: 0, revision }),
+      () => ({ health, isTerminal: false, pagesSeen: 0, pagesCommitted: 0, revision }),
       (state, page) =>
         Effect.gen(function*() {
           if (state.isTerminal) {
@@ -381,6 +396,7 @@ export const makeManualPluginSynchronization = Effect.fn(
             })
           }
           const committedAt = DateTime.makeUnsafe(yield* Clock.currentTimeMillis)
+          const successfulHealth = successfulHealthAt(state.health, committedAt)
           const receipt = yield* materializeNormalizedPluginPage({
             workspaceId: bound.workspaceId,
             pluginConnectionId: bound.pluginConnectionId,
@@ -388,7 +404,7 @@ export const makeManualPluginSynchronization = Effect.fn(
             streamKey: bound.streamKey,
             expectedRevision: state.revision,
             committedAt,
-            successfulHealth: health,
+            successfulHealth,
             expectedAuthority: authority
           }, page).pipe(
             Effect.provideService(Crypto.Crypto, cryptoService),
@@ -396,6 +412,7 @@ export const makeManualPluginSynchronization = Effect.fn(
           )
           const pagesSeen = state.pagesSeen + 1
           return {
+            health: successfulHealth,
             isTerminal: !page.hasMore,
             pagesSeen,
             pagesCommitted: state.pagesCommitted + (receipt.pageCommitted ? 1 : 0),
@@ -451,7 +468,7 @@ export const makeManualPluginSynchronization = Effect.fn(
                 diagnosticCode: "manual-sync-terminal-page-missing"
               })
             }
-            return health
+            return completed.health
           }).pipe(Effect.provide(context))
       )
     ))

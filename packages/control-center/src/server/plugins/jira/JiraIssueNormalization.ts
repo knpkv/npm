@@ -594,7 +594,7 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
     events.push(
       yield* normalizedEvent({
         _tag: "UpsertEntity",
-        eventId: `jira:version:${version.id}:${revision}`,
+        eventId: `jira:version:${version.id}:issue:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision,
         entityType: "release",

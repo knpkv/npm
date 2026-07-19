@@ -186,13 +186,27 @@ const ISSUE_FIELDS = [
 
 const escapeJqlString = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")
 
-const projectJql = (request: JiraProjectIssuePageRequest): string => {
+const twoDigits = (value: number): string => String(value).padStart(2, "0")
+
+const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
+  request: JiraProjectIssuePageRequest
+): Effect.fn.Return<string, PluginMalformedResponseFailure> {
   const project = `project = "${escapeJqlString(request.projectId)}"`
   if (request.watermark === null) return `${project} ORDER BY updated ASC, id ASC`
-  const updatedAt = escapeJqlString(request.watermark.updatedAt)
-  const issueId = escapeJqlString(request.watermark.issueId)
-  return `${project} AND (updated > "${updatedAt}" OR (updated = "${updatedAt}" AND id > "${issueId}")) ORDER BY updated ASC, id ASC`
-}
+  const updated = yield* Effect.fromOption(
+    DateTime.make(request.watermark.updatedAt),
+    () =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-watermark-invalid"
+      })
+  )
+  const parts = DateTime.toPartsUtc(updated)
+  const updatedAt = `${String(parts.year).padStart(4, "0")}-${twoDigits(parts.month)}-${twoDigits(parts.day)} ${
+    twoDigits(parts.hour)
+  }:${twoDigits(parts.minute)}`
+  return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, id ASC`
+})
 
 const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
   response: unknown
@@ -242,15 +256,20 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       client.getChangeLogs(issueId, { params: request })
     ),
   searchProjectIssues: (request) =>
-    providerCall(
-      "jira-search-project-issues",
-      client.searchIssuesUsingJql({
-        params: {
-          jql: projectJql(request),
-          maxResults: request.maxResults,
-          fields: ISSUE_FIELDS,
-          ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
-        }
-      })
-    ).pipe(Effect.flatMap(decodeProjectIssuePage))
+    projectJql(request).pipe(
+      Effect.flatMap((jql) =>
+        providerCall(
+          "jira-search-project-issues",
+          client.searchIssuesUsingJql({
+            params: {
+              jql,
+              maxResults: request.maxResults,
+              fields: ISSUE_FIELDS,
+              ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
+            }
+          })
+        )
+      ),
+      Effect.flatMap(decodeProjectIssuePage)
+    )
 })

@@ -390,8 +390,7 @@ const compareWatermarks = (left: JiraIssueWatermark, right: JiraIssueWatermark):
 
 const issueWatermark = Effect.fn("JiraReadPlugin.issueWatermark")(function*(
   issue: JiraProjectIssue,
-  configuration: JiraReadPluginConfiguration,
-  previous: JiraIssueWatermark | null
+  configuration: JiraReadPluginConfiguration
 ): Effect.fn.Return<JiraIssueWatermark, PluginMalformedResponseFailure> {
   const identity = yield* Schema.decodeUnknownEffect(JiraSynchronizedIssueIdentity)(issue).pipe(
     Effect.mapError(() =>
@@ -407,14 +406,7 @@ const issueWatermark = Effect.fn("JiraReadPlugin.issueWatermark")(function*(
       diagnosticCode: "jira-sync-issue-project-mismatch"
     })
   }
-  const watermark = { updatedAt: identity.fields.updated, issueId: identity.id }
-  if (previous !== null && compareWatermarks(watermark, previous) <= 0) {
-    return yield* new PluginMalformedResponseFailure({
-      operation: "jira-search-project-issues",
-      diagnosticCode: "jira-sync-issue-order-invalid"
-    })
-  }
-  return watermark
+  return { updatedAt: identity.fields.updated, issueId: identity.id }
 })
 
 interface JiraSyncState {
@@ -505,8 +497,8 @@ const syncProject = (
               for (let index = 0; index < providerPage.issues.length; index += 1) {
                 const issue = providerPage.issues[index]
                 if (issue === undefined) continue
-                committedWatermark = yield* issueWatermark(issue, configuration, committedWatermark)
-                const observedAt = yield* Schema.decodeUnknownEffect(UtcTimestamp)(committedWatermark.updatedAt).pipe(
+                const watermark = yield* issueWatermark(issue, configuration)
+                yield* Schema.decodeUnknownEffect(UtcTimestamp)(watermark.updatedAt).pipe(
                   Effect.mapError(() =>
                     new PluginMalformedResponseFailure({
                       operation: "jira-search-project-issues",
@@ -514,7 +506,27 @@ const syncProject = (
                     })
                   )
                 )
+                if (state.queryWatermark !== null && compareWatermarks(watermark, state.queryWatermark) <= 0) {
+                  if (
+                    committedWatermark !== null &&
+                    compareWatermarks(committedWatermark, state.queryWatermark) > 0
+                  ) {
+                    return yield* new PluginMalformedResponseFailure({
+                      operation: "jira-search-project-issues",
+                      diagnosticCode: "jira-sync-issue-order-invalid"
+                    })
+                  }
+                  continue
+                }
+                if (committedWatermark !== null && compareWatermarks(watermark, committedWatermark) <= 0) {
+                  return yield* new PluginMalformedResponseFailure({
+                    operation: "jira-search-project-issues",
+                    diagnosticCode: "jira-sync-issue-order-invalid"
+                  })
+                }
+                committedWatermark = watermark
                 const { changelogs, comments } = yield* collectIssueActivity(provider, configuration, issue.id)
+                const observedAt = yield* DateTime.now
                 const events = yield* normalizeJiraIssueEvents({
                   issue,
                   comments,
@@ -547,6 +559,22 @@ const syncProject = (
                   seenPageTokens: new Set(state.seenPageTokens).add(providerPage.nextPageToken)
                 })
                 : Option.none<JiraSyncState>()
+              if (normalizedPages.length === 0 && Option.isNone(nextState)) {
+                normalizedPages.push(
+                  yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+                    events: [],
+                    checkpointAfterPage: yield* checkpointFromWatermark(committedWatermark),
+                    hasMore: false
+                  }).pipe(
+                    Effect.mapError(() =>
+                      new PluginMalformedResponseFailure({
+                        operation: "jira-sync",
+                        diagnosticCode: "jira-sync-page-invalid"
+                      })
+                    )
+                  )
+                )
+              }
               return [normalizedPages, nextState]
             })
         )

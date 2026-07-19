@@ -7,7 +7,7 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
-import type { ProviderId } from "../../src/domain/sourceRevision.js"
+import { type ProviderId, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { ApplicationServiceUnavailable } from "../../src/server/api/ApplicationServices.js"
 import {
@@ -29,6 +29,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000203")
 const SYNCHRONIZED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:00.000Z")
 const PAGE_COMMITTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:01:00.000Z")
+const PROVIDER_OBSERVED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:01.000Z")
 
 const fixtures = [
   {
@@ -111,14 +112,18 @@ const descriptor = (providerId: ProviderId) => ({
   capabilities: [{ capabilityId: "sync.incremental", supportedVersions: [1], requirement: "required" }]
 })
 
-const pageFor = (fixture: typeof fixtures[number], title = fixture.title) =>
+const pageFor = (
+  fixture: typeof fixtures[number],
+  title = fixture.title,
+  observedAt = SYNCHRONIZED_AT
+) =>
   Schema.decodeSync(PluginSyncPageV1)({
     checkpointAfterPage: fixture.checkpoint,
     hasMore: false,
     events: [{
       _tag: "UpsertEntity",
       eventId: `${fixture.providerId}-entity-1`,
-      observedAt: DateTime.formatIso(SYNCHRONIZED_AT),
+      observedAt: DateTime.formatIso(observedAt),
       revision: "revision-1",
       entityType: fixture.entityType,
       vendorImmutableId: fixture.vendorImmutableId,
@@ -190,6 +195,40 @@ describe("manual plugin synchronization", () => {
     assert.isTrue(Option.isSome(driver))
     if (Option.isSome(driver)) assert.strictEqual(driver.value.streamKey, "project-issues")
   })
+
+  it.effect("commits a Jira page at or after observations made after the initial health sample", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "jira")
+      if (fixture === undefined) return yield* Effect.die("jira fixture not found")
+      const { connections, persistence } = yield* setupFixture(fixture)
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            TestClock.adjust("1 second").pipe(
+              Effect.as(pageFor(fixture, fixture.title, PROVIDER_OBSERVED_AT))
+            )
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(synchronized.result, "synchronized")
+      assert.strictEqual(synchronized.pagesCommitted, 1)
+      const entity = yield* persistence.entities.findBySourceIdentity(WORKSPACE_ID, {
+        pluginConnectionId: fixture.pluginConnectionId,
+        providerId: "jira",
+        vendorImmutableId: VendorImmutableId.make(fixture.vendorImmutableId)
+      })
+      assert.strictEqual(DateTime.formatIso(entity.sourceRevision.lastObservedAt), "2026-07-19T12:00:01.000Z")
+      assert.strictEqual(DateTime.formatIso(entity.sourceRevision.synchronizedAt), "2026-07-19T12:00:01.000Z")
+    })))
 
   it.effect("materializes each supported fixture connection once and exposes replay-safe attempt state", () =>
     withApplication(Effect.gen(function*() {

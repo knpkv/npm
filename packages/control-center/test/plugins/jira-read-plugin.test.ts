@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
+import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -9,6 +10,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
@@ -582,7 +584,7 @@ describe("JiraReadPlugin", () => {
           Ref.update(searches, (current) => [...current, request]).pipe(
             Effect.as(
               request.watermark !== null
-                ? { issues: [], nextPageToken: null }
+                ? { issues: [secondIssue], nextPageToken: null }
                 : request.nextPageToken === null
                 ? { issues: [issue], nextPageToken: "page-2" }
                 : { issues: [secondIssue], nextPageToken: null }
@@ -618,6 +620,15 @@ describe("JiraReadPlugin", () => {
           "AppendEvidence"
         ]
       )
+      const releaseEventIds = pages.flatMap(({ events }) =>
+        events.flatMap((event) =>
+          event._tag === "UpsertEntity" && event.entityType === "release"
+            ? [event.eventId]
+            : []
+        )
+      )
+      assert.lengthOf(releaseEventIds, 2)
+      assert.notStrictEqual(releaseEventIds[0], releaseEventIds[1])
 
       const replay = yield* withConnection(
         provider,
@@ -661,6 +672,38 @@ describe("JiraReadPlugin", () => {
         assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
       }
       assert.strictEqual(yield* Ref.get(searchCalls), 0)
+    }))
+
+  it.effect("uses host time for observation while retaining a newer Jira update as the checkpoint revision", () =>
+    Effect.gen(function*() {
+      const observedAt = DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const providerUpdatedAt = "2026-07-19T10:00:01.000Z"
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              ...issue,
+              fields: { ...issue.fields, updated: providerUpdatedAt }
+            }],
+            nextPageToken: null
+          })
+      })
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+      const issueEvent = pages[0]?.events.find(
+        (event) => event._tag === "UpsertEntity" && event.entityType === "jira.issue"
+      )
+      assert.strictEqual(issueEvent?._tag, "UpsertEntity")
+      if (issueEvent?._tag !== "UpsertEntity") return yield* Effect.die("expected normalized Jira issue")
+      assert.strictEqual(DateTime.formatIso(issueEvent.observedAt), "2026-07-19T10:00:00.000Z")
+      assert.strictEqual(issueEvent.revision, providerUpdatedAt)
+      assert.include(pages[0]?.checkpointAfterPage ?? "", providerUpdatedAt)
     }))
 
   it.effect("rejects a cross-project search result before reading comments or history", () =>

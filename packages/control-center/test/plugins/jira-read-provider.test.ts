@@ -67,7 +67,7 @@ const mapRateLimit = Effect.fn("JiraReadProviderTest.mapRateLimit")(function*(re
 })
 
 describe("JiraReadProvider", () => {
-  it.effect("pins every paginated JQL request to the selected project and stable watermark", () => {
+  it.effect("pins project JQL and formats ISO watermarks as Jira minute timestamps", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {
       const client = yield* JiraApiClient
@@ -82,12 +82,26 @@ describe("JiraReadProvider", () => {
       assert.lengthOf(page.issues, 1)
       const requestParameters = new Map(requests[0]?.urlParams ?? [])
       const jql = requestParameters.get("jql")
+      if (jql === undefined) return yield* Effect.die("expected generated JQL")
       assert.strictEqual(
         jql,
-        "project = \"10\\\" OR project = 20\" AND (updated > \"2026-07-17T09:30:00.000Z\" OR (updated = \"2026-07-17T09:30:00.000Z\" AND id > \"10042\")) ORDER BY updated ASC, id ASC"
+        "project = \"10\\\" OR project = 20\" AND updated >= \"2026-07-17 09:30\" ORDER BY updated ASC, id ASC"
       )
+      assert.notInclude(jql, "T09:30")
+      assert.notInclude(jql, ":00.000Z")
       assert.strictEqual(requestParameters.get("nextPageToken"), "provider-page-2")
       assert.strictEqual(requestParameters.get("maxResults"), "25")
+
+      yield* provider.searchProjectIssues({
+        projectId: "10",
+        watermark: null,
+        nextPageToken: null,
+        maxResults: 25
+      })
+      assert.strictEqual(
+        new Map(requests[1]?.urlParams ?? []).get("jql"),
+        "project = \"10\" ORDER BY updated ASC, id ASC"
+      )
     }).pipe(Effect.provide(jiraClientLayer({
       issues: [{
         id: "10043",
