@@ -7,7 +7,14 @@ import * as Schema from "effect/Schema"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 import * as RateLimiter from "effect/unstable/persistence/RateLimiter"
 
-export const RequestLimitProfile = Schema.Literals(["pairing", "read", "mutation", "agent", "media"])
+export const RequestLimitProfile = Schema.Literals([
+  "pairing",
+  "read",
+  "mutation",
+  "synchronization",
+  "agent",
+  "media"
+])
 export type RequestLimitProfile = typeof RequestLimitProfile.Type
 
 /** Stable policy values applied by the API boundary. */
@@ -16,10 +23,12 @@ export interface RequestLimitPolicyValue {
   readonly pairing: { readonly limit: number; readonly window: Duration.Duration }
   readonly read: { readonly limit: number; readonly window: Duration.Duration }
   readonly mutation: { readonly limit: number; readonly window: Duration.Duration }
+  readonly synchronization: { readonly limit: number; readonly window: Duration.Duration }
   readonly agent: { readonly limit: number; readonly window: Duration.Duration }
   readonly media: { readonly limit: number; readonly window: Duration.Duration }
   readonly readTimeout: Duration.Duration
   readonly mutationTimeout: Duration.Duration
+  readonly synchronizationTimeout: Duration.Duration
   readonly agentTimeout: Duration.Duration
 }
 
@@ -33,10 +42,12 @@ export class RequestLimitPolicy extends Context.Service<
     pairing: { limit: 10, window: Duration.minutes(5) },
     read: { limit: 120, window: Duration.minutes(1) },
     mutation: { limit: 30, window: Duration.minutes(1) },
+    synchronization: { limit: 8, window: Duration.minutes(1) },
     agent: { limit: 8, window: Duration.minutes(1) },
     media: { limit: 60, window: Duration.minutes(1) },
     readTimeout: Duration.seconds(15),
     mutationTimeout: Duration.seconds(30),
+    synchronizationTimeout: Duration.minutes(10),
     agentTimeout: Duration.seconds(130)
   })
 }
@@ -127,6 +138,8 @@ export const withRequestTimeout = <A, E, R>(
     Effect.timeoutOrElse(effect, {
       duration: profile === "agent"
         ? policy.agentTimeout
+        : profile === "synchronization"
+        ? policy.synchronizationTimeout
         : profile === "mutation" || profile === "pairing"
         ? policy.mutationTimeout
         : policy.readTimeout,

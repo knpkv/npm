@@ -298,6 +298,8 @@ describe("ControlCenterApi contract", () => {
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
+        ["synchronization", "GET", "/api/v1/plugins/:pluginConnectionId/synchronization"],
+        ["synchronizeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/sync"],
         ["configurationMetadata", "GET", "/api/v1/plugins/:pluginConnectionId/configuration-metadata"],
         ["configuration", "GET", "/api/v1/plugins/:pluginConnectionId/configuration"],
         ["patchConfiguration", "PATCH", "/api/v1/plugins/:pluginConnectionId/configuration"]
@@ -416,6 +418,8 @@ describe("ControlCenterApi contract", () => {
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
+      synchronization: [SessionCookieAuth.key],
+      synchronizeConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       configurationMetadata: [SessionCookieAuth.key],
       configuration: [SessionCookieAuth.key],
       patchConfiguration: [SessionCookieAuth.key, SessionMutationAuth.key]
@@ -488,6 +492,10 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.plugins.health({ params: { pluginConnectionId } }),
       "https://control.example/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/health"
+    )
+    assert.strictEqual(
+      urls.plugins.synchronizeConnection({ params: { pluginConnectionId } }),
+      "https://control.example/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/sync"
     )
     assert.strictEqual(urls.plugins.list(), "https://control.example/api/v1/plugins")
     assert.strictEqual(urls.plugins.overview(), "https://control.example/api/v1/plugins/overview")

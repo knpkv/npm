@@ -16,10 +16,12 @@ const limitPolicyLayer = Layer.succeed(RequestLimitPolicy, {
   pairing: { limit: 1, window: Duration.minutes(1) },
   read: { limit: 1, window: Duration.minutes(1) },
   mutation: { limit: 1, window: Duration.minutes(1) },
+  synchronization: { limit: 1, window: Duration.minutes(1) },
   agent: { limit: 1, window: Duration.minutes(1) },
   media: { limit: 1, window: Duration.minutes(1) },
   readTimeout: Duration.seconds(5),
-  mutationTimeout: Duration.seconds(5),
+  mutationTimeout: Duration.millis(25),
+  synchronizationTimeout: Duration.millis(250),
   agentTimeout: Duration.seconds(5)
 })
 
@@ -35,6 +37,16 @@ const webHandlerLayer = Layer.mergeAll(
   HttpRouter.add("GET", "/api/ping", HttpServerResponse.text("pong")),
   HttpRouter.add("GET", "/api/schema-request", schemaDefect("Payload")),
   HttpRouter.add("POST", "/api/schema-response", schemaDefect("Body")),
+  HttpRouter.add(
+    "POST",
+    "/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000204/sync",
+    Effect.sleep(Duration.millis(75)).pipe(Effect.as(HttpServerResponse.jsonUnsafe({ result: "synchronized" })))
+  ),
+  HttpRouter.add(
+    "POST",
+    "/api/slow-mutation",
+    Effect.sleep(Duration.millis(75)).pipe(Effect.as(HttpServerResponse.text("too late")))
+  ),
   HttpRouter.add("GET", "/asset.js", HttpServerResponse.text("asset")),
   requestBoundaryLayer,
   HttpServer.layerServices
@@ -152,6 +164,30 @@ describe("API request boundary", () => {
 
       assert.strictEqual(response.status, 200)
       assert.strictEqual(response.headers.get("cache-control"), "no-store")
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
+  it("gives the bounded synchronization endpoint its dedicated execution budget", async () => {
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    try {
+      const synchronization = await webHandler.handler(
+        new Request(
+          "http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000204/sync",
+          { method: "POST", headers: { "x-correlation-id": "synchronization-timeout" } }
+        )
+      )
+      const ordinaryMutation = await webHandler.handler(
+        new Request("http://127.0.0.1:4173/api/slow-mutation", {
+          method: "POST",
+          headers: { "x-correlation-id": "mutation-timeout" }
+        })
+      )
+
+      assert.strictEqual(synchronization.status, 200)
+      assert.deepStrictEqual(await synchronization.json(), { result: "synchronized" })
+      assert.strictEqual(ordinaryMutation.status, 408)
     } finally {
       await webHandler.dispose()
     }

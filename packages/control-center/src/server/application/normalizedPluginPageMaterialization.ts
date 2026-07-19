@@ -33,6 +33,11 @@ import type { PersistenceOperationFailure, PersistenceService } from "../persist
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import type { PluginConflictFailure } from "../plugins/failures.js"
+import {
+  type PluginSynchronizationAuthority,
+  verifyPluginSynchronizationAuthority
+} from "./pluginSynchronizationAuthority.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 type EntityTombstone = Extract<NormalizedPluginEventV1, { readonly _tag: "TombstoneEntity" }>
@@ -773,6 +778,7 @@ export interface NormalizedPluginPageMaterializationScope {
   readonly expectedRevision: number
   readonly committedAt: UtcTimestamp
   readonly successfulHealth: Extract<PluginHealth, { readonly _tag: "healthy" | "degraded" }>
+  readonly expectedAuthority?: PluginSynchronizationAuthority
 }
 
 /** Durable counts from one new page, or zero counts when the exact page is replayed. */
@@ -800,12 +806,15 @@ export const materializeNormalizedPluginPage = Effect.fn(
   page: PluginSyncPageV1
 ): Effect.fn.Return<
   NormalizedPluginPageMaterializationReceipt,
-  NormalizedPluginPageMaterializationError | PersistenceOperationFailure,
+  NormalizedPluginPageMaterializationError | PersistenceOperationFailure | PluginConflictFailure,
   Crypto.Crypto | Persistence
 > {
   const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
   return yield* persistence.transact(Effect.gen(function*() {
+    if (scope.expectedAuthority !== undefined) {
+      yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
+    }
     const committed = yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
       scope.workspaceId,
       scope.pluginConnectionId,

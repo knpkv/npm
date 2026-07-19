@@ -1107,6 +1107,12 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
   const secrets = yield* SecretStore
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const manualSynchronization = pluginConnections === null
+    ? null
+    : yield* Effect.flatMap(
+      Effect.promise(() => import("./manualPluginSynchronization.js")),
+      ({ makeManualPluginSynchronization }) => makeManualPluginSynchronization(pluginConnections)
+    )
 
   return {
     list: (workspaceId) => listPluginConnections(persistence, workspaceId),
@@ -1240,6 +1246,12 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       }
       return tested.test
     }),
+    ...(manualSynchronization === null
+      ? {}
+      : {
+        synchronization: manualSynchronization.state,
+        synchronizeConnection: manualSynchronization.synchronize
+      }),
     configurationMetadata: ({ pluginConnectionId, workspaceId }) =>
       metadata(persistence, workspaceId, pluginConnectionId),
     configuration: ({ pluginConnectionId, workspaceId }) =>

@@ -38,8 +38,10 @@ export {
 export {
   type OpenPluginSyncAttemptsQueryInput,
   type PluginSyncAttemptsQueryInput,
+  type PluginSyncAttemptStateQueryInput,
   renderOpenPluginSyncAttemptsQuery,
-  renderPluginSyncAttemptsQuery
+  renderPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptStateQuery
 } from "./pluginSyncAttempts.js"
 export {
   type CreateProviderAccountQueryInput,

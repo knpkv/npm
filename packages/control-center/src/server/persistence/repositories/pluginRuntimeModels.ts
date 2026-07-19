@@ -151,6 +151,13 @@ export const PluginSyncAttemptRecord = Schema.Struct({
 )
 export type PluginSyncAttemptRecord = typeof PluginSyncAttemptRecord.Type
 
+/** Bounded materialization of the attempt records needed for current synchronization state. */
+export const PluginSyncAttemptState = Schema.Struct({
+  latestAttempt: Schema.NullOr(PluginSyncAttemptRecord),
+  latestSynchronized: Schema.NullOr(PluginSyncAttemptRecord)
+})
+export type PluginSyncAttemptState = typeof PluginSyncAttemptState.Type
+
 export const PluginCacheRecord = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
