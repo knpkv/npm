@@ -59,6 +59,7 @@ const allAtlassianProducts: AtlassianOAuthProviderIntent = ["jira", "confluence"
 
 const allAtlassianProductsIntent: AtlassianSetupIntent = {
   preferredProfileId: null,
+  preferredSiteId: null,
   providers: allAtlassianProducts,
   requestedOAuthProviders: allAtlassianProducts
 }
@@ -99,6 +100,7 @@ const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnect
   const providers = missingAtlassianProducts(connections)
   return {
     preferredProfileId: null,
+    preferredSiteId: null,
     providers,
     requestedOAuthProviders: null
   }
@@ -571,6 +573,7 @@ export const ServicesPage = ({
           ? missingAtlassianProductsIntent(connectionsState.overview.connections)
           : {
               preferredProfileId: selectedAtlassianOAuthProfileId(searchParams),
+              preferredSiteId: null,
               providers: callbackProviders,
               requestedOAuthProviders: callbackProviders
             }
@@ -866,7 +869,17 @@ export const ServicesPage = ({
                     connections={connectionsState.overview.connections}
                     enablementStates={enablementStates}
                     key={account.providerAccountId}
-                    onAdd={(providerId) => setOpenProvider(providerId)}
+                    onAdd={(providerId, providerImmutableId) => {
+                      if (providerId === "jira" || providerId === "confluence") {
+                        setAtlassianSetupIntent({
+                          preferredProfileId: null,
+                          preferredSiteId: providerImmutableId,
+                          providers: [providerId],
+                          requestedOAuthProviders: null
+                        })
+                      }
+                      setOpenProvider(providerId)
+                    }}
                     onSetEnabled={setConnectionEnabled}
                     onTest={testConnection}
                     testStates={testStates}

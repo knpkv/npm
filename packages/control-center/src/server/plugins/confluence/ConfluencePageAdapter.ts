@@ -79,6 +79,10 @@ const SiteUrl = Schema.String.pipe(
   )
 )
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const RawConfluenceSystemInfo = Schema.Struct({
+  cloudId: Identifier,
+  siteTitle: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)))
+})
 const BoundedNormalizedAttributes = Schema.Json.check(
   hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes)
 )
@@ -418,6 +422,16 @@ export const makeConfluencePageAdapter = (
     descriptor: input.descriptor,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
+      const rawSystemInfo = yield* providerCall(input.client.getSystemInfo)
+      const systemInfo = yield* decodeProvider(
+        "confluence-system-info",
+        "confluence-system-info-invalid",
+        RawConfluenceSystemInfo,
+        rawSystemInfo
+      )
+      if (systemInfo.cloudId !== input.configuration.siteId) {
+        return yield* malformed("confluence-system-info", "confluence-site-identity-mismatch")
+      }
       const rawUser = yield* providerCall(input.client.getCurrentUser)
       const user = yield* decodeProvider(
         "confluence-current-user",
@@ -434,8 +448,8 @@ export const makeConfluencePageAdapter = (
           displayName: currentUserDisplayName(user.displayName, user.publicName)
         },
         workspace: {
-          providerImmutableId: input.configuration.siteId,
-          displayName: input.configuration.siteBaseUrl.hostname
+          providerImmutableId: systemInfo.cloudId,
+          displayName: systemInfo.siteTitle ?? input.configuration.siteBaseUrl.hostname
         },
         resource: {
           providerImmutableId: input.configuration.spaceId,

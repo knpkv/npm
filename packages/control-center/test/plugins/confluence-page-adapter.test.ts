@@ -80,6 +80,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
     displayName: "Avery Bell",
     accountStatus: "active"
   }),
+  getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
   getPageVersions: () => Effect.succeed({ results: [currentPage.version] }),
   getUsers: (accountIds) =>
@@ -188,12 +189,27 @@ describe("Confluence page adapter", () => {
       })
       assert.deepStrictEqual(discovery.workspace, {
         providerImmutableId: "site-acme",
-        displayName: "acme.atlassian.net"
+        displayName: "Acme"
       })
       assert.deepStrictEqual(discovery.resource, {
         providerImmutableId: "space-payments",
         displayName: "Space · space-payments"
       })
+    }))
+
+  it.effect("rejects a configured site identity that does not match Confluence", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getSystemInfo: Effect.succeed({ cloudId: "site-other", commitHash: "commit" })
+      }))
+      const outcome = yield* adapter.connection.discover.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "confluence-site-identity-mismatch")
+        }
+      }
     }))
 
   it.effect("uses the public name for a privacy-limited current-user profile", () =>

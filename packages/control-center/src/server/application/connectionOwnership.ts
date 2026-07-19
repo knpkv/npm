@@ -35,7 +35,7 @@ const ownershipDiscovery = (
     case "jira":
     case "confluence":
       return discovery === null || discovery.workspace === null || discovery.resource === null
-        ? undefined
+        ? null
         : { account: discovery.workspace, providerFamily: "atlassian", resource: discovery.resource }
     case "clockify":
       return null

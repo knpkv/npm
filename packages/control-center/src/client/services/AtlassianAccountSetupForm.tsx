@@ -15,6 +15,7 @@ import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupV
 type AuthenticationMode = "oauth" | "api-token"
 export interface AtlassianSetupIntent {
   readonly preferredProfileId: string | null
+  readonly preferredSiteId: string | null
   readonly providers: AtlassianOAuthProviderIntent
   readonly requestedOAuthProviders: AtlassianOAuthProviderIntent | null
 }
@@ -25,7 +26,9 @@ const selectedProfile = (
 ): DiscoveredAtlassianProfile | undefined => profiles.find((profile) => profile.profileId === profileId)
 
 const isUsableProfile = (profile: DiscoveredAtlassianProfile, intent: AtlassianSetupIntent): boolean =>
-  profile.status === "valid" && intent.providers.every((providerId) => profile.providers.includes(providerId))
+  profile.status === "valid" &&
+  (intent.preferredSiteId === null || profile.cloudId === intent.preferredSiteId) &&
+  intent.providers.every((providerId) => profile.providers.includes(providerId))
 
 const profileAvailability = (profile: DiscoveredAtlassianProfile): string => {
   if (profile.status === "expired") return "expired"
@@ -66,6 +69,7 @@ export const AtlassianAccountSetupForm = ({
   const [profileId, setProfileId] = useState("")
   const [siteUrl, setSiteUrl] = useState("")
   const [siteId, setSiteId] = useState("")
+  const [projectId, setProjectId] = useState("")
   const [spaceId, setSpaceId] = useState("")
   const [probePageId, setProbePageId] = useState("")
   const [email, setEmail] = useState("")
@@ -78,15 +82,21 @@ export const AtlassianAccountSetupForm = ({
   useEffect(() => () => startRequest.current?.abort(), [])
 
   useEffect(() => {
-    if (authenticationMode !== "oauth" || profileId.length > 0) return
+    if (authenticationMode !== "oauth") return
+    const currentProfile = selectedProfile(profiles, profileId)
+    if (currentProfile !== undefined && isUsableProfile(currentProfile, setupIntent)) return
     const preferredProfile =
       setupIntent.preferredProfileId === null ? undefined : selectedProfile(profiles, setupIntent.preferredProfileId)
     const initialProfile =
       preferredProfile !== undefined && isUsableProfile(preferredProfile, setupIntent)
         ? preferredProfile
         : profiles.find((profile) => isUsableProfile(profile, setupIntent))
-    if (initialProfile !== undefined) setProfileId(initialProfile.profileId)
+    setProfileId(initialProfile?.profileId ?? "")
   }, [authenticationMode, profileId, profiles, setupIntent])
+
+  useEffect(() => {
+    if (setupIntent.preferredSiteId !== null) setSiteId(setupIntent.preferredSiteId)
+  }, [setupIntent.preferredSiteId])
 
   useEffect(() => {
     if (authenticationMode !== "oauth") return
@@ -106,18 +116,22 @@ export const AtlassianAccountSetupForm = ({
     const normalizedAccountName = accountName.trim()
     const normalizedSiteUrl = siteUrl.trim()
     const normalizedSiteId = siteId.trim()
+    const normalizedProjectId = projectId.trim()
     const normalizedSpaceId = spaceId.trim()
     const normalizedProbePageId = probePageId.trim()
     if (
       normalizedAccountName.length === 0 ||
       normalizedSiteUrl.length === 0 ||
       normalizedSiteId.length === 0 ||
+      (setupJira && normalizedProjectId.length === 0) ||
       (setupConfluence && (normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
     ) {
       setSetupError(
-        setupConfluence
-          ? "Add the Atlassian site identity, Confluence space, and readable health page."
-          : "Add the Atlassian site identity."
+        setupJira && setupConfluence
+          ? "Add the Atlassian site identity, Jira project, Confluence space, and readable health page."
+          : setupJira
+            ? "Add the Atlassian site identity and Jira project."
+            : "Add the Atlassian site identity, Confluence space, and readable health page."
       )
       return
     }
@@ -146,6 +160,7 @@ export const AtlassianAccountSetupForm = ({
       ["webBaseUrl", normalizedSiteUrl],
       ["siteBaseUrl", normalizedSiteUrl],
       ["siteId", normalizedSiteId],
+      ["projectId", normalizedProjectId],
       ["spaceId", normalizedSpaceId],
       ["probePageId", normalizedProbePageId]
     ]
@@ -271,15 +286,19 @@ export const AtlassianAccountSetupForm = ({
             {(controlProps) => (
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
                 <option value="">Choose a profile already on this machine</option>
-                {profiles.map((profile) => (
-                  <option
-                    disabled={!isUsableProfile(profile, setupIntent)}
-                    key={profile.profileId}
-                    value={profile.profileId}
-                  >
-                    {profile.name} · {profileAvailability(profile)}
-                  </option>
-                ))}
+                {profiles
+                  .filter(
+                    (profile) => setupIntent.preferredSiteId === null || profile.cloudId === setupIntent.preferredSiteId
+                  )
+                  .map((profile) => (
+                    <option
+                      disabled={!isUsableProfile(profile, setupIntent)}
+                      key={profile.profileId}
+                      value={profile.profileId}
+                    >
+                      {profile.name} · {profileAvailability(profile)}
+                    </option>
+                  ))}
               </select>
             )}
           </Field>
@@ -338,12 +357,24 @@ export const AtlassianAccountSetupForm = ({
         {(controlProps) => (
           <input
             {...controlProps}
-            disabled={authenticationMode === "oauth"}
+            disabled={authenticationMode === "oauth" || setupIntent.preferredSiteId !== null}
             onChange={(event) => setSiteId(event.currentTarget.value)}
             value={siteId}
           />
         )}
       </Field>
+      {setupJira ? (
+        <Field
+          description="The immutable Jira project ID followed by this connection."
+          label="Jira project ID"
+          required
+          size="compact"
+        >
+          {(controlProps) => (
+            <input {...controlProps} onChange={(event) => setProjectId(event.currentTarget.value)} value={projectId} />
+          )}
+        </Field>
+      ) : null}
       {setupConfluence ? (
         <div className={styles.resources}>
           <Field label="Confluence space ID" required size="compact">

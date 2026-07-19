@@ -31,6 +31,10 @@ const PageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))
 const MaximumPages = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
 const OperationTimeoutMillis = Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 120_000 }))
 const AtlassianSiteId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const JiraIssueProjectIdentity = Schema.Struct({
+  fields: Schema.Struct({ project: Schema.Struct({ id: JiraProjectId }) })
+})
 const JiraWebBaseUrl = SourceUrl.pipe(
   Schema.check(
     Schema.makeFilter(
@@ -51,6 +55,7 @@ const JiraWebBaseUrl = SourceUrl.pipe(
 export const JiraReadPluginConfiguration = Schema.Struct({
   webBaseUrl: JiraWebBaseUrl,
   siteId: AtlassianSiteId,
+  projectId: JiraProjectId,
   pageSize: PageSize,
   maximumPages: MaximumPages,
   operationTimeoutMillis: OperationTimeoutMillis
@@ -85,6 +90,13 @@ export const jiraReadPluginDescriptor = {
       key: "siteId",
       label: "Site ID",
       description: "Stable Atlassian cloud identity, discovered automatically by OAuth.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "projectId",
+      label: "Project ID",
+      description: "Immutable Jira project ID followed by this connection.",
       required: true
     },
     {
@@ -245,6 +257,20 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
       diagnosticCode: "jira-issue-identity-mismatch"
     })
   }
+  const issueProject = yield* Schema.decodeUnknownEffect(JiraIssueProjectIdentity)(issue.value).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-get-issue",
+        diagnosticCode: "jira-issue-project-missing"
+      })
+    )
+  )
+  if (issueProject.fields.project.id !== configuration.projectId) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-get-issue",
+      diagnosticCode: "jira-issue-project-mismatch"
+    })
+  }
 
   const comments = yield* collectPages({
     operation: "jira-get-comments",
@@ -274,7 +300,8 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
 
 const makeRuntime = (
   provider: JiraReadProvider,
-  configuration: unknown
+  configuration: unknown,
+  verifiedSiteId: string | null
 ): JiraReadPluginRuntime => {
   const definition = definePluginV1({
     rawDescriptor: jiraReadPluginDescriptor,
@@ -294,6 +321,17 @@ const makeRuntime = (
             decoded.operationTimeoutMillis,
             provider.getCurrentUser
           )
+          const project = yield* withTimeout(
+            "jira-get-project",
+            decoded.operationTimeoutMillis,
+            provider.getProject(decoded.projectId)
+          )
+          if (project.id !== decoded.projectId) {
+            return yield* new PluginMalformedResponseFailure({
+              operation: "jira-get-project",
+              diagnosticCode: "jira-project-identity-mismatch"
+            })
+          }
           const discoveredAt = yield* DateTime.now
           return yield* Schema.decodeUnknownEffect(Schema.toType(PluginDiscoveryV1))({
             account: user.accountId === undefined
@@ -302,13 +340,15 @@ const makeRuntime = (
                 providerImmutableId: user.accountId,
                 displayName: user.displayName ?? user.accountId
               },
-            workspace: {
-              providerImmutableId: decoded.siteId,
-              displayName: server.serverTitle ?? decoded.webBaseUrl.hostname
-            },
+            workspace: verifiedSiteId === null
+              ? null
+              : {
+                providerImmutableId: verifiedSiteId,
+                displayName: server.serverTitle ?? decoded.webBaseUrl.hostname
+              },
             resource: {
-              providerImmutableId: decoded.siteId,
-              displayName: "Jira"
+              providerImmutableId: project.id,
+              displayName: project.name ?? project.key ?? project.id
             },
             endpoints: [
               { kind: "web", url: decoded.webBaseUrl, label: "Jira" },
@@ -366,9 +406,14 @@ const makeRuntime = (
 
 /** Build a production Jira runtime from the configured shared API client. */
 export const makeJiraReadPluginRuntime = (
-  configuration: unknown
+  configuration: unknown,
+  verifiedSiteId: string | null = null
 ): Effect.Effect<JiraReadPluginRuntime, never, JiraApiClient> =>
-  Effect.map(JiraApiClient, (client) => makeRuntime(makeJiraReadProvider(client), configuration))
+  Effect.map(JiraApiClient, (client) => makeRuntime(makeJiraReadProvider(client), configuration, verifiedSiteId))
 
 /** Build the runtime around a deterministic provider double. @internal */
-export const makeJiraReadPluginRuntimeFromProvider = makeRuntime
+export const makeJiraReadPluginRuntimeFromProvider = (
+  provider: JiraReadProvider,
+  configuration: unknown,
+  verifiedSiteId: string | null = null
+): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId)

@@ -16,7 +16,7 @@ const resourceKind = (providerId: ProviderId): string => {
     case "codepipeline":
       return "Pipeline"
     case "jira":
-      return "Jira site"
+      return "Project"
     case "confluence":
       return "Space"
     case "clockify":
@@ -39,7 +39,7 @@ export const ProviderAccountCard = ({
   readonly canConfigure: boolean
   readonly connections: ReadonlyArray<PluginConnectionSummary>
   readonly enablementStates: ReadonlyMap<PluginConnectionId, ConnectionEnablementState>
-  readonly onAdd: (providerId: ProviderId) => void
+  readonly onAdd: (providerId: ProviderId, providerImmutableId: string) => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testStates: ReadonlyMap<PluginConnectionId, ConnectionTestState>
@@ -125,21 +125,31 @@ export const ProviderAccountCard = ({
     </div>
     {account.providerFamily === "aws" ? (
       <div className={styles.accountActions}>
-        <Button disabled={!canConfigure} onClick={() => onAdd("codecommit")} variant="secondary">
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("codecommit", account.providerImmutableId)}
+          variant="secondary"
+        >
           Add repository
         </Button>
-        <Button disabled={!canConfigure} onClick={() => onAdd("codepipeline")} variant="secondary">
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("codepipeline", account.providerImmutableId)}
+          variant="secondary"
+        >
           Add pipeline
         </Button>
       </div>
     ) : account.providerFamily === "atlassian" ? (
       <div className={styles.accountActions}>
-        {account.resources.some(({ providerId }) => providerId === "jira") ? null : (
-          <Button disabled={!canConfigure} onClick={() => onAdd("jira")} variant="secondary">
-            Add Jira
-          </Button>
-        )}
-        <Button disabled={!canConfigure} onClick={() => onAdd("confluence")} variant="secondary">
+        <Button disabled={!canConfigure} onClick={() => onAdd("jira", account.providerImmutableId)} variant="secondary">
+          Add Jira project
+        </Button>
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("confluence", account.providerImmutableId)}
+          variant="secondary"
+        >
           Add Confluence space
         </Button>
       </div>

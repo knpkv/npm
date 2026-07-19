@@ -222,6 +222,7 @@ const legacyAtlassianDescriptor = (providerId: ProviderId): unknown | undefined 
   return {
     ...descriptor,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
+      if (providerId === "jira" && (field.key === "siteId" || field.key === "projectId")) return []
       if (field.key === "authMode" || field.key === "oauthProfileId") return []
       if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
       return [{
@@ -387,12 +388,19 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
 })
 
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
+  // Pre-stability persistence is intentionally breaking: old Jira connections
+  // have neither a verified cloud ID nor an immutable project scope. Recreate
+  // them rather than silently loading an unscoped reader.
+  if (loaded.descriptorGeneration === "legacy-atlassian") {
+    return yield* configurationFailure("plugin-configuration-migration-required")
+  }
   const authMode = yield* atlassianAuthenticationMode(loaded)
   const expectedKeys = new Set([
     ...(authMode.includesModeKey ? ["authMode"] : []),
     "maximumPages",
     "operationTimeoutMillis",
     "pageSize",
+    "projectId",
     "siteId",
     "webBaseUrl",
     ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
@@ -401,6 +409,7 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const configurationInput = {
     webBaseUrl: yield* textValue(loaded.configuration, "webBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
+    projectId: yield* textValue(loaded.configuration, "projectId"),
     pageSize: yield* integerValue(loaded.configuration, "pageSize"),
     maximumPages: yield* integerValue(loaded.configuration, "maximumPages"),
     operationTimeoutMillis: yield* integerValue(loaded.configuration, "operationTimeoutMillis")
@@ -422,7 +431,10 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     }))
   )
   const plugin = Layer.unwrap(
-    makeJiraReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
+    makeJiraReadPluginRuntime(
+      configurationInput,
+      authMode.value === "oauth" ? configuration.siteId : null
+    ).pipe(Effect.map(({ layer }) => layer))
   ).pipe(Layer.provide(client))
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })

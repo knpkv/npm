@@ -79,7 +79,10 @@ const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
 
 type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
-type AtlassianConfigurationValue = CreatePluginConnectionValue | StoredPluginConfigurationValue
+type AtlassianConfigurationValue =
+  | CreatePluginConnectionValue
+  | PluginConfigurationPatchValue
+  | StoredPluginConfigurationValue
 type PluginAdministrationOAuthRequirements =
   | Crypto.Crypto
   | DomainEventWakeups
@@ -103,6 +106,22 @@ const configuredText = (
     ? value.value
     : null
 }
+
+const rejectBoundAtlassianIdentityChange = Effect.fn(
+  "PluginAdministration.rejectBoundAtlassianIdentityChange"
+)(function*(
+  connection: PluginConnectionRecord,
+  current: ReadonlyArray<StoredPluginConfigurationValue>,
+  replacement: ReadonlyArray<PluginConfigurationPatchValue>
+) {
+  if (!isAtlassianProvider(connection.providerId) || connection.followedResourceId === null) return
+  const identityKeys = connection.providerId === "jira"
+    ? ["webBaseUrl", "siteId", "projectId"]
+    : ["siteBaseUrl", "siteId", "spaceId"]
+  if (identityKeys.some((key) => configuredText(current, key) !== configuredText(replacement, key))) {
+    return yield* new ApplicationInvalidRequest()
+  }
+})
 
 const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAtlassianOAuthProfile")(function*(
   providerId: PluginConnectionRecord["providerId"],
@@ -131,7 +150,7 @@ const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAt
   )
   if (
     profileSite.origin !== expectedSite.origin ||
-    (providerId === "confluence" && profile.token.cloud_id !== configuredText(values, "siteId"))
+    profile.token.cloud_id !== configuredText(values, "siteId")
   ) {
     return yield* new ApplicationInvalidRequest()
   }
@@ -1241,6 +1260,11 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         Option.isSome(current)
           ? current.value.values.map((value) => [value.key, value])
           : []
+      )
+      yield* rejectBoundAtlassianIdentityChange(
+        connection,
+        Option.isSome(current) ? current.value.values : [],
+        patch.values
       )
       // PATCH is a full replacement: all required descriptor fields must be present.
       // Keep operations resolve only the reference stored at the expected revision. The
