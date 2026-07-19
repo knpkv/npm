@@ -172,6 +172,7 @@ describe("AtlassianOAuthGrants", () => {
         SHARED_OAUTH_CONFIG
       ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
       assert.strictEqual(configured._tag, "ready")
+      if (configured._tag !== "ready") return
 
       const stored = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
         Effect.provide(HomeDirectoryLive),
@@ -179,21 +180,62 @@ describe("AtlassianOAuthGrants", () => {
       )
       assert.deepStrictEqual(stored, SHARED_OAUTH_CONFIG)
 
-      const replacement = yield* Effect.result(
+      const failedExchange = yield* Effect.result(
+        grants.exchange(
+          owner,
+          yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+            new URL(configured.authorizationUrl).searchParams.get("state")
+          ),
+          "invalid-authorization-code"
+        ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      )
+      assert.isTrue(Result.isFailure(failedExchange))
+
+      const replacementConfig = { clientId: "replacement-client", clientSecret: "replacement-secret" }
+      const replacement = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira"],
+        replacementConfig
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(replacement._tag, "ready")
+      const replaced = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(replaced, replacementConfig)
+
+      const token: OAuthToken = {
+        access_token: "saved-access",
+        refresh_token: "saved-refresh",
+        expires_at: 4_102_444_800_000,
+        scope: JIRA_SCOPES.join(" "),
+        cloud_id: "saved-cloud",
+        site_url: "https://saved.atlassian.net/",
+        user: { account_id: "saved-user", name: "Saved User", email: "saved@example.com" }
+      }
+      yield* saveProfileToken(CONTROL_CENTER_AUTH_STORE_NAME, token).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const protectedReplacement = yield* Effect.result(
         grants.start(
           owner,
           "http://127.0.0.1:4173",
           ["jira"],
-          { clientId: "replacement-client", clientSecret: "replacement-secret" }
+          { clientId: "protected-client", clientSecret: "protected-secret" }
         ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
       )
-      assert.isTrue(Result.isFailure(replacement))
-      if (Result.isFailure(replacement)) assert.strictEqual(replacement.failure._tag, "ApplicationConflict")
+      assert.isTrue(Result.isFailure(protectedReplacement))
+      if (Result.isFailure(protectedReplacement)) {
+        assert.strictEqual(protectedReplacement.failure._tag, "ApplicationConflict")
+      }
       const preserved = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
         Effect.provide(HomeDirectoryLive),
         Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
       )
-      assert.deepStrictEqual(preserved, SHARED_OAUTH_CONFIG)
+      assert.deepStrictEqual(preserved, replacementConfig)
 
       assert.isFalse(yield* fileSystem.exists(path.join(configHome, "atlassian", "jira-cli")))
       assert.isFalse(yield* fileSystem.exists(path.join(configHome, "atlassian", "confluence-to-markdown")))
@@ -203,7 +245,12 @@ describe("AtlassianOAuthGrants", () => {
       )
       assert.strictEqual(restarted._tag, "ready")
     }).pipe(
-      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("invalid OAuth code", { status: 401 })))
+        )
+      ),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

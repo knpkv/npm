@@ -198,8 +198,10 @@ const configureControlCenterOAuth = Effect.fn("AtlassianOAuthGrants.configureCon
     loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME)
   ], { concurrency: 1 })
   if (currentConfig !== null) {
-    if (!sameOAuthConfig(currentConfig, configuration)) return yield* new ApplicationConflict()
-    return currentConfig
+    if (sameOAuthConfig(currentConfig, configuration)) return currentConfig
+    if (profiles.profiles.length > 0) return yield* new ApplicationConflict()
+    yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, configuration)
+    return configuration
   }
   if (profiles.profiles.length > 0) return yield* unavailable()
   yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, configuration)
