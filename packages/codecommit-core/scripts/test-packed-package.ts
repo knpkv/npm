@@ -64,7 +64,7 @@ if (policy.schedule === undefined) throw new Error("Distilled AWS retry policy w
 `
     )
 
-    yield* run("npm", ["install", "--ignore-scripts", "--no-audit", "--no-fund"], consumer)
+    yield* run("pnpm", ["install", "--offline", "--ignore-scripts", "--no-frozen-lockfile"], consumer)
     yield* run("node", ["verify.mjs"], consumer)
     yield* Console.log("codecommit-core packed consumer verified the published Distilled AWS runtime")
   }).pipe(Effect.provide(NodeServices.layer))
