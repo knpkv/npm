@@ -15,12 +15,13 @@ export const selectedServiceProvider = (searchParams: URLSearchParams, key: "ena
 /** Post-pairing destination that opens the selected service setup in place. */
 export const serviceSetupPath = (providerId: ProviderId): string => `/services?enable=${providerId}`
 
-/** Post-OAuth destination that preserves the completed Atlassian profile and its granted products. */
-export const atlassianOAuthSetupPath = (providers: AtlassianOAuthProviderIntent, profileId: string): string => {
-  const searchParams = new URLSearchParams({
-    enable: providers.includes("jira") ? "jira" : "confluence",
-    atlassianProfile: profileId
-  })
+/** Atlassian setup destination that preserves the initiating products and, when present, the completed profile. */
+export const atlassianOAuthSetupPath = (
+  providers: AtlassianOAuthProviderIntent,
+  profileId: string | null = null
+): string => {
+  const searchParams = new URLSearchParams({ enable: providers.includes("jira") ? "jira" : "confluence" })
+  if (profileId !== null) searchParams.set("atlassianProfile", profileId)
   for (const provider of providers) searchParams.append("atlassianProvider", provider)
   return `/services?${searchParams.toString()}`
 }

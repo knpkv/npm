@@ -9,6 +9,7 @@ import type {
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
 import styles from "./AtlassianAccountSetupForm.module.css"
+import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
 import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupValues.js"
 
 type AuthenticationMode = "oauth" | "api-token"
@@ -184,6 +185,11 @@ export const AtlassianAccountSetupForm = ({
         if (result._tag === "configuration-required") {
           setOAuthCallbackUrl(result.callbackUrl)
           setSetupError("OAuth needs a one-time local client configuration before sign-in.")
+          setIsStartingOAuth(false)
+          return
+        }
+        if (!rememberAtlassianOAuthSetupIntent(result.authorizationUrl, setupIntent.providers)) {
+          setSetupError("Control Center could not preserve this Atlassian setup across sign-in. Try again.")
           setIsStartingOAuth(false)
           return
         }

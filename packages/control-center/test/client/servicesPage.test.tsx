@@ -145,6 +145,8 @@ const session = Schema.decodeSync(SessionSummary)({
   revokedAt: null
 })
 const csrfToken = Schema.decodeSync(CsrfToken)("ab".repeat(32))
+const grantId = "b".repeat(43)
+const oauthIntentKey = (state: string): string => `cc_atlassian_oauth_setup_intent:${state}`
 
 let root: Root | undefined
 let sessionControls: ReturnType<typeof useBrowserSession> | undefined
@@ -1048,15 +1050,56 @@ describe("ServicesPage connection tests", () => {
     }
   )
 
+  it("submits only Jira after returning with a profile granted for both Atlassian products", async () => {
+    const create = vi.fn<ConnectionTestTransport["create"]>(successfulCreate)
+    const profileId = "account-1@cloud-1"
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAtlassianProfiles: () =>
+        Promise.resolve([
+          {
+            profileId,
+            name: "Avery Bell @ team.atlassian.net",
+            siteUrl: "https://team.atlassian.net/",
+            cloudId: "cloud-1",
+            accountName: "Avery Bell",
+            accountEmail: "avery@example.com",
+            status: "valid",
+            providers: ["jira", "confluence"]
+          }
+        ]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [confluenceConnection] }),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(
+      transport,
+      `/services?enable=jira&atlassianProfile=${encodeURIComponent(profileId)}&atlassianProvider=jira`
+    )
+    await act(async () => undefined)
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect Atlassian")
+    )
+
+    await act(async () => submit?.click())
+
+    expect(create).toHaveBeenCalledOnce()
+    expect(create.mock.calls[0]?.[0].providerId).toBe("jira")
+  })
+
   it("requests durable Atlassian scopes when extending a canonical OAuth-backed product", async () => {
     let resolveProfiles: ((profiles: AtlassianProfileDiscoveryResponse) => void) | undefined
     const profiles = new Promise<AtlassianProfileDiscoveryResponse>((resolve) => {
       resolveProfiles = resolve
     })
+    const previousLocation = window.location.href
+    const authorizationUrl = new URL(`/authorize?state=${grantId}`, previousLocation).href
     const startAtlassianOAuthGrant = vi
       .fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>()
       .mockResolvedValue({
-        _tag: "configuration-required",
+        _tag: "ready",
+        authorizationUrl,
         callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
       })
     const transport: ConnectionTestTransport = {
@@ -1097,6 +1140,9 @@ describe("ServicesPage connection tests", () => {
 
     expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
     expect(startAtlassianOAuthGrant.mock.calls[0]?.[0]).toEqual(["jira", "confluence"])
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(JSON.stringify(["jira"]))
+    expect(window.location.href).toBe(authorizationUrl)
+    window.history.replaceState(null, "", previousLocation)
   })
 
   it("keeps an explicit different-cloud OAuth return product-scoped", async () => {
@@ -1232,7 +1278,9 @@ describe("ServicesPage connection tests", () => {
     let resolveFirstStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined
     let firstStartSignal: AbortSignal | undefined
     const previousLocation = window.location.href
-    const authorizationUrl = new URL("#atlassian-oauth-ready", previousLocation).href
+    const authorizationLocation = new URL("#atlassian-oauth-ready", previousLocation)
+    authorizationLocation.searchParams.set("state", grantId)
+    const authorizationUrl = authorizationLocation.href
     const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
       (_providers, signal) => {
         if (firstStartSignal === undefined) {
@@ -1278,6 +1326,7 @@ describe("ServicesPage connection tests", () => {
     await act(async () => buttonWithText("Sign in with Atlassian")?.click())
 
     expect(window.location.href).toBe(authorizationUrl)
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(JSON.stringify(["confluence"]))
     window.history.replaceState(null, "", previousLocation)
   })
 

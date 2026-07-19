@@ -20,6 +20,7 @@ import { PersonId, WorkspaceId } from "../../src/domain/identifiers.js"
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const grantId = "a".repeat(43)
+const oauthIntentKey = (state: string): string => `cc_atlassian_oauth_setup_intent:${state}`
 const exchangeResponse = Schema.decodeSync(AtlassianOAuthGrantExchangeResponse)({
   grantId,
   accountName: "Avery Bell",
@@ -165,11 +166,11 @@ describe("AtlassianOAuthCallbackPage", () => {
   })
 
   it.each(callbackReturnCases)(
-    "returns to the $label setup preserved by the completed profile",
+    "returns to the initiating $label setup independently of the completed profile scopes",
     async ({ destination, providers }) => {
       const complete = vi
         .fn<NonNullable<ConnectionTestTransport["completeAtlassianOAuthGrant"]>>()
-        .mockResolvedValue({ ...completedProfile, providers })
+        .mockResolvedValue(completedProfile)
       const transport: CallbackTransport = {
         completeAtlassianOAuthGrant: complete,
         exchangeAtlassianOAuthGrant: () => Promise.resolve(exchangeResponse)
@@ -177,6 +178,7 @@ describe("AtlassianOAuthCallbackPage", () => {
       const host = document.createElement("div")
       document.body.append(host)
       root = createRoot(host)
+      sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify(providers))
 
       await act(async () => {
         root?.render(
@@ -195,8 +197,65 @@ describe("AtlassianOAuthCallbackPage", () => {
 
       expect(complete).toHaveBeenCalledOnce()
       expect(currentLocation).toBe(destination)
+      expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBeNull()
     }
   )
+
+  it("restores a Confluence-only setup after a failed callback", async () => {
+    const transport: CallbackTransport = { exchangeAtlassianOAuthGrant: vi.fn() }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify(["confluence"]))
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&error=access_denied`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Try again")
+    )
+    await act(async () => retry?.click())
+
+    expect(currentLocation).toBe("/services?enable=confluence&atlassianProvider=confluence")
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBeNull()
+  })
+
+  it.each([
+    ["unknown", null],
+    ["invalid", JSON.stringify(["jira", "jira"])],
+    ["malformed", "not-json"]
+  ])("returns safely to Services for %s callback intent", async (_scenario, storedIntent) => {
+    const transport: CallbackTransport = { exchangeAtlassianOAuthGrant: vi.fn() }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    if (storedIntent !== null) sessionStorage.setItem(oauthIntentKey(grantId), storedIntent)
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&error=access_denied`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Try again")
+    )
+    await act(async () => retry?.click())
+
+    expect(currentLocation).toBe("/services")
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBeNull()
+  })
 
   it("keeps exactly one grant exchange alive across StrictMode effect replay", async () => {
     let resolveExchange: ((value: AtlassianOAuthGrantExchangeResponse) => void) | undefined

@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from "react-router"
 
 import { AtlassianOAuthGrantId, type AtlassianOAuthGrantExchangeResponse } from "../../api/plugins.js"
 import { useBrowserSession } from "../BrowserSession.js"
+import { forgetAtlassianOAuthSetupIntent, readAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import { atlassianOAuthSetupPath } from "./serviceOnboarding.js"
 import styles from "./AtlassianOAuthCallbackPage.module.css"
@@ -29,6 +30,8 @@ export const AtlassianOAuthCallbackPage = ({
 } = {}): ReactElement => {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const callbackGrantState = useRef(searchParams.get("state")).current
+  const [setupProviders] = useState(() => readAtlassianOAuthSetupIntent(callbackGrantState))
   const { state: sessionState } = useBrowserSession()
   const [state, setState] = useState<CallbackState>({ _tag: "waiting" })
   const exchangeStarted = useRef(false)
@@ -85,13 +88,21 @@ export const AtlassianOAuthCallbackPage = ({
     setState({ _tag: "saving", grant, cloudId })
     void save(grant.grantId, cloudId, request.signal).then(
       (profile) => {
-        if (!request.signal.aborted)
-          navigate(atlassianOAuthSetupPath(profile.providers, profile.profileId), { replace: true })
+        if (request.signal.aborted) return
+        forgetAtlassianOAuthSetupIntent(callbackGrantState)
+        navigate(setupProviders === null ? "/services" : atlassianOAuthSetupPath(setupProviders, profile.profileId), {
+          replace: true
+        })
       },
       () => {
         if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })
       }
     )
+  }
+
+  const leaveCallback = (): void => {
+    forgetAtlassianOAuthSetupIntent(callbackGrantState)
+    navigate(setupProviders === null ? "/services" : atlassianOAuthSetupPath(setupProviders))
   }
 
   if (sessionState._tag === "checking") {
@@ -106,7 +117,7 @@ export const AtlassianOAuthCallbackPage = ({
     return (
       <section className={styles.page}>
         <StatePanel
-          action={<Button onClick={() => navigate("/services")}>Return to Services</Button>}
+          action={<Button onClick={leaveCallback}>Return to Services</Button>}
           description="Return to the paired browser session that started this sign-in."
           title="Paired session required"
         />
@@ -118,7 +129,7 @@ export const AtlassianOAuthCallbackPage = ({
     return (
       <section className={styles.page}>
         <StatePanel
-          action={<Button onClick={() => navigate("/services?enable=jira")}>Try again</Button>}
+          action={<Button onClick={leaveCallback}>Try again</Button>}
           description="The grant may have expired, been denied, or already been used. No provider token was saved."
           title="Atlassian sign-in did not finish"
         />
