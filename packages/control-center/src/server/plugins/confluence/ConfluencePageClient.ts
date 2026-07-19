@@ -40,6 +40,7 @@ export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<Conflue
 /** Minimal provider reads needed for the first Confluence page vertical slice. @internal */
 export interface ConfluencePageClientShape {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPageVersions: (
     pageId: string,
@@ -107,6 +108,7 @@ export const makeConfluencePageClient = (
   api: ConfluenceApiClientShape
 ): ConfluencePageClientShape => ({
   getCurrentUser: bounded("confluence-current-user", api.v1.getCurrentUser(undefined)),
+  getSystemInfo: bounded("confluence-system-info", api.v1.getSystemInfo(undefined)),
   getPage: (pageId) =>
     bounded(
       "confluence-page-read",

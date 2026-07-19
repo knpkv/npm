@@ -53,6 +53,8 @@ const jiraSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionValue>): b
   return Result.isSuccess(
     Schema.decodeUnknownResult(JiraReadPluginConfiguration)({
       webBaseUrl: configured.get("webBaseUrl"),
+      siteId: configured.get("siteId"),
+      projectId: configured.get("projectId"),
       pageSize: configured.get("pageSize"),
       maximumPages: configured.get("maximumPages"),
       operationTimeoutMillis: configured.get("operationTimeoutMillis")
@@ -177,6 +179,8 @@ const codePipelineFields = [
 ]
 const jiraFields = [
   field("webBaseUrl", "Jira site URL", "Root URL of the Jira Cloud site.", "url"),
+  field("siteId", "Site ID", "Stable Atlassian cloud identity.", "text"),
+  field("projectId", "Project ID", "Immutable Jira project followed by this connection.", "text"),
   field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
     defaultValue: "api-token"
   }),

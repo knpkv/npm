@@ -21,6 +21,8 @@ import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
 const configuration = {
   webBaseUrl: "https://acme.atlassian.net",
+  siteId: "cloud-acme",
+  projectId: "10",
   pageSize: 2,
   maximumPages: 3,
   operationTimeoutMillis: 5_000
@@ -122,6 +124,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
     baseUrl: "https://acme.atlassian.net",
     serverTitle: "Acme Jira"
   }),
+  getProject: () => Effect.succeed({ id: "10", key: "PAY", name: "Payments" }),
   getIssue: () => Effect.succeed(Option.some(issue)),
   getComments: (_issueId, request) =>
     Effect.succeed({
@@ -145,7 +148,7 @@ const withConnection = <Value, Error>(
   use: Effect.Effect<Value, Error, PluginConnection>,
   configured: unknown = configuration
 ): Effect.Effect<Value, Error | PluginFailure> => {
-  const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configured)
+  const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configured, configuration.siteId)
   return use.pipe(Effect.provide(runtime.layer), Effect.scoped)
 }
 
@@ -199,6 +202,58 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(Result.isFailure(decode(configured(invalid))), invalid)
     }
   })
+
+  it.effect("discovers the authenticated user, verified Atlassian site, and selected Jira project separately", () =>
+    withConnection(
+      baseProvider(),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const discovery = yield* connection.discover
+
+        assert.deepStrictEqual(discovery.account, {
+          providerImmutableId: "ari",
+          displayName: "Ari Chen"
+        })
+        assert.deepStrictEqual(discovery.workspace, {
+          providerImmutableId: "cloud-acme",
+          displayName: "Acme Jira"
+        })
+        assert.deepStrictEqual(discovery.resource, {
+          providerImmutableId: "10",
+          displayName: "Payments"
+        })
+      })
+    ))
+
+  it.effect("keeps API-token Jira usable without claiming an unverified shared site", () =>
+    Effect.gen(function*() {
+      const runtime = makeJiraReadPluginRuntimeFromProvider(baseProvider(), configuration)
+      const discovery = yield* PluginConnection.pipe(
+        Effect.flatMap((connection) => connection.discover),
+        Effect.provide(runtime.layer),
+        Effect.scoped
+      )
+      assert.isNull(discovery.workspace)
+      assert.deepStrictEqual(discovery.resource, {
+        providerImmutableId: "10",
+        displayName: "Payments"
+      })
+    }))
+
+  it.effect("rejects a project lookup that does not confirm the configured immutable ID", () =>
+    Effect.gen(function*() {
+      const outcome = yield* withConnection(
+        baseProvider({ getProject: () => Effect.succeed({ id: "20", key: "OPS", name: "Operations" }) }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.discover))
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-project-identity-mismatch")
+        }
+      }
+    }))
 
   it.effect("reads all bounded activity pages and normalizes human issue context", () =>
     Effect.gen(function*() {
@@ -466,6 +521,34 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(Result.isFailure(outcome))
       if (Result.isFailure(outcome)) {
         assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
+      assert.strictEqual(yield* Ref.get(childCalls), 0)
+    }))
+
+  it.effect("rejects an issue from outside the configured project before requesting child collections", () =>
+    Effect.gen(function*() {
+      const childCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(
+            Option.some({
+              ...issue,
+              fields: { ...issue.fields, project: { id: "20", key: "OPS", name: "Operations" } }
+            })
+          ),
+        getComments: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({})),
+        getChangelogs: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({}))
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-issue-project-mismatch")
+        }
       }
       assert.strictEqual(yield* Ref.get(childCalls), 0)
     }))

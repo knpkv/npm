@@ -15,6 +15,7 @@ import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupV
 type AuthenticationMode = "oauth" | "api-token"
 export interface AtlassianSetupIntent {
   readonly preferredProfileId: string | null
+  readonly preferredSiteId: string | null
   readonly providers: AtlassianOAuthProviderIntent
   readonly requestedOAuthProviders: AtlassianOAuthProviderIntent | null
 }
@@ -25,7 +26,9 @@ const selectedProfile = (
 ): DiscoveredAtlassianProfile | undefined => profiles.find((profile) => profile.profileId === profileId)
 
 const isUsableProfile = (profile: DiscoveredAtlassianProfile, intent: AtlassianSetupIntent): boolean =>
-  profile.status === "valid" && intent.providers.every((providerId) => profile.providers.includes(providerId))
+  profile.status === "valid" &&
+  (intent.preferredSiteId === null || profile.cloudId === intent.preferredSiteId) &&
+  intent.providers.every((providerId) => profile.providers.includes(providerId))
 
 const profileAvailability = (profile: DiscoveredAtlassianProfile): string => {
   if (profile.status === "expired") return "expired"
@@ -66,6 +69,7 @@ export const AtlassianAccountSetupForm = ({
   const [profileId, setProfileId] = useState("")
   const [siteUrl, setSiteUrl] = useState("")
   const [siteId, setSiteId] = useState("")
+  const [projectId, setProjectId] = useState("")
   const [spaceId, setSpaceId] = useState("")
   const [probePageId, setProbePageId] = useState("")
   const [email, setEmail] = useState("")
@@ -78,15 +82,21 @@ export const AtlassianAccountSetupForm = ({
   useEffect(() => () => startRequest.current?.abort(), [])
 
   useEffect(() => {
-    if (authenticationMode !== "oauth" || profileId.length > 0) return
+    if (authenticationMode !== "oauth") return
+    const currentProfile = selectedProfile(profiles, profileId)
+    if (currentProfile !== undefined && isUsableProfile(currentProfile, setupIntent)) return
     const preferredProfile =
       setupIntent.preferredProfileId === null ? undefined : selectedProfile(profiles, setupIntent.preferredProfileId)
     const initialProfile =
       preferredProfile !== undefined && isUsableProfile(preferredProfile, setupIntent)
         ? preferredProfile
         : profiles.find((profile) => isUsableProfile(profile, setupIntent))
-    if (initialProfile !== undefined) setProfileId(initialProfile.profileId)
+    setProfileId(initialProfile?.profileId ?? "")
   }, [authenticationMode, profileId, profiles, setupIntent])
+
+  useEffect(() => {
+    if (setupIntent.preferredSiteId !== null) setSiteId(setupIntent.preferredSiteId)
+  }, [setupIntent.preferredSiteId])
 
   useEffect(() => {
     if (authenticationMode !== "oauth") return
@@ -106,15 +116,23 @@ export const AtlassianAccountSetupForm = ({
     const normalizedAccountName = accountName.trim()
     const normalizedSiteUrl = siteUrl.trim()
     const normalizedSiteId = siteId.trim()
+    const normalizedProjectId = projectId.trim()
     const normalizedSpaceId = spaceId.trim()
     const normalizedProbePageId = probePageId.trim()
     if (
       normalizedAccountName.length === 0 ||
       normalizedSiteUrl.length === 0 ||
-      (setupConfluence &&
-        (normalizedSiteId.length === 0 || normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
+      normalizedSiteId.length === 0 ||
+      (setupJira && normalizedProjectId.length === 0) ||
+      (setupConfluence && (normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
     ) {
-      setSetupError("Add the Atlassian site, Confluence space, and readable health page.")
+      setSetupError(
+        setupJira && setupConfluence
+          ? "Add the Atlassian site identity, Jira project, Confluence space, and readable health page."
+          : setupJira
+            ? "Add the Atlassian site identity and Jira project."
+            : "Add the Atlassian site identity, Confluence space, and readable health page."
+      )
       return
     }
     const authentication: ReadonlyArray<readonly [string, string]> =
@@ -137,11 +155,16 @@ export const AtlassianAccountSetupForm = ({
       setSetupError("Add the Atlassian email and API token.")
       return
     }
+    if (authenticationMode === "api-token" && setupJira && setupIntent.preferredSiteId !== null) {
+      setSetupError("Use a matching OAuth profile to add a Jira project to this Atlassian site.")
+      return
+    }
     const sharedValues: ReadonlyArray<readonly [string, string]> = [
       ...authentication,
       ["webBaseUrl", normalizedSiteUrl],
       ["siteBaseUrl", normalizedSiteUrl],
       ["siteId", normalizedSiteId],
+      ["projectId", normalizedProjectId],
       ["spaceId", normalizedSpaceId],
       ["probePageId", normalizedProbePageId]
     ]
@@ -188,7 +211,12 @@ export const AtlassianAccountSetupForm = ({
           setIsStartingOAuth(false)
           return
         }
-        if (!rememberAtlassianOAuthSetupIntent(result.authorizationUrl, setupIntent.providers)) {
+        if (
+          !rememberAtlassianOAuthSetupIntent(result.authorizationUrl, {
+            preferredSiteId: setupIntent.preferredSiteId,
+            providers: setupIntent.providers
+          })
+        ) {
           setSetupError("Control Center could not preserve this Atlassian setup across sign-in. Try again.")
           setIsStartingOAuth(false)
           return
@@ -267,21 +295,27 @@ export const AtlassianAccountSetupForm = ({
             {(controlProps) => (
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
                 <option value="">Choose a profile already on this machine</option>
-                {profiles.map((profile) => (
-                  <option
-                    disabled={!isUsableProfile(profile, setupIntent)}
-                    key={profile.profileId}
-                    value={profile.profileId}
-                  >
-                    {profile.name} · {profileAvailability(profile)}
-                  </option>
-                ))}
+                {profiles
+                  .filter(
+                    (profile) => setupIntent.preferredSiteId === null || profile.cloudId === setupIntent.preferredSiteId
+                  )
+                  .map((profile) => (
+                    <option
+                      disabled={!isUsableProfile(profile, setupIntent)}
+                      key={profile.profileId}
+                      value={profile.profileId}
+                    >
+                      {profile.name} · {profileAvailability(profile)}
+                    </option>
+                  ))}
               </select>
             )}
           </Field>
-          <Button onClick={useApiToken} type="button" variant="quiet">
-            Use API token instead
-          </Button>
+          {setupJira && setupIntent.preferredSiteId !== null ? null : (
+            <Button onClick={useApiToken} type="button" variant="quiet">
+              Use API token instead
+            </Button>
+          )}
         </>
       ) : (
         <div className={styles.fallback}>
@@ -325,20 +359,30 @@ export const AtlassianAccountSetupForm = ({
           />
         )}
       </Field>
-      {setupConfluence ? (
+      <Field
+        description="The stable Atlassian cloud ID; filled from OAuth when available."
+        label="Site ID"
+        required
+        size="compact"
+      >
+        {(controlProps) => (
+          <input
+            {...controlProps}
+            disabled={authenticationMode === "oauth" || setupIntent.preferredSiteId !== null}
+            onChange={(event) => setSiteId(event.currentTarget.value)}
+            value={siteId}
+          />
+        )}
+      </Field>
+      {setupJira ? (
         <Field
-          description="The stable Atlassian cloud ID; filled from OAuth when available."
-          label="Site ID"
+          description="The immutable Jira project ID followed by this connection."
+          label="Jira project ID"
           required
           size="compact"
         >
           {(controlProps) => (
-            <input
-              {...controlProps}
-              disabled={authenticationMode === "oauth"}
-              onChange={(event) => setSiteId(event.currentTarget.value)}
-              value={siteId}
-            />
+            <input {...controlProps} onChange={(event) => setProjectId(event.currentTarget.value)} value={projectId} />
           )}
         </Field>
       ) : null}

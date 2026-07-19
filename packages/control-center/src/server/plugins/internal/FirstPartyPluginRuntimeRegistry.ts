@@ -212,13 +212,108 @@ const expectedDescriptor = (providerId: ProviderId): unknown => {
   }
 }
 
-const legacyAtlassianDescriptor = (providerId: ProviderId): unknown | undefined => {
-  const descriptor = providerId === "jira"
-    ? jiraReadPluginDescriptor
-    : providerId === "confluence"
-    ? confluencePagePluginDescriptor
-    : undefined
-  if (descriptor === undefined) return undefined
+const jiraDescriptorSnapshot = (configurationFields: ReadonlyArray<unknown>) => ({
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.jira.read",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "Jira issue reader",
+  configurationFields,
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+})
+
+const jiraWebBaseUrlField = {
+  _tag: "url",
+  key: "webBaseUrl",
+  label: "Jira site URL",
+  description: "HTTPS Jira Cloud tenant root URL under atlassian.net, without query or credentials.",
+  required: true
+}
+const jiraSiteIdField = {
+  _tag: "text",
+  key: "siteId",
+  label: "Site ID",
+  description: "Stable Atlassian cloud identity, discovered automatically by OAuth.",
+  required: true
+}
+const jiraOAuthFields = [
+  {
+    _tag: "text",
+    key: "authMode",
+    label: "Authentication",
+    description: "OAuth profile or API token fallback.",
+    required: true
+  },
+  {
+    _tag: "text",
+    key: "oauthProfileId",
+    label: "OAuth profile",
+    description: "Shared local Atlassian OAuth profile identifier.",
+    required: false
+  },
+  {
+    _tag: "text",
+    key: "email",
+    label: "Account email",
+    description: "Atlassian account email used only for API token fallback.",
+    required: false
+  },
+  {
+    _tag: "secret-reference",
+    key: "apiToken",
+    label: "API token",
+    description: "Owner-only Atlassian API token resolved only for the scoped runtime.",
+    required: false,
+    secretKind: "token"
+  }
+]
+const jiraLegacyCredentialFields = [
+  {
+    _tag: "text",
+    key: "email",
+    label: "Account email",
+    description: "Atlassian account email used for Jira Cloud basic authentication.",
+    required: true
+  },
+  { ...jiraOAuthFields[3], required: true }
+]
+const jiraReaderFields = [
+  {
+    _tag: "integer",
+    key: "pageSize",
+    label: "Activity page size",
+    description: "Comments and history entries requested per Jira page.",
+    required: true,
+    minimum: 1,
+    maximum: 50
+  },
+  {
+    _tag: "integer",
+    key: "maximumPages",
+    label: "Maximum activity pages",
+    description: "Hard request limit for comments and history independently.",
+    required: true,
+    minimum: 1,
+    maximum: 5
+  },
+  {
+    _tag: "integer",
+    key: "operationTimeoutMillis",
+    label: "Request timeout",
+    description: "Maximum milliseconds for each Jira provider request.",
+    required: true,
+    minimum: 1_000,
+    maximum: 120_000
+  }
+]
+const historicalJiraDescriptors = [
+  jiraDescriptorSnapshot([jiraWebBaseUrlField, ...jiraLegacyCredentialFields, ...jiraReaderFields]),
+  jiraDescriptorSnapshot([jiraWebBaseUrlField, ...jiraOAuthFields, ...jiraReaderFields]),
+  jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
+]
+
+const legacyConfluenceDescriptor = () => {
+  const descriptor = confluencePagePluginDescriptor
   return {
     ...descriptor,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
@@ -226,9 +321,7 @@ const legacyAtlassianDescriptor = (providerId: ProviderId): unknown | undefined 
       if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
       return [{
         ...field,
-        description: providerId === "jira"
-          ? "Atlassian account email used for Jira Cloud basic authentication."
-          : "Atlassian account email used for Confluence Cloud basic authentication.",
+        description: "Atlassian account email used for Confluence Cloud basic authentication.",
         required: true
       }]
     })
@@ -236,8 +329,9 @@ const legacyAtlassianDescriptor = (providerId: ProviderId): unknown | undefined 
 }
 
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
-  const legacy = legacyAtlassianDescriptor(providerId)
-  return legacy === undefined ? [expectedDescriptor(providerId)] : [expectedDescriptor(providerId), legacy]
+  if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
+  if (providerId === "confluence") return [confluencePagePluginDescriptor, legacyConfluenceDescriptor()]
+  return [expectedDescriptor(providerId)]
 }
 
 const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: PluginRuntimeScope) {
@@ -387,18 +481,28 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
 })
 
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
+  // Pre-stability persistence is intentionally breaking: old Jira connections
+  // have neither a verified cloud ID nor an immutable project scope. Recreate
+  // them rather than silently loading an unscoped reader.
+  if (loaded.descriptorGeneration === "legacy-atlassian") {
+    return yield* configurationFailure("plugin-configuration-migration-required")
+  }
   const authMode = yield* atlassianAuthenticationMode(loaded)
   const expectedKeys = new Set([
     ...(authMode.includesModeKey ? ["authMode"] : []),
     "maximumPages",
     "operationTimeoutMillis",
     "pageSize",
+    "projectId",
+    "siteId",
     "webBaseUrl",
     ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const configurationInput = {
     webBaseUrl: yield* textValue(loaded.configuration, "webBaseUrl", "url"),
+    siteId: yield* textValue(loaded.configuration, "siteId"),
+    projectId: yield* textValue(loaded.configuration, "projectId"),
     pageSize: yield* integerValue(loaded.configuration, "pageSize"),
     maximumPages: yield* integerValue(loaded.configuration, "maximumPages"),
     operationTimeoutMillis: yield* integerValue(loaded.configuration, "operationTimeoutMillis")
@@ -410,7 +514,8 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     loaded,
     authMode.value,
     "jira",
-    configuration.webBaseUrl.origin
+    configuration.webBaseUrl.origin,
+    configuration.siteId
   )
   const client = JiraApiClient.layer.pipe(
     Layer.provide(Layer.succeed(JiraApiConfig, {
@@ -419,7 +524,10 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     }))
   )
   const plugin = Layer.unwrap(
-    makeJiraReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
+    makeJiraReadPluginRuntime(
+      configurationInput,
+      authMode.value === "oauth" ? configuration.siteId : null
+    ).pipe(Effect.map(({ layer }) => layer))
   ).pipe(Layer.provide(client))
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
@@ -479,7 +587,8 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
     spaceId: yield* textValue(loaded.configuration, "spaceId"),
-    probePageId: yield* textValue(loaded.configuration, "probePageId")
+    probePageId: yield* textValue(loaded.configuration, "probePageId"),
+    ...(authMode.value === "oauth" ? { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") } : {})
   }
   const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))

@@ -39,7 +39,7 @@ export const ProviderAccountCard = ({
   readonly canConfigure: boolean
   readonly connections: ReadonlyArray<PluginConnectionSummary>
   readonly enablementStates: ReadonlyMap<PluginConnectionId, ConnectionEnablementState>
-  readonly onAdd: (providerId: ProviderId) => void
+  readonly onAdd: (providerId: ProviderId, providerImmutableId: string) => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testStates: ReadonlyMap<PluginConnectionId, ConnectionTestState>
@@ -48,7 +48,12 @@ export const ProviderAccountCard = ({
     <div className={styles.accountHeading}>
       <div className={styles.accountIdentity}>
         <Text as="h2" variant="section-title">
-          {account.providerFamily === "aws" ? "AWS account" : "Provider account"} {account.displayName}
+          {account.providerFamily === "aws"
+            ? "AWS account"
+            : account.providerFamily === "atlassian"
+              ? "Atlassian site"
+              : "Provider account"}{" "}
+          {account.displayName}
         </Text>
         <Text className={styles.identifier} tone="secondary" variant="meta">
           Verified identity · {account.providerImmutableId}
@@ -120,11 +125,32 @@ export const ProviderAccountCard = ({
     </div>
     {account.providerFamily === "aws" ? (
       <div className={styles.accountActions}>
-        <Button disabled={!canConfigure} onClick={() => onAdd("codecommit")} variant="secondary">
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("codecommit", account.providerImmutableId)}
+          variant="secondary"
+        >
           Add repository
         </Button>
-        <Button disabled={!canConfigure} onClick={() => onAdd("codepipeline")} variant="secondary">
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("codepipeline", account.providerImmutableId)}
+          variant="secondary"
+        >
           Add pipeline
+        </Button>
+      </div>
+    ) : account.providerFamily === "atlassian" ? (
+      <div className={styles.accountActions}>
+        <Button disabled={!canConfigure} onClick={() => onAdd("jira", account.providerImmutableId)} variant="secondary">
+          Add Jira project
+        </Button>
+        <Button
+          disabled={!canConfigure}
+          onClick={() => onAdd("confluence", account.providerImmutableId)}
+          variant="secondary"
+        >
+          Add Confluence space
         </Button>
       </div>
     ) : null}

@@ -35,6 +35,7 @@ export interface JiraPageRequest {
 export interface JiraReadProvider {
   readonly getCurrentUser: Effect.Effect<JiraApi.User, PluginFailure>
   readonly getServerInfo: Effect.Effect<JiraApi.ServerInformation, PluginFailure>
+  readonly getProject: (projectId: string) => Effect.Effect<JiraApi.Project, PluginFailure>
   readonly getIssue: (
     issueId: string
   ) => Effect.Effect<Option.Option<JiraApi.IssueBean>, PluginFailure>
@@ -138,6 +139,7 @@ const ISSUE_FIELDS = [
 export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
   getServerInfo: providerCall("jira-server-info", client.getServerInfo(undefined)),
+  getProject: (projectId) => providerCall("jira-get-project", client.getProject(projectId, undefined)),
   getIssue: (issueId) =>
     client.getIssue(issueId, { params: { fields: ISSUE_FIELDS } }).pipe(
       Effect.map(Option.some),

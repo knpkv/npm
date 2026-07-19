@@ -79,6 +79,10 @@ const SiteUrl = Schema.String.pipe(
   )
 )
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const RawConfluenceSystemInfo = Schema.Struct({
+  cloudId: Identifier,
+  siteTitle: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)))
+})
 const BoundedNormalizedAttributes = Schema.Json.check(
   hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes)
 )
@@ -88,7 +92,8 @@ export const ConfluencePageAdapterConfiguration = Schema.Struct({
   siteBaseUrl: SiteUrl,
   siteId: Identifier,
   spaceId: Identifier,
-  probePageId: Identifier
+  probePageId: Identifier,
+  oauthVerifiedSiteId: Schema.optionalKey(Identifier)
 })
 
 /** Decoded Confluence page adapter configuration. @internal */
@@ -418,6 +423,21 @@ export const makeConfluencePageAdapter = (
     descriptor: input.descriptor,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
+      const verifiedSite = input.configuration.oauthVerifiedSiteId === undefined
+        ? yield* providerCall(input.client.getSystemInfo).pipe(
+          Effect.flatMap((rawSystemInfo) =>
+            decodeProvider(
+              "confluence-system-info",
+              "confluence-system-info-invalid",
+              RawConfluenceSystemInfo,
+              rawSystemInfo
+            )
+          )
+        )
+        : { cloudId: input.configuration.oauthVerifiedSiteId, siteTitle: undefined }
+      if (verifiedSite.cloudId !== input.configuration.siteId) {
+        return yield* malformed("confluence-system-info", "confluence-site-identity-mismatch")
+      }
       const rawUser = yield* providerCall(input.client.getCurrentUser)
       const user = yield* decodeProvider(
         "confluence-current-user",
@@ -434,10 +454,13 @@ export const makeConfluencePageAdapter = (
           displayName: currentUserDisplayName(user.displayName, user.publicName)
         },
         workspace: {
-          providerImmutableId: input.configuration.spaceId,
-          displayName: "Confluence space"
+          providerImmutableId: verifiedSite.cloudId,
+          displayName: verifiedSite.siteTitle ?? input.configuration.siteBaseUrl.hostname
         },
-        resource: null,
+        resource: {
+          providerImmutableId: input.configuration.spaceId,
+          displayName: `Space · ${input.configuration.spaceId}`
+        },
         endpoints: [{ kind: "api", url: endpoint, label: "Confluence Cloud v2" }],
         discoveredAt
       }

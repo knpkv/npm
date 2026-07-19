@@ -80,6 +80,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
     displayName: "Avery Bell",
     accountStatus: "active"
   }),
+  getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
   getPageVersions: () => Effect.succeed({ results: [currentPage.version] }),
   getUsers: (accountIds) =>
@@ -97,12 +98,13 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
 const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
   client: ConfluencePageClientShape,
   markdown?: string,
-  onConvert?: () => void
+  onConvert?: () => void,
+  configured: ConfluencePageAdapterConfiguration = configuration
 ) {
   const descriptor = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
   return makeConfluencePageAdapter({
     client,
-    configuration,
+    configuration: configured,
     converter: converter(markdown, onConvert),
     descriptor
   })
@@ -187,10 +189,40 @@ describe("Confluence page adapter", () => {
         displayName: "Avery Bell"
       })
       assert.deepStrictEqual(discovery.workspace, {
-        providerImmutableId: "space-payments",
-        displayName: "Confluence space"
+        providerImmutableId: "site-acme",
+        displayName: "Acme"
       })
-      assert.isNull(discovery.resource)
+      assert.deepStrictEqual(discovery.resource, {
+        providerImmutableId: "space-payments",
+        displayName: "Space · space-payments"
+      })
+    }))
+
+  it.effect("rejects a configured site identity that does not match Confluence", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getSystemInfo: Effect.succeed({ cloudId: "site-other", commitHash: "commit" })
+      }))
+      const outcome = yield* adapter.connection.discover.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "confluence-site-identity-mismatch")
+        }
+      }
+    }))
+
+  it.effect("uses the already-verified OAuth cloud ID without requesting system information", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({ getSystemInfo: Effect.die("OAuth discovery must not require Confluence settings scope") }),
+        undefined,
+        undefined,
+        { ...configuration, oauthVerifiedSiteId: "site-acme" }
+      )
+      const discovery = yield* adapter.connection.discover
+      assert.strictEqual(discovery.workspace?.providerImmutableId, "site-acme")
     }))
 
   it.effect("uses the public name for a privacy-limited current-user profile", () =>

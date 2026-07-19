@@ -45,6 +45,7 @@ const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
   return {
     ...descriptor,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
+      if (providerId === "jira" && (field.key === "siteId" || field.key === "projectId")) return []
       if (field.key === "authMode" || field.key === "oauthProfileId") return []
       if (field.key !== "email") return [{ ...field, required: field.key === "apiToken" ? true : field.required }]
       return [{
@@ -56,6 +57,18 @@ const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
       }]
     })
   }
+}
+
+const jiraOAuthDescriptorWithoutIdentity = {
+  ...jiraReadPluginDescriptor,
+  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(
+    ({ key }) => key !== "siteId" && key !== "projectId"
+  )
+}
+
+const jiraOAuthDescriptorWithSiteOnly = {
+  ...jiraReadPluginDescriptor,
+  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
 }
 
 const oauthProfile = (id: string, expiresAt: number) => ({
@@ -115,13 +128,16 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
+          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only"
           readonly missing: "none" | "apiToken" | "email"
           readonly providerId: "jira" | "confluence"
         }> = [
-          { providerId: "jira", missing: "none" },
-          { providerId: "confluence", missing: "none" },
-          { providerId: "jira", missing: "email" },
-          { providerId: "confluence", missing: "apiToken" }
+          { providerId: "jira", generation: "pre-oauth", missing: "none" },
+          { providerId: "jira", generation: "oauth-without-identity", missing: "none" },
+          { providerId: "jira", generation: "oauth-with-site-only", missing: "none" },
+          { providerId: "confluence", generation: "pre-oauth", missing: "none" },
+          { providerId: "jira", generation: "pre-oauth", missing: "email" },
+          { providerId: "confluence", generation: "pre-oauth", missing: "apiToken" }
         ]
 
         for (const [index, testCase] of cases.entries()) {
@@ -148,11 +164,17 @@ describe("first-party plugin runtime", () => {
             testCase.providerId === "jira"
               ? [
                 ...credentials,
+                ...(testCase.generation === "pre-oauth"
+                  ? []
+                  : [{ _tag: "text", key: "authMode", value: "api-token" }]),
+                ...(testCase.generation === "oauth-with-site-only"
+                  ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
+                  : []),
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
-              ]
+              ].sort((left, right) => left.key.localeCompare(right.key))
               : [
                 ...credentials,
                 { _tag: "text", key: "probePageId", value: "page-1" },
@@ -172,7 +194,13 @@ describe("first-party plugin runtime", () => {
             WORKSPACE_ID,
             pluginConnectionId,
             testCase.providerId,
-            preOAuthDescriptor(testCase.providerId),
+            testCase.providerId === "confluence"
+              ? preOAuthDescriptor("confluence")
+              : testCase.generation === "pre-oauth"
+              ? preOAuthDescriptor("jira")
+              : testCase.generation === "oauth-without-identity"
+              ? jiraOAuthDescriptorWithoutIdentity
+              : jiraOAuthDescriptorWithSiteOnly,
             0,
             CREATED_AT
           )
@@ -181,7 +209,12 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.missing === "none") {
+          if (testCase.providerId === "jira") {
+            assert.strictEqual(outcome._tag, "Failure")
+            if (outcome._tag === "Failure" && outcome.failure._tag === "PluginConfigurationFailure") {
+              assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-migration-required")
+            }
+          } else if (testCase.missing === "none") {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
           } else {
@@ -236,13 +269,31 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
+          readonly expectedDiagnosticCode: string | null
           readonly profileId: "valid-profile" | "expired-profile"
           readonly providerId: "jira" | "confluence"
+          readonly siteId: string
         }> = [
-          { providerId: "jira", profileId: "valid-profile" },
-          { providerId: "confluence", profileId: "valid-profile" },
-          { providerId: "jira", profileId: "expired-profile" },
-          { providerId: "confluence", profileId: "expired-profile" }
+          { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
+          { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-site-mismatch",
+            providerId: "jira",
+            profileId: "valid-profile",
+            siteId: "cloud-other"
+          },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-expired",
+            providerId: "jira",
+            profileId: "expired-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-expired",
+            providerId: "confluence",
+            profileId: "expired-profile",
+            siteId: "cloud-1"
+          }
         ]
 
         for (const [index, testCase] of cases.entries()) {
@@ -264,6 +315,8 @@ describe("first-party plugin runtime", () => {
                 { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "projectId", value: "project-1" },
+                { _tag: "text", key: "siteId", value: testCase.siteId },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
               ]
               : [
@@ -271,7 +324,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
-                { _tag: "text", key: "siteId", value: "cloud-1" },
+                { _tag: "text", key: "siteId", value: testCase.siteId },
                 { _tag: "text", key: "spaceId", value: "space-1" }
               ]
           )
@@ -295,7 +348,7 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.profileId === "valid-profile") {
+          if (testCase.expectedDiagnosticCode === null) {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
           } else {
@@ -303,7 +356,7 @@ describe("first-party plugin runtime", () => {
             if (outcome._tag === "Failure") {
               assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
               if (outcome.failure._tag === "PluginConfigurationFailure") {
-                assert.strictEqual(outcome.failure.diagnosticCode, "plugin-oauth-profile-expired")
+                assert.strictEqual(outcome.failure.diagnosticCode, testCase.expectedDiagnosticCode)
               }
             }
           }
@@ -381,6 +434,8 @@ describe("first-party plugin runtime", () => {
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "projectId", value: "project-1" },
+                { _tag: "text", key: "siteId", value: "site-1" },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
               ]
               : [
@@ -486,6 +541,8 @@ describe("first-party plugin runtime", () => {
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "projectId", value: "project-1" },
+                { _tag: "text", key: "siteId", value: "site-1" },
                 { _tag: "url", key: "webBaseUrl", value: invalid.webBaseUrl }
               ]
               : [

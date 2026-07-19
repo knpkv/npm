@@ -525,6 +525,167 @@ describe("ServicesPage connection tests", () => {
     )
   })
 
+  it("pins account-card Confluence setup to the owning Atlassian site", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000191")
+    const jiraResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000192")
+    const spaceResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
+    const jiraConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
+    const spaceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
+    const previousLocation = window.location.href
+    const authorizationLocation = new URL("#account-card-atlassian-oauth", previousLocation)
+    authorizationLocation.searchParams.set("state", grantId)
+    const startAtlassianOAuthGrant = vi
+      .fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>()
+      .mockResolvedValue({
+        _tag: "ready",
+        authorizationUrl: authorizationLocation.href,
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      })
+    const atlassianOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: jiraConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: jiraResourceId,
+          providerId: "jira",
+          displayName: "Acme Jira",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: spaceConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: spaceResourceId,
+          providerId: "confluence",
+          displayName: "Payments space",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "atlassian",
+          displayName: "acme.atlassian.net",
+          providerImmutableId: "cloud-2",
+          resources: [
+            {
+              followedResourceId: jiraResourceId,
+              providerId: "jira",
+              displayName: "Payments",
+              providerImmutableId: "project-payments",
+              isEnabled: true
+            },
+            {
+              followedResourceId: spaceResourceId,
+              providerId: "confluence",
+              displayName: "Space · payments",
+              providerImmutableId: "space-payments",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () =>
+        Promise.resolve([
+          {
+            profileId: "account-1@cloud-1",
+            name: "Avery Bell @ first.atlassian.net",
+            siteUrl: "https://first.atlassian.net/",
+            cloudId: "cloud-1",
+            accountName: "Avery Bell",
+            accountEmail: "avery@example.com",
+            status: "valid",
+            providers: ["jira", "confluence"]
+          },
+          {
+            profileId: "account-2@cloud-2",
+            name: "Blair Chen @ second.atlassian.net",
+            siteUrl: "https://second.atlassian.net/",
+            cloudId: "cloud-2",
+            accountName: "Blair Chen",
+            accountEmail: "blair@example.com",
+            status: "valid",
+            providers: ["jira", "confluence"]
+          }
+        ]),
+      overview: () => Promise.resolve(atlassianOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Atlassian site acme.atlassian.net")
+    expect(host.textContent).toContain("Verified identity · cloud-2")
+    expect(host.textContent).toContain("Project · project-payments")
+    expect(host.textContent).toContain("Space · space-payments")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
+      expect.arrayContaining(["Add Jira project", "Add Confluence space"])
+    )
+
+    const addConfluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Add Confluence space")
+    )
+    await act(async () => addConfluence?.click())
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Connect Confluence with your Atlassian identity.")
+    expect(host.textContent).not.toContain("Jira project ID")
+    expect(host.textContent).toContain("Confluence space ID")
+    const profileOptions = [...host.querySelectorAll<HTMLOptionElement>("option")]
+    expect(profileOptions.some(({ value }) => value === "account-1@cloud-1")).toBe(false)
+    expect(profileOptions.find(({ value }) => value === "account-2@cloud-2")?.selected).toBe(true)
+    const pinnedSiteId = [...host.querySelectorAll<HTMLInputElement>("input")].find(({ value }) => value === "cloud-2")
+    expect(pinnedSiteId?.disabled).toBe(true)
+    const useApiToken = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Use API token instead")
+    )
+    await act(async () => useApiToken?.click())
+    expect(pinnedSiteId?.value).toBe("cloud-2")
+    expect(pinnedSiteId?.disabled).toBe(true)
+
+    const cancel = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Cancel")
+    )
+    await act(async () => cancel?.click())
+    const addJira = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Add Jira project")
+    )
+    await act(async () => addJira?.click())
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Jira project ID")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).not.toContain(
+      "Use API token instead"
+    )
+    expect(
+      [...host.querySelectorAll<HTMLOptionElement>("option")].some(({ value }) => value === "account-2@cloud-2")
+    ).toBe(true)
+    const signIn = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Sign in with Atlassian")
+    )
+    await act(async () => signIn?.click())
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(
+      JSON.stringify({ preferredSiteId: "cloud-2", providers: ["jira"] })
+    )
+    window.history.replaceState(null, "", previousLocation)
+  })
+
   it("surfaces failed enablement for a resource inside an AWS account", async () => {
     const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000176")
     const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000177")
@@ -871,6 +1032,7 @@ describe("ServicesPage connection tests", () => {
             field("oauthProfileId", "text", null, false),
             field("email", "text", null, false),
             field("apiToken", "secret", null, false),
+            field("projectId"),
             field("pageSize", "integer", "50"),
             field("maximumPages", "integer", "5"),
             field("operationTimeoutMillis", "integer", "30000")
@@ -967,6 +1129,8 @@ describe("ServicesPage connection tests", () => {
     await act(async () => undefined)
 
     expect(host.textContent).toContain("Avery Bell @ team.atlassian.net")
+    expect(host.textContent).toContain("Blair Chen @ other.atlassian.net")
+    expect(host.querySelector<HTMLSelectElement>("select")?.disabled).toBe(false)
     expect(
       [...host.querySelectorAll<HTMLOptionElement>("option")].find(({ value }) => value === "account-1@cloud-1")
         ?.selected
@@ -980,8 +1144,10 @@ describe("ServicesPage connection tests", () => {
     const inputs = host.querySelectorAll<HTMLInputElement>("input")
     expect(inputs[3]?.required).toBe(true)
     expect(inputs[4]?.required).toBe(true)
-    if (inputs[3] !== undefined) await setControlValue(inputs[3], "space-1")
-    if (inputs[4] !== undefined) await setControlValue(inputs[4], "page-1")
+    expect(inputs[5]?.required).toBe(true)
+    if (inputs[3] !== undefined) await setControlValue(inputs[3], "project-1")
+    if (inputs[4] !== undefined) await setControlValue(inputs[4], "space-1")
+    if (inputs[5] !== undefined) await setControlValue(inputs[5], "page-1")
     await act(async () => submit?.click())
 
     expect(create).toHaveBeenCalledTimes(2)
@@ -995,6 +1161,7 @@ describe("ServicesPage connection tests", () => {
       })
       expect(request.values.some(({ key }) => key === "apiToken" || key === "email")).toBe(false)
     }
+    expect(create.mock.calls[0]?.[0].values).toContainEqual({ _tag: "text", key: "projectId", value: "project-1" })
   })
 
   it("adds only the missing Atlassian product for an existing account", async () => {
@@ -1086,6 +1253,41 @@ describe("ServicesPage connection tests", () => {
     }
   )
 
+  it("rejects an OAuth callback profile that does not match the account-card site", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () =>
+        Promise.resolve([
+          {
+            profileId: "account-1@cloud-1",
+            name: "Wrong Atlassian site",
+            siteUrl: "https://first.atlassian.net/",
+            cloudId: "cloud-1",
+            accountName: "Avery Bell",
+            accountEmail: "avery@example.com",
+            status: "valid",
+            providers: ["jira", "confluence"]
+          }
+        ]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(
+      transport,
+      "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianSite=cloud-2&atlassianProvider=jira"
+    )
+    await act(async () => undefined)
+
+    expect(
+      [...host.querySelectorAll<HTMLOptionElement>("option")].some(({ value }) => value === "account-1@cloud-1")
+    ).toBe(false)
+    const pinnedSiteId = [...host.querySelectorAll<HTMLInputElement>("input")].find(({ value }) => value === "cloud-2")
+    expect(pinnedSiteId?.disabled).toBe(true)
+    expect(currentLocation).toBe("/services")
+  })
+
   it("submits only Jira after returning with a profile granted for both Atlassian products", async () => {
     const create = vi.fn<ConnectionTestTransport["create"]>(successfulCreate)
     const profileId = "account-1@cloud-1"
@@ -1118,6 +1320,8 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Connect Atlassian")
     )
 
+    const projectId = host.querySelectorAll<HTMLInputElement>("input")[3]
+    if (projectId !== undefined) await setControlValue(projectId, "project-1")
     await act(async () => submit?.click())
 
     expect(create).toHaveBeenCalledOnce()
@@ -1176,7 +1380,9 @@ describe("ServicesPage connection tests", () => {
 
     expect(startAtlassianOAuthGrant).toHaveBeenCalledOnce()
     expect(startAtlassianOAuthGrant.mock.calls[0]?.[0]).toEqual(["jira", "confluence"])
-    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(JSON.stringify(["jira"]))
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(
+      JSON.stringify({ preferredSiteId: null, providers: ["jira"] })
+    )
     expect(window.location.href).toBe(authorizationUrl)
     window.history.replaceState(null, "", previousLocation)
   })
@@ -1393,7 +1599,9 @@ describe("ServicesPage connection tests", () => {
     await act(async () => buttonWithText("Sign in with Atlassian")?.click())
 
     expect(window.location.href).toBe(authorizationUrl)
-    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(JSON.stringify(["confluence"]))
+    expect(sessionStorage.getItem(oauthIntentKey(grantId))).toBe(
+      JSON.stringify({ preferredSiteId: null, providers: ["confluence"] })
+    )
     window.history.replaceState(null, "", previousLocation)
   })
 
@@ -1431,6 +1639,7 @@ describe("ServicesPage connection tests", () => {
       "api-token",
       "https://second.atlassian.net/",
       "cloud-2",
+      "project-2",
       "space-2",
       "page-2"
     ]
@@ -1465,10 +1674,17 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Use API token instead")
     )
     await act(async () => useApiToken?.click())
-    expect(host.textContent).not.toContain("Site ID")
+    expect(host.textContent).toContain("Site ID")
     expect(host.textContent).not.toContain("Confluence space ID")
     expect(host.textContent).not.toContain("Health page ID")
-    const values = ["Jira account", "avery@example.com", "api-token", "https://team.atlassian.net/"]
+    const values = [
+      "Jira account",
+      "avery@example.com",
+      "api-token",
+      "https://team.atlassian.net/",
+      "cloud-team",
+      "project-team"
+    ]
     for (const [index, value] of values.entries()) {
       const input = host.querySelectorAll<HTMLInputElement>("input")[index]
       if (input !== undefined) await setControlValue(input, value)
@@ -1480,6 +1696,29 @@ describe("ServicesPage connection tests", () => {
 
     expect(create).toHaveBeenCalledTimes(1)
     expect(create.mock.calls[0]?.[0].providerId).toBe("jira")
+  })
+
+  it("keeps a site-selectable Jira setup available after the first Jira project", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const addJira = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Add Jira project"
+    )
+
+    expect(addJira).toBeDefined()
+    await act(async () => addJira?.click())
+
+    expect(host.textContent).toContain("Connect Jira with your Atlassian identity.")
+    expect(host.textContent).toContain("Jira project ID")
+    expect(host.textContent).not.toContain("Confluence space ID")
   })
 
   it("keeps API-token site fields when OAuth discovery finishes later", async () => {

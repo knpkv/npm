@@ -66,7 +66,7 @@ import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
-import { materializeAwsConnectionOwnership } from "./awsConnectionOwnership.js"
+import { materializeConnectionOwnership } from "./connectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
@@ -79,7 +79,10 @@ const MAXIMUM_CONNECTION_TEST_MESSAGE_LENGTH = 200
 const secretEncoder = new TextEncoder()
 
 type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
-type AtlassianConfigurationValue = CreatePluginConnectionValue | StoredPluginConfigurationValue
+type AtlassianConfigurationValue =
+  | CreatePluginConnectionValue
+  | PluginConfigurationPatchValue
+  | StoredPluginConfigurationValue
 type PluginAdministrationOAuthRequirements =
   | Crypto.Crypto
   | DomainEventWakeups
@@ -103,6 +106,22 @@ const configuredText = (
     ? value.value
     : null
 }
+
+const rejectBoundAtlassianIdentityChange = Effect.fn(
+  "PluginAdministration.rejectBoundAtlassianIdentityChange"
+)(function*(
+  connection: PluginConnectionRecord,
+  current: ReadonlyArray<StoredPluginConfigurationValue>,
+  replacement: ReadonlyArray<PluginConfigurationPatchValue>
+) {
+  if (!isAtlassianProvider(connection.providerId) || connection.followedResourceId === null) return
+  const identityKeys = connection.providerId === "jira"
+    ? ["webBaseUrl", "siteId", "projectId"]
+    : ["siteBaseUrl", "siteId", "spaceId"]
+  if (identityKeys.some((key) => configuredText(current, key) !== configuredText(replacement, key))) {
+    return yield* new ApplicationInvalidRequest()
+  }
+})
 
 const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAtlassianOAuthProfile")(function*(
   providerId: PluginConnectionRecord["providerId"],
@@ -131,7 +150,7 @@ const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAt
   )
   if (
     profileSite.origin !== expectedSite.origin ||
-    (providerId === "confluence" && profile.token.cloud_id !== configuredText(values, "siteId"))
+    profile.token.cloud_id !== configuredText(values, "siteId")
   ) {
     return yield* new ApplicationInvalidRequest()
   }
@@ -975,7 +994,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       createdAt,
       maximum: MAXIMUM_PLUGIN_CONNECTIONS
     }).pipe(Effect.mapError(mapPersistenceWriteError))
-    yield* persistence.pluginConfigurations.update(
+    const setupConfiguration = yield* persistence.pluginConfigurations.update(
       workspaceId,
       request.pluginConnectionId,
       values,
@@ -1018,7 +1037,13 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         request.pluginConnectionId
       )
       const bound = tested.test._tag === "healthy"
-        ? yield* materializeAwsConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
+        ? yield* materializeConnectionOwnership(
+          persistence,
+          cryptoService,
+          enabled,
+          tested.discovery,
+          setupConfiguration.revision
+        )
         : enabled
       cleanupConnection = bound
       yield* persistSetupTestHealth(
@@ -1242,6 +1267,11 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
           ? current.value.values.map((value) => [value.key, value])
           : []
       )
+      yield* rejectBoundAtlassianIdentityChange(
+        connection,
+        Option.isSome(current) ? current.value.values : [],
+        patch.values
+      )
       // PATCH is a full replacement: all required descriptor fields must be present.
       // Keep operations resolve only the reference stored at the expected revision. The
       // repository CAS then prevents that reference from surviving a concurrent replacement.
@@ -1254,22 +1284,28 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         path
       )
       const updatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-      yield* Effect.uninterruptible(
-        persistence.pluginConfigurations.update(
-          workspaceId,
-          pluginConnectionId,
-          values,
-          patch.expectedRevision,
-          updatedAt
-        ).pipe(
-          Effect.mapError(mapPersistenceWriteError),
-          Effect.andThen(
-            pluginConnections === null
-              ? Effect.void
-              : pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      yield* Effect.uninterruptible(Effect.gen(function*() {
+        const updated = yield* persistence.transact(Effect.gen(function*() {
+          const latestConnection = yield* persistence.pluginConnections.get(workspaceId, pluginConnectionId)
+          const identityCheck = yield* rejectBoundAtlassianIdentityChange(
+            latestConnection,
+            Option.isSome(current) ? current.value.values : [],
+            patch.values
+          ).pipe(Effect.result)
+          if (Result.isFailure(identityCheck)) return null
+          return yield* persistence.pluginConfigurations.update(
+            workspaceId,
+            pluginConnectionId,
+            values,
+            patch.expectedRevision,
+            updatedAt
           )
-        )
-      )
+        })).pipe(Effect.mapError(mapPersistenceWriteError))
+        if (updated === null) return yield* new ApplicationInvalidRequest()
+        if (pluginConnections !== null) {
+          yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+        }
+      }))
       return yield* configuration(persistence, secrets, workspaceId, pluginConnectionId)
     })
   } satisfies PluginAdministrationService

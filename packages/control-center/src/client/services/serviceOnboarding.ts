@@ -18,12 +18,22 @@ export const serviceSetupPath = (providerId: ProviderId): string => `/services?e
 /** Atlassian setup destination that preserves the initiating products and, when present, the completed profile. */
 export const atlassianOAuthSetupPath = (
   providers: AtlassianOAuthProviderIntent,
-  profileId: string | null = null
+  profileId: string | null = null,
+  preferredSiteId: string | null = null
 ): string => {
   const searchParams = new URLSearchParams({ enable: providers.includes("jira") ? "jira" : "confluence" })
   if (profileId !== null) searchParams.set("atlassianProfile", profileId)
+  if (preferredSiteId !== null) searchParams.set("atlassianSite", preferredSiteId)
   for (const provider of providers) searchParams.append("atlassianProvider", provider)
   return `/services?${searchParams.toString()}`
+}
+
+/** Atlassian site pinned by a bounded, untrusted browser query parameter. */
+export const selectedAtlassianOAuthSiteId = (searchParams: URLSearchParams): string | null => {
+  const sites = searchParams.getAll("atlassianSite")
+  if (sites.length !== 1) return null
+  const [siteId] = sites
+  return siteId !== undefined && siteId.length > 0 && siteId.length <= 512 && siteId.trim() === siteId ? siteId : null
 }
 
 /** Completed Atlassian profile selected by a bounded, untrusted browser query parameter. */
