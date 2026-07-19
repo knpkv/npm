@@ -32,14 +32,18 @@
     "build": "tsc",
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
+    "test:pack": "tsx scripts/test-packed-package.ts",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "docgen": "docgen"
   },
   "dependencies": {
     "@aws-sdk/credential-providers": "^3.1085.0",
+    "@distilled.cloud/aws": "0.29.1",
     "@effect/sql-libsql": "4.0.0-beta.98",
     "@libsql/client": "^0.17.4",
-    "distilled-aws": "0.1.1",
     "effect": "4.0.0-beta.98"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "4.0.0-beta.98"
   }
 }

@@ -30,11 +30,15 @@
  *
  * @internal
  */
-import type { Credentials, Region } from "distilled-aws"
-import type { ListPullRequestsError, ListPullRequestsInput, ListPullRequestsOutput } from "distilled-aws/codecommit"
-import * as codecommit from "distilled-aws/codecommit"
-import * as DistilledCredentials from "distilled-aws/Credentials"
-import * as DistilledRegion from "distilled-aws/Region"
+import type { Credentials, Region } from "@distilled.cloud/aws"
+import type {
+  ListPullRequestsError,
+  ListPullRequestsInput,
+  ListPullRequestsOutput
+} from "@distilled.cloud/aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
+import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
+import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
@@ -368,7 +372,7 @@ export const getPullRequests = (
     return stream.pipe(
       Stream.provide(DistilledCredentials.fromCredentials(credentials)),
       Stream.provideService(HttpClient.HttpClient, httpClient),
-      Stream.provideService(DistilledRegion.Region, account.region),
+      Stream.provideService(DistilledRegion.Region, Effect.succeed(account.region)),
       Stream.timeout(config.streamTimeout)
     )
   })

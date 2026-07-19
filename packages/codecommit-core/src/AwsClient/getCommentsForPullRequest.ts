@@ -1,9 +1,9 @@
 /**
  * @internal
  */
-import type { Credentials, Region } from "distilled-aws"
-import type { GetCommentsForPullRequestError } from "distilled-aws/codecommit"
-import * as codecommit from "distilled-aws/codecommit"
+import type { Credentials, Region } from "@distilled.cloud/aws"
+import type { GetCommentsForPullRequestError } from "@distilled.cloud/aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { type CommentThread, PRComment, type PRCommentLocation } from "../Domain.js"

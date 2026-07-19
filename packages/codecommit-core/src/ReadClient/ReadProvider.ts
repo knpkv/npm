@@ -1,7 +1,7 @@
 /**
  * Injectable raw CodeCommit provider boundary.
  *
- * The live layer performs real distilled-aws calls. Responses deliberately
+ * The live layer performs real @distilled.cloud/aws calls. Responses deliberately
  * remain `unknown` until the read client decodes them with repository-owned
  * Schema contracts; tests can therefore supply provider-shaped fixtures
  * without credentials or network access.
@@ -9,10 +9,10 @@
  * @category Read client
  * @module
  */
-import * as codecommit from "distilled-aws/codecommit"
-import type * as DistilledCredentials from "distilled-aws/Credentials"
-import type * as DistilledRegion from "distilled-aws/Region"
-import * as sts from "distilled-aws/sts"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
+import type * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
+import type * as DistilledRegion from "@distilled.cloud/aws/Region"
+import * as sts from "@distilled.cloud/aws/sts"
 import { Context, Effect, Layer } from "effect"
 import { HttpClient } from "effect/unstable/http"
 
@@ -90,7 +90,7 @@ const callProvider = <A, E>(
     { retry: false }
   )
 
-/** Live raw provider layer backed by distilled-aws CodeCommit and STS operations. */
+/** Live raw provider layer backed by @distilled.cloud/aws CodeCommit and STS operations. */
 export const CodeCommitReadProviderLive = Layer.effect(
   CodeCommitReadProvider,
   Effect.gen(function*() {

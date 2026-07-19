@@ -24,7 +24,7 @@ const validManifest = {
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "distilled-aws": "0.1.1",
+    "@distilled.cloud/aws": "0.29.1",
     effect: "4.0.0-beta.98",
     react: "^19.2.7",
     "react-dom": "^19.2.7",
@@ -110,11 +110,11 @@ describe("package contract", () => {
         dependencies: {
           ...validManifest.dependencies,
           "@aws-sdk/credential-providers": "latest",
-          "distilled-aws": "latest"
+          "@distilled.cloud/aws": "latest"
         }
       })
     ).toEqual(expect.arrayContaining([
-      "distilled-aws must remain on the reviewed CodePipeline client version",
+      "@distilled.cloud/aws must remain on the reviewed CodePipeline client version",
       "AWS credential providers must remain on the reviewed runtime version"
     ]))
   })

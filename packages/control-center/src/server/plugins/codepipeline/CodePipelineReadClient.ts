@@ -625,6 +625,6 @@ export class CodePipelineReadClient extends Context.Service<
     })
   )
 
-  /** Production client using direct distilled-aws operations. @internal */
+  /** Production client using direct @distilled.cloud/aws operations. @internal */
   static readonly live = CodePipelineReadClient.layer.pipe(Layer.provide(CodePipelineReadProviderLive))
 }

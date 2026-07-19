@@ -65,7 +65,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "@knpkv/control-center-sql",
     "@knpkv/jira-api-client",
     "@knpkv/rly",
-    "distilled-aws",
+    "@distilled.cloud/aws",
     "effect",
     "react",
     "react-dom",
@@ -77,8 +77,8 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
   }
-  if (manifest.dependencies["distilled-aws"] !== "0.1.1") {
-    violations.push("distilled-aws must remain on the reviewed CodePipeline client version")
+  if (manifest.dependencies["@distilled.cloud/aws"] !== "0.29.1") {
+    violations.push("@distilled.cloud/aws must remain on the reviewed CodePipeline client version")
   }
   if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1085.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")

@@ -1,9 +1,9 @@
 /**
  * @internal
  */
-import type { Credentials, Region } from "distilled-aws"
-import type { ListBranchesError } from "distilled-aws/codecommit"
-import * as codecommit from "distilled-aws/codecommit"
+import type { Credentials, Region } from "@distilled.cloud/aws"
+import type { ListBranchesError } from "@distilled.cloud/aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Stream } from "effect"
 import type { HttpClient } from "effect/unstable/http"
 import { type ListBranchesParams, makeApiError, withAwsContext } from "./internal.js"

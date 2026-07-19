@@ -1,7 +1,7 @@
 /**
  * @internal
  */
-import * as sts from "distilled-aws/sts"
+import * as sts from "@distilled.cloud/aws/sts"
 import { Effect } from "effect"
 import { type AccountParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 

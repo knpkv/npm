@@ -5,7 +5,6 @@ packages:
 
 patchedDependencies:
   "@changesets/assemble-release-plan": patches/@changesets__assemble-release-plan.patch
-  distilled-aws@0.1.1: patches/distilled-aws@0.1.1.patch
 
 catalog:
   vitest: ^4.1.10
@@ -17,7 +16,7 @@ allowBuilds:
   unrs-resolver: false
 
 overrides:
-  distilled-aws>fast-xml-parser: ^5.3.4
+  "@distilled.cloud/aws>fast-xml-parser": ^5.3.4
   vitest: "catalog:"
   "@effect/vitest": 4.0.0-beta.98
   "@effect/platform-bun": 4.0.0-beta.98

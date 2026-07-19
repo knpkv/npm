@@ -1,7 +1,7 @@
 /**
  * @internal
  */
-import * as codecommit from "distilled-aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect } from "effect"
 import { makeApiError, type UpdatePullRequestTitleParams, withAwsContext } from "./internal.js"
 

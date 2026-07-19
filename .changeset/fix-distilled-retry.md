@@ -1,5 +1,6 @@
 ---
 "@knpkv/codecommit-core": patch
+"@knpkv/control-center": patch
 ---
 
-Keep live AWS reads compatible with the pinned Effect retry schedule API.
+Move live AWS reads to the maintained Effect 4-compatible Distilled AWS package.

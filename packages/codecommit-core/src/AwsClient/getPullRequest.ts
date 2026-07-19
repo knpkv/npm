@@ -23,7 +23,7 @@
  *
  * @internal
  */
-import * as codecommit from "distilled-aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
 import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
