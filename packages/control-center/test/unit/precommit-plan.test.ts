@@ -21,7 +21,6 @@ describe("pre-commit plan", () => {
       "format staged files",
       "run Effect static checks",
       "lint Control Center",
-      "ensure Control Center dependencies",
       "build Control Center",
       "type-check Control Center",
       "test Control Center"

@@ -7,6 +7,11 @@ export type BuildPhase = {
 /** The ordered, integrity-preserving phases of a Control Center production build. */
 export const controlCenterBuildPhases: ReadonlyArray<BuildPhase> = [
   {
+    args: ["scripts/ensure-build-dependencies.ts"],
+    command: "tsx",
+    label: "ensure dependency artifacts"
+  },
+  {
     args: ["scripts/validate-boundaries.ts"],
     command: "tsx",
     label: "validate source boundaries"

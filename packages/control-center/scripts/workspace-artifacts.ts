@@ -50,6 +50,30 @@ export type WorkspaceArtifactBuilder = (
   packages: ReadonlyArray<string>
 ) => Effect.Effect<void, WorkspaceArtifactError>
 
+/** Remove stale TypeScript state before repairing manifest-declared package output. */
+export const clearWorkspaceIncrementalBuildState = Effect.fn(
+  "controlCenter.clearWorkspaceIncrementalBuildState"
+)(function*(packageRoots: ReadonlyArray<string>) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+
+  for (const packageRoot of packageRoots) {
+    yield* fileSystem.remove(path.join(packageRoot, "tsconfig.tsbuildinfo"), { force: true }).pipe(
+      Effect.mapError(
+        () => new WorkspaceArtifactError({ reason: `could not clear build state for ${packageRoot}` })
+      )
+    )
+    yield* fileSystem.remove(path.join(packageRoot, "node_modules", ".cache"), {
+      force: true,
+      recursive: true
+    }).pipe(
+      Effect.mapError(
+        () => new WorkspaceArtifactError({ reason: `could not clear build state for ${packageRoot}` })
+      )
+    )
+  }
+})
+
 /** Select packages with at least one missing declared entry artifact. */
 export const packagesMissingPublishedArtifacts = (
   contracts: ReadonlyArray<WorkspaceArtifactContract>,

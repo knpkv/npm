@@ -93,11 +93,6 @@ export const planPrecommit = (
           label: "lint Control Center"
         },
         {
-          args: ["packages/control-center/scripts/ensure-build-dependencies.ts"],
-          command: "tsx",
-          label: "ensure Control Center dependencies"
-        },
-        {
           args: ["--filter", "@knpkv/control-center", "build"],
           command: "pnpm",
           label: "build Control Center"

@@ -7,6 +7,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
+  clearWorkspaceIncrementalBuildState,
   ensureWorkspaceArtifactContracts,
   publishedArtifactPaths,
   type WorkspaceArtifactContract,
@@ -64,7 +65,19 @@ const program = Effect.gen(function*() {
     missingPackages: ReadonlyArray<string>
   ) {
     yield* Console.log(
-      `[pre-commit] building missing dependency artifacts: ${missingPackages.join(", ")}`
+      `[control-center dependencies] building missing artifacts: ${missingPackages.join(", ")}`
+    )
+    const rootsByName = new Map(contracts.map(({ name, packageRoot }) => [name, packageRoot]))
+    const missingRoots = missingPackages.flatMap((name) => {
+      const packageRoot = rootsByName.get(name)
+      return packageRoot === undefined ? [] : [packageRoot]
+    })
+    if (missingRoots.length !== missingPackages.length) {
+      return yield* new WorkspaceArtifactError({ reason: "could not locate a missing workspace package" })
+    }
+    yield* clearWorkspaceIncrementalBuildState(missingRoots).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path)
     )
     const filterArguments = missingPackages.flatMap((name) => ["--filter", name])
     const exitCode = yield* spawner.exitCode(
@@ -87,14 +100,14 @@ const program = Effect.gen(function*() {
   })
 
   yield* ensureWorkspaceArtifactContracts(contracts, buildMissing)
-  yield* Console.log("[pre-commit] Control Center dependency artifacts are ready")
+  yield* Console.log("[control-center dependencies] workspace artifacts are ready")
 })
 
 NodeRuntime.runMain(
   program.pipe(
     Effect.tapError((error) =>
       Console.error(
-        `[pre-commit] ${error._tag === "WorkspaceArtifactError" ? error.reason : String(error)}`
+        `[control-center dependencies] ${error._tag === "WorkspaceArtifactError" ? error.reason : String(error)}`
       )
     ),
     Effect.provide(NodeServices.layer)

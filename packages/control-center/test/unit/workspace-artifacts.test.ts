@@ -5,6 +5,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { expect } from "vitest"
 import {
+  clearWorkspaceIncrementalBuildState,
   ensureWorkspaceArtifactContracts,
   packagesMissingPublishedArtifacts,
   publishedArtifactPaths
@@ -49,6 +50,30 @@ describe("workspace package artifacts", () => {
 
     expect(missing).toEqual(["@example/missing"])
   })
+
+  it.effect("clears stale TypeScript state before repairing missing output", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const packageRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-stale-build-state-"
+      })
+      const cacheRoot = path.join(packageRoot, "node_modules", ".cache")
+      const rootBuildInfo = path.join(packageRoot, "tsconfig.tsbuildinfo")
+      const cachedBuildInfo = path.join(cacheRoot, "tsconfig.build.tsbuildinfo")
+      const sourceMarker = path.join(packageRoot, "src", "index.ts")
+      yield* fileSystem.makeDirectory(cacheRoot, { recursive: true })
+      yield* fileSystem.makeDirectory(path.dirname(sourceMarker), { recursive: true })
+      yield* fileSystem.writeFileString(rootBuildInfo, "stale")
+      yield* fileSystem.writeFileString(cachedBuildInfo, "stale")
+      yield* fileSystem.writeFileString(sourceMarker, "export {}\n")
+
+      yield* clearWorkspaceIncrementalBuildState([packageRoot])
+
+      assert.strictEqual(yield* fileSystem.exists(rootBuildInfo), false)
+      assert.strictEqual(yield* fileSystem.exists(cachedBuildInfo), false)
+      assert.strictEqual(yield* fileSystem.exists(sourceMarker), true)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("fails when a successful dependency build leaves an advertised artifact missing", () =>
     Effect.gen(function*() {
