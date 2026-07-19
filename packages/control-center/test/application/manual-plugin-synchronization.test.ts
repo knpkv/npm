@@ -27,6 +27,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000203")
 const SYNCHRONIZED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:00.000Z")
+const PAGE_COMMITTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:01:00.000Z")
 
 const fixtures = [
   {
@@ -361,6 +362,49 @@ describe("manual plugin synchronization", () => {
       }
     })))
 
+  it.effect("commits a page observed after its health probe at the current clock time", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const page = pageFor(fixture)
+      const encodedPage = Schema.encodeSync(PluginSyncPageV1)(page)
+      const observedAfterHealth = Schema.decodeSync(PluginSyncPageV1)({
+        ...encodedPage,
+        events: encodedPage.events.map((event) => ({
+          ...event,
+          observedAt: DateTime.formatIso(PAGE_COMMITTED_AT)
+        }))
+      })
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            TestClock.setTime(DateTime.toEpochMillis(PAGE_COMMITTED_AT)).pipe(
+              Effect.as(observedAfterHealth)
+            )
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(synchronized.result, "synchronized")
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.isTrue(
+        stream.synchronizedAt !== null && DateTime.Equivalence(stream.synchronizedAt, PAGE_COMMITTED_AT)
+      )
+    })))
+
   it.effect("keeps state reads observational and recovers a stale attempt on the next owner sync", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
@@ -427,7 +471,7 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(completedAttempts[1]?.outcome, "synchronized")
     })))
 
-  it.effect("keeps cross-instance state reads observational while rejecting same-service overlap", () =>
+  it.effect("keeps cross-instance state reads observational while rejecting cross-instance overlap", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
@@ -461,7 +505,7 @@ describe("manual plugin synchronization", () => {
       yield* Deferred.await(providerEntered)
       const active = yield* observer.state(input)
       assert.strictEqual(active.result, "running")
-      const overlapping = yield* synchronization.synchronize(input).pipe(Effect.result)
+      const overlapping = yield* observer.synchronize(input).pipe(Effect.result)
       assert.isTrue(Result.isFailure(overlapping))
       if (Result.isFailure(overlapping)) {
         assert.instanceOf(overlapping.failure, ApplicationServiceUnavailable)

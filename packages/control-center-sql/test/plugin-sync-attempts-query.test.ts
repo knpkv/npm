@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest"
 
-import { renderOpenPluginSyncAttemptsQuery, renderPluginSyncAttemptsQuery } from "../src/index.js"
+import {
+  renderOpenPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptStateQuery
+} from "../src/index.js"
 
 describe("open plugin sync attempts query", () => {
   it("renders one scoped anti-join in stable attempt order", () => {
@@ -34,5 +38,21 @@ describe("open plugin sync attempts query", () => {
       "order by \"plugin_sync_attempts\".\"attempt_sequence\" asc"
     )
     expect(rendered.params).toEqual(["workspace-1", "connection-1", "releases"])
+  })
+
+  it("bounds current state to the latest attempt and latest synchronized completion", () => {
+    const rendered = renderPluginSyncAttemptStateQuery({
+      workspaceId: "workspace-1",
+      pluginConnectionId: "connection-1",
+      streamKey: "releases"
+    })
+
+    expect(rendered.sql).toContain(" or ")
+    expect(rendered.sql).toContain("order by \"plugin_sync_attempts\".\"attempt_sequence\" desc")
+    expect(rendered.sql.match(/max\(/gu)).toHaveLength(2)
+    expect(rendered.sql).toContain("\"synchronizedCompletions\".\"outcome\" = ?")
+    expect(rendered.params.filter((parameter) => parameter === "workspace-1")).toHaveLength(3)
+    expect(rendered.params.filter((parameter) => parameter === "connection-1")).toHaveLength(3)
+    expect(rendered.params.filter((parameter) => parameter === "releases")).toHaveLength(3)
   })
 })

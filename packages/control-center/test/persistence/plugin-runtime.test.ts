@@ -145,6 +145,83 @@ const upsertPage = {
 }
 
 describe("plugin runtime persistence", () => {
+  it.effect("claims one synchronization owner transactionally and recovers an expired claim", () =>
+    withRuntime(Effect.gen(function*() {
+      const runtime = yield* PluginRuntimeRepository
+      yield* setup
+
+      assert.isTrue(
+        yield* runtime.claimSync(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          STREAM,
+          "00000000-0000-4000-8000-000000000001",
+          T0,
+          T1
+        )
+      )
+      assert.isFalse(
+        yield* runtime.claimSync(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          STREAM,
+          "00000000-0000-4000-8000-000000000002",
+          T0,
+          T1
+        )
+      )
+      yield* runtime.releaseSyncClaim(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        "00000000-0000-4000-8000-000000000002"
+      )
+      assert.isTrue(
+        yield* runtime.claimSync(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          STREAM,
+          "00000000-0000-4000-8000-000000000002",
+          T1,
+          T2
+        )
+      )
+    })))
+
+  it.effect("reads only the latest attempt and latest synchronized completion for current state", () =>
+    withRuntime(Effect.gen(function*() {
+      const runtime = yield* PluginRuntimeRepository
+      yield* setup
+
+      const synchronized = yield* runtime.beginSyncAttempt(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T0)
+      yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        synchronized.attemptSequence,
+        "synchronized",
+        T1
+      )
+      const unavailable = yield* runtime.beginSyncAttempt(WORKSPACE_ID, PLUGIN_ID, "jira", STREAM, T1)
+      yield* runtime.completeSyncAttempt(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        STREAM,
+        unavailable.attemptSequence,
+        "source-unavailable",
+        T2
+      )
+
+      const state = yield* runtime.getSyncAttemptState(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.strictEqual(state.latestAttempt?.attemptSequence, 2)
+      assert.strictEqual(state.latestAttempt?.outcome, "source-unavailable")
+      assert.strictEqual(state.latestSynchronized?.attemptSequence, 1)
+      assert.strictEqual(state.latestSynchronized?.outcome, "synchronized")
+    })))
+
   it.effect("reconciles crash-left sync attempts once and preserves immutable completion boundaries", () =>
     withRuntime(Effect.gen(function*() {
       const database = yield* Database
@@ -217,6 +294,10 @@ describe("plugin runtime persistence", () => {
           }
         ]
       )
+      const state = yield* runtime.getSyncAttemptState(WORKSPACE_ID, PLUGIN_ID, STREAM)
+      assert.strictEqual(state.latestAttempt?.attemptSequence, 2)
+      assert.strictEqual(state.latestAttempt?.outcome, "synchronized")
+      assert.strictEqual(state.latestSynchronized?.attemptSequence, 2)
 
       const mutations = yield* Effect.all([
         database.sql`UPDATE plugin_sync_attempts SET started_revision = 1`.pipe(Effect.result),

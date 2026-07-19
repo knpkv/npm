@@ -1,4 +1,8 @@
-import { renderOpenPluginSyncAttemptsQuery, renderPluginSyncAttemptsQuery } from "@knpkv/control-center-sql"
+import {
+  renderOpenPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptsQuery,
+  renderPluginSyncAttemptStateQuery
+} from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -35,6 +39,7 @@ import {
   PluginRuntimeRecord,
   PluginStreamRecord,
   PluginSyncAttemptRecord,
+  PluginSyncAttemptState,
   PluginSyncCompletionOutcome,
   PluginSyncPage
 } from "./pluginRuntimeModels.js"
@@ -569,6 +574,41 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     })).pipe(mapPersistenceOperation("plugin-runtime.begin-sync-attempt"))
   })
 
+  const claimSync = Effect.fn("PluginRuntimeRepository.claimSync")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    providerId: typeof ProviderId.Type,
+    streamKey: PluginStreamKey,
+    claimId: string,
+    claimedAt: UtcTimestamp,
+    expiresAt: UtcTimestamp
+  ) {
+    return yield* database.transaction(Effect.gen(function*() {
+      yield* verifyProvider(workspaceId, pluginConnectionId, providerId)
+      yield* sql`DELETE FROM plugin_sync_claims
+        WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
+          AND stream_key = ${streamKey} AND expires_at <= ${encodeTimestamp(claimedAt)}`
+      yield* sql`INSERT INTO plugin_sync_claims (
+        workspace_id, plugin_connection_id, provider_id, stream_key, claim_id, claimed_at, expires_at
+      ) VALUES (
+        ${workspaceId}, ${pluginConnectionId}, ${providerId}, ${streamKey}, ${claimId},
+        ${encodeTimestamp(claimedAt)}, ${encodeTimestamp(expiresAt)}
+      ) ON CONFLICT (workspace_id, plugin_connection_id, stream_key) DO NOTHING`
+      return (yield* readChanges(sql)) === 1
+    })).pipe(mapPersistenceOperation("plugin-runtime.claim-sync"))
+  })
+
+  const releaseSyncClaim = Effect.fn("PluginRuntimeRepository.releaseSyncClaim")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    claimId: string
+  ) {
+    yield* sql`DELETE FROM plugin_sync_claims
+      WHERE workspace_id = ${workspaceId} AND plugin_connection_id = ${pluginConnectionId}
+        AND stream_key = ${streamKey} AND claim_id = ${claimId}`
+  }, mapPersistenceOperation("plugin-runtime.release-sync-claim"))
+
   const listSyncAttempts = Effect.fn("PluginRuntimeRepository.listSyncAttempts")(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
@@ -577,6 +617,24 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     const rendered = renderPluginSyncAttemptsQuery({ workspaceId, pluginConnectionId, streamKey })
     const rows = yield* sql.unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
     return yield* Schema.decodeUnknownEffect(Schema.Array(PluginSyncAttemptRecord))(rows)
+  })
+
+  const getSyncAttemptState = Effect.fn("PluginRuntimeRepository.getSyncAttemptState")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rendered = renderPluginSyncAttemptStateQuery({ workspaceId, pluginConnectionId, streamKey })
+    const rows = yield* sql.unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
+    const decodedRows = yield* Schema.decodeUnknownEffect(
+      Schema.Array(PluginSyncAttemptRecord).check(Schema.isMaxLength(2))
+    )(rows)
+    const latestAttempt = decodedRows.at(0) ?? null
+    const latestSynchronized = decodedRows.find(({ outcome }) => outcome === "synchronized") ?? null
+    return yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncAttemptState))({
+      latestAttempt,
+      latestSynchronized
+    })
   })
 
   const completeSyncAttempt = Effect.fn("PluginRuntimeRepository.completeSyncAttempt")(function*(
@@ -1213,6 +1271,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
   return {
     acceptPluginDescriptor,
     beginSyncAttempt,
+    claimSync,
     commitNormalizedPage,
     commitNormalizedPageReceipt,
     commitPage,
@@ -1220,10 +1279,12 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     getCache,
     getLastSuccessfulHealth,
     getRuntime,
+    getSyncAttemptState,
     getStream,
     listEvidence,
     listSyncAttempts,
     reconcileSyncAttempts,
+    releaseSyncClaim,
     recordHealth
   }
 })

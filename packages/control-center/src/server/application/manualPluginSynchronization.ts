@@ -1,10 +1,10 @@
+import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
-import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -23,7 +23,10 @@ import {
 } from "../api/ApplicationServices.js"
 import type { PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
-import type { PluginSyncAttemptRecord } from "../persistence/repositories/pluginRuntimeModels.js"
+import type {
+  PluginSyncAttemptRecord,
+  PluginSyncAttemptState
+} from "../persistence/repositories/pluginRuntimeModels.js"
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginFailure } from "../plugins/failures.js"
 import { pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
@@ -39,6 +42,7 @@ import {
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PAGES_PER_INVOCATION = 100
+const SYNCHRONIZATION_CLAIM_LIFETIME_MINUTES = 15
 const SOURCE_UNAVAILABLE_OUTCOME = "source-unavailable"
 const SYNCHRONIZED_OUTCOME = "synchronized"
 
@@ -169,20 +173,14 @@ const failureHealth = Effect.fn("ManualPluginSynchronization.failureHealth")(fun
   })
 })
 
-const stateFromAttempts = (
+const stateFromAttemptState = (
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,
   streamKey: string,
-  attempts: ReadonlyArray<PluginSyncAttemptRecord>
+  attemptState: PluginSyncAttemptState
 ): PluginSynchronizationState => {
-  const lastAttempt = attempts.at(-1)
-  let lastSuccess: PluginSyncAttemptRecord | undefined
-  for (let index = attempts.length - 1; index >= 0; index -= 1) {
-    if (attempts[index]?.outcome === "synchronized") {
-      lastSuccess = attempts[index]
-      break
-    }
-  }
+  const lastAttempt: PluginSyncAttemptRecord | undefined = attemptState.latestAttempt ?? undefined
+  const lastSuccess: PluginSyncAttemptRecord | undefined = attemptState.latestSynchronized ?? undefined
   return {
     pluginConnectionId,
     providerId,
@@ -206,7 +204,9 @@ interface BoundManualSync {
   readonly streamKey: PluginStreamKey
 }
 
-const activityKey = (bound: BoundManualSync): string => `${bound.workspaceId}/${bound.pluginConnectionId}`
+interface SynchronizationClaim extends BoundManualSync {
+  readonly claimId: string
+}
 
 export interface ManualPluginSynchronizationService {
   readonly state: (input: {
@@ -229,7 +229,6 @@ export const makeManualPluginSynchronization = Effect.fn(
   const persistence = yield* Persistence
   const wakeups = yield* DomainEventWakeups
   const cryptoService = yield* Crypto.Crypto
-  const activeSynchronizations = yield* Ref.make<ReadonlySet<string>>(new Set())
 
   const bind = Effect.fn("ManualPluginSynchronization.bind")(function*(input: {
     readonly workspaceId: WorkspaceId
@@ -249,41 +248,45 @@ export const makeManualPluginSynchronization = Effect.fn(
 
   const releaseSynchronization = Effect.fn(
     "ManualPluginSynchronization.releaseSynchronization"
-  )(function*(key: string) {
-    yield* Ref.update(activeSynchronizations, (current) => {
-      const updated = new Set(current)
-      updated.delete(key)
-      return updated
-    })
+  )(function*(claim: SynchronizationClaim) {
+    yield* persistence.pluginRuntime.releaseSyncClaim(
+      claim.workspaceId,
+      claim.pluginConnectionId,
+      claim.streamKey,
+      claim.claimId
+    ).pipe(Effect.mapError(() => unavailable()))
   })
 
   const claimSynchronization = Effect.fn(
     "ManualPluginSynchronization.claimSynchronization"
-  )(function*(key: string) {
-    const claimed = yield* Ref.modify(activeSynchronizations, (current): readonly [
-      boolean,
-      ReadonlySet<string>
-    ] => {
-      if (current.has(key)) return [false, current]
-      const updated = new Set(current)
-      updated.add(key)
-      return [true, updated]
-    })
+  )(function*(bound: BoundManualSync) {
+    const claimId = yield* cryptoService.randomUUIDv4.pipe(Effect.mapError(() => unavailable()))
+    const claimedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+    const expiresAt = DateTime.add(claimedAt, { minutes: SYNCHRONIZATION_CLAIM_LIFETIME_MINUTES })
+    const claimed = yield* persistence.pluginRuntime.claimSync(
+      bound.workspaceId,
+      bound.pluginConnectionId,
+      bound.providerId,
+      bound.streamKey,
+      claimId,
+      claimedAt,
+      expiresAt
+    ).pipe(Effect.mapError(() => unavailable()))
     if (!claimed) return yield* unavailable()
-    return key
+    return { ...bound, claimId }
   })
 
   const stateFor = Effect.fn("ManualPluginSynchronization.stateFor")(function*(bound: BoundManualSync) {
-    const attempts = yield* persistence.pluginRuntime.listSyncAttempts(
+    const attemptState = yield* persistence.pluginRuntime.getSyncAttemptState(
       bound.workspaceId,
       bound.pluginConnectionId,
       bound.streamKey
     ).pipe(Effect.mapError(() => unavailable()))
-    return stateFromAttempts(
+    return stateFromAttemptState(
       bound.pluginConnectionId,
       bound.providerId,
       bound.streamKey,
-      attempts
+      attemptState
     )
   })
 
@@ -376,13 +379,14 @@ export const makeManualPluginSynchronization = Effect.fn(
               diagnosticCode: "manual-sync-page-after-terminal"
             })
           }
+          const committedAt = DateTime.makeUnsafe(yield* Clock.currentTimeMillis)
           const receipt = yield* materializeNormalizedPluginPage({
             workspaceId: bound.workspaceId,
             pluginConnectionId: bound.pluginConnectionId,
             providerId: bound.providerId,
             streamKey: bound.streamKey,
             expectedRevision: state.revision,
-            committedAt: health.checkedAt,
+            committedAt,
             successfulHealth: health,
             expectedAuthority: authority
           }, page).pipe(
@@ -481,9 +485,8 @@ export const makeManualPluginSynchronization = Effect.fn(
     readonly pluginConnectionId: PluginConnectionId
   }) {
     const bound = yield* bind(input)
-    const key = activityKey(bound)
     return yield* Effect.acquireUseRelease(
-      claimSynchronization(key),
+      claimSynchronization(bound),
       () => synchronizeBound(input, bound),
       releaseSynchronization
     )

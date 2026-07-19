@@ -294,6 +294,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.accept-plugin-descriptor", pluginRuntime.acceptPluginDescriptor(...args)),
       beginSyncAttempt: (...args: Parameters<PluginRuntimeRepositoryService["beginSyncAttempt"]>) =>
         publicOperation("plugin-runtime.begin-sync-attempt", pluginRuntime.beginSyncAttempt(...args)),
+      claimSync: (...args: Parameters<PluginRuntimeRepositoryService["claimSync"]>) =>
+        publicOperation("plugin-runtime.claim-sync", pluginRuntime.claimSync(...args)),
       commitNormalizedPage: (...args: Parameters<PluginRuntimeRepositoryService["commitNormalizedPage"]>) =>
         publicOperation("plugin-runtime.commit-normalized-page", pluginRuntime.commitNormalizedPage(...args)),
       commitNormalizedPageReceipt: (
@@ -314,6 +316,8 @@ const makePersistence = Effect.gen(function*() {
         ),
       getRuntime: (...args: Parameters<PluginRuntimeRepositoryService["getRuntime"]>) =>
         publicOperation("plugin-runtime.get", pluginRuntime.getRuntime(...args)),
+      getSyncAttemptState: (...args: Parameters<PluginRuntimeRepositoryService["getSyncAttemptState"]>) =>
+        publicOperation("plugin-runtime.get-sync-attempt-state", pluginRuntime.getSyncAttemptState(...args)),
       getStream: (...args: Parameters<PluginRuntimeRepositoryService["getStream"]>) =>
         publicOperation("plugin-runtime.get-stream", pluginRuntime.getStream(...args)),
       listEvidence: (...args: Parameters<PluginRuntimeRepositoryService["listEvidence"]>) =>
@@ -322,6 +326,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.list-sync-attempts", pluginRuntime.listSyncAttempts(...args)),
       reconcileSyncAttempts: (...args: Parameters<PluginRuntimeRepositoryService["reconcileSyncAttempts"]>) =>
         publicOperation("plugin-runtime.reconcile-sync-attempts", pluginRuntime.reconcileSyncAttempts(...args)),
+      releaseSyncClaim: (...args: Parameters<PluginRuntimeRepositoryService["releaseSyncClaim"]>) =>
+        publicOperation("plugin-runtime.release-sync-claim", pluginRuntime.releaseSyncClaim(...args)),
       recordHealth: (...args: Parameters<PluginRuntimeRepositoryService["recordHealth"]>) =>
         publicOperation("plugin-runtime.record-health", pluginRuntime.recordHealth(...args))
     },
