@@ -358,6 +358,49 @@ describe("AtlassianOAuthGrants", () => {
       Effect.scoped
     ))
 
+  it.effect("falls back to matching legacy OAuth apps when the canonical store has no profiles", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-empty-canonical-" })
+      const path = yield* Path.Path
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME, {
+        clientId: "unused-canonical-client",
+        clientSecret: "unused-canonical-secret"
+      })
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      assert.strictEqual(new URL(started.authorizationUrl).searchParams.get("client_id"), SHARED_OAUTH_CONFIG.clientId)
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const canonicalConfig = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(canonicalConfig, SHARED_OAUTH_CONFIG)
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
   it.effect("carries provider intent through authorization, site filtering, and completion", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem

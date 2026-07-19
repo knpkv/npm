@@ -197,12 +197,13 @@ const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthCon
     ],
     { concurrency: 1 }
   )
-  if (controlCenterConfig !== null) {
-    return controlCenterProfiles.profiles.length > 0 ? controlCenterConfig : null
+  if (controlCenterConfig !== null && controlCenterProfiles.profiles.length > 0) {
+    return { config: controlCenterConfig, didReplace: false } satisfies ConfiguredOAuth
   }
-  return jiraConfig !== null && confluenceConfig !== null && sameOAuthConfig(jiraConfig, confluenceConfig)
-    ? jiraConfig
-    : null
+  if (jiraConfig === null || confluenceConfig === null || !sameOAuthConfig(jiraConfig, confluenceConfig)) return null
+  const didReplace = controlCenterConfig !== null && !sameOAuthConfig(controlCenterConfig, jiraConfig)
+  if (didReplace) yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, jiraConfig)
+  return { config: jiraConfig, didReplace } satisfies ConfiguredOAuth
 })
 
 const configureControlCenterOAuth = Effect.fn("AtlassianOAuthGrants.configureControlCenterOAuth")(function*(
@@ -462,26 +463,27 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     configuration
   ) {
     const redirectUri = callbackUrl(publicOrigin)
-    const config = yield* (configuration === undefined
-      ? loadSharedOAuthConfig().pipe(Effect.mapError(unavailable))
-      : profileStoreLock.withPermit(
-        Effect.gen(function*() {
-          const configured: ConfiguredOAuth = yield* configureControlCenterOAuth(configuration)
-          if (configured.didReplace) {
-            const nowMilliseconds = yield* Clock.currentTimeMillis
-            yield* Ref.update(grants, (current) =>
-              new Map(
-                [...activeGrants(current, nowMilliseconds)].filter(([, grant]) =>
-                  sameOAuthConfig(grant.config, configured.config)
-                )
-              ))
-          }
-          return configured.config
-        })
-      )).pipe(
-        Effect.provide(localStorageLayer),
-        Effect.mapError((error) => error._tag === "ApplicationConflict" ? error : unavailable())
-      )
+    const config = yield* profileStoreLock.withPermit(
+      Effect.gen(function*() {
+        const configured = configuration === undefined
+          ? yield* loadSharedOAuthConfig()
+          : yield* configureControlCenterOAuth(configuration)
+        if (configured === null) return null
+        if (configured.didReplace) {
+          const nowMilliseconds = yield* Clock.currentTimeMillis
+          yield* Ref.update(grants, (current) =>
+            new Map(
+              [...activeGrants(current, nowMilliseconds)].filter(([, grant]) =>
+                sameOAuthConfig(grant.config, configured.config)
+              )
+            ))
+        }
+        return configured.config
+      })
+    ).pipe(
+      Effect.provide(localStorageLayer),
+      Effect.mapError((error) => error._tag === "ApplicationConflict" ? error : unavailable())
+    )
     if (config === null) return { _tag: "configuration-required", callbackUrl: redirectUri }
 
     const stateBytes = yield* cryptoService.randomBytes(32).pipe(Effect.mapError(unavailable))
