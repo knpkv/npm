@@ -355,6 +355,107 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(ari?.avatarUrl, "https://avatar.example/ari.png")
     }))
 
+  it.effect("uses a longer Markdown fence when Jira code contains triple backticks", () =>
+    Effect.gen(function*() {
+      const fencedCode = "before\n```\n# heading\n```\nafter"
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              description: {
+                type: "doc",
+                content: [{ type: "codeBlock", content: [{ type: "text", text: fencedCode }] }]
+              }
+            }
+          }))
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.strictEqual(attributes.description, `\`\`\`\`\n${fencedCode}\n\`\`\`\``)
+    }))
+
+  it.effect("preserves a Jira ADF hard break without adding one to plain text", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              description: {
+                type: "doc",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [
+                      { type: "text", text: "first" },
+                      { type: "hardBreak" },
+                      { type: "text", text: "second" }
+                    ]
+                  },
+                  { type: "paragraph", content: [{ type: "text", text: "first second" }] }
+                ]
+              }
+            }
+          }))
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.strictEqual(attributes.description, "first\\\nsecond\n\nfirst second")
+    }))
+
+  it.effect("preserves supported Jira ADF inline formatting marks", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              description: {
+                type: "doc",
+                content: [{
+                  type: "paragraph",
+                  content: [
+                    { type: "text", text: "Deploy " },
+                    { type: "text", text: "now", marks: [{ type: "strong" }] },
+                    { type: "text", text: " with " },
+                    { type: "text", text: "retry()", marks: [{ type: "code" }] },
+                    { type: "text", text: " " },
+                    { type: "text", text: "carefully", marks: [{ type: "em" }] },
+                    { type: "text", text: " " },
+                    { type: "text", text: "later", marks: [{ type: "strike" }] }
+                  ]
+                }]
+              }
+            }
+          }))
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.strictEqual(attributes.description, "Deploy **now** with `retry()` *carefully* ~~later~~")
+    }))
+
   it.effect("continues full comment and changelog pages when Jira omits total", () =>
     Effect.gen(function*() {
       const commentStarts = yield* Ref.make<ReadonlyArray<number>>([])
@@ -472,6 +573,43 @@ describe("JiraReadPlugin", () => {
       )
       assert.isTrue(attributes.commentsTruncated)
       assert.isTrue(attributes.historyTruncated)
+    }))
+
+  it.effect("spends the bounded page budget on the newest Jira comment tail when total exceeds the fetch window", () =>
+    Effect.gen(function*() {
+      const starts = yield* Ref.make<ReadonlyArray<number>>([])
+      const ascendingComments = Array.from({ length: 300 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: `Comment ${String(index)}`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Ref.update(starts, (current) => [...current, request.startAt]).pipe(
+            Effect.as({
+              comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: ascendingComments.length
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 5 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(yield* Ref.get(starts), [0, 100, 150, 200, 250])
+      assert.deepStrictEqual(
+        attributes.comments?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 200 }, (_, index) => `comment-${String(index + 100)}`)
+      )
+      assert.strictEqual(attributes.commentTotal, 300)
+      assert.isTrue(attributes.commentsTruncated)
     }))
 
   it.effect("trims combined comment and history activity to the normalized payload budget", () =>

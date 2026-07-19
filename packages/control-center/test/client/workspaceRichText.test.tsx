@@ -92,4 +92,22 @@ describe("WorkspaceRichText", () => {
     expect(links[0]?.textContent).toBe("runbook")
     expect(links[0]?.getAttribute("href")).toBe("https://wiki.example.test/runbook")
   })
+
+  it("renders a normalized Jira hard break without breaking adjacent plain text", async () => {
+    const host = await renderRichText("first\\\nsecond\n\nfirst second")
+
+    expect(host.querySelectorAll("br")).toHaveLength(1)
+    expect(host.querySelectorAll("p")).toHaveLength(2)
+    expect(host.querySelectorAll("p")[0]?.textContent).toBe("first\nsecond")
+    expect(host.querySelectorAll("p")[1]?.textContent).toBe("first second")
+  })
+
+  it("renders normalized Jira inline formatting marks", async () => {
+    const host = await renderRichText("Deploy **now** with `retry()` *carefully* ~~later~~")
+
+    expect(host.querySelector("strong")?.textContent).toBe("now")
+    expect(host.querySelector("code")?.textContent).toBe("retry()")
+    expect(host.querySelector("em")?.textContent).toBe("carefully")
+    expect(host.querySelector("del")?.textContent).toBe("later")
+  })
 })

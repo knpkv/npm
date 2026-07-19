@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from "react"
 import Markdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 const safeExternalUrl = (value: string): string => {
   try {
@@ -11,6 +12,41 @@ const safeExternalUrl = (value: string): string => {
     return ""
   }
 }
+
+interface MarkdownNode {
+  children?: Array<MarkdownNode> | undefined
+  position?:
+    | {
+        end: { offset?: number | undefined }
+        start: { offset?: number | undefined }
+      }
+    | undefined
+  type: string
+}
+
+const preserveLiteralUrls =
+  () =>
+  (tree: MarkdownNode, file: { readonly value: unknown }): void => {
+    if (typeof file.value !== "string") return
+    const source = file.value
+    const visit = (node: MarkdownNode): void => {
+      const children = node.children
+      if (children === undefined) return
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index]
+        const start = child?.position?.start.offset
+        const end = child?.position?.end.offset
+        const markdown = start === undefined || end === undefined ? "" : source.slice(start, end)
+        if (child?.type === "link" && !markdown.startsWith("[") && !markdown.startsWith("<")) {
+          children.splice(index, 1, ...(child.children ?? []))
+          index -= 1
+        } else if (child !== undefined) {
+          visit(child)
+        }
+      }
+    }
+    visit(tree)
+  }
 
 const Heading = ({ children, level }: { readonly children: ReactNode; readonly level: 3 | 4 | 5 | 6 }) => {
   if (level === 3) return <h3>{children}</h3>
@@ -67,6 +103,7 @@ export const WorkspaceRichText = ({
         h6: ({ children }) => <Heading level={6}>{children}</Heading>
       }}
       skipHtml
+      remarkPlugins={[remarkGfm, preserveLiteralUrls]}
       urlTransform={safeExternalUrl}
     >
       {value}

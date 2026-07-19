@@ -287,6 +287,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   let totalKnown = false
   let startAt = 0
   let exhausted = false
+  let skippedPrefix = false
 
   for (let page = 0; page < options.configuration.maximumPages; page += 1) {
     const response = yield* withTimeout(
@@ -302,6 +303,12 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
+    const remainingPages = options.configuration.maximumPages - page - 1
+    if (page === 0 && totalKnown && remainingPages > 0) {
+      const tailStart = Math.max(startAt, total - remainingPages * options.configuration.pageSize)
+      skippedPrefix = tailStart > startAt
+      startAt = tailStart
+    }
     if (totalKnown && startAt >= total) {
       exhausted = true
       break
@@ -316,7 +323,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     }
   }
 
-  return { values, total, truncated: !exhausted }
+  return { values, total, truncated: skippedPrefix || !exhausted }
 })
 
 const collectIssueActivity = Effect.fn("JiraReadPlugin.collectIssueActivity")(function*(

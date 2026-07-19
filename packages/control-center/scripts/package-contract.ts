@@ -71,7 +71,8 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
     "react",
     "react-dom",
     "react-markdown",
-    "react-router"
+    "react-router",
+    "remark-gfm"
   ]
   if (!sameKeys(manifest.dependencies, [...runtimeKeys].sort())) {
     violations.push("runtime dependencies must remain the reviewed set")

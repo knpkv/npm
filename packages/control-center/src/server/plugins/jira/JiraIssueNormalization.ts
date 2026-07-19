@@ -180,18 +180,43 @@ const MarkdownAsciiPunctuation: ReadonlySet<string> = new Set(
 const escapedMarkdownText = (value: string): string =>
   Array.from(value, (character) => MarkdownAsciiPunctuation.has(character) ? `\\${character}` : character).join("")
 
-const adfTextWithLinkMark = (record: typeof JsonRecord.Type, value: string): string => {
+const markdownInlineCode = (value: string): string => {
+  let longestBacktickRun = 0
+  for (const match of value.matchAll(/`+/gu)) {
+    longestBacktickRun = Math.max(longestBacktickRun, match[0].length)
+  }
+  const delimiter = "`".repeat(longestBacktickRun + 1)
+  const padding = value.startsWith("`") || value.endsWith("`") ? " " : ""
+  return `${delimiter}${padding}${value}${padding}${delimiter}`
+}
+
+const adfTextWithMarks = (record: typeof JsonRecord.Type, value: string): string => {
   if (!Array.isArray(record.marks)) return escapedMarkdownText(value)
+  let rendered = escapedMarkdownText(value)
+  let linkTarget: string | null = null
+  let strong = false
+  let emphasis = false
+  let strike = false
+  let code = false
   for (const markValue of record.marks) {
     const mark = decodedJsonRecord(markValue)
-    if (mark?.type !== "link") continue
+    if (mark === null) continue
+    if (mark.type === "strong") strong = true
+    if (mark.type === "em") emphasis = true
+    if (mark.type === "strike") strike = true
+    if (mark.type === "code") code = true
+    if (mark.type !== "link") continue
     const attrs = mark.attrs === undefined ? null : decodedJsonRecord(mark.attrs)
     if (typeof attrs?.href !== "string") continue
     const decoded = Schema.decodeUnknownResult(SourceUrl)(attrs.href)
     if (Result.isFailure(decoded)) continue
-    return `[${escapedMarkdownText(value)}](<${Schema.encodeSync(SourceUrl)(decoded.success)}>)`
+    linkTarget = Schema.encodeSync(SourceUrl)(decoded.success)
   }
-  return escapedMarkdownText(value)
+  if (code) rendered = markdownInlineCode(value)
+  if (strong) rendered = `**${rendered}**`
+  if (emphasis) rendered = `*${rendered}*`
+  if (strike) rendered = `~~${rendered}~~`
+  return linkTarget === null ? rendered : `[${rendered}](<${linkTarget}>)`
 }
 
 const adfText = (value: Schema.Json): string => {
@@ -199,13 +224,13 @@ const adfText = (value: Schema.Json): string => {
   if (Array.isArray(value)) return value.map(adfText).join("")
   const record = decodedJsonRecord(value)
   if (record === null) return ""
-  if (record.type === "hardBreak") return "\n"
+  if (record.type === "hardBreak") return "\\\n"
   if (record.type === "mention") {
     const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
     return typeof attrs?.text === "string" ? escapedMarkdownText(attrs.text) : ""
   }
   return typeof record.text === "string"
-    ? adfTextWithLinkMark(record, record.text)
+    ? adfTextWithMarks(record, record.text)
     : adfContent(record).map(adfText).join("")
 }
 
@@ -215,6 +240,14 @@ const rawAdfText = (value: Schema.Json): string => {
   const record = decodedJsonRecord(value)
   if (record === null) return ""
   return typeof record.text === "string" ? record.text : adfContent(record).map(rawAdfText).join("")
+}
+
+const markdownCodeFence = (value: string): string => {
+  let longestBacktickRun = 0
+  for (const match of value.matchAll(/`+/gu)) {
+    longestBacktickRun = Math.max(longestBacktickRun, match[0].length)
+  }
+  return "`".repeat(Math.max(3, longestBacktickRun + 1))
 }
 
 const indented = (value: string, prefix: string): string =>
@@ -264,7 +297,9 @@ const renderAdfBlock = (value: Schema.Json): string => {
     case "codeBlock": {
       const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
       const language = typeof attrs?.language === "string" ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
-      return `\`\`\`${language}\n${content.map(rawAdfText).join("")}\n\`\`\``
+      const code = content.map(rawAdfText).join("")
+      const fence = markdownCodeFence(code)
+      return `${fence}${language}\n${code}\n${fence}`
     }
     case "blockquote":
       return content
