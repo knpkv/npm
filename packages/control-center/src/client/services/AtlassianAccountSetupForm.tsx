@@ -211,7 +211,12 @@ export const AtlassianAccountSetupForm = ({
           setIsStartingOAuth(false)
           return
         }
-        if (!rememberAtlassianOAuthSetupIntent(result.authorizationUrl, setupIntent.providers)) {
+        if (
+          !rememberAtlassianOAuthSetupIntent(result.authorizationUrl, {
+            preferredSiteId: setupIntent.preferredSiteId,
+            providers: setupIntent.providers
+          })
+        ) {
           setSetupError("Control Center could not preserve this Atlassian setup across sign-in. Try again.")
           setIsStartingOAuth(false)
           return

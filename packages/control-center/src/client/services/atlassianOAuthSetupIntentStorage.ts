@@ -1,14 +1,18 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import {
-  AtlassianOAuthGrantId,
-  AtlassianOAuthProviderIntent,
-  type AtlassianOAuthProviderIntent as AtlassianOAuthProviderIntentType
-} from "../../api/plugins.js"
+import { AtlassianOAuthGrantId, AtlassianOAuthProviderIntent } from "../../api/plugins.js"
 
 const activeGrantStorageKey = "cc_atlassian_oauth_setup_intent_state"
-const StoredAtlassianOAuthProviderIntent = Schema.fromJsonString(AtlassianOAuthProviderIntent)
+const StoredAtlassianOAuthSetupIntent = Schema.fromJsonString(Schema.Struct({
+  preferredSiteId: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
+  providers: AtlassianOAuthProviderIntent
+}))
+
+/** Bounded setup target that survives the same-tab OAuth redirect. */
+export type AtlassianOAuthSetupIntent = typeof StoredAtlassianOAuthSetupIntent.Type
 
 const decodedGrantId = (value: string | null): AtlassianOAuthGrantId | null => {
   const decoded = Schema.decodeUnknownResult(AtlassianOAuthGrantId)(value)
@@ -29,10 +33,10 @@ const authorizationGrantId = (authorizationUrl: string): AtlassianOAuthGrantId |
 /** Persist one bounded, schema-valid setup target for the next same-tab Atlassian redirect. */
 export const rememberAtlassianOAuthSetupIntent = (
   authorizationUrl: string,
-  providers: AtlassianOAuthProviderIntentType
+  intent: AtlassianOAuthSetupIntent
 ): boolean => {
   const grantId = authorizationGrantId(authorizationUrl)
-  const encoded = Schema.encodeUnknownResult(StoredAtlassianOAuthProviderIntent)(providers)
+  const encoded = Schema.encodeUnknownResult(StoredAtlassianOAuthSetupIntent)(intent)
   if (grantId === null || Result.isFailure(encoded)) return false
   try {
     const previousGrantId = decodedGrantId(sessionStorage.getItem(activeGrantStorageKey))
@@ -55,14 +59,14 @@ export const rememberAtlassianOAuthSetupIntent = (
 /** Read only a schema-valid setup target associated with the exact callback state. */
 export const readAtlassianOAuthSetupIntent = (
   state: string | null
-): AtlassianOAuthProviderIntentType | null => {
+): AtlassianOAuthSetupIntent | null => {
   const grantId = decodedGrantId(state)
   if (grantId === null) return null
   try {
     const key = setupIntentStorageKey(grantId)
     const source = sessionStorage.getItem(key)
     if (source === null) return null
-    const decoded = Schema.decodeUnknownResult(StoredAtlassianOAuthProviderIntent)(source)
+    const decoded = Schema.decodeUnknownResult(StoredAtlassianOAuthSetupIntent)(source)
     if (Result.isSuccess(decoded)) return decoded.success
     sessionStorage.removeItem(key)
     if (sessionStorage.getItem(activeGrantStorageKey) === grantId) sessionStorage.removeItem(activeGrantStorageKey)

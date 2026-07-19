@@ -30,6 +30,7 @@ import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupVa
 import {
   selectedAtlassianOAuthProfileId,
   selectedAtlassianOAuthProviders,
+  selectedAtlassianOAuthSiteId,
   selectedServiceProvider,
   servicePairingPath
 } from "./serviceOnboarding.js"
@@ -96,8 +97,14 @@ const hasConnectedProductOutsideSetup = (
       !setupProviders.includes(providerId) && connections.some((connection) => connection.providerId === providerId)
   )
 
-const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnectionSummary>): AtlassianSetupIntent => {
-  const providers = missingAtlassianProducts(connections)
+const missingAtlassianProductsIntent = (
+  connections: ReadonlyArray<PluginConnectionSummary>,
+  requestedProvider?: "jira" | "confluence"
+): AtlassianSetupIntent => {
+  const providers =
+    requestedProvider !== undefined && connections.some(({ providerId }) => providerId === requestedProvider)
+      ? [requestedProvider]
+      : missingAtlassianProducts(connections)
   return {
     preferredProfileId: null,
     preferredSiteId: null,
@@ -308,6 +315,7 @@ const CatalogCard = ({
   canConfigure,
   catalog,
   catalogs,
+  isAdditional,
   isOpen,
   isRecovery,
   isSubmitting,
@@ -326,6 +334,7 @@ const CatalogCard = ({
   readonly canConfigure: boolean
   readonly catalog: PluginServiceCatalogEntry
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
+  readonly isAdditional: boolean
   readonly isOpen: boolean
   readonly isSubmitting: boolean
   readonly isRecovery: boolean
@@ -351,7 +360,7 @@ const CatalogCard = ({
           </Text>
         </div>
         <StateLabel
-          label={isRecovery ? "Needs correction" : "Not configured"}
+          label={isRecovery ? "Needs correction" : isAdditional ? "Add another" : "Not configured"}
           size="compact"
           tone={isRecovery ? "critical" : "neutral"}
         />
@@ -386,7 +395,15 @@ const CatalogCard = ({
       ) : (
         <div className={styles.cardAction}>
           <Button disabled={!canConfigure} onClick={onOpen} variant="secondary">
-            {isAws ? "Configure AWS account" : isAtlassian ? "Configure Atlassian" : "Enable service"}
+            {isAws
+              ? "Configure AWS account"
+              : isAdditional && catalog.providerId === "jira"
+                ? "Add Jira project"
+                : isAdditional && catalog.providerId === "confluence"
+                  ? "Add Confluence space"
+                  : isAtlassian
+                    ? "Configure Atlassian"
+                    : "Enable service"}
           </Button>
           {!canConfigure ? (
             <Text tone="secondary" variant="meta">
@@ -570,10 +587,10 @@ export const ServicesPage = ({
       const hasAlignedCallbackIntent = callbackProviders?.includes(requestedProvider) === true
       setAtlassianSetupIntent(
         !hasAlignedCallbackIntent
-          ? missingAtlassianProductsIntent(connectionsState.overview.connections)
+          ? missingAtlassianProductsIntent(connectionsState.overview.connections, requestedProvider)
           : {
               preferredProfileId: selectedAtlassianOAuthProfileId(searchParams),
-              preferredSiteId: null,
+              preferredSiteId: selectedAtlassianOAuthSiteId(searchParams),
               providers: callbackProviders,
               requestedOAuthProviders: callbackProviders
             }
@@ -584,6 +601,7 @@ export const ServicesPage = ({
     nextSearchParams.delete("enable")
     nextSearchParams.delete("atlassianProfile")
     nextSearchParams.delete("atlassianProvider")
+    nextSearchParams.delete("atlassianSite")
     setSearchParams(nextSearchParams, { replace: true })
   }, [connectionsState, searchParams, sessionState, setSearchParams])
 
@@ -901,7 +919,10 @@ export const ServicesPage = ({
               const standaloneConnections = configured.filter(
                 ({ followedResourceId }) => followedResourceId === null || !groupedResourceIds.has(followedResourceId)
               )
-              const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
+              const missingAtlassianIntent = missingAtlassianProductsIntent(
+                connectionsState.overview.connections,
+                catalog.providerId === "jira" || catalog.providerId === "confluence" ? catalog.providerId : undefined
+              )
               const setupIntent = resolvedAtlassianSetupIntent(
                 atlassianSetupIntent ?? missingAtlassianIntent,
                 connectionsState.overview.connections,
@@ -925,7 +946,13 @@ export const ServicesPage = ({
                   testState={testStates.get(connection.pluginConnectionId)}
                 />
               ))
-              if (configured.length > 0 && openProvider !== catalog.providerId) return cards
+              if (
+                configured.length > 0 &&
+                openProvider !== catalog.providerId &&
+                catalog.providerId !== "jira" &&
+                catalog.providerId !== "confluence"
+              )
+                return cards
               return [
                 ...cards,
                 <CatalogCard
@@ -937,6 +964,9 @@ export const ServicesPage = ({
                   canConfigure={canConfigure}
                   catalog={catalog}
                   catalogs={connectionsState.overview.catalog}
+                  isAdditional={
+                    configured.length > 0 && (catalog.providerId === "jira" || catalog.providerId === "confluence")
+                  }
                   isOpen={openProvider === catalog.providerId}
                   isRecovery={standaloneConnections.length > 0}
                   isSubmitting={submittingProvider === catalog.providerId}

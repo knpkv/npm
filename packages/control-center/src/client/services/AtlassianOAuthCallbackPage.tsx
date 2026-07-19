@@ -31,7 +31,7 @@ export const AtlassianOAuthCallbackPage = ({
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const callbackGrantState = useRef(searchParams.get("state")).current
-  const [setupProviders] = useState(() => readAtlassianOAuthSetupIntent(callbackGrantState))
+  const [setupIntent] = useState(() => readAtlassianOAuthSetupIntent(callbackGrantState))
   const { state: sessionState } = useBrowserSession()
   const [state, setState] = useState<CallbackState>({ _tag: "waiting" })
   const exchangeStarted = useRef(false)
@@ -77,6 +77,7 @@ export const AtlassianOAuthCallbackPage = ({
   }, [searchParams, sessionState, setSearchParams, transport])
 
   const complete = (grant: AtlassianOAuthGrantExchangeResponse, cloudId: string): void => {
+    if (setupIntent !== null && setupIntent.preferredSiteId !== null && setupIntent.preferredSiteId !== cloudId) return
     const save = transport.completeAtlassianOAuthGrant
     if (save === undefined) {
       setState({ _tag: "failed" })
@@ -90,9 +91,12 @@ export const AtlassianOAuthCallbackPage = ({
       (profile) => {
         if (request.signal.aborted) return
         forgetAtlassianOAuthSetupIntent(callbackGrantState)
-        navigate(setupProviders === null ? "/services" : atlassianOAuthSetupPath(setupProviders, profile.profileId), {
-          replace: true
-        })
+        navigate(
+          setupIntent === null
+            ? "/services"
+            : atlassianOAuthSetupPath(setupIntent.providers, profile.profileId, setupIntent.preferredSiteId),
+          { replace: true }
+        )
       },
       () => {
         if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })
@@ -102,7 +106,11 @@ export const AtlassianOAuthCallbackPage = ({
 
   const leaveCallback = (): void => {
     forgetAtlassianOAuthSetupIntent(callbackGrantState)
-    navigate(setupProviders === null ? "/services" : atlassianOAuthSetupPath(setupProviders))
+    navigate(
+      setupIntent === null
+        ? "/services"
+        : atlassianOAuthSetupPath(setupIntent.providers, null, setupIntent.preferredSiteId)
+    )
   }
 
   if (sessionState._tag === "checking") {
@@ -145,6 +153,22 @@ export const AtlassianOAuthCallbackPage = ({
     )
   }
 
+  if (
+    setupIntent !== null &&
+    setupIntent.preferredSiteId !== null &&
+    !state.grant.sites.some(({ cloudId }) => cloudId === setupIntent.preferredSiteId)
+  ) {
+    return (
+      <section className={styles.page}>
+        <StatePanel
+          action={<Button onClick={leaveCallback}>Return to Services</Button>}
+          description="Sign in with an Atlassian account that can access the site selected from the account card."
+          title="Selected Atlassian site unavailable"
+        />
+      </section>
+    )
+  }
+
   return (
     <section aria-labelledby="atlassian-site-title" className={styles.page}>
       <header className={styles.heading}>
@@ -174,7 +198,12 @@ export const AtlassianOAuthCallbackPage = ({
               </Text>
             </div>
             <Button
-              disabled={state._tag === "saving"}
+              disabled={
+                state._tag === "saving" ||
+                (setupIntent !== null &&
+                  setupIntent.preferredSiteId !== null &&
+                  setupIntent.preferredSiteId !== site.cloudId)
+              }
               loading={state._tag === "saving" && state.cloudId === site.cloudId}
               onClick={() => complete(state.grant, site.cloudId)}
               variant="primary"

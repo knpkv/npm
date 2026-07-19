@@ -178,7 +178,7 @@ describe("AtlassianOAuthCallbackPage", () => {
       const host = document.createElement("div")
       document.body.append(host)
       root = createRoot(host)
-      sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify(providers))
+      sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify({ preferredSiteId: null, providers }))
 
       await act(async () => {
         root?.render(
@@ -201,12 +201,86 @@ describe("AtlassianOAuthCallbackPage", () => {
     }
   )
 
+  it("keeps account-card OAuth pinned to the initiating Atlassian site", async () => {
+    const complete = vi
+      .fn<NonNullable<ConnectionTestTransport["completeAtlassianOAuthGrant"]>>()
+      .mockResolvedValue(completedProfile)
+    const transport: CallbackTransport = {
+      completeAtlassianOAuthGrant: complete,
+      exchangeAtlassianOAuthGrant: () => Promise.resolve(exchangeResponse)
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify({ preferredSiteId: "cloud-2", providers: ["jira"] }))
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    const siteButtons = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(({ textContent }) =>
+      textContent?.includes("Use this site")
+    )
+    expect(siteButtons[0]?.disabled).toBe(true)
+    expect(siteButtons[1]?.disabled).toBe(false)
+    await act(async () => siteButtons[1]?.click())
+
+    expect(complete).toHaveBeenCalledWith(grantId, "cloud-2", expect.any(AbortSignal))
+    expect(currentLocation).toBe(
+      "/services?enable=jira&atlassianProfile=account-1%40cloud-2&atlassianSite=cloud-2&atlassianProvider=jira"
+    )
+  })
+
+  it("offers recovery when the signed-in account cannot access the account-card site", async () => {
+    const complete = vi.fn<NonNullable<ConnectionTestTransport["completeAtlassianOAuthGrant"]>>()
+    const transport: CallbackTransport = {
+      completeAtlassianOAuthGrant: complete,
+      exchangeAtlassianOAuthGrant: () =>
+        Promise.resolve({ ...exchangeResponse, sites: exchangeResponse.sites.slice(0, 1) })
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    sessionStorage.setItem(
+      oauthIntentKey(grantId),
+      JSON.stringify({ preferredSiteId: "cloud-2", providers: ["confluence"] })
+    )
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+
+    expect(host.textContent).toContain("Selected Atlassian site unavailable")
+    expect(complete).not.toHaveBeenCalled()
+    const back = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Return to Services")
+    )
+    await act(async () => back?.click())
+    expect(currentLocation).toBe("/services?enable=confluence&atlassianSite=cloud-2&atlassianProvider=confluence")
+  })
+
   it("restores a Confluence-only setup after a failed callback", async () => {
     const transport: CallbackTransport = { exchangeAtlassianOAuthGrant: vi.fn() }
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
-    sessionStorage.setItem(oauthIntentKey(grantId), JSON.stringify(["confluence"]))
+    sessionStorage.setItem(
+      oauthIntentKey(grantId),
+      JSON.stringify({ preferredSiteId: null, providers: ["confluence"] })
+    )
 
     await act(async () => {
       root?.render(
