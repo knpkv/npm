@@ -6,6 +6,10 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type {
+  AtlassianOAuthGrantExchangeResponse,
+  AtlassianOAuthGrantId,
+  AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
@@ -14,6 +18,7 @@ import type {
   PluginConnectionTestResult,
   PluginOverviewResponse
 } from "../../api/index.js"
+import type { DiscoveredAtlassianProfile } from "../../api/plugins.js"
 import { PluginConnectionId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
@@ -22,6 +27,20 @@ export interface ConnectionTestTransport {
   /** Optional only for injected legacy/test transports; the browser transport always discovers profiles. */
   readonly discoverAwsProfiles?: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
   readonly discoverAtlassianProfiles?: (signal: AbortSignal) => Promise<AtlassianProfileDiscoveryResponse>
+  readonly startAtlassianOAuthGrant?: (
+    providers: AtlassianOAuthProviderIntent,
+    signal: AbortSignal
+  ) => Promise<AtlassianOAuthGrantStartResponse>
+  readonly exchangeAtlassianOAuthGrant?: (
+    grantId: AtlassianOAuthGrantId,
+    code: string,
+    signal: AbortSignal
+  ) => Promise<AtlassianOAuthGrantExchangeResponse>
+  readonly completeAtlassianOAuthGrant?: (
+    grantId: AtlassianOAuthGrantId,
+    cloudId: string,
+    signal: AbortSignal
+  ) => Promise<DiscoveredAtlassianProfile>
   readonly overview: (signal: AbortSignal) => Promise<PluginOverviewResponse>
   readonly create: (
     request: CreatePluginConnectionRequest,
@@ -38,6 +57,36 @@ export interface ConnectionTestTransport {
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
 export const browserConnectionTestTransport: ConnectionTestTransport = {
+  startAtlassianOAuthGrant: (providers, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.createAtlassianOAuthGrant({ payload: { providers } })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  exchangeAtlassianOAuthGrant: (grantId, code, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.exchangeAtlassianOAuthGrant({
+          params: { grantId },
+          payload: { code }
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  completeAtlassianOAuthGrant: (grantId, cloudId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.completeAtlassianOAuthGrant({
+          params: { grantId },
+          payload: { cloudId }
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   discoverAtlassianProfiles: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {

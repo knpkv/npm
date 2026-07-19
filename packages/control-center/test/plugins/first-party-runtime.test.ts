@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -64,7 +65,7 @@ const oauthProfile = (id: string, expiresAt: number) => ({
     access_token: `${id}-access-token`,
     refresh_token: `${id}-refresh-token`,
     expires_at: expiresAt,
-    scope: "read:me offline_access",
+    scope: Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).join(" "),
     cloud_id: "cloud-1",
     site_url: "https://knpkv.atlassian.net/",
     user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
@@ -200,7 +201,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("loads current OAuth profiles and rejects expired tokens before client use", () =>
+  it.effect("loads one canonical OAuth credential for both providers and rejects expired tokens", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -208,15 +209,13 @@ describe("first-party plugin runtime", () => {
       const configRoot = path.join(home, ".config")
       const now = DateTime.toEpochMillis(CREATED_AT)
       yield* TestClock.setTime(now)
-      for (const storeName of ["jira-cli", "confluence-to-markdown"]) {
-        const storePath = path.join(configRoot, "atlassian", storeName)
-        yield* fileSystem.makeDirectory(storePath, { recursive: true })
-        const profiles = [oauthProfile("valid-profile", now + 60_000), oauthProfile("expired-profile", now - 1)]
-        yield* fileSystem.writeFileString(
-          path.join(storePath, "profiles.json"),
-          JSON.stringify({ activeProfileId: "valid-profile", profiles })
-        )
-      }
+      const storePath = path.join(configRoot, "atlassian", "control-center")
+      yield* fileSystem.makeDirectory(storePath, { recursive: true })
+      const profiles = [oauthProfile("valid-profile", now + 60_000), oauthProfile("expired-profile", now - 1)]
+      yield* fileSystem.writeFileString(
+        path.join(storePath, "profiles.json"),
+        JSON.stringify({ activeProfileId: "valid-profile", profiles })
+      )
 
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-oauth-")
       const root = config.blobRoot.slice(0, -"/blobs".length)

@@ -62,6 +62,11 @@ const servicesRoute = async () => {
   return { Component: module.ServicesPage }
 }
 
+const atlassianOAuthCallbackRoute = async () => {
+  const module = await import("./services/AtlassianOAuthCallbackPage.js")
+  return { Component: module.AtlassianOAuthCallbackPage }
+}
+
 const authorizedShareRoute = async () => {
   const module = await import("./items/AuthorizedSharePage.js")
   return { Component: module.AuthorizedSharePage }
@@ -75,6 +80,7 @@ export const router = createBrowserRouter([
       { index: true, lazy: overviewRoute },
       { path: "releases", element: <ReleasesPage /> },
       { path: "services", lazy: servicesRoute },
+      { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
       { path: "agent", lazy: agentRoute },
       { path: "pair", lazy: pairRoute },
       { path: "shares/:workspaceId/:shareId", lazy: authorizedShareRoute },

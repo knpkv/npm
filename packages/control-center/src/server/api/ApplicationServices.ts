@@ -20,10 +20,15 @@ import type {
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
+  AtlassianOAuthGrantExchangeResponse,
+  AtlassianOAuthGrantId,
+  AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
+  DiscoveredAtlassianProfile,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
@@ -110,6 +115,32 @@ export interface PluginAdministrationService {
   readonly discoverAtlassianProfiles?: () => Effect.Effect<
     AtlassianProfileDiscoveryResponse,
     ApplicationServiceUnavailable
+  >
+  readonly startAtlassianOAuthGrant?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly sessionId: SessionId
+    readonly providers: AtlassianOAuthProviderIntent
+  }) => Effect.Effect<
+    AtlassianOAuthGrantStartResponse,
+    ApplicationConflict | ApplicationServiceUnavailable
+  >
+  readonly exchangeAtlassianOAuthGrant?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly sessionId: SessionId
+    readonly grantId: AtlassianOAuthGrantId
+    readonly code: string
+  }) => Effect.Effect<
+    AtlassianOAuthGrantExchangeResponse,
+    ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly completeAtlassianOAuthGrant?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly sessionId: SessionId
+    readonly grantId: AtlassianOAuthGrantId
+    readonly cloudId: string
+  }) => Effect.Effect<
+    DiscoveredAtlassianProfile,
+    ApplicationInvalidRequest | PluginAdministrationError
   >
   readonly connectAndTest?: (input: {
     readonly workspaceId: WorkspaceId

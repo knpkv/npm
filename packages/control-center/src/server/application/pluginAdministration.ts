@@ -12,6 +12,8 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import type * as Scope from "effect/Scope"
+import type * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
   CreatePluginConnectionRequest,
@@ -46,6 +48,10 @@ import {
   StoredPluginConfiguration,
   StoredPluginConfigurationKey
 } from "../persistence/repositories/pluginConfigurationModels.js"
+import {
+  type AtlassianOAuthGrantOperations,
+  makeAtlassianOAuthGrants
+} from "../plugins/atlassian/AtlassianOAuthGrants.js"
 import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
@@ -69,6 +75,15 @@ const secretEncoder = new TextEncoder()
 
 type AtlassianProviderId = Extract<PluginConnectionRecord["providerId"], "jira" | "confluence">
 type AtlassianConfigurationValue = CreatePluginConnectionValue | StoredPluginConfigurationValue
+type PluginAdministrationOAuthRequirements =
+  | Crypto.Crypto
+  | DomainEventWakeups
+  | FileSystem.FileSystem
+  | HttpClient.HttpClient
+  | Path.Path
+  | Persistence
+  | Scope.Scope
+  | SecretStore
 
 const isAtlassianProvider = (
   providerId: PluginConnectionRecord["providerId"]
@@ -114,6 +129,35 @@ const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAt
     (providerId === "confluence" && profile.token.cloud_id !== configuredText(values, "siteId"))
   ) {
     return yield* new ApplicationInvalidRequest()
+  }
+})
+
+const invalidateAtlassianOAuthProfileRuntimes = Effect.fn(
+  "PluginAdministration.invalidateAtlassianOAuthProfileRuntimes"
+)(function*(
+  persistence: Persistence["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  profileId: string
+) {
+  if (pluginConnections === null) return
+  const connections = yield* persistence.pluginConnections.list(workspaceId).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (connections.length > MAXIMUM_PLUGIN_CONNECTIONS) return yield* unavailable()
+  for (const connection of connections) {
+    if (!isAtlassianProvider(connection.providerId)) continue
+    const configuration = yield* persistence.pluginConfigurations.get(
+      workspaceId,
+      connection.pluginConnectionId
+    ).pipe(Effect.mapError(() => unavailable()))
+    if (
+      Option.isSome(configuration) &&
+      configuredText(configuration.value.values, "authMode") === "oauth" &&
+      configuredText(configuration.value.values, "oauthProfileId") === profileId
+    ) {
+      yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: connection.pluginConnectionId })
+    }
   }
 })
 
@@ -1001,7 +1045,9 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
 
 /** Construct the secret-free plugin administration adapter over durable host state. */
 export const makePluginAdministrationWithConnections = Effect.fn("PluginAdministration.makeWithConnections")(function*(
-  pluginConnections: PluginConnectionMapV1 | null
+  pluginConnections: PluginConnectionMapV1 | null,
+  publicOrigin = "http://127.0.0.1:4173",
+  atlassianOAuthGrants?: AtlassianOAuthGrantOperations
 ) {
   const persistence = yield* Persistence
   const cryptoService = yield* Crypto.Crypto
@@ -1039,6 +1085,31 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
       if (profiles.length > MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES) return yield* unavailable()
       return [...profiles].sort((left, right) => left.name.localeCompare(right.name))
     }),
+    ...(atlassianOAuthGrants === undefined
+      ? {}
+      : {
+        startAtlassianOAuthGrant: ({ providers, sessionId, workspaceId }) =>
+          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers),
+        exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
+          atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
+        completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
+          cloudId,
+          grantId,
+          sessionId,
+          workspaceId
+        }) {
+          return yield* Effect.uninterruptible(Effect.gen(function*() {
+            const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+            yield* invalidateAtlassianOAuthProfileRuntimes(
+              persistence,
+              pluginConnections,
+              workspaceId,
+              profile.profileId
+            )
+            return profile
+          }))
+        })
+      }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(
         persistence,
@@ -1152,12 +1223,36 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
 /** Construct administration reads when no provider runtime registry is configured. */
 export const makePluginAdministration = makePluginAdministrationWithConnections(null)
 
+/** Construct administration with the process-local browser OAuth grant manager enabled. */
+export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration.makeWithOAuth")(function*(
+  pluginConnections: PluginConnectionMapV1 | null,
+  publicOrigin: string
+): Effect.fn.Return<PluginAdministrationService, never, PluginAdministrationOAuthRequirements> {
+  const grants = yield* makeAtlassianOAuthGrants()
+  return yield* makePluginAdministrationWithConnections(pluginConnections, publicOrigin, grants)
+})
+
 /** Live plugin administration layer. */
 export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration)
 
+/** Live administration layer with browser Atlassian OAuth grants. */
+export const pluginAdministrationOAuthLayer = (
+  publicOrigin: string
+): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin))
+
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
-export const pluginAdministrationLayerWithConnections = (pluginConnections: PluginConnectionMapV1) =>
-  Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections))
+export const pluginAdministrationLayerWithConnections = (
+  pluginConnections: PluginConnectionMapV1,
+  publicOrigin?: string
+) => Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections, publicOrigin))
+
+/** Live administration layer backed by provider runtimes and browser Atlassian OAuth grants. */
+export const pluginAdministrationOAuthLayerWithConnections = (
+  pluginConnections: PluginConnectionMapV1,
+  publicOrigin: string
+): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections

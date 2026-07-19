@@ -5,6 +5,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 import {
   AgentApiGroup,
   ControlCenterApi,
+  CreateAtlassianOAuthGrantRequest,
   DeliveryGraphApiGroup,
   LiveEventsApiGroup,
   makeControlCenterApiClient,
@@ -78,6 +79,17 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
 }
 
 describe("ControlCenterApi contract", () => {
+  it("accepts only one or both distinct Atlassian OAuth providers", () => {
+    const isCreateGrantRequest = Schema.is(CreateAtlassianOAuthGrantRequest)
+
+    assert.isTrue(isCreateGrantRequest({ providers: ["jira"] }))
+    assert.isTrue(isCreateGrantRequest({ providers: ["confluence"] }))
+    assert.isTrue(isCreateGrantRequest({ providers: ["jira", "confluence"] }))
+    assert.isFalse(isCreateGrantRequest({ providers: [] }))
+    assert.isFalse(isCreateGrantRequest({ providers: ["jira", "jira"] }))
+    assert.isFalse(isCreateGrantRequest({ providers: ["jira", "bitbucket"] }))
+  })
+
   it("publishes stable error discriminators and HTTP statuses", () => {
     const specification = OpenApi.fromApi(ControlCenterApi)
     const configurationPath = specification.paths["/api/v1/plugins/{pluginConnectionId}/configuration"]
@@ -230,6 +242,17 @@ describe("ControlCenterApi contract", () => {
         ["overview", "GET", "/api/v1/plugins/overview"],
         ["discoverAwsProfiles", "GET", "/api/v1/plugins/discovery/aws-profiles"],
         ["discoverAtlassianProfiles", "GET", "/api/v1/plugins/discovery/atlassian-profiles"],
+        ["createAtlassianOAuthGrant", "POST", "/api/v1/plugins/oauth/atlassian/grants"],
+        [
+          "exchangeAtlassianOAuthGrant",
+          "POST",
+          "/api/v1/plugins/oauth/atlassian/grants/:grantId/exchange"
+        ],
+        [
+          "completeAtlassianOAuthGrant",
+          "POST",
+          "/api/v1/plugins/oauth/atlassian/grants/:grantId/complete"
+        ],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
@@ -340,6 +363,9 @@ describe("ControlCenterApi contract", () => {
       overview: [SessionCookieAuth.key],
       discoverAwsProfiles: [SessionCookieAuth.key],
       discoverAtlassianProfiles: [SessionCookieAuth.key],
+      createAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
+      exchangeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
+      completeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],

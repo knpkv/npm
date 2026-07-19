@@ -1,19 +1,22 @@
 import { Button, Field, Text } from "@knpkv/rly/primitives"
-import { type FormEvent, type ReactElement, useEffect, useState } from "react"
+import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
 import type {
+  AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   DiscoveredAtlassianProfile,
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
 import styles from "./AtlassianAccountSetupForm.module.css"
+import { rememberAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
 import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupValues.js"
 
 type AuthenticationMode = "oauth" | "api-token"
-type AtlassianProviderId = "confluence" | "jira"
-
 export interface AtlassianSetupIntent {
-  readonly providers: ReadonlyArray<AtlassianProviderId>
+  readonly preferredProfileId: string | null
+  readonly providers: AtlassianOAuthProviderIntent
+  readonly requestedOAuthProviders: AtlassianOAuthProviderIntent | null
 }
 
 const selectedProfile = (
@@ -36,6 +39,7 @@ export const AtlassianAccountSetupForm = ({
   catalogs,
   isSubmitting,
   onCancel,
+  onStartOAuth,
   onSubmit,
   profiles,
   profilesState,
@@ -44,6 +48,10 @@ export const AtlassianAccountSetupForm = ({
   readonly catalogs: ReadonlyArray<PluginServiceCatalogEntry>
   readonly isSubmitting: boolean
   readonly onCancel: () => void
+  readonly onStartOAuth: (
+    providers: AtlassianOAuthProviderIntent,
+    signal: AbortSignal
+  ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
   readonly profilesState: "failed" | "idle" | "loading" | "ready"
@@ -62,12 +70,22 @@ export const AtlassianAccountSetupForm = ({
   const [probePageId, setProbePageId] = useState("")
   const [email, setEmail] = useState("")
   const [apiToken, setApiToken] = useState("")
+  const [isStartingOAuth, setIsStartingOAuth] = useState(false)
+  const [oauthCallbackUrl, setOAuthCallbackUrl] = useState<string | null>(null)
   const [setupError, setSetupError] = useState<string | null>(null)
+  const startRequest = useRef<AbortController | null>(null)
+
+  useEffect(() => () => startRequest.current?.abort(), [])
 
   useEffect(() => {
     if (authenticationMode !== "oauth" || profileId.length > 0) return
-    const firstUsableProfile = profiles.find((profile) => isUsableProfile(profile, setupIntent))
-    if (firstUsableProfile !== undefined) setProfileId(firstUsableProfile.profileId)
+    const preferredProfile =
+      setupIntent.preferredProfileId === null ? undefined : selectedProfile(profiles, setupIntent.preferredProfileId)
+    const initialProfile =
+      preferredProfile !== undefined && isUsableProfile(preferredProfile, setupIntent)
+        ? preferredProfile
+        : profiles.find((profile) => isUsableProfile(profile, setupIntent))
+    if (initialProfile !== undefined) setProfileId(initialProfile.profileId)
   }, [authenticationMode, profileId, profiles, setupIntent])
 
   useEffect(() => {
@@ -153,6 +171,45 @@ export const AtlassianAccountSetupForm = ({
     })
   }
 
+  const startOAuth = (): void => {
+    if (setupIntent.requestedOAuthProviders === null) return
+    setSetupError(null)
+    setOAuthCallbackUrl(null)
+    setIsStartingOAuth(true)
+    startRequest.current?.abort()
+    const request = new AbortController()
+    startRequest.current = request
+    void onStartOAuth(setupIntent.requestedOAuthProviders, request.signal).then(
+      (result) => {
+        if (request.signal.aborted) return
+        if (result._tag === "configuration-required") {
+          setOAuthCallbackUrl(result.callbackUrl)
+          setSetupError("OAuth needs a one-time local client configuration before sign-in.")
+          setIsStartingOAuth(false)
+          return
+        }
+        if (!rememberAtlassianOAuthSetupIntent(result.authorizationUrl, setupIntent.providers)) {
+          setSetupError("Control Center could not preserve this Atlassian setup across sign-in. Try again.")
+          setIsStartingOAuth(false)
+          return
+        }
+        window.location.assign(result.authorizationUrl)
+      },
+      () => {
+        if (request.signal.aborted) return
+        setSetupError("Control Center could not start Atlassian sign-in. Try again.")
+        setIsStartingOAuth(false)
+      }
+    )
+  }
+
+  const useApiToken = (): void => {
+    startRequest.current?.abort()
+    startRequest.current = null
+    setIsStartingOAuth(false)
+    setAuthenticationMode("api-token")
+  }
+
   const discoveryMessage =
     profilesState === "loading"
       ? "Finding local Atlassian OAuth profiles…"
@@ -191,10 +248,25 @@ export const AtlassianAccountSetupForm = ({
       </Field>
       {authenticationMode === "oauth" ? (
         <>
+          <Button
+            disabled={setupIntent.requestedOAuthProviders === null}
+            loading={isStartingOAuth}
+            onClick={startOAuth}
+            type="button"
+            variant="primary"
+          >
+            Sign in with Atlassian
+          </Button>
+          {oauthCallbackUrl === null ? null : (
+            <Text as="p" tone="secondary" variant="meta">
+              Add <code>{oauthCallbackUrl}</code> as the callback URL, then run <code>jira auth configure</code> and
+              <code> confluence auth configure</code> on this machine.
+            </Text>
+          )}
           <Field label="OAuth profile" required size="compact">
             {(controlProps) => (
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
-                <option value="">Choose a local profile</option>
+                <option value="">Choose a profile already on this machine</option>
                 {profiles.map((profile) => (
                   <option
                     disabled={!isUsableProfile(profile, setupIntent)}
@@ -207,7 +279,7 @@ export const AtlassianAccountSetupForm = ({
               </select>
             )}
           </Field>
-          <Button onClick={() => setAuthenticationMode("api-token")} type="button" variant="quiet">
+          <Button onClick={useApiToken} type="button" variant="quiet">
             Use API token instead
           </Button>
         </>

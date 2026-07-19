@@ -9,6 +9,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
+  type AtlassianOAuthGrantStartResponse,
   type AtlassianProfileDiscoveryResponse,
   CreatePluginConnectionResponse,
   PluginConfiguration,
@@ -1017,6 +1018,46 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result, expected)
       assert.notInclude(JSON.stringify(result), "access_token")
       assert.notInclude(JSON.stringify(result), "refresh_token")
+    }))
+
+  it.effect("passes Atlassian OAuth provider intent through the owner handler", () =>
+    Effect.gen(function*() {
+      const expected: AtlassianOAuthGrantStartResponse = {
+        _tag: "configuration-required",
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      }
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        startAtlassianOAuthGrant: (input) => {
+          assert.strictEqual(input.workspaceId, session.workspaceId)
+          assert.strictEqual(input.sessionId, session.sessionId)
+          assert.deepStrictEqual(input.providers, ["confluence"])
+          return Effect.succeed(expected)
+        },
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.createAtlassianOAuthGrant({
+          payload: { providers: ["confluence"] }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
     }))
 
   it.effect("runs owner connection setup through the session and CSRF-protected handler", () =>

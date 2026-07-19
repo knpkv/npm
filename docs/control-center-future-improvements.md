@@ -11,7 +11,8 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Atlassian authorization
 
-- Add an in-app browser OAuth grant and callback. The current OAuth-first setup safely reuses local `jira-cli` and `confluence-to-markdown` profiles, with API tokens retained as a deliberate compatibility fallback.
+- Move OAuth client registration into a dedicated owner settings view. The MVP reports the callback URL and reuses the secure CLI client configuration files rather than accepting a client secret in browser state.
+- Add revocation, reauthorization, and expired-profile recovery controls without exposing access or refresh tokens.
 - Persist the selected Atlassian site separately from followed Jira projects and Confluence spaces.
 
 ## Build performance

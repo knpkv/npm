@@ -53,13 +53,22 @@ export {
 } from "./liveEvents.js"
 export { MediaApiGroup, MediaResponseHeaders, OpaqueMediaId, SafeMediaContentType } from "./media.js"
 export {
+  AtlassianOAuthGrantExchangeResponse,
+  AtlassianOAuthGrantId,
+  AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthProvider,
+  AtlassianOAuthProviderIntent,
+  AtlassianOAuthSite,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  CompleteAtlassianOAuthGrantRequest,
+  CreateAtlassianOAuthGrantRequest,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionValue,
   DiscoveredAtlassianProfile,
   DiscoveredAwsProfile,
+  ExchangeAtlassianOAuthGrantRequest,
   OpaqueSecretReference,
   PatchPluginConfigurationRequest,
   PluginConfiguration,

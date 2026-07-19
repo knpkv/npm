@@ -32,6 +32,7 @@ const MAXIMUM_PROVIDER_ACCOUNTS = 100
 const MAXIMUM_FOLLOWED_RESOURCES = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
+const MAXIMUM_ATLASSIAN_OAUTH_SITES = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
 const MAXIMUM_SECRET_VALUE_LENGTH = 16_384
 
@@ -73,6 +74,21 @@ const BoundedConfigurationText = Schema.String.check(
   Schema.isMaxLength(4_096)
 )
 const BoundedConfigurationUrl = BoundedConfigurationText.check(isProviderHttpUrl)
+const AtlassianCloudSiteUrl = BoundedConfigurationUrl.check(
+  Schema.makeFilter((value: string) => {
+    const decoded = Schema.decodeUnknownResult(Schema.URLFromString)(value)
+    if (Result.isFailure(decoded)) return false
+    const url = decoded.success
+    return (
+      url.protocol === "https:" &&
+      url.port.length === 0 &&
+      url.hostname.endsWith(".atlassian.net") &&
+      url.hostname.length > ".atlassian.net".length &&
+      (url.pathname === "" || url.pathname === "/") &&
+      url.search.length === 0
+    )
+  }, { expected: "an HTTPS Atlassian Cloud site root" })
+)
 
 /** Explicit replacement semantics for a redacted secret in a full configuration update. */
 export const SecretReferencePatchOperation = Schema.Union([
@@ -283,6 +299,85 @@ export const AtlassianProfileDiscoveryResponse = Schema.Array(DiscoveredAtlassia
 /** Decoded bounded local Atlassian profile discovery response. */
 export type AtlassianProfileDiscoveryResponse = typeof AtlassianProfileDiscoveryResponse.Type
 
+/** Single-use browser OAuth grant identifier; it is also the provider state parameter. */
+export const AtlassianOAuthGrantId = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_-]{43}$/u, { expected: "a base64url-encoded 256-bit OAuth state" })
+).pipe(Schema.brand("AtlassianOAuthGrantId"))
+
+/** Decoded single-use Atlassian OAuth grant identifier. */
+export type AtlassianOAuthGrantId = typeof AtlassianOAuthGrantId.Type
+
+/** Atlassian product requested by one browser OAuth grant. */
+export const AtlassianOAuthProvider = Schema.Literals(["jira", "confluence"])
+
+/** Decoded Atlassian product requested by OAuth. */
+export type AtlassianOAuthProvider = typeof AtlassianOAuthProvider.Type
+
+/** One or both distinct Atlassian products requested by an OAuth grant. */
+export const AtlassianOAuthProviderIntent = Schema.Array(AtlassianOAuthProvider).check(
+  Schema.isNonEmpty(),
+  Schema.makeFilter((providers) => providers.length <= 2, { expected: "at most two Atlassian OAuth providers" }),
+  Schema.makeFilter((providers) => new Set(providers).size === providers.length, {
+    expected: "distinct Atlassian OAuth providers"
+  })
+)
+
+/** Decoded one- or two-product Atlassian OAuth intent. */
+export type AtlassianOAuthProviderIntent = typeof AtlassianOAuthProviderIntent.Type
+
+/** Owner request to start OAuth for the products currently being configured. */
+export const CreateAtlassianOAuthGrantRequest = Schema.Struct({
+  providers: AtlassianOAuthProviderIntent
+}).annotate({ identifier: "CreateAtlassianOAuthGrantRequest" })
+
+/** Decoded owner request to start OAuth for the products currently being configured. */
+export type CreateAtlassianOAuthGrantRequest = typeof CreateAtlassianOAuthGrantRequest.Type
+
+/** Safe result of preparing the browser authorization redirect. */
+export const AtlassianOAuthGrantStartResponse = Schema.Union([
+  Schema.TaggedStruct("ready", {
+    authorizationUrl: Schema.String.check(isProviderHttpUrl),
+    callbackUrl: BoundedConfigurationUrl
+  }),
+  Schema.TaggedStruct("configuration-required", { callbackUrl: BoundedConfigurationUrl })
+]).pipe(Schema.toTaggedUnion("_tag"), Schema.annotate({ identifier: "AtlassianOAuthGrantStartResponse" }))
+
+/** Decoded browser authorization preparation result. */
+export type AtlassianOAuthGrantStartResponse = typeof AtlassianOAuthGrantStartResponse.Type
+
+/** Authorization code returned by Atlassian to the same authenticated browser. */
+export const ExchangeAtlassianOAuthGrantRequest = Schema.Struct({
+  code: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
+}).annotate({ identifier: "ExchangeAtlassianOAuthGrantRequest" })
+
+/** One accessible Atlassian site awaiting explicit selection. */
+export const AtlassianOAuthSite = Schema.Struct({
+  cloudId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  siteUrl: AtlassianCloudSiteUrl
+}).annotate({ identifier: "AtlassianOAuthSite" })
+
+/** Secret-free account and site choices returned after code exchange. */
+export const AtlassianOAuthGrantExchangeResponse = Schema.Struct({
+  grantId: AtlassianOAuthGrantId,
+  accountName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  accountEmail: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))),
+  sites: Schema.Array(AtlassianOAuthSite).check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((sites) => sites.length <= MAXIMUM_ATLASSIAN_OAUTH_SITES, {
+      expected: `at most ${MAXIMUM_ATLASSIAN_OAUTH_SITES} accessible Atlassian sites`
+    })
+  )
+}).annotate({ identifier: "AtlassianOAuthGrantExchangeResponse" })
+
+/** Decoded secret-free site-selection state. */
+export type AtlassianOAuthGrantExchangeResponse = typeof AtlassianOAuthGrantExchangeResponse.Type
+
+/** Explicit site choice that completes a pending browser OAuth grant. */
+export const CompleteAtlassianOAuthGrantRequest = Schema.Struct({
+  cloudId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+}).annotate({ identifier: "CompleteAtlassianOAuthGrantRequest" })
+
 /** Bounded plugin-navigation and portfolio response retained for v1 clients. */
 export const PluginListResponse = Schema.Array(PluginConnectionSummary).check(
   Schema.makeFilter((plugins) => plugins.length <= MAXIMUM_PLUGIN_CONNECTIONS, {
@@ -466,6 +561,44 @@ const discoverAtlassianProfiles = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const createAtlassianOAuthGrant = HttpApiEndpoint.post(
+  "createAtlassianOAuthGrant",
+  "/oauth/atlassian/grants",
+  {
+    payload: CreateAtlassianOAuthGrantRequest,
+    success: AtlassianOAuthGrantStartResponse,
+    error: [...pluginReadErrors, InvalidRequestApiError, ConflictApiError]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const exchangeAtlassianOAuthGrant = HttpApiEndpoint.post(
+  "exchangeAtlassianOAuthGrant",
+  "/oauth/atlassian/grants/:grantId/exchange",
+  {
+    params: Schema.Struct({ grantId: AtlassianOAuthGrantId }),
+    payload: ExchangeAtlassianOAuthGrantRequest,
+    success: AtlassianOAuthGrantExchangeResponse,
+    error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const completeAtlassianOAuthGrant = HttpApiEndpoint.post(
+  "completeAtlassianOAuthGrant",
+  "/oauth/atlassian/grants/:grantId/complete",
+  {
+    params: Schema.Struct({ grantId: AtlassianOAuthGrantId }),
+    payload: CompleteAtlassianOAuthGrantRequest,
+    success: DiscoveredAtlassianProfile,
+    error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const createConnection = HttpApiEndpoint.post("createConnection", "/connections", {
   payload: CreatePluginConnectionRequest,
   success: CreatePluginConnectionResponse,
@@ -529,6 +662,9 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     overview,
     discoverAwsProfiles,
     discoverAtlassianProfiles,
+    createAtlassianOAuthGrant,
+    exchangeAtlassianOAuthGrant,
+    completeAtlassianOAuthGrant,
     createConnection,
     setConnectionEnabled,
     health,
