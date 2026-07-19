@@ -17,6 +17,19 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+### Distribution JavaScript budgets
+
+`validate:dist` checks every emitted client and server `.js` file independently using its raw byte length and deterministic level-9 gzip byte length. Source maps, the Vite manifest, and `build-graph.json` are build metadata and are not runtime JavaScript artifacts.
+
+| Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
+| ------ | --------------------------- | ------------------------: | -----------------------------: |
+| Client | generated API client chunk  |    221,593 / 66,543 bytes |         235,000 / 70,000 bytes |
+| Server | shared `BindConfig-*` chunk | 1,583,001 / 273,567 bytes |      1,650,000 / 290,000 bytes |
+
+These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
+
+The remaining 1.58 MB raw shared server chunk is bounded technical debt: it is primarily Control Center's own shared application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries; raising the budget requires recording a new measurement and cause here.
+
 ## Run the application
 
 Build once, then start the authenticated application server:

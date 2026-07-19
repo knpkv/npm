@@ -7,6 +7,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
+import { gzipSync } from "node:zlib"
 import * as ts from "typescript"
 import { type ControlCenterBuildTarget, decodeBuildGraph, inspectBuildGraph } from "./build-graph.js"
 import {
@@ -14,6 +15,11 @@ import {
   initialJavaScriptArtifacts,
   inspectClientBuildContract
 } from "./clientBuildContract.js"
+import {
+  inspectJavaScriptArtifactBudgets,
+  type JavaScriptArtifactMeasurement,
+  javaScriptArtifactPaths
+} from "./javascriptArtifactBudget.js"
 import { inspectServerDeclarationContract } from "./serverDeclarationContract.js"
 
 class DistValidationError extends Data.TaggedError("DistValidationError")<{
@@ -89,6 +95,22 @@ const program = Effect.gen(function*() {
   const serverArtifacts = yield* filesWithin(fs, path, serverRoot)
   const serverFiles = serverArtifacts.map((file) => path.relative(serverRoot, file).replaceAll("\\", "/"))
   if (serverFiles.some((file) => file.startsWith("client/"))) failures.push("server build emitted browser source")
+
+  const buildTargets: ReadonlyArray<ControlCenterBuildTarget> = ["client", "server"]
+  for (const target of buildTargets) {
+    const root = target === "client" ? clientRoot : serverRoot
+    const files = target === "client" ? clientArtifacts : serverArtifacts
+    const measurements: Array<JavaScriptArtifactMeasurement> = []
+    for (const file of javaScriptArtifactPaths(files)) {
+      const source = yield* fs.readFile(file)
+      measurements.push({
+        artifact: path.relative(root, file).replaceAll("\\", "/"),
+        gzipBytes: gzipSync(source, { level: 9 }).byteLength,
+        rawBytes: source.byteLength
+      })
+    }
+    for (const violation of inspectJavaScriptArtifactBudgets(target, measurements)) failures.push(violation)
+  }
 
   const clientManifestSource = yield* fs.readFileString(path.join(clientRoot, ".vite/manifest.json"))
   const clientManifestValue = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(

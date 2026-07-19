@@ -32,6 +32,7 @@ export default defineConfig(({ mode }) => {
         outDir: "dist/client",
         sourcemap: true
       },
-    plugins: [react(), controlCenterBuildGraph(packageRoot, isServer ? "server" : "client")]
+    plugins: [react(), controlCenterBuildGraph(packageRoot, isServer ? "server" : "client")],
+    ...(isServer ? { ssr: { external: true } } : {})
   }
 })
