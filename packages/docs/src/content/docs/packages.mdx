@@ -59,12 +59,13 @@ Effect.runPromise(
 
 ## Local AI Adapters
 
-These packages expose local coding-agent CLIs through Effect AI's `LanguageModel` service. Each package keeps one public constructor, `model(options)`, and leaves authentication with the installed CLI.
+These packages expose local coding-agent CLIs through Effect and provide a shared protocol for durable application workers. Authentication stays with the installed CLI.
 
-| Package            | Public API       | Runtime                                              | Docs                          |
-| ------------------ | ---------------- | ---------------------------------------------------- | ----------------------------- |
-| `@knpkv/ai-codex`  | `model(options)` | Local `codex` process; read-only access by default.  | [Codex Adapter](/ai-codex/)   |
-| `@knpkv/ai-claude` | `model(options)` | Local `claude` process; read-only access by default. | [Claude Adapter](/ai-claude/) |
+| Package             | Public API                                   | Runtime                                              | Docs                          |
+| ------------------- | -------------------------------------------- | ---------------------------------------------------- | ----------------------------- |
+| `@knpkv/ai-runtime` | `AgentRuntime`, `layerAgentRuntime(adapter)` | Provider-neutral bounded event protocol.             | [Agent Runtime](/ai-runtime/) |
+| `@knpkv/ai-codex`   | `model(options)`, `streamEvents(options)`    | Local `codex` process; read-only access by default.  | [Codex Adapter](/ai-codex/)   |
+| `@knpkv/ai-claude`  | `model(options)`                             | Local `claude` process; read-only access by default. | [Claude Adapter](/ai-claude/) |
 
 ## Shared Libraries
 
@@ -87,6 +88,7 @@ These packages expose local coding-agent CLIs through Effect AI's `LanguageModel
 | `@knpkv/agent-skills`               | Codex and Claude skill directories.                                                                          |
 | `@knpkv/ai-codex`                   | Uses the Codex CLI's existing local authentication and configuration; the adapter owns no credential store.  |
 | `@knpkv/ai-claude`                  | Uses the Claude CLI's existing local authentication and configuration; the adapter owns no credential store. |
+| `@knpkv/ai-runtime`                 | Owns no state; applications persist jobs and opaque server-side continuation references.                     |
 
 ## Documentation Surfaces
 

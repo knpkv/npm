@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "noEmit": true,
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "overriddenschemaconstructor": "off"
+        },
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
+      }
+    ]
+  },
+  "include": ["src/**/*.ts", "dtslint/valid-contract.ts"],
+  "exclude": ["node_modules", "dist"]
+}

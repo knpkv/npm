@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.contract.json",
+  "compilerOptions": {
+    "plugins": [
+      {
+        "name": "@effect/language-service",
+        "namespaceImportPackages": ["effect", "@effect/*"],
+        "diagnosticSeverity": {
+          "overriddenschemaconstructor": "off"
+        },
+        "includeSuggestionsInTsc": false,
+        "ignoreEffectSuggestionsInTscExitCode": false,
+        "ignoreEffectWarningsInTscExitCode": false,
+        "ignoreEffectErrorsInTscExitCode": false
+      }
+    ]
+  },
+  "include": ["src/**/*.ts", "dtslint/public-contract.ts"],
+  "exclude": ["node_modules", "dist"]
+}

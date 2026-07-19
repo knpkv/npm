@@ -35,6 +35,7 @@ export default defineConfig({
         {
           label: "Local AI",
           items: [
+            { label: "Agent Runtime", link: "/ai-runtime/" },
             { label: "Codex Adapter", link: "/ai-codex/" },
             { label: "Claude Adapter", link: "/ai-claude/" }
           ]
