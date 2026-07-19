@@ -193,6 +193,61 @@ describe("relationship inference", () => {
     assert.isTrue(result.candidates.every(({ lifecycle }) => lifecycle === "missing"))
   })
 
+  it("matches exact current release documentation without using version prefixes or superseded pages", () => {
+    const issue = entity(
+      20,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "PAY-42 · Guard refunds",
+        details: { _tag: "issue", key: "PAY-42", status: "Ready", priority: null, estimatePoints: null }
+      },
+      [releaseId]
+    )
+    const exact = entity(21, {
+      ...common,
+      entityType: "page",
+      displayKey: "PAY/21",
+      title: "Payments 2026.29 runbook",
+      details: { _tag: "page", spaceKey: "PAY", revision: "1", status: "current" }
+    })
+    const patchVersion = entity(22, {
+      ...common,
+      entityType: "page",
+      displayKey: "PAY/22",
+      title: "Payments 2026.29.1 runbook",
+      details: { _tag: "page", spaceKey: "PAY", revision: "1", status: "current" }
+    })
+    const superseded = entity(23, {
+      ...common,
+      entityType: "page",
+      displayKey: "PAY/23",
+      title: "Payments archive",
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "2",
+        status: "superseded",
+        linkedIssueKeys: ["PAY-42"],
+        linkedReleaseVersions: ["2026.29"]
+      }
+    })
+
+    const result = deriveRelationshipInference({
+      entities: [issue, exact, patchVersion, superseded],
+      releases: [{ nodeId: nodeId("29"), releaseId, version: "2026.29" }],
+      relationships: []
+    })
+
+    const documentation = result.candidates.filter(({ kind }) => kind === "documented-by")
+    assert.lengthOf(documentation, 1)
+    assert.strictEqual(documentation[0]?.target._tag, "resolved")
+    if (documentation[0]?.target._tag === "resolved") {
+      assert.strictEqual(documentation[0].target.nodeId, exact.nodeId)
+    }
+  })
+
   it("marks oversized candidate sets truncated so materialization can fail closed", () => {
     const issueKeys = Array.from({ length: 100 }, (_, index) => `PAY-${index + 1}`)
     const issues = issueKeys.map((key, index) =>

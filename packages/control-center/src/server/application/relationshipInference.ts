@@ -101,6 +101,18 @@ const currentExternalRelationship = (relationship: DeliveryRelationship): boolea
     OWNED_RULE_IDS.has(relationship.provenance.ruleId)
   )
 
+const currentOwnedRelationship = (relationship: DeliveryRelationship): boolean =>
+  currentRelationship(relationship) &&
+  relationship.lifecycle._tag === "inferred" &&
+  relationship.provenance._tag === "rule" &&
+  OWNED_RULE_IDS.has(relationship.provenance.ruleId)
+
+const currentInferenceRelationship = (relationship: DeliveryRelationship): boolean =>
+  relationship.lifecycle._tag !== "rejected" &&
+  relationship.lifecycle._tag !== "superseded" &&
+  relationship.provenance._tag === "rule" &&
+  (relationship.provenance.ruleId === "delivery-gap-v1" || OWNED_RULE_IDS.has(relationship.provenance.ruleId))
+
 const relationshipInRelease = (relationship: DeliveryRelationship, releaseId: ReleaseId): boolean =>
   relationship.scope?._tag === "release" && relationship.scope.releaseId === releaseId
 
@@ -114,6 +126,20 @@ const containsToken = (text: string, token: string): boolean => {
     const boundary = (character: string | undefined) => character === undefined || !/[A-Z0-9]/u.test(character)
     if (boundary(before) && boundary(after)) return true
     offset = normalizedText.indexOf(normalizedToken, offset + normalizedToken.length)
+  }
+  return false
+}
+
+const containsReleaseVersion = (text: string, version: string): boolean => {
+  const normalizedText = text.toUpperCase()
+  const normalizedVersion = version.toUpperCase()
+  let offset = normalizedText.indexOf(normalizedVersion)
+  while (offset >= 0) {
+    const before = normalizedText[offset - 1]
+    const after = normalizedText[offset + normalizedVersion.length]
+    const boundary = (character: string | undefined) => character === undefined || !/[A-Z0-9._+-]/u.test(character)
+    if (boundary(before) && boundary(after)) return true
+    offset = normalizedText.indexOf(normalizedVersion, offset + normalizedVersion.length)
   }
   return false
 }
@@ -163,6 +189,33 @@ const issueGapIdentity = (releaseId: ReleaseId, issueNodeId: GraphNodeId): strin
 
 const pipelineGapIdentity = (releaseId: ReleaseId, pullRequestNodeId: GraphNodeId): string =>
   `gap:delivered-by:${releaseId}:${pullRequestNodeId}`
+
+const candidateGapKey = (candidate: RelationshipInferenceCandidate): string | null => {
+  if (candidate.lifecycle !== "missing") return null
+  if (candidate.kind === "implements" && candidate.target._tag === "resolved") {
+    return `${candidate.kind}:${candidate.releaseId}:${candidate.target.nodeId}`
+  }
+  if (candidate.kind === "delivered-by" && candidate.source._tag === "resolved") {
+    return `${candidate.kind}:${candidate.releaseId}:${candidate.source.nodeId}`
+  }
+  return null
+}
+
+const relationshipGapKey = (relationship: DeliveryRelationship): string | null => {
+  if (
+    relationship.lifecycle._tag !== "missing" ||
+    relationship.provenance._tag !== "rule" ||
+    relationship.provenance.ruleId !== "delivery-gap-v1" ||
+    relationship.scope?._tag !== "release"
+  ) return null
+  if (relationship.kind === "implements") {
+    return `${relationship.kind}:${relationship.scope.releaseId}:${relationship.targetNodeId}`
+  }
+  if (relationship.kind === "delivered-by") {
+    return `${relationship.kind}:${relationship.scope.releaseId}:${relationship.sourceNodeId}`
+  }
+  return null
+}
 
 const hasRelationship = (
   relationships: ReadonlyArray<DeliveryRelationship>,
@@ -216,7 +269,9 @@ const addDocumentationCandidates = (
   accumulator: CandidateAccumulator
 ) => {
   const issues = entities.filter((entity) => entity.projection.details._tag === "issue")
-  const pages = entities.filter((entity) => entity.projection.details._tag === "page")
+  const pages = entities.filter(
+    (entity) => entity.projection.details._tag === "page" && entity.projection.details.status === "current"
+  )
   for (const page of pages) {
     const pageDetails = page.projection.details
     if (pageDetails._tag !== "page") continue
@@ -254,7 +309,7 @@ const addDocumentationCandidates = (
       const explicitLink = pageDetails.linkedReleaseVersions?.some(
         (version) => version.toUpperCase() === release.version.toUpperCase()
       ) ?? false
-      if (!explicitLink && !containsToken(pageMetadata, release.version)) continue
+      if (!explicitLink && !containsReleaseVersion(pageMetadata, release.version)) continue
       addCandidate(
         accumulator,
         inferred({
@@ -287,7 +342,22 @@ export const deriveRelationshipInference = (input: {
   readonly releases: ReadonlyArray<RelationshipInferenceRelease>
   readonly relationships: ReadonlyArray<DeliveryRelationship>
 }): RelationshipInferenceResult => {
-  const entities = input.entities.filter(present)
+  const entities = input.entities.filter(present).map((entity) => ({
+    ...entity,
+    releaseIds: entity.releaseIds.filter((releaseId) => {
+      const touchesEntity = (relationship: DeliveryRelationship) =>
+        relationshipInRelease(relationship, releaseId) &&
+        (relationship.sourceNodeId === entity.nodeId || relationship.targetNodeId === entity.nodeId)
+      const inferenceMembership = input.relationships.some(
+        (relationship) => currentInferenceRelationship(relationship) && touchesEntity(relationship)
+      )
+      return !inferenceMembership ||
+        input.relationships.some((relationship) =>
+          currentExternalRelationship(relationship) &&
+          touchesEntity(relationship)
+        )
+    })
+  }))
   const issues = entities.filter((entity) => entity.projection.details._tag === "issue")
   const pullRequests = entities.filter((entity) => entity.projection.details._tag === "pull-request")
   const pipelines = entities.filter((entity) => entity.projection.details._tag === "pipeline-execution")
@@ -299,7 +369,19 @@ export const deriveRelationshipInference = (input: {
   for (const pullRequest of pullRequests) {
     const details = pullRequest.projection.details
     if (details._tag !== "pull-request") continue
-    const releaseIds = new Set(pullRequest.releaseIds)
+    const releaseIds = new Set(
+      pullRequest.releaseIds.filter((releaseId) => {
+        const touchesPullRequest = (relationship: DeliveryRelationship) =>
+          relationshipInRelease(relationship, releaseId) &&
+          (relationship.sourceNodeId === pullRequest.nodeId || relationship.targetNodeId === pullRequest.nodeId)
+        const ownedMembership = input.relationships.some(
+          (relationship) => currentOwnedRelationship(relationship) && touchesPullRequest(relationship)
+        )
+        return !ownedMembership || input.relationships.some(
+          (relationship) => currentExternalRelationship(relationship) && touchesPullRequest(relationship)
+        )
+      })
+    )
     for (const issue of issues) {
       const issueDetails = issue.projection.details
       if (issueDetails._tag !== "issue" || !containsToken(metadata(pullRequest), issueDetails.key)) continue
@@ -435,17 +517,24 @@ export const deriveRelationshipInference = (input: {
         : []
     )
   )
-  const obsoleteRelationshipIds = input.relationships.flatMap((relationship) =>
-    relationship.lifecycle._tag === "inferred" &&
+  const candidateGaps = new Set(
+    [...unique.values()].flatMap((candidate) => {
+      const key = candidateGapKey(candidate)
+      return key === null ? [] : [key]
+    })
+  )
+  const obsoleteRelationshipIds = input.relationships.flatMap((relationship) => {
+    const gapKey = relationshipGapKey(relationship)
+    const obsoleteInference = relationship.lifecycle._tag === "inferred" &&
       relationship.provenance._tag === "rule" &&
       OWNED_RULE_IDS.has(relationship.provenance.ruleId) &&
       relationship.scope?._tag === "release" &&
       !candidateEdges.has(
         `${relationship.kind}:${relationship.scope.releaseId}:${relationship.sourceNodeId}:${relationship.targetNodeId}`
       )
-      ? [relationship.relationshipId]
-      : []
-  )
+    const obsoleteGap = gapKey !== null && !candidateGaps.has(gapKey)
+    return obsoleteInference || obsoleteGap ? [relationship.relationshipId] : []
+  })
   return {
     candidates: [...unique.values()].sort((left, right) => left.identityKey.localeCompare(right.identityKey)),
     obsoleteGapIdentityKeys: [...obsoleteGaps].sort(),

@@ -9,6 +9,7 @@ import { derivePersonInitials, Person } from "../../domain/actors.js"
 import {
   type DeliveryEntityDetails,
   type DeliveryEntityKind,
+  type DeliveryNode,
   type DeliveryRelationship,
   EvidencePredicate,
   EvidenceValue,
@@ -55,6 +56,7 @@ type RelationshipProposal = Extract<NormalizedPluginEventV1, { readonly _tag: "P
 interface RelationshipEndpointResolution {
   readonly entity: EntityRecord | null
   readonly kind: DeliveryRelationship["sourceNodeKind"]
+  readonly node: DeliveryNode | null
   readonly nodeId: GraphNodeId
   readonly releaseId: ReleaseId | null
 }
@@ -446,28 +448,6 @@ const nodeIdFor = Effect.fn("NormalizedPluginPageMaterialization.nodeIdFor")(fun
 ) {
   return GraphNodeId.make(
     yield* stableUuid(cryptoService, materializationKey(scope, "entity-node", vendorImmutableId), eventId)
-  )
-})
-
-const releaseIdFor = Effect.fn("NormalizedPluginPageMaterialization.releaseIdFor")(function*(
-  cryptoService: Crypto.Crypto,
-  scope: NormalizedPluginPageMaterializationScope,
-  vendorImmutableId: string,
-  eventId: string
-) {
-  return ReleaseId.make(
-    yield* stableUuid(cryptoService, materializationKey(scope, "release", vendorImmutableId), eventId)
-  )
-})
-
-const releaseNodeIdFor = Effect.fn("NormalizedPluginPageMaterialization.releaseNodeIdFor")(function*(
-  cryptoService: Crypto.Crypto,
-  scope: NormalizedPluginPageMaterializationScope,
-  vendorImmutableId: string,
-  eventId: string
-) {
-  return GraphNodeId.make(
-    yield* stableUuid(cryptoService, materializationKey(scope, "release-node", vendorImmutableId), eventId)
   )
 })
 
@@ -938,10 +918,27 @@ const materializeRelationship = Effect.fn(
         }
         return yield* release.failure
       }
+      const nodeId = yield* releaseNodeIdFor(cryptoService, scope, reference.vendorImmutableId, event.eventId)
+      const existingNode = yield* persistence.deliveryGraph.read(scope.workspaceId, {
+        _tag: "node",
+        nodeId
+      }).pipe(Effect.result)
+      if (Result.isFailure(existingNode) && existingNode.failure._tag !== "RecordNotFoundError") {
+        return yield* existingNode.failure
+      }
       return {
         entity: null,
         kind: "release",
-        nodeId: yield* releaseNodeIdFor(cryptoService, scope, reference.vendorImmutableId, event.eventId),
+        node: Result.isSuccess(existingNode)
+          ? null
+          : {
+            workspaceId: scope.workspaceId,
+            nodeId,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId } },
+            createdAt: scope.committedAt
+          },
+        nodeId,
         releaseId
       } satisfies RelationshipEndpointResolution
     }
@@ -952,6 +949,7 @@ const materializeRelationship = Effect.fn(
     return {
       entity,
       kind,
+      node: null,
       nodeId: yield* nodeIdFor(cryptoService, scope, reference.vendorImmutableId, event.eventId),
       releaseId: null
     } satisfies RelationshipEndpointResolution
@@ -987,12 +985,15 @@ const materializeRelationship = Effect.fn(
     ? existing.success.value
     : null
   const revision = LedgerRevision.make((previous?.revision ?? 0) + 1)
+  const nodes: Array<DeliveryNode> = []
+  if (source.node !== null) nodes.push(source.node)
+  if (target.node !== null && target.node.nodeId !== source.nodeId) nodes.push(target.node)
   const receipt = yield* writeGraph(
     persistence,
     scope.workspaceId,
     {
       entityProjections: [],
-      nodes: [],
+      nodes,
       evidenceItems: [],
       evidenceClaims: [],
       relationships: [
@@ -1034,7 +1035,7 @@ const materializeRelationship = Effect.fn(
     },
     event.eventId
   )
-  return receipt.relationshipCount
+  return { nodeCount: receipt.nodeCount, relationshipCount: receipt.relationshipCount }
 })
 
 const hasAuthoritativeJiraFixVersions = (event: NormalizedPluginEventV1): event is EntityUpsert => {
@@ -1221,7 +1222,9 @@ export const materializeNormalizedPluginPage = Effect.fn(
     }
     for (const event of events) {
       if (event._tag !== "ProposeRelationship") continue
-      relationshipCount += yield* materializeRelationship(persistence, cryptoService, scope, event)
+      const receipt = yield* materializeRelationship(persistence, cryptoService, scope, event)
+      nodeCount += receipt.nodeCount
+      relationshipCount += receipt.relationshipCount
     }
     relationshipCount += yield* retireMissingJiraReleaseContainments(
       persistence,
