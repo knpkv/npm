@@ -137,29 +137,17 @@ explicit. Those filters now execute against the complete current workspace proje
 
 ## Remaining roadmap
 
-- D07 is complete through exact-scope authenticated item shares. The workspace command search
-  combines the authenticated release portfolio and Items index with deterministic ranking,
-  keyboard navigation, exact destinations, and contextual Relay access. Authorized links resolve
-  one current item projection only after grantee, expiry, revocation, workspace, and target checks.
-  D08 timeline, event detail, bounded exports, and export audit are complete. D09 has the shared
-  HTTP/SSE/background graceful-drain boundary, stable subsystem hook snapshots, SQLite WAL flush,
-  bounded governed-action startup recovery, append-only durable recovery-claim expiry during
-  drain, and append-only fake sync attempts whose open work is reconciled as interrupted before
-  startup synchronization. The D05 bounded readiness batch refinement is complete.
-- I01–I12: production CodeCommit, CodePipeline, Jira, Confluence, and Clockify adapters plus sync,
-  webhooks, configuration, and policy integration.
-- S01–S07: complete the full Jira, CodeCommit, Confluence, CodePipeline, and Clockify service pages,
-  shared entity shell/presenters, and cross-service route-state acceptance.
-- A01–A05 and A08–A12: connect complete provider-backed PR data, durable governed agent jobs and
-  release threads, an OpenAI-compatible provider, provider administration, review findings, and
-  static-analysis suggestion/application flows. The reusable diff UI and local CLI providers are
-  already delivered.
-- Complete the adapter-dependent H01–H07 operational, accessibility, and parity work after the
-  production integrations above exist. Documentation, changesets, repository gates, exact-commit
-  reviews, and PR monitoring for the current safe checkpoint are handled in this branch.
+- D01–D09 are complete at the intended MVP boundary.
+- Read-only production adapters, live connection tests, first-run setup, shared AWS profiles,
+  preferred Atlassian OAuth, provider-account ownership, multi-resource following, and bounded batch
+  setup are delivered. Provider synchronization is incomplete for Jira and Confluence; all five
+  adapters still need their planned governed write capabilities.
+- S01–S07 canonical service pages, complete application diff data, durable agent jobs/threads,
+  sandbox review, provider administration, and final hardening remain.
 
-The detailed dependency order remains in `implementation-plan.md` and the milestone files under
-`plan/`.
+The current status, complete task list, faster vertical-slice order, acceptance tests, and explicit
+deferrals are in [remaining work](./remaining-work.md). The original capability definitions remain
+in `implementation-plan.md` and the milestone files under `plan/`.
 
 ## Known non-ideal pieces
 
@@ -258,7 +246,7 @@ The detailed dependency order remains in `implementation-plan.md` and the milest
 
 ## Recommended next session
 
-Run the remaining 100-release readiness benchmark, then continue with D08 attributable Timeline and
-bounded exports.
-Run one independent exact-commit review after each deterministic milestone gate; turn recurring,
-high-impact, mechanically enforceable findings into static rules or repository instructions.
+Start M1.1 from [remaining work](./remaining-work.md): add one bounded owner-only manual sync journey
+for the production adapters that already negotiate synchronization. Run one consolidated exact-diff
+review after focused deterministic gates; turn only recurring, high-impact, mechanically enforceable
+findings into static rules or repository instructions.

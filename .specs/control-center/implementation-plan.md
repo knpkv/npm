@@ -6,6 +6,11 @@ Status: **Phase 4 approved — Phase 5 implementation authorized on 2026-07-13**
 
 This index turns the approved [requirements](./requirements.md) and [design](./design.md) into reviewable, independently passing commits. The plan is split by milestone so implementation detail does not accumulate in one oversized file.
 
+The source-backed status and smaller post-checkpoint delivery sequence are maintained in
+[remaining work](./remaining-work.md). The milestone files below remain the normative capability
+definitions; the remaining-work specification splits their unfinished portions into faster vertical
+slices without weakening their security or authority boundaries.
+
 ## Milestones
 
 | Order | Milestone                                                     | Commit IDs | Exit evidence                                                                                 |
