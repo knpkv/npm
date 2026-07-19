@@ -33,6 +33,7 @@ import {
   type JiraIssueWatermark,
   type JiraPageRequest,
   type JiraProjectIssue,
+  JiraProviderPageToken,
   type JiraReadProvider,
   makeJiraReadProvider
 } from "./JiraReadProvider.js"
@@ -64,11 +65,7 @@ const JiraCheckpointIssueId = Schema.String.check(
   Schema.isMaxLength(64),
   Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
 )
-const JiraCheckpointPageToken = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(512)
-)
+const JiraCheckpointPageToken = JiraProviderPageToken
 const JiraCheckpointIssueKey = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -105,8 +102,8 @@ const JiraSyncCheckpointV3 = Schema.Struct({
   cursorExpiresAt: Schema.NullOr(UtcTimestamp)
 }).check(
   Schema.makeFilter(
-    ({ issueKey, updatedAt }) => (issueKey === null) === (updatedAt === null),
-    { expected: "both committed Jira watermark fields or neither" }
+    ({ issueKey, updatedAt }) => issueKey === null || updatedAt !== null,
+    { expected: "a committed Jira issue key only with its update watermark" }
   ),
   Schema.makeFilter(
     ({ queryIssueKey, queryUpdatedAt }) => queryIssueKey === null || queryUpdatedAt !== null,
@@ -419,7 +416,7 @@ const checkpointState = Effect.fn("JiraReadPlugin.checkpointState")(function*(
       nextPageToken: null
     }
   }
-  const committedWatermark = decoded.updatedAt === null || decoded.issueKey === null
+  const committedWatermark = decoded.updatedAt === null
     ? null
     : { updatedAt: DateTime.formatIso(decoded.updatedAt), issueKey: decoded.issueKey }
   const queryWatermark = decoded.queryUpdatedAt === null
@@ -667,7 +664,7 @@ const syncProject = (
                         }
                         : null
                     ),
-                    hasMore: index < providerPage.issues.length - 1 || providerPage.nextPageToken !== null
+                    hasMore: index < providerPage.issues.length - 1 || canContinue
                   }).pipe(
                     Effect.mapError(() =>
                       new PluginMalformedResponseFailure({
@@ -701,7 +698,7 @@ const syncProject = (
                           nextPageToken: providerPage.nextPageToken
                         }
                     ),
-                    hasMore: providerPage.nextPageToken !== null
+                    hasMore: false
                   }).pipe(
                     Effect.mapError(() =>
                       new PluginMalformedResponseFailure({

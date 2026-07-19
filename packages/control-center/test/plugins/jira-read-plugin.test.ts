@@ -827,12 +827,40 @@ describe("JiraReadPlugin", () => {
       const skipped = yield* synchronize(checkpoint)
       assert.lengthOf(skipped, 1)
       assert.deepStrictEqual(skipped[0]?.events, [])
+      assert.isFalse(skipped[0]?.hasMore)
       assert.include(skipped[0]?.checkpointAfterPage ?? "", "page-2")
 
       const resumed = yield* synchronize(skipped[0]?.checkpointAfterPage ?? checkpoint)
       assert.isNotEmpty(resumed[0]?.events ?? [])
       assert.include(resumed[0]?.checkpointAfterPage ?? "", "PAY-10043")
       assert.deepStrictEqual(yield* Ref.get(pageTokens), [null, "page-2"])
+    }))
+
+  it.effect("migrates quiet legacy watermarks without inventing an issue key", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [], nextPageToken: null })
+      })
+      const legacyCheckpoints = [
+        "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}",
+        "{\"version\":2,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\",\"nextPageToken\":null}"
+      ]
+
+      for (const legacyCheckpoint of legacyCheckpoints) {
+        const pages = yield* withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(legacyCheckpoint)))),
+            Effect.map((collectedPages) => [...collectedPages])
+          )
+        )
+
+        assert.lengthOf(pages, 1)
+        assert.deepStrictEqual(pages[0]?.events, [])
+        assert.isFalse(pages[0]?.hasMore)
+        assert.include(pages[0]?.checkpointAfterPage ?? "", "2026-07-17T09:30:00.000Z")
+        assert.include(pages[0]?.checkpointAfterPage ?? "", "\"issueKey\":null")
+      }
     }))
 
   it.effect("binds a bounded provider cursor to its original query and drops it after expiry", () =>
@@ -877,7 +905,7 @@ describe("JiraReadPlugin", () => {
       const initial = yield* synchronize(null)
       const boundedCheckpoint = initial[0]?.checkpointAfterPage ?? null
       assert.isNotNull(boundedCheckpoint)
-      assert.isTrue(initial[0]?.hasMore)
+      assert.isFalse(initial[0]?.hasMore)
 
       yield* synchronize(boundedCheckpoint)
       assert.deepStrictEqual((yield* Ref.get(searches))[1], {

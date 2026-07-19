@@ -27,7 +27,7 @@ import {
   ReleaseId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
-import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plugins/events.js"
+import { NormalizedPluginEventV1, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
@@ -84,6 +84,12 @@ const ReleaseAttributes = Schema.Struct({
   serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
   lifecycle: Schema.Literals(["assembling", "candidate", "deploying", "released", "cancelled"])
+})
+const JiraIssueRelationshipSnapshot = Schema.Struct({
+  fixVersions: Schema.Array(Schema.Struct({
+    id: Schema.NullOr(Schema.String)
+  })),
+  truncatedFields: Schema.Array(Schema.String)
 })
 const EvidenceData = Schema.Struct({
   predicate: Schema.optionalKey(EvidencePredicate),
@@ -436,6 +442,14 @@ const sourceRevision = (
   normalizationSchemaVersion: NormalizationSchemaVersion.make(1)
 })
 
+const laterTimestamp = (left: UtcTimestamp, right: UtcTimestamp): UtcTimestamp =>
+  DateTime.Order(left, right) >= 0 ? left : right
+
+const sameSourceUrl = (
+  left: EntityUpsert["sourceUrl"],
+  right: EntityUpsert["sourceUrl"]
+): boolean => left?.href === right?.href
+
 const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(function*(
   persistence: PersistenceService,
   workspaceId: WorkspaceId,
@@ -547,15 +561,19 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
       providerId === scope.providerId &&
       vendorImmutableId === event.vendorImmutableId
   )
+  const observedAt = previousSource === undefined
+    ? event.observedAt
+    : laterTimestamp(previousSource.lastObservedAt, event.observedAt)
   const source = sourceRevision(
     scope,
     event,
     previousSource?.firstObservedAt ?? event.observedAt,
     event.sourceUrl
   )
+  const refreshedSource = { ...source, lastObservedAt: observedAt }
   const sourceAgeSeconds = Math.max(
     0,
-    (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(event.observedAt)) / 1_000
+    (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(observedAt)) / 1_000
   )
   const release = yield* Schema.decodeUnknownEffect(Schema.toType(Release))({
     createdAt: previous?.release.createdAt ?? event.observedAt,
@@ -563,8 +581,8 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
       _tag: "current",
       evaluatedAt: scope.committedAt,
       pluginHealth: scope.successfulHealth,
-      provenance: { _tag: "provider", sourceRevision: source },
-      sourceObservedAt: event.observedAt,
+      provenance: { _tag: "provider", sourceRevision: refreshedSource },
+      sourceObservedAt: observedAt,
       staleAfterSeconds: Math.max(1, Math.ceil(sourceAgeSeconds) + 86_400),
       synchronizedAt: scope.committedAt
     },
@@ -580,19 +598,26 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
           providerId !== scope.providerId ||
           vendorImmutableId !== event.vendorImmutableId
       ) ?? []),
-      source
+      refreshedSource
     ],
     targetEnvironmentIds: previous?.release.targetEnvironmentIds ?? [],
     updatedAt: scope.committedAt,
     version: attributes.version,
     workspaceId: scope.workspaceId
   }).pipe(Effect.mapError(() => malformed("normalized-release-invalid", event.eventId)))
-  if (previousSource?.revision !== event.revision) {
-    if (previous === null) {
-      yield* persistence.releases.create(scope.workspaceId, release)
-    } else {
-      yield* persistence.releases.append(scope.workspaceId, release, previous.revision)
-    }
+  if (previous === null) {
+    yield* persistence.releases.create(scope.workspaceId, release)
+  } else if (
+    previousSource === undefined ||
+    previousSource.revision !== refreshedSource.revision ||
+    !sameSourceUrl(previousSource.sourceUrl, refreshedSource.sourceUrl) ||
+    !DateTime.Equivalence(previousSource.lastObservedAt, refreshedSource.lastObservedAt) ||
+    !DateTime.Equivalence(previousSource.synchronizedAt, refreshedSource.synchronizedAt) ||
+    previous.release.serviceName !== release.serviceName ||
+    previous.release.version !== release.version ||
+    previous.release.lifecycle !== release.lifecycle
+  ) {
+    yield* persistence.releases.append(scope.workspaceId, release, previous.revision)
   }
   const nodeId = yield* releaseNodeIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId)
   const existingNode = yield* persistence.deliveryGraph.read(scope.workspaceId, {
@@ -906,6 +931,115 @@ const materializeRelationship = Effect.fn(
   return receipt.relationshipCount
 })
 
+const hasAuthoritativeJiraFixVersions = (event: NormalizedPluginEventV1): event is EntityUpsert => {
+  if (event._tag !== "UpsertEntity" || event.entityType !== "jira.issue") return false
+  const snapshot = Schema.decodeUnknownResult(JiraIssueRelationshipSnapshot)(event.attributes)
+  return Result.isSuccess(snapshot) && !snapshot.success.truncatedFields.includes("fixVersions")
+}
+
+const cachedNormalizedEvents = Effect.fn(
+  "NormalizedPluginPageMaterialization.cachedNormalizedEvents"
+)(function*(records: ReadonlyArray<{ readonly payloadJson: string | null }>) {
+  const events: Array<NormalizedPluginEventV1> = []
+  for (const record of records) {
+    if (record.payloadJson === null) continue
+    const payload = yield* Schema.decodeUnknownEffect(Schema.UnknownFromJsonString)(record.payloadJson).pipe(
+      Effect.mapError(() => malformed("normalized-plugin-cache-json-invalid"))
+    )
+    events.push(
+      yield* Schema.decodeUnknownEffect(NormalizedPluginEventV1)(payload).pipe(
+        Effect.mapError(() => malformed("normalized-plugin-cache-event-invalid"))
+      )
+    )
+  }
+  return events
+})
+
+const isReleaseContainmentForIssue = (
+  event: NormalizedPluginEventV1,
+  issue: EntityUpsert
+): event is RelationshipProposal =>
+  event._tag === "ProposeRelationship" &&
+  event.relationshipType === "contains" &&
+  event.from.entityType === "release" &&
+  event.to.entityType === issue.entityType &&
+  event.to.vendorImmutableId === issue.vendorImmutableId
+
+const retireMissingJiraReleaseContainments = Effect.fn(
+  "NormalizedPluginPageMaterialization.retireMissingJiraReleaseContainments"
+)(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  previousEvents: ReadonlyArray<NormalizedPluginEventV1>,
+  acceptedEvents: ReadonlyArray<NormalizedPluginEventV1>
+) {
+  let relationshipCount = 0
+  for (const issue of acceptedEvents) {
+    if (!hasAuthoritativeJiraFixVersions(issue)) continue
+    const currentRelationshipIds = new Set(
+      acceptedEvents
+        .filter((event) => isReleaseContainmentForIssue(event, issue))
+        .map(({ relationshipId }) => relationshipId)
+    )
+    const removed = previousEvents.filter(
+      (event) => isReleaseContainmentForIssue(event, issue) && !currentRelationshipIds.has(event.relationshipId)
+    )
+    if (removed.length === 0) continue
+    const source = yield* findEntity(persistence, scope, issue.vendorImmutableId)
+    if (source === null) return yield* malformed("normalized-relationship-endpoint-missing", issue.eventId)
+
+    for (const proposal of removed) {
+      if (proposal._tag !== "ProposeRelationship") continue
+      const relationshipId = RelationshipId.make(
+        yield* stableUuid(
+          cryptoService,
+          materializationKey(scope, "relationship", proposal.relationshipId),
+          issue.eventId
+        )
+      )
+      const existing = yield* persistence.deliveryGraph.read(scope.workspaceId, {
+        _tag: "relationship",
+        relationshipId,
+        revision: null
+      }).pipe(Effect.result)
+      if (Result.isFailure(existing)) {
+        if (existing.failure._tag === "RecordNotFoundError") continue
+        return yield* existing.failure
+      }
+      if (existing.success._tag !== "relationship") continue
+      const previous = existing.success.value
+      if (previous.lifecycle._tag === "rejected" || previous.lifecycle._tag === "superseded") continue
+      const receipt = yield* writeGraph(persistence, scope.workspaceId, {
+        entityProjections: [],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: [{
+          ...previous,
+          revision: LedgerRevision.make(previous.revision + 1),
+          supersedesRevision: previous.revision,
+          lifecycle: {
+            _tag: "superseded",
+            effectiveAt: issue.observedAt,
+            reason: "No longer present in the latest Jira fixVersion observation."
+          },
+          provenance: {
+            _tag: "plugin",
+            pluginConnectionId: scope.pluginConnectionId,
+            sourceEntityId: source.entityId,
+            sourceEntityRevision: LedgerRevision.make(source.revision)
+          },
+          recordedBy: { _tag: "system", component: "normalized-plugin-page-materializer" },
+          recordedAt: scope.committedAt
+        }]
+      }, issue.eventId)
+      relationshipCount += receipt.relationshipCount
+    }
+  }
+  return relationshipCount
+})
+
 /** Host authority supplied separately from provider-controlled normalized data. */
 export interface NormalizedPluginPageMaterializationScope {
   readonly workspaceId: WorkspaceId
@@ -952,6 +1086,15 @@ export const materializeNormalizedPluginPage = Effect.fn(
     if (scope.expectedAuthority !== undefined) {
       yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
     }
+    const previousEvents = scope.providerId === "jira" && page.events.some(hasAuthoritativeJiraFixVersions)
+      ? yield* cachedNormalizedEvents(
+        yield* persistence.pluginRuntime.getCache(
+          scope.workspaceId,
+          scope.pluginConnectionId,
+          scope.streamKey
+        )
+      )
+      : []
     const committed = yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
       scope.workspaceId,
       scope.pluginConnectionId,
@@ -1000,6 +1143,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
       if (event._tag !== "ProposeRelationship") continue
       relationshipCount += yield* materializeRelationship(persistence, cryptoService, scope, event)
     }
+    relationshipCount += yield* retireMissingJiraReleaseContainments(
+      persistence,
+      cryptoService,
+      scope,
+      previousEvents,
+      events
+    )
     return {
       pageCommitted: committed.pageCommitted,
       acceptedEventCount: events.length,

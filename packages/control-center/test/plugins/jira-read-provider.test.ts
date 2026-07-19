@@ -169,6 +169,48 @@ describe("JiraReadProvider", () => {
     }).pipe(Effect.provide(jiraClientLayer({ issues: [], nextPageToken: null }, requests)))
   })
 
+  it.effect("accepts opaque enhanced-search cursors beyond Jira identifier bounds", () => {
+    const nextPageToken = "t".repeat(700)
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+      const page = yield* provider.searchProjectIssues({
+        projectId: "10",
+        watermark: null,
+        nextPageToken: null,
+        maxResults: 25,
+        timeZone: "UTC"
+      })
+
+      assert.strictEqual(page.nextPageToken, nextPageToken)
+    }).pipe(Effect.provide(jiraClientLayer({ issues: [], isLast: false, nextPageToken }, [])))
+  })
+
+  it.effect("keeps Jira issue identifiers within their 512-character bound", () =>
+    Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+      const outcome = yield* provider.searchProjectIssues({
+        projectId: "10",
+        watermark: null,
+        nextPageToken: null,
+        maxResults: 25,
+        timeZone: "UTC"
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-project-search-response-invalid")
+        }
+      }
+    }).pipe(Effect.provide(jiraClientLayer({
+      issues: [{ id: "10043", key: "K".repeat(513), fields: {} }],
+      isLast: true,
+      nextPageToken: null
+    }, []))))
+
   it.effect("maps a numeric Retry-After delta from the current Effect clock", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-17T12:00:00.000Z")))

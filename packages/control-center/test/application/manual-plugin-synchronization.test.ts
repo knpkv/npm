@@ -20,6 +20,8 @@ import { PersistenceOperationError } from "../../src/server/persistence/errors.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { makeJiraReadPluginRuntimeFromProvider } from "../../src/server/plugins/jira/JiraReadPlugin.js"
+import type { JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection, type PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
@@ -228,6 +230,72 @@ describe("manual plugin synchronization", () => {
       })
       assert.strictEqual(DateTime.formatIso(entity.sourceRevision.lastObservedAt), "2026-07-19T12:00:01.000Z")
       assert.strictEqual(DateTime.formatIso(entity.sourceRevision.synchronizedAt), "2026-07-19T12:00:01.000Z")
+    })))
+
+  it.effect("accepts a bounded Jira invocation as terminal while persisting its durable cursor", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "jira")
+      if (fixture === undefined) return yield* Effect.die("jira fixture not found")
+      const { persistence } = yield* setupFixture(fixture)
+      const provider: JiraReadProvider = {
+        getCurrentUser: Effect.succeed({
+          accountId: "ari",
+          displayName: "Ari Chen",
+          active: true,
+          timeZone: "UTC"
+        }),
+        getServerInfo: Effect.succeed({ baseUrl: "https://acme.atlassian.net", serverTitle: "Acme Jira" }),
+        getProject: () => Effect.succeed({ id: "10", key: "PAY", name: "Payments" }),
+        getIssue: () => Effect.succeed(Option.none()),
+        getComments: (_issueId, request) =>
+          Effect.succeed({ comments: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({ values: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              id: "10042",
+              key: "PAY-42",
+              fields: {
+                summary: "Protect payment retries",
+                updated: "2026-07-17T09:30:00.000Z",
+                project: { id: "10", key: "PAY", name: "Payments" }
+              }
+            }],
+            nextPageToken: "provider-page-2"
+          })
+      }
+      const runtime = makeJiraReadPluginRuntimeFromProvider(provider, {
+        webBaseUrl: "https://acme.atlassian.net",
+        siteId: "cloud-acme",
+        projectId: "10",
+        pageSize: 1,
+        maximumPages: 1,
+        operationTimeoutMillis: 5_000
+      }, "cloud-acme")
+      const connections: PluginConnectionMapV1 = {
+        contextEffect: ({ pluginConnectionId }) =>
+          pluginConnectionId === fixture.pluginConnectionId
+            ? Layer.build(runtime.layer)
+            : Effect.die("fixture connection not found"),
+        invalidate: () => Effect.void
+      }
+      const synchronization = yield* makeManualPluginSynchronization(connections)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(synchronized.result, "synchronized")
+      assert.strictEqual(synchronized.pagesCommitted, 1)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        Schema.decodeSync(PluginStreamKey)(fixture.streamKey)
+      )
+      assert.include(stream.checkpointJson ?? "", "provider-page-2")
     })))
 
   it.effect("materializes each supported fixture connection once and exposes replay-safe attempt state", () =>

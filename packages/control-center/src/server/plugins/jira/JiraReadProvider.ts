@@ -51,6 +51,18 @@ const JiraProviderIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(512)
 )
+/**
+ * Leave room for both issue-key watermarks and timestamps inside the 2,048-character
+ * durable plugin checkpoint while accepting Jira cursors beyond identifier bounds.
+ */
+export const JiraProviderPageToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(800),
+  Schema.makeFilter((value) => JSON.stringify(value).length <= 802, {
+    expected: "an opaque Jira page token that fits the durable checkpoint envelope"
+  })
+)
 const JiraProviderIssueId = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -69,7 +81,7 @@ export type JiraProjectIssue = typeof JiraProjectIssue.Type
 const JiraProjectIssuePageResponse = Schema.Struct({
   issues: Schema.Array(JiraProjectIssue),
   isLast: Schema.optionalKey(Schema.Boolean),
-  nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderIdentifier))
+  nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderPageToken))
 })
 
 /** Schema-decoded page shape crossing the bounded project iteration boundary. @internal */

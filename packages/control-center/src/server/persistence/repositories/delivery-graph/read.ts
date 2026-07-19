@@ -554,6 +554,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               WHERE revision.workspace_id = ${workspaceId}
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id IS NULL
+                AND revision.lifecycle NOT IN ('rejected', 'superseded')
               ORDER BY revision.recorded_at DESC
               LIMIT ${identityLimit}`
           : yield* sql`SELECT revision.relationship_id AS relationshipId
@@ -565,6 +566,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               WHERE revision.workspace_id = ${workspaceId}
                 AND revision.release_id = ${query.releaseId}
                 AND revision.environment_id = ${query.environmentId}
+                AND revision.lifecycle NOT IN ('rejected', 'superseded')
               ORDER BY revision.recorded_at DESC
               LIMIT ${identityLimit}`
         const identities = yield* decodeRows(Schema.Struct({ relationshipId: RelationshipId }), identityRows)

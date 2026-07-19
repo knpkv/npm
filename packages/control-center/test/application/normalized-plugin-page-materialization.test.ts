@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Schema } from "effect"
+import { DateTime, Effect, Layer, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
 import {
@@ -206,6 +206,27 @@ const jiraReleaseUpdatePage = Schema.decodeSync(PluginSyncPageV1)({
   }]
 })
 
+const jiraReleaseRepeatedObservationPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "jira-release-observed-again",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "jira-version-2026-29-candidate-observed-again",
+    observedAt: "2026-07-19T09:02:30.000Z",
+    revision: "candidate:2026-07-29:2026.29",
+    entityType: "release",
+    vendorImmutableId: "jira-version:2026.29",
+    sourceUrl: "https://jira.example/plugins/servlet/project-config/PAY/versions",
+    title: "Payments · 2026.29",
+    attributes: {
+      source: "jira-fix-version",
+      serviceName: "Payments",
+      version: "2026.29",
+      lifecycle: "candidate"
+    }
+  }]
+})
+
 const invalidRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "invalid-relationship-complete",
   hasMore: false,
@@ -364,6 +385,70 @@ describe("normalized plugin page materialization", () => {
       )
     })))
 
+  it.effect("refreshes a repeated Jira release observation while exact page replay stays a no-op", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const initialScope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+
+      yield* materializeNormalizedPluginPage(initialScope, jiraReleasePage)
+      const initial = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]
+      if (initial === undefined) return yield* Effect.die("expected materialized release")
+
+      const repeatedScope: NormalizedPluginPageMaterializationScope = {
+        ...initialScope,
+        expectedRevision: 1,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }
+      const repeated = yield* materializeNormalizedPluginPage(
+        repeatedScope,
+        jiraReleaseRepeatedObservationPage
+      )
+      assert.isTrue(repeated.pageCommitted)
+      assert.strictEqual(repeated.acceptedEventCount, 1)
+
+      const refreshed = yield* persistence.releases.get(WORKSPACE_ID, initial.release.id)
+      assert.strictEqual(refreshed.revision, initial.revision + 1)
+      const jiraSource = refreshed.release.sourceRevisions.find(({ providerId }) => providerId === "jira")
+      if (jiraSource === undefined) return yield* Effect.die("expected Jira release source")
+      assert.strictEqual(jiraSource.revision, "candidate:2026-07-29:2026.29")
+      assert.strictEqual(DateTime.formatIso(jiraSource.firstObservedAt), "2026-07-19T09:01:30.000Z")
+      assert.strictEqual(DateTime.formatIso(jiraSource.lastObservedAt), "2026-07-19T09:02:30.000Z")
+      assert.strictEqual(DateTime.formatIso(jiraSource.synchronizedAt), "2026-07-19T09:03:00.000Z")
+      assert.strictEqual(refreshed.release.freshness._tag, "current")
+      if (refreshed.release.freshness._tag !== "current") {
+        return yield* Effect.die("expected current release freshness")
+      }
+      assert.strictEqual(
+        DateTime.formatIso(refreshed.release.freshness.sourceObservedAt),
+        "2026-07-19T09:02:30.000Z"
+      )
+      assert.strictEqual(
+        DateTime.formatIso(refreshed.release.freshness.synchronizedAt),
+        "2026-07-19T09:03:00.000Z"
+      )
+
+      const replay = yield* materializeNormalizedPluginPage(
+        repeatedScope,
+        jiraReleaseRepeatedObservationPage
+      )
+      assert.isFalse(replay.pageCommitted)
+      assert.strictEqual(replay.acceptedEventCount, 0)
+      assert.strictEqual(
+        (yield* persistence.releases.get(WORKSPACE_ID, initial.release.id)).revision,
+        refreshed.revision
+      )
+    })))
+
   it.effect("materializes Jira fix versions into the release workset only for linked issues", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -437,6 +522,148 @@ describe("normalized plugin page materialization", () => {
         _tag: "release",
         releaseId: release.release.id
       })
+    })))
+
+  it.effect("retires a Jira release containment when an issue moves to another fix version", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const normalizeIssue = (input: {
+        readonly id: string
+        readonly key: string
+        readonly summary: string
+        readonly updated: string
+        readonly versionId: string
+      }) =>
+        normalizeJiraIssueEvents({
+          comments: { values: [], total: 0, truncated: false },
+          changelogs: { values: [], total: 0, truncated: false },
+          observedAt: input.updated === "2026-07-19T09:01:00.000Z" ? T1 : T2,
+          webBaseUrl: new URL("https://jira.example"),
+          issue: {
+            id: input.id,
+            key: input.key,
+            fields: {
+              summary: input.summary,
+              updated: input.updated,
+              project: { id: "10000", key: "PAY", name: "Payments" },
+              fixVersions: [{ id: input.versionId, name: input.versionId, released: false }]
+            }
+          }
+        })
+      const issueA = yield* normalizeIssue({
+        id: "10042",
+        key: "PAY-42",
+        summary: "Ship guarded refunds",
+        updated: "2026-07-19T09:01:00.000Z",
+        versionId: "2026.29"
+      })
+      const issueB = yield* normalizeIssue({
+        id: "10043",
+        key: "PAY-43",
+        summary: "Ship retry telemetry",
+        updated: "2026-07-19T09:01:00.000Z",
+        versionId: "2026.29"
+      })
+      const initialPage = Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+        checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("jira-fix-version-initial-membership"),
+        hasMore: false,
+        events: [...issueA, ...issueB]
+      })
+      const initialScope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(initialScope, initialPage)
+
+      const initialReleases = yield* persistence.releases.list(WORKSPACE_ID, 10)
+      const oldRelease = initialReleases.find(({ release }) => release.version === "2026.29")
+      if (oldRelease === undefined) return yield* Effect.die("expected original Jira release")
+      const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: oldRelease.release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+      assert.deepStrictEqual(
+        initialSlice.value.entityProjections.map(({ projection }) => projection.displayKey).sort(),
+        ["PAY-42", "PAY-43"]
+      )
+      const issueBProjection = initialSlice.value.entityProjections.find(
+        ({ projection }) => projection.displayKey === "PAY-43"
+      )
+      if (issueBProjection === undefined) return yield* Effect.die("expected PAY-43 projection")
+      const issueBNode = initialSlice.value.nodes.find((node) =>
+        node.resolution._tag === "resolved" &&
+        node.resolution.target._tag === "entity" &&
+        node.resolution.target.entityId === issueBProjection.projection.entityId
+      )
+      if (issueBNode === undefined) return yield* Effect.die("expected PAY-43 delivery node")
+      const oldContainment = initialSlice.value.relationships.find(
+        ({ targetNodeId }) => targetNodeId === issueBNode.nodeId
+      )
+      if (oldContainment === undefined) return yield* Effect.die("expected PAY-43 release containment")
+
+      const movedIssueB = yield* normalizeIssue({
+        id: "10043",
+        key: "PAY-43",
+        summary: "Ship retry telemetry",
+        updated: "2026-07-19T09:02:00.000Z",
+        versionId: "2026.30"
+      })
+      const movedPage = Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+        checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("jira-fix-version-moved-membership"),
+        hasMore: false,
+        events: movedIssueB
+      })
+      yield* materializeNormalizedPluginPage({
+        ...initialScope,
+        expectedRevision: 1,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, movedPage)
+
+      const oldSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: oldRelease.release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (oldSlice._tag !== "releaseSlice") return yield* Effect.die("expected updated old release slice")
+      assert.deepStrictEqual(
+        oldSlice.value.entityProjections.map(({ projection }) => projection.displayKey),
+        ["PAY-42"]
+      )
+      assert.lengthOf(oldSlice.value.relationships, 1)
+      const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: oldContainment.relationshipId,
+        limit: 10
+      })
+      if (history._tag !== "relationshipHistory") return yield* Effect.die("expected containment history")
+      assert.lengthOf(history.value, 2)
+      assert.strictEqual(history.value[0]?.lifecycle._tag, "superseded")
+
+      const newRelease = (yield* persistence.releases.list(WORKSPACE_ID, 10))
+        .find(({ release }) => release.version === "2026.30")
+      if (newRelease === undefined) return yield* Effect.die("expected destination Jira release")
+      const newSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: newRelease.release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (newSlice._tag !== "releaseSlice") return yield* Effect.die("expected destination release slice")
+      assert.deepStrictEqual(
+        newSlice.value.entityProjections.map(({ projection }) => projection.displayKey),
+        ["PAY-43"]
+      )
     })))
 
   it.effect("atomically applies all five operations and makes replay a canonical no-op", () =>
