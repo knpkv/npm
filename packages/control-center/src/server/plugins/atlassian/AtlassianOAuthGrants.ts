@@ -105,6 +105,10 @@ interface SiteSelectionGrant extends GrantOwner {
 
 type PendingGrant = AuthorizationGrant | ExchangeGrant | SiteSelectionGrant
 type PendingGrants = ReadonlyMap<AtlassianOAuthGrantId, PendingGrant>
+type SiteSelectionTakeResult =
+  | { readonly _tag: "not-found" }
+  | { readonly _tag: "invalid-site" }
+  | { readonly _tag: "selected"; readonly grant: SiteSelectionGrant; readonly site: AccessibleResource }
 
 /** Inputs bound to the owner session that starts or resumes an OAuth grant. */
 export interface AtlassianOAuthGrantOwner extends GrantOwner {}
@@ -207,21 +211,23 @@ const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(
   } satisfies AuthStoreWritePlan
 })
 
-const takeGrant = Effect.fn("AtlassianOAuthGrants.takeGrant")(function*(
+const takeSiteSelectionGrant = Effect.fn("AtlassianOAuthGrants.takeSiteSelectionGrant")(function*(
   grants: Ref.Ref<PendingGrants>,
   grantId: AtlassianOAuthGrantId,
   owner: AtlassianOAuthGrantOwner,
-  expectedPhase: PendingGrant["_tag"]
+  cloudId: string
 ) {
   const nowMilliseconds = yield* Clock.currentTimeMillis
-  return yield* Ref.modify(grants, (current): readonly [PendingGrant | null, PendingGrants] => {
+  return yield* Ref.modify(grants, (current): readonly [SiteSelectionTakeResult, PendingGrants] => {
     const active = activeGrants(current, nowMilliseconds)
     const grant = active.get(grantId)
-    if (grant === undefined || grant._tag !== expectedPhase || !sameOwner(grant, owner)) {
-      return [null, active]
+    if (grant === undefined || grant._tag !== "site-selection" || !sameOwner(grant, owner)) {
+      return [{ _tag: "not-found" }, active]
     }
+    const site = grant.sites.find((candidate) => candidate.id === cloudId)
+    if (site === undefined) return [{ _tag: "invalid-site" }, active]
     active.delete(grantId)
-    return [grant, active]
+    return [{ _tag: "selected", grant, site }, active]
   })
 })
 
@@ -533,10 +539,10 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     grantId,
     cloudId
   ) {
-    const pending = yield* takeGrant(grants, grantId, owner, "site-selection")
-    if (pending === null || pending._tag !== "site-selection") return yield* new ApplicationResourceNotFound()
-    const site = pending.sites.find((candidate) => candidate.id === cloudId)
-    if (site === undefined) return yield* new ApplicationInvalidRequest()
+    const selected = yield* takeSiteSelectionGrant(grants, grantId, owner, cloudId)
+    if (selected._tag === "not-found") return yield* new ApplicationResourceNotFound()
+    if (selected._tag === "invalid-site") return yield* new ApplicationInvalidRequest()
+    const { grant: pending, site } = selected
     const token = tokenForSite(pending.tokens, pending.tokenExpiresAtMilliseconds, pending.user, site)
     const profile = yield* profileStoreLock.withPermit(
       Effect.gen(function*() {

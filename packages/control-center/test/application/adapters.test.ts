@@ -10,6 +10,7 @@ import * as Path from "effect/Path"
 import * as TestClock from "effect/testing/TestClock"
 
 import {
+  AtlassianOAuthGrantId,
   type CreatePluginConnectionRequest,
   OpaqueMediaId,
   OpaqueSecretReference,
@@ -58,6 +59,7 @@ import { BlobNotFoundError } from "../../src/server/persistence/object-store/Blo
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import type { AtlassianOAuthGrantOperations } from "../../src/server/plugins/atlassian/AtlassianOAuthGrants.js"
 import { firstPartyService } from "../../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { PluginAuthenticationFailure } from "../../src/server/plugins/failures.js"
@@ -1258,6 +1260,83 @@ describe("application adapters", () => {
       assert.isTrue(Option.isSome(durable))
       if (Option.isSome(durable)) assert.strictEqual(durable.value.revision, 2)
     }))))
+
+  it.effect("invalidates connections that use a successfully completed Atlassian OAuth profile", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const profileId = "account-1@cloud-1"
+      yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        providerId: "jira",
+        displayName: PluginConnectionDisplayName.make("OAuth Jira"),
+        isEnabled: true,
+        createdAt: T0
+      })
+      yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        PROVISIONED_PLUGIN_ID,
+        yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "authMode", value: "oauth" },
+          { _tag: "text", key: "oauthProfileId", value: profileId }
+        ]),
+        0,
+        T0
+      )
+
+      const invalidations = yield* Ref.make<
+        Array<{ readonly pluginConnectionId: PluginConnectionId; readonly workspaceId: WorkspaceId }>
+      >([])
+      const grants: AtlassianOAuthGrantOperations = {
+        start: () => Effect.die("not used"),
+        exchange: () => Effect.die("not used"),
+        complete: (_owner, _grantId, cloudId) =>
+          Effect.succeed({
+            profileId: cloudId === "cloud-1" ? profileId : "account-2@cloud-2",
+            name: "Avery Bell @ knpkv.atlassian.net",
+            siteUrl: "https://knpkv.atlassian.net/",
+            cloudId,
+            accountName: "Avery Bell",
+            accountEmail: "avery@example.com",
+            status: "valid",
+            providers: ["jira"]
+          }),
+        pendingGrantCount: Effect.succeed(0)
+      }
+      const pluginConnections: PluginConnectionMapV1 = {
+        contextEffect: () => Effect.die("OAuth completion must not acquire a provider runtime"),
+        invalidate: (scope) => Ref.update(invalidations, (scopes) => [...scopes, scope])
+      }
+      const administration = yield* makePluginAdministrationWithConnections(
+        pluginConnections,
+        "http://127.0.0.1:4173",
+        grants
+      )
+      const complete = administration.completeAtlassianOAuthGrant
+      assert.isDefined(complete)
+      const grantId = Schema.decodeSync(AtlassianOAuthGrantId)("a".repeat(43))
+
+      yield* complete({ cloudId: "cloud-2", grantId, sessionId: OWNER_SESSION_ID, workspaceId: WORKSPACE_ID })
+      assert.deepStrictEqual(yield* Ref.get(invalidations), [])
+
+      yield* complete({ cloudId: "cloud-1", grantId, sessionId: OWNER_SESSION_ID, workspaceId: WORKSPACE_ID })
+      assert.deepStrictEqual(yield* Ref.get(invalidations), [{
+        pluginConnectionId: PROVISIONED_PLUGIN_ID,
+        workspaceId: WORKSPACE_ID
+      }])
+
+      const disconnected = yield* makePluginAdministrationWithConnections(
+        null,
+        "http://127.0.0.1:4173",
+        grants
+      )
+      assert.isDefined(disconnected.completeAtlassianOAuthGrant)
+      yield* disconnected.completeAtlassianOAuthGrant({
+        cloudId: "cloud-1",
+        grantId,
+        sessionId: OWNER_SESSION_ID,
+        workspaceId: WORKSPACE_ID
+      })
+    })))
 
   it.effect("patches pre-OAuth Atlassian configurations without requiring current authentication fields", () =>
     withApplication(Effect.gen(function*() {

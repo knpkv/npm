@@ -95,29 +95,45 @@ const unavailableAtlassianDiscoveryCases: ReadonlyArray<{
   }
 ]
 const atlassianOAuthCallbackCases: ReadonlyArray<{
+  readonly connections: ReadonlyArray<PluginConnectionSummary>
   readonly heading: string
   readonly label: string
   readonly providers: AtlassianOAuthProviderIntent
   readonly route: string
+  readonly selectsCompletedProfile: boolean
 }> = [
   {
+    connections: [],
     heading: "Connect Confluence with your Atlassian identity.",
     label: "Confluence-only",
     providers: ["confluence"],
-    route: "/services?enable=confluence&atlassianProfile=account-1%40cloud-1&atlassianProvider=confluence"
+    route: "/services?enable=confluence&atlassianProfile=account-1%40cloud-1&atlassianProvider=confluence",
+    selectsCompletedProfile: true
   },
   {
+    connections: [],
     heading: "Connect Jira with your Atlassian identity.",
     label: "Jira-only",
     providers: ["jira"],
-    route: "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=jira"
+    route: "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=jira",
+    selectsCompletedProfile: true
   },
   {
+    connections: [confluenceConnection],
+    heading: "Connect Jira with your Atlassian identity.",
+    label: "Jira fallback for a mismatched Confluence-only callback",
+    providers: ["jira"],
+    route: "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=confluence",
+    selectsCompletedProfile: false
+  },
+  {
+    connections: [],
     heading: "One identity. Jira and Confluence together.",
     label: "combined Jira and Confluence",
     providers: ["jira", "confluence"],
     route:
-      "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=jira&atlassianProvider=confluence"
+      "/services?enable=jira&atlassianProfile=account-1%40cloud-1&atlassianProvider=jira&atlassianProvider=confluence",
+    selectsCompletedProfile: true
   }
 ]
 const catalogEntry = (providerId: "codecommit" | "codepipeline" | "jira" | "confluence" | "clockify") => ({
@@ -1021,8 +1037,8 @@ describe("ServicesPage connection tests", () => {
   })
 
   it.each(atlassianOAuthCallbackCases)(
-    "restores the $label OAuth callback intent and selects its completed profile",
-    async ({ heading, providers, route }) => {
+    "handles the $label OAuth return intent and bounds completed-profile selection",
+    async ({ connections, heading, providers, route, selectsCompletedProfile }) => {
       const profileId = "account-1@cloud-1"
       const transport: ConnectionTestTransport = {
         create: vi.fn(),
@@ -1050,7 +1066,7 @@ describe("ServicesPage connection tests", () => {
             }
           ]),
         makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
-        overview: () => Promise.resolve({ ...overview, connections: [] }),
+        overview: () => Promise.resolve({ ...overview, connections }),
         setEnabled: vi.fn(),
         test: vi.fn()
       }
@@ -1060,11 +1076,11 @@ describe("ServicesPage connection tests", () => {
       expect(host.textContent).toContain(heading)
       const profile = [...host.querySelectorAll<HTMLOptionElement>("option")].find(({ value }) => value === profileId)
       expect(profile?.disabled).toBe(false)
-      expect(profile?.selected).toBe(true)
+      expect(profile?.selected).toBe(selectsCompletedProfile)
       expect(
         [...host.querySelectorAll<HTMLOptionElement>("option")].find(({ value }) => value === "aaa@cloud-before")
           ?.selected
-      ).toBe(false)
+      ).toBe(!selectsCompletedProfile)
       expect(currentLocation).toBe("/services")
     }
   )

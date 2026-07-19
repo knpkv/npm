@@ -563,8 +563,9 @@ export const ServicesPage = ({
     if (!connectionsState.overview.catalog.some(({ providerId }) => providerId === requestedProvider)) return
     if (requestedProvider === "jira" || requestedProvider === "confluence") {
       const callbackProviders = selectedAtlassianOAuthProviders(searchParams)
+      const hasAlignedCallbackIntent = callbackProviders?.includes(requestedProvider) === true
       setAtlassianSetupIntent(
-        callbackProviders === null
+        !hasAlignedCallbackIntent
           ? missingAtlassianProductsIntent(connectionsState.overview.connections)
           : {
               preferredProfileId: selectedAtlassianOAuthProfileId(searchParams),

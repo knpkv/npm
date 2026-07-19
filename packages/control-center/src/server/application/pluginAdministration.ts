@@ -132,6 +132,35 @@ const validateAtlassianOAuthProfile = Effect.fn("PluginAdministration.validateAt
   }
 })
 
+const invalidateAtlassianOAuthProfileRuntimes = Effect.fn(
+  "PluginAdministration.invalidateAtlassianOAuthProfileRuntimes"
+)(function*(
+  persistence: Persistence["Service"],
+  pluginConnections: PluginConnectionMapV1 | null,
+  workspaceId: WorkspaceId,
+  profileId: string
+) {
+  if (pluginConnections === null) return
+  const connections = yield* persistence.pluginConnections.list(workspaceId).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (connections.length > MAXIMUM_PLUGIN_CONNECTIONS) return yield* unavailable()
+  for (const connection of connections) {
+    if (!isAtlassianProvider(connection.providerId)) continue
+    const configuration = yield* persistence.pluginConfigurations.get(
+      workspaceId,
+      connection.pluginConnectionId
+    ).pipe(Effect.mapError(() => unavailable()))
+    if (
+      Option.isSome(configuration) &&
+      configuredText(configuration.value.values, "authMode") === "oauth" &&
+      configuredText(configuration.value.values, "oauthProfileId") === profileId
+    ) {
+      yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId: connection.pluginConnectionId })
+    }
+  }
+})
+
 const validateStoredAtlassianAuthentication = Effect.fn(
   "PluginAdministration.validateStoredAtlassianAuthentication"
 )(function*(
@@ -1063,8 +1092,23 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
           atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers),
         exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
           atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
-        completeAtlassianOAuthGrant: ({ cloudId, grantId, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+        completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
+          cloudId,
+          grantId,
+          sessionId,
+          workspaceId
+        }) {
+          return yield* Effect.uninterruptible(Effect.gen(function*() {
+            const profile = yield* atlassianOAuthGrants.complete({ sessionId, workspaceId }, grantId, cloudId)
+            yield* invalidateAtlassianOAuthProfileRuntimes(
+              persistence,
+              pluginConnections,
+              workspaceId,
+              profile.profileId
+            )
+            return profile
+          }))
+        })
       }),
     connectAndTest: ({ request, workspaceId }) =>
       connectAndTest(
