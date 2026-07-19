@@ -95,7 +95,13 @@ export const WorkspaceIssueDetails = ({ issue }: { readonly issue: WorkspaceIssu
               <Text tone="secondary" variant="meta">
                 Parent
               </Text>
-              <strong>{issue.parent.key}</strong>
+              {issue.parent.href === null ? (
+                <strong>{issue.parent.key}</strong>
+              ) : (
+                <a href={issue.parent.href} rel="noreferrer" target="_blank">
+                  {issue.parent.key}
+                </a>
+              )}
               <span>{issue.parent.summary}</span>
               <small>{issue.parent.status}</small>
             </div>
@@ -105,7 +111,13 @@ export const WorkspaceIssueDetails = ({ issue }: { readonly issue: WorkspaceIssu
               <Text tone="secondary" variant="meta">
                 Subtask
               </Text>
-              <strong>{subtask.key}</strong>
+              {subtask.href === null ? (
+                <strong>{subtask.key}</strong>
+              ) : (
+                <a href={subtask.href} rel="noreferrer" target="_blank">
+                  {subtask.key}
+                </a>
+              )}
               <span>{subtask.summary}</span>
               <small>{subtask.status}</small>
             </div>

@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime"
 import * as Option from "effect/Option"
 
 import type { DeliveryEntityDetails } from "../../domain/deliveryGraph.js"
+import type { SourceRevision } from "../../domain/sourceRevision.js"
 
 type IssueDetails = Extract<DeliveryEntityDetails, { readonly _tag: "issue" }>
 
@@ -26,6 +27,7 @@ export interface WorkspaceIssueHistoryPresentation {
 }
 
 export interface WorkspaceIssueRelatedPresentation {
+  readonly href: string | null
   readonly key: string
   readonly status: string
   readonly summary: string
@@ -94,8 +96,14 @@ const peopleFor = (details: IssueDetails): ReadonlyMap<string, RlyPerson> =>
   )
 
 const relatedIssue = (
-  value: NonNullable<IssueDetails["parent"]>
+  value: NonNullable<IssueDetails["parent"]>,
+  sourceUrl: SourceRevision["sourceUrl"]
 ): WorkspaceIssueRelatedPresentation => ({
+  href: (() => {
+    if (sourceUrl === null || value.key === null) return null
+    const browsePath = /^(.*\/browse\/)[^/]+$/u.exec(sourceUrl.pathname)?.[1]
+    return browsePath === undefined ? null : `${sourceUrl.origin}${browsePath}${encodeURIComponent(value.key)}`
+  })(),
   key: value.key ?? value.sourceId ?? "Unknown issue",
   status: value.status === null ? "Status unknown" : valueName(value.status),
   summary: value.summary ?? "Summary unavailable"
@@ -134,7 +142,10 @@ const metadataFor = (details: IssueDetails): ReadonlyArray<WorkspaceIssueMetadat
 const transition = (from: string | null, to: string | null): string => `${from ?? "Empty"} → ${to ?? "Empty"}`
 
 /** Present provider-neutral synchronized issue detail for the canonical entity document. */
-export const presentWorkspaceIssue = (details: IssueDetails): WorkspaceIssuePresentation => {
+export const presentWorkspaceIssue = (
+  details: IssueDetails,
+  sourceUrl: SourceRevision["sourceUrl"]
+): WorkspaceIssuePresentation => {
   const people = peopleFor(details)
   const person = (sourcePersonId: string | null): RlyPerson =>
     sourcePersonId === null
@@ -170,8 +181,8 @@ export const presentWorkspaceIssue = (details: IssueDetails): WorkspaceIssuePres
     historyTruncated: (details.historyTruncated ?? false) || truncatedFields.has("history") ||
       historyCount > history.length,
     metadata: metadataFor(details),
-    parent: details.parent === null || details.parent === undefined ? null : relatedIssue(details.parent),
-    subtasks: (details.subtasks ?? []).map(relatedIssue),
+    parent: details.parent === null || details.parent === undefined ? null : relatedIssue(details.parent, sourceUrl),
+    subtasks: (details.subtasks ?? []).map((subtask) => relatedIssue(subtask, sourceUrl)),
     truncationMessage: reducedFields.length === 0
       ? null
       : `Jira shortened ${reducedFields.map(titleCase).join(", ")} to keep this synchronized view bounded.`

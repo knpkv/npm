@@ -142,9 +142,17 @@
   padding: var(--rly-space-16);
 }
 
-.related strong {
+.related strong,
+.related a {
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
+}
+
+.related a {
+  color: var(--rly-color-service-jira);
+  inline-size: fit-content;
+  text-decoration-thickness: 1px;
+  text-underline-offset: var(--rly-space-4);
 }
 
 .related small,

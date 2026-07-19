@@ -420,7 +420,9 @@ export const presentWorkspaceEntity = (
   const service = serviceFor(projection.entityType)
   const serviceName = serviceNames[service]
   const verdict = statusFor(projection.details)
-  const issue = projection.details._tag === "issue" ? presentWorkspaceIssue(projection.details) : null
+  const issue = projection.details._tag === "issue"
+    ? presentWorkspaceIssue(projection.details, inspection.source.sourceUrl)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {

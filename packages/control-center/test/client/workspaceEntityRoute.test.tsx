@@ -353,6 +353,8 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Payments 2026.07")
     expect(host.textContent).toContain("OPS-400")
     expect(host.textContent).toContain("OPS-429")
+    expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-400"]')).not.toBeNull()
+    expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-429"]')).not.toBeNull()
     expect(host.querySelector("textarea")).toBeNull()
     expect(host.textContent).not.toContain("Edit issue")
   })
