@@ -9,6 +9,7 @@ import * as HttpEffect from "effect/unstable/http/HttpEffect"
 import * as HttpServerResponse from "effect/unstable/http/HttpServerResponse"
 import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 
+import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
@@ -29,6 +30,7 @@ import {
   PluginAdministration,
   PortfolioSnapshots,
   RelationshipRepairProposals,
+  ReleaseAgentJobs,
   ReleaseAgentTurns,
   TimelineExportAudits,
   TimelineReads
@@ -55,6 +57,8 @@ const currentSessionToken = (request: { readonly cookies: Readonly<Record<string
   Redacted.make(request.cookies.cc_session ?? "")
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
+const INITIAL_AGENT_THREAD_CURSOR = ReleaseAgentThreadCursor.make(0)
+const DEFAULT_AGENT_THREAD_EVENT_LIMIT = 128
 
 const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
   session.permission === "workspace-owner" || session.permission === "workspace-approver"
@@ -808,23 +812,54 @@ export const agentHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const agent = yield* ReleaseAgentTurns
-      return handlers.handle("turn", ({ params, payload }) =>
-        Effect.gen(function*() {
-          const session = yield* CurrentSession
-          if (session.permission !== "workspace-owner") {
-            return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-          }
-          return yield* agent.runTurn({
-            history: payload.history,
-            prompt: payload.prompt,
-            provider: payload.provider,
-            releaseId: params.releaseId,
-            workspaceId: session.workspaceId
-          }).pipe(Effect.catchTags({
-            ApplicationResourceNotFound: mapApplicationNotFound,
-            ApplicationServiceUnavailable: mapApplicationUnavailable
+      const jobs = yield* ReleaseAgentJobs
+      return handlers
+        .handle("turn", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* agent.runTurn({
+              history: payload.history,
+              prompt: payload.prompt,
+              provider: payload.provider,
+              releaseId: params.releaseId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
           }))
-        }))
+        .handle("enqueueJob", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* jobs.enqueue({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              request: payload
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("replayThread", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            return yield* jobs.replay({
+              workspaceId: session.workspaceId,
+              releaseId: params.releaseId,
+              after: query.after ?? INITIAL_AGENT_THREAD_CURSOR,
+              limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
     })
 )
 

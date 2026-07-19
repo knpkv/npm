@@ -4,8 +4,16 @@ export {
   AgentHistoryMessage,
   AgentPrompt,
   AgentProvider,
+  DurableAgentProviderId,
+  EnqueueReleaseAgentJobRequest,
+  EnqueueReleaseAgentJobResponse,
   ReleaseAgentHistoryMessage,
   ReleaseAgentProvider,
+  ReleaseAgentThreadCursor,
+  ReleaseAgentThreadCursorFromString,
+  ReleaseAgentThreadEvent,
+  ReleaseAgentThreadEventLimitFromString,
+  ReleaseAgentThreadPage,
   ReleaseAgentTurnRequest,
   ReleaseAgentTurnResponse
 } from "./agent.js"

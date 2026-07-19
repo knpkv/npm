@@ -17,6 +17,7 @@ import {
   PluginOverviewResponse,
   PluginsApiGroup,
   PortfolioApiGroup,
+  ReleaseAgentThreadCursor,
   SessionApiGroup,
   SessionCookieAuth,
   SessionId,
@@ -164,6 +165,33 @@ describe("ControlCenterApi contract", () => {
       "404",
       "408",
       "413",
+      "429",
+      "503"
+    ])
+    const agentJobPath = specification.paths["/api/v1/agent/releases/{releaseId}/jobs"]
+    assert.isDefined(agentJobPath)
+    assert.isDefined(agentJobPath.post)
+    assert.deepStrictEqual(Object.keys(agentJobPath.post.responses), [
+      "202",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "413",
+      "429",
+      "503"
+    ])
+    const agentThreadPath = specification.paths["/api/v1/agent/releases/{releaseId}/thread/events"]
+    assert.isDefined(agentThreadPath)
+    assert.isDefined(agentThreadPath.get)
+    assert.deepStrictEqual(Object.keys(agentThreadPath.get.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
       "429",
       "503"
     ])
@@ -327,7 +355,11 @@ describe("ControlCenterApi contract", () => {
     )
     assert.deepStrictEqual(
       Object.entries(AgentApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
-      [["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"]]
+      [
+        ["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"],
+        ["enqueueJob", "POST", "/api/v1/agent/releases/:releaseId/jobs"],
+        ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"]
+      ]
     )
   })
 
@@ -418,7 +450,9 @@ describe("ControlCenterApi contract", () => {
       exportJson: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
-      turn: [SessionCookieAuth.key, SessionMutationAuth.key]
+      turn: [SessionCookieAuth.key, SessionMutationAuth.key],
+      enqueueJob: [SessionCookieAuth.key, SessionMutationAuth.key],
+      replayThread: [SessionCookieAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
@@ -477,6 +511,17 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.agent.turn({ params: { releaseId } }),
       "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/turns"
+    )
+    assert.strictEqual(
+      urls.agent.enqueueJob({ params: { releaseId } }),
+      "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/jobs"
+    )
+    assert.strictEqual(
+      urls.agent.replayThread({
+        params: { releaseId },
+        query: { after: ReleaseAgentThreadCursor.make(12), limit: 32 }
+      }),
+      "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/thread/events?after=12&limit=32"
     )
     assert.strictEqual(
       urls.deliveryGraph.relationship({ params: { relationshipId }, query: {} }),

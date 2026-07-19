@@ -17,6 +17,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { createServer } from "node:net"
 
+import { DurableAgentProviderId } from "../../src/api/agent.js"
 import { makeControlCenterApiClient } from "../../src/api/client.js"
 import { PairingCode } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
@@ -34,6 +35,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
+import { AgentEventCursor, AgentThreadEventPageSize } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -368,21 +370,6 @@ describe("Control Center closed runtime", () => {
       assert.deepStrictEqual(portfolio.releases, [])
       assert.deepStrictEqual(portfolio.plugins, [])
 
-      const inspectionContext = yield* Layer.build(databaseLayer(persistenceConfig))
-      const inspectionDatabase = Context.get(inspectionContext, Database)
-      const beforeDrain = yield* inspectionDatabase.sql<{
-        readonly auditCount: number
-        readonly lastSeenAt: string
-      }>`SELECT
-        (SELECT COUNT(*) FROM timeline_export_audits) AS auditCount,
-        last_seen_at AS lastSeenAt
-      FROM sessions
-      WHERE session_id = ${paired.session.sessionId}`
-      assert.strictEqual(beforeDrain[0]?.auditCount, 0)
-
-      const lifecycle = Context.get(runtime, ServerLifecycle)
-      yield* TestClock.adjust("1 minute")
-      yield* lifecycle.beginDrain
       const mutationClient = yield* makeControlCenterApiClient({
         baseUrl: origin,
         transformClient: (client) =>
@@ -392,6 +379,33 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const rejectedAgentJob = yield* mutationClient.agent.enqueueJob({
+        params: { releaseId: RELEASE_ID },
+        payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedAgentJob))
+      if (Result.isFailure(rejectedAgentJob)) {
+        assert.strictEqual(rejectedAgentJob.failure._tag, "ServiceUnavailableApiError")
+      }
+
+      const inspectionContext = yield* Layer.build(databaseLayer(persistenceConfig))
+      const inspectionDatabase = Context.get(inspectionContext, Database)
+      const beforeDrain = yield* inspectionDatabase.sql<{
+        readonly agentJobCount: number
+        readonly auditCount: number
+        readonly lastSeenAt: string
+      }>`SELECT
+        (SELECT COUNT(*) FROM agent_jobs) AS agentJobCount,
+        (SELECT COUNT(*) FROM timeline_export_audits) AS auditCount,
+        last_seen_at AS lastSeenAt
+      FROM sessions
+      WHERE session_id = ${paired.session.sessionId}`
+      assert.strictEqual(beforeDrain[0]?.agentJobCount, 0)
+      assert.strictEqual(beforeDrain[0]?.auditCount, 0)
+
+      const lifecycle = Context.get(runtime, ServerLifecycle)
+      yield* TestClock.adjust("1 minute")
+      yield* lifecycle.beginDrain
       const rejectedMutation = yield* mutationClient.session.logout().pipe(Effect.result)
       assert.isTrue(Result.isFailure(rejectedMutation))
       if (Result.isFailure(rejectedMutation)) {
@@ -413,9 +427,11 @@ describe("Control Center closed runtime", () => {
         assert.strictEqual(rejectedStream.failure._tag, "ServiceUnavailableApiError")
       }
       const afterDrain = yield* inspectionDatabase.sql<{
+        readonly agentJobCount: number
         readonly auditCount: number
         readonly lastSeenAt: string
       }>`SELECT
+        (SELECT COUNT(*) FROM agent_jobs) AS agentJobCount,
         (SELECT COUNT(*) FROM timeline_export_audits) AS auditCount,
         last_seen_at AS lastSeenAt
       FROM sessions
@@ -551,7 +567,8 @@ describe("Control Center closed runtime", () => {
                 Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
               )
           }
-        }
+        },
+        releaseAgent: { cwd: staticRoot, enabledProviders: ["codex"] }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
       const governedExecution = Context.getOption(runtime, GovernedActionExecutionStartup)
@@ -635,7 +652,7 @@ describe("Control Center closed runtime", () => {
         baseUrl: origin,
         transformClient: (client) => requestHeaders(client, { origin })
       })
-      const [, pairResponse] = yield* pairClient.session.pair({
+      const [paired, pairResponse] = yield* pairClient.session.pair({
         payload: { pairingCode: PairingCode.make(Redacted.value(bootstrapState.pairingCode)) },
         responseMode: "decoded-and-response"
       })
@@ -654,6 +671,31 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(portfolio.releases[0]?.releaseId, RELEASE_ID)
       assert.strictEqual(portfolio.releases[0]?.collaboratorCount, 2)
       assert.strictEqual(portfolio.plugins[0]?.providerId, "jira")
+      const mutationClient = yield* makeControlCenterApiClient({
+        baseUrl: origin,
+        transformClient: (client) =>
+          requestHeaders(client, {
+            cookie: `cc_session=${sessionCookie.valueEncoded}`,
+            origin,
+            "x-csrf-token": paired.csrfToken
+          })
+      })
+      const enqueued = yield* mutationClient.agent.enqueueJob({
+        params: { releaseId: RELEASE_ID },
+        payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+      })
+      const durableThread = yield* runtimePersistence.agentJobs.threadAfter({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: AgentEventCursor.make(0),
+        limit: AgentThreadEventPageSize.make(128)
+      })
+      assert.strictEqual(enqueued.releaseId, RELEASE_ID)
+      assert.strictEqual(enqueued.state, "queued")
+      assert.deepStrictEqual(
+        durableThread.events.map(({ eventKind }) => eventKind),
+        ["user-message", "job-queued"]
+      )
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

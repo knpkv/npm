@@ -30,6 +30,10 @@ Goal: prove diff completeness and stable anchors before executing review work, t
 - **Depends on:** D01, A03.
 - **Review focus:** no cross-release/workspace evidence; one durable thread is not duplicated per page.
 
+Issue #210 now has durable persistence, run-once worker execution, and authenticated bounded enqueue/replay
+HTTP slices. Remaining work is to supervise the worker in the server lifecycle, expose cancellation and live
+wakeups, replace browser-local thread ownership, and complete provider administration and reconnect E2E coverage.
+
 ## A05 — Add the deterministic fake agent and governed tool proposals
 
 - **Scope:** define provider-neutral streaming event/result/tool contract, Schema decode, scripted fake provider, read-only evidence tools, blocker/description/check/review results, cancellation/usage, and proposal-only governed action handoff.

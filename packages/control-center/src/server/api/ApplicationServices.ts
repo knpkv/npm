@@ -4,7 +4,16 @@ import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
 import type * as Stream from "effect/Stream"
 
-import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
+import type {
+  AgentHistoryMessage,
+  AgentPrompt,
+  AgentProvider,
+  EnqueueReleaseAgentJobRequest,
+  EnqueueReleaseAgentJobResponse,
+  ReleaseAgentThreadCursor,
+  ReleaseAgentThreadPage,
+  ReleaseAgentTurnResponse
+} from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
   CreateRelationshipRepairProposalRequest,
@@ -398,6 +407,30 @@ export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/ReleaseAgentTurns") {}
+
+/**
+ * Provider-neutral durable release-agent boundary. Implementations derive job,
+ * context, and workspace ownership server-side and return only browser-safe events.
+ */
+export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
+  readonly enqueue: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly request: EnqueueReleaseAgentJobRequest
+  }) => Effect.Effect<
+    EnqueueReleaseAgentJobResponse,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly replay: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly releaseId: ReleaseId
+    readonly after: ReleaseAgentThreadCursor
+    readonly limit: number
+  }) => Effect.Effect<
+    ReleaseAgentThreadPage,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+}>()("@knpkv/control-center/server/api/ReleaseAgentJobs") {}
 
 /** Injectable durable replay boundary used by the authenticated SSE handler. */
 export class LiveEvents extends Context.Service<LiveEvents, {

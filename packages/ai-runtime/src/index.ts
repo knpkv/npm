@@ -13,7 +13,8 @@ export {
   type AgentRuntimeError,
   AgentRuntimeEvent,
   AgentRuntimeProtocolError,
-  AgentSessionRef
+  AgentSessionRef,
+  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
 } from "./model.js"
 export {
   type AgentAdapter,
