@@ -484,6 +484,154 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(yield* Ref.get(providerCalls), 2)
     })))
 
+  it.effect("rejects a delayed page after the connection is disabled", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const providerEntered = yield* Deferred.make<void>()
+      const releaseProvider = yield* Deferred.make<void>()
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            Deferred.succeed(providerEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseProvider)),
+              Effect.as(pageFor(fixture))
+            )
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+      const input = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      }
+
+      const fiber = yield* synchronization.synchronize(input).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(providerEntered)
+      const current = yield* persistence.pluginConnections.get(WORKSPACE_ID, fixture.pluginConnectionId)
+      yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, fixture.pluginConnectionId, {
+        displayName: current.displayName,
+        isEnabled: false,
+        expectedRevision: current.revision,
+        updatedAt: SYNCHRONIZED_AT
+      })
+      yield* Deferred.succeed(releaseProvider, undefined)
+
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result.result, "source-unavailable")
+      assert.strictEqual(result.pagesCommitted, 0)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(stream))
+      const disabled = yield* persistence.pluginConnections.get(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.isFalse(disabled.isEnabled)
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.strictEqual(runtime.health._tag, "healthy")
+    })))
+
+  it.effect("rejects a delayed page after the connection configuration changes", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const providerEntered = yield* Deferred.make<void>()
+      const releaseProvider = yield* Deferred.make<void>()
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            Deferred.succeed(providerEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseProvider)),
+              Effect.as(pageFor(fixture))
+            )
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const fiber = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(providerEntered)
+      yield* persistence.pluginConfigurations.update(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        [],
+        0,
+        SYNCHRONIZED_AT
+      )
+      yield* Deferred.succeed(releaseProvider, undefined)
+
+      const result = yield* Fiber.join(fiber)
+      assert.strictEqual(result.result, "source-unavailable")
+      assert.strictEqual(result.pagesCommitted, 0)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(stream))
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.strictEqual(runtime.health._tag, "healthy")
+    })))
+
+  it.effect("rejects a capped invocation made entirely from replayed nonterminal pages", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const replayedPage = emptyPage("replayed-checkpoint", true)
+      const pages = yield* Ref.make<ReadonlyArray<typeof PluginSyncPageV1.Type>>([
+        replayedPage,
+        emptyPage("terminal-checkpoint", false)
+      ])
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () => Stream.fromEffect(Ref.get(pages)).pipe(Stream.flatMap(Stream.fromIterable))
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const seeded = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+      assert.strictEqual(seeded.result, "synchronized")
+      assert.strictEqual(seeded.pagesCommitted, 2)
+
+      yield* Ref.set(pages, Array.from({ length: 100 }, () => replayedPage))
+      const replayed = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
+      assert.strictEqual(replayed.result, "source-unavailable")
+      assert.strictEqual(replayed.pagesCommitted, 0)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.strictEqual(stream.revision, 2)
+      assert.strictEqual(stream.checkpointJson, "\"terminal-checkpoint\"")
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      assert.strictEqual(runtime.health._tag, "unavailable")
+      if (runtime.health._tag === "unavailable") {
+        assert.strictEqual(runtime.health.failureClass, "malformed-response")
+      }
+    })))
+
   it.effect("completes the hundredth provider page as successful bounded progress", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))

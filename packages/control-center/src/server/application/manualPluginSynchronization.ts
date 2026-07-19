@@ -31,6 +31,11 @@ import { PluginConnection, type PluginConnectionV1 } from "../plugins/PluginConn
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { materializeNormalizedPluginPage } from "./normalizedPluginPageMaterialization.js"
+import {
+  capturePluginSynchronizationAuthority,
+  type PluginSynchronizationAuthority,
+  verifyPluginSynchronizationAuthority
+} from "./pluginSynchronizationAuthority.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
 const MAXIMUM_PAGES_PER_INVOCATION = 100
@@ -292,10 +297,12 @@ export const makeManualPluginSynchronization = Effect.fn(
 
   const persistHealth = Effect.fn("ManualPluginSynchronization.persistHealth")(function*(
     bound: BoundManualSync,
+    authority: PluginSynchronizationAuthority,
     health: PluginHealthType,
     failed: boolean
   ) {
-    yield* persistence.transact(Effect.gen(function*() {
+    const persisted = yield* persistence.transact(Effect.gen(function*() {
+      yield* verifyPluginSynchronizationAuthority(persistence, authority)
       const runtime = yield* persistence.pluginRuntime.getRuntime(
         bound.workspaceId,
         bound.pluginConnectionId
@@ -317,8 +324,13 @@ export const makeManualPluginSynchronization = Effect.fn(
         Effect.provideService(Crypto.Crypto, cryptoService),
         Effect.provideService(Persistence, persistence)
       )
-    })).pipe(Effect.mapError(() => unavailable()))
-    yield* wakeups.notify(bound.workspaceId)
+      return true
+    })).pipe(
+      Effect.catchTag("PluginConflictFailure", () => Effect.succeed(false)),
+      Effect.mapError(() => unavailable())
+    )
+    if (persisted) yield* wakeups.notify(bound.workspaceId)
+    return persisted
   })
 
   const initialCheckpoint = Effect.fn("ManualPluginSynchronization.initialCheckpoint")(function*(
@@ -340,6 +352,7 @@ export const makeManualPluginSynchronization = Effect.fn(
 
   const run = Effect.fn("ManualPluginSynchronization.run")(function*(
     bound: BoundManualSync,
+    authority: PluginSynchronizationAuthority,
     connection: PluginConnectionV1,
     health: Extract<PluginHealthType, { readonly _tag: "healthy" | "degraded" }>
   ) {
@@ -354,7 +367,7 @@ export const makeManualPluginSynchronization = Effect.fn(
     const revision = Result.isSuccess(initialStream) ? initialStream.success.revision : 0
     return yield* Stream.runFoldEffect(
       bound.driver.sync(connection, request).pipe(Stream.take(MAXIMUM_PAGES_PER_INVOCATION)),
-      () => ({ isTerminal: false, pagesSeen: 0, revision }),
+      () => ({ isTerminal: false, pagesSeen: 0, pagesCommitted: 0, revision }),
       (state, page) =>
         Effect.gen(function*() {
           if (state.isTerminal) {
@@ -370,7 +383,8 @@ export const makeManualPluginSynchronization = Effect.fn(
             streamKey: bound.streamKey,
             expectedRevision: state.revision,
             committedAt: health.checkedAt,
-            successfulHealth: health
+            successfulHealth: health,
+            expectedAuthority: authority
           }, page).pipe(
             Effect.provideService(Crypto.Crypto, cryptoService),
             Effect.provideService(Persistence, persistence)
@@ -379,6 +393,7 @@ export const makeManualPluginSynchronization = Effect.fn(
           return {
             isTerminal: !page.hasMore,
             pagesSeen,
+            pagesCommitted: state.pagesCommitted + (receipt.pageCommitted ? 1 : 0),
             revision: state.revision + (receipt.pageCommitted ? 1 : 0)
           }
         })
@@ -392,10 +407,12 @@ export const makeManualPluginSynchronization = Effect.fn(
     },
     bound: BoundManualSync
   ) {
-    const connectionRecord = yield* persistence.pluginConnections.get(
+    const captured = yield* capturePluginSynchronizationAuthority(
+      persistence,
       bound.workspaceId,
       bound.pluginConnectionId
     ).pipe(Effect.mapError(mapPersistenceRead))
+    const { authority, connection: connectionRecord } = captured
     if (!connectionRecord.isEnabled) return yield* new ApplicationInvalidRequest()
     const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
     const attempt = yield* persistence.pluginRuntime.beginSyncAttempt(
@@ -416,8 +433,14 @@ export const makeManualPluginSynchronization = Effect.fn(
             const connection = Context.get(context, PluginConnection)
             const health = yield* connection.health
             if (health._tag === "unavailable" || health._tag === "disabled") return health
-            const completed = yield* run(bound, connection, health)
-            if (!completed.isTerminal && completed.pagesSeen < MAXIMUM_PAGES_PER_INVOCATION) {
+            const completed = yield* run(bound, authority, connection, health)
+            if (
+              !completed.isTerminal &&
+              (
+                completed.pagesSeen < MAXIMUM_PAGES_PER_INVOCATION ||
+                completed.pagesCommitted === 0
+              )
+            ) {
               return yield* new PluginMalformedResponseFailure({
                 operation: "manual-sync",
                 diagnosticCode: "manual-sync-terminal-page-missing"
@@ -431,14 +454,14 @@ export const makeManualPluginSynchronization = Effect.fn(
       if (Result.isSuccess(synchronized)) {
         const health = synchronized.success
         const sourceUnavailable = health._tag === "unavailable" || health._tag === "disabled"
-        yield* persistHealth(bound, health, sourceUnavailable)
-        return sourceUnavailable ? SOURCE_UNAVAILABLE_OUTCOME : SYNCHRONIZED_OUTCOME
+        const healthPersisted = yield* persistHealth(bound, authority, health, sourceUnavailable)
+        return sourceUnavailable || !healthPersisted ? SOURCE_UNAVAILABLE_OUTCOME : SYNCHRONIZED_OUTCOME
       }
       const failure = sourceFailure(synchronized.failure)
       if (failure === null) return yield* unavailable()
       const failedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
       const health = yield* failureHealth(failure, failedAt).pipe(Effect.mapError(() => unavailable()))
-      yield* persistHealth(bound, health, true)
+      yield* persistHealth(bound, authority, health, true)
       return SOURCE_UNAVAILABLE_OUTCOME
     })
     const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
