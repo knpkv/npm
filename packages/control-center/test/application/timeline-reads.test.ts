@@ -30,7 +30,7 @@ const record = (overrides: Partial<TimelineRecord>): TimelineRecord => ({
 describe("Timeline presentation", () => {
   it("uses the Items selection contract for entity-backed events", () => {
     const event = presentTimelineEvent(workspaceId, record({ entityId: "entity-42" }))
-    assert.strictEqual(event.href, `/w/${workspaceId}/items?object=entity-42#item-details`)
+    assert.strictEqual(event.href, `/w/${workspaceId}/items/entity-42`)
   })
 
   it("keeps release-backed events on the release route", () => {

@@ -13,7 +13,9 @@ import {
   EvidenceItem,
   LedgerRevision
 } from "../domain/deliveryGraph.js"
+import { Freshness } from "../domain/freshness.js"
 import {
+  EntityId,
   EnvironmentId,
   EvidenceId,
   PersonId,
@@ -29,6 +31,8 @@ import {
   RelationshipRepairRationale,
   RelationshipRepairReviewDecision
 } from "../domain/relationshipRepair.js"
+import { SourceRevision } from "../domain/sourceRevision.js"
+import { TimelineEvent } from "../domain/timeline.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ConflictApiError,
@@ -49,6 +53,8 @@ export const MAXIMUM_WORKSPACE_ENTITY_RELEASES = 500
 export const MAXIMUM_WORKSPACE_ENTITY_OWNERS = 20
 export const MAXIMUM_WORKSPACE_OWNER_OPTIONS = 200
 export const MAXIMUM_WORKSPACE_OWNER_ROLES = 16
+export const MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS = 100
+export const MAXIMUM_WORKSPACE_ENTITY_ACTIVITY = 20
 const MAXIMUM_RELATIONSHIP_HISTORY = 200
 const MAXIMUM_EVIDENCE_CLAIMS = 200
 export const MAXIMUM_REPAIR_PROPOSALS = 128
@@ -147,6 +153,44 @@ export const WorkspaceEntityProjectionIndex = Schema.Struct({
 
 /** Decoded workspace-wide current entity index. */
 export type WorkspaceEntityProjectionIndex = typeof WorkspaceEntityProjectionIndex.Type
+
+/** Complete bounded graph closure surrounding one exact normalized entity. */
+export const WorkspaceEntityGraph = Schema.Struct({
+  truncated: Schema.Boolean,
+  nodes: boundedArray(DeliveryNode, MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS * 2),
+  relatedEntityProjections: boundedArray(
+    InspectedEntityProjection,
+    MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS
+  ),
+  relationships: boundedArray(DeliveryRelationship, MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS),
+  evidenceClaims: boundedArray(EvidenceClaim, MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS * 2),
+  evidenceItems: boundedArray(EvidenceItem, MAXIMUM_WORKSPACE_ENTITY_RELATIONSHIPS * 2)
+}).annotate({ identifier: "WorkspaceEntityGraph" })
+
+/** Decoded exact entity graph closure. */
+export type WorkspaceEntityGraph = typeof WorkspaceEntityGraph.Type
+
+/** Bounded attributable activity for one exact normalized entity. */
+export const WorkspaceEntityActivity = Schema.Struct({
+  truncated: Schema.Boolean,
+  events: boundedArray(TimelineEvent, MAXIMUM_WORKSPACE_ENTITY_ACTIVITY)
+}).annotate({ identifier: "WorkspaceEntityActivity" })
+
+/** Decoded exact entity activity. */
+export type WorkspaceEntityActivity = typeof WorkspaceEntityActivity.Type
+
+/** Canonical provider-neutral full-page read model for one workspace entity. */
+export const WorkspaceEntityInspection = Schema.Struct({
+  entity: WorkspaceEntityProjection,
+  source: SourceRevision,
+  isSourceCurrent: Schema.Boolean,
+  freshness: Schema.NullOr(Freshness),
+  graph: WorkspaceEntityGraph,
+  activity: WorkspaceEntityActivity
+}).annotate({ identifier: "WorkspaceEntityInspection" })
+
+/** Decoded canonical workspace entity read model. */
+export type WorkspaceEntityInspection = typeof WorkspaceEntityInspection.Type
 
 /** Bounded immutable lifecycle history for one relationship, newest first. */
 export const RelationshipHistoryInspection = Schema.Struct({
@@ -285,6 +329,12 @@ const workspaceEntityProjections = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const workspaceEntity = HttpApiEndpoint.get("workspaceEntity", "/api/v1/items/:entityId", {
+  params: { entityId: EntityId },
+  success: WorkspaceEntityInspection,
+  error: readErrors
+}).middleware(SessionCookieAuth)
+
 const relationship = HttpApiEndpoint.get("relationship", "/api/v1/relationships/:relationshipId", {
   params: { relationshipId: RelationshipId },
   query: {
@@ -415,6 +465,7 @@ const evidence = HttpApiEndpoint.get("evidence", "/api/v1/evidence/:evidenceId",
 export class DeliveryGraphApiGroup extends HttpApiGroup.make("deliveryGraph")
   .add(
     workspaceEntityProjections,
+    workspaceEntity,
     releaseSlice,
     repairCandidates,
     repairProposalDraft,

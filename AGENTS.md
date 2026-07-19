@@ -173,6 +173,10 @@ When writing Effect code:
   transaction ownership, and fold insertion must live in one shared private fold module. Dispatch
   and reconciliation modules may supply source-specific outcome material, but must not duplicate
   the fold state machine or persistence boundary.
+- In `packages/control-center/src/server/persistence/repositories/delivery-graph/read.ts`, keep
+  relationship bounding and node, projection, claim, and evidence closure hydration in the private
+  `hydrateRelationshipClosure` helper; slice branches may supply only identities, bounds, and their
+  projection-selection policy.
 - Decode untrusted JSON/body data with Schema helpers before assigning it to a
   domain type.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,

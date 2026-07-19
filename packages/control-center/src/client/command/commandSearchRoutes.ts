@@ -1,5 +1,6 @@
 import type { EntityId, WorkspaceId } from "../../domain/identifiers.js"
 import { workspaceItemsPath } from "../releases/releasePaths.js"
+import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 const searchParameters = (query: string): URLSearchParams => {
   const parameters = new URLSearchParams()
@@ -18,10 +19,5 @@ export const commandSearchItemsHref = (workspaceId: WorkspaceId, query: string):
 /** Open one command-search result without inventing a release membership. */
 export const commandSearchItemHref = (
   workspaceId: WorkspaceId,
-  query: string,
   entityId: EntityId
-): string => {
-  const parameters = searchParameters(query)
-  parameters.set("object", entityId)
-  return `${workspaceItemsPath(workspaceId)}?${parameters.toString()}#item-details`
-}
+): string => workspaceEntityPath(workspaceId, entityId)

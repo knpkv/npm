@@ -163,7 +163,8 @@ export default tseslint.config(
   {
     files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
     rules: {
-      "local-rules/no-direct-mutation-proof-read": "error"
+      "local-rules/no-direct-mutation-proof-read": "error",
+      "local-rules/no-ad-hoc-workspace-entity-path": "error"
     }
   },
   {

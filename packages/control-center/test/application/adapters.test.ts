@@ -21,8 +21,12 @@ import {
 import { derivePersonInitials, Person } from "../../src/domain/actors.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
+  EntityId,
   EnvironmentId,
   EventCursor,
+  EvidenceClaimId,
+  EvidenceId,
+  GraphNodeId,
   PersonId,
   PluginConnectionId,
   RelationshipId,
@@ -89,6 +93,12 @@ const DUPLICATE_ATLASSIAN_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)(
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
+const INSPECTED_ENTITY_ID = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-000000000097")
+const INSPECTED_ENTITY_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-000000000098")
+const INSPECTED_MISSING_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+const INSPECTED_EVIDENCE_ID = Schema.decodeSync(EvidenceId)("01890f6f-6d6a-7cc0-98d2-00000000009a")
+const INSPECTED_CLAIM_ID = Schema.decodeSync(EvidenceClaimId)("01890f6f-6d6a-7cc0-98d2-00000000009b")
+const INSPECTED_RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-00000000009c")
 const REPAIR_PROPOSAL_ID = Schema.decodeSync(RelationshipRepairProposalId)(
   "01890f6f-6d6a-7cc0-98d2-000000000079"
 )
@@ -2289,6 +2299,185 @@ describe("application adapters", () => {
       if (Result.isFailure(crossWorkspace)) {
         assert.instanceOf(crossWorkspace.failure, ApplicationResourceNotFound)
       }
+    })))
+
+  it.effect("re-evaluates persisted entity freshness at each inspection read", () =>
+    withApplication(Effect.gen(function*() {
+      const persistence = yield* setup
+      const database = yield* Database
+      const t0 = Schema.encodeSync(UtcTimestamp)(T0)
+      const sourceRevision = {
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        vendorImmutableId: "PAY-42",
+        revision: "source-1",
+        normalizationSchemaVersion: 1,
+        sourceUrl: null,
+        firstObservedAt: "2026-07-14T10:00:00.000Z",
+        lastObservedAt: "2026-07-14T10:00:00.000Z",
+        synchronizedAt: "2026-07-14T10:01:00.000Z"
+      }
+      yield* database.sql`INSERT INTO entities (
+        workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
+        entity_type, current_revision, created_at, updated_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${INSPECTED_ENTITY_ID}, ${PLUGIN_ID}, 'jira', 'PAY-42',
+        'issue', 1, '2026-07-14T10:00:00.000Z', '2026-07-14T10:00:00.000Z'
+      )`
+      yield* database.sql`INSERT INTO entity_revisions (
+        workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+        source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${INSPECTED_ENTITY_ID}, 1, 'source-1', 1, NULL,
+        '2026-07-14T10:00:00.000Z', '2026-07-14T10:00:00.000Z',
+        '2026-07-14T10:01:00.000Z', '2026-07-14T10:00:00.000Z'
+      )`
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId: INSPECTED_ENTITY_ID,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "issue",
+            displayKey: "PAY-42",
+            title: "Ship guarded refunds",
+            details: {
+              _tag: "issue",
+              key: "PAY-42",
+              status: "Ready",
+              priority: null,
+              estimatePoints: null
+            }
+          },
+          recordedAt: t0
+        }],
+        nodes: [{
+          workspaceId: WORKSPACE_ID,
+          nodeId: INSPECTED_ENTITY_NODE_ID,
+          endpointKind: "issue",
+          resolution: {
+            _tag: "resolved",
+            target: { _tag: "entity", entityId: INSPECTED_ENTITY_ID, entityKind: "issue" }
+          },
+          createdAt: t0
+        }, {
+          workspaceId: WORKSPACE_ID,
+          nodeId: INSPECTED_MISSING_NODE_ID,
+          endpointKind: "issue",
+          resolution: {
+            _tag: "missing",
+            expectedKind: "entity",
+            expectedEntityKind: "issue",
+            missingKey: "PAY-43"
+          },
+          createdAt: t0
+        }],
+        evidenceItems: [{
+          workspaceId: WORKSPACE_ID,
+          evidenceId: INSPECTED_EVIDENCE_ID,
+          schemaVersion: 1,
+          attribution: {
+            _tag: "plugin",
+            pluginConnectionId: PLUGIN_ID,
+            sourceEntityId: INSPECTED_ENTITY_ID,
+            sourceEntityRevision: 1
+          },
+          verifier: { _tag: "system", component: "delivery-graph" },
+          observedAt: t0,
+          recordedAt: t0,
+          validUntil: null,
+          freshness: {
+            _tag: "current",
+            pluginHealth: { _tag: "healthy", checkedAt: "2026-07-14T10:01:00.000Z" },
+            provenance: { _tag: "provider", sourceRevision },
+            sourceObservedAt: "2026-07-14T10:00:00.000Z",
+            staleAfterSeconds: 300,
+            synchronizedAt: "2026-07-14T10:01:00.000Z"
+          },
+          retention: { classification: "audit", retainUntil: null, legalHold: false }
+        }],
+        evidenceClaims: [{
+          workspaceId: WORKSPACE_ID,
+          evidenceClaimId: INSPECTED_CLAIM_ID,
+          evidenceId: INSPECTED_EVIDENCE_ID,
+          subjectNodeId: INSPECTED_ENTITY_NODE_ID,
+          predicate: "relationship-observed",
+          value: { _tag: "reference", targetNodeId: INSPECTED_MISSING_NODE_ID },
+          recordedAt: t0,
+          supersedesEvidenceClaimId: null
+        }],
+        relationships: [{
+          workspaceId: WORKSPACE_ID,
+          relationshipId: INSPECTED_RELATIONSHIP_ID,
+          relationshipSchemaVersion: 1,
+          revision: 1,
+          supersedesRevision: null,
+          kind: "depends-on",
+          sourceNodeId: INSPECTED_ENTITY_NODE_ID,
+          sourceNodeKind: "issue",
+          targetNodeId: INSPECTED_MISSING_NODE_ID,
+          targetNodeKind: "issue",
+          scope: null,
+          lifecycle: { _tag: "verified", effectiveAt: t0 },
+          confidence: { _tag: "confirmed" },
+          provenance: {
+            _tag: "rule",
+            ruleId: "entity-inspection-test",
+            ruleVersion: 1,
+            rationale: "Keeps direct entity evidence in the inspected closure."
+          },
+          recordedBy: { _tag: "system", component: "delivery-graph" },
+          evidenceClaimIds: [INSPECTED_CLAIM_ID],
+          recordedAt: t0
+        }]
+      })
+      const inspection = yield* makeDeliveryGraphInspection
+
+      const withinThresholdAt = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:04:00.000Z")
+      yield* TestClock.setTime(epochMillis(withinThresholdAt))
+      const current = yield* inspection.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: INSPECTED_ENTITY_ID
+      })
+      assert.strictEqual(current.freshness?._tag, "current")
+      if (current.freshness?._tag !== "current") return yield* Effect.die("Expected current freshness")
+      assert.deepStrictEqual(current.freshness.evaluatedAt, withinThresholdAt)
+
+      const expiredAt = Schema.decodeSync(UtcTimestamp)("2026-07-14T10:06:00.000Z")
+      yield* TestClock.setTime(epochMillis(expiredAt))
+      const stale = yield* inspection.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: INSPECTED_ENTITY_ID
+      })
+      assert.strictEqual(stale.freshness?._tag, "stale")
+      if (stale.freshness?._tag !== "stale") return yield* Effect.die("Expected stale freshness")
+      assert.deepStrictEqual(stale.freshness.evaluatedAt, expiredAt)
+
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            ...current.entity.projection,
+            projectionRevision: 2,
+            supersedesProjectionRevision: 1,
+            entityState: "deleted"
+          },
+          recordedAt: Schema.encodeSync(UtcTimestamp)(expiredAt)
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const deleted = yield* inspection.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: INSPECTED_ENTITY_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(deleted))
+      if (Result.isFailure(deleted)) assert.instanceOf(deleted.failure, ApplicationResourceNotFound)
     })))
 
   it.effect("drafts only the exact current repair head within its workspace and release scope", () =>

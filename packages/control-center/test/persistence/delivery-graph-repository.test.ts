@@ -940,6 +940,70 @@ describe("DeliveryGraphRepository", () => {
       })
     ))
 
+  it.effect("reads one exact bounded entity slice without crossing workspace boundaries", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        yield* repository.write(WORKSPACE_A, initialBatch)
+
+        const firstRelationship = initialBatch.relationships[0]
+        if (firstRelationship === undefined) return yield* Effect.die("Expected relationship fixture")
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [{
+            workspaceId: WORKSPACE_A,
+            nodeId: OTHER_RELEASE_NODE_ID,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: OTHER_RELEASE_ID } },
+            createdAt: UPDATED_AT
+          }],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [{
+            ...firstRelationship,
+            relationshipId: OTHER_RELATIONSHIP_ID,
+            revision: 1,
+            supersedesRevision: null,
+            sourceNodeId: OTHER_RELEASE_NODE_ID,
+            scope: { _tag: "release", releaseId: OTHER_RELEASE_ID },
+            confidence: { _tag: "unknown", rationale: "Independent release association fixture." },
+            evidenceClaimIds: [],
+            recordedAt: UPDATED_AT
+          }]
+        })
+
+        const bounded = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 1
+        })
+        assert.strictEqual(bounded._tag, "entitySlice")
+        if (bounded._tag === "entitySlice") {
+          assert.strictEqual(bounded.value.entity.projection.entityId, ISSUE_ID)
+          assert.deepStrictEqual(bounded.value.entity.releaseIds, [RELEASE_ID, OTHER_RELEASE_ID].sort())
+          assert.deepStrictEqual(bounded.value.entity.owners, [{
+            avatarFallback: "AB",
+            displayName: "Avery Bell",
+            personId: OWNER_PERSON_ID,
+            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+          }])
+          assert.lengthOf(bounded.value.relationships, 1)
+          assert.isTrue(bounded.value.truncated)
+        }
+
+        const crossedWorkspace = yield* repository.read(WORKSPACE_B, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(crossedWorkspace))
+        if (Result.isFailure(crossedWorkspace)) {
+          assert.instanceOf(crossedWorkspace.failure, RecordNotFoundError)
+        }
+      })
+    ))
+
   it.effect("indexes current present workspace projections including unlinked entities and excluding deleted heads", () =>
     withRepository(
       Effect.gen(function*() {
@@ -947,6 +1011,52 @@ describe("DeliveryGraphRepository", () => {
         const repository = yield* DeliveryGraphRepository
         const database = yield* Database
         yield* repository.write(WORKSPACE_A, initialBatch)
+        const excludedAssignmentPersonId = Schema.decodeSync(PersonId)(
+          "01890f6f-6d6a-7cc0-98d2-300000000010"
+        )
+        const inactivePersonId = Schema.decodeSync(PersonId)(
+          "01890f6f-6d6a-7cc0-98d2-300000000011"
+        )
+        yield* database.sql`INSERT INTO persons (
+          workspace_id, person_id, display_name, avatar_json, is_active,
+          revision, created_at, updated_at
+        ) VALUES
+          (${WORKSPACE_A}, ${excludedAssignmentPersonId}, 'Excluded Assignment',
+            ${JSON.stringify({ _tag: "initials", text: "EA" })}, 1, 1, ${CREATED_AT}, ${UPDATED_AT}),
+          (${WORKSPACE_A}, ${inactivePersonId}, 'Inactive Person',
+            ${JSON.stringify({ _tag: "initials", text: "IP" })}, 0, 1, ${CREATED_AT}, ${UPDATED_AT})`
+        yield* database.sql`INSERT INTO role_assignments (
+          workspace_id, assignment_id, actor_kind, person_id, agent_id, role,
+          scope_kind, release_id, environment_id, entity_id, lifecycle_kind,
+          assigned_at, ended_at, revoked_at, revision, created_at, updated_at
+        ) VALUES
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000001', 'human', ${OWNER_PERSON_ID}, NULL,
+            'contributor', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000002', 'human', ${OWNER_PERSON_ID}, NULL,
+            'reviewer', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000003', 'human', ${OWNER_PERSON_ID}, NULL,
+            'watcher', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000004', 'human', ${OWNER_PERSON_ID}, NULL,
+            'deployment-approver', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000005', 'human', ${OWNER_PERSON_ID}, NULL,
+            'merge-approver', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000006', 'human', ${OWNER_PERSON_ID}, NULL,
+            'workspace-owner', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000007', 'human', ${excludedAssignmentPersonId}, NULL,
+            'contributor', 'entity', NULL, NULL, ${ISSUE_ID}, 'ended',
+            ${CREATED_AT}, ${UPDATED_AT}, NULL, 1, ${CREATED_AT}, ${UPDATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000008', 'human', ${excludedAssignmentPersonId}, NULL,
+            'reviewer', 'release', ${RELEASE_ID}, NULL, NULL, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000009', 'human', ${inactivePersonId}, NULL,
+            'watcher', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT})`
 
         const bounded = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
@@ -969,14 +1079,34 @@ describe("DeliveryGraphRepository", () => {
             avatarFallback: "AB",
             displayName: "Avery Bell",
             personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+            roles: [
+              "author",
+              "contributor",
+              "deployment-approver",
+              "issue-assignee",
+              "issue-owner",
+              "merge-approver",
+              "operator",
+              "reviewer",
+              "watcher"
+            ]
           }])
           assert.isFalse(bounded.value.items[0]?.ownersTruncated)
           assert.deepStrictEqual(bounded.value.ownerOptions, [{
             avatarFallback: "AB",
             displayName: "Avery Bell",
             personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+            roles: [
+              "author",
+              "contributor",
+              "deployment-approver",
+              "issue-assignee",
+              "issue-owner",
+              "merge-approver",
+              "operator",
+              "reviewer",
+              "watcher"
+            ]
           }])
           assert.isFalse(bounded.value.ownerOptionsTruncated)
         }

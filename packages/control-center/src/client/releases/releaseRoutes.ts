@@ -52,12 +52,24 @@ const ReleaseOriginSchema = Schema.Struct({
   search: Schema.String
 })
 
-const ReleaseRouteStateSchema = Schema.Struct({
+/** Bounded decoder shared by nested client routes that need to retain a release activation. */
+export const ReleaseRouteStateSchema = Schema.Struct({
   _tag: Schema.Literal("release-origin/v1"),
   origin: ReleaseOriginSchema,
   releaseId: ReleaseId,
   workspaceId: WorkspaceId
 })
+
+/** Retain only safe state for the exact release target, dropping foreign or malformed history data. */
+export const retainReleaseRouteState = (
+  state: unknown,
+  workspaceId: WorkspaceIdType,
+  releaseId: ReleaseIdType
+): ReleaseRouteState | null => {
+  const decoded = Schema.decodeUnknownOption(ReleaseRouteStateSchema)(state)
+  if (Option.isNone(decoded)) return null
+  return resolveReleaseOrigin(decoded.value, workspaceId, releaseId).isStored ? decoded.value : null
+}
 
 /** Decode one workspace route segment at the browser boundary. */
 export const decodeWorkspaceRouteId = (value: unknown): WorkspaceIdType | null => {

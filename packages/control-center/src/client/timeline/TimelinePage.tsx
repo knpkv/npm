@@ -1,3 +1,4 @@
+import { LinkProvider } from "@knpkv/rly/foundations"
 import { TimelineRow as RlyTimelineRow } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
@@ -7,6 +8,7 @@ import { Link, useLocation } from "react-router"
 import type { TimelineActorKind, TimelineEvent, TimelineSourceKind } from "../../domain/timeline.js"
 import { browserReadableSessionKey, type BrowserSessionState, useBrowserSession } from "../BrowserSession.js"
 import { contextualAgentPath } from "../contextualAgentPath.js"
+import { WorkspaceEntityLink } from "../entities/WorkspaceEntityLink.js"
 import { TimelineDetailSheet } from "./TimelineDetailSheet.js"
 import type { TimelineDetailTransport } from "./useTimelineDetail.js"
 import styles from "./TimelinePage.module.css"
@@ -203,25 +205,27 @@ export const TimelinePage = ({
       {timelineState.events.length === 0 ? (
         <StatePanel description="Try a wider date range or another actor." title="No activity in this view" />
       ) : (
-        <ol className={styles.events}>
-          {timelineState.events.map((event, index) => (
-            <TimelineRow
-              actor={
-                canInspect ? (
-                  <span className={styles.rowActor}>
-                    <span>{event.actor.label}</span>
-                    <Button onClick={() => setSelectedEvent(event)} size="compact" variant="quiet">
-                      Inspect
-                    </Button>
-                  </span>
-                ) : undefined
-              }
-              continued={index < timelineState.events.length - 1}
-              event={event}
-              key={event.eventKey}
-            />
-          ))}
-        </ol>
+        <LinkProvider component={WorkspaceEntityLink}>
+          <ol className={styles.events}>
+            {timelineState.events.map((event, index) => (
+              <TimelineRow
+                actor={
+                  canInspect ? (
+                    <span className={styles.rowActor}>
+                      <span>{event.actor.label}</span>
+                      <Button onClick={() => setSelectedEvent(event)} size="compact" variant="quiet">
+                        Inspect
+                      </Button>
+                    </span>
+                  ) : undefined
+                }
+                continued={index < timelineState.events.length - 1}
+                event={event}
+                key={event.eventKey}
+              />
+            ))}
+          </ol>
+        </LinkProvider>
       )}
       {timelineState.nextCursor === null ? null : (
         <Button disabled={timelineState.isLoadingMore} onClick={controller.loadMore} size="principal" stretch>

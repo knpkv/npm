@@ -15,6 +15,7 @@ import type { ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { contextualAgentPath } from "../contextualAgentPath.js"
 import type { WorkspaceItemPresentation } from "../items/presentWorkspaceItems.js"
+import { entityOriginFromLocation, makeWorkspaceEntityRouteState } from "../items/workspaceEntityRoutes.js"
 import {
   browserWorkspaceItemsTransport,
   useWorkspaceItems,
@@ -22,7 +23,7 @@ import {
   type WorkspaceItemsTransport
 } from "../items/useWorkspaceItems.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
-import { commandSearchItemHref, commandSearchItemsHref } from "./commandSearchRoutes.js"
+import { commandSearchItemsHref } from "./commandSearchRoutes.js"
 import {
   browserCommandReleasesTransport,
   type CommandReleasePresentation,
@@ -173,13 +174,14 @@ const CommandSearchSurface = ({
       return
     }
     const item = result.item
-    if (item.releaseId !== null) {
-      navigate(item.href, {
-        state: makeReleaseRouteState(workspaceId, item.releaseId, releaseOriginFromLocation(location))
-      })
-      return
-    }
-    navigate(commandSearchItemHref(workspaceId, deferredQuery, item.entityId))
+    navigate(item.href, {
+      state: makeWorkspaceEntityRouteState(
+        location.state,
+        workspaceId,
+        item.entityId,
+        entityOriginFromLocation(location)
+      )
+    })
   }
 
   const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>): void => {

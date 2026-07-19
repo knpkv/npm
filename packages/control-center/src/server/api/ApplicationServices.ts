@@ -24,6 +24,7 @@ import type {
   RelationshipRepairProposalList,
   ReleaseDeliveryGraphInspection,
   ReviewRelationshipRepairProposalRequest,
+  WorkspaceEntityInspection,
   WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
@@ -66,6 +67,7 @@ import type {
   LedgerRevision
 } from "../../domain/deliveryGraph.js"
 import type {
+  EntityId,
   EnvironmentId,
   EventCursor,
   EvidenceId,
@@ -301,6 +303,13 @@ export class AuthorizedShares extends Context.Service<AuthorizedShares, {
 
 /** Workspace-scoped read boundary for relationship, lifecycle, and evidence inspection. */
 export class DeliveryGraphInspection extends Context.Service<DeliveryGraphInspection, {
+  readonly workspaceEntity: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+  }) => Effect.Effect<
+    WorkspaceEntityInspection,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly workspaceEntityProjections: (
     input: {
       readonly workspaceId: WorkspaceId

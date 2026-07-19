@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { renderTimelineQueries } from "@knpkv/control-center-sql"
 import { Effect, Layer, Schema } from "effect"
 
-import { WorkspaceId } from "../../src/domain/identifiers.js"
+import { EntityId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { TimelineRepository } from "../../src/server/persistence/repositories/timelineRepository.js"
@@ -24,6 +24,8 @@ const ExplainQueryPlanRow = Schema.Struct({ detail: Schema.String })
 const detailWorkspaces = [
   {
     workspaceId,
+    entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014a"),
+    siblingEntityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014c"),
     suffix: "payments",
     displayName: "Payments",
     providerId: "jira",
@@ -33,6 +35,8 @@ const detailWorkspaces = [
   },
   {
     workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000149"),
+    entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014b"),
+    siblingEntityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014d"),
     suffix: "identity",
     displayName: "Identity",
     providerId: "confluence",
@@ -42,6 +46,8 @@ const detailWorkspaces = [
   }
 ] satisfies ReadonlyArray<{
   readonly workspaceId: typeof workspaceId
+  readonly entityId: EntityId
+  readonly siblingEntityId: EntityId
   readonly suffix: string
   readonly displayName: string
   readonly providerId: "jira" | "confluence"
@@ -108,7 +114,8 @@ const seedTimelineDetailSources = Effect.gen(function*() {
   yield* Effect.forEach(detailWorkspaces, (fixture) =>
     Effect.gen(function*() {
       const connectionId = `connection-${fixture.suffix}`
-      const entityId = `entity-${fixture.suffix}`
+      const entityId = fixture.entityId
+      const siblingEntityId = fixture.siblingEntityId
       const releaseId = `release-${fixture.suffix}`
       const personId = `person-${fixture.suffix}`
       const agentId = `agent-${fixture.suffix}`
@@ -137,6 +144,9 @@ const seedTimelineDetailSources = Effect.gen(function*() {
       ) VALUES (
         ${fixture.workspaceId}, ${entityId}, ${connectionId}, ${fixture.providerId},
         ${`vendor-${fixture.suffix}`}, 'issue', 1, ${occurredAt}, ${occurredAt}
+      ), (
+        ${fixture.workspaceId}, ${siblingEntityId}, ${connectionId}, ${fixture.providerId},
+        ${`vendor-sibling-${fixture.suffix}`}, 'issue', 1, ${occurredAt}, ${occurredAt}
       )`
       yield* sql`INSERT INTO entity_revisions (
         workspace_id, entity_id, revision, source_revision, normalization_schema_version,
@@ -212,6 +222,34 @@ const seedTimelineDetailSources = Effect.gen(function*() {
         ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'detail-page', 0,
         ${"9".repeat(64)}, ${"8".repeat(64)}, ${detailSyncEventDigest}, 1, ${occurredAt}
       )`
+      yield* sql`INSERT INTO plugin_sync_evidence (
+        workspace_id, plugin_connection_id, stream_key, page_id, ordinal,
+        event_id, event_digest, event_kind, record_key, source_revision,
+        payload_json, observed_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'detail-page', 0,
+        ${`target-event-${fixture.suffix}`}, ${"a".repeat(64)}, 'upsert',
+        ${`vendor-${fixture.suffix}`}, 'source-1', '{}', ${occurredAt}
+      )`
+      yield* sql`INSERT INTO plugin_sync_pages (
+        workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
+        page_digest, checkpoint_digest, timeline_event_digest, event_count, committed_at
+      ) VALUES
+        (${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'sibling-page', 1,
+          ${"b".repeat(64)}, ${"c".repeat(64)},
+          ${fixture.suffix === "payments" ? "e".repeat(64) : "f".repeat(64)}, 1, ${occurredAt}),
+        (${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'batch-only-page', 2,
+          ${"d".repeat(64)}, ${"e".repeat(64)},
+          ${fixture.suffix === "payments" ? "0".repeat(64) : "1".repeat(64)}, 0, ${occurredAt})`
+      yield* sql`INSERT INTO plugin_sync_evidence (
+        workspace_id, plugin_connection_id, stream_key, page_id, ordinal,
+        event_id, event_digest, event_kind, record_key, source_revision,
+        payload_json, observed_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'sibling-page', 0,
+        ${`sibling-event-${fixture.suffix}`}, ${"f".repeat(64)}, 'upsert',
+        ${`vendor-sibling-${fixture.suffix}`}, 'source-1', '{}', ${occurredAt}
+      )`
 
       yield* sql`INSERT INTO delivery_nodes (
         workspace_id, node_id, node_key_digest, node_kind, endpoint_kind,
@@ -219,7 +257,7 @@ const seedTimelineDetailSources = Effect.gen(function*() {
         missing_key, created_at
       ) VALUES
         (${fixture.workspaceId}, ${sourceNodeId}, ${"a".repeat(64)}, 'entity', 'issue',
-          'missing', NULL, NULL, NULL, 'issue', ${`missing-source-${fixture.suffix}`}, ${occurredAt}),
+          'resolved', ${entityId}, NULL, NULL, NULL, NULL, ${occurredAt}),
         (${fixture.workspaceId}, ${targetNodeId}, ${"b".repeat(64)}, 'entity', 'issue',
           'missing', NULL, NULL, NULL, 'issue', ${`missing-target-${fixture.suffix}`}, ${occurredAt})`
       yield* sql`INSERT INTO relationship_heads (
@@ -269,6 +307,7 @@ describe("TimelineRepository", () => {
       const first = yield* repository.page({
         actorKind: "system",
         before: null,
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -284,6 +323,7 @@ describe("TimelineRepository", () => {
       const second = yield* repository.page({
         actorKind: "system",
         before: { eventKey: firstEvent.eventKey, occurredAt: newestAt },
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -294,6 +334,7 @@ describe("TimelineRepository", () => {
       const human = yield* repository.page({
         actorKind: "human",
         before: null,
+        entityId: null,
         from: null,
         limit: 10,
         to: null,
@@ -310,6 +351,7 @@ describe("TimelineRepository", () => {
       const first = yield* repository.page({
         actorKind: "plugin",
         before: null,
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -330,12 +372,78 @@ describe("TimelineRepository", () => {
       const second = yield* repository.page({
         actorKind: "plugin",
         before: { eventKey: firstEvent.eventKey, occurredAt: newestAt },
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
         workspaceId
       })
       assert.deepStrictEqual(second.map(({ eventKey }) => eventKey), [`sync:${"1".repeat(64)}`])
+    })))
+
+  it.effect("returns only attributable activity for the exact workspace entity", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedTimelineDetailSources
+      const repository = yield* TimelineRepository
+      const paymentsWorkspace = detailWorkspaces[0]
+      const identityWorkspace = detailWorkspaces[1]
+      if (paymentsWorkspace === undefined || identityWorkspace === undefined) {
+        return yield* Effect.die("Timeline entity activity fixtures are incomplete")
+      }
+      const paymentsEntityId = paymentsWorkspace.entityId
+      const identityEntityId = identityWorkspace.entityId
+      const siblingEntityId = paymentsWorkspace.siblingEntityId
+
+      const payments = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: paymentsEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: paymentsWorkspace.workspaceId
+      })
+      assert.deepStrictEqual(
+        payments.map(({ eventKey }) => eventKey).sort(),
+        [
+          `audit:${detailAuditEventId}`,
+          `domain:${detailDomainEventId}`,
+          `relationship:${detailRelationshipEventDigest}`,
+          `sync:${detailSyncEventDigest}`
+        ].sort()
+      )
+      assert.isTrue(payments.every(({ entityId }) => entityId === paymentsEntityId))
+      assert.deepStrictEqual(
+        payments.filter(({ sourceKind }) => sourceKind === "plugin-sync").map(({ eventKey }) => eventKey),
+        [`sync:${detailSyncEventDigest}`]
+      )
+
+      const sibling = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: siblingEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: paymentsWorkspace.workspaceId
+      })
+      assert.deepStrictEqual(
+        sibling.map(({ eventKey }) => eventKey),
+        [`sync:${"e".repeat(64)}`]
+      )
+      assert.isTrue(sibling.every(({ entityId }) => entityId === siblingEntityId))
+
+      const identity = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: identityEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: identityWorkspace.workspaceId
+      })
+      assert.lengthOf(identity, 4)
+      assert.isTrue(identity.every(({ entityId }) => entityId === identityEntityId))
     })))
 
   it.effect("resolves exact source details without crossing workspace boundaries", () =>
@@ -351,7 +459,7 @@ describe("TimelineRepository", () => {
       const resolvedDetails = yield* Effect.forEach(detailWorkspaces, (fixture) =>
         Effect.gen(function*() {
           const connectionId = `connection-${fixture.suffix}`
-          const entityId = `entity-${fixture.suffix}`
+          const entityId = fixture.entityId
           const releaseId = `release-${fixture.suffix}`
           const actionId = `action-${fixture.suffix}`
           const relationshipId = `relationship-${fixture.suffix}`
@@ -453,6 +561,7 @@ describe("TimelineRepository", () => {
       const plans = renderTimelineQueries({
         actorKind: null,
         before: null,
+        entityId: null,
         from: "2026-07-01T00:00:00.000Z",
         limit: 25,
         to: "2026-07-31T23:59:59.999Z",

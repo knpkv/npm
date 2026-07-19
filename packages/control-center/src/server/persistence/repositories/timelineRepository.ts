@@ -6,7 +6,7 @@ import type { Success } from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
-import type { WorkspaceId } from "../../../domain/identifiers.js"
+import type { EntityId, WorkspaceId } from "../../../domain/identifiers.js"
 import type {
   TimelineActorKind,
   TimelineCursor,
@@ -56,6 +56,7 @@ export interface TimelineRecord {
 export interface ReadTimelinePageInput {
   readonly actorKind: TimelineActorKind | null
   readonly before: TimelineCursor | null
+  readonly entityId: EntityId | null
   readonly from: UtcTimestamp | null
   readonly limit: number
   readonly to: UtcTimestamp | null
@@ -105,6 +106,7 @@ const makeTimelineRepository = Effect.gen(function*() {
         before: input.before === null
           ? null
           : { eventKey: input.before.eventKey, occurredAt: DateTime.formatIso(input.before.occurredAt) },
+        entityId: input.entityId,
         from: input.from === null ? null : DateTime.formatIso(input.from),
         limit: sourceLimit,
         to: input.to === null ? null : DateTime.formatIso(input.to),

@@ -674,6 +674,18 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
       const inspection = yield* DeliveryGraphInspection
       const repairProposals = yield* RelationshipRepairProposals
       return handlers
+        .handle("workspaceEntity", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            return yield* inspection.workspaceEntity({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("workspaceEntityProjections", ({ query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

@@ -48,7 +48,7 @@ const eventTitle = (record: TimelineRecord): string => {
 
 const eventHref = (workspaceId: WorkspaceId, record: TimelineRecord): string | null => {
   if (record.releaseId !== null) return `/w/${workspaceId}/releases/${record.releaseId}`
-  if (record.entityId !== null) return `/w/${workspaceId}/items?object=${record.entityId}#item-details`
+  if (record.entityId !== null) return `/w/${workspaceId}/items/${record.entityId}`
   if (record.sourceKind === "plugin-sync") return "/services"
   return null
 }
@@ -87,7 +87,9 @@ export const makeTimelineReads = Effect.gen(function*() {
   const persistence = yield* Persistence
   return TimelineReads.of({
     page: Effect.fn("TimelineReads.page")(function*(input) {
-      const records = yield* persistence.timeline.page(input).pipe(Effect.mapError(() => unavailable()))
+      const records = yield* persistence.timeline.page({ ...input, entityId: null }).pipe(
+        Effect.mapError(() => unavailable())
+      )
       const visible = records.slice(0, input.limit)
       const last = visible.at(-1)
       return {

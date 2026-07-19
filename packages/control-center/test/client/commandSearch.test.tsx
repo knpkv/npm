@@ -92,9 +92,7 @@ describe("command search", () => {
     expect(commandSearchItemsHref(WORKSET_WORKSPACE_ID, " OPS-428 ")).toBe(
       `/w/${WORKSET_WORKSPACE_ID}/items?q=OPS-428#results`
     )
-    expect(commandSearchItemHref(WORKSET_WORKSPACE_ID, " OPS-428 ", entity)).toBe(
-      `/w/${WORKSET_WORKSPACE_ID}/items?q=OPS-428&object=${entity}#item-details`
-    )
+    expect(commandSearchItemHref(WORKSET_WORKSPACE_ID, entity)).toBe(`/w/${WORKSET_WORKSPACE_ID}/items/${entity}`)
     expect(contextualAgentPath(`/w/${WORKSET_WORKSPACE_ID}/items`, "?status=attention", "#results")).toBe(
       `/agent?from=${encodeURIComponent(`/w/${WORKSET_WORKSPACE_ID}/items?status=attention#results`)}`
     )
@@ -202,13 +200,20 @@ describe("command search", () => {
     const selectedEntity = issueEntries[1]?.projection.entityId
     if (selectedEntity === undefined) throw new Error("Expected second issue fixture")
     expect(router.state.location).toMatchObject({
-      hash: "#release-work",
-      pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}`,
-      search: `?object=${selectedEntity}`,
+      hash: "",
+      pathname: `/w/${WORKSET_WORKSPACE_ID}/items/${selectedEntity}`,
+      search: "",
       state: {
-        _tag: "release-origin/v1",
-        releaseId: releaseWorksetFixture.releaseId,
-        workspaceId: WORKSET_WORKSPACE_ID
+        entityOrigin: {
+          _tag: "entity-origin/v2",
+          entityId: selectedEntity,
+          origin: {
+            hash: "",
+            pathname: `/w/${WORKSET_WORKSPACE_ID}/overview`,
+            search: "?status=attention"
+          },
+          workspaceId: WORKSET_WORKSPACE_ID
+        }
       }
     })
     expect(portal.querySelector('[role="dialog"]')).toBeNull()

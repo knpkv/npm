@@ -200,9 +200,8 @@ const ReleasePreviewContent = ({ selection }: { readonly selection: ReleaseRoute
 
   useEffect(() => {
     if (isOpen || exit === null) return
-    if (resolvedOrigin.isStored) navigate(-1)
-    else navigate(originHref, { replace: true })
-  }, [context.workspaceId, exit, isOpen, navigate, originHref, resolvedOrigin.isStored, selection.releaseId])
+    navigate(originHref, { replace: true })
+  }, [context.workspaceId, exit, isOpen, navigate, originHref, selection.releaseId])
 
   const requestOrigin = (): void => {
     context.requestReleaseFocus(selection.releaseId)

@@ -52,6 +52,11 @@ const itemsRoute = async () => {
   return { Component: module.ItemsPage }
 }
 
+const workspaceEntityRoute = async () => {
+  const module = await import("./entities/WorkspaceEntityRoute.js")
+  return { Component: module.WorkspaceEntityRoute }
+}
+
 const timelineRoute = async () => {
   const module = await import("./timeline/TimelinePage.js")
   return { Component: module.TimelinePage }
@@ -90,6 +95,7 @@ export const router = createBrowserRouter([
         children: [
           { path: "overview", lazy: workspaceOverviewRoute },
           { path: "work", lazy: activeWorkRoute },
+          { path: "items/:entityId", lazy: workspaceEntityRoute },
           { path: "items", lazy: itemsRoute },
           { path: "timeline", lazy: timelineRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },

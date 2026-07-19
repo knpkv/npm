@@ -12,6 +12,13 @@ export {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentThreadReplayQuery
 } from "./agentJobs.js"
+export {
+  renderWorkspaceEntityOwnersQuery,
+  renderWorkspaceEntityRelationshipsQuery,
+  renderWorkspaceEntityReleasesQuery,
+  type WorkspaceEntityQueryInput,
+  type WorkspaceEntityRelationshipsQueryInput
+} from "./deliveryGraph.js"
 export { type EntitySourceIdentityQueryInput, renderEntitySourceIdentityQuery } from "./entities.js"
 export {
   type CreateFollowedResourceQueryInput,

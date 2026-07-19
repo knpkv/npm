@@ -83,6 +83,10 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     relationshipId: RelationshipId,
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 }))
   },
+  entitySlice: {
+    entityId: EntityId,
+    limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+  },
   releaseSlice: {
     releaseId: ReleaseId,
     environmentId: Schema.NullOr(EnvironmentId),
@@ -166,6 +170,16 @@ const WorkspaceEntityProjection = Schema.Struct({
   )
 )
 
+const EntitySlice = Schema.Struct({
+  entity: WorkspaceEntityProjection,
+  truncated: Schema.Boolean,
+  nodes: Schema.Array(DeliveryNode),
+  relatedEntityProjections: Schema.Array(PersistedEntityProjection),
+  relationships: Schema.Array(DeliveryRelationship),
+  evidenceClaims: Schema.Array(EvidenceClaim),
+  evidenceItems: Schema.Array(EvidenceItem)
+})
+
 const WorkspaceEntityProjections = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   ownerOptions: Schema.Array(WorkspaceEntityOwner).check(Schema.isMaxLength(MAXIMUM_WORKSPACE_OWNER_OPTIONS)),
@@ -194,6 +208,7 @@ export const DeliveryGraphReadResult = Schema.TaggedUnion({
   evidence: { value: EvidenceBundle },
   relationship: { value: DeliveryRelationship },
   relationshipHistory: { value: Schema.Array(DeliveryRelationship) },
+  entitySlice: { value: EntitySlice },
   releaseSlice: { value: ReleaseSlice },
   workspaceEntityProjections: { value: WorkspaceEntityProjections },
   releaseSummary: { value: ReleaseRelationshipSummary }

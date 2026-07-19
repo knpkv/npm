@@ -33,7 +33,10 @@ export {
   RelationshipRepairCandidate,
   RelationshipRepairCandidates,
   RelationshipRepairProposalDraft,
-  ReleaseDeliveryGraphInspection
+  ReleaseDeliveryGraphInspection,
+  WorkspaceEntityActivity,
+  WorkspaceEntityGraph,
+  WorkspaceEntityInspection
 } from "./deliveryGraph.js"
 export {
   ConflictApiError,

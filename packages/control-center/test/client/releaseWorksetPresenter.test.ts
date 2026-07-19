@@ -75,9 +75,9 @@ describe("release workset presenter", () => {
       state: "current"
     })])
     for (const item of [...workset.jiraItems, ...workset.pullRequestGroups, ...workset.pipelines]) {
-      expect(item.href).toMatch(/^\/w\/[^/]+\/releases\/[^/?]+\?object=[^#]+#release-work$/u)
+      expect(item.href).toMatch(/^\/w\/[^/]+\/items\/[^/?#]+$/u)
     }
-    expect(workset.runbooks[0]?.href).toMatch(/#release-work$/u)
+    expect(workset.runbooks[0]?.href).toMatch(/^\/w\/[^/]+\/items\/[^/?#]+$/u)
   })
 
   it("maps the OPS-428 review lifecycle and provider states without copying portfolio labels", () => {

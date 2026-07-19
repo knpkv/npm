@@ -715,7 +715,44 @@ const isHttpHandleCallback = (node) => {
   return parent.callee.type === "MemberExpression" && staticPropertyName(parent.callee.property) === "handle"
 }
 
+const containsEntityIdLikeIdentifier = (sourceCode, node) => {
+  if (node.type === "Identifier") return /entityId$/iu.test(node.name)
+  const visitorKeys = sourceCode.visitorKeys[node.type] ?? []
+  return visitorKeys.some((key) => {
+    const child = node[key]
+    return Array.isArray(child)
+      ? child.some((entry) => entry !== null && containsEntityIdLikeIdentifier(sourceCode, entry))
+      : child !== null && child !== undefined && containsEntityIdLikeIdentifier(sourceCode, child)
+  })
+}
+
 module.exports = {
+  "no-ad-hoc-workspace-entity-path": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require the canonical workspace entity path helper in Control Center client source",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        adHocPath: "Build canonical workspace entity hrefs with workspaceEntityPath."
+      }
+    },
+    create(context) {
+      if (context.filename.replaceAll("\\", "/").endsWith("/client/workspaceEntityPaths.ts")) return {}
+      return {
+        TemplateLiteral(node) {
+          if (!node.quasis.some((quasi) => quasi.value.raw.includes("/items/"))) return
+          if (!node.expressions.some((expression) => containsEntityIdLikeIdentifier(context.sourceCode, expression))) {
+            return
+          }
+          context.report({ messageId: "adHocPath", node })
+        }
+      }
+    }
+  },
   "require-isolated-agent-child-environment": {
     meta: {
       type: "problem",
