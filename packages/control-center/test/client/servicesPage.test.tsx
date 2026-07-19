@@ -1558,6 +1558,84 @@ describe("ServicesPage connection tests", () => {
     })
   })
 
+  it("lets a returned OAuth flow replace stored credentials before any profile is saved", async () => {
+    const previousLocation = window.location.href
+    const originalAuthorization = new URL("#stored-unverified-oauth", previousLocation)
+    originalAuthorization.searchParams.set("state", grantId)
+    const replacementAuthorization = new URL("#replacement-oauth", previousLocation)
+    replacementAuthorization.searchParams.set("state", "c".repeat(43))
+    let startsWithoutConfiguration = 0
+    const startAtlassianOAuthGrant = vi.fn<NonNullable<ConnectionTestTransport["startAtlassianOAuthGrant"]>>(
+      (_providers, _signal, configuration) => {
+        if (configuration !== undefined) {
+          return Promise.resolve({
+            _tag: "ready",
+            authorizationUrl: replacementAuthorization.href,
+            callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+          })
+        }
+        startsWithoutConfiguration += 1
+        return Promise.resolve(
+          startsWithoutConfiguration === 1
+            ? {
+                _tag: "ready",
+                authorizationUrl: originalAuthorization.href,
+                callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+              }
+            : {
+                _tag: "configuration-required",
+                callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+              }
+        )
+      }
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAtlassianProfiles: () => Promise.resolve([]),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      setEnabled: vi.fn(),
+      startAtlassianOAuthGrant,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=jira")
+    await act(async () => undefined)
+    const button = (text: string): HTMLButtonElement | undefined =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent?.includes(text))
+
+    await act(async () => button("Sign in with Atlassian")?.click())
+    expect(window.location.href).toBe(originalAuthorization.href)
+
+    await act(async () => root?.unmount())
+    root = undefined
+    document.body.replaceChildren()
+    window.history.replaceState(null, "", previousLocation)
+    const returnedHost = await renderServices(transport, "/services?enable=jira")
+    await act(async () => undefined)
+    const returnedButton = (text: string): HTMLButtonElement | undefined =>
+      [...returnedHost.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+        textContent?.includes(text)
+      )
+    await act(async () => returnedButton("Sign in with Atlassian")?.click())
+    const clientId = returnedHost.querySelector<HTMLInputElement>('input[maxlength="500"]')
+    const clientSecret = returnedHost.querySelector<HTMLInputElement>('input[type="password"][maxlength="16384"]')
+    expect(clientId).not.toBeNull()
+    expect(clientSecret).not.toBeNull()
+    if (clientId === null || clientSecret === null) return
+
+    await setControlValue(clientId, "replacement-client")
+    await setControlValue(clientSecret, "replacement-secret")
+    await act(async () => returnedButton("Save OAuth app and continue")?.click())
+
+    expect(startAtlassianOAuthGrant).toHaveBeenCalledTimes(3)
+    expect(startAtlassianOAuthGrant.mock.calls[2]?.[2]).toEqual({
+      clientId: "replacement-client",
+      clientSecret: "replacement-secret"
+    })
+    expect(window.location.href).toBe(replacementAuthorization.href)
+    window.history.replaceState(null, "", previousLocation)
+  })
+
   it("cancels a pending OAuth start when the setup form closes", async () => {
     let resolveStart: ((value: AtlassianOAuthGrantStartResponse) => void) | undefined
     let startSignal: AbortSignal | undefined
