@@ -588,6 +588,22 @@ export const ServicesPage = ({
     const synchronizable = connectionsState.overview.connections.filter(
       ({ supportsSynchronization }) => supportsSynchronization
     )
+    const synchronizableIds = new Set(synchronizable.map(({ pluginConnectionId }) => pluginConnectionId))
+    for (const [pluginConnectionId, request] of synchronizationRequests.current) {
+      if (synchronizableIds.has(pluginConnectionId)) continue
+      request.abort()
+      synchronizationRequests.current.delete(pluginConnectionId)
+    }
+    setSynchronizationStates((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const pluginConnectionId of next.keys()) {
+        if (synchronizableIds.has(pluginConnectionId)) continue
+        next.delete(pluginConnectionId)
+        changed = true
+      }
+      return changed ? next : current
+    })
     for (const connection of synchronizable) refreshSynchronization(connection.pluginConnectionId)
     return () => {
       for (const connection of synchronizable) {

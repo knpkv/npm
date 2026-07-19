@@ -79,7 +79,9 @@ const COMPLETE_CHECKPOINT_PREFIX = "complete:"
 const NEXT_CHECKPOINT_PREFIX = "next:"
 const BOUNDED_CHECKPOINT_PREFIX = "bounded:"
 const DURABLE_BOUNDED_CHECKPOINT_PREFIX = "bounded:v1:"
+const DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX = "bounded:v2:"
 const DURABLE_COMPLETE_CHECKPOINT_PREFIX = "complete:v1:"
+const DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX = "complete:v2:"
 const RESTART_INITIAL_CHECKPOINT = "restart:initial"
 const RESTART_CURSOR_PREFIX = "restart:cursor:"
 const INVENTORY_DIGEST_LENGTH = 64
@@ -256,16 +258,20 @@ interface BoundedPrefixCheckpoint {
 
 interface SyncCheckpointState {
   readonly boundedPrefix: BoundedPrefixCheckpoint | null
+  readonly checkpointGeneration: number
   readonly cursor: string | null
   readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
   readonly inventoryDigest: string | null
+  readonly usesGenerationCheckpoint: boolean
 }
 
 const initialSyncCheckpointState: SyncCheckpointState = {
   boundedPrefix: null,
+  checkpointGeneration: 0,
   cursor: null,
   expectedBoundedPrefix: null,
-  inventoryDigest: null
+  inventoryDigest: null,
+  usesGenerationCheckpoint: false
 }
 
 const validSyncCursor = (cursor: string): boolean => cursor.length > 0 && cursor.length <= MAXIMUM_SYNC_CURSOR_LENGTH
@@ -276,6 +282,28 @@ const syncCursorFromCheckpoint = (
   if (checkpoint === null || checkpoint === LEGACY_COMPLETE_CHECKPOINT) {
     return Effect.succeed(initialSyncCheckpointState)
   }
+  if (checkpoint.startsWith(DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX)) {
+    const match = /^([0-9]{1,9}):([0-9a-f]{64}):([0-9a-f]{64}):(.+)$/u.exec(
+      checkpoint.slice(DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX.length)
+    )
+    const generation = Number(match?.[1])
+    if (
+      match !== null &&
+      Number.isSafeInteger(generation) &&
+      generation < 999_999_999 &&
+      validSyncCursor(match[4] ?? "")
+    ) {
+      return Effect.succeed({
+        boundedPrefix: null,
+        checkpointGeneration: generation + 1,
+        cursor: null,
+        expectedBoundedPrefix: { inventoryDigest: match[3]!, cursor: match[4]! },
+        inventoryDigest: null,
+        usesGenerationCheckpoint: true
+      })
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
   if (checkpoint.startsWith(DURABLE_COMPLETE_CHECKPOINT_PREFIX)) {
     const match = /^([0-9a-f]{64}):([0-9a-f]{64}):(.+)$/u.exec(
       checkpoint.slice(DURABLE_COMPLETE_CHECKPOINT_PREFIX.length)
@@ -284,9 +312,11 @@ const syncCursorFromCheckpoint = (
       const boundedPrefix = { inventoryDigest: match[2]!, cursor: match[3]! }
       return Effect.succeed({
         boundedPrefix: null,
+        checkpointGeneration: 0,
         cursor: null,
         expectedBoundedPrefix: boundedPrefix,
-        inventoryDigest: null
+        inventoryDigest: null,
+        usesGenerationCheckpoint: false
       })
     }
     return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
@@ -296,6 +326,34 @@ const syncCursorFromCheckpoint = (
       ? Effect.succeed(initialSyncCheckpointState)
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
   }
+  if (checkpoint.startsWith(DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX)) {
+    const payload = checkpoint.slice(DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX.length)
+    const header = /^([0-9]{1,9}):([0-9a-f]{64}):([0-9]{1,4}):/u.exec(payload)
+    if (header !== null) {
+      const generation = Number(header[1])
+      const prefixCursorLength = Number(header[3])
+      const remaining = payload.slice(header[0].length)
+      const prefixCursor = remaining.slice(0, prefixCursorLength)
+      const current = /^([0-9a-f]{64}):(.+)$/u.exec(remaining.slice(prefixCursorLength))
+      if (
+        Number.isSafeInteger(generation) &&
+        prefixCursor.length === prefixCursorLength &&
+        validSyncCursor(prefixCursor) &&
+        current !== null &&
+        validSyncCursor(current[2] ?? "")
+      ) {
+        return Effect.succeed({
+          boundedPrefix: { inventoryDigest: header[2]!, cursor: prefixCursor },
+          checkpointGeneration: generation,
+          cursor: current[2]!,
+          expectedBoundedPrefix: null,
+          inventoryDigest: current[1]!,
+          usesGenerationCheckpoint: true
+        })
+      }
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
   if (checkpoint.startsWith(DURABLE_BOUNDED_CHECKPOINT_PREFIX)) {
     const match = /^([0-9a-f]{64}):(.+)$/u.exec(
       checkpoint.slice(DURABLE_BOUNDED_CHECKPOINT_PREFIX.length)
@@ -304,9 +362,11 @@ const syncCursorFromCheckpoint = (
       const boundedPrefix = { inventoryDigest: match[1]!, cursor: match[2]! }
       return Effect.succeed({
         boundedPrefix,
+        checkpointGeneration: 0,
         cursor: boundedPrefix.cursor,
         expectedBoundedPrefix: null,
-        inventoryDigest: boundedPrefix.inventoryDigest
+        inventoryDigest: boundedPrefix.inventoryDigest,
+        usesGenerationCheckpoint: false
       })
     }
     return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
@@ -316,7 +376,14 @@ const syncCursorFromCheckpoint = (
     if (!checkpoint.startsWith(prefix)) continue
     const cursor = checkpoint.slice(prefix.length)
     return validSyncCursor(cursor)
-      ? Effect.succeed({ boundedPrefix: null, cursor, expectedBoundedPrefix: null, inventoryDigest: null })
+      ? Effect.succeed({
+        boundedPrefix: null,
+        checkpointGeneration: 0,
+        cursor,
+        expectedBoundedPrefix: null,
+        inventoryDigest: null,
+        usesGenerationCheckpoint: false
+      })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
   }
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
@@ -326,15 +393,20 @@ const checkpointAfterPage = (
   cursor: string | null,
   bounded: boolean,
   inventoryDigest: string,
-  previousBoundedPrefix: BoundedPrefixCheckpoint | null
+  previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number,
+  usesGenerationCheckpoint: boolean
 ): string => {
   if (cursor !== null) {
-    return bounded
+    if (!bounded) return `${NEXT_CHECKPOINT_PREFIX}${cursor}`
+    return previousBoundedPrefix === null
       ? `${DURABLE_BOUNDED_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor}`
-      : `${NEXT_CHECKPOINT_PREFIX}${cursor}`
+      : `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor.length}:${previousBoundedPrefix.cursor}${inventoryDigest}:${cursor}`
   }
   return previousBoundedPrefix === null
     ? `${COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}`
+    : usesGenerationCheckpoint
+    ? `${DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX}${checkpointGeneration}:${inventoryDigest}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor}`
     : `${DURABLE_COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor}`
 }
 
@@ -915,6 +987,8 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   pageNumber: number,
   previousInventoryDigest: string | null,
   previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number,
+  usesGenerationCheckpoint: boolean,
   expectedBoundedPrefix: BoundedPrefixCheckpoint | null,
   seenCursors: Set<string>
 ) {
@@ -956,7 +1030,14 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   const normalized = verifiedBoundedPrefix === null
     ? yield* splitSyncPage({
       events,
-      logicalCheckpoint: checkpointAfterPage(following, bounded, inventoryDigest, previousBoundedPrefix),
+      logicalCheckpoint: checkpointAfterPage(
+        following,
+        bounded,
+        inventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration,
+        usesGenerationCheckpoint
+      ),
       logicalHasMore: hasMore,
       restartCheckpoint: checkpointBeforePage(cursor)
     })
@@ -965,11 +1046,13 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
     normalized,
     nextState: hasMore
       ? Option.some({
+        checkpointGeneration,
         cursor: following,
         expectedBoundedPrefix: verifiedBoundedPrefix === null ? expectedBoundedPrefix : null,
         inventoryDigest,
         pageNumber: verifiedBoundedPrefix === null ? pageNumber + 1 : 1,
-        previousBoundedPrefix: verifiedBoundedPrefix ?? previousBoundedPrefix
+        previousBoundedPrefix: verifiedBoundedPrefix ?? previousBoundedPrefix,
+        usesGenerationCheckpoint
       })
       : Option.none()
   }
@@ -1173,17 +1256,21 @@ export const makeConfluencePageAdapter = (
             Effect.map((checkpointState) => {
               if (checkpointState.cursor !== null) seenCursors.add(checkpointState.cursor)
               const initialState: {
+                readonly checkpointGeneration: number
                 readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
                 readonly cursor: string | null
                 readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
                 readonly inventoryDigest: string | null
                 readonly pageNumber: number
+                readonly usesGenerationCheckpoint: boolean
               } = {
+                checkpointGeneration: checkpointState.checkpointGeneration,
                 previousBoundedPrefix: checkpointState.boundedPrefix,
                 cursor: checkpointState.cursor,
                 expectedBoundedPrefix: checkpointState.expectedBoundedPrefix,
                 inventoryDigest: checkpointState.inventoryDigest,
-                pageNumber: 1
+                pageNumber: 1,
+                usesGenerationCheckpoint: checkpointState.usesGenerationCheckpoint
               }
               return Stream.paginate(
                 initialState,
@@ -1194,6 +1281,8 @@ export const makeConfluencePageAdapter = (
                     state.pageNumber,
                     state.inventoryDigest,
                     state.previousBoundedPrefix,
+                    state.checkpointGeneration,
+                    state.usesGenerationCheckpoint,
                     state.expectedBoundedPrefix,
                     seenCursors
                   )

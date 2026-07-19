@@ -31,7 +31,7 @@ import type {
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginFailure } from "../plugins/failures.js"
 import { pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
-import { hasPluginCapability } from "../plugins/negotiation.js"
+import { supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
 import { PluginConnection, type PluginConnectionV1 } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
@@ -266,7 +266,7 @@ export const makeManualPluginSynchronization = Effect.fn(
     const descriptor = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(NegotiatedPluginDescriptorV1))(
       runtime.descriptorJson
     ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
-    if (!hasPluginCapability(descriptor, "sync.incremental", 1)) {
+    if (!supportsFirstPartySynchronization(connection.providerId, descriptor)) {
       return yield* new ApplicationInvalidRequest()
     }
     const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(driver.value.streamKey).pipe(

@@ -27,7 +27,10 @@ import {
 } from "../../src/server/plugins/confluence/ConfluencePageAdapter.js"
 import type { ConfluencePageClientShape } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
-import { makeJiraReadPluginRuntimeFromProvider } from "../../src/server/plugins/jira/JiraReadPlugin.js"
+import {
+  jiraReadPluginDescriptor,
+  makeJiraReadPluginRuntimeFromProvider
+} from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import type { JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection, type PluginConnectionV1 } from "../../src/server/plugins/PluginConnection.js"
@@ -39,6 +42,12 @@ const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000
 const SYNCHRONIZED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:00.000Z")
 const PAGE_COMMITTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:01:00.000Z")
 const PROVIDER_OBSERVED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T12:00:01.000Z")
+
+const compatibleHistoricalJiraDescriptor = {
+  ...jiraReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}
 
 const fixtures = [
   {
@@ -340,6 +349,45 @@ describe("manual plugin synchronization", () => {
         SYNCHRONIZED_AT
       )
       const synchronized = yield* synchronization.synchronize(input)
+      assert.strictEqual(synchronized.result, "synchronized")
+      assert.strictEqual(synchronized.pagesCommitted, 1)
+      assert.lengthOf(
+        yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        ),
+        1
+      )
+    })))
+
+  it.effect("preserves synchronization for a compatible historical Jira runtime", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "jira")
+      if (fixture === undefined) return yield* Effect.die("jira fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        "jira",
+        compatibleHistoricalJiraDescriptor,
+        runtime.revision,
+        SYNCHRONIZED_AT
+      )
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () => Stream.succeed(pageFor(fixture))
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const synchronized = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      })
+
       assert.strictEqual(synchronized.result, "synchronized")
       assert.strictEqual(synchronized.pagesCommitted, 1)
       assert.lengthOf(
@@ -922,6 +970,93 @@ describe("manual plugin synchronization", () => {
         stream.checkpointJson ?? "",
         /^"complete:v1:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u
       )
+    })))
+
+  it.effect("retains the first bounded prefix across multiple suffix windows", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "confluence")
+      if (fixture === undefined) return yield* Effect.die("confluence fixture not found")
+      const { persistence, streamKey } = yield* setupFixture(fixture)
+      const cursors: Array<string | null> = []
+      let attachmentTitle = "release-v1.txt"
+      const connection = yield* makeConfluenceConnection(confluenceClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return index < 10
+              ? { results: [], _links: { next: `/pages?cursor=c${index + 1}` } }
+              : { results: [confluencePage] }
+          }),
+        getPageAttachments: (pageId) =>
+          Effect.succeed({
+            results: pageId === CONFLUENCE_PAGE_ID
+              ? [{
+                id: "attachment-1",
+                status: "current",
+                title: attachmentTitle,
+                createdAt: CONFLUENCE_UPDATED_AT,
+                pageId,
+                version: { number: 1 }
+              }]
+              : []
+          })
+      }))
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: (pluginConnection, request) => pluginConnection.sync(request)
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(
+        confluenceConnections(fixture, connection),
+        drivers
+      )
+      const input = { workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId }
+
+      const firstWindow = yield* synchronization.synchronize(input)
+      const secondWindow = yield* synchronization.synchronize(input)
+      const completed = yield* synchronization.synchronize(input)
+      attachmentTitle = "release-v2.txt"
+      const verifiedWindows = yield* synchronization.synchronize(input)
+      const changedTail = yield* synchronization.synchronize(input)
+
+      assert.strictEqual(firstWindow.pagesCommitted, 5)
+      assert.strictEqual(secondWindow.pagesCommitted, 5)
+      assert.strictEqual(completed.pagesCommitted, 1)
+      assert.strictEqual(verifiedWindows.pagesCommitted, 1)
+      assert.deepStrictEqual(cursors, [
+        null,
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8",
+        "c9",
+        "c10",
+        null,
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "c6",
+        "c7",
+        "c8",
+        "c9",
+        "c10"
+      ])
+      assert.strictEqual(changedTail.result, "synchronized")
+      assert.strictEqual(changedTail.pagesCommitted, 1)
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.match(stream.checkpointJson ?? "", /^"complete:v2:1:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u)
     })))
 
   it.effect("does not commit a page for a non-advancing stored Confluence cursor", () =>

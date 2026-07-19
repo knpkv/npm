@@ -2422,6 +2422,95 @@ describe("ServicesPage connection tests", () => {
     ).toHaveLength(1)
   })
 
+  it("drops stale synchronization state when refreshed support disappears", async () => {
+    const current = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      supportsSynchronization: true
+    })
+    const historical = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(current),
+      isEnabled: false,
+      supportsSynchronization: false
+    })
+    const overviewTransport = vi.fn().mockResolvedValue({ ...overview, connections: [current] })
+    const setEnabled = vi.fn().mockResolvedValue(historical)
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>().mockResolvedValue(
+      Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: current.pluginConnectionId,
+        providerId: "confluence",
+        streamKey: "pages",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        result: "never",
+        pagesCommitted: 0
+      })
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: overviewTransport,
+      setEnabled,
+      synchronization,
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Never synchronized")
+    expect(host.textContent).toContain("Sync now")
+
+    const disable = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Disable")
+    )
+    await act(async () => disable?.click())
+    await act(async () => undefined)
+
+    expect(setEnabled).toHaveBeenCalledWith(current.pluginConnectionId, false, expect.any(AbortSignal))
+    expect(synchronization).toHaveBeenCalledTimes(1)
+    expect(host.textContent).not.toContain("Never synchronized")
+    expect(host.textContent).not.toContain("Sync now")
+  })
+
+  it("shows disabled synchronization history without enabling Sync now", async () => {
+    const disabled = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      isEnabled: false,
+      supportsSynchronization: true,
+      health: { _tag: "disabled", checkedAt: "2026-07-14T10:00:00.000Z" }
+    })
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>().mockResolvedValue(
+      Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: disabled.pluginConnectionId,
+        providerId: "confluence",
+        streamKey: "pages",
+        lastAttemptAt: "2026-07-19T10:00:00.000Z",
+        lastSuccessAt: "2026-07-19T10:00:01.000Z",
+        result: "synchronized",
+        pagesCommitted: 3
+      })
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [disabled] }),
+      setEnabled: vi.fn(),
+      synchronization,
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Synchronized")
+    expect(host.textContent).toContain("3 pages")
+    const syncNow = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Sync now")
+    )
+    expect(syncNow?.disabled).toBe(true)
+  })
+
   it("shows synchronization loading and error states and refreshes them", async () => {
     const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),
