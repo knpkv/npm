@@ -1,0 +1,51 @@
+---
+title: Agent Runtime
+description: Build durable local-agent workers against one provider-neutral Effect protocol.
+---
+
+`@knpkv/ai-runtime` is the small interface between durable application workers and local AI providers. Codex, Claude, and test bridges can emit the same bounded event stream through this contract; the application remains responsible for authorization, durable jobs, leases, context snapshots, and reconnectable threads. Provider bridges land separately from this foundation package.
+
+## Install
+
+```bash
+pnpm add @knpkv/ai-runtime effect
+```
+
+## Runtime boundary
+
+An adapter implements one method:
+
+```typescript
+interface AgentAdapter {
+  run(request: AgentRunRequest): Stream.Stream<AgentRuntimeEvent, AgentProviderError>
+}
+```
+
+Provide it through `layerAgentRuntime(adapter)`, then consume `AgentRuntime` in an Effect worker. A successfully exhausted stream must finish with exactly one `completed` event; `AgentProviderError` is the alternative terminal for a failed run and must occur before completion. Output or failure after completion, duplicate completion, and successful exhaustion without completion fail with a typed `AgentRuntimeProtocolError`. Interrupting the consumer interrupts the adapter stream and is the shared cancellation mechanism. Adapters that acquire resources must return a properly scoped stream so interruption runs their provider finalizers.
+
+## Durable continuation
+
+`AgentRunRequest` captures the workspace, release, subject revision, provider, model, access level, and a context fingerprint. A resumed request contains only an opaque `AgentSessionRef` plus that fingerprint.
+
+The reference is deliberately not provider-native session data. Keep the actual Codex or Claude continuation payload behind a server-only adapter store, and resume only when the stored fingerprint matches the new request exactly. Browser responses and ordinary thread events should never expose provider session state.
+
+## Deterministic tests
+
+Use `makeDeterministicAgent` to test worker claims, retries, restart recovery, and thread replay without launching a local CLI:
+
+```typescript
+const fake = makeDeterministicAgent({
+  events: [
+    { _tag: "started", providerRunRef: null, sessionRef: null },
+    { _tag: "output", channel: "assistant", text: "No blocking findings." },
+    { _tag: "completed", outcome: "success", sessionRef: null }
+  ]
+})
+
+const program = Effect.gen(function* () {
+  const runtime = yield* AgentRuntime
+  return yield* runtime.run(request).pipe(Stream.runCollect)
+}).pipe(Effect.provide(fake.layer))
+```
+
+`fake.requests` records the ordered requests so an acceptance test can prove that recovery preserved the intended release context and did not duplicate a claim.

@@ -1,0 +1,211 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Cause, Deferred, Effect, Fiber, Stream } from "effect"
+
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  AgentRunId,
+  type AgentRunRequest,
+  AgentRuntime,
+  type AgentRuntimeEvent,
+  AgentSessionRef,
+  makeAgentRuntime,
+  makeDeterministicAgent
+} from "../src/index.js"
+
+const fingerprint = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
+
+const request: AgentRunRequest = {
+  runId: AgentRunId.make("run-1"),
+  providerId: AgentProviderId.make("fake"),
+  model: null,
+  access: "read-only",
+  prompt: "Review this release",
+  context: {
+    workspaceId: "workspace-1",
+    releaseId: "release-1",
+    subjectRevision: "revision-1",
+    fingerprint
+  },
+  continuation: { _tag: "fresh" }
+}
+
+const events: ReadonlyArray<AgentRuntimeEvent> = [
+  { _tag: "started", providerRunRef: "provider-run-1", sessionRef: AgentSessionRef.make("session-1") },
+  { _tag: "output", channel: "assistant", text: "No blocking findings." },
+  { _tag: "usage", inputTokens: 20, outputTokens: 4 },
+  { _tag: "completed", outcome: "success", sessionRef: AgentSessionRef.make("session-1") }
+]
+
+describe("AgentRuntime", () => {
+  it.effect("replays a deterministic provider script and captures its context", () => {
+    const fake = makeDeterministicAgent({ events })
+    return Effect.gen(function*() {
+      const runtime = yield* AgentRuntime
+      const observed = yield* runtime.run(request).pipe(Stream.runCollect)
+
+      expect(Array.from(observed)).toEqual(events)
+      expect(fake.requests).toEqual([request])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("rejects a stream that ends without one terminal event", () =>
+    Effect.gen(function*() {
+      const runtime = makeAgentRuntime({ run: () => Stream.make(events[0]!) })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "AgentRuntimeProtocolError",
+        reason: "missing-terminal-event"
+      })
+    }))
+
+  it.effect("rejects output after the terminal event", () =>
+    Effect.gen(function*() {
+      const lateOutput: AgentRuntimeEvent = {
+        _tag: "output",
+        channel: "progress",
+        text: "late"
+      }
+      const runtime = makeAgentRuntime({
+        run: () => Stream.fromIterable([events[3]!, lateOutput])
+      })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "AgentRuntimeProtocolError",
+        reason: "event-after-terminal"
+      })
+    }))
+
+  it.effect("rejects a duplicate terminal event", () =>
+    Effect.gen(function*() {
+      const runtime = makeAgentRuntime({ run: () => Stream.make(events[3]!, events[3]!) })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "AgentRuntimeProtocolError",
+        reason: "duplicate-terminal-event"
+      })
+    }))
+
+  it.effect("rejects a provider failure after the terminal event", () =>
+    Effect.gen(function*() {
+      const providerFailure = new AgentProviderError({
+        providerId: AgentProviderId.make("fake"),
+        phase: "execution",
+        message: "late failure",
+        retryable: false
+      })
+      const runtime = makeAgentRuntime({
+        run: () => Stream.make(events[3]!).pipe(Stream.concat(Stream.fail(providerFailure)))
+      })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "AgentRuntimeProtocolError",
+        reason: "failure-after-terminal"
+      })
+      expect(error.cause).toEqual(Cause.fail(providerFailure))
+    }))
+
+  it.effect("forwards a provider failure as the alternative terminal", () =>
+    Effect.gen(function*() {
+      const providerFailure = new AgentProviderError({
+        providerId: AgentProviderId.make("fake"),
+        phase: "execution",
+        message: "provider stopped",
+        retryable: true
+      })
+      const runtime = makeAgentRuntime({ run: () => Stream.fail(providerFailure) })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toBe(providerFailure)
+    }))
+
+  it.effect("fails closed before invoking an adapter with continuation state from another context", () => {
+    const fake = makeDeterministicAgent({ events })
+    const mismatched: AgentRunRequest = {
+      ...request,
+      continuation: {
+        _tag: "resume",
+        sessionRef: AgentSessionRef.make("session-1"),
+        contextFingerprint: AgentContextFingerprint.make(`sha256:${"b".repeat(64)}`)
+      }
+    }
+    return Effect.gen(function*() {
+      const runtime = yield* AgentRuntime
+      const error = yield* runtime.run(mismatched).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toMatchObject({ _tag: "AgentContextMismatchError" })
+      expect(fake.requests).toEqual([])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("evaluates fake scripts only on subscription and returns request snapshots", () => {
+    let evaluations = 0
+    const fake = makeDeterministicAgent(() => {
+      evaluations += 1
+      return { events }
+    })
+    return Effect.gen(function*() {
+      const runtime = yield* AgentRuntime
+      const stream = runtime.run(request)
+      expect(evaluations).toBe(0)
+
+      yield* stream.pipe(Stream.runDrain)
+      expect(evaluations).toBe(1)
+
+      const firstSnapshot = fake.requests
+      yield* stream.pipe(Stream.runDrain)
+      expect(evaluations).toBe(2)
+      expect(firstSnapshot).toHaveLength(1)
+      expect(fake.requests).toHaveLength(2)
+      expect(fake.requests).not.toBe(fake.requests)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("defers adapter invocation until subscription", () => {
+    let invocations = 0
+    const runtime = makeAgentRuntime({
+      run: () => {
+        invocations += 1
+        return Stream.make(events[3]!)
+      }
+    })
+    return Effect.gen(function*() {
+      const stream = runtime.run(request)
+      expect(invocations).toBe(0)
+
+      yield* stream.pipe(Stream.runDrain)
+      expect(invocations).toBe(1)
+    })
+  })
+
+  it.effect("releases the adapter stream when its consumer is interrupted", () =>
+    Effect.gen(function*() {
+      const acquired = yield* Deferred.make<void>()
+      const released = yield* Deferred.make<void>()
+      const runtime = makeAgentRuntime({
+        run: () =>
+          Stream.fromEffect(
+            Effect.acquireRelease(
+              Deferred.succeed(acquired, void 0),
+              () => Deferred.succeed(released, void 0)
+            )
+          ).pipe(
+            Stream.flatMap(() => Stream.never),
+            Stream.scoped
+          )
+      })
+      const fiber = yield* runtime.run(request).pipe(
+        Stream.runDrain,
+        Effect.forkChild({ startImmediately: true })
+      )
+
+      yield* Deferred.await(acquired)
+      yield* Fiber.interrupt(fiber)
+      expect(yield* Deferred.isDone(released)).toBe(true)
+    }))
+})
