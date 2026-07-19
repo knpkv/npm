@@ -21,6 +21,7 @@ import { browserWorkspaceItemsTransport, useWorkspaceItems, type WorkspaceItemsT
 import { AuthorizedSharePanel } from "./AuthorizedSharePanel.js"
 import type { AuthorizedShareTransport } from "./authorizedShareTransport.js"
 import styles from "./ItemsPage.module.css"
+import { entityOriginFromLocation, makeWorkspaceEntityRouteState } from "./workspaceEntityRoutes.js"
 
 interface ItemFilters {
   readonly query: string
@@ -423,16 +424,13 @@ export const ItemsPage = ({
               <ServiceMark service={item.service} size="compact" />
               <Link
                 className={styles.itemLink}
-                state={
-                  item.releaseId === null
-                    ? undefined
-                    : makeReleaseRouteState(context.workspaceId, item.releaseId, releaseOriginFromLocation(location))
-                }
-                to={
-                  item.releaseId === null
-                    ? unlinkedItemLocation(location.pathname, searchParams, item.entityId)
-                    : item.href
-                }
+                state={makeWorkspaceEntityRouteState(
+                  location.state,
+                  context.workspaceId,
+                  item.entityId,
+                  entityOriginFromLocation(location)
+                )}
+                to={item.href}
               >
                 <span>{item.key}</span>
                 <strong>{item.title}</strong>

@@ -54,9 +54,7 @@ describe("workspace items", () => {
       title: "Review payment capture safeguards",
       tone: "progress"
     })
-    expect(issue.href).toBe(
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${issue.entityId}#release-work`
-    )
+    expect(issue.href).toBe(`/w/${WORKSET_WORKSPACE_ID}/items/${issue.entityId}`)
     expect(issue.freshness).toBe("2026-07-14T10:02:00.000Z")
     expect(formatItemFreshness(issue.freshness)).toBe("14 Jul 2026, 10:02")
   })
@@ -85,9 +83,7 @@ describe("workspace items", () => {
       releaseId: null,
       title: source.projection.title
     })
-    expect(unlinked?.href).toBe(
-      `/w/${WORKSET_WORKSPACE_ID}/items?object=${source.projection.entityId}#item-details`
-    )
+    expect(unlinked?.href).toBe(`/w/${WORKSET_WORKSPACE_ID}/items/${source.projection.entityId}`)
     expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], source.projection.entityId)).toBe(unlinked)
     expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], "deleted-entity")).toBeNull()
   })
@@ -165,7 +161,7 @@ describe("workspace items", () => {
     )
     const [outsidePrefix] = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, index, portfolioPrefix)
     expect(outsidePrefix).toMatchObject({ releaseId: null })
-    expect(outsidePrefix?.href).toContain(`/w/${WORKSET_WORKSPACE_ID}/items?object=`)
+    expect(outsidePrefix?.href).toBe(`/w/${WORKSET_WORKSPACE_ID}/items/${source.projection.entityId}`)
   })
 
   it("combines text, owner, service, type, and status filters without substituting results", () => {
@@ -368,7 +364,7 @@ describe("workspace items", () => {
       }#release-work`
     )
     expect(trace.relationships[0]?.other.href).toBe(
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${releaseWorksetFixture.releaseId}?object=${pullRequest.projection.entityId}#release-work`
+      `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequest.projection.entityId}`
     )
     const pullRequestTrace = selectReleaseWorksetTrace(
       releaseWorksetFixture,
@@ -605,7 +601,7 @@ describe("workspace items", () => {
 
     expect(forwardShared?.href).toBe(reverseShared?.href)
     expect(forwardShared).toMatchObject({ releaseId: null, releaseIds, routableReleaseIds: releaseIds })
-    expect(forwardShared?.href).toContain(`/w/${WORKSET_WORKSPACE_ID}/items?object=`)
+    expect(forwardShared?.href).toBe(`/w/${WORKSET_WORKSPACE_ID}/items/${source.projection.entityId}`)
     expect(forward.find(({ key }) => key === "OPS-499")?.releaseId).toBe(otherReleaseId)
   })
 

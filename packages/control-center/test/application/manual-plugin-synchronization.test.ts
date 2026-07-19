@@ -270,6 +270,7 @@ describe("manual plugin synchronization", () => {
         workspaceId: WORKSPACE_ID,
         actorKind: "plugin",
         before: null,
+        entityId: null,
         from: null,
         limit: 100,
         to: null
@@ -302,6 +303,7 @@ describe("manual plugin synchronization", () => {
         workspaceId: WORKSPACE_ID,
         actorKind: "plugin",
         before: null,
+        entityId: null,
         from: null,
         limit: 100,
         to: null

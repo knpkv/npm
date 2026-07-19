@@ -1,11 +1,12 @@
-import { LinkProvider, type RlyLinkProps } from "@knpkv/rly/foundations"
+import { LinkProvider } from "@knpkv/rly/foundations"
 import { ServiceMark, WorksetCard } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StateLabel, StatePanel, Text } from "@knpkv/rly/primitives"
-import { forwardRef, type ReactElement } from "react"
+import { type ReactElement } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
+import { WorkspaceEntityLink, workspaceEntityStateForHref } from "../entities/WorkspaceEntityLink.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import {
   presentReleaseWorkset,
@@ -31,11 +32,11 @@ const LoadingWorkset = (): ReactElement => (
 
 /** Inspectable destination for an Items result selected within its release context. */
 export const SelectedReleaseWorksetObjectPanel = ({
-  linkState,
+  linkLocation,
   selectedObject,
   trace
 }: {
-  readonly linkState?: unknown
+  readonly linkLocation?: RouterLocationParts
   readonly selectedObject: SelectedReleaseWorksetObject
   readonly trace?: SelectedReleaseWorksetTrace
 }): ReactElement => {
@@ -90,7 +91,14 @@ export const SelectedReleaseWorksetObjectPanel = ({
                     {relationship.other.href === null ? (
                       <Text tone="secondary">{relationship.other.title}</Text>
                     ) : (
-                      <Link state={linkState} to={relationship.other.href}>
+                      <Link
+                        state={
+                          linkLocation === undefined
+                            ? undefined
+                            : workspaceEntityStateForHref(relationship.other.href, linkLocation)
+                        }
+                        to={relationship.other.href}
+                      >
                         {relationship.other.title}
                       </Link>
                     )}
@@ -108,7 +116,7 @@ export const SelectedReleaseWorksetObjectPanel = ({
                   <Link
                     aria-label={`Details for ${relationship.kind} ${relationship.direction} relationship with ${relationship.other.label}`}
                     className={styles.traceDetails}
-                    state={makeRelationshipDetailRouteState(linkState, selectedObject.id, relationship.id)}
+                    state={makeRelationshipDetailRouteState(linkLocation?.state, selectedObject.id, relationship.id)}
                     to={relationship.detailsHref}
                   >
                     Details
@@ -123,13 +131,12 @@ export const SelectedReleaseWorksetObjectPanel = ({
   )
 }
 
-const ReleaseWorksetLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function ReleaseWorksetLink(
-  { href, ...props },
-  ref
-) {
-  const location = useLocation()
-  return <Link {...props} ref={ref} state={location.state} to={href} />
-})
+interface RouterLocationParts {
+  readonly hash: string
+  readonly pathname: string
+  readonly search: string
+  readonly state: unknown
+}
 
 /** Compatibility name retained for release-workset callers of the shared readable-session policy. */
 export const releaseWorksetSessionKey = browserReadableSessionKey
@@ -222,7 +229,12 @@ export const ReleaseWorkset = ({
             ) : (
               <div className={styles.runbooks}>
                 {workset.runbooks.map((runbook) => (
-                  <Link className={styles.runbook} key={runbook.id} state={location.state} to={runbook.href}>
+                  <Link
+                    className={styles.runbook}
+                    key={runbook.id}
+                    state={workspaceEntityStateForHref(runbook.href, location)}
+                    to={runbook.href}
+                  >
                     <strong>{runbook.title}</strong>
                     <span>{runbook.reference}</span>
                   </Link>
@@ -235,13 +247,13 @@ export const ReleaseWorkset = ({
           ) : null}
           {selectedObject === null || selectedTrace === null ? null : (
             <SelectedReleaseWorksetObjectPanel
-              linkState={location.state}
+              linkLocation={location}
               selectedObject={selectedObject}
               trace={selectedTrace}
             />
           )}
         </div>
-        <LinkProvider component={ReleaseWorksetLink}>
+        <LinkProvider component={WorkspaceEntityLink}>
           <WorksetCard
             gaps={workset.gaps}
             heading={`${release.serviceName} release work`}

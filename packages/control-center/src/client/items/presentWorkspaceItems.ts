@@ -129,10 +129,8 @@ export const workspaceItemReleaseHref = (
   entityId: EntityId
 ): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
 
-const itemHref = (workspaceId: WorkspaceId, releaseId: ReleaseId | null, entityId: EntityId): string =>
-  releaseId === null
-    ? `/w/${workspaceId}/items?object=${encodeURIComponent(entityId)}#item-details`
-    : workspaceItemReleaseHref(workspaceId, releaseId, entityId)
+const itemHref = (workspaceId: WorkspaceId, entityId: EntityId): string =>
+  `/w/${workspaceId}/items/${encodeURIComponent(entityId)}`
 
 const presentProjection = (
   workspaceId: WorkspaceId,
@@ -168,7 +166,7 @@ const presentProjection = (
   return {
     entityId: projection.entityId,
     freshness: DateTime.formatIso(entry.recordedAt),
-    href: itemHref(workspaceId, releaseId, projection.entityId),
+    href: itemHref(workspaceId, projection.entityId),
     key: projection.displayKey,
     kind: projection.entityType,
     owner: owners.length === 0 ? "Unassigned" : owners.map(({ name }) => name).join(", "),

@@ -1,3 +1,9 @@
+import {
+  type RenderedSql,
+  renderWorkspaceEntityOwnersQuery,
+  renderWorkspaceEntityRelationshipsQuery,
+  renderWorkspaceEntityReleasesQuery
+} from "@knpkv/control-center-sql"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
@@ -36,6 +42,14 @@ const WorkspaceOwnerIdentity = Schema.Struct({
 })
 const WorkspaceOwnerIdentities = Schema.fromJsonString(Schema.Array(WorkspaceOwnerIdentity))
 const WorkspaceOwnerOptionRow = WorkspaceOwnerIdentity
+const WorkspaceOwnerRoleRow = Schema.Struct({
+  avatarJson: Schema.String,
+  displayName: Schema.String,
+  personId: PersonId,
+  role: Role
+})
+const WorkspaceEntityRelationshipIdentity = Schema.Struct({ relationshipId: RelationshipId })
+const WorkspaceEntityReleaseIdentity = Schema.Struct({ releaseId: Schema.NullOr(ReleaseId) })
 const PersonAvatarJson = Schema.fromJsonString(PersonAvatar)
 const WorkspaceOwnerDisplayName = Schema.String.check(
   Schema.isTrimmed(),
@@ -81,6 +95,14 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     decodeProjectionRow,
     decodeRelationshipRow
   } = yield* makeDeliveryGraphDecoders
+
+  const executePlan = Effect.fn("DeliveryGraphRepository.executePlan")(function*<RowSchema extends Schema.Top>(
+    plan: RenderedSql,
+    schema: RowSchema
+  ) {
+    const rows = yield* sql.unsafe(plan.sql, [...plan.params])
+    return yield* decodeRows(schema, rows)
+  })
 
   const loadProjection = Effect.fn("DeliveryGraphRepository.loadProjection")(function*(
     workspaceId: WorkspaceId,
@@ -329,6 +351,53 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     )
   })
 
+  const loadWorkspaceEntityOwners = Effect.fn("DeliveryGraphRepository.loadWorkspaceEntityOwners")(function*(
+    workspaceId: WorkspaceId,
+    entityId: EntityId
+  ) {
+    const rows = yield* executePlan(
+      renderWorkspaceEntityOwnersQuery({ workspaceId, entityId }),
+      WorkspaceOwnerRoleRow
+    )
+    const identities = new Map<PersonId, {
+      readonly avatarJson: string
+      readonly displayName: string
+      readonly personId: PersonId
+      readonly roles: Set<Role>
+    }>()
+    for (const row of rows) {
+      const existing = identities.get(row.personId)
+      if (existing === undefined) {
+        identities.set(row.personId, { ...row, roles: new Set([row.role]) })
+      } else {
+        existing.roles.add(row.role)
+      }
+    }
+    const candidates = [...identities.values()]
+    const owners = yield* Effect.forEach(candidates.slice(0, 20), (owner) =>
+      decodeWorkspaceOwner(workspaceId, {
+        avatarJson: owner.avatarJson,
+        displayName: owner.displayName,
+        personId: owner.personId,
+        rolesCsv: [...owner.roles].sort().join(",")
+      }))
+    return { owners, ownersTruncated: candidates.length > 20 }
+  })
+
+  const loadWorkspaceEntityReleaseIds = Effect.fn(
+    "DeliveryGraphRepository.loadWorkspaceEntityReleaseIds"
+  )(function*(workspaceId: WorkspaceId, entityId: EntityId) {
+    const rows = yield* executePlan(
+      renderWorkspaceEntityReleasesQuery({ workspaceId, entityId }),
+      WorkspaceEntityReleaseIdentity
+    )
+    const releaseIds = rows.flatMap(({ releaseId }): ReadonlyArray<ReleaseId> => releaseId === null ? [] : [releaseId])
+    return {
+      releaseIds: releaseIds.slice(0, 500),
+      releaseMembershipsTruncated: releaseIds.length > 500
+    }
+  })
+
   const readDecoded = Effect.fn("DeliveryGraphRepository.readDecoded")(function*(
     workspaceId: WorkspaceId,
     query: DeliveryGraphQuery
@@ -372,6 +441,78 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           ({ revision }) => loadRelationship(workspaceId, query.relationshipId, revision)
         )
         return DeliveryGraphReadResult.make({ _tag: "relationshipHistory", value })
+      }
+      case "entitySlice": {
+        const projection = yield* loadProjection(workspaceId, query.entityId, null)
+        const { owners, ownersTruncated } = yield* loadWorkspaceEntityOwners(workspaceId, query.entityId)
+        const { releaseIds, releaseMembershipsTruncated } = yield* loadWorkspaceEntityReleaseIds(
+          workspaceId,
+          query.entityId
+        )
+        const identityRows = yield* executePlan(
+          renderWorkspaceEntityRelationshipsQuery({
+            workspaceId,
+            entityId: query.entityId,
+            limit: query.limit + 1
+          }),
+          WorkspaceEntityRelationshipIdentity
+        )
+        const candidateRelationships = yield* Effect.forEach(
+          identityRows.slice(0, query.limit),
+          ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
+        )
+        const bounded = selectBoundedRelationshipClosure(candidateRelationships, {
+          relationships: query.limit,
+          nodes: 200,
+          evidenceClaims: 200
+        })
+        const relationships = bounded.relationships
+        const nodeIds = Array.from(
+          new Set(relationships.flatMap(({ sourceNodeId, targetNodeId }) => [
+            sourceNodeId,
+            targetNodeId
+          ]))
+        )
+        const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
+        const relatedEntityIds = Array.from(
+          new Set(nodes.flatMap((node): ReadonlyArray<EntityId> => {
+            if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") return []
+            return node.resolution.target.entityId === query.entityId ? [] : [node.resolution.target.entityId]
+          }))
+        )
+        const relatedEntityProjections = yield* Effect.forEach(
+          relatedEntityIds,
+          (entityId) => loadProjection(workspaceId, entityId, null)
+        )
+        const claimIds = Array.from(new Set(relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)))
+        const evidenceClaims = yield* Effect.forEach(
+          claimIds,
+          (evidenceClaimId) => loadClaim(workspaceId, evidenceClaimId)
+        )
+        const evidenceIds = Array.from(new Set(evidenceClaims.map(({ evidenceId }) => evidenceId)))
+        const evidenceItems = yield* Effect.forEach(
+          evidenceIds,
+          (evidenceId) => loadEvidence(workspaceId, evidenceId)
+        )
+        return DeliveryGraphReadResult.make({
+          _tag: "entitySlice",
+          value: {
+            entity: {
+              canonicalReleaseId: releaseIds[0] ?? null,
+              owners,
+              ownersTruncated,
+              releaseIds,
+              releaseMembershipsTruncated,
+              ...projection
+            },
+            truncated: identityRows.length > query.limit || bounded.truncated,
+            nodes,
+            relatedEntityProjections,
+            relationships,
+            evidenceClaims,
+            evidenceItems
+          }
+        })
       }
       case "releaseSlice": {
         const identityLimit = query.limit + 1

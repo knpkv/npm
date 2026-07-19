@@ -940,6 +940,70 @@ describe("DeliveryGraphRepository", () => {
       })
     ))
 
+  it.effect("reads one exact bounded entity slice without crossing workspace boundaries", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        yield* repository.write(WORKSPACE_A, initialBatch)
+
+        const firstRelationship = initialBatch.relationships[0]
+        if (firstRelationship === undefined) return yield* Effect.die("Expected relationship fixture")
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [],
+          nodes: [{
+            workspaceId: WORKSPACE_A,
+            nodeId: OTHER_RELEASE_NODE_ID,
+            endpointKind: "release",
+            resolution: { _tag: "resolved", target: { _tag: "release", releaseId: OTHER_RELEASE_ID } },
+            createdAt: UPDATED_AT
+          }],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: [{
+            ...firstRelationship,
+            relationshipId: OTHER_RELATIONSHIP_ID,
+            revision: 1,
+            supersedesRevision: null,
+            sourceNodeId: OTHER_RELEASE_NODE_ID,
+            scope: { _tag: "release", releaseId: OTHER_RELEASE_ID },
+            confidence: { _tag: "unknown", rationale: "Independent release association fixture." },
+            evidenceClaimIds: [],
+            recordedAt: UPDATED_AT
+          }]
+        })
+
+        const bounded = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 1
+        })
+        assert.strictEqual(bounded._tag, "entitySlice")
+        if (bounded._tag === "entitySlice") {
+          assert.strictEqual(bounded.value.entity.projection.entityId, ISSUE_ID)
+          assert.deepStrictEqual(bounded.value.entity.releaseIds, [RELEASE_ID, OTHER_RELEASE_ID].sort())
+          assert.deepStrictEqual(bounded.value.entity.owners, [{
+            avatarFallback: "AB",
+            displayName: "Avery Bell",
+            personId: OWNER_PERSON_ID,
+            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+          }])
+          assert.lengthOf(bounded.value.relationships, 1)
+          assert.isTrue(bounded.value.truncated)
+        }
+
+        const crossedWorkspace = yield* repository.read(WORKSPACE_B, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(crossedWorkspace))
+        if (Result.isFailure(crossedWorkspace)) {
+          assert.instanceOf(crossedWorkspace.failure, RecordNotFoundError)
+        }
+      })
+    ))
+
   it.effect("indexes current present workspace projections including unlinked entities and excluding deleted heads", () =>
     withRepository(
       Effect.gen(function*() {

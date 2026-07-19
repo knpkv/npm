@@ -82,11 +82,8 @@ export interface ReleaseWorksetPresentation {
   readonly truncated: boolean
 }
 
-const objectHref = (
-  workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
-  entityId: EntityId
-): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
+const objectHref = (workspaceId: WorkspaceId, entityId: EntityId): string =>
+  `/w/${workspaceId}/items/${encodeURIComponent(entityId)}`
 
 const relationshipHref = (
   workspaceId: WorkspaceId,
@@ -318,7 +315,7 @@ const traceConnection = (
     const selected = presentSelectedObject(projection)
     return {
       href: projection.entityState === "present"
-        ? objectHref(workspaceId, inspection.releaseId, projection.entityId)
+        ? objectHref(workspaceId, projection.entityId)
         : null,
       kind: selected.kind,
       label: selected.label,
@@ -513,8 +510,7 @@ export const presentReleaseWorkset = (
 ): ReleaseWorksetPresentation => {
   const projections = entityProjectionByNode(inspection)
   const runbookEntityIds = releaseRunbookEntityIds(inspection, projections)
-  const href = (projection: DeliveryEntityProjection): string =>
-    objectHref(workspaceId, inspection.releaseId, projection.entityId)
+  const href = (projection: DeliveryEntityProjection): string => objectHref(workspaceId, projection.entityId)
   const issues = inspection.entityProjections
     .map(({ projection }) => projection)
     .filter((projection): projection is ProjectionWithDetails<"issue"> =>

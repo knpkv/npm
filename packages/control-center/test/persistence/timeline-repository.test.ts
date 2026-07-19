@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { renderTimelineQueries } from "@knpkv/control-center-sql"
 import { Effect, Layer, Schema } from "effect"
 
-import { WorkspaceId } from "../../src/domain/identifiers.js"
+import { EntityId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { TimelineRepository } from "../../src/server/persistence/repositories/timelineRepository.js"
@@ -24,6 +24,7 @@ const ExplainQueryPlanRow = Schema.Struct({ detail: Schema.String })
 const detailWorkspaces = [
   {
     workspaceId,
+    entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014a"),
     suffix: "payments",
     displayName: "Payments",
     providerId: "jira",
@@ -33,6 +34,7 @@ const detailWorkspaces = [
   },
   {
     workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000149"),
+    entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014b"),
     suffix: "identity",
     displayName: "Identity",
     providerId: "confluence",
@@ -42,6 +44,7 @@ const detailWorkspaces = [
   }
 ] satisfies ReadonlyArray<{
   readonly workspaceId: typeof workspaceId
+  readonly entityId: EntityId
   readonly suffix: string
   readonly displayName: string
   readonly providerId: "jira" | "confluence"
@@ -108,7 +111,7 @@ const seedTimelineDetailSources = Effect.gen(function*() {
   yield* Effect.forEach(detailWorkspaces, (fixture) =>
     Effect.gen(function*() {
       const connectionId = `connection-${fixture.suffix}`
-      const entityId = `entity-${fixture.suffix}`
+      const entityId = fixture.entityId
       const releaseId = `release-${fixture.suffix}`
       const personId = `person-${fixture.suffix}`
       const agentId = `agent-${fixture.suffix}`
@@ -219,7 +222,7 @@ const seedTimelineDetailSources = Effect.gen(function*() {
         missing_key, created_at
       ) VALUES
         (${fixture.workspaceId}, ${sourceNodeId}, ${"a".repeat(64)}, 'entity', 'issue',
-          'missing', NULL, NULL, NULL, 'issue', ${`missing-source-${fixture.suffix}`}, ${occurredAt}),
+          'resolved', ${entityId}, NULL, NULL, NULL, NULL, ${occurredAt}),
         (${fixture.workspaceId}, ${targetNodeId}, ${"b".repeat(64)}, 'entity', 'issue',
           'missing', NULL, NULL, NULL, 'issue', ${`missing-target-${fixture.suffix}`}, ${occurredAt})`
       yield* sql`INSERT INTO relationship_heads (
@@ -269,6 +272,7 @@ describe("TimelineRepository", () => {
       const first = yield* repository.page({
         actorKind: "system",
         before: null,
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -284,6 +288,7 @@ describe("TimelineRepository", () => {
       const second = yield* repository.page({
         actorKind: "system",
         before: { eventKey: firstEvent.eventKey, occurredAt: newestAt },
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -294,6 +299,7 @@ describe("TimelineRepository", () => {
       const human = yield* repository.page({
         actorKind: "human",
         before: null,
+        entityId: null,
         from: null,
         limit: 10,
         to: null,
@@ -310,6 +316,7 @@ describe("TimelineRepository", () => {
       const first = yield* repository.page({
         actorKind: "plugin",
         before: null,
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
@@ -330,12 +337,70 @@ describe("TimelineRepository", () => {
       const second = yield* repository.page({
         actorKind: "plugin",
         before: { eventKey: firstEvent.eventKey, occurredAt: newestAt },
+        entityId: null,
         from: null,
         limit: 1,
         to: null,
         workspaceId
       })
       assert.deepStrictEqual(second.map(({ eventKey }) => eventKey), [`sync:${"1".repeat(64)}`])
+    })))
+
+  it.effect("returns only attributable activity for the exact workspace entity", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedTimelineDetailSources
+      const repository = yield* TimelineRepository
+      const paymentsWorkspace = detailWorkspaces[0]
+      const identityWorkspace = detailWorkspaces[1]
+      if (paymentsWorkspace === undefined || identityWorkspace === undefined) {
+        return yield* Effect.die("Timeline entity activity fixtures are incomplete")
+      }
+      const paymentsEntityId = paymentsWorkspace.entityId
+      const identityEntityId = identityWorkspace.entityId
+      const absentEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014c")
+
+      const payments = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: paymentsEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: paymentsWorkspace.workspaceId
+      })
+      assert.deepStrictEqual(
+        payments.map(({ eventKey }) => eventKey).sort(),
+        [
+          `audit:${detailAuditEventId}`,
+          `domain:${detailDomainEventId}`,
+          `relationship:${detailRelationshipEventDigest}`
+        ].sort()
+      )
+      assert.isTrue(payments.every(({ entityId }) => entityId === paymentsEntityId))
+      assert.isFalse(payments.some(({ sourceKind }) => sourceKind === "plugin-sync"))
+
+      const absent = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: absentEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: paymentsWorkspace.workspaceId
+      })
+      assert.deepStrictEqual(absent, [])
+
+      const identity = yield* repository.page({
+        actorKind: null,
+        before: null,
+        entityId: identityEntityId,
+        from: null,
+        limit: 20,
+        to: null,
+        workspaceId: identityWorkspace.workspaceId
+      })
+      assert.lengthOf(identity, 3)
+      assert.isTrue(identity.every(({ entityId }) => entityId === identityEntityId))
     })))
 
   it.effect("resolves exact source details without crossing workspace boundaries", () =>
@@ -351,7 +416,7 @@ describe("TimelineRepository", () => {
       const resolvedDetails = yield* Effect.forEach(detailWorkspaces, (fixture) =>
         Effect.gen(function*() {
           const connectionId = `connection-${fixture.suffix}`
-          const entityId = `entity-${fixture.suffix}`
+          const entityId = fixture.entityId
           const releaseId = `release-${fixture.suffix}`
           const actionId = `action-${fixture.suffix}`
           const relationshipId = `relationship-${fixture.suffix}`
@@ -453,6 +518,7 @@ describe("TimelineRepository", () => {
       const plans = renderTimelineQueries({
         actorKind: null,
         before: null,
+        entityId: null,
         from: "2026-07-01T00:00:00.000Z",
         limit: 25,
         to: "2026-07-31T23:59:59.999Z",

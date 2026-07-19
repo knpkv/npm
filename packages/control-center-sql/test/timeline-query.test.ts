@@ -7,6 +7,7 @@ describe("renderTimelineQueries", () => {
     const rendered = renderTimelineQueries({
       actorKind: null,
       before: { eventKey: "relationship:rel-1:4", occurredAt: "2026-07-17T12:00:00.000Z" },
+      entityId: null,
       from: "2026-07-01T00:00:00.000Z",
       limit: 25,
       to: "2026-07-17T23:59:59.999Z",
@@ -32,6 +33,7 @@ describe("renderTimelineQueries", () => {
     const rendered = renderTimelineQueries({
       actorKind: "human",
       before: null,
+      entityId: null,
       from: null,
       limit: 10,
       to: null,
@@ -46,6 +48,7 @@ describe("renderTimelineQueries", () => {
     const rendered = renderTimelineQueries({
       actorKind: "plugin",
       before: null,
+      entityId: null,
       from: null,
       limit: 10,
       to: null,
@@ -59,6 +62,7 @@ describe("renderTimelineQueries", () => {
     const rendered = renderTimelineQueries({
       actorKind: "system",
       before: null,
+      entityId: null,
       from: null,
       limit: 10,
       to: null,
@@ -83,6 +87,22 @@ describe("renderTimelineQueries", () => {
       expect(query.params).toContain("event-42")
       expect(query.params).toContain(1)
     }
+  })
+
+  it("attributes only exact entity activity and excludes workspace-wide sync rows", () => {
+    const rendered = renderTimelineQueries({
+      actorKind: null,
+      before: null,
+      entityId: "entity-42",
+      from: null,
+      limit: 20,
+      to: null,
+      workspaceId: "workspace-1"
+    })
+
+    expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["action", "relationship", "system"])
+    expect(rendered.every(({ params }) => params.includes("entity-42"))).toBe(true)
+    expect(rendered.find(({ sourceKind }) => sourceKind === "relationship")?.sql).toContain("delivery_nodes")
   })
 
   it("rejects unknown and empty detail-key namespaces before rendering SQL", () => {

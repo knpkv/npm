@@ -8,6 +8,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import { DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
+import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
   type AtlassianOAuthGrantStartResponse,
@@ -148,6 +149,7 @@ const repairReviewId = Schema.decodeSync(RelationshipRepairReviewId)(
 )
 const inspectedRelationshipRevision = Schema.decodeSync(LedgerRevision)(1)
 const sharedEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000000a")
+const missingEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000000e")
 const authorizedShareId = Schema.decodeSync(ShareId)("01890f6f-6d6a-7cc0-98d2-00000000000b")
 const otherShareWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-00000000000c")
 const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
@@ -168,6 +170,39 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
     priority: "High",
     estimatePoints: 5
   }
+})
+const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  entity: {
+    canonicalReleaseId: null,
+    owners: [],
+    ownersTruncated: false,
+    releaseIds: [],
+    releaseMembershipsTruncated: false,
+    projection: sharedProjection,
+    recordedAt: "2026-07-14T10:02:00.000Z"
+  },
+  source: {
+    providerId: "jira",
+    pluginConnectionId,
+    vendorImmutableId: "PAY-42",
+    revision: "source-1",
+    sourceUrl: "https://jira.example/browse/PAY-42",
+    firstObservedAt: "2026-07-14T09:58:00.000Z",
+    lastObservedAt: "2026-07-14T10:00:00.000Z",
+    synchronizedAt: "2026-07-14T10:01:00.000Z",
+    normalizationSchemaVersion: 1
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  graph: {
+    truncated: false,
+    nodes: [],
+    relatedEntityProjections: [],
+    relationships: [],
+    evidenceClaims: [],
+    evidenceItems: []
+  },
+  activity: { truncated: false, events: [] }
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
@@ -229,6 +264,14 @@ const timelineExportAuditsLayer = Layer.succeed(TimelineExportAudits, {
 const timelineApplicationLayer = Layer.merge(timelineLayer, timelineExportAuditsLayer)
 
 const deliveryGraphLayer = Layer.succeed(DeliveryGraphInspection, {
+  workspaceEntity: ({ entityId, workspaceId: requestedWorkspaceId }) => {
+    if (requestedWorkspaceId !== session.workspaceId) {
+      return Effect.die("workspace entity handler crossed its workspace boundary")
+    }
+    return entityId === sharedEntityId
+      ? Effect.succeed(workspaceEntityInspection)
+      : Effect.fail(new ApplicationResourceNotFound())
+  },
   workspaceEntityProjections: ({
     owner,
     query,
@@ -491,6 +534,29 @@ describe("Control Center API handlers", () => {
       ])
     ))
 
+  it.effect("serves one exact workspace entity and maps a missing entity to NotFound", () =>
+    Effect.gen(function*() {
+      const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+      const found = yield* client.deliveryGraph.workspaceEntity({
+        params: { entityId: sharedEntityId }
+      })
+      const missing = yield* client.deliveryGraph.workspaceEntity({
+        params: { entityId: missingEntityId }
+      }).pipe(Effect.result)
+
+      assert.strictEqual(found.entity.projection.entityId, sharedEntityId)
+      assert.strictEqual(found.source.vendorImmutableId, "PAY-42")
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) assert.strictEqual(missing.failure._tag, "NotFoundApiError")
+    }).pipe(
+      Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        deliveryGraphHandlersTestLayer
+      ])
+    ))
+
   it.effect("keeps an exact-share watcher out of adjacent workspace reads", () =>
     Effect.gen(function*() {
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
@@ -527,6 +593,9 @@ describe("Control Center API handlers", () => {
         assert.strictEqual(shared.item.projection.entityId, sharedEntityId)
         return yield* Effect.all([
           client.deliveryGraph.workspaceEntityProjections({ query: {} }).pipe(Effect.result),
+          client.deliveryGraph.workspaceEntity({
+            params: { entityId: sharedEntityId }
+          }).pipe(Effect.result),
           client.deliveryGraph.releaseSlice({
             params: { releaseId: inspectedReleaseId },
             query: {}
@@ -541,8 +610,9 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
-      const [entityIndex, releaseSlice, portfolioSnapshot, liveEventStream] = result
+      const [entityIndex, workspaceEntity, releaseSlice, portfolioSnapshot, liveEventStream] = result
       assertForbidden(entityIndex)
+      assertForbidden(workspaceEntity)
       assertForbidden(releaseSlice)
       assertForbidden(portfolioSnapshot)
       assertForbidden(liveEventStream)

@@ -1,3 +1,4 @@
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
@@ -8,13 +9,15 @@ import type {
   RelationshipRepairCandidates,
   RelationshipRepairProposalDraft,
   ReleaseDeliveryGraphInspection,
+  WorkspaceEntityInspection,
   WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
 import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
-import type { EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import type { EntityId, EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { ApplicationResourceNotFound, DeliveryGraphInspection } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { mapPersistenceRead } from "./errors.js"
+import { presentTimelineEvent } from "./timelineReads.js"
 
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
   Effect.die(`Delivery graph repository returned an unexpected result for ${operation}`)
@@ -119,7 +122,62 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
     return result.value satisfies DeliveryRelationship
   })
 
+  const workspaceEntity = Effect.fn("DeliveryGraphInspection.workspaceEntity")(function*(input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+  }) {
+    const entityRecord = yield* mapPersistenceRead(persistence.entities.get(input.workspaceId, input.entityId))
+    const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
+      _tag: "entitySlice",
+      entityId: input.entityId,
+      limit: 100
+    }))
+    if (result._tag !== "entitySlice") return yield* unexpectedResult("workspace entity")
+
+    const entityNodeIds = new Set(result.value.nodes.flatMap((node): ReadonlyArray<string> => {
+      if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") return []
+      return node.resolution.target.entityId === input.entityId ? [node.nodeId] : []
+    }))
+    const directEvidenceIds = new Set(
+      result.value.evidenceClaims.flatMap((claim): ReadonlyArray<string> =>
+        entityNodeIds.has(claim.subjectNodeId) ? [claim.evidenceId] : []
+      )
+    )
+    const directEvidence = result.value.evidenceItems
+      .filter(({ evidenceId }) => directEvidenceIds.has(evidenceId))
+      .sort((left, right) => DateTime.Order(right.recordedAt, left.recordedAt))[0]
+    const activityRecords = yield* mapPersistenceRead(persistence.timeline.page({
+      workspaceId: input.workspaceId,
+      actorKind: null,
+      before: null,
+      entityId: input.entityId,
+      from: null,
+      limit: 21,
+      to: null
+    }))
+
+    return {
+      entity: result.value.entity,
+      source: entityRecord.sourceRevision,
+      isSourceCurrent: Number(entityRecord.revision) === Number(result.value.entity.projection.sourceEntityRevision),
+      freshness: directEvidence?.freshness ?? null,
+      graph: {
+        truncated: result.value.truncated,
+        nodes: result.value.nodes,
+        relatedEntityProjections: result.value.relatedEntityProjections,
+        relationships: result.value.relationships,
+        evidenceClaims: result.value.evidenceClaims,
+        evidenceItems: result.value.evidenceItems
+      },
+      activity: {
+        truncated: activityRecords.length > 20,
+        events: activityRecords.slice(0, 20).map((record) => presentTimelineEvent(input.workspaceId, record))
+      }
+    } satisfies WorkspaceEntityInspection
+  })
+
   return DeliveryGraphInspection.of({
+    workspaceEntity,
     workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(input) {
       const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
         _tag: "workspaceEntityProjections",

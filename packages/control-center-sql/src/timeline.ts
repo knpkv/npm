@@ -13,6 +13,7 @@ export interface TimelineQueryCursor {
 export interface TimelineQueryInput {
   readonly actorKind: "agent" | "human" | "plugin" | "system" | null
   readonly before: TimelineQueryCursor | null
+  readonly entityId: string | null
   readonly from: string | null
   readonly limit: number
   readonly to: string | null
@@ -84,6 +85,8 @@ const relationshipRevisions = table("relationshipRevisions", {
   workspaceId: Column.text(),
   relationshipId: Column.text(),
   revision: Column.int(),
+  sourceNodeId: Column.text(),
+  targetNodeId: Column.text(),
   lifecycle: Column.text(),
   releaseId: Column.text().pipe(Column.nullable),
   provenancePluginConnectionId: Column.text().pipe(Column.nullable),
@@ -93,6 +96,13 @@ const relationshipRevisions = table("relationshipRevisions", {
   recordedByComponent: Column.text().pipe(Column.nullable),
   recordedAt: Column.text(),
   revisionDigest: Column.text()
+})
+
+const deliveryNodes = table("deliveryNodes", {
+  workspaceId: Column.text(),
+  nodeId: Column.text(),
+  entityId: Column.text().pipe(Column.nullable),
+  resolutionState: Column.text()
 })
 
 const domainEvents = table("domainEvents", {
@@ -114,6 +124,9 @@ const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const actorPredicate = input.actorKind === null
     ? Query.eq(1, 1)
     : Query.eq(auditEvents.causeKind, input.actorKind)
+  const entityPredicate = input.entityId === null
+    ? Query.eq(1, 1)
+    : Query.eq(governedActions.targetEntityId, input.entityId)
   const fromPredicate = input.from === null ? Query.eq(1, 1) : Query.gte(auditEvents.occurredAt, input.from)
   const toPredicate = input.to === null ? Query.eq(1, 1) : Query.lte(auditEvents.occurredAt, input.to)
   const cursorPredicate = input.before === null
@@ -161,6 +174,7 @@ const auditQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
         Query.eq(auditEvents.workspaceId, input.workspaceId),
         eventPredicate,
         actorPredicate,
+        entityPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -241,6 +255,24 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
   const actorPredicate = input.actorKind === null
     ? Query.eq(1, 1)
     : Query.eq(relationshipRevisions.recordedByKind, input.actorKind)
+  const relatedNodes = input.entityId === null
+    ? null
+    : Query.select({ nodeId: deliveryNodes.nodeId }).pipe(
+      Query.from(deliveryNodes),
+      Query.where(
+        Query.and(
+          Query.eq(deliveryNodes.workspaceId, input.workspaceId),
+          Query.eq(deliveryNodes.entityId, input.entityId),
+          Query.eq(deliveryNodes.resolutionState, "resolved")
+        )
+      )
+    )
+  const entityPredicate = relatedNodes === null
+    ? Query.eq(1, 1)
+    : Query.or(
+      Query.inSubquery(relationshipRevisions.sourceNodeId, relatedNodes),
+      Query.inSubquery(relationshipRevisions.targetNodeId, relatedNodes)
+    )
   const fromPredicate = input.from === null
     ? Query.eq(1, 1)
     : Query.gte(relationshipRevisions.recordedAt, input.from)
@@ -270,7 +302,7 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
     sourceKind: Query.literal("relationship"),
     service: nullText,
     releaseId: relationshipRevisions.releaseId,
-    entityId: nullText,
+    entityId: input.entityId === null ? nullText : Query.literal(input.entityId),
     actionId: nullText,
     relationshipId: relationshipRevisions.relationshipId,
     pluginConnectionId: relationshipRevisions.provenancePluginConnectionId,
@@ -289,6 +321,7 @@ const relationshipQuery = (input: TimelineQueryInput): RenderedTimelineQuery => 
         Query.eq(relationshipRevisions.workspaceId, input.workspaceId),
         eventPredicate,
         actorPredicate,
+        entityPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -307,6 +340,9 @@ const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
   const eventPredicate = input.sourceId === undefined
     ? Query.eq(1, 1)
     : Query.eq(domainEvents.eventId, input.sourceId)
+  const entityPredicate = input.entityId === null
+    ? Query.eq(1, 1)
+    : Query.eq(domainEvents.entityId, input.entityId)
   const fromPredicate = input.from === null ? Query.eq(1, 1) : Query.gte(domainEvents.occurredAt, input.from)
   const toPredicate = input.to === null ? Query.eq(1, 1) : Query.lte(domainEvents.occurredAt, input.to)
   const cursorPredicate = input.before === null
@@ -339,6 +375,7 @@ const systemQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
       Query.and(
         Query.eq(domainEvents.workspaceId, input.workspaceId),
         eventPredicate,
+        entityPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -358,7 +395,7 @@ export const renderTimelineQueries = (input: TimelineQueryInput): ReadonlyArray<
   if (input.actorKind !== "plugin") {
     queries.push(auditQuery(input), relationshipQuery(input))
   }
-  if (input.actorKind === null || input.actorKind === "plugin") {
+  if (input.entityId === null && (input.actorKind === null || input.actorKind === "plugin")) {
     queries.push(syncQuery(input))
   }
   if (input.actorKind === null || input.actorKind === "system") {
@@ -375,6 +412,7 @@ export const renderTimelineDetailQueries = (input: {
   const base = {
     actorKind: null,
     before: null,
+    entityId: null,
     from: null,
     limit: 1,
     to: null,
