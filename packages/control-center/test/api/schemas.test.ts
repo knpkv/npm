@@ -100,6 +100,12 @@ describe("public API schemas", () => {
         region: "eu-west-1"
       })
     ))
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(AwsResourceDiscoveryRequest)({
+        profile: "Production Read Only",
+        region: "eu-west-1"
+      })
+    ))
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(AwsResourceDiscoveryRequest)({
         profile: "../../credentials",

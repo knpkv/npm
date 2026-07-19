@@ -130,6 +130,32 @@ describe("AWS resource discovery", () => {
       })
     ))
 
+  it.effect("classifies a wrapped CodeCommit throttle independently as rate limited", () =>
+    runDiscovery(
+      codeCommitClient({
+        listRepositoriesPage: ({ account }) =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "listRepositoriesPage",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "ThrottlingException", secret: "must-not-cross-api" }
+            })
+          )
+      }),
+      codePipelineClient({ listPipelinesPage: () => Effect.succeed(pipelinePage(["release"])) }),
+      Effect.gen(function*() {
+        const discovery = yield* AwsResourceDiscovery
+        const result = yield* discovery.discover(request)
+        assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "rate-limit" })
+        assert.deepStrictEqual(result.codePipeline, {
+          _tag: "available",
+          names: ["release"],
+          truncated: false
+        })
+      })
+    ))
+
   it.effect("deduplicates, sorts, and truncates each service at twenty names", () => {
     const names = Array.from({ length: 25 }, (_, index) => `repository-${String(24 - index).padStart(2, "0")}`)
     return runDiscovery(

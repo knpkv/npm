@@ -67,6 +67,15 @@ const isAuthenticationCause = (cause: unknown): boolean =>
 const isTimeoutCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["TimeoutError", "RequestTimeoutException", "RequestExpired"])
 
+const isRateLimitCause = (cause: unknown): boolean =>
+  hasAwsTag(cause, [
+    "RequestLimitExceeded",
+    "SlowDown",
+    "Throttling",
+    "ThrottlingException",
+    "TooManyRequestsException"
+  ])
+
 const mapIdentityFailure = (failure: CodeCommit.CodeCommitReadError): AwsIdentityDiscoveryError => {
   if (Predicate.isTagged(failure, "AwsCredentialError")) return new ApplicationInvalidRequest()
   if (Predicate.isTagged(failure, "AwsThrottleError")) return new ApplicationRateLimited({ retryAt: null })
@@ -90,6 +99,7 @@ const codeCommitFailureClass = (
   if (Predicate.isTagged(failure, "AwsThrottleError")) return "rate-limit"
   if (Predicate.isTagged(failure, "AwsApiError")) {
     if (isAuthorizationCause(failure.cause)) return "authorization"
+    if (isRateLimitCause(failure.cause)) return "rate-limit"
     if (isTimeoutCause(failure.cause)) return "timeout"
   }
   return "unavailable"

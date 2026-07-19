@@ -1086,7 +1086,12 @@ export const ServicesPage = ({
                     const discover = transport.discoverAwsResources
                     if (discover === undefined)
                       return Promise.reject(new Error("AWS resource discovery is unavailable"))
-                    return discover(request, signal)
+                    return discover(request, signal).catch((failure: unknown) => {
+                      if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) {
+                        invalidateSession(sessionKey)
+                      }
+                      return Promise.reject(failure)
+                    })
                   }}
                   onOpen={() => {
                     if (openProvider !== catalog.providerId) {

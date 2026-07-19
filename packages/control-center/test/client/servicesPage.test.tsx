@@ -17,6 +17,7 @@ import {
   PluginOverviewResponse,
   PluginSynchronizationState
 } from "../../src/api/plugins.js"
+import { UnauthorizedApiError } from "../../src/api/errors.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
@@ -2079,6 +2080,82 @@ describe("ServicesPage connection tests", () => {
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     expect(refreshedPayment?.checked).toBe(true)
     expect(host.textContent).toContain("No pipelines were found")
+  })
+
+  it("keeps selections visible and removable when AWS refresh loses service access", async () => {
+    const discoverAwsResources = vi
+      .fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: [], truncated: false },
+        codePipeline: { _tag: "available", names: ["payments-production"], truncated: false }
+      })
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: [], truncated: false },
+        codePipeline: { _tag: "failed", failureClass: "authorization" }
+      })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsResources,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codepipeline")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const pipelineChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-production"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => pipelineChoice?.click())
+    const refresh = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Refresh discovery")
+    )
+    await act(async () => refresh?.click())
+
+    expect(host.textContent).toContain("CodePipeline access was denied")
+    expect(host.textContent).toContain("payments-production")
+    const preservedChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-production"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    expect(preservedChoice?.checked).toBe(true)
+    await act(async () => preservedChoice?.click())
+    expect(host.textContent).not.toContain("payments-production")
+  })
+
+  it("invalidates an expired session when AWS resource discovery is unauthorized", async () => {
+    const unauthorized = Schema.decodeUnknownSync(UnauthorizedApiError)({
+      _tag: "UnauthorizedApiError",
+      correlationId: "aws-discovery-expired-session",
+      code: "unauthorized",
+      message: "The browser session expired."
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsResources: () => Promise.reject(unauthorized),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+
+    expect(sessionControls?.state._tag).toBe("anonymous")
+    expect(host.textContent).toContain("Pair to enable")
   })
 
   it("keeps manual AWS resource entry available when account discovery fails", async () => {

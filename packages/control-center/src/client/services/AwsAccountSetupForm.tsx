@@ -123,14 +123,41 @@ const ResourcePicker = ({
   readonly setSelected: (selected: ReadonlySet<string>) => void
 }): ReactElement => {
   if (service._tag === "failed") {
+    const preservedNames = [...selected].sort((left, right) => left.localeCompare(right))
     return (
       <div className={styles.resourcePanel}>
-        <Text as="h4" variant="card-title">
-          {label}
-        </Text>
+        <div className={styles.resourcePanelHeading}>
+          <Text as="h4" variant="card-title">
+            {label}
+          </Text>
+          <StateLabel label={`${selected.size} selected`} size="compact" tone="neutral" />
+        </div>
         <Text as="p" className={styles.error} role="status" variant="body">
           {failureMessage(label === "Repositories" ? "CodeCommit" : "CodePipeline", service.failureClass)}
         </Text>
+        {preservedNames.length === 0 ? null : (
+          <>
+            <Text tone="secondary" variant="meta">
+              Preserved from the previous discovery. Clear any resource you no longer want to connect.
+            </Text>
+            <div className={styles.choiceList}>
+              {preservedNames.map((name) => (
+                <label className={styles.choice} key={name}>
+                  <input
+                    checked
+                    onChange={() => {
+                      const next = new Set(selected)
+                      next.delete(name)
+                      setSelected(next)
+                    }}
+                    type="checkbox"
+                  />
+                  <span>{name}</span>
+                </label>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     )
   }

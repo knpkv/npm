@@ -281,7 +281,7 @@ export const AwsResourceDiscoveryRequest = Schema.Struct({
     Schema.isTrimmed(),
     Schema.isNonEmpty(),
     Schema.isMaxLength(200),
-    Schema.isPattern(/^[A-Za-z0-9_+=,.@-]+$/u, { expected: "a valid AWS profile name" })
+    Schema.isPattern(/^[A-Za-z0-9_+=,.@ -]+$/u, { expected: "a valid AWS profile name" })
   ),
   region: Schema.String.check(
     Schema.isTrimmed(),
