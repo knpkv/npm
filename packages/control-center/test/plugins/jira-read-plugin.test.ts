@@ -8,9 +8,10 @@ import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
-import { ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import {
   JiraReadPluginConfiguration,
@@ -33,6 +34,9 @@ const issueReference = (vendorImmutableId: string): ReadPluginEntityRequestV1 =>
     entityType: "jira.issue",
     vendorImmutableId
   })
+
+const syncRequest = (checkpoint: string | null = null) =>
+  Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "project-issues", checkpoint })
 
 const issue = {
   id: "10042",
@@ -140,6 +144,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
       maxResults: request.maxResults,
       total: changelogs.length
     }),
+  searchProjectIssues: () => Effect.succeed({ issues: [], nextPageToken: null }),
   ...overrides
 })
 
@@ -551,6 +556,178 @@ describe("JiraReadPlugin", () => {
         }
       }
       assert.strictEqual(yield* Ref.get(childCalls), 0)
+    }))
+
+  it.effect("paginates one project with stable checkpoints and normalizes issues, people, releases, and evidence", () =>
+    Effect.gen(function*() {
+      const searches = yield* Ref.make<
+        ReadonlyArray<{
+          readonly projectId: string
+          readonly nextPageToken: string | null
+          readonly watermark: { readonly updatedAt: string; readonly issueId: string } | null
+        }>
+      >([])
+      const secondIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: {
+          ...issue.fields,
+          summary: "Bound retry attempts",
+          updated: "2026-07-17T09:31:00.000Z"
+        }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(searches, (current) => [...current, request]).pipe(
+            Effect.as(
+              request.watermark !== null
+                ? { issues: [], nextPageToken: null }
+                : request.nextPageToken === null
+                ? { issues: [issue], nextPageToken: "page-2" }
+                : { issues: [secondIssue], nextPageToken: null }
+            )
+          )
+      })
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest()))),
+          Effect.map((collectedPages) => [...collectedPages])
+        )
+      )
+
+      assert.lengthOf(pages, 2)
+      assert.isTrue(pages[0]?.hasMore)
+      assert.isFalse(pages[1]?.hasMore)
+      assert.include(pages[1]?.checkpointAfterPage ?? "", "10043")
+      assert.deepStrictEqual((yield* Ref.get(searches)).map(({ projectId }) => projectId), ["10", "10"])
+      assert.deepStrictEqual(
+        pages[0]?.events.flatMap((event) => event._tag === "UpsertEntity" ? [event.entityType] : []),
+        ["jira.issue", "release"]
+      )
+      assert.sameMembers(
+        pages[0]?.events.map(({ _tag }) => _tag) ?? [],
+        [
+          "UpsertEntity",
+          "UpsertPerson",
+          "UpsertPerson",
+          "UpsertPerson",
+          "AppendEvidence",
+          "UpsertEntity",
+          "AppendEvidence"
+        ]
+      )
+
+      const replay = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            Stream.runCollect(connection.sync(syncRequest(pages[1]?.checkpointAfterPage ?? null)))
+          ),
+          Effect.map((collectedPages) => [...collectedPages])
+        )
+      )
+      assert.lengthOf(replay, 1)
+      assert.deepStrictEqual(replay[0]?.events, [])
+      assert.deepStrictEqual((yield* Ref.get(searches))[2]?.watermark, {
+        updatedAt: "2026-07-17T09:31:00.000Z",
+        issueId: "10043"
+      })
+    }))
+
+  it.effect("rejects an invalid persisted watermark before searching Jira", () =>
+    Effect.gen(function*() {
+      const searchCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Ref.update(searchCalls, (count) => count + 1).pipe(Effect.as({
+            issues: [],
+            nextPageToken: null
+          }))
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            Stream.runCollect(
+              connection.sync(syncRequest("{\"version\":1,\"updatedAt\":\"not-a-date\",\"issueId\":\"10042\"}"))
+            )
+          )
+        )
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+      }
+      assert.strictEqual(yield* Ref.get(searchCalls), 0)
+    }))
+
+  it.effect("rejects a cross-project search result before reading comments or history", () =>
+    Effect.gen(function*() {
+      const childCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Effect.succeed({
+            issues: [{
+              ...issue,
+              fields: { ...issue.fields, project: { id: "20", key: "OPS", name: "Operations" } }
+            }],
+            nextPageToken: null
+          }),
+        getComments: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({})),
+        getChangelogs: () => Ref.update(childCalls, (count) => count + 1).pipe(Effect.as({}))
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-sync-issue-project-mismatch")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(childCalls), 0)
+    }))
+
+  it.effect("interrupts an in-flight project search when synchronization is cancelled", () =>
+    Effect.gen(function*() {
+      const entered = yield* Deferred.make<void>()
+      const provider = baseProvider({
+        searchProjectIssues: () => Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never))
+      })
+      const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configuration)
+      const fiber = yield* PluginConnection.pipe(
+        Effect.flatMap((connection) => Stream.runDrain(connection.sync(syncRequest()))),
+        Effect.provide(runtime.layer),
+        Effect.scoped,
+        Effect.forkChild
+      )
+      yield* Deferred.await(entered)
+      yield* Fiber.interrupt(fiber)
+      const exit = yield* Fiber.await(fiber)
+      assert.isTrue(Exit.isFailure(exit))
+      if (Exit.isFailure(exit)) assert.isTrue(Cause.hasInterruptsOnly(exit.cause))
+    }))
+
+  it.live("fails a project search that exceeds its configured request timeout", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.never
+      })
+      const outcome = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runDrain(connection.sync(syncRequest())))
+        ),
+        { ...configuration, operationTimeoutMillis: 1_000 }
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "PluginTimeoutFailure")
     }))
 
   it.effect("interrupts an in-flight provider page when the scoped read is cancelled", () =>

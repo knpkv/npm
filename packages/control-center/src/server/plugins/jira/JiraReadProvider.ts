@@ -31,6 +31,52 @@ export interface JiraPageRequest {
   readonly maxResults: number
 }
 
+/** Stable provider-independent lower bound for one incremental project query. @internal */
+export interface JiraIssueWatermark {
+  readonly updatedAt: string
+  readonly issueId: string
+}
+
+/** One bounded project search request. @internal */
+export interface JiraProjectIssuePageRequest {
+  readonly projectId: string
+  readonly watermark: JiraIssueWatermark | null
+  readonly nextPageToken: string | null
+  readonly maxResults: number
+}
+
+const JiraProviderIdentifier = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+)
+const JiraProviderIssueId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
+)
+const JiraProjectIssue = Schema.Struct({
+  id: JiraProviderIssueId,
+  key: JiraProviderIdentifier,
+  fields: Schema.Record(Schema.String, Schema.Json)
+})
+
+/** Schema-decoded issue shape crossing the bounded project iteration boundary. @internal */
+export type JiraProjectIssue = typeof JiraProjectIssue.Type
+
+const JiraProjectIssuePageResponse = Schema.Struct({
+  issues: Schema.Array(JiraProjectIssue),
+  isLast: Schema.Boolean,
+  nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderIdentifier))
+})
+
+/** Schema-decoded page shape crossing the bounded project iteration boundary. @internal */
+export interface JiraProjectIssuePage {
+  readonly issues: ReadonlyArray<JiraProjectIssue>
+  readonly nextPageToken: string | null
+}
+
 /** Narrow provider surface required by the production issue-read adapter. @internal */
 export interface JiraReadProvider {
   readonly getCurrentUser: Effect.Effect<JiraApi.User, PluginFailure>
@@ -47,6 +93,9 @@ export interface JiraReadProvider {
     issueId: string,
     request: JiraPageRequest
   ) => Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure>
+  readonly searchProjectIssues: (
+    request: JiraProjectIssuePageRequest
+  ) => Effect.Effect<JiraProjectIssuePage, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -135,6 +184,37 @@ const ISSUE_FIELDS = [
   "subtasks"
 ]
 
+const escapeJqlString = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")
+
+const projectJql = (request: JiraProjectIssuePageRequest): string => {
+  const project = `project = "${escapeJqlString(request.projectId)}"`
+  if (request.watermark === null) return `${project} ORDER BY updated ASC, id ASC`
+  const updatedAt = escapeJqlString(request.watermark.updatedAt)
+  const issueId = escapeJqlString(request.watermark.issueId)
+  return `${project} AND (updated > "${updatedAt}" OR (updated = "${updatedAt}" AND id > "${issueId}")) ORDER BY updated ASC, id ASC`
+}
+
+const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
+  response: unknown
+): Effect.fn.Return<JiraProjectIssuePage, PluginMalformedResponseFailure> {
+  const decoded = yield* Schema.decodeUnknownEffect(JiraProjectIssuePageResponse)(response).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-response-invalid"
+      })
+    )
+  )
+  const nextPageToken = decoded.nextPageToken ?? null
+  if ((!decoded.isLast && nextPageToken === null) || (decoded.isLast && nextPageToken !== null)) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-search-project-issues",
+      diagnosticCode: "jira-project-search-cursor-invalid"
+    })
+  }
+  return { issues: decoded.issues, nextPageToken }
+})
+
 /** Build the production provider boundary from the shared generated Jira client. @internal */
 export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
@@ -160,5 +240,17 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     providerCall(
       "jira-get-changelogs",
       client.getChangeLogs(issueId, { params: request })
-    )
+    ),
+  searchProjectIssues: (request) =>
+    providerCall(
+      "jira-search-project-issues",
+      client.searchIssuesUsingJql({
+        params: {
+          jql: projectJql(request),
+          maxResults: request.maxResults,
+          fields: ISSUE_FIELDS,
+          ...(request.nextPageToken === null ? {} : { nextPageToken: request.nextPageToken })
+        }
+      })
+    ).pipe(Effect.flatMap(decodeProjectIssuePage))
 })

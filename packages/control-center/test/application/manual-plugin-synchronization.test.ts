@@ -11,6 +11,7 @@ import type { ProviderId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { ApplicationServiceUnavailable } from "../../src/server/api/ApplicationServices.js"
 import {
+  firstPartyManualPluginSyncDrivers,
   makeManualPluginSyncDriverRegistry,
   makeManualPluginSynchronization
 } from "../../src/server/application/manualPluginSynchronization.js"
@@ -73,6 +74,20 @@ const fixtures = [
       durationMinutes: 30,
       billable: true,
       approvalState: "pending"
+    }
+  },
+  {
+    providerId: "jira",
+    pluginConnectionId: Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000207"),
+    streamKey: "project-issues",
+    checkpoint: "jira-complete",
+    entityType: "jira.issue",
+    vendorImmutableId: "10042",
+    title: "PAY-42 · Protect payment retries",
+    attributes: {
+      key: "PAY-42",
+      status: { name: "In Review" },
+      priority: { name: "High" }
     }
   }
 ] satisfies ReadonlyArray<{
@@ -170,6 +185,12 @@ const setupFixture = Effect.fn("ManualPluginSynchronizationTest.setupFixture")(f
 })
 
 describe("manual plugin synchronization", () => {
+  it("registers Jira only after its first-party adapter negotiates incremental synchronization", () => {
+    const driver = firstPartyManualPluginSyncDrivers.get("jira")
+    assert.isTrue(Option.isSome(driver))
+    if (Option.isSome(driver)) assert.strictEqual(driver.value.streamKey, "project-issues")
+  })
+
   it.effect("materializes each supported fixture connection once and exposes replay-safe attempt state", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
@@ -264,7 +285,7 @@ describe("manual plugin synchronization", () => {
       if (itemRead._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
       assert.deepStrictEqual(
         itemRead.value.items.map(({ projection }) => projection.entityType).sort(),
-        ["pipeline-execution", "pull-request", "time-entry"]
+        ["issue", "pipeline-execution", "pull-request", "time-entry"]
       )
       const timelineBeforeReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
@@ -277,7 +298,7 @@ describe("manual plugin synchronization", () => {
       })).filter(({ sourceKind }) => sourceKind === "plugin-sync")
       assert.deepStrictEqual(
         timelineBeforeReplay.map(({ service }) => service).sort(),
-        ["clockify", "codecommit", "codepipeline"]
+        ["clockify", "codecommit", "codepipeline", "jira"]
       )
 
       for (const fixture of fixtures) {
@@ -298,7 +319,7 @@ describe("manual plugin synchronization", () => {
         limit: 100
       })
       if (replayedItems._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
-      assert.strictEqual(replayedItems.value.totalCount, 3)
+      assert.strictEqual(replayedItems.value.totalCount, 4)
       const timelineAfterReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
         actorKind: "plugin",

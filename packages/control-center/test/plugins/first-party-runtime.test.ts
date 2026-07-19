@@ -40,8 +40,14 @@ const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
 
+const historicalJiraDescriptor = {
+  ...jiraReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}
+
 const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
-  const descriptor = providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor
+  const descriptor = providerId === "jira" ? historicalJiraDescriptor : confluencePagePluginDescriptor
   return {
     ...descriptor,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
@@ -60,15 +66,15 @@ const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
 }
 
 const jiraOAuthDescriptorWithoutIdentity = {
-  ...jiraReadPluginDescriptor,
-  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(
+  ...historicalJiraDescriptor,
+  configurationFields: historicalJiraDescriptor.configurationFields.filter(
     ({ key }) => key !== "siteId" && key !== "projectId"
   )
 }
 
 const jiraOAuthDescriptorWithSiteOnly = {
-  ...jiraReadPluginDescriptor,
-  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
+  ...historicalJiraDescriptor,
+  configurationFields: historicalJiraDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
 }
 
 const oauthProfile = (id: string, expiresAt: number) => ({

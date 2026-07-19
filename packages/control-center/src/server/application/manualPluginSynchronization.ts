@@ -75,10 +75,11 @@ const connectionSync = (
   request: typeof PluginSyncRequestV1.Type
 ) => connection.sync(request)
 
-/** Production drivers for the three first-party connections that currently negotiate synchronization. */
+/** Production drivers for first-party connections that currently negotiate synchronization. */
 export const firstPartyManualPluginSyncDrivers = makeManualPluginSyncDriverRegistry([
   { providerId: "codecommit", streamKey: "pull-requests", sync: connectionSync },
   { providerId: "codepipeline", streamKey: "executions", sync: connectionSync },
+  { providerId: "jira", streamKey: "project-issues", sync: connectionSync },
   { providerId: "clockify", streamKey: "time-entries", sync: connectionSync }
 ])
 

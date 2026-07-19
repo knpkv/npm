@@ -24,9 +24,12 @@ import {
   PersonId,
   type PluginConnectionId,
   RelationshipId,
+  ReleaseId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plugins/events.js"
+import { Release } from "../../domain/release.js"
+import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
@@ -76,6 +79,11 @@ const EntityAttributes = Schema.Struct({
     duration: OptionalText,
     state: OptionalText
   }))
+})
+const ReleaseAttributes = Schema.Struct({
+  serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
+  lifecycle: Schema.Literals(["assembling", "candidate", "deploying", "released", "cancelled"])
 })
 const EvidenceData = Schema.Struct({
   predicate: Schema.optionalKey(EvidencePredicate),
@@ -488,6 +496,75 @@ const materializeUpsertEntity = Effect.fn(
   return { ...receipt, skippedEntityCount: 0 }
 })
 
+const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsertRelease")(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  event: EntityUpsert
+) {
+  const attributes = yield* Schema.decodeUnknownEffect(ReleaseAttributes)(event.attributes).pipe(
+    Effect.mapError(() => malformed("normalized-release-attributes-invalid", event.eventId))
+  )
+  const releaseId = ReleaseId.make(
+    yield* stableUuid(
+      cryptoService,
+      materializationKey(scope, "release", event.vendorImmutableId),
+      event.eventId
+    )
+  )
+  const existing = yield* persistence.releases.get(scope.workspaceId, releaseId).pipe(Effect.result)
+  if (Result.isFailure(existing) && existing.failure._tag !== "RecordNotFoundError") {
+    return yield* existing.failure
+  }
+  const previous = Result.isSuccess(existing) ? existing.success : null
+  const previousSource = previous?.release.sourceRevisions.find(
+    ({ pluginConnectionId, providerId, vendorImmutableId }) =>
+      pluginConnectionId === scope.pluginConnectionId &&
+      providerId === scope.providerId &&
+      vendorImmutableId === event.vendorImmutableId
+  )
+  if (previousSource?.revision === event.revision) return 0
+
+  const source = sourceRevision(
+    scope,
+    event,
+    previousSource?.firstObservedAt ?? event.observedAt,
+    event.sourceUrl
+  )
+  const sourceAgeSeconds = Math.max(
+    0,
+    (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(event.observedAt)) / 1_000
+  )
+  const release = yield* Schema.decodeUnknownEffect(Schema.toType(Release))({
+    createdAt: previous?.release.createdAt ?? event.observedAt,
+    freshness: {
+      _tag: "current",
+      evaluatedAt: scope.committedAt,
+      pluginHealth: scope.successfulHealth,
+      provenance: { _tag: "provider", sourceRevision: source },
+      sourceObservedAt: event.observedAt,
+      staleAfterSeconds: Math.max(1, Math.ceil(sourceAgeSeconds) + 86_400),
+      synchronizedAt: scope.committedAt
+    },
+    id: releaseId,
+    lifecycle: attributes.lifecycle,
+    relay: deriveReleaseRelay(releaseId),
+    roleAssignments: [],
+    serviceName: attributes.serviceName,
+    sourceRevisions: [source],
+    targetEnvironmentIds: [],
+    updatedAt: scope.committedAt,
+    version: attributes.version,
+    workspaceId: scope.workspaceId
+  }).pipe(Effect.mapError(() => malformed("normalized-release-invalid", event.eventId)))
+  if (previous === null) {
+    yield* persistence.releases.create(scope.workspaceId, release)
+  } else {
+    yield* persistence.releases.append(scope.workspaceId, release, previous.revision)
+  }
+  return 1
+})
+
 const materializeTombstoneEntity = Effect.fn(
   "NormalizedPluginPageMaterialization.tombstoneEntity"
 )(function*(
@@ -841,6 +918,10 @@ export const materializeNormalizedPluginPage = Effect.fn(
     }
     for (const event of events) {
       if (event._tag === "UpsertEntity") {
+        if (event.entityType === "release") {
+          yield* materializeRelease(persistence, cryptoService, scope, event)
+          continue
+        }
         const receipt = yield* materializeUpsertEntity(persistence, cryptoService, scope, event)
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount

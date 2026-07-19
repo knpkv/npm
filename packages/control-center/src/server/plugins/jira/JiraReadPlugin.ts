@@ -9,11 +9,15 @@ import * as Stream from "effect/Stream"
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
   PluginDiscoveryV1,
+  PluginSyncPageV1,
+  type PluginSyncRequestV1,
   type ReadPluginEntityRequestV1,
   type ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
 import { SourceUrl } from "../../../domain/sourceRevision.js"
+import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import {
+  PluginConfigurationFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginTimeoutFailure,
@@ -24,8 +28,14 @@ import type { PluginConnectionV1 } from "../PluginConnection.js"
 import { buildPluginDefinitionLayer, definePluginV1 } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
-import { type JiraFetchedCollection, normalizeJiraIssue } from "./JiraIssueNormalization.js"
-import { type JiraPageRequest, type JiraReadProvider, makeJiraReadProvider } from "./JiraReadProvider.js"
+import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
+import {
+  type JiraIssueWatermark,
+  type JiraPageRequest,
+  type JiraProjectIssue,
+  type JiraReadProvider,
+  makeJiraReadProvider
+} from "./JiraReadProvider.js"
 
 const PageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))
 const MaximumPages = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
@@ -35,6 +45,35 @@ const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(
 const JiraIssueProjectIdentity = Schema.Struct({
   fields: Schema.Struct({ project: Schema.Struct({ id: JiraProjectId }) })
 })
+const JiraSynchronizedIssueIdentity = Schema.Struct({
+  id: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
+  ),
+  fields: Schema.Struct({
+    project: Schema.Struct({ id: JiraProjectId }),
+    updated: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+  })
+})
+const JiraSyncCheckpoint = Schema.Struct({
+  version: Schema.Literal(1),
+  updatedAt: Schema.NullOr(UtcTimestamp),
+  issueId: Schema.NullOr(Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(64),
+    Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
+  ))
+}).check(
+  Schema.makeFilter(
+    ({ issueId, updatedAt }) => (issueId === null) === (updatedAt === null),
+    { expected: "both Jira watermark fields or neither" }
+  )
+)
+const JiraSyncCheckpointJson = Schema.fromJsonString(JiraSyncCheckpoint)
+const JIRA_ISSUE_STREAM_KEY = "project-issues"
 const JiraWebBaseUrl = SourceUrl.pipe(
   Schema.check(
     Schema.makeFilter(
@@ -75,7 +114,7 @@ export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
-  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
   displayName: "Jira issue reader",
   configurationFields: [
     {
@@ -156,11 +195,11 @@ export const jiraReadPluginDescriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: [{
-    capabilityId: "entity.read",
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
     supportedVersions: [1],
     requirement: "required"
-  }]
+  }))
 } satisfies unknown
 
 const unsupported = (
@@ -235,6 +274,30 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   return { values, total, truncated: !exhausted }
 })
 
+const collectIssueActivity = Effect.fn("JiraReadPlugin.collectIssueActivity")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraReadPluginConfiguration,
+  issueId: string
+) {
+  const comments = yield* collectPages({
+    operation: "jira-get-comments",
+    configuration,
+    load: (page) =>
+      provider.getComments(issueId, page).pipe(
+        Effect.map((response) => ({ values: response.comments, total: response.total }))
+      )
+  })
+  const changelogs = yield* collectPages({
+    operation: "jira-get-changelogs",
+    configuration,
+    load: (page) =>
+      provider.getChangelogs(issueId, page).pipe(
+        Effect.map((response) => ({ values: response.values, total: response.total }))
+      )
+  })
+  return { comments, changelogs }
+})
+
 const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
   provider: JiraReadProvider,
   configuration: JiraReadPluginConfiguration,
@@ -272,22 +335,7 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
     })
   }
 
-  const comments = yield* collectPages({
-    operation: "jira-get-comments",
-    configuration,
-    load: (page) =>
-      provider.getComments(request.vendorImmutableId, page).pipe(
-        Effect.map((response) => ({ values: response.comments, total: response.total }))
-      )
-  })
-  const changelogs = yield* collectPages({
-    operation: "jira-get-changelogs",
-    configuration,
-    load: (page) =>
-      provider.getChangelogs(request.vendorImmutableId, page).pipe(
-        Effect.map((response) => ({ values: response.values, total: response.total }))
-      )
-  })
+  const { changelogs, comments } = yield* collectIssueActivity(provider, configuration, request.vendorImmutableId)
   const event = yield* normalizeJiraIssue({
     issue: issue.value,
     comments,
@@ -298,6 +346,215 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
   return { _tag: "found", event }
 })
 
+const checkpointWatermark = Effect.fn("JiraReadPlugin.checkpointWatermark")(function*(
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+): Effect.fn.Return<JiraIssueWatermark | null, PluginConfigurationFailure> {
+  if (checkpoint === null) return null
+  const decoded = yield* Schema.decodeUnknownEffect(JiraSyncCheckpointJson)(checkpoint).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
+  )
+  return decoded.updatedAt === null || decoded.issueId === null
+    ? null
+    : { updatedAt: DateTime.formatIso(decoded.updatedAt), issueId: decoded.issueId }
+})
+
+const checkpointFromWatermark = Effect.fn("JiraReadPlugin.checkpointFromWatermark")(function*(
+  watermark: JiraIssueWatermark | null
+) {
+  const updatedAt = watermark === null
+    ? null
+    : yield* Schema.decodeUnknownEffect(UtcTimestamp)(watermark.updatedAt).pipe(
+      Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
+    )
+  return yield* Schema.encodeEffect(JiraSyncCheckpointJson)({
+    version: 1,
+    updatedAt,
+    issueId: watermark?.issueId ?? null
+  }).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
+  )
+})
+
+const compareNumericIds = (left: string, right: string): number => {
+  const normalizedLeft = left.replace(/^0+/u, "") || "0"
+  const normalizedRight = right.replace(/^0+/u, "") || "0"
+  return normalizedLeft.length === normalizedRight.length
+    ? normalizedLeft.localeCompare(normalizedRight)
+    : normalizedLeft.length - normalizedRight.length
+}
+
+const compareWatermarks = (left: JiraIssueWatermark, right: JiraIssueWatermark): number => {
+  const updated = left.updatedAt.localeCompare(right.updatedAt)
+  return updated === 0 ? compareNumericIds(left.issueId, right.issueId) : updated
+}
+
+const issueWatermark = Effect.fn("JiraReadPlugin.issueWatermark")(function*(
+  issue: JiraProjectIssue,
+  configuration: JiraReadPluginConfiguration,
+  previous: JiraIssueWatermark | null
+): Effect.fn.Return<JiraIssueWatermark, PluginMalformedResponseFailure> {
+  const identity = yield* Schema.decodeUnknownEffect(JiraSynchronizedIssueIdentity)(issue).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-sync-issue-identity-invalid"
+      })
+    )
+  )
+  if (identity.fields.project.id !== configuration.projectId) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-search-project-issues",
+      diagnosticCode: "jira-sync-issue-project-mismatch"
+    })
+  }
+  const watermark = { updatedAt: identity.fields.updated, issueId: identity.id }
+  if (previous !== null && compareWatermarks(watermark, previous) <= 0) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-search-project-issues",
+      diagnosticCode: "jira-sync-issue-order-invalid"
+    })
+  }
+  return watermark
+})
+
+interface JiraSyncState {
+  readonly queryWatermark: JiraIssueWatermark | null
+  readonly committedWatermark: JiraIssueWatermark | null
+  readonly nextPageToken: string | null
+  readonly remainingPages: number
+  readonly remainingResults: number
+  readonly seenPageTokens: ReadonlySet<string>
+}
+
+const syncProject = (
+  provider: JiraReadProvider,
+  configuration: JiraReadPluginConfiguration,
+  request: PluginSyncRequestV1
+): Stream.Stream<typeof PluginSyncPageV1.Type, PluginFailure> => {
+  if (request.streamKey !== JIRA_ISSUE_STREAM_KEY) {
+    return Stream.fail(new PluginConfigurationFailure({ diagnosticCode: "jira-sync-stream-unsupported" }))
+  }
+  return Stream.unwrap(
+    checkpointWatermark(request.checkpoint).pipe(
+      Effect.map((watermark) =>
+        Stream.paginate<JiraSyncState, typeof PluginSyncPageV1.Type, PluginFailure>(
+          {
+            queryWatermark: watermark,
+            committedWatermark: watermark,
+            nextPageToken: null,
+            remainingPages: configuration.maximumPages,
+            remainingResults: configuration.pageSize * configuration.maximumPages,
+            seenPageTokens: new Set()
+          },
+          (state) =>
+            Effect.gen(function*() {
+              const requestedResults = Math.min(configuration.pageSize, state.remainingResults)
+              const providerPage = yield* withTimeout(
+                "jira-search-project-issues",
+                configuration.operationTimeoutMillis,
+                provider.searchProjectIssues({
+                  projectId: configuration.projectId,
+                  watermark: state.queryWatermark,
+                  nextPageToken: state.nextPageToken,
+                  maxResults: requestedResults
+                })
+              )
+              if (providerPage.issues.length > requestedResults) {
+                return yield* new PluginMalformedResponseFailure({
+                  operation: "jira-search-project-issues",
+                  diagnosticCode: "jira-sync-page-result-limit-exceeded"
+                })
+              }
+              if (providerPage.issues.length === 0) {
+                if (providerPage.nextPageToken !== null) {
+                  return yield* new PluginMalformedResponseFailure({
+                    operation: "jira-search-project-issues",
+                    diagnosticCode: "jira-sync-empty-page-with-cursor"
+                  })
+                }
+                const terminal = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+                  events: [],
+                  checkpointAfterPage: yield* checkpointFromWatermark(state.committedWatermark),
+                  hasMore: false
+                }).pipe(
+                  Effect.mapError(() =>
+                    new PluginMalformedResponseFailure({
+                      operation: "jira-sync",
+                      diagnosticCode: "jira-sync-page-invalid"
+                    })
+                  )
+                )
+                return [[terminal], Option.none<JiraSyncState>()]
+              }
+
+              const remainingPages = state.remainingPages - 1
+              const remainingResults = state.remainingResults - providerPage.issues.length
+              const canContinue = providerPage.nextPageToken !== null && remainingPages > 0 && remainingResults > 0
+              if (
+                providerPage.nextPageToken !== null &&
+                state.seenPageTokens.has(providerPage.nextPageToken)
+              ) {
+                return yield* new PluginMalformedResponseFailure({
+                  operation: "jira-search-project-issues",
+                  diagnosticCode: "jira-sync-page-cursor-repeated"
+                })
+              }
+
+              const normalizedPages: Array<typeof PluginSyncPageV1.Type> = []
+              let committedWatermark = state.committedWatermark
+              for (let index = 0; index < providerPage.issues.length; index += 1) {
+                const issue = providerPage.issues[index]
+                if (issue === undefined) continue
+                committedWatermark = yield* issueWatermark(issue, configuration, committedWatermark)
+                const observedAt = yield* Schema.decodeUnknownEffect(UtcTimestamp)(committedWatermark.updatedAt).pipe(
+                  Effect.mapError(() =>
+                    new PluginMalformedResponseFailure({
+                      operation: "jira-search-project-issues",
+                      diagnosticCode: "jira-sync-issue-updated-invalid"
+                    })
+                  )
+                )
+                const { changelogs, comments } = yield* collectIssueActivity(provider, configuration, issue.id)
+                const events = yield* normalizeJiraIssueEvents({
+                  issue,
+                  comments,
+                  changelogs,
+                  observedAt,
+                  webBaseUrl: configuration.webBaseUrl
+                })
+                normalizedPages.push(
+                  yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
+                    events,
+                    checkpointAfterPage: yield* checkpointFromWatermark(committedWatermark),
+                    hasMore: index < providerPage.issues.length - 1 || canContinue
+                  }).pipe(
+                    Effect.mapError(() =>
+                      new PluginMalformedResponseFailure({
+                        operation: "jira-sync",
+                        diagnosticCode: "jira-sync-page-invalid"
+                      })
+                    )
+                  )
+                )
+              }
+              const nextState = canContinue && providerPage.nextPageToken !== null
+                ? Option.some<JiraSyncState>({
+                  queryWatermark: state.queryWatermark,
+                  committedWatermark,
+                  nextPageToken: providerPage.nextPageToken,
+                  remainingPages,
+                  remainingResults,
+                  seenPageTokens: new Set(state.seenPageTokens).add(providerPage.nextPageToken)
+                })
+                : Option.none<JiraSyncState>()
+              return [normalizedPages, nextState]
+            })
+        )
+      )
+    )
+  )
+}
+
 const makeRuntime = (
   provider: JiraReadProvider,
   configuration: unknown,
@@ -306,7 +563,10 @@ const makeRuntime = (
   const definition = definePluginV1({
     rawDescriptor: jiraReadPluginDescriptor,
     configurationSchema: JiraReadPluginConfiguration,
-    capabilityCodecs: { entityRead: pluginCapabilityCodecsV1.entityRead },
+    capabilityCodecs: {
+      entityRead: pluginCapabilityCodecsV1.entityRead,
+      syncIncremental: pluginCapabilityCodecsV1.syncIncremental
+    },
     make: ({ configuration: decoded, descriptor: negotiated }) => {
       const connection: PluginConnectionV1 = {
         descriptor: negotiated,
@@ -384,7 +644,7 @@ const makeRuntime = (
             )
           )
         }),
-        sync: () => Stream.fail(unsupported("sync.incremental")),
+        sync: (request) => syncProject(provider, decoded, request),
         readEntity: (request) => readIssue(provider, decoded, request),
         diff: Option.none(),
         proposeAction: () => Effect.fail(unsupported("action.propose"))

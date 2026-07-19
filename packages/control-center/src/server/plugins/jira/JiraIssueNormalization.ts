@@ -5,11 +5,15 @@ import * as Schema from "effect/Schema"
 
 import { MaximumPluginPayloadBytes } from "../../../domain/plugins/bounds.js"
 import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
+import { SourceUrl } from "../../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { PluginMalformedResponseFailure } from "../failures.js"
 
 const JiraText = Schema.String.check(Schema.isMaxLength(32_768))
 const JiraIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const JiraAccountId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128))
+const JiraVersionId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128))
+const JiraVersionName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(255))
 const JiraTimestamp = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
 const JiraAvatarUrls = Schema.Struct({
@@ -20,7 +24,7 @@ const JiraAvatarUrls = Schema.Struct({
 })
 
 const JiraUser = Schema.Struct({
-  accountId: Schema.optionalKey(JiraIdentifier),
+  accountId: Schema.optionalKey(JiraAccountId),
   active: Schema.optionalKey(Schema.Boolean),
   avatarUrls: Schema.optionalKey(JiraAvatarUrls),
   displayName: Schema.optionalKey(JiraText)
@@ -38,8 +42,8 @@ const JiraProject = Schema.Struct({
 })
 
 const JiraVersion = Schema.Struct({
-  id: Schema.optionalKey(JiraIdentifier),
-  name: Schema.optionalKey(JiraText),
+  id: Schema.optionalKey(JiraVersionId),
+  name: Schema.optionalKey(JiraVersionName),
   released: Schema.optionalKey(Schema.Boolean),
   releaseDate: Schema.optionalKey(Schema.String)
 })
@@ -108,6 +112,34 @@ const JiraChangelogResponse = Schema.Struct({
 })
 
 type JiraIssueEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
+
+const NormalizedJiraIssueAttributes = Schema.Struct({
+  project: Schema.NullOr(Schema.Struct({
+    id: Schema.NullOr(JiraIdentifier),
+    key: Schema.NullOr(JiraIdentifier),
+    name: Schema.NullOr(JiraText)
+  })),
+  collaborators: Schema.Array(Schema.Struct({
+    providerPersonId: JiraAccountId,
+    displayName: JiraText,
+    avatarUrl: Schema.NullOr(Schema.String),
+    active: Schema.Boolean,
+    roles: Schema.Array(Schema.String)
+  })),
+  fixVersions: Schema.Array(Schema.Struct({
+    id: Schema.NullOr(JiraVersionId),
+    name: Schema.NullOr(JiraVersionName),
+    released: Schema.Boolean,
+    releaseDate: Schema.NullOr(Schema.String)
+  })),
+  commentTotal: Schema.Number,
+  commentsTruncated: Schema.Boolean,
+  historyTotal: Schema.Number,
+  historyTruncated: Schema.Boolean
+})
+
+const MAXIMUM_MATERIALIZED_COLLABORATORS = 200
+const MAXIMUM_MATERIALIZED_FIX_VERSIONS = 100
 
 /** One bounded collection fetched from Jira. @internal */
 export interface JiraFetchedCollection<Value> {
@@ -490,4 +522,124 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   }).pipe(Effect.mapError(() => malformed("jira-normalized-issue-invalid")))
   if (event._tag !== "UpsertEntity") return yield* malformed("jira-normalized-event-kind-invalid")
   return event
+})
+
+const normalizedEvent = Effect.fn("JiraIssueNormalization.normalizedEvent")(function*(input: unknown) {
+  return yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))(input).pipe(
+    Effect.mapError(() => malformed("jira-normalized-related-event-invalid"))
+  )
+})
+
+const releaseRevision = (version: typeof NormalizedJiraIssueAttributes.Type["fixVersions"][number]): string =>
+  `${version.released ? "released" : "candidate"}:${version.releaseDate ?? "none"}:${version.name ?? "unnamed"}`
+
+/** Normalize one synchronized Jira issue into canonical issue, person, release, and evidence events. @internal */
+export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normalizeEvents")(function*(
+  input: NormalizeJiraIssueInput
+): Effect.fn.Return<ReadonlyArray<NormalizedPluginEventV1>, PluginMalformedResponseFailure> {
+  const issueEvent = yield* normalizeJiraIssue(input)
+  const attributes = yield* Schema.decodeUnknownEffect(NormalizedJiraIssueAttributes)(issueEvent.attributes).pipe(
+    Effect.mapError(() => malformed("jira-normalized-issue-attributes-invalid"))
+  )
+  const events: Array<NormalizedPluginEventV1> = [issueEvent]
+
+  for (const collaborator of attributes.collaborators.slice(0, MAXIMUM_MATERIALIZED_COLLABORATORS)) {
+    const avatarUrl = collaborator.avatarUrl === null
+      ? null
+      : Schema.decodeUnknownResult(SourceUrl)(collaborator.avatarUrl)
+    events.push(
+      yield* normalizedEvent({
+        _tag: "UpsertPerson",
+        eventId: `jira:person:${collaborator.providerPersonId}:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
+        observedAt: issueEvent.observedAt,
+        revision: issueEvent.revision,
+        vendorPersonId: collaborator.providerPersonId,
+        displayName: collaborator.displayName.slice(0, 200),
+        avatarUrl: avatarUrl === null || Result.isFailure(avatarUrl) ? null : avatarUrl.success,
+        active: collaborator.active
+      })
+    )
+  }
+
+  const activitySummary = [
+    `comments ${String(attributes.commentTotal)}${attributes.commentsTruncated ? "+" : ""}`,
+    `history ${String(attributes.historyTotal)}${attributes.historyTruncated ? "+" : ""}`
+  ].join(", ")
+  events.push(
+    yield* normalizedEvent({
+      _tag: "AppendEvidence",
+      eventId: `jira:evidence:${issueEvent.vendorImmutableId}:activity:${issueEvent.revision}`,
+      observedAt: issueEvent.observedAt,
+      revision: issueEvent.revision,
+      evidenceId: `jira:issue:${issueEvent.vendorImmutableId}:activity:${issueEvent.revision}`,
+      subject: {
+        entityType: issueEvent.entityType,
+        vendorImmutableId: issueEvent.vendorImmutableId
+      },
+      evidenceType: "status-observed",
+      summary: `Jira activity freshness: ${activitySummary}`,
+      capturedAt: issueEvent.observedAt,
+      data: {
+        predicate: "status-observed",
+        value: { _tag: "state", value: activitySummary }
+      }
+    })
+  )
+
+  for (const version of attributes.fixVersions.slice(0, MAXIMUM_MATERIALIZED_FIX_VERSIONS)) {
+    if (version.id === null || version.name === null) continue
+    const revision = releaseRevision(version)
+    const releaseVendorId = `jira-version:${version.id}`
+    const projectKey = attributes.project?.key
+    events.push(
+      yield* normalizedEvent({
+        _tag: "UpsertEntity",
+        eventId: `jira:version:${version.id}:${revision}`,
+        observedAt: issueEvent.observedAt,
+        revision,
+        entityType: "release",
+        vendorImmutableId: releaseVendorId,
+        sourceUrl: projectKey === null || projectKey === undefined
+          ? null
+          : new URL(
+            `plugins/servlet/project-config/${encodeURIComponent(projectKey)}/versions`,
+            input.webBaseUrl
+          ),
+        title: `${attributes.project?.name ?? projectKey ?? "Jira"} · ${version.name}`.slice(0, 500),
+        attributes: {
+          schemaVersion: 1,
+          source: "jira-fix-version",
+          projectId: attributes.project?.id ?? null,
+          projectKey: projectKey ?? null,
+          serviceName: (attributes.project?.name ?? projectKey ?? "Jira").slice(0, 200),
+          version: version.name.slice(0, 100),
+          lifecycle: version.released ? "released" : "candidate",
+          releaseDate: version.releaseDate,
+          fixVersionId: version.id
+        }
+      })
+    )
+    events.push(
+      yield* normalizedEvent({
+        _tag: "AppendEvidence",
+        eventId: `jira:evidence:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
+        observedAt: issueEvent.observedAt,
+        revision: issueEvent.revision,
+        evidenceId: `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}`,
+        subject: {
+          entityType: issueEvent.entityType,
+          vendorImmutableId: issueEvent.vendorImmutableId
+        },
+        evidenceType: "relationship-observed",
+        summary: `Jira fix version ${version.name}`.slice(0, 500),
+        capturedAt: issueEvent.observedAt,
+        data: {
+          predicate: "relationship-observed",
+          value: { _tag: "state", value: version.name.slice(0, 500) }
+        }
+      })
+    )
+  }
+
+  return events
 })

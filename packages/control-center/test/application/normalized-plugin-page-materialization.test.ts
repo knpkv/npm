@@ -152,6 +152,27 @@ const repeatedEntityEventPage = Schema.decodeSync(PluginSyncPageV1)({
   }]
 })
 
+const jiraReleasePage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "jira-release-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "jira-version-2026-29-candidate",
+    observedAt: "2026-07-19T09:01:30.000Z",
+    revision: "candidate:2026-07-29:2026.29",
+    entityType: "release",
+    vendorImmutableId: "jira-version:2026.29",
+    sourceUrl: "https://jira.example/plugins/servlet/project-config/PAY/versions",
+    title: "Payments · 2026.29",
+    attributes: {
+      source: "jira-fix-version",
+      serviceName: "Payments",
+      version: "2026.29",
+      lifecycle: "candidate"
+    }
+  }]
+})
+
 const invalidRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "invalid-relationship-complete",
   hasMore: false,
@@ -228,6 +249,37 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it.effect("projects a normalized Jira fix version into the canonical release repository", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+
+      const receipt = yield* materializeNormalizedPluginPage(scope, jiraReleasePage)
+      assert.strictEqual(receipt.acceptedEventCount, 1)
+      assert.strictEqual(receipt.entityProjectionCount, 0)
+      assert.strictEqual((yield* items()).totalCount, 0)
+
+      const releases = yield* persistence.releases.list(WORKSPACE_ID, 10)
+      assert.lengthOf(releases, 1)
+      assert.strictEqual(releases[0]?.release.serviceName, "Payments")
+      assert.strictEqual(releases[0]?.release.version, "2026.29")
+      assert.strictEqual(releases[0]?.release.lifecycle, "candidate")
+      assert.strictEqual(releases[0]?.release.sourceRevisions[0]?.vendorImmutableId, "jira-version:2026.29")
+
+      const replay = yield* materializeNormalizedPluginPage(scope, jiraReleasePage)
+      assert.isFalse(replay.pageCommitted)
+      assert.lengthOf(yield* persistence.releases.list(WORKSPACE_ID, 10), 1)
+    })))
+
   it.effect("atomically applies all five operations and makes replay a canonical no-op", () =>
     withMaterializer(Effect.gen(function*() {
       const database = yield* Database
