@@ -107,4 +107,32 @@ describe("Control Center observability", () => {
       const capturedRequests = yield* CapturedRequests
       assert.deepStrictEqual(yield* capturedRequests.requests, [])
     }).pipe(Effect.provide(testLayer({}))))
+
+  it.effect("ignores malformed endpoints while exporters are inactive", () =>
+    Effect.gen(function*() {
+      yield* Effect.logInfo("Inactive malformed endpoint probe")
+      yield* Effect.void.pipe(Effect.withSpan("inactive-malformed.trace-probe"))
+
+      const capturedRequests = yield* CapturedRequests
+      assert.deepStrictEqual(yield* capturedRequests.requests, [])
+    }).pipe(
+      Effect.provide(testLayer({
+        OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url"
+      }))
+    ))
+
+  it.effect("ignores malformed endpoints when the OpenTelemetry SDK is disabled", () =>
+    Effect.gen(function*() {
+      yield* Effect.logInfo("Disabled SDK malformed endpoint probe")
+      yield* Effect.void.pipe(Effect.withSpan("disabled-sdk-malformed.trace-probe"))
+
+      const capturedRequests = yield* CapturedRequests
+      assert.deepStrictEqual(yield* capturedRequests.requests, [])
+    }).pipe(
+      Effect.provide(testLayer({
+        OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+        OTEL_LOGS_EXPORTER: "otlp",
+        OTEL_SDK_DISABLED: "true"
+      }))
+    ))
 })
