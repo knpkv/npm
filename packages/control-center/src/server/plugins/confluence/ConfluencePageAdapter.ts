@@ -85,12 +85,20 @@ const DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX = "complete:v2:"
 const RESTART_INITIAL_CHECKPOINT = "restart:initial"
 const RESTART_CURSOR_PREFIX = "restart:cursor:"
 const INVENTORY_DIGEST_LENGTH = 64
-const MAXIMUM_SYNC_CURSOR_LENGTH = MAXIMUM_CHECKPOINT_LENGTH
-  - DURABLE_COMPLETE_CHECKPOINT_PREFIX.length
-  - INVENTORY_DIGEST_LENGTH
-  - 1
-  - INVENTORY_DIGEST_LENGTH
-  - 1
+const MAXIMUM_CHECKPOINT_GENERATION_DIGITS = 9
+const MAXIMUM_CHECKPOINT_CURSOR_LENGTH_DIGITS = 4
+const MAXIMUM_SYNC_CURSOR_LENGTH = Math.floor(
+  (MAXIMUM_CHECKPOINT_LENGTH
+    - DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX.length
+    - MAXIMUM_CHECKPOINT_GENERATION_DIGITS
+    - 1
+    - INVENTORY_DIGEST_LENGTH
+    - 1
+    - MAXIMUM_CHECKPOINT_CURSOR_LENGTH_DIGITS
+    - 1
+    - INVENTORY_DIGEST_LENGTH
+    - 1) / 2
+)
 
 const SiteUrl = Schema.String.pipe(
   Schema.decodeTo(Schema.URL, SchemaTransformation.urlFromString),
@@ -398,10 +406,12 @@ const checkpointAfterPage = (
   usesGenerationCheckpoint: boolean
 ): string => {
   if (cursor !== null) {
-    if (!bounded) return `${NEXT_CHECKPOINT_PREFIX}${cursor}`
-    return previousBoundedPrefix === null
+    if (previousBoundedPrefix !== null) {
+      return `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor.length}:${previousBoundedPrefix.cursor}${inventoryDigest}:${cursor}`
+    }
+    return bounded
       ? `${DURABLE_BOUNDED_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor}`
-      : `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor.length}:${previousBoundedPrefix.cursor}${inventoryDigest}:${cursor}`
+      : `${NEXT_CHECKPOINT_PREFIX}${cursor}`
   }
   return previousBoundedPrefix === null
     ? `${COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}`

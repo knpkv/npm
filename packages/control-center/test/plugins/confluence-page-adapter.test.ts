@@ -15,6 +15,7 @@ import * as Stream from "effect/Stream"
 import {
   MaximumPluginPayloadBytes,
   MaximumPluginSyncPageBytes,
+  PluginCheckpointV1,
   PluginSyncRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
@@ -850,27 +851,47 @@ describe("Confluence page adapter", () => {
       assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
     }))
 
-  it.effect("reserves the longest checkpoint prefix when accepting resumed cursors", () =>
+  it.effect("reserves enough checkpoint budget for two provider cursors", () =>
     Effect.gen(function*() {
-      const maximumCursor = "c".repeat(2_048 - "complete:v1:".length - 64 - 1 - 64 - 1)
+      const maximumCursorLength = Math.floor(
+        (2_048 - "bounded:v2:".length - 9 - 1 - 64 - 1 - 4 - 1 - 64 - 1) / 2
+      )
+      const prefixCursor = "p".repeat(maximumCursorLength)
+      const suffixCursor = "s".repeat(maximumCursorLength)
       const validCalls: Array<string | null> = []
       const adapter = yield* makeAdapter(defaultClient({
         getSpacePages: (_spaceId, cursor) =>
           Effect.sync(() => {
             validCalls.push(cursor)
-            return { results: [] }
+            if (cursor === suffixCursor) return { results: [] }
+            if (cursor === prefixCursor) return { results: [], _links: { next: `/pages?cursor=${suffixCursor}` } }
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return {
+              results: [],
+              _links: { next: `/pages?cursor=${index === 4 ? prefixCursor : `c${index + 1}`}` }
+            }
           })
       }))
+
+      const bounded = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
       const valid = yield* adapter.connection.sync(
         Schema.decodeUnknownSync(PluginSyncRequestV1)({
           streamKey: "pages",
-          checkpoint: `bounded:${maximumCursor}`
+          checkpoint: bounded[4]?.checkpointAfterPage
         })
       ).pipe(Stream.runCollect)
-      assert.deepStrictEqual(validCalls, [maximumCursor])
-      assert.match(valid[0]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+      assert.deepStrictEqual(validCalls, [null, "c1", "c2", "c3", "c4", prefixCursor, suffixCursor])
+      assert.lengthOf(valid, 2)
+      for (const page of valid) {
+        assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginCheckpointV1)(page.checkpointAfterPage)))
+      }
+      assert.match(
+        valid[0]?.checkpointAfterPage ?? "",
+        /^bounded:v2:0:[0-9a-f]{64}:[0-9]{3}:[p]+[0-9a-f]{64}:[s]+$/u
+      )
 
-      const overlongCursor = "c".repeat(2_048 - "bounded:".length)
+      validCalls.length = 0
+      const overlongCursor = "c".repeat(maximumCursorLength + 1)
       const invalid = yield* adapter.connection.sync(
         Schema.decodeUnknownSync(PluginSyncRequestV1)({
           streamKey: "pages",
@@ -878,7 +899,13 @@ describe("Confluence page adapter", () => {
         })
       ).pipe(Stream.runCollect, Effect.result)
       assert.isTrue(Result.isFailure(invalid))
-      assert.deepStrictEqual(validCalls, [maximumCursor])
+      assert.deepStrictEqual(validCalls, [])
+
+      assert.isTrue(Result.isFailure(
+        Schema.decodeUnknownResult(PluginCheckpointV1)(
+          `bounded:v2:0:${"a".repeat(64)}:999:${"p".repeat(999)}${"b".repeat(64)}:${"s".repeat(999)}`
+        )
+      ))
     }))
 
   it.effect("changes sync event identity only when mutable inventory changes", () =>

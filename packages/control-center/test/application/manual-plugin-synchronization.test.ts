@@ -25,7 +25,10 @@ import {
   ConfluencePageAdapterConfiguration,
   makeConfluencePageAdapter
 } from "../../src/server/plugins/confluence/ConfluencePageAdapter.js"
-import type { ConfluencePageClientShape } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
+import {
+  ConfluencePageClientFailure,
+  type ConfluencePageClientShape
+} from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import {
   jiraReadPluginDescriptor,
@@ -1024,7 +1027,7 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(firstWindow.pagesCommitted, 5)
       assert.strictEqual(secondWindow.pagesCommitted, 5)
       assert.strictEqual(completed.pagesCommitted, 1)
-      assert.strictEqual(verifiedWindows.pagesCommitted, 1)
+      assert.strictEqual(verifiedWindows.pagesCommitted, 5)
       assert.deepStrictEqual(cursors, [
         null,
         "c1",
@@ -1057,6 +1060,77 @@ describe("manual plugin synchronization", () => {
         streamKey
       )
       assert.match(stream.checkpointJson ?? "", /^"complete:v2:1:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u)
+    })))
+
+  it.effect("preserves the bounded prefix when a suffix page fails after progress", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "confluence")
+      if (fixture === undefined) return yield* Effect.die("confluence fixture not found")
+      const { persistence, streamKey } = yield* setupFixture(fixture)
+      const cursors: Array<string | null> = []
+      let failAtC6 = true
+      const connection = yield* makeConfluenceConnection(confluenceClient({
+        getSpacePages: (_spaceId, cursor) => {
+          cursors.push(cursor)
+          if (cursor === "c6" && failAtC6) {
+            return Effect.fail(
+              new ConfluencePageClientFailure({
+                operation: "confluence-space-pages",
+                reason: "outage",
+                retryAfterSeconds: null
+              })
+            )
+          }
+          const index = cursor === null ? 0 : Number(cursor.slice(1))
+          return Effect.succeed(
+            index < 10
+              ? { results: [], _links: { next: `/pages?cursor=c${index + 1}` } }
+              : { results: [confluencePage] }
+          )
+        }
+      }))
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: (pluginConnection, request) => pluginConnection.sync(request)
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(
+        confluenceConnections(fixture, connection),
+        drivers
+      )
+      const input = { workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId }
+
+      const bounded = yield* synchronization.synchronize(input)
+      const interrupted = yield* synchronization.synchronize(input)
+      const interruptedStream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+
+      assert.strictEqual(bounded.pagesCommitted, 5)
+      assert.strictEqual(interrupted.result, "source-unavailable")
+      assert.match(
+        interruptedStream.checkpointJson ?? "",
+        /^"bounded:v2:0:[0-9a-f]{64}:2:c5[0-9a-f]{64}:c6"$/u
+      )
+
+      failAtC6 = false
+      const completed = yield* synchronization.synchronize(input)
+
+      assert.strictEqual(completed.result, "synchronized")
+      assert.strictEqual(completed.pagesCommitted, 5)
+      assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4", "c5", "c6", "c6", "c7", "c8", "c9", "c10"])
+      const completedStream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.match(
+        completedStream.checkpointJson ?? "",
+        /^"complete:v2:0:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u
+      )
     })))
 
   it.effect("does not commit a page for a non-advancing stored Confluence cursor", () =>
