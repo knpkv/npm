@@ -151,6 +151,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "siteId", value: "cloud-1" },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
               ]
               : [
@@ -236,13 +237,31 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
+          readonly expectedDiagnosticCode: string | null
           readonly profileId: "valid-profile" | "expired-profile"
           readonly providerId: "jira" | "confluence"
+          readonly siteId: string
         }> = [
-          { providerId: "jira", profileId: "valid-profile" },
-          { providerId: "confluence", profileId: "valid-profile" },
-          { providerId: "jira", profileId: "expired-profile" },
-          { providerId: "confluence", profileId: "expired-profile" }
+          { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
+          { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-site-mismatch",
+            providerId: "jira",
+            profileId: "valid-profile",
+            siteId: "cloud-other"
+          },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-expired",
+            providerId: "jira",
+            profileId: "expired-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: "plugin-oauth-profile-expired",
+            providerId: "confluence",
+            profileId: "expired-profile",
+            siteId: "cloud-1"
+          }
         ]
 
         for (const [index, testCase] of cases.entries()) {
@@ -264,6 +283,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "siteId", value: testCase.siteId },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
               ]
               : [
@@ -271,7 +291,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "text", key: "oauthProfileId", value: testCase.profileId },
                 { _tag: "text", key: "probePageId", value: "page-1" },
                 { _tag: "url", key: "siteBaseUrl", value: "https://knpkv.atlassian.net/" },
-                { _tag: "text", key: "siteId", value: "cloud-1" },
+                { _tag: "text", key: "siteId", value: testCase.siteId },
                 { _tag: "text", key: "spaceId", value: "space-1" }
               ]
           )
@@ -295,7 +315,7 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.profileId === "valid-profile") {
+          if (testCase.expectedDiagnosticCode === null) {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
           } else {
@@ -303,7 +323,7 @@ describe("first-party plugin runtime", () => {
             if (outcome._tag === "Failure") {
               assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
               if (outcome.failure._tag === "PluginConfigurationFailure") {
-                assert.strictEqual(outcome.failure.diagnosticCode, "plugin-oauth-profile-expired")
+                assert.strictEqual(outcome.failure.diagnosticCode, testCase.expectedDiagnosticCode)
               }
             }
           }
@@ -381,6 +401,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "siteId", value: "site-1" },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
               ]
               : [
@@ -486,6 +507,7 @@ describe("first-party plugin runtime", () => {
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
+                { _tag: "text", key: "siteId", value: "site-1" },
                 { _tag: "url", key: "webBaseUrl", value: invalid.webBaseUrl }
               ]
               : [

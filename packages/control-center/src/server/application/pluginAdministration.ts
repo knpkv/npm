@@ -66,7 +66,7 @@ import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
-import { materializeAwsConnectionOwnership } from "./awsConnectionOwnership.js"
+import { materializeConnectionOwnership } from "./connectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
 
@@ -1018,7 +1018,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         request.pluginConnectionId
       )
       const bound = tested.test._tag === "healthy"
-        ? yield* materializeAwsConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
+        ? yield* materializeConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
         : enabled
       cleanupConnection = bound
       yield* persistSetupTestHealth(

@@ -35,6 +35,10 @@ const REPOSITORY_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-
 const PIPELINE_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000006")
 const JIRA_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000007")
 const SECOND_REPOSITORY_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-00000000000b")
+const ATLASSIAN_ACCOUNT_ID = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-00000000000c")
+const CONFLUENCE_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-00000000000d")
+const DUPLICATE_JIRA_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-00000000000e")
+const DUPLICATE_CONFLUENCE_ID = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-00000000000f")
 const REPOSITORY_CONNECTION_ID = Schema.decodeSync(PluginConnectionId)(
   "01890f6f-6d6a-7cc0-98d2-000000000008"
 )
@@ -175,6 +179,73 @@ describe("provider account repository", () => {
         })
         assert.strictEqual(updated.revision, 2)
         assert.isFalse(updated.isEnabled)
+      })
+    ))
+
+  it.effect("service-scopes Atlassian resource identity while rejecting same-service duplicates", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspace
+        const accounts = yield* ProviderAccountRepository
+        yield* accounts.create(WORKSPACE_A, {
+          providerAccountId: ATLASSIAN_ACCOUNT_ID,
+          providerFamily: "atlassian",
+          vendorAccountId: VendorAccountId.make("cloud-acme"),
+          displayName: ProviderAccountDisplayName.make("acme.atlassian.net"),
+          createdAt: CREATED_AT
+        })
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: JIRA_ID,
+          providerAccountId: ATLASSIAN_ACCOUNT_ID,
+          providerId: "jira",
+          vendorResourceId: VendorResourceId.make("shared-resource"),
+          displayName: FollowedResourceDisplayName.make("Jira"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: CONFLUENCE_ID,
+          providerAccountId: ATLASSIAN_ACCOUNT_ID,
+          providerId: "confluence",
+          vendorResourceId: VendorResourceId.make("shared-resource"),
+          displayName: FollowedResourceDisplayName.make("Space · shared-resource"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+
+        const duplicateJira = yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: DUPLICATE_JIRA_ID,
+          providerAccountId: ATLASSIAN_ACCOUNT_ID,
+          providerId: "jira",
+          vendorResourceId: VendorResourceId.make("shared-resource"),
+          displayName: FollowedResourceDisplayName.make("Duplicate Jira"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        }).pipe(Effect.result)
+        const duplicateConfluence = yield* accounts.followResource(WORKSPACE_A, {
+          followedResourceId: DUPLICATE_CONFLUENCE_ID,
+          providerAccountId: ATLASSIAN_ACCOUNT_ID,
+          providerId: "confluence",
+          vendorResourceId: VendorResourceId.make("shared-resource"),
+          displayName: FollowedResourceDisplayName.make("Duplicate space"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(duplicateJira))
+        if (Result.isFailure(duplicateJira)) assert.instanceOf(duplicateJira.failure, PersistenceOperationError)
+        assert.isTrue(Result.isFailure(duplicateConfluence))
+        if (Result.isFailure(duplicateConfluence)) {
+          assert.instanceOf(duplicateConfluence.failure, PersistenceOperationError)
+        }
+        assert.deepStrictEqual(
+          (yield* accounts.listResources(WORKSPACE_A, ATLASSIAN_ACCOUNT_ID))
+            .map(({ followedResourceId, providerId }) => ({ followedResourceId, providerId })),
+          [
+            { followedResourceId: CONFLUENCE_ID, providerId: "confluence" },
+            { followedResourceId: JIRA_ID, providerId: "jira" }
+          ]
+        )
       })
     ))
 

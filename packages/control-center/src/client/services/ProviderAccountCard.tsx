@@ -16,7 +16,7 @@ const resourceKind = (providerId: ProviderId): string => {
     case "codepipeline":
       return "Pipeline"
     case "jira":
-      return "Project"
+      return "Jira site"
     case "confluence":
       return "Space"
     case "clockify":
@@ -48,7 +48,12 @@ export const ProviderAccountCard = ({
     <div className={styles.accountHeading}>
       <div className={styles.accountIdentity}>
         <Text as="h2" variant="section-title">
-          {account.providerFamily === "aws" ? "AWS account" : "Provider account"} {account.displayName}
+          {account.providerFamily === "aws"
+            ? "AWS account"
+            : account.providerFamily === "atlassian"
+              ? "Atlassian site"
+              : "Provider account"}{" "}
+          {account.displayName}
         </Text>
         <Text className={styles.identifier} tone="secondary" variant="meta">
           Verified identity · {account.providerImmutableId}
@@ -125,6 +130,17 @@ export const ProviderAccountCard = ({
         </Button>
         <Button disabled={!canConfigure} onClick={() => onAdd("codepipeline")} variant="secondary">
           Add pipeline
+        </Button>
+      </div>
+    ) : account.providerFamily === "atlassian" ? (
+      <div className={styles.accountActions}>
+        {account.resources.some(({ providerId }) => providerId === "jira") ? null : (
+          <Button disabled={!canConfigure} onClick={() => onAdd("jira")} variant="secondary">
+            Add Jira
+          </Button>
+        )}
+        <Button disabled={!canConfigure} onClick={() => onAdd("confluence")} variant="secondary">
+          Add Confluence space
         </Button>
       </div>
     ) : null}

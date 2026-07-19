@@ -21,6 +21,7 @@ import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
 const configuration = {
   webBaseUrl: "https://acme.atlassian.net",
+  siteId: "cloud-acme",
   pageSize: 2,
   maximumPages: 3,
   operationTimeoutMillis: 5_000
@@ -199,6 +200,28 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(Result.isFailure(decode(configured(invalid))), invalid)
     }
   })
+
+  it.effect("discovers the authenticated user, selected Atlassian site, and Jira surface separately", () =>
+    withConnection(
+      baseProvider(),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const discovery = yield* connection.discover
+
+        assert.deepStrictEqual(discovery.account, {
+          providerImmutableId: "ari",
+          displayName: "Ari Chen"
+        })
+        assert.deepStrictEqual(discovery.workspace, {
+          providerImmutableId: "cloud-acme",
+          displayName: "Acme Jira"
+        })
+        assert.deepStrictEqual(discovery.resource, {
+          providerImmutableId: "cloud-acme",
+          displayName: "Jira"
+        })
+      })
+    ))
 
   it.effect("reads all bounded activity pages and normalizes human issue context", () =>
     Effect.gen(function*() {

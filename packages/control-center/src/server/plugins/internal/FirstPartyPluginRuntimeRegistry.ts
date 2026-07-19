@@ -393,12 +393,14 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     "maximumPages",
     "operationTimeoutMillis",
     "pageSize",
+    "siteId",
     "webBaseUrl",
     ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const configurationInput = {
     webBaseUrl: yield* textValue(loaded.configuration, "webBaseUrl", "url"),
+    siteId: yield* textValue(loaded.configuration, "siteId"),
     pageSize: yield* integerValue(loaded.configuration, "pageSize"),
     maximumPages: yield* integerValue(loaded.configuration, "maximumPages"),
     operationTimeoutMillis: yield* integerValue(loaded.configuration, "operationTimeoutMillis")
@@ -410,7 +412,8 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     loaded,
     authMode.value,
     "jira",
-    configuration.webBaseUrl.origin
+    configuration.webBaseUrl.origin,
+    configuration.siteId
   )
   const client = JiraApiClient.layer.pipe(
     Layer.provide(Layer.succeed(JiraApiConfig, {

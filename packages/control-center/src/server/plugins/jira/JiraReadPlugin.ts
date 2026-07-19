@@ -30,6 +30,7 @@ import { type JiraPageRequest, type JiraReadProvider, makeJiraReadProvider } fro
 const PageSize = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 }))
 const MaximumPages = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
 const OperationTimeoutMillis = Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 120_000 }))
+const AtlassianSiteId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraWebBaseUrl = SourceUrl.pipe(
   Schema.check(
     Schema.makeFilter(
@@ -49,6 +50,7 @@ const JiraWebBaseUrl = SourceUrl.pipe(
 /** Secret-free runtime settings for the Jira read adapter. */
 export const JiraReadPluginConfiguration = Schema.Struct({
   webBaseUrl: JiraWebBaseUrl,
+  siteId: AtlassianSiteId,
   pageSize: PageSize,
   maximumPages: MaximumPages,
   operationTimeoutMillis: OperationTimeoutMillis
@@ -76,6 +78,13 @@ export const jiraReadPluginDescriptor = {
       key: "webBaseUrl",
       label: "Jira site URL",
       description: "HTTPS Jira Cloud tenant root URL under atlassian.net, without query or credentials.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "siteId",
+      label: "Site ID",
+      description: "Stable Atlassian cloud identity, discovered automatically by OAuth.",
       required: true
     },
     {
@@ -294,10 +303,13 @@ const makeRuntime = (
                 displayName: user.displayName ?? user.accountId
               },
             workspace: {
-              providerImmutableId: server.baseUrl ?? decoded.webBaseUrl.href,
-              displayName: server.serverTitle ?? "Jira"
+              providerImmutableId: decoded.siteId,
+              displayName: server.serverTitle ?? decoded.webBaseUrl.hostname
             },
-            resource: null,
+            resource: {
+              providerImmutableId: decoded.siteId,
+              displayName: "Jira"
+            },
             endpoints: [
               { kind: "web", url: decoded.webBaseUrl, label: "Jira" },
               {

@@ -111,10 +111,14 @@ export const AtlassianAccountSetupForm = ({
     if (
       normalizedAccountName.length === 0 ||
       normalizedSiteUrl.length === 0 ||
-      (setupConfluence &&
-        (normalizedSiteId.length === 0 || normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
+      normalizedSiteId.length === 0 ||
+      (setupConfluence && (normalizedSpaceId.length === 0 || normalizedProbePageId.length === 0))
     ) {
-      setSetupError("Add the Atlassian site, Confluence space, and readable health page.")
+      setSetupError(
+        setupConfluence
+          ? "Add the Atlassian site identity, Confluence space, and readable health page."
+          : "Add the Atlassian site identity."
+      )
       return
     }
     const authentication: ReadonlyArray<readonly [string, string]> =
@@ -325,23 +329,21 @@ export const AtlassianAccountSetupForm = ({
           />
         )}
       </Field>
-      {setupConfluence ? (
-        <Field
-          description="The stable Atlassian cloud ID; filled from OAuth when available."
-          label="Site ID"
-          required
-          size="compact"
-        >
-          {(controlProps) => (
-            <input
-              {...controlProps}
-              disabled={authenticationMode === "oauth"}
-              onChange={(event) => setSiteId(event.currentTarget.value)}
-              value={siteId}
-            />
-          )}
-        </Field>
-      ) : null}
+      <Field
+        description="The stable Atlassian cloud ID; filled from OAuth when available."
+        label="Site ID"
+        required
+        size="compact"
+      >
+        {(controlProps) => (
+          <input
+            {...controlProps}
+            disabled={authenticationMode === "oauth"}
+            onChange={(event) => setSiteId(event.currentTarget.value)}
+            value={siteId}
+          />
+        )}
+      </Field>
       {setupConfluence ? (
         <div className={styles.resources}>
           <Field label="Confluence space ID" required size="compact">

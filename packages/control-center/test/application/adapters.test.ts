@@ -83,6 +83,9 @@ const PROVISIONED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d
 const INVALID_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008e")
 const FAILED_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-00000000008f")
 const DUPLICATE_AWS_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
+const DUPLICATE_ATLASSIAN_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000093"
+)
 const RELEASE_ID = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000075")
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000076")
 const RELATIONSHIP_ID = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000077")
@@ -546,7 +549,7 @@ describe("application adapters", () => {
         discover: Effect.succeed({
           account: { providerImmutableId: "atlassian-account-789", displayName: "Provisioned Owner" },
           workspace: { providerImmutableId: "site-789", displayName: "Provisioned Jira" },
-          resource: null,
+          resource: { providerImmutableId: "site-789", displayName: "Jira" },
           endpoints: [],
           discoveredAt: T0
         }),
@@ -566,6 +569,16 @@ describe("application adapters", () => {
           discoveredAt: T0
         })
       }
+      const confluenceConnection: PluginConnectionV1 = {
+        ...connection,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "atlassian-account-789", displayName: "Provisioned Owner" },
+          workspace: { providerImmutableId: "site-789", displayName: "Provisioned Jira" },
+          resource: { providerImmutableId: "space-789", displayName: "Space · space-789" },
+          endpoints: [],
+          discoveredAt: T0
+        })
+      }
       const pluginConnections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId, workspaceId }) =>
           workspaceId === WORKSPACE_ID && [
@@ -575,7 +588,11 @@ describe("application adapters", () => {
             ].includes(pluginConnectionId)
             ? Effect.succeed(Context.make(
               PluginConnection,
-              pluginConnectionId === CODEPIPELINE_PLUGIN_ID ? awsConnection : connection
+              pluginConnectionId === CODEPIPELINE_PLUGIN_ID
+                ? awsConnection
+                : pluginConnectionId === CONFLUENCE_PLUGIN_ID
+                ? confluenceConnection
+                : connection
             ))
             : Effect.die("provisioning crossed its requested scope"),
         invalidate: () => Ref.update(invalidations, (count) => count + 1)
@@ -591,6 +608,7 @@ describe("application adapters", () => {
           displayName: "Provisioned Jira",
           values: [
             { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-789" },
             { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
             { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "plaintext-token-canary" }
           ]
@@ -625,7 +643,7 @@ describe("application adapters", () => {
       const persistence = yield* Persistence
       const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.isTrue(record.isEnabled)
-      assert.strictEqual(record.revision, 2)
+      assert.strictEqual(record.revision, 3)
       const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PROVISIONED_PLUGIN_ID)
       assert.include(runtime.descriptorJson, "apiToken")
       const database = yield* Database
@@ -660,6 +678,7 @@ describe("application adapters", () => {
             { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
             { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
             { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 49 },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-789" },
             {
               _tag: "url",
               key: PluginConfigurationKey.make("webBaseUrl"),
@@ -695,6 +714,7 @@ describe("application adapters", () => {
             { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
             { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
             { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 49 },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-789" },
             {
               _tag: "url",
               key: PluginConfigurationKey.make("webBaseUrl"),
@@ -748,7 +768,7 @@ describe("application adapters", () => {
             { _tag: "url", key: PluginConfigurationKey.make("siteBaseUrl"), value: "https://knpkv.atlassian.net/" },
             { _tag: "text", key: PluginConfigurationKey.make("email"), value: "docs@example.com" },
             { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "confluence-token-canary" },
-            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-789" },
             { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-1" },
             { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-1" }
           ]
@@ -765,6 +785,23 @@ describe("application adapters", () => {
         value: "space-1"
       })
       assert.notInclude(JSON.stringify(confluence), "docs@example.com")
+      assert.isNotNull(response.connection.providerAccountId)
+      assert.strictEqual(response.connection.providerAccountId, confluence.connection.providerAccountId)
+      assert.notStrictEqual(response.connection.followedResourceId, confluence.connection.followedResourceId)
+      if (response.connection.providerAccountId === null) return assert.fail("Atlassian site was not materialized")
+      const atlassianAccounts = yield* persistence.providerAccounts.list(WORKSPACE_ID)
+      assert.lengthOf(atlassianAccounts, 1)
+      assert.strictEqual(atlassianAccounts[0]?.providerFamily, "atlassian")
+      assert.strictEqual(atlassianAccounts[0]?.vendorAccountId, "site-789")
+      assert.deepStrictEqual(
+        (yield* persistence.providerAccounts.listResources(WORKSPACE_ID, response.connection.providerAccountId))
+          .map(({ providerId, vendorResourceId }) => ({ providerId, vendorResourceId }))
+          .sort((left, right) => left.providerId.localeCompare(right.providerId)),
+        [
+          { providerId: "confluence", vendorResourceId: "space-789" },
+          { providerId: "jira", vendorResourceId: "site-789" }
+        ]
+      )
 
       const codeCommit = yield* operation({
         workspaceId: WORKSPACE_ID,
@@ -825,6 +862,122 @@ describe("application adapters", () => {
         pluginConnectionId: PROVISIONED_PLUGIN_ID
       })
       assert.strictEqual(metadata.pluginId, "dev.knpkv.codecommit")
+    })))
+
+  it.effect("shares one Atlassian site across Jira and Confluence and rejects duplicate resources", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const atlassianConnection = (
+        resource: { readonly providerImmutableId: string; readonly displayName: string }
+      ): PluginConnectionV1 => ({
+        descriptor: negotiatedDescriptor,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "account-avery", displayName: "Avery Bell" },
+          workspace: { providerImmutableId: "cloud-acme", displayName: "acme.atlassian.net" },
+          resource,
+          endpoints: [],
+          discoveredAt: T0
+        }),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      })
+      const jiraConnection = atlassianConnection({ providerImmutableId: "cloud-acme", displayName: "Jira" })
+      const confluenceConnection = atlassianConnection({
+        providerImmutableId: "space-payments",
+        displayName: "Space · space-payments"
+      })
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: ({ pluginConnectionId, workspaceId }) =>
+          workspaceId !== WORKSPACE_ID
+            ? Effect.die("Atlassian setup crossed its requested workspace")
+            : Effect.succeed(Context.make(
+              PluginConnection,
+              pluginConnectionId === PROVISIONED_PLUGIN_ID ? jiraConnection : confluenceConnection
+            )),
+        invalidate: () => Effect.void
+      })
+      const connect = administration.connectAndTest
+      const connectBatch = administration.connectAndTestBatch
+      assert.isDefined(connect)
+      assert.isDefined(connectBatch)
+
+      const batch = yield* connectBatch({
+        workspaceId: WORKSPACE_ID,
+        requests: [
+          {
+            pluginConnectionId: PROVISIONED_PLUGIN_ID,
+            providerId: "jira",
+            displayName: "Acme Jira",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://acme.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-acme" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "avery@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "jira-token" }
+            ]
+          },
+          {
+            pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+            providerId: "confluence",
+            displayName: "Payments space",
+            values: [
+              { _tag: "url", key: PluginConfigurationKey.make("siteBaseUrl"), value: "https://acme.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-acme" },
+              { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-payments" },
+              { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-health" },
+              { _tag: "text", key: PluginConfigurationKey.make("email"), value: "avery@example.com" },
+              { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "confluence-token" }
+            ]
+          }
+        ]
+      })
+      const [jiraResult, confluenceResult] = batch.results
+      if (jiraResult?._tag !== "succeeded" || confluenceResult?._tag !== "succeeded") {
+        return assert.fail("healthy Atlassian setup batch did not succeed")
+      }
+      assert.isNotNull(jiraResult.response.connection.providerAccountId)
+      assert.strictEqual(
+        jiraResult.response.connection.providerAccountId,
+        confluenceResult.response.connection.providerAccountId
+      )
+      assert.notStrictEqual(
+        jiraResult.response.connection.followedResourceId,
+        confluenceResult.response.connection.followedResourceId
+      )
+
+      const duplicate = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: DUPLICATE_ATLASSIAN_PLUGIN_ID,
+          providerId: "confluence",
+          displayName: "Duplicate payments space",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("siteBaseUrl"), value: "https://acme.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-acme" },
+            { _tag: "text", key: PluginConfigurationKey.make("spaceId"), value: "space-payments" },
+            { _tag: "text", key: PluginConfigurationKey.make("probePageId"), value: "page-health" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "avery@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "duplicate-token" }
+          ]
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(duplicate))
+      if (Result.isFailure(duplicate)) assert.instanceOf(duplicate.failure, ApplicationConflict)
+
+      const persistence = yield* Persistence
+      const accounts = yield* persistence.providerAccounts.list(WORKSPACE_ID)
+      assert.lengthOf(accounts, 1)
+      assert.strictEqual(accounts[0]?.providerFamily, "atlassian")
+      assert.strictEqual(accounts[0]?.vendorAccountId, "cloud-acme")
+      const account = accounts[0]
+      if (account === undefined) return assert.fail("Atlassian site account was not persisted")
+      assert.lengthOf(yield* persistence.providerAccounts.listResources(WORKSPACE_ID, account.providerAccountId), 2)
+      const duplicateDraft = yield* persistence.pluginConnections.get(WORKSPACE_ID, DUPLICATE_ATLASSIAN_PLUGIN_ID)
+      assert.isFalse(duplicateDraft.isEnabled)
+      assert.isNull(duplicateDraft.providerAccountId)
+      assert.isNull(duplicateDraft.followedResourceId)
     })))
 
   it.effect("shares an AWS account while region-scoping resources and rejecting duplicate bindings", () =>
@@ -1135,6 +1288,7 @@ describe("application adapters", () => {
             displayName: "Invalid Jira",
             values: [
               { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: invalid.webBaseUrl },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-invalid" },
               { _tag: "text", key: PluginConfigurationKey.make("email"), value: invalid.email },
               { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "must-not-be-persisted" }
             ]
@@ -1196,7 +1350,7 @@ describe("application adapters", () => {
         discover: Effect.succeed({
           account: { providerImmutableId: "account-1", displayName: "Avery Bell" },
           workspace: { providerImmutableId: "cloud-1", displayName: "Knpkv Jira" },
-          resource: null,
+          resource: { providerImmutableId: "cloud-1", displayName: "Jira" },
           endpoints: [],
           discoveredAt: T0
         }),
@@ -1218,6 +1372,7 @@ describe("application adapters", () => {
         displayName: "OAuth Jira",
         values: [
           { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+          { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-1" },
           { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "oauth" },
           { _tag: "text", key: PluginConfigurationKey.make("oauthProfileId"), value: profileId }
         ]
@@ -1249,6 +1404,7 @@ describe("application adapters", () => {
         { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
         { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
         { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 50 },
+        { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "cloud-1" },
         { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" }
       ]
       const invalidPatches: ReadonlyArray<ReadonlyArray<PluginConfigurationPatchValue>> = [
@@ -1391,6 +1547,7 @@ describe("application adapters", () => {
           { _tag: "integer", key: "maximumPages", value: 3 },
           { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
           { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "text", key: "siteId", value: "site-1" },
           { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
         ]),
         0,
@@ -1424,6 +1581,7 @@ describe("application adapters", () => {
             { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 3 },
             { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 5_000 },
             { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 10 },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
             {
               _tag: "url",
               key: PluginConfigurationKey.make("webBaseUrl"),
@@ -1537,6 +1695,7 @@ describe("application adapters", () => {
           displayName: "Rejected Jira",
           values: [
             { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
             { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
             { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "rejected-token-canary" }
           ]
@@ -1660,6 +1819,7 @@ describe("application adapters", () => {
             displayName: "Interrupted Jira",
             values: [
               { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
               { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
               { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "temporary-token" }
             ]
@@ -1721,6 +1881,7 @@ describe("application adapters", () => {
             displayName: "Committed Jira",
             values: [
               { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
               { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
               { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "durable-token" }
             ]
@@ -1764,6 +1925,7 @@ describe("application adapters", () => {
             displayName: "Duplicate Jira",
             values: [
               { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://knpkv.atlassian.net/" },
+              { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-1" },
               { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
               { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "temporary-token" }
             ]

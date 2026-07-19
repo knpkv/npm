@@ -525,6 +525,88 @@ describe("ServicesPage connection tests", () => {
     )
   })
 
+  it("groups Jira and Confluence beneath one verified Atlassian site", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000191")
+    const jiraResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000192")
+    const spaceResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
+    const jiraConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
+    const spaceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
+    const atlassianOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        {
+          pluginConnectionId: jiraConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: jiraResourceId,
+          providerId: "jira",
+          displayName: "Acme Jira",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: spaceConnectionId,
+          providerAccountId: accountId,
+          followedResourceId: spaceResourceId,
+          providerId: "confluence",
+          displayName: "Payments space",
+          isEnabled: true,
+          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "atlassian",
+          displayName: "acme.atlassian.net",
+          providerImmutableId: "cloud-acme",
+          resources: [
+            {
+              followedResourceId: jiraResourceId,
+              providerId: "jira",
+              displayName: "Jira",
+              providerImmutableId: "cloud-acme",
+              isEnabled: true
+            },
+            {
+              followedResourceId: spaceResourceId,
+              providerId: "confluence",
+              displayName: "Space · payments",
+              providerImmutableId: "space-payments",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.resolve(atlassianOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(host.textContent).toContain("Atlassian site acme.atlassian.net")
+    expect(host.textContent).toContain("Verified identity · cloud-acme")
+    expect(host.textContent).toContain("Jira site · cloud-acme")
+    expect(host.textContent).toContain("Space · space-payments")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
+      expect.arrayContaining(["Add Confluence space"])
+    )
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).not.toContain("Add Jira")
+  })
+
   it("surfaces failed enablement for a resource inside an AWS account", async () => {
     const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000176")
     const resourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000177")
@@ -1465,10 +1547,10 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Use API token instead")
     )
     await act(async () => useApiToken?.click())
-    expect(host.textContent).not.toContain("Site ID")
+    expect(host.textContent).toContain("Site ID")
     expect(host.textContent).not.toContain("Confluence space ID")
     expect(host.textContent).not.toContain("Health page ID")
-    const values = ["Jira account", "avery@example.com", "api-token", "https://team.atlassian.net/"]
+    const values = ["Jira account", "avery@example.com", "api-token", "https://team.atlassian.net/", "cloud-team"]
     for (const [index, value] of values.entries()) {
       const input = host.querySelectorAll<HTMLInputElement>("input")[index]
       if (input !== undefined) await setControlValue(input, value)

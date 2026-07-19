@@ -855,7 +855,7 @@ export const ServicesPage = ({
                   Connected accounts
                 </Text>
                 <Text tone="secondary" variant="body">
-                  One provider identity can own several repositories and pipelines.
+                  One verified provider identity can own several followed resources.
                 </Text>
               </div>
               <div className={styles.accountGrid}>

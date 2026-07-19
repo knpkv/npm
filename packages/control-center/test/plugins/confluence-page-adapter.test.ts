@@ -187,10 +187,13 @@ describe("Confluence page adapter", () => {
         displayName: "Avery Bell"
       })
       assert.deepStrictEqual(discovery.workspace, {
-        providerImmutableId: "space-payments",
-        displayName: "Confluence space"
+        providerImmutableId: "site-acme",
+        displayName: "acme.atlassian.net"
       })
-      assert.isNull(discovery.resource)
+      assert.deepStrictEqual(discovery.resource, {
+        providerImmutableId: "space-payments",
+        displayName: "Space · space-payments"
+      })
     }))
 
   it.effect("uses the public name for a privacy-limited current-user profile", () =>
