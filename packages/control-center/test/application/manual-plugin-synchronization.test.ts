@@ -763,6 +763,68 @@ describe("manual plugin synchronization", () => {
       assert.match(stream.checkpointJson ?? "", /^"complete:[0-9a-f]{64}"$/u)
     })))
 
+  it.effect("retains a bounded Confluence prefix when a resumed suffix reaches completion", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "confluence")
+      if (fixture === undefined) return yield* Effect.die("confluence fixture not found")
+      const { persistence, streamKey } = yield* setupFixture(fixture)
+      const cursors: Array<string | null> = []
+      let attachmentTitle = "release-v1.txt"
+      const connection = yield* makeConfluenceConnection(confluenceClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return index < 5
+              ? { results: [], _links: { next: `/pages?cursor=c${index + 1}` } }
+              : { results: [confluencePage] }
+          }),
+        getPageAttachments: (pageId) =>
+          Effect.succeed({
+            results: [{
+              id: "attachment-1",
+              status: "current",
+              title: attachmentTitle,
+              createdAt: CONFLUENCE_UPDATED_AT,
+              pageId,
+              version: { number: 1 }
+            }]
+          })
+      }))
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: (pluginConnection, request) => pluginConnection.sync(request)
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(
+        confluenceConnections(fixture, connection),
+        drivers
+      )
+      const input = { workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId }
+
+      const bounded = yield* synchronization.synchronize(input)
+      const completed = yield* synchronization.synchronize(input)
+      attachmentTitle = "release-v2.txt"
+      const changedTail = yield* synchronization.synchronize(input)
+
+      assert.strictEqual(bounded.pagesCommitted, 5)
+      assert.strictEqual(completed.pagesCommitted, 1)
+      assert.strictEqual(changedTail.result, "synchronized")
+      assert.strictEqual(changedTail.pagesCommitted, 1)
+      assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4", "c5", "c5"])
+      const stream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.strictEqual(stream.revision, 7)
+      assert.match(
+        stream.checkpointJson ?? "",
+        /^"complete:v1:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u
+      )
+    })))
+
   it.effect("does not commit a page for a non-advancing stored Confluence cursor", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))

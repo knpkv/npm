@@ -7,15 +7,19 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import {
@@ -27,6 +31,7 @@ import { StoredPluginConfiguration } from "../../src/server/persistence/reposito
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
+import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMap.js"
 import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
@@ -168,7 +173,9 @@ const fakeClockifyClient = (
   HttpClient.make((request) =>
     Effect.sync(() => {
       requests.push(request)
-      const body = request.url.endsWith("/v1/user")
+      const body = request.url.includes("/wiki/api/v2/spaces/")
+        ? { results: [] }
+        : request.url.endsWith("/v1/user")
         ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
         : [{ id: "clockify-workspace", name: "Delivery" }]
       return HttpClientResponse.fromWeb(
@@ -467,7 +474,49 @@ describe("first-party plugin runtime", () => {
           )
           if (testCase.expectedDiagnosticCode === null) {
             assert.strictEqual(outcome._tag, "Success")
-            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+            if (outcome._tag === "Success") {
+              const connection = Context.get(outcome.success, PluginConnection)
+              if (testCase.historicalDescriptor === true) {
+                assert.isFalse(hasPluginCapability(connection.descriptor, "sync.incremental", 1))
+                const driver = firstPartyManualPluginSyncDrivers.get("confluence")
+                assert.isTrue(Option.isSome(driver))
+                if (Option.isNone(driver)) return yield* Effect.die("Confluence sync driver not found")
+                const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+                  streamKey: driver.value.streamKey,
+                  checkpoint: null
+                })
+                const historicalSync = yield* driver.value.sync(connection, request).pipe(
+                  Stream.runCollect,
+                  Effect.result
+                )
+                assert.strictEqual(historicalSync._tag, "Failure")
+                if (historicalSync._tag === "Failure") {
+                  assert.strictEqual(historicalSync.failure._tag, "PluginUnsupportedCapabilityFailure")
+                }
+
+                const stored = yield* persistenceService.pluginRuntime.getRuntime(
+                  WORKSPACE_ID,
+                  pluginConnectionId
+                )
+                yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+                  WORKSPACE_ID,
+                  pluginConnectionId,
+                  "confluence",
+                  confluencePagePluginDescriptor,
+                  stored.revision,
+                  CREATED_AT
+                )
+                yield* connections.invalidate({ workspaceId: WORKSPACE_ID, pluginConnectionId })
+                const currentContext = yield* connections.contextEffect({
+                  workspaceId: WORKSPACE_ID,
+                  pluginConnectionId
+                })
+                const currentConnection = Context.get(currentContext, PluginConnection)
+                assert.isTrue(hasPluginCapability(currentConnection.descriptor, "sync.incremental", 1))
+                const currentPages = yield* driver.value.sync(currentConnection, request).pipe(Stream.runCollect)
+                assert.lengthOf(currentPages, 1)
+              }
+            }
           } else {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure") {
@@ -478,7 +527,7 @@ describe("first-party plugin runtime", () => {
             }
           }
         }
-        assert.lengthOf(requests, 0)
+        assert.lengthOf(requests, 1)
       }).pipe(
         Effect.provide(firstPartyPluginConnectionMapLayer),
         Effect.provide(dependencies),

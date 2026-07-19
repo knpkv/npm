@@ -52,7 +52,7 @@ import {
 } from "../jira/JiraReadPlugin.js"
 import { negotiatePluginDescriptorV1 } from "../negotiation.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
-import { buildPluginDefinitionLayer } from "../PluginDefinition.js"
+import { buildPluginDefinitionLayer, buildPluginDefinitionLayerFromNegotiatedDescriptor } from "../PluginDefinition.js"
 import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
 import {
   PluginRuntimeAccountDigest,
@@ -735,7 +735,11 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   const converter = MarkdownConverterLayer.pipe(
     Layer.provide(Layer.merge(AdfSchemaValidatorLayer, AtlaskitTransformersLayer))
   )
-  const plugin = buildPluginDefinitionLayer(confluencePagePluginDefinition, configurationInput).pipe(
+  const plugin = buildPluginDefinitionLayerFromNegotiatedDescriptor(
+    confluencePagePluginDefinition,
+    configurationInput,
+    loaded.descriptor
+  ).pipe(
     Layer.provide(Layer.merge(pageClient, converter))
   )
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }

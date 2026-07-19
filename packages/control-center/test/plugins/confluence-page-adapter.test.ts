@@ -8,6 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
@@ -592,6 +593,60 @@ describe("Confluence page adapter", () => {
       )
     }))
 
+  it.effect("treats watcher ownership for unsafe numeric page ids as unverifiable", () =>
+    Effect.gen(function*() {
+      const unsafePageId = "9007199254740993"
+      const unsafePage = {
+        ...currentPage,
+        id: unsafePageId,
+        _links: { webui: `/wiki/spaces/PAY/pages/${unsafePageId}` }
+      }
+      const unsafeAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [unsafePage] }),
+        getPageVersions: () => Effect.succeed({ results: [unsafePage.version] }),
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [{
+              type: "watch",
+              contentId: Number(unsafePageId),
+              watcher: { accountId: "account-watcher" }
+            }],
+            start: 0,
+            limit: 50,
+            size: 1
+          })
+      }))
+
+      const unsafePages = yield* unsafeAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const unsafeEntity = unsafePages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(unsafeEntity)
+      if (unsafeEntity?._tag !== "UpsertEntity") return
+      const unsafeAttributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(unsafeEntity.attributes)
+      assert.deepStrictEqual(unsafeAttributes.watcherInventory, { complete: false, pagesFetched: 1 })
+      assert.isFalse(unsafeAttributes.contributors.some(({ accountId }) => accountId === "account-watcher"))
+
+      const mismatchedAdapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [{ type: "watch", contentId: 43, watcher: { accountId: "account-watcher" } }],
+            start: 0,
+            limit: 50,
+            size: 1
+          })
+      }))
+      const mismatch = yield* mismatchedAdapter.connection.sync(syncRequest).pipe(
+        Stream.runCollect,
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(mismatch))
+      if (Result.isFailure(mismatch)) {
+        assert.strictEqual(mismatch.failure._tag, "PluginMalformedResponseFailure")
+        if (mismatch.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(mismatch.failure.diagnosticCode, "confluence-watcher-page-mismatch")
+        }
+      }
+    }))
+
   it.effect("compacts maximum-length version and contributor identities within the payload bound", () =>
     Effect.gen(function*() {
       const accountId = (index: number) => `${String(index).padStart(4, "0")}${"a".repeat(508)}`
@@ -702,7 +757,7 @@ describe("Confluence page adapter", () => {
       const first = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
       assert.strictEqual(first.length, 5)
       assert.strictEqual(first[4]?.hasMore, false)
-      assert.strictEqual(first[4]?.checkpointAfterPage, "bounded:c5")
+      assert.match(first[4]?.checkpointAfterPage ?? "", /^bounded:v1:[0-9a-f]{64}:c5$/u)
       assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4"])
 
       cursors.length = 0
@@ -713,7 +768,10 @@ describe("Confluence page adapter", () => {
         })
       ).pipe(Stream.runCollect)
       assert.strictEqual(resumed.length, 1)
-      assert.match(resumed[0]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+      assert.match(
+        resumed[0]?.checkpointAfterPage ?? "",
+        /^complete:v1:[0-9a-f]{64}:[0-9a-f]{64}:c5$/u
+      )
       assert.deepStrictEqual(cursors, ["c5"])
     }))
 
@@ -753,9 +811,48 @@ describe("Confluence page adapter", () => {
       assert.match(advanced[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
     }))
 
+  it.effect("tracks pagination cursors independently for each wrapped sync retry", () =>
+    Effect.gen(function*() {
+      let versionCalls = 0
+      const cursors: Array<string | null> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            return cursor === null
+              ? { results: [currentPage], _links: { next: "/pages?cursor=c1" } }
+              : { results: [] }
+          }),
+        getPageVersions: () =>
+          Effect.suspend(() => {
+            versionCalls += 1
+            return versionCalls === 1
+              ? Effect.fail(
+                new ConfluencePageClientFailure({
+                  operation: "confluence-page-version-history",
+                  reason: "rate-limit",
+                  retryAfterSeconds: 0
+                })
+              )
+              : Effect.succeed({ results: [currentPage.version] })
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(
+        Stream.retry(Schedule.recurs(1)),
+        Stream.runCollect
+      )
+
+      assert.deepStrictEqual(cursors, [null, null, "c1"])
+      assert.strictEqual(versionCalls, 2)
+      assert.strictEqual(pages.length, 2)
+      assert.strictEqual(pages[0]?.checkpointAfterPage, "next:c1")
+      assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+    }))
+
   it.effect("reserves the longest checkpoint prefix when accepting resumed cursors", () =>
     Effect.gen(function*() {
-      const maximumCursor = "c".repeat(2_048 - "restart:cursor:".length)
+      const maximumCursor = "c".repeat(2_048 - "complete:v1:".length - 64 - 1 - 64 - 1)
       const validCalls: Array<string | null> = []
       const adapter = yield* makeAdapter(defaultClient({
         getSpacePages: (_spaceId, cursor) =>

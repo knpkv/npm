@@ -396,6 +396,18 @@ export const definePluginV1 = <ConfigurationSchema extends Schema.Codec<unknown,
 const hasDefinitionRuntime = (definition: PluginDefinitionV1): definition is DefinedPluginV1<never> =>
   PluginDefinitionRuntimeTypeId in definition
 
+/** Build a registered definition with a descriptor already authenticated by its owning runtime registry. @internal */
+export const buildPluginDefinitionLayerFromNegotiatedDescriptor = (
+  definition: PluginDefinitionV1,
+  configuration: unknown,
+  descriptor: NegotiatedPluginDescriptorV1
+): Layer.Layer<PluginServices, PluginFailure> =>
+  hasDefinitionRuntime(definition)
+    ? definition[PluginDefinitionRuntimeTypeId].build(configuration, descriptor)
+    : Layer.effectContext(
+      Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "plugin-definition-not-registered" }))
+    )
+
 /** Negotiate and decode before constructing the scoped adapter layer. @internal */
 export function buildPluginDefinitionLayer<R>(
   definition: DefinedPluginV1<R>,

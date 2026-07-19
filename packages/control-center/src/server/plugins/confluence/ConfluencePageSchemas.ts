@@ -88,7 +88,10 @@ export type RawConfluenceAttachmentPage = typeof RawConfluenceAttachmentPage.Typ
 export const RawConfluenceWatcherPage = Schema.Struct({
   results: Schema.Array(Schema.Struct({
     type: boundedString(100),
-    contentId: Schema.Int.check(Schema.isGreaterThan(0)),
+    contentId: Schema.Number.check(
+      Schema.makeFilter(Number.isInteger, { expected: "a JSON integer" }),
+      Schema.isGreaterThan(0)
+    ),
     watcher: Schema.Struct({
       accountId: Schema.NullOr(boundedString(512))
     })
