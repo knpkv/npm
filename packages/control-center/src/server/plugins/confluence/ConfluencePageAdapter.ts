@@ -437,6 +437,7 @@ export const makeConfluencePageAdapter = (
           providerImmutableId: input.configuration.spaceId,
           displayName: "Confluence space"
         },
+        resource: null,
         endpoints: [{ kind: "api", url: endpoint, label: "Confluence Cloud v2" }],
         discoveredAt
       }

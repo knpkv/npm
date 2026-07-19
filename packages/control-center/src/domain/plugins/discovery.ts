@@ -1,4 +1,6 @@
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 
 import { SourceUrl } from "../sourceRevision.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
@@ -26,6 +28,7 @@ const ProviderContainer = Schema.Struct({
   providerImmutableId: SafeProviderIdentifier,
   displayName: SafeProviderLabel
 })
+const NullableProviderContainer = Schema.NullOr(ProviderContainer)
 
 /** Secret-free provider endpoint advertised during connection discovery. */
 export const PluginDiscoveryEndpointV1 = Schema.Struct({
@@ -42,8 +45,14 @@ export type PluginDiscoveryEndpointV1 = typeof PluginDiscoveryEndpointV1.Type
  * Credentials, raw headers, and provider response bodies are deliberately absent.
  */
 export const PluginDiscoveryV1 = Schema.Struct({
-  account: Schema.NullOr(ProviderContainer),
-  workspace: Schema.NullOr(ProviderContainer),
+  account: NullableProviderContainer,
+  workspace: NullableProviderContainer,
+  resource: Schema.optional(NullableProviderContainer).pipe(
+    Schema.decodeTo(Schema.toType(NullableProviderContainer), {
+      decode: SchemaGetter.withDefault(Effect.succeed<typeof NullableProviderContainer.Type>(null)),
+      encode: SchemaGetter.required()
+    })
+  ),
   endpoints: Schema.Array(PluginDiscoveryEndpointV1).check(
     Schema.makeFilter(
       (endpoints) => endpoints.length <= 20,

@@ -137,7 +137,9 @@ describe("CodeCommitPlugin", () => {
       )
 
       assert.strictEqual(result.health._tag, "healthy")
-      assert.strictEqual(result.discovery.workspace?.providerImmutableId, "eu-west-1:payments-api")
+      assert.isNull(result.discovery.workspace)
+      assert.strictEqual(result.discovery.resource?.providerImmutableId, "eu-west-1:payments-api")
+      assert.strictEqual(result.discovery.resource?.displayName, "payments-api")
       assert.strictEqual(yield* Ref.get(probes), 2)
     }))
 

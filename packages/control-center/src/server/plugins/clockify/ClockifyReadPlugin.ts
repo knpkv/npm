@@ -439,6 +439,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
                 providerImmutableId: context.workspace.id,
                 displayName: context.workspace.name
               },
+              resource: null,
               endpoints: [{ kind: "web", url: decoded.webBaseUrl, label: "Clockify" }],
               discoveredAt
             }).pipe(Effect.mapError(() => malformed("clockify-discover", "clockify-discovery-shape-invalid")))

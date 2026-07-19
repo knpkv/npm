@@ -308,7 +308,8 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     const discoveredAt = yield* now
     return yield* output("discover", PluginDiscoveryV1, {
       account: { providerImmutableId: identity.accountId, displayName: identity.accountId },
-      workspace: {
+      workspace: null,
+      resource: {
         providerImmutableId: `${configuration.region}:${configuration.repositoryName}`,
         displayName: configuration.repositoryName
       },
