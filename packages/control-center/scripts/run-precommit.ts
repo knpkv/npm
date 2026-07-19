@@ -42,7 +42,7 @@ const program = Effect.gen(function*() {
   const stagedOutput = yield* spawner.string(
     ChildProcess.make(
       "git",
-      ["diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMR", "--"],
+      ["diff", "--cached", "--name-status", "-z", "--diff-filter=ACDMRT", "--"],
       { cwd: workspaceRoot, stderr: "inherit" }
     )
   ).pipe(Effect.mapError(() => new PrecommitError({ reason: "could not read staged paths" })))

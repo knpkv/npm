@@ -38,6 +38,16 @@ describe("pre-commit plan", () => {
 
   it("runs the full gate for executable documentation application content", () => {
     expect(planPrecommit(["packages/docs/src/content/docs/broken.mdx"]).mode).toBe("full")
+    expect(
+      planPrecommit([
+        "packages/control-center/src/index.ts",
+        "packages/docs/src/content/docs/control-center.mdx"
+      ]).mode
+    ).toBe("full")
+    expect(
+      planPrecommit(["packages/control-center/src/index.ts", "docs/control-center-build-feedback.md"])
+        .mode
+    ).toBe("control-center")
     expect(planPrecommit(["docs/control-center-build-feedback.md"]).mode).toBe("docs")
   })
 
@@ -65,11 +75,25 @@ describe("pre-commit plan", () => {
     expect(planPrecommit([])).toEqual({ commands: [], mode: "none", reason: "no staged files" })
   })
 
-  it("still checks a deleted Control Center file without sending it to Prettier", () => {
-    const plan = planPrecommit(["packages/control-center/src/server/removed.ts"], [])
+  it("plans type changes and deletions without formatting deleted paths", () => {
+    const staged = parseStagedNameStatus(
+      "T\0packages/control-center/src/server/retyped.ts\0D\0packages/control-center/src/server/removed.ts\0"
+    )
+    expect(staged).toEqual({
+      stagedFiles: [
+        "packages/control-center/src/server/retyped.ts",
+        "packages/control-center/src/server/removed.ts"
+      ],
+      formattableFiles: ["packages/control-center/src/server/retyped.ts"]
+    })
+
+    const plan = planPrecommit(staged?.stagedFiles ?? [], staged?.formattableFiles ?? [])
 
     expect(plan.mode).toBe("control-center")
-    expect(plan.commands.map(({ label }) => label)).not.toContain("format staged files")
+    expect(plan.commands[0]).toMatchObject({
+      args: expect.not.arrayContaining(["packages/control-center/src/server/removed.ts"]),
+      label: "format staged files"
+    })
     expect(plan.commands.map(({ label }) => label)).toContain("build Control Center")
   })
 })

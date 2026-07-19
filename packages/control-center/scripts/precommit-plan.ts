@@ -17,6 +17,9 @@ const isDocumentationPath = (file: string): boolean =>
 
 const isDocumentationApplicationPath = (file: string): boolean => file.startsWith("packages/docs/")
 
+const isFocusedDocumentationPath = (file: string): boolean =>
+  isDocumentationPath(file) && !isDocumentationApplicationPath(file)
+
 export type StagedPathSelection = {
   readonly formattableFiles: ReadonlyArray<string>
   readonly stagedFiles: ReadonlyArray<string>
@@ -77,7 +80,7 @@ export const planPrecommit = (
 
   const isControlCenterChange = files.some((file) => file.startsWith("packages/control-center/"))
   const isControlCenterScope = files.every(
-    (file) => file.startsWith("packages/control-center/") || isDocumentationPath(file)
+    (file) => file.startsWith("packages/control-center/") || isFocusedDocumentationPath(file)
   )
   if (isControlCenterChange && isControlCenterScope) {
     return {

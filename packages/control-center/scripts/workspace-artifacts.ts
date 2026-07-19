@@ -1,4 +1,12 @@
+import * as Data from "effect/Data"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+
+export class WorkspaceArtifactError extends Data.TaggedError("WorkspaceArtifactError")<{
+  readonly reason: string
+}> {}
 
 export type PublishedPackageManifest = {
   readonly bin?: unknown
@@ -38,6 +46,10 @@ export type WorkspaceArtifactContract = {
   readonly packageRoot: string
 }
 
+export type WorkspaceArtifactBuilder = (
+  packages: ReadonlyArray<string>
+) => Effect.Effect<void, WorkspaceArtifactError>
+
 /** Select packages with at least one missing declared entry artifact. */
 export const packagesMissingPublishedArtifacts = (
   contracts: ReadonlyArray<WorkspaceArtifactContract>,
@@ -50,3 +62,44 @@ export const packagesMissingPublishedArtifacts = (
     )
     .map(({ name }) => name)
     .sort()
+
+const findPackagesMissingPublishedArtifacts = Effect.fn(
+  "controlCenter.findPackagesMissingPublishedArtifacts"
+)(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const existingArtifacts = new Set<string>()
+
+  for (const contract of contracts) {
+    for (const artifact of contract.artifactPaths) {
+      const absolutePath = path.join(contract.packageRoot, artifact)
+      if (yield* fileSystem.exists(absolutePath)) existingArtifacts.add(absolutePath)
+    }
+  }
+
+  return packagesMissingPublishedArtifacts(
+    contracts,
+    (artifact) => existingArtifacts.has(artifact),
+    (root, artifact) => path.join(root, artifact)
+  )
+})
+
+/** Build missing package artifacts once, then verify every advertised artifact exists. */
+export const ensureWorkspaceArtifactContracts = Effect.fn(
+  "controlCenter.ensureWorkspaceArtifactContracts"
+)(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>, buildMissing: WorkspaceArtifactBuilder) {
+  const missingPackages = yield* findPackagesMissingPublishedArtifacts(contracts)
+  if (missingPackages.length === 0) return missingPackages
+
+  yield* buildMissing(missingPackages)
+
+  const remainingPackages = yield* findPackagesMissingPublishedArtifacts(contracts)
+  if (remainingPackages.length > 0) {
+    return yield* new WorkspaceArtifactError({
+      reason: "dependency build completed successfully but advertised artifacts are still missing for: " +
+        remainingPackages.join(", ")
+    })
+  }
+
+  return missingPackages
+})

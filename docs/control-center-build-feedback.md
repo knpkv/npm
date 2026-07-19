@@ -53,9 +53,12 @@ check 0.69s, build 32.58s, check 22.75s, and tests 28.59s.
 `pnpm precommit` reads staged paths and selects one of three conservative gates:
 
 - documentation-only changes run Prettier against the staged paths;
-- changes confined to `packages/control-center` (plus Markdown or MDX companions)
+- changes confined to `packages/control-center` (plus ordinary Markdown or MDX
+  companions outside the executable `packages/docs` application)
   run the Effect static checks, Control Center lint/build/check/test, and builds
-  only missing public artifacts of Control Center's workspace dependencies;
+  only missing public artifacts of Control Center's workspace dependencies. A
+  successful dependency build is accepted only after those advertised artifacts
+  are rechecked;
 - every other change runs the full repository gate.
 
 Run the authoritative local gate explicitly with:

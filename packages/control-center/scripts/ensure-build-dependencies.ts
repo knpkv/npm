@@ -1,21 +1,17 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
-import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
-  packagesMissingPublishedArtifacts,
+  ensureWorkspaceArtifactContracts,
   publishedArtifactPaths,
-  type WorkspaceArtifactContract
+  type WorkspaceArtifactContract,
+  WorkspaceArtifactError
 } from "./workspace-artifacts.js"
-
-class WorkspaceArtifactError extends Data.TaggedError("WorkspaceArtifactError")<{
-  readonly reason: string
-}> {}
 
 const PackageManifestSchema = Schema.Struct({
   bin: Schema.optional(Schema.Unknown),
@@ -64,43 +60,43 @@ const program = Effect.gen(function*() {
     })
   }
 
-  const existingArtifacts = new Set<string>()
-  for (const contract of contracts) {
-    for (const artifact of contract.artifactPaths) {
-      const absolute = path.join(contract.packageRoot, artifact)
-      if (yield* fs.exists(absolute)) existingArtifacts.add(absolute)
+  const buildMissing = Effect.fn("controlCenter.buildMissingDependencyArtifacts")(function*(
+    missingPackages: ReadonlyArray<string>
+  ) {
+    yield* Console.log(
+      `[pre-commit] building missing dependency artifacts: ${missingPackages.join(", ")}`
+    )
+    const filterArguments = missingPackages.flatMap((name) => ["--filter", name])
+    const exitCode = yield* spawner.exitCode(
+      ChildProcess.make("pnpm", [...filterArguments, "--if-present", "run", "build"], {
+        cwd: workspaceRoot,
+        stderr: "inherit",
+        stdin: "inherit",
+        stdout: "inherit"
+      })
+    ).pipe(
+      Effect.mapError(
+        () => new WorkspaceArtifactError({ reason: "could not build missing dependency artifacts" })
+      )
+    )
+    if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+      return yield* new WorkspaceArtifactError({
+        reason: `dependency build failed with exit code ${exitCode}`
+      })
     }
-  }
-  const missing = packagesMissingPublishedArtifacts(
-    contracts,
-    (artifact) => existingArtifacts.has(artifact),
-    (root, artifact) => path.join(root, artifact)
-  )
-  if (missing.length === 0) {
-    yield* Console.log("[pre-commit] Control Center dependency artifacts are ready")
-    return
-  }
+  })
 
-  yield* Console.log(`[pre-commit] building missing dependency artifacts: ${missing.join(", ")}`)
-  const filterArguments = missing.flatMap((name) => ["--filter", name])
-  const exitCode = yield* spawner.exitCode(
-    ChildProcess.make("pnpm", [...filterArguments, "--if-present", "run", "build"], {
-      cwd: workspaceRoot,
-      stderr: "inherit",
-      stdin: "inherit",
-      stdout: "inherit"
-    })
-  ).pipe(
-    Effect.mapError(() => new WorkspaceArtifactError({ reason: "could not build missing dependency artifacts" }))
-  )
-  if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-    return yield* new WorkspaceArtifactError({ reason: `dependency build failed with exit code ${exitCode}` })
-  }
+  yield* ensureWorkspaceArtifactContracts(contracts, buildMissing)
+  yield* Console.log("[pre-commit] Control Center dependency artifacts are ready")
 })
 
 NodeRuntime.runMain(
   program.pipe(
-    Effect.tapError((error) => Console.error(`[pre-commit] ${String(error)}`)),
+    Effect.tapError((error) =>
+      Console.error(
+        `[pre-commit] ${error._tag === "WorkspaceArtifactError" ? error.reason : String(error)}`
+      )
+    ),
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }
