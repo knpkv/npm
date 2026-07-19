@@ -37,7 +37,12 @@ const normalizeAdapterFailure = (
   failure: unknown
 ): AgentProviderError =>
   !isAgentRuntimeProtocolFailure(failure) && isAgentProviderError(failure)
-    ? failure
+    ? new AgentProviderError({
+      providerId,
+      phase: failure.phase,
+      message: failure.message,
+      retryable: failure.retryable
+    })
     : new AgentProviderError({
       providerId,
       phase: "protocol",
@@ -116,7 +121,14 @@ export const makeAgentRuntime = (adapter: AgentAdapter): AgentRuntimeService => 
       snapshot.continuation._tag === "resume" &&
         snapshot.continuation.contextFingerprint !== snapshot.context.fingerprint
         ? Stream.fail(new AgentContextMismatchError())
-        : guardTerminalEvent(validateAdapterStream(snapshot, adapter.run(snapshot)))
+        : guardTerminalEvent(
+          Stream.unwrap(
+            Effect.try({
+              try: () => validateAdapterStream(snapshot, adapter.run(snapshot)),
+              catch: (failure) => normalizeAdapterFailure(snapshot.providerId, failure)
+            })
+          )
+        )
     )
   }
 })

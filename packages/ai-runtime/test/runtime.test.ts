@@ -130,7 +130,7 @@ describe("AgentRuntime", () => {
       expect(error.cause).toEqual(Cause.fail(providerFailure))
     }))
 
-  it.effect("forwards a provider failure as the alternative terminal", () =>
+  it.effect("forwards sanitized provider failure fields as the alternative terminal", () =>
     Effect.gen(function*() {
       const providerFailure = new AgentProviderError({
         providerId: AgentProviderId.make("fake"),
@@ -141,7 +141,51 @@ describe("AgentRuntime", () => {
       const runtime = makeAgentRuntime({ run: () => Stream.fail(providerFailure) })
       const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
 
-      expect(error).toBe(providerFailure)
+      expect(error).not.toBe(providerFailure)
+      expect(error).toEqual(providerFailure)
+      expect(error).toBeInstanceOf(AgentProviderError)
+    }))
+
+  it.effect("converts synchronous adapter throws into provider failures", () =>
+    Effect.gen(function*() {
+      const runtime = makeAgentRuntime({
+        run: () => {
+          throw new Error("native launch details")
+        }
+      })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toBeInstanceOf(AgentProviderError)
+      expect(error).toMatchObject({
+        _tag: "AgentProviderError",
+        providerId: request.providerId,
+        phase: "protocol",
+        retryable: false
+      })
+      expect(error).not.toHaveProperty("cause")
+    }))
+
+  it.effect("removes adapter-owned fields from provider failures", () =>
+    Effect.gen(function*() {
+      const providerFailure = new AgentProviderError({
+        providerId: AgentProviderId.make("fake"),
+        phase: "execution",
+        message: "provider stopped",
+        retryable: true
+      })
+      Reflect.set(providerFailure, "nativePayload", "secret-token")
+      const runtime = makeAgentRuntime({ run: () => Stream.fail(providerFailure) })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).not.toBe(providerFailure)
+      expect(error).toMatchObject({
+        _tag: "AgentProviderError",
+        providerId: request.providerId,
+        phase: "execution",
+        message: "provider stopped",
+        retryable: true
+      })
+      expect(error).not.toHaveProperty("nativePayload")
     }))
 
   it.effect("normalizes adapter-owned protocol errors as provider failures", () =>
