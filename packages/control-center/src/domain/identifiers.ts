@@ -136,6 +136,12 @@ export const JobId = canonicalUuid7("JobId")
 /** Decoded asynchronous job identifier. */
 export type JobId = typeof JobId.Type
 
+/** Canonical identifier of one durable release-scoped agent thread. */
+export const AgentThreadId = canonicalUuid7("AgentThreadId")
+
+/** Decoded durable agent-thread identifier. */
+export type AgentThreadId = typeof AgentThreadId.Type
+
 /** Canonical identifier of an authenticated browser session. */
 export const SessionId = canonicalUuid7("SessionId")
 

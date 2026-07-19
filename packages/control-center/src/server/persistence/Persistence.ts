@@ -24,6 +24,9 @@ import { BlobStore } from "./object-store/BlobStore.js"
 import type { BlobStoreError } from "./object-store/BlobStoreError.js"
 import { decodePersistenceConfig } from "./PersistenceConfig.js"
 import {
+  type AgentJobInputError,
+  AgentJobRepository,
+  type AgentJobRepositoryService,
   type AuthorizedShareInputError,
   AuthorizedShareRepository,
   type AuthorizedShareRepositoryService,
@@ -70,6 +73,7 @@ import { mapPersistenceOperation } from "./repositories/internal.js"
 
 /** Typed failures that may cross the public persistence operation boundary. */
 export type PersistenceOperationFailure =
+  | AgentJobInputError
   | AuthorizedShareInputError
   | BlobStoreError
   | ContentMetadataMismatchError
@@ -91,6 +95,7 @@ export type PersistenceOperationFailure =
   | TimelineExportAuditInputError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
+  "AgentJobInputError",
   "AuthorizedShareInputError",
   "BlobContainmentError",
   "BlobIntegrityError",
@@ -152,6 +157,7 @@ export type PersistenceLayerError =
 const makePersistence = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const database = yield* Database
+  const agentJobs = yield* AgentJobRepository
   const authorizedShares = yield* AuthorizedShareRepository
   const content = yield* ContentStore
   const deliveryGraph = yield* DeliveryGraphRepository
@@ -171,6 +177,20 @@ const makePersistence = Effect.gen(function*() {
   const workspaces = yield* WorkspaceRepository
 
   return {
+    agentJobs: {
+      appendEvent: (...args: Parameters<AgentJobRepositoryService["appendEvent"]>) =>
+        publicOperation("agent-job.append-event", agentJobs.appendEvent(...args)),
+      claimNext: (...args: Parameters<AgentJobRepositoryService["claimNext"]>) =>
+        publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
+      enqueue: (...args: Parameters<AgentJobRepositoryService["enqueue"]>) =>
+        publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
+      failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
+        publicOperation("agent-job.fail-attempt", agentJobs.failAttempt(...args)),
+      requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
+        publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
+      threadAfter: (...args: Parameters<AgentJobRepositoryService["threadAfter"]>) =>
+        publicOperation("agent-job.thread-after", agentJobs.threadAfter(...args))
+    },
     authorizedShares: {
       create: (...args: Parameters<AuthorizedShareRepositoryService["create"]>) =>
         publicOperation("authorized-share.create", authorizedShares.create(...args)),
@@ -415,6 +435,7 @@ export const persistenceLayerFromDatabase = (
     decodePersistenceConfig(input).pipe(
       Effect.map((config) => {
         const foundation = QuarantineRepository.layer
+        const agentJobs = AgentJobRepository.layer
         const authorizedShares = AuthorizedShareRepository.layer
         const contentMetadata = ContentBlobMetadataRepository.layer.pipe(
           Layer.provide(foundation)
@@ -440,6 +461,7 @@ export const persistenceLayerFromDatabase = (
         )
         const services = Layer.mergeAll(
           foundation,
+          agentJobs,
           authorizedShares,
           contentMetadata,
           deliveryGraph,
