@@ -5,12 +5,6 @@ export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 export { liveEventsLayer, makeLiveEvents } from "./liveEvents.js"
 export { makeMediaReads, mediaReadsLayer } from "./mediaReads.js"
 export {
-  materializeNormalizedPluginPage,
-  NormalizedPluginPageMaterializationError,
-  type NormalizedPluginPageMaterializationReceipt,
-  type NormalizedPluginPageMaterializationScope
-} from "./normalizedPluginPageMaterialization.js"
-export {
   listFirstPartyServiceMetadata,
   listPluginConnectionSummaries,
   makePluginAdministration,

@@ -3,7 +3,6 @@ import * as Sqlite from "effect-qb/sqlite"
 
 import type { RenderedSql } from "./types.js"
 
-export { type EntitySourceIdentityQueryInput, renderEntitySourceIdentityQuery } from "./entities.js"
 export {
   type AgentJobClaimQueryInput,
   type AgentJobDispatchCandidatesQueryInput,
@@ -13,6 +12,7 @@ export {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentThreadReplayQuery
 } from "./agentJobs.js"
+export { type EntitySourceIdentityQueryInput, renderEntitySourceIdentityQuery } from "./entities.js"
 export {
   type CreateFollowedResourceQueryInput,
   type FollowedResourceQueryInput,
