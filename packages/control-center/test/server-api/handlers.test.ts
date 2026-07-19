@@ -11,6 +11,7 @@ import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
   type AtlassianOAuthGrantStartResponse,
   type AtlassianProfileDiscoveryResponse,
+  CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   PluginConfiguration,
   PluginConfigurationKey,
@@ -1100,6 +1101,11 @@ describe("Control Center API handlers", () => {
           request.pluginConnectionId === pluginConnectionId && workspaceId === session.workspaceId
             ? Effect.succeed(expected)
             : Effect.die("connection setup crossed its authenticated scope"),
+        connectAndTestBatch: ({ requests, workspaceId }) =>
+          requests.length === 1 && requests[0]?.pluginConnectionId === pluginConnectionId &&
+            workspaceId === session.workspaceId
+            ? Effect.succeed({ results: [{ _tag: "succeeded", response: expected }] })
+            : Effect.die("connection batch setup crossed its authenticated scope"),
         configuration: () => Effect.die("not used"),
         configurationMetadata: () => Effect.die("not used"),
         health: () => Effect.die("not used"),
@@ -1114,18 +1120,21 @@ describe("Control Center API handlers", () => {
       )
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
-        return yield* client.plugins.createConnection({
-          payload: {
-            pluginConnectionId,
-            providerId: "codecommit",
-            displayName: "Payments CodeCommit",
-            values: [
-              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
-              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
-              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
-            ]
-          }
+        const payload = Schema.decodeUnknownSync(CreatePluginConnectionRequest)({
+          pluginConnectionId,
+          providerId: "codecommit",
+          displayName: "Payments CodeCommit",
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "default" },
+            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+          ]
         })
+        const connection = yield* client.plugins.createConnection({ payload })
+        const batch = yield* client.plugins.createConnections({
+          payload: { connections: [payload] }
+        })
+        return { batch, connection }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -1133,7 +1142,8 @@ describe("Control Center API handlers", () => {
         handler
       ]))
 
-      assert.deepStrictEqual(result, expected)
+      assert.deepStrictEqual(result.connection, expected)
+      assert.deepStrictEqual(result.batch, { results: [{ _tag: "succeeded", response: expected }] })
     }))
 
   it.effect("serves credential-scoped emails as redacted references while adapter values remain readable", () =>

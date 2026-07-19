@@ -254,6 +254,7 @@ describe("ControlCenterApi contract", () => {
           "/api/v1/plugins/oauth/atlassian/grants/:grantId/complete"
         ],
         ["createConnection", "POST", "/api/v1/plugins/connections"],
+        ["createConnections", "POST", "/api/v1/plugins/connections/batch"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
@@ -367,6 +368,7 @@ describe("ControlCenterApi contract", () => {
       exchangeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
       completeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
+      createConnections: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],

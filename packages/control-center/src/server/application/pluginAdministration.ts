@@ -16,13 +16,16 @@ import type * as Scope from "effect/Scope"
 import type * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
+  CreatePluginConnectionBatchResult,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
+  CreatePluginConnectionsResponse,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
   PluginConfigurationPatchValue,
   PluginConnectionIdentity,
+  PluginConnectionSetupFailureClass,
   PluginConnectionSummary,
   PluginConnectionTestResult,
   ProviderAccountSummary,
@@ -36,6 +39,8 @@ import type { PluginDiscoveryV1 } from "../../domain/plugins/discovery.js"
 import {
   ApplicationConflict,
   ApplicationInvalidRequest,
+  type ApplicationRateLimited,
+  type ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   PluginAdministration,
   type PluginAdministrationService
@@ -1043,6 +1048,28 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
   )
 })
 
+const setupFailureClass = (
+  failure:
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationRateLimited
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+): PluginConnectionSetupFailureClass => {
+  switch (failure._tag) {
+    case "ApplicationConflict":
+      return "conflict"
+    case "ApplicationInvalidRequest":
+      return "invalid-request"
+    case "ApplicationRateLimited":
+      return "rate-limited"
+    case "ApplicationResourceNotFound":
+      return "not-found"
+    case "ApplicationServiceUnavailable":
+      return "service-unavailable"
+  }
+}
+
 /** Construct the secret-free plugin administration adapter over durable host state. */
 export const makePluginAdministrationWithConnections = Effect.fn("PluginAdministration.makeWithConnections")(function*(
   pluginConnections: PluginConnectionMapV1 | null,
@@ -1122,6 +1149,34 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         workspaceId,
         request
       ),
+    connectAndTestBatch: Effect.fn("PluginAdministration.connectAndTestBatch")(function*({ requests, workspaceId }) {
+      const results = yield* Effect.forEach(
+        requests,
+        (request) =>
+          connectAndTest(
+            persistence,
+            cryptoService,
+            wakeups,
+            secrets,
+            pluginConnections,
+            fileSystem,
+            path,
+            workspaceId,
+            request
+          ).pipe(
+            Effect.match({
+              onFailure: (failure) => ({
+                _tag: "failed",
+                pluginConnectionId: request.pluginConnectionId,
+                failureClass: setupFailureClass(failure)
+              } satisfies CreatePluginConnectionBatchResult),
+              onSuccess: (response) => ({ _tag: "succeeded", response } satisfies CreatePluginConnectionBatchResult)
+            })
+          ),
+        { concurrency: 1 }
+      )
+      return { results } satisfies CreatePluginConnectionsResponse
+    }),
     setConnectionEnabled: ({ isEnabled, pluginConnectionId, workspaceId }) =>
       setConnectionEnabled(
         persistence,

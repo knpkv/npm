@@ -11,6 +11,7 @@ import {
   type AtlassianOAuthGrantStartResponse,
   type AtlassianOAuthProviderIntent,
   CreatePluginConnectionResponse,
+  CreatePluginConnectionsResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginOverviewResponse
@@ -1596,6 +1597,18 @@ describe("ServicesPage connection tests", () => {
         })
       )
     const create = vi.fn(createImplementation)
+    const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>(async (request, signal) =>
+      Schema.decodeUnknownSync(CreatePluginConnectionsResponse)({
+        results: await Promise.all(
+          request.connections.map(async (connectionRequest) => ({
+            _tag: "succeeded",
+            response: Schema.encodeSync(CreatePluginConnectionResponse)(
+              await createImplementation(connectionRequest, signal)
+            )
+          }))
+        )
+      })
+    )
     const makeConnectionId = vi
       .fn()
       .mockResolvedValueOnce(connectionIds[0])
@@ -1603,6 +1616,7 @@ describe("ServicesPage connection tests", () => {
       .mockResolvedValueOnce(connectionIds[2])
     const transport: ConnectionTestTransport = {
       create,
+      createBatch,
       discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId,
@@ -1623,20 +1637,18 @@ describe("ServicesPage connection tests", () => {
     )
     await act(async () => submit?.click())
 
-    expect(create).toHaveBeenCalledTimes(3)
-    expect(create.mock.calls.map(([request]) => request.providerId)).toEqual([
-      "codecommit",
-      "codecommit",
-      "codepipeline"
-    ])
-    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+    expect(create).not.toHaveBeenCalled()
+    expect(createBatch).toHaveBeenCalledTimes(1)
+    const batchConnections = createBatch.mock.calls[0]?.[0].connections ?? []
+    expect(batchConnections.map(({ providerId }) => providerId)).toEqual(["codecommit", "codecommit", "codepipeline"])
+    expect(batchConnections.map(({ displayName }) => displayName)).toEqual([
       "Payments production · payments-api",
       "Payments production · risk-engine",
       "Payments production · payments-production"
     ])
     expect(
-      create.mock.calls.map(
-        ([request]) => request.values.find(({ key }) => key === "repositoryName" || key === "pipelineName")?.value
+      batchConnections.map(
+        (request) => request.values.find(({ key }) => key === "repositoryName" || key === "pipelineName")?.value
       )
     ).toEqual(["payments-api", "risk-engine", "payments-production"])
   })
@@ -1647,42 +1659,61 @@ describe("ServicesPage connection tests", () => {
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000172"),
       Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000173")
     ]
-    let creationAttempt = 0
-    const create = vi.fn<ConnectionTestTransport["create"]>((request) => {
-      creationAttempt += 1
-      if (creationAttempt === 2) return Promise.reject(new Error("temporary provider failure"))
-      return Promise.resolve(
-        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
-          connection: {
-            pluginConnectionId: request.pluginConnectionId,
-            providerId: request.providerId,
-            displayName: request.displayName,
-            isEnabled: true,
-            health: null,
-            updatedAt: "2026-07-14T10:03:00.000Z"
-          },
-          configuration: {
-            pluginConnectionId: request.pluginConnectionId,
-            revision: 1,
-            values: request.values,
-            updatedAt: "2026-07-14T10:03:00.000Z"
-          },
-          test: {
-            _tag: "healthy",
-            pluginConnectionId: request.pluginConnectionId,
-            providerId: request.providerId,
-            checkedAt: "2026-07-14T10:03:00.000Z",
-            latencyMilliseconds: 20,
-            identity: {
-              kind: "account",
-              label: "AWS account",
-              displayName: "Production account",
-              providerImmutableId: "123456789012"
-            }
+    const responseFor = (request: Parameters<ConnectionTestTransport["create"]>[0]) =>
+      Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+        connection: {
+          pluginConnectionId: request.pluginConnectionId,
+          providerId: request.providerId,
+          displayName: request.displayName,
+          isEnabled: true,
+          health: null,
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        configuration: {
+          pluginConnectionId: request.pluginConnectionId,
+          revision: 1,
+          values: request.values,
+          updatedAt: "2026-07-14T10:03:00.000Z"
+        },
+        test: {
+          _tag: "healthy",
+          pluginConnectionId: request.pluginConnectionId,
+          providerId: request.providerId,
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          latencyMilliseconds: 20,
+          identity: {
+            kind: "account",
+            label: "AWS account",
+            displayName: "Production account",
+            providerImmutableId: "123456789012"
           }
-        })
-      )
+        }
+      })
+    let batchAttempt = 0
+    let completeBatch: (() => void) | undefined
+    const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>((request) => {
+      batchAttempt += 1
+      return new Promise((resolve) => {
+        completeBatch = () =>
+          resolve(
+            Schema.decodeUnknownSync(CreatePluginConnectionsResponse)({
+              results: request.connections.map((connectionRequest, index) =>
+                batchAttempt === 1 && index === 1
+                  ? {
+                      _tag: "failed",
+                      pluginConnectionId: connectionRequest.pluginConnectionId,
+                      failureClass: "service-unavailable"
+                    }
+                  : {
+                      _tag: "succeeded",
+                      response: Schema.encodeSync(CreatePluginConnectionResponse)(responseFor(connectionRequest))
+                    }
+              )
+            })
+          )
+      })
     })
+    const create = vi.fn<ConnectionTestTransport["create"]>()
     const makeConnectionId = vi
       .fn()
       .mockResolvedValueOnce(connectionIds[0])
@@ -1690,6 +1721,7 @@ describe("ServicesPage connection tests", () => {
       .mockResolvedValueOnce(connectionIds[2])
     const transport: ConnectionTestTransport = {
       create,
+      createBatch,
       overview: () => Promise.resolve({ ...overview, connections: [] }),
       makeConnectionId,
       setEnabled: vi.fn(),
@@ -1707,23 +1739,22 @@ describe("ServicesPage connection tests", () => {
       textContent?.includes("Connect AWS account")
     )
     await act(async () => submit?.click())
+    await act(async () => completeBatch?.())
 
-    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
+    expect(create).not.toHaveBeenCalled()
+    expect(createBatch.mock.calls[0]?.[0].connections.map(({ displayName }) => displayName)).toEqual([
       "Payments production · payments-api",
       "Payments production · risk-engine"
     ])
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("could not be connected")
 
     await act(async () => submit?.click())
+    await act(async () => completeBatch?.())
 
-    expect(create.mock.calls.map(([request]) => request.displayName)).toEqual([
-      "Payments production · payments-api",
-      "Payments production · risk-engine",
+    expect(createBatch).toHaveBeenCalledTimes(2)
+    expect(createBatch.mock.calls[1]?.[0].connections.map(({ displayName }) => displayName)).toEqual([
       "Payments production · risk-engine"
     ])
-    expect(
-      create.mock.calls.filter(([request]) => request.displayName === "Payments production · payments-api")
-    ).toHaveLength(1)
   })
 
   it("rejects an oversized AWS resource list instead of silently dropping resources", async () => {
