@@ -75,6 +75,10 @@ export const confluencePagePluginDescriptor = {
     capabilityId: "entity.read",
     supportedVersions: [1],
     requirement: "required"
+  }, {
+    capabilityId: "sync.incremental",
+    supportedVersions: [1],
+    requirement: "required"
   }]
 } satisfies unknown
 
@@ -86,7 +90,8 @@ export const confluencePagePluginDefinition: PluginDefinitionV1 = definePluginV1
   rawDescriptor: confluencePagePluginDescriptor,
   configurationSchema: ConfluencePageAdapterConfiguration,
   capabilityCodecs: {
-    entityRead: pluginCapabilityCodecsV1.entityRead
+    entityRead: pluginCapabilityCodecsV1.entityRead,
+    syncIncremental: pluginCapabilityCodecsV1.syncIncremental
   },
   make: ({ configuration, descriptor }) => acquireConfluencePageAdapter(configuration, descriptor)
 })

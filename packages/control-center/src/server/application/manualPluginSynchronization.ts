@@ -95,7 +95,8 @@ export const firstPartyManualPluginSyncDrivers = makeManualPluginSyncDriverRegis
   { providerId: "codecommit", streamKey: "pull-requests", sync: connectionSync },
   { providerId: "codepipeline", streamKey: "executions", sync: connectionSync },
   { providerId: "jira", streamKey: "project-issues", sync: connectionSync },
-  { providerId: "clockify", streamKey: "time-entries", sync: connectionSync }
+  { providerId: "clockify", streamKey: "time-entries", sync: connectionSync },
+  { providerId: "confluence", streamKey: "pages", sync: connectionSync }
 ])
 
 const unavailable = () => new ApplicationServiceUnavailable({ retryAt: null })

@@ -7,8 +7,14 @@ import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 
-import { MaximumPluginPayloadBytes, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import {
+  MaximumPluginPayloadBytes,
+  MaximumPluginSyncPageBytes,
+  PluginSyncRequestV1,
+  ReadPluginEntityRequestV1
+} from "../../src/domain/plugins/index.js"
 import {
   ConfluencePageAdapterConfiguration,
   makeConfluencePageAdapter
@@ -21,7 +27,7 @@ import { confluencePagePluginDescriptor } from "../../src/server/plugins/conflue
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 
-const PAGE_ID = "page-42"
+const PAGE_ID = "42"
 const CREATED_AT = "2026-07-01T09:00:00.000Z"
 const UPDATED_AT = "2026-07-17T10:30:00.000Z"
 
@@ -62,6 +68,11 @@ const request = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
   vendorImmutableId: PAGE_ID
 })
 
+const syncRequest = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+  streamKey: "pages",
+  checkpoint: null
+})
+
 const converter = (
   markdown = "Runbook\n",
   onConvert: () => void = () => undefined
@@ -82,6 +93,9 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
   }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
+  getSpacePages: () => Effect.succeed({ results: [currentPage] }),
+  getPageAttachments: () => Effect.succeed({ results: [] }),
+  getPageWatchers: (_pageId, start) => Effect.succeed({ results: [], start, limit: 50, size: 0 }),
   getPageVersions: () => Effect.succeed({ results: [currentPage.version] }),
   getUsers: (accountIds) =>
     Effect.succeed({
@@ -196,6 +210,249 @@ describe("Confluence page adapter", () => {
         providerImmutableId: "space-payments",
         displayName: "Space · space-payments"
       })
+    }))
+
+  it.effect("synchronizes lazy space pages, people, attachment metadata, and safe runbook evidence", () =>
+    Effect.gen(function*() {
+      const spaces: Array<string> = []
+      const attachmentCursors: Array<string | null> = []
+      let conversions = 0
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getSpacePages: (spaceId) =>
+            Effect.sync(() => {
+              spaces.push(spaceId)
+              return { results: [currentPage] }
+            }),
+          getPageAttachments: (pageId, cursor) =>
+            Effect.sync(() => {
+              assert.strictEqual(pageId, PAGE_ID)
+              attachmentCursors.push(cursor)
+              return cursor === null
+                ? {
+                  results: [{
+                    id: "attachment-1",
+                    status: "current",
+                    title: "rollback-checklist.pdf",
+                    createdAt: UPDATED_AT,
+                    pageId: PAGE_ID,
+                    mediaType: "application/pdf",
+                    fileSize: 42,
+                    version: currentPage.version
+                  }],
+                  _links: { next: "/wiki/api/v2/pages/page-42/attachments?cursor=attachments%2B2" }
+                }
+                : {
+                  results: [{
+                    id: "attachment-2",
+                    status: "current",
+                    title: "release-map.svg",
+                    createdAt: UPDATED_AT,
+                    pageId: PAGE_ID
+                  }]
+                }
+            }),
+          getPageVersions: () =>
+            Effect.succeed({
+              results: [currentPage.version, {
+                number: 2,
+                createdAt: "2026-07-15T08:00:00.000Z",
+                authorId: "account-contributor"
+              }]
+            }),
+          getPageWatchers: (pageId, start) =>
+            Effect.sync(() => {
+              assert.strictEqual(pageId, PAGE_ID)
+              assert.strictEqual(start, 0)
+              return {
+                results: [{
+                  type: "watch",
+                  contentId: Number(PAGE_ID),
+                  watcher: {
+                    accountId: "account-watcher",
+                    displayName: "Watcher",
+                    isExternalCollaborator: false,
+                    isGuest: false
+                  }
+                }],
+                start,
+                limit: 50,
+                size: 1
+              }
+            })
+        }),
+        undefined,
+        () => {
+          conversions += 1
+        }
+      )
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      assert.strictEqual(pages.length, 1)
+      const events = pages[0]?.events ?? []
+      const entity = events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+
+      assert.deepStrictEqual(spaces, ["space-payments"])
+      assert.deepStrictEqual(attachmentCursors, [null, "attachments+2"])
+      assert.strictEqual(conversions, 0)
+      assert.strictEqual(attributes.content, null)
+      assert.strictEqual(attributes.contentState, "lazy")
+      assert.deepStrictEqual(attributes.versions.map(({ number }) => number), [3, 2])
+      assert.deepStrictEqual(attributes.versionHistory, { complete: true, pagesFetched: 1 })
+      assert.deepStrictEqual(attributes.attachmentInventory, { complete: true, pagesFetched: 2 })
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: true, pagesFetched: 1 })
+      assert.deepStrictEqual(attributes.attachments, [{
+        id: "attachment-1",
+        title: "rollback-checklist.pdf",
+        createdAt: UPDATED_AT,
+        mediaType: "application/pdf",
+        fileSize: 42,
+        version: 3
+      }, {
+        id: "attachment-2",
+        title: "release-map.svg",
+        createdAt: UPDATED_AT,
+        mediaType: null,
+        fileSize: null,
+        version: null
+      }])
+      const people = events.filter((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(people.length, 4)
+      assert.exists(people.find(({ vendorPersonId }) => vendorPersonId === "account-watcher"))
+      const runbook = events.find((event) => event._tag === "AppendEvidence")
+      assert.exists(runbook)
+      if (runbook?._tag === "AppendEvidence") {
+        assert.strictEqual(runbook.evidenceType, "confluence.runbook-candidate")
+        assert.deepStrictEqual(runbook.data, {
+          schemaVersion: 1,
+          basis: "title-keyword",
+          pageId: PAGE_ID,
+          spaceId: "space-payments"
+        })
+      }
+    }))
+
+  it.effect("marks watcher metadata incomplete when the OAuth grant lacks watcher scope", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-watchers",
+              reason: "authorization",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
+    }))
+
+  it.effect("rejects pages from another space before reading their attachments", () =>
+    Effect.gen(function*() {
+      const spaces: Array<string> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (spaceId) =>
+          Effect.sync(() => {
+            spaces.push(spaceId)
+            return { results: [{ ...currentPage, spaceId: "space-other" }] }
+          }),
+        getPageAttachments: () => Effect.die("cross-space pages must be rejected before attachment reads")
+      }))
+
+      const outcome = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect, Effect.result)
+
+      assert.deepStrictEqual(spaces, ["space-payments"])
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
+    }))
+
+  it.effect("stops at the bounded page limit and resumes from its durable cursor", () =>
+    Effect.gen(function*() {
+      const cursors: Array<string | null> = []
+      const client = defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return index < 5
+              ? { results: [], _links: { next: `/wiki/api/v2/spaces/space-payments/pages?cursor=c${index + 1}` } }
+              : { results: [] }
+          })
+      })
+      const adapter = yield* makeAdapter(client)
+
+      const first = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      assert.strictEqual(first.length, 5)
+      assert.strictEqual(first[4]?.hasMore, false)
+      assert.strictEqual(first[4]?.checkpointAfterPage, "bounded:c5")
+      assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4"])
+
+      cursors.length = 0
+      const resumed = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: first[4]?.checkpointAfterPage
+        })
+      ).pipe(Stream.runCollect)
+      assert.strictEqual(resumed.length, 1)
+      assert.strictEqual(resumed[0]?.checkpointAfterPage, "complete")
+      assert.deepStrictEqual(cursors, ["c5"])
+    }))
+
+  it.effect("splits attachment-heavy provider pages without losing restart safety", () =>
+    Effect.gen(function*() {
+      const sourcePages = Array.from({ length: 20 }, (_, index) => ({
+        ...currentPage,
+        id: `page-${index}`,
+        title: `Operations runbook ${index}`,
+        _links: { webui: `/wiki/spaces/PAY/pages/page-${index}` }
+      }))
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: sourcePages }),
+        getPageAttachments: (pageId, cursor) => {
+          const offset = cursor === null ? 0 : 25
+          return Effect.succeed({
+            results: Array.from({ length: 25 }, (_, index) => ({
+              id: `${pageId}-attachment-${offset + index}-${"i".repeat(440)}`,
+              status: "current",
+              title: `artifact-${offset + index}-${"t".repeat(470)}`,
+              createdAt: UPDATED_AT,
+              pageId,
+              mediaType: `application/vnd.${"m".repeat(230)}`,
+              fileSize: index,
+              version: currentPage.version
+            })),
+            ...(cursor === null
+              ? { _links: { next: `/wiki/api/v2/pages/${pageId}/attachments?cursor=second` } }
+              : {})
+          })
+        }
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+
+      assert.isAbove(pages.length, 1)
+      for (const page of pages) assert.isAtMost(jsonBytes(page), MaximumPluginSyncPageBytes)
+      for (const page of pages.slice(0, -1)) {
+        assert.strictEqual(page.hasMore, true)
+        assert.strictEqual(page.checkpointAfterPage, "restart:initial")
+      }
+      assert.strictEqual(pages.at(-1)?.checkpointAfterPage, "complete")
+      assert.strictEqual(
+        pages.flatMap(({ events }) => events).filter(({ _tag }) => _tag === "UpsertEntity").length,
+        sourcePages.length
+      )
     }))
 
   it.effect("rejects a configured site identity that does not match Confluence", () =>

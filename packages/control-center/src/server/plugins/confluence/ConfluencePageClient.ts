@@ -42,6 +42,18 @@ export interface ConfluencePageClientShape {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getSpacePages: (
+    spaceId: string,
+    cursor: string | null
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getPageAttachments: (
+    pageId: string,
+    cursor: string | null
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getPageWatchers: (
+    pageId: string,
+    start: number
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPageVersions: (
     pageId: string,
     cursor: string | null
@@ -118,6 +130,38 @@ export const makeConfluencePageClient = (
           "include-version": true,
           status: ["current"]
         }
+      })
+    ),
+  getSpacePages: (spaceId, cursor) =>
+    bounded(
+      "confluence-space-pages",
+      api.v2.getPagesInSpace(spaceId, {
+        params: {
+          ...(cursor === null ? {} : { cursor }),
+          depth: "all",
+          limit: 25,
+          sort: "-modified-date",
+          status: ["current"]
+        }
+      })
+    ),
+  getPageAttachments: (pageId, cursor) =>
+    bounded(
+      "confluence-page-attachments",
+      api.v2.getPageAttachments(pageId, {
+        params: {
+          ...(cursor === null ? {} : { cursor }),
+          limit: 25,
+          sort: "-modified-date",
+          status: ["current"]
+        }
+      })
+    ),
+  getPageWatchers: (pageId, start) =>
+    bounded(
+      "confluence-page-watchers",
+      api.v1.getWatchesForPage(pageId, {
+        params: { limit: 50, start }
       })
     ),
   getPageVersions: (pageId, cursor) =>

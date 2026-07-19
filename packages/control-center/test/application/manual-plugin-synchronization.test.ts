@@ -92,6 +92,20 @@ const fixtures = [
       status: { name: "In Review" },
       priority: { name: "High" }
     }
+  },
+  {
+    providerId: "confluence",
+    pluginConnectionId: Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000208"),
+    streamKey: "pages",
+    checkpoint: "confluence-complete",
+    entityType: "confluence-page",
+    vendorImmutableId: "page-42",
+    title: "Payments release runbook",
+    attributes: {
+      spaceId: "space-payments",
+      currentVersion: 3,
+      contentState: "lazy"
+    }
   }
 ] satisfies ReadonlyArray<{
   readonly providerId: ProviderId
@@ -392,7 +406,7 @@ describe("manual plugin synchronization", () => {
       if (itemRead._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
       assert.deepStrictEqual(
         itemRead.value.items.map(({ projection }) => projection.entityType).sort(),
-        ["issue", "pipeline-execution", "pull-request", "time-entry"]
+        ["issue", "page", "pipeline-execution", "pull-request", "time-entry"]
       )
       const timelineBeforeReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
@@ -405,7 +419,7 @@ describe("manual plugin synchronization", () => {
       })).filter(({ sourceKind }) => sourceKind === "plugin-sync")
       assert.deepStrictEqual(
         timelineBeforeReplay.map(({ service }) => service).sort(),
-        ["clockify", "codecommit", "codepipeline", "jira"]
+        ["clockify", "codecommit", "codepipeline", "confluence", "jira"]
       )
 
       for (const fixture of fixtures) {
@@ -426,7 +440,7 @@ describe("manual plugin synchronization", () => {
         limit: 100
       })
       if (replayedItems._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
-      assert.strictEqual(replayedItems.value.totalCount, 4)
+      assert.strictEqual(replayedItems.value.totalCount, 5)
       const timelineAfterReplay = (yield* persistence.timeline.page({
         workspaceId: WORKSPACE_ID,
         actorKind: "plugin",

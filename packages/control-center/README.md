@@ -192,6 +192,16 @@ OAuth profiles provide the verified cloud ID used to share one Atlassian site ac
 
 An issue read fetches the issue, comments, and changelog through interruptible Effect operations. Pagination stops at the configured bound and records explicit comment/history truncation flags. The normalized issue attributes include description and environment text, workflow metadata, release versions, parent and subtasks, comments, history, and deduplicated collaborators with roles and avatar URLs. If fixed issue fields would cross the payload cap, optional arrays and presentation fields are omitted deterministically and named in `truncatedFields`. OpenAPI, HTTP, timeout, authentication, authorization, rate-limit, outage, and adapter-schema failures are translated to the closed plugin failure taxonomy without retaining raw provider causes.
 
+### Confluence space reader
+
+The production Confluence adapter negotiates `entity.read@1` and bounded `sync.incremental@1` for the `pages` stream. Each connection is pinned to one immutable space ID under its verified Atlassian site. Space iteration always sends that exact ID to Confluence and rejects any returned page belonging to another space before attachment or person reads, so followed spaces sharing one OAuth site remain isolated.
+
+Synchronization retains current page and bounded revision metadata, owner/author/contributor/watcher roles, and at most two pages each of watcher and attachment metadata without loading attachment bytes. Page bodies remain `contentState: "lazy"`; `entity.read` loads and safely converts ADF only when the page is opened. Titles containing operational runbook terms emit explicit `confluence.runbook-candidate` evidence rather than silently classifying a page as authoritative documentation.
+
+One invocation reads at most five provider pages and persists a resumable `bounded:<cursor>` checkpoint when more work exists. Large provider pages are deterministically divided into contract-sized atomic pages. Intermediate chunks use a restart checkpoint for the current provider page so interruption replays stable event identities instead of skipping uncommitted entities.
+
+This MVP remains read-only. Unbounded watcher/activity history, authoritative deletion evidence, scheduled or webhook synchronization, content search, and governed update/publish are deferred to later Confluence milestones.
+
 ### Clockify time-entry reader
 
 `makeClockifyReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Clockify adapter around the shared Schema-validated `ClockifyApiClient`. It negotiates only `entity.read` for `clockify.time-entry` and bounded `sync.incremental` snapshots on the `time-entries` stream. Credentials remain in the externally supplied client layer.
