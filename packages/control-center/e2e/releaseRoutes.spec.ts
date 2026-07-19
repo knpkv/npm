@@ -93,6 +93,62 @@ const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
     activity: { events: [], truncated: false },
     entity: {
       ...canonicalEntityEntry,
+      projection: {
+        ...canonicalEntityEntry.projection,
+        details: {
+          _tag: "issue",
+          key: "OPS-428",
+          status: "In review",
+          priority: "High",
+          estimatePoints: 3,
+          summary: "Review payment capture safeguards",
+          description: "Customer impact\n\nCapture retries must never create a second charge.",
+          acceptanceCriteria:
+            "- A repeated capture returns the original payment result.\n- No duplicate ledger entry is created.",
+          environment: "Payments production in eu-west-1.",
+          issueType: { sourceId: "10001", name: "Story" },
+          project: { sourceId: "10000", key: "OPS", name: "Operations" },
+          resolution: null,
+          labels: ["payments", "release-blocker"],
+          components: [{ sourceId: "20001", name: "Capture API" }],
+          fixVersions: [{ sourceId: "30001", name: "Payments 2026.07", released: false, releaseDate: null }],
+          createdAt: "2026-07-10T08:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z",
+          dueDate: "2026-07-18",
+          resolvedAt: null,
+          parent: null,
+          subtasks: [],
+          assigneeSourcePersonId: "account-mina",
+          reporterSourcePersonId: null,
+          creatorSourcePersonId: null,
+          collaborators: [{
+            sourcePersonId: "account-mina",
+            displayName: "Mina Ortiz",
+            avatarUrl: "https://images.example.test/mina.png",
+            active: true,
+            roles: ["assignee", "commenter"]
+          }],
+          comments: [{
+            sourceId: "comment-41",
+            authorSourcePersonId: "account-mina",
+            updateAuthorSourcePersonId: null,
+            body: "Sandbox replay is green. I am waiting for the final reviewer.",
+            createdAt: "2026-07-14T09:30:00.000Z",
+            updatedAt: null
+          }],
+          commentTotal: 1,
+          commentsTruncated: false,
+          history: [{
+            sourceId: "history-9",
+            authorSourcePersonId: "account-mina",
+            createdAt: "2026-07-14T09:00:00.000Z",
+            changes: [{ field: "Status", from: "In progress", to: "In review" }]
+          }],
+          historyTotal: 1,
+          historyTruncated: false,
+          truncatedFields: []
+        }
+      },
       canonicalReleaseId: encodedWorkset.releaseId,
       owners: [],
       ownersTruncated: false,
@@ -420,6 +476,20 @@ test("returns a directly loaded canonical entity to Items", async ({ page }) => 
 
   await page.getByRole("link", { name: "Back to items" }).click()
   await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/items`)
+})
+
+test("renders a synchronized Jira issue as a complete read-only document", async ({ page }) => {
+  await page.goto(canonicalEntityPath)
+
+  await expect(page.getByRole("heading", { name: "Description" })).toBeVisible()
+  await expect(page.getByText("Capture retries must never create a second charge.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Acceptance criteria" })).toBeVisible()
+  await expect(page.getByText("A repeated capture returns the original payment result.")).toBeVisible()
+  await expect(page.getByText("Mina Ortiz").first()).toBeVisible()
+  await expect(page.getByText("Sandbox replay is green. I am waiting for the final reviewer.")).toBeVisible()
+  await expect(page.getByRole("heading", { name: "History" })).toBeVisible()
+  await expect(page.getByText("In progress → In review")).toBeVisible()
+  await expect(page.getByRole("textbox")).toHaveCount(0)
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

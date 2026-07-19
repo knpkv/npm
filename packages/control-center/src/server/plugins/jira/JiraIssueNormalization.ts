@@ -3,6 +3,18 @@ import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import type { NormalizedIssueFixVersion } from "../../../domain/normalizedIssue.js"
+import {
+  MAXIMUM_NORMALIZED_ISSUE_COLLABORATORS,
+  MAXIMUM_NORMALIZED_ISSUE_COMMENTS,
+  MAXIMUM_NORMALIZED_ISSUE_COMPONENTS,
+  MAXIMUM_NORMALIZED_ISSUE_FIX_VERSIONS,
+  MAXIMUM_NORMALIZED_ISSUE_HISTORY,
+  MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES,
+  MAXIMUM_NORMALIZED_ISSUE_LABELS,
+  MAXIMUM_NORMALIZED_ISSUE_SUBTASKS,
+  NormalizedIssueAttributes
+} from "../../../domain/normalizedIssue.js"
 import { MaximumPluginPayloadBytes } from "../../../domain/plugins/bounds.js"
 import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
 import { SourceUrl } from "../../../domain/sourceRevision.js"
@@ -77,7 +89,8 @@ const JiraIssueFields = Schema.Struct({
   duedate: Schema.optionalKey(Schema.NullOr(Schema.String)),
   resolutiondate: Schema.optionalKey(Schema.NullOr(JiraTimestamp)),
   parent: Schema.optionalKey(Schema.NullOr(JiraRelatedIssue)),
-  subtasks: Schema.optionalKey(Schema.Array(JiraRelatedIssue))
+  subtasks: Schema.optionalKey(Schema.Array(JiraRelatedIssue)),
+  estimatePoints: Schema.optionalKey(Schema.NullOr(Schema.Number))
 })
 
 const JiraIssueResponse = Schema.Struct({
@@ -113,35 +126,6 @@ const JiraChangelogResponse = Schema.Struct({
 
 type JiraIssueEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 
-const NormalizedJiraIssueAttributes = Schema.Struct({
-  project: Schema.NullOr(Schema.Struct({
-    id: Schema.NullOr(JiraIdentifier),
-    key: Schema.NullOr(JiraIdentifier),
-    name: Schema.NullOr(JiraText)
-  })),
-  collaborators: Schema.Array(Schema.Struct({
-    providerPersonId: JiraAccountId,
-    displayName: JiraText,
-    avatarUrl: Schema.NullOr(Schema.String),
-    active: Schema.Boolean,
-    roles: Schema.Array(Schema.String)
-  })),
-  fixVersions: Schema.Array(Schema.Struct({
-    id: Schema.NullOr(JiraVersionId),
-    name: Schema.NullOr(JiraVersionName),
-    released: Schema.Boolean,
-    releaseDate: Schema.NullOr(Schema.String)
-  })),
-  commentTotal: Schema.Number,
-  commentsTruncated: Schema.Boolean,
-  historyTotal: Schema.Number,
-  historyTruncated: Schema.Boolean
-})
-
-const MAXIMUM_MATERIALIZED_COLLABORATORS = 200
-// One issue, its activity evidence, 200 people, and three events per fix version must fit one 500-event page.
-const MAXIMUM_MATERIALIZED_FIX_VERSIONS = 99
-
 /** One bounded collection fetched from Jira. @internal */
 export interface JiraFetchedCollection<Value> {
   readonly values: ReadonlyArray<Value>
@@ -158,7 +142,7 @@ interface NormalizeJiraIssueInput {
 }
 
 interface MutablePerson {
-  readonly providerPersonId: string
+  readonly sourcePersonId: string
   readonly displayName: string
   readonly avatarUrl: string | null
   readonly active: boolean
@@ -166,48 +150,185 @@ interface MutablePerson {
 }
 
 const JsonRecord = Schema.Record(Schema.String, Schema.Json)
-const MAX_RICH_TEXT_CHARACTERS = 4_000
+const MAX_RICH_TEXT_CHARACTERS = 16_000
 const MAX_CHANGE_VALUE_CHARACTERS = 1_000
 const jsonEncoder = new TextEncoder()
 
 const jsonByteLength = (value: unknown): number => jsonEncoder.encode(JSON.stringify(value)).byteLength
 
-const richTextFragments = (value: Schema.Json): ReadonlyArray<string> => {
-  if (typeof value === "string") return [value]
-  if (Array.isArray(value)) return value.flatMap(richTextFragments)
+const decodedJsonRecord = (value: Schema.Json): typeof JsonRecord.Type | null => {
   const decoded = Schema.decodeUnknownResult(JsonRecord)(value)
-  if (Result.isFailure(decoded)) return []
-  const text = decoded.success.text
-  const content = decoded.success.content
-  return [
-    ...(typeof text === "string" ? [text] : []),
-    ...(Array.isArray(content) ? content.flatMap(richTextFragments) : [])
-  ]
+  return Result.isSuccess(decoded) ? decoded.success : null
+}
+
+const normalizedRenderedText = (value: string, maximum: number | null = MAX_RICH_TEXT_CHARACTERS): string | null => {
+  const text = value
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[\t ]+\n/gu, "\n")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim()
+  return text.length === 0 ? null : maximum === null ? text : text.slice(0, maximum)
+}
+
+const adfContent = (record: typeof JsonRecord.Type): ReadonlyArray<Schema.Json> =>
+  Array.isArray(record.content) ? record.content : []
+
+const adfText = (value: Schema.Json): string => {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return value.map(adfText).join("")
+  const record = decodedJsonRecord(value)
+  if (record === null) return ""
+  if (record.type === "hardBreak") return "\n"
+  if (record.type === "mention") {
+    const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
+    return typeof attrs?.text === "string" ? attrs.text : ""
+  }
+  return typeof record.text === "string" ? record.text : adfContent(record).map(adfText).join("")
+}
+
+const indented = (value: string, prefix: string): string =>
+  value
+    .split("\n")
+    .map((line, index) => (index === 0 ? `${prefix}${line}` : `  ${line}`))
+    .join("\n")
+
+const renderAdfBlock = (value: Schema.Json): string => {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) {
+    return value
+      .map(renderAdfBlock)
+      .filter((part) => part.length > 0)
+      .join("\n\n")
+  }
+  const record = decodedJsonRecord(value)
+  if (record === null) return ""
+  const content = adfContent(record)
+  switch (record.type) {
+    case "doc":
+      return content
+        .map(renderAdfBlock)
+        .filter((part) => part.length > 0)
+        .join("\n\n")
+    case "paragraph":
+      return content.map(adfText).join("")
+    case "heading": {
+      const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
+      const level = typeof attrs?.level === "number" && Number.isInteger(attrs.level)
+        ? Math.min(6, Math.max(1, attrs.level))
+        : 1
+      return `${"#".repeat(level)} ${content.map(adfText).join("")}`
+    }
+    case "bulletList":
+      return content.map((item) => indented(renderAdfBlock(item), "- ")).join("\n")
+    case "orderedList": {
+      const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
+      const start = typeof attrs?.order === "number" && Number.isInteger(attrs.order) ? attrs.order : 1
+      return content.map((item, index) => indented(renderAdfBlock(item), `${String(start + index)}. `)).join("\n")
+    }
+    case "listItem":
+      return content
+        .map(renderAdfBlock)
+        .filter((part) => part.length > 0)
+        .join("\n")
+    case "codeBlock": {
+      const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
+      const language = typeof attrs?.language === "string" ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
+      return `\`\`\`${language}\n${content.map(adfText).join("")}\n\`\`\``
+    }
+    case "blockquote":
+      return content
+        .map(renderAdfBlock)
+        .join("\n\n")
+        .split("\n")
+        .map((line) => `> ${line}`)
+        .join("\n")
+    case "rule":
+      return "---"
+    case "hardBreak":
+      return "\n"
+    default:
+      return typeof record.text === "string"
+        ? record.text
+        : content
+          .map(renderAdfBlock)
+          .filter((part) => part.length > 0)
+          .join("\n")
+  }
 }
 
 const normalizeRichText = (value: Schema.Json | null | undefined): string | null => {
   if (value === null || value === undefined) return null
-  const text = richTextFragments(value).join(" ").replace(/\s+/gu, " ").trim()
-  return text.length === 0 ? null : text.slice(0, MAX_RICH_TEXT_CHARACTERS)
+  return normalizedRenderedText(renderAdfBlock(value))
+}
+
+const unboundedRichText = (value: Schema.Json | null | undefined): string | null => {
+  if (value === null || value === undefined) return null
+  return normalizedRenderedText(renderAdfBlock(value), null)
+}
+
+const acceptanceCriteriaFromAdf = (
+  value: Schema.Json | null | undefined,
+  maximum: number | null = MAX_RICH_TEXT_CHARACTERS
+): string | null => {
+  if (value === null || value === undefined || typeof value === "string" || Array.isArray(value)) return null
+  const document = decodedJsonRecord(value)
+  if (document === null) return null
+  const blocks = adfContent(document)
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]
+    if (typeof block !== "object" || block === null || Array.isArray(block)) continue
+    const heading = decodedJsonRecord(block)
+    if (heading?.type !== "heading") continue
+    const headingText = normalizedRenderedText(adfContent(heading).map(adfText).join(""), 255)
+    if (headingText === null || !/^acceptance criteria:?$/iu.test(headingText)) continue
+    const attrs = heading.attrs === undefined ? null : decodedJsonRecord(heading.attrs)
+    const level = typeof attrs?.level === "number" && Number.isInteger(attrs.level) ? attrs.level : 1
+    const criteria: Array<Schema.Json> = []
+    for (const candidate of blocks.slice(index + 1)) {
+      if (typeof candidate === "object" && candidate !== null && !Array.isArray(candidate)) {
+        const candidateRecord = decodedJsonRecord(candidate)
+        if (candidateRecord?.type === "heading") {
+          const candidateAttrs = candidateRecord.attrs === undefined ? null : decodedJsonRecord(candidateRecord.attrs)
+          const candidateLevel = typeof candidateAttrs?.level === "number" && Number.isInteger(candidateAttrs.level)
+            ? candidateAttrs.level
+            : 1
+          if (candidateLevel <= level) break
+        }
+      }
+      criteria.push(candidate)
+    }
+    return normalizedRenderedText(criteria.map(renderAdfBlock).join("\n\n"), maximum)
+  }
+  return null
 }
 
 const compact = (value: string | undefined): string | null =>
   value === undefined ? null : value.slice(0, MAX_CHANGE_VALUE_CHARACTERS)
 
 const namedValue = (value: typeof JiraNamedValue.Type | null | undefined) =>
-  value === null || value === undefined
-    ? null
-    : { id: value.id ?? null, name: value.name ?? null }
+  value === null || value === undefined ? null : { sourceId: value.id ?? null, name: value.name?.slice(0, 255) ?? null }
 
 const relatedIssue = (value: typeof JiraRelatedIssue.Type | null | undefined) =>
   value === null || value === undefined
     ? null
     : {
-      id: value.id ?? null,
-      key: value.key ?? null,
-      summary: value.fields?.summary ?? null,
+      sourceId: value.id ?? null,
+      key: value.key?.slice(0, 100) ?? null,
+      summary: value.fields?.summary?.slice(0, 500) ?? null,
       status: namedValue(value.fields?.status)
     }
+
+const normalizedAvatarUrl = (value: string | undefined): string | null => {
+  if (value === undefined || value.length > 2_048) return null
+  const decoded = Schema.decodeUnknownResult(SourceUrl)(value)
+  return Result.isSuccess(decoded) ? Schema.encodeSync(SourceUrl)(decoded.success) : null
+}
+
+const collaboratorLosesDetail = (user: typeof JiraUser.Type | null | undefined): boolean => {
+  if (user === null || user === undefined || user.accountId === undefined) return false
+  const avatarUrl = user.avatarUrls?.["48x48"] ?? user.avatarUrls?.["32x32"]
+  return (user.displayName?.length ?? 0) > 200 || (avatarUrl !== undefined && normalizedAvatarUrl(avatarUrl) === null)
+}
 
 const addPerson = (
   people: Map<string, MutablePerson>,
@@ -221,9 +342,9 @@ const addPerson = (
     return user.accountId
   }
   people.set(user.accountId, {
-    providerPersonId: user.accountId,
-    displayName: user.displayName ?? user.accountId,
-    avatarUrl: user.avatarUrls?.["48x48"] ?? user.avatarUrls?.["32x32"] ?? null,
+    sourcePersonId: user.accountId,
+    displayName: (user.displayName ?? user.accountId).slice(0, 200),
+    avatarUrl: normalizedAvatarUrl(user.avatarUrls?.["48x48"] ?? user.avatarUrls?.["32x32"]),
     active: user.active ?? true,
     roles: new Set([role])
   })
@@ -269,77 +390,167 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     : input.webBaseUrl.href
   const sourceUrl = new URL(`${baseUrl}/browse/${encodeURIComponent(issue.key)}`)
 
-  const retainedComments = [...comments]
-  const retainedChangelogs = [...changelogs]
-  const retainedLabels = [...(issue.fields.labels ?? [])]
-  const retainedComponents = (issue.fields.components ?? []).map(namedValue)
-  const normalizedFixVersions = (issue.fields.fixVersions ?? []).map((version) => ({
-    id: version.id ?? null,
-    name: version.name ?? null,
-    released: version.released ?? false,
-    releaseDate: version.releaseDate ?? null
-  }))
-  const retainedFixVersions = normalizedFixVersions.slice(0, MAXIMUM_MATERIALIZED_FIX_VERSIONS)
-  const retainedSubtasks = (issue.fields.subtasks ?? []).map(relatedIssue)
-  const truncatedFields = new Set<string>(
-    normalizedFixVersions.length > retainedFixVersions.length ? ["fixVersions"] : []
-  )
+  const truncatedFields = new Set<string>()
+  const retainedComments = comments.slice(0, MAXIMUM_NORMALIZED_ISSUE_COMMENTS)
+  const retainedChangelogs = changelogs.slice(0, MAXIMUM_NORMALIZED_ISSUE_HISTORY)
+  const retainedLabels = (issue.fields.labels ?? [])
+    .map((label) => label.trim().slice(0, 255))
+    .filter((label) => label.length > 0)
+    .slice(0, MAXIMUM_NORMALIZED_ISSUE_LABELS)
+  const retainedComponents = (issue.fields.components ?? [])
+    .slice(0, MAXIMUM_NORMALIZED_ISSUE_COMPONENTS)
+    .map(namedValue)
+  const retainedFixVersions = (issue.fields.fixVersions ?? [])
+    .slice(0, MAXIMUM_NORMALIZED_ISSUE_FIX_VERSIONS)
+    .map((version) => ({
+      sourceId: version.id ?? null,
+      name: version.name?.slice(0, 255) ?? null,
+      released: version.released ?? false,
+      releaseDate: version.releaseDate?.slice(0, 100) ?? null
+    }))
+  const retainedSubtasks = (issue.fields.subtasks ?? []).slice(0, MAXIMUM_NORMALIZED_ISSUE_SUBTASKS).map(relatedIssue)
+  if (comments.length > retainedComments.length || input.comments.truncated) truncatedFields.add("comments")
+  if (changelogs.length > retainedChangelogs.length || input.changelogs.truncated) truncatedFields.add("history")
+  if ((issue.fields.labels?.length ?? 0) > retainedLabels.length) truncatedFields.add("labels")
+  if ((issue.fields.components?.length ?? 0) > retainedComponents.length) truncatedFields.add("components")
+  if ((issue.fields.fixVersions?.length ?? 0) > retainedFixVersions.length) truncatedFields.add("fixVersions")
+  if ((issue.fields.subtasks?.length ?? 0) > retainedSubtasks.length) truncatedFields.add("subtasks")
+  if (changelogs.some(({ items }) => (items?.length ?? 0) > MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES)) {
+    truncatedFields.add("history")
+  }
+  if (issue.key.length > 100) truncatedFields.add("key")
+  if (issue.fields.summary.length > 500) truncatedFields.add("summary")
+  if (issue.fields.updated.length > 100) truncatedFields.add("updatedAt")
+  if ((issue.fields.duedate?.length ?? 0) > 100) truncatedFields.add("dueDate")
+  if ((issue.fields.status?.name?.trim().length ?? 0) > 100) truncatedFields.add("status")
+  if ((issue.fields.priority?.name?.trim().length ?? 0) > 100) truncatedFields.add("priority")
+  if ((issue.fields.issuetype?.name?.length ?? 0) > 255) truncatedFields.add("issueType")
+  if ((issue.fields.resolution?.name?.length ?? 0) > 255) truncatedFields.add("resolution")
+  if ((issue.fields.project?.key?.length ?? 0) > 100 || (issue.fields.project?.name?.length ?? 0) > 255) {
+    truncatedFields.add("project")
+  }
+  if ((issue.fields.labels ?? []).some((label) => label.trim().length === 0 || label.trim().length > 255)) {
+    truncatedFields.add("labels")
+  }
+  if ((issue.fields.components ?? []).some(({ name }) => (name?.length ?? 0) > 255)) {
+    truncatedFields.add("components")
+  }
+  if ((issue.fields.fixVersions ?? []).some(({ releaseDate }) => (releaseDate?.length ?? 0) > 100)) {
+    truncatedFields.add("fixVersions")
+  }
+  if (
+    issue.fields.parent !== null &&
+    issue.fields.parent !== undefined &&
+    ((issue.fields.parent.key?.length ?? 0) > 100 ||
+      (issue.fields.parent.fields?.summary?.length ?? 0) > 500 ||
+      (issue.fields.parent.fields?.status?.name?.length ?? 0) > 255)
+  ) {
+    truncatedFields.add("parent")
+  }
+  if (
+    (issue.fields.subtasks ?? []).some(
+      (subtask) =>
+        (subtask.key?.length ?? 0) > 100 ||
+        (subtask.fields?.summary?.length ?? 0) > 500 ||
+        (subtask.fields?.status?.name?.length ?? 0) > 255
+    )
+  ) {
+    truncatedFields.add("subtasks")
+  }
+  if (comments.some((comment) => (unboundedRichText(comment.body)?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS)) {
+    truncatedFields.add("comments")
+  }
+  if (
+    changelogs.some(({ items }) =>
+      (items ?? []).some(
+        (item) =>
+          (item.field ?? item.fieldId ?? "unknown").length > 255 ||
+          ((item.fromString ?? item.from)?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS ||
+          ((item.toString ?? item.to)?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS
+      )
+    )
+  ) {
+    truncatedFields.add("history")
+  }
+  if (
+    [issue.fields.assignee, issue.fields.reporter, issue.fields.creator].some(collaboratorLosesDetail) ||
+    comments.some(
+      ({ author, updateAuthor }) => collaboratorLosesDetail(author) || collaboratorLosesDetail(updateAuthor)
+    ) ||
+    changelogs.some(({ author }) => collaboratorLosesDetail(author))
+  ) {
+    truncatedFields.add("collaborators")
+  }
   let compactCollaborators = false
-  let retainedDescription = normalizeRichText(issue.fields.description)
-  let retainedEnvironment = normalizeRichText(issue.fields.environment)
-  let retainedStatus = namedValue(issue.fields.status)
-  let retainedPriority = namedValue(issue.fields.priority)
+  const description = unboundedRichText(issue.fields.description)
+  const acceptanceCriteria = acceptanceCriteriaFromAdf(issue.fields.description, null)
+  const environment = unboundedRichText(issue.fields.environment)
+  if ((description?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS) truncatedFields.add("description")
+  if ((acceptanceCriteria?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS) {
+    truncatedFields.add("acceptanceCriteria")
+  }
+  if ((environment?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS) truncatedFields.add("environment")
+  let retainedDescription = description?.slice(0, MAX_RICH_TEXT_CHARACTERS) ?? null
+  let retainedAcceptanceCriteria = acceptanceCriteria?.slice(0, MAX_RICH_TEXT_CHARACTERS) ?? null
+  let retainedEnvironment = environment?.slice(0, MAX_RICH_TEXT_CHARACTERS) ?? null
+  let retainedStatus = issue.fields.status?.name?.trim().slice(0, 100) || "unknown"
+  let retainedPriority = issue.fields.priority?.name?.trim().slice(0, 100) || null
   let retainedIssueType = namedValue(issue.fields.issuetype)
   let retainedProject = issue.fields.project === null || issue.fields.project === undefined
     ? null
     : {
-      id: issue.fields.project.id ?? null,
-      key: issue.fields.project.key ?? null,
-      name: issue.fields.project.name ?? null
+      sourceId: issue.fields.project.id ?? null,
+      key: issue.fields.project.key?.slice(0, 100) ?? null,
+      name: issue.fields.project.name?.slice(0, 255) ?? null
     }
   let retainedResolution = namedValue(issue.fields.resolution)
   let retainedCreatedAt: string | null = issue.fields.created ?? null
-  let retainedDueDate: string | null = issue.fields.duedate ?? null
+  let retainedDueDate: string | null = issue.fields.duedate?.slice(0, 100) ?? null
   let retainedResolvedAt: string | null = issue.fields.resolutiondate ?? null
   let retainedParent = relatedIssue(issue.fields.parent)
   const makeAttributes = () => {
     const people = new Map<string, MutablePerson>()
-    const assigneeId = addPerson(people, issue.fields.assignee, "assignee")
-    const reporterId = addPerson(people, issue.fields.reporter, "reporter")
-    const creatorId = addPerson(people, issue.fields.creator, "creator")
+    const assigneeSourcePersonId = addPerson(people, issue.fields.assignee, "assignee")
+    const reporterSourcePersonId = addPerson(people, issue.fields.reporter, "reporter")
+    const creatorSourcePersonId = addPerson(people, issue.fields.creator, "creator")
     const normalizedComments = retainedComments.map((comment) => ({
-      id: comment.id,
-      authorId: addPerson(people, comment.author, "commenter"),
-      updateAuthorId: addPerson(people, comment.updateAuthor, "comment-editor"),
+      sourceId: comment.id,
+      authorSourcePersonId: addPerson(people, comment.author, "commenter"),
+      updateAuthorSourcePersonId: addPerson(people, comment.updateAuthor, "comment-editor"),
       body: normalizeRichText(comment.body),
       createdAt: comment.created ?? null,
       updatedAt: comment.updated ?? null
     }))
     const normalizedHistory = retainedChangelogs.map((history) => ({
-      id: history.id,
-      authorId: addPerson(people, history.author, "change-author"),
+      sourceId: history.id,
+      authorSourcePersonId: addPerson(people, history.author, "change-author"),
       createdAt: history.created ?? null,
-      changes: (history.items ?? []).map((item) => ({
-        field: item.field ?? item.fieldId ?? "unknown",
+      changes: (history.items ?? []).slice(0, MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES).map((item) => ({
+        field: (item.field ?? item.fieldId ?? "unknown").slice(0, 255),
         from: compact(item.fromString ?? item.from),
         to: compact(item.toString ?? item.to)
       }))
     }))
-    const collaborators = Array.from(people.values()).map((person) => ({
-      providerPersonId: person.providerPersonId,
-      displayName: compactCollaborators ? person.providerPersonId : person.displayName,
+    const collaboratorValues = Array.from(people.values())
+    if (collaboratorValues.length > MAXIMUM_NORMALIZED_ISSUE_COLLABORATORS) {
+      truncatedFields.add("collaborators")
+    }
+    const collaborators = collaboratorValues.slice(0, MAXIMUM_NORMALIZED_ISSUE_COLLABORATORS).map((person) => ({
+      sourcePersonId: person.sourcePersonId,
+      displayName: compactCollaborators ? person.sourcePersonId : person.displayName,
       avatarUrl: compactCollaborators ? null : person.avatarUrl,
       active: person.active,
       roles: Array.from(person.roles).sort()
     }))
     return {
-      schemaVersion: 1,
-      key: issue.key,
-      summary: issue.fields.summary,
+      key: issue.key.slice(0, 100),
+      summary: issue.fields.summary.slice(0, 500),
       description: retainedDescription,
+      acceptanceCriteria: retainedAcceptanceCriteria,
       environment: retainedEnvironment,
       status: retainedStatus,
       priority: retainedPriority,
+      estimatePoints: issue.fields.estimatePoints ?? null,
       issueType: retainedIssueType,
       project: retainedProject,
       resolution: retainedResolution,
@@ -347,14 +558,14 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       components: retainedComponents,
       fixVersions: retainedFixVersions,
       createdAt: retainedCreatedAt,
-      updatedAt: issue.fields.updated,
+      updatedAt: issue.fields.updated.slice(0, 100),
       dueDate: retainedDueDate,
       resolvedAt: retainedResolvedAt,
       parent: retainedParent,
       subtasks: retainedSubtasks,
-      assigneeId,
-      reporterId,
-      creatorId,
+      assigneeSourcePersonId,
+      reporterSourcePersonId,
+      creatorSourcePersonId,
       collaborators,
       truncatedFields: Array.from(truncatedFields).sort(),
       comments: normalizedComments,
@@ -379,8 +590,10 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     for (let removed = 0; removed < removeCount; removed += 1) {
       if (retainedComments.length >= retainedChangelogs.length && retainedComments.length > 0) {
         retainedComments.shift()
+        truncatedFields.add("comments")
       } else {
         retainedChangelogs.shift()
+        truncatedFields.add("history")
       }
     }
     attributes = makeAttributes()
@@ -429,9 +642,9 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       field: "collaborators",
       removableBytes: () => {
         if (compactCollaborators) return 0
-        const compacted = attributes.collaborators.map(({ active, providerPersonId, roles }) => ({
-          providerPersonId,
-          displayName: providerPersonId,
+        const compacted = attributes.collaborators.map(({ active, roles, sourcePersonId }) => ({
+          sourcePersonId,
+          displayName: sourcePersonId,
           avatarUrl: null,
           active,
           roles
@@ -469,6 +682,10 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
         retainedDescription = null
       }, retainedDescription !== null),
     () =>
+      clearValue("acceptanceCriteria", () => {
+        retainedAcceptanceCriteria = null
+      }, retainedAcceptanceCriteria !== null),
+    () =>
       clearValue("parent", () => {
         retainedParent = null
       }, retainedParent !== null),
@@ -490,8 +707,8 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       }, retainedIssueType !== null),
     () =>
       clearValue("status", () => {
-        retainedStatus = null
-      }, retainedStatus !== null),
+        retainedStatus = "unknown"
+      }, retainedStatus !== "unknown"),
     () =>
       clearValue("dueDate", () => {
         retainedDueDate = null
@@ -513,6 +730,10 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     if (optionalFieldTruncations[step]?.()) attributes = makeAttributes()
   }
 
+  const normalizedAttributes = yield* Schema.decodeUnknownEffect(NormalizedIssueAttributes)(attributes).pipe(
+    Effect.mapError(() => malformed("jira-normalized-issue-attributes-invalid"))
+  )
+
   const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
     _tag: "UpsertEntity",
     eventId: `jira:issue:${issue.id}:${issue.fields.updated}`,
@@ -522,7 +743,7 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
     vendorImmutableId: issue.id,
     sourceUrl,
     title: `${issue.key} · ${issue.fields.summary}`.slice(0, 500),
-    attributes
+    attributes: normalizedAttributes
   }).pipe(Effect.mapError(() => malformed("jira-normalized-issue-invalid")))
   if (event._tag !== "UpsertEntity") return yield* malformed("jira-normalized-event-kind-invalid")
   return event
@@ -534,7 +755,7 @@ const normalizedEvent = Effect.fn("JiraIssueNormalization.normalizedEvent")(func
   )
 })
 
-const releaseRevision = (version: typeof NormalizedJiraIssueAttributes.Type["fixVersions"][number]): string =>
+const releaseRevision = (version: typeof NormalizedIssueFixVersion.Type): string =>
   `${version.released ? "released" : "candidate"}:${version.releaseDate ?? "none"}:${version.name ?? "unnamed"}`
 
 /** Normalize one synchronized Jira issue into canonical issue, person, release, and evidence events. @internal */
@@ -542,22 +763,22 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
   input: NormalizeJiraIssueInput
 ): Effect.fn.Return<ReadonlyArray<NormalizedPluginEventV1>, PluginMalformedResponseFailure> {
   const issueEvent = yield* normalizeJiraIssue(input)
-  const attributes = yield* Schema.decodeUnknownEffect(NormalizedJiraIssueAttributes)(issueEvent.attributes).pipe(
+  const attributes = yield* Schema.decodeUnknownEffect(NormalizedIssueAttributes)(issueEvent.attributes).pipe(
     Effect.mapError(() => malformed("jira-normalized-issue-attributes-invalid"))
   )
   const events: Array<NormalizedPluginEventV1> = [issueEvent]
 
-  for (const collaborator of attributes.collaborators.slice(0, MAXIMUM_MATERIALIZED_COLLABORATORS)) {
+  for (const collaborator of attributes.collaborators ?? []) {
     const avatarUrl = collaborator.avatarUrl === null
       ? null
       : Schema.decodeUnknownResult(SourceUrl)(collaborator.avatarUrl)
     events.push(
       yield* normalizedEvent({
         _tag: "UpsertPerson",
-        eventId: `jira:person:${collaborator.providerPersonId}:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
+        eventId: `jira:person:${collaborator.sourcePersonId}:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision: issueEvent.revision,
-        vendorPersonId: collaborator.providerPersonId,
+        vendorPersonId: collaborator.sourcePersonId,
         displayName: collaborator.displayName.slice(0, 200),
         avatarUrl: avatarUrl === null || Result.isFailure(avatarUrl) ? null : avatarUrl.success,
         active: collaborator.active
@@ -566,8 +787,8 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
   }
 
   const activitySummary = [
-    `comments ${String(attributes.commentTotal)}${attributes.commentsTruncated ? "+" : ""}`,
-    `history ${String(attributes.historyTotal)}${attributes.historyTruncated ? "+" : ""}`
+    `comments ${String(attributes.commentTotal ?? 0)}${attributes.commentsTruncated ? "+" : ""}`,
+    `history ${String(attributes.historyTotal ?? 0)}${attributes.historyTruncated ? "+" : ""}`
   ].join(", ")
   events.push(
     yield* normalizedEvent({
@@ -590,17 +811,17 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
     })
   )
 
-  for (const version of attributes.fixVersions.slice(0, MAXIMUM_MATERIALIZED_FIX_VERSIONS)) {
-    if (version.id === null || version.name === null) continue
+  for (const version of attributes.fixVersions ?? []) {
+    if (version.sourceId === null || version.name === null) continue
     const revision = releaseRevision(version)
-    const releaseVendorId = `jira-version:${version.id}`
+    const releaseVendorId = `jira-version:${version.sourceId}`
     const projectKey = attributes.project?.key
     const fixVersionEvidenceId =
-      `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`
+      `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.sourceId}:${issueEvent.revision}`
     events.push(
       yield* normalizedEvent({
         _tag: "UpsertEntity",
-        eventId: `jira:version:${version.id}:issue:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
+        eventId: `jira:version:${version.sourceId}:issue:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision,
         entityType: "release",
@@ -615,20 +836,20 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
         attributes: {
           schemaVersion: 1,
           source: "jira-fix-version",
-          projectId: attributes.project?.id ?? null,
+          projectId: attributes.project?.sourceId ?? null,
           projectKey: projectKey ?? null,
           serviceName: (attributes.project?.name ?? projectKey ?? "Jira").slice(0, 200),
           version: version.name.slice(0, 100),
           lifecycle: version.released ? "released" : "candidate",
           releaseDate: version.releaseDate,
-          fixVersionId: version.id
+          fixVersionId: version.sourceId
         }
       })
     )
     events.push(
       yield* normalizedEvent({
         _tag: "AppendEvidence",
-        eventId: `jira:evidence:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
+        eventId: `jira:evidence:${issueEvent.vendorImmutableId}:fix-version:${version.sourceId}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision: issueEvent.revision,
         evidenceId: fixVersionEvidenceId,

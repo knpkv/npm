@@ -14,6 +14,7 @@ import { type NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } fr
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { makeDeliveryGraphInspection } from "../../src/server/application/deliveryGraphInspection.js"
 import {
   materializeNormalizedPluginPage,
   type NormalizedPluginPageMaterializationScope
@@ -133,6 +134,126 @@ const materializedPage = Schema.decodeSync(PluginSyncPageV1)({
     evidenceIds: ["review-ready"]
   }]
 })
+
+const richIssueAttributes = {
+  key: "PAY-42",
+  status: "In Review",
+  priority: "High",
+  estimatePoints: 5,
+  summary: "Protect payment retries",
+  description: "Persist retry state.\n\n## Acceptance Criteria\n\n- Restart-safe\n- Timeout-safe",
+  acceptanceCriteria: "- Restart-safe\n- Timeout-safe",
+  environment: "Production and staging",
+  issueType: { sourceId: "10001", name: "Story" },
+  project: { sourceId: "10", key: "PAY", name: "Payments" },
+  resolution: null,
+  labels: ["payments", "release-candidate"],
+  components: [{ sourceId: "7", name: "Checkout" }],
+  fixVersions: [{ sourceId: "2026.29", name: "2026.29", released: false, releaseDate: null }],
+  createdAt: "2026-07-15T08:00:00.000Z",
+  updatedAt: "2026-07-17T09:30:00.000Z",
+  dueDate: "2026-07-21",
+  resolvedAt: null,
+  parent: {
+    sourceId: "10000",
+    key: "PAY-1",
+    summary: "Payments hardening",
+    status: { sourceId: "3", name: "In Progress" }
+  },
+  subtasks: [
+    {
+      sourceId: "10043",
+      key: "PAY-43",
+      summary: "Cover timeout path",
+      status: { sourceId: "1", name: "Open" }
+    }
+  ],
+  assigneeSourcePersonId: "ari",
+  reporterSourcePersonId: "sam",
+  creatorSourcePersonId: "sam",
+  collaborators: [
+    {
+      sourcePersonId: "ari",
+      displayName: "Ari Chen",
+      avatarUrl: "https://avatar.example/ari.png",
+      active: true,
+      roles: ["assignee", "commenter"]
+    },
+    {
+      sourcePersonId: "sam",
+      displayName: "Sam Rivera",
+      avatarUrl: null,
+      active: true,
+      roles: ["change-author", "creator", "reporter"]
+    }
+  ],
+  comments: [
+    {
+      sourceId: "c1",
+      authorSourcePersonId: "ari",
+      updateAuthorSourcePersonId: null,
+      body: "Ready for review.",
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T10:00:00.000Z"
+    }
+  ],
+  commentTotal: 2,
+  commentsTruncated: true,
+  history: [
+    {
+      sourceId: "h1",
+      authorSourcePersonId: "sam",
+      createdAt: "2026-07-16T09:00:00.000Z",
+      changes: [{ field: "status", from: "In Progress", to: "In Review" }]
+    }
+  ],
+  historyTotal: 1,
+  historyTruncated: false,
+  truncatedFields: ["comments"]
+}
+
+const richIssuePage = (revision: 1 | 2) =>
+  Schema.decodeSync(PluginSyncPageV1)({
+    checkpointAfterPage: `rich-issue-${revision}`,
+    hasMore: false,
+    events: [
+      {
+        _tag: "UpsertEntity",
+        eventId: `rich-issue-pay-42-${revision}`,
+        observedAt: revision === 1 ? "2026-07-19T09:01:20.000Z" : "2026-07-19T09:02:20.000Z",
+        revision: `issue-revision-${revision}`,
+        entityType: "jira.issue",
+        vendorImmutableId: "rich-issue-42",
+        sourceUrl: "https://jira.example/browse/PAY-42",
+        title: revision === 1 ? "PAY-42 · Protect payment retries" : "PAY-42 · Payment retries protected",
+        attributes: revision === 1
+          ? richIssueAttributes
+          : {
+            ...richIssueAttributes,
+            status: "Done",
+            summary: "Payment retries protected",
+            description: "Retry state is durable in production.",
+            acceptanceCriteria: "- Restart-safe\n- Timeout-safe\n- Verified in production",
+            resolution: { sourceId: "10000", name: "Done" },
+            updatedAt: "2026-07-19T09:02:00.000Z",
+            resolvedAt: "2026-07-19T09:02:00.000Z",
+            comments: [
+              {
+                sourceId: "c2",
+                authorSourcePersonId: "sam",
+                updateAuthorSourcePersonId: "sam",
+                body: "Verified in production.",
+                createdAt: "2026-07-19T09:01:00.000Z",
+                updatedAt: "2026-07-19T09:01:30.000Z"
+              }
+            ],
+            commentTotal: 2,
+            commentsTruncated: false,
+            truncatedFields: []
+          }
+      }
+    ]
+  })
 
 const tombstonePage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "tombstone-complete",
@@ -303,6 +424,73 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        const scope: NormalizedPluginPageMaterializationScope = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }
+
+        yield* materializeNormalizedPluginPage(scope, richIssuePage(1))
+        const firstIndex = yield* items()
+        const entityId = firstIndex.items[0]?.projection.entityId
+        if (entityId === undefined) return yield* Effect.die("expected rich Jira entity")
+
+        yield* materializeNormalizedPluginPage(
+          {
+            ...scope,
+            expectedRevision: 1,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          richIssuePage(2)
+        )
+
+        const first = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "entityProjection",
+          entityId,
+          revision: 1
+        })
+        if (first._tag !== "entityProjection") return yield* Effect.die("expected first projection revision")
+        assert.strictEqual(first.value.projection.details._tag, "issue")
+        if (first.value.projection.details._tag !== "issue") return yield* Effect.die("expected issue detail")
+        assert.strictEqual(first.value.projection.details.description, richIssueAttributes.description)
+        assert.strictEqual(first.value.projection.details.acceptanceCriteria, richIssueAttributes.acceptanceCriteria)
+        assert.strictEqual(first.value.projection.details.comments?.[0]?.sourceId, "c1")
+        assert.strictEqual(first.value.projection.details.history?.[0]?.changes[0]?.to, "In Review")
+        assert.strictEqual(first.value.projection.details.fixVersions?.[0]?.name, "2026.29")
+        assert.deepStrictEqual(first.value.projection.details.truncatedFields, ["comments"])
+
+        const inspectionService = yield* makeDeliveryGraphInspection
+        const inspection = yield* inspectionService.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+        assert.strictEqual(inspection.entity.projection.projectionRevision, 2)
+        assert.strictEqual(inspection.entity.projection.sourceEntityRevision, 2)
+        assert.strictEqual(inspection.entity.projection.details._tag, "issue")
+        if (inspection.entity.projection.details._tag !== "issue") return yield* Effect.die("expected issue detail")
+        const details = inspection.entity.projection.details
+        assert.strictEqual(details.status, "Done")
+        assert.strictEqual(details.description, "Retry state is durable in production.")
+        assert.strictEqual(details.acceptanceCriteria, "- Restart-safe\n- Timeout-safe\n- Verified in production")
+        assert.strictEqual(details.comments?.[0]?.sourceId, "c2")
+        assert.strictEqual(details.comments?.[0]?.updateAuthorSourcePersonId, "sam")
+        assert.strictEqual(details.history?.[0]?.sourceId, "h1")
+        assert.strictEqual(details.collaborators?.[0]?.sourcePersonId, "ari")
+        assert.strictEqual(details.collaborators?.[0]?.avatarUrl, "https://avatar.example/ari.png")
+        assert.strictEqual(details.fixVersions?.[0]?.sourceId, "2026.29")
+        assert.isFalse(details.commentsTruncated)
+        assert.deepStrictEqual(details.truncatedFields, [])
+        assert.isTrue(inspection.isSourceCurrent)
+      })
+    ))
+
   it.effect("projects a normalized Jira fix version into the canonical release repository", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence

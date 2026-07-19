@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 
+import { NormalizedIssueAttributes } from "../../src/domain/normalizedIssue.js"
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
@@ -47,9 +48,31 @@ const issue = {
     summary: "Protect payment retries",
     description: {
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "Keep retry state durable." }] }]
+      content: [
+        { type: "paragraph", content: [{ type: "text", text: "Keep retry state durable." }] },
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Acceptance Criteria" }] },
+        {
+          type: "bulletList",
+          content: [
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Retry survives restart." }] }]
+            },
+            {
+              type: "listItem",
+              content: [{ type: "paragraph", content: [{ type: "text", text: "Timeout is covered." }] }]
+            }
+          ]
+        },
+        { type: "codeBlock", content: [{ type: "text", text: "retry();" }] },
+        { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Notes" }] },
+        { type: "paragraph", content: [{ type: "text", text: "Legacy retries are out of scope." }] }
+      ]
     },
-    environment: null,
+    environment: {
+      type: "doc",
+      content: [{ type: "paragraph", content: [{ type: "text", text: "Production and staging" }] }]
+    },
     status: { id: "3", name: "In Review" },
     priority: { id: "2", name: "High" },
     issuetype: { id: "10001", name: "Story" },
@@ -164,34 +187,7 @@ const withConnection = <Value, Error>(
   return use.pipe(Effect.provide(runtime.layer), Effect.scoped)
 }
 
-const ExpectedAttributes = Schema.Struct({
-  key: Schema.String,
-  description: Schema.NullOr(Schema.String),
-  status: Schema.NullOr(Schema.Struct({ id: Schema.NullOr(Schema.String), name: Schema.NullOr(Schema.String) })),
-  assigneeId: Schema.NullOr(Schema.String),
-  reporterId: Schema.NullOr(Schema.String),
-  labels: Schema.Array(Schema.String),
-  truncatedFields: Schema.Array(Schema.String),
-  comments: Schema.Array(Schema.Struct({
-    id: Schema.String,
-    authorId: Schema.NullOr(Schema.String),
-    body: Schema.NullOr(Schema.String)
-  })),
-  commentTotal: Schema.Number,
-  commentsTruncated: Schema.Boolean,
-  history: Schema.Array(Schema.Struct({
-    id: Schema.String,
-    authorId: Schema.NullOr(Schema.String)
-  })),
-  historyTotal: Schema.Number,
-  historyTruncated: Schema.Boolean,
-  collaborators: Schema.Array(Schema.Struct({
-    providerPersonId: Schema.String,
-    displayName: Schema.String,
-    avatarUrl: Schema.NullOr(Schema.String),
-    roles: Schema.Array(Schema.String)
-  }))
-})
+const ExpectedAttributes = NormalizedIssueAttributes
 
 describe("JiraReadPlugin", () => {
   it("accepts only HTTPS Jira Cloud tenant root URLs", () => {
@@ -296,20 +292,35 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(result.event.vendorImmutableId, "10042")
       assert.strictEqual(result.event.title, "PAY-42 · Protect payment retries")
       assert.strictEqual(result.event.sourceUrl?.href, "https://acme.atlassian.net/browse/PAY-42")
-      assert.strictEqual(attributes.description, "Keep retry state durable.")
-      assert.deepStrictEqual(attributes.status, { id: "3", name: "In Review" })
-      assert.strictEqual(attributes.comments.length, 3)
-      assert.strictEqual(attributes.comments[1]?.body, "Please cover the timeout path.")
-      assert.strictEqual(attributes.history.length, 2)
+      assert.strictEqual(
+        attributes.description,
+        [
+          "Keep retry state durable.",
+          "## Acceptance Criteria",
+          "- Retry survives restart.\n- Timeout is covered.",
+          "```\nretry();\n```",
+          "## Notes",
+          "Legacy retries are out of scope."
+        ].join("\n\n")
+      )
+      assert.strictEqual(
+        attributes.acceptanceCriteria,
+        "- Retry survives restart.\n- Timeout is covered.\n\n```\nretry();\n```"
+      )
+      assert.strictEqual(attributes.environment, "Production and staging")
+      assert.strictEqual(attributes.status, "In Review")
+      assert.strictEqual(attributes.comments?.length, 3)
+      assert.strictEqual(attributes.comments?.[1]?.body, "Please cover the timeout path.")
+      assert.strictEqual(attributes.history?.length, 2)
       assert.isFalse(attributes.commentsTruncated)
       assert.isFalse(attributes.historyTruncated)
       assert.deepStrictEqual(attributes.truncatedFields, [])
       assert.deepStrictEqual(yield* Ref.get(commentStarts), [0, 2])
       assert.deepStrictEqual(yield* Ref.get(historyStarts), [0])
 
-      const sam = attributes.collaborators.find(({ providerPersonId }) => providerPersonId === "sam")
+      const sam = attributes.collaborators?.find(({ sourcePersonId }) => sourcePersonId === "sam")
       assert.deepStrictEqual(sam?.roles, ["change-author", "commenter", "creator", "reporter"])
-      const ari = attributes.collaborators.find(({ providerPersonId }) => providerPersonId === "ari")
+      const ari = attributes.collaborators?.find(({ sourcePersonId }) => sourcePersonId === "ari")
       assert.strictEqual(ari?.avatarUrl, "https://avatar.example/ari.png")
     }))
 
@@ -351,8 +362,8 @@ describe("JiraReadPlugin", () => {
       assert.deepStrictEqual(yield* Ref.get(historyStarts), [0, 2])
       assert.strictEqual(attributes.commentTotal, comments.length)
       assert.strictEqual(attributes.historyTotal, extendedChangelogs.length)
-      assert.lengthOf(attributes.comments, comments.length)
-      assert.lengthOf(attributes.history, extendedChangelogs.length)
+      assert.lengthOf(attributes.comments ?? [], comments.length)
+      assert.lengthOf(attributes.history ?? [], extendedChangelogs.length)
       assert.isFalse(attributes.commentsTruncated)
       assert.isFalse(attributes.historyTruncated)
     }))
@@ -414,11 +425,72 @@ describe("JiraReadPlugin", () => {
       if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
       assert.isBelow(new TextEncoder().encode(JSON.stringify(result.event.attributes)).byteLength, 262_145)
-      assert.isBelow(attributes.comments.length, largeComments.length)
-      assert.isBelow(attributes.history.length, largeChangelogs.length)
+      assert.isBelow(attributes.comments?.length ?? 0, largeComments.length)
+      assert.isBelow(attributes.history?.length ?? 0, largeChangelogs.length)
       assert.isTrue(attributes.commentsTruncated)
       assert.isTrue(attributes.historyTruncated)
-      assert.deepStrictEqual(attributes.truncatedFields, [])
+      assert.deepStrictEqual(attributes.truncatedFields, ["comments", "history"])
+    }))
+
+  it.effect("reports clipping of rich text and individual collection values", () =>
+    Effect.gen(function*() {
+      const clippedIssue = {
+        ...issue,
+        fields: {
+          ...issue.fields,
+          description: {
+            type: "doc",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "d".repeat(20_000) }] },
+              { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Acceptance Criteria" }] },
+              { type: "paragraph", content: [{ type: "text", text: "a".repeat(20_000) }] }
+            ]
+          },
+          labels: ["l".repeat(1_000)],
+          components: [{ id: "7", name: "c".repeat(1_000) }],
+          fixVersions: [{ id: "v1", name: "Version 1", releaseDate: "2".repeat(200) }],
+          subtasks: [{ id: "s1", key: "PAY-43", fields: { summary: "s".repeat(1_000) } }]
+        }
+      }
+      const provider = baseProvider({
+        getIssue: () => Effect.succeed(Option.some(clippedIssue)),
+        getComments: (_issueId, request) =>
+          Effect.succeed({
+            comments: [{ ...comments[0], body: "m".repeat(20_000) }],
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: 1
+          }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({
+            values: [
+              {
+                ...changelogs[0],
+                items: [{ field: "f".repeat(300), fromString: "x".repeat(2_000), toString: "y".repeat(2_000) }]
+              }
+            ],
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: 1
+          })
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected a clipped Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+      assert.lengthOf(attributes.description ?? "", 16_000)
+      assert.lengthOf(attributes.acceptanceCriteria ?? "", 16_000)
+      assert.isTrue(attributes.truncatedFields?.includes("acceptanceCriteria"))
+      assert.isTrue(attributes.truncatedFields?.includes("comments"))
+      assert.isTrue(attributes.truncatedFields?.includes("components"))
+      assert.isTrue(attributes.truncatedFields?.includes("description"))
+      assert.isTrue(attributes.truncatedFields?.includes("fixVersions"))
+      assert.isTrue(attributes.truncatedFields?.includes("history"))
+      assert.isTrue(attributes.truncatedFields?.includes("labels"))
+      assert.isTrue(attributes.truncatedFields?.includes("subtasks"))
     }))
 
   it.effect("trims oversized fixed issue attributes with explicit field metadata", () =>
@@ -434,9 +506,26 @@ describe("JiraReadPlugin", () => {
         fields: {
           ...issue.fields,
           assignee: oversizedUser("oversized-assignee", "a"),
-          reporter: oversizedUser("oversized-reporter", "r"),
+          reporter: {
+            ...oversizedUser("oversized-reporter", "r"),
+            avatarUrls: { "48x48": "javascript:alert(1)" }
+          },
           creator: oversizedUser("oversized-creator", "c"),
-          labels: Array.from({ length: 9 }, (_, index) => `${index}${"l".repeat(32_767)}`)
+          labels: Array.from({ length: 200 }, (_, index) => `${index}${"l".repeat(32_000)}`),
+          components: Array.from({ length: 100 }, (_, index) => ({
+            id: `component-${index}`,
+            name: `component-${index}-${"c".repeat(32_000)}`
+          })),
+          fixVersions: Array.from({ length: 100 }, (_, index) => ({
+            id: `version-${index}`,
+            name: `version-${index}-${"v".repeat(230)}`,
+            released: false
+          })),
+          subtasks: Array.from({ length: 200 }, (_, index) => ({
+            id: `subtask-${index}`,
+            key: `PAY-${index + 100}`,
+            fields: { summary: `Subtask ${index} ${"s".repeat(32_000)}` }
+          }))
         }
       }
       const provider = baseProvider({
@@ -458,12 +547,12 @@ describe("JiraReadPlugin", () => {
         new TextEncoder().encode(JSON.stringify(result.event.attributes)).byteLength,
         MaximumPluginPayloadBytes
       )
-      assert.deepStrictEqual(attributes.labels, [])
-      assert.deepStrictEqual(attributes.truncatedFields, ["collaborators", "labels"])
-      assert.isTrue(attributes.collaborators.every(({ avatarUrl }) => avatarUrl === null))
-      assert.isTrue(
-        attributes.collaborators.every(({ displayName, providerPersonId }) => displayName === providerPersonId)
-      )
+      assert.isAbove(attributes.truncatedFields?.length ?? 0, 0)
+      assert.isTrue(attributes.truncatedFields?.includes("subtasks"))
+      assert.lengthOf(attributes.subtasks ?? [], 200)
+      assert.lengthOf(attributes.subtasks?.[0]?.summary ?? "", 500)
+      assert.lengthOf(attributes.labels?.[0] ?? "", 255)
+      assert.isTrue(attributes.collaborators?.every(({ avatarUrl }) => avatarUrl === null))
     }))
 
   it.effect("reports an inconsistent empty provider page as truncated", () =>

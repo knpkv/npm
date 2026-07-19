@@ -27,6 +27,7 @@ import {
   ReleaseId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
+import { NormalizedIssueAttributes } from "../../domain/normalizedIssue.js"
 import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
@@ -80,6 +81,12 @@ const EntityAttributes = Schema.Struct({
     state: OptionalText
   }))
 })
+const LegacyIssueAttributes = Schema.Struct({
+  key: OptionalText,
+  status: Schema.optionalKey(Schema.NullOr(NamedText)),
+  priority: Schema.optionalKey(Schema.NullOr(NamedText)),
+  estimatePoints: Schema.optionalKey(Schema.NullOr(Schema.Number))
+})
 const ReleaseAttributes = Schema.Struct({
   serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
@@ -87,7 +94,7 @@ const ReleaseAttributes = Schema.Struct({
 })
 const JiraIssueRelationshipSnapshot = Schema.Struct({
   fixVersions: Schema.Array(Schema.Struct({
-    id: Schema.NullOr(Schema.String)
+    sourceId: Schema.NullOr(Schema.String)
   })),
   truncatedFields: Schema.Array(Schema.String)
 })
@@ -122,6 +129,26 @@ const bounded = (value: string | null | undefined, fallback: string, maximum: nu
 
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : value?.name ?? null
+
+const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.decodeIssueAttributes")(function*(
+  event: EntityUpsert
+) {
+  const normalized = Schema.decodeUnknownResult(NormalizedIssueAttributes)(event.attributes)
+  if (Result.isSuccess(normalized)) return normalized.success
+
+  const legacy = yield* Schema.decodeUnknownEffect(LegacyIssueAttributes)(event.attributes).pipe(
+    Effect.mapError(() => malformed("normalized-issue-attributes-invalid", event.eventId))
+  )
+  const key = bounded(legacy.key, event.vendorImmutableId, 100)
+  return yield* Schema.decodeUnknownEffect(NormalizedIssueAttributes)({
+    key,
+    status: bounded(namedText(legacy.status), "unknown", 100),
+    priority: legacy.priority === null || legacy.priority === undefined
+      ? null
+      : bounded(namedText(legacy.priority), "unknown", 100),
+    estimatePoints: legacy.estimatePoints ?? null
+  }).pipe(Effect.mapError(() => malformed("normalized-issue-attributes-invalid", event.eventId)))
+})
 
 const canonicalKind = (entityType: string): typeof DeliveryEntityKind.Type | null => {
   switch (entityType) {
@@ -210,17 +237,12 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
   const attributes = yield* decodedAttributes(event)
   switch (kind) {
     case "issue": {
-      const key = bounded(attributes.key, event.vendorImmutableId, 100)
+      const issueAttributes = yield* decodedIssueAttributes(event)
       return {
-        displayKey: key,
+        displayKey: issueAttributes.key,
         details: {
           _tag: "issue",
-          key,
-          status: bounded(namedText(attributes.status), "unknown", 100),
-          priority: attributes.priority === null || attributes.priority === undefined
-            ? null
-            : bounded(namedText(attributes.priority), "unknown", 100),
-          estimatePoints: attributes.estimatePoints ?? null
+          ...issueAttributes
         }
       }
     }
