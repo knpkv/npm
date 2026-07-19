@@ -2325,7 +2325,8 @@ describe("ServicesPage connection tests", () => {
     const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),
       providerId: "codecommit",
-      displayName: "Payments CodeCommit"
+      displayName: "Payments CodeCommit",
+      supportsSynchronization: true
     })
     const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>().mockResolvedValue(
       Schema.decodeUnknownSync(PluginSynchronizationState)({
@@ -2379,11 +2380,54 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("2026-07-19T10:00:01.000Z")
   })
 
+  it("shows synchronization only for Confluence connections with negotiated sync", async () => {
+    const current = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      supportsSynchronization: true
+    })
+    const historical = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000146",
+      displayName: "Historical Confluence",
+      supportsSynchronization: false
+    })
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>().mockResolvedValue(
+      Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: current.pluginConnectionId,
+        providerId: "confluence",
+        streamKey: "pages",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        result: "never",
+        pagesCommitted: 0
+      })
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [current, historical] }),
+      setEnabled: vi.fn(),
+      synchronization,
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(synchronization).toHaveBeenCalledTimes(1)
+    expect(synchronization).toHaveBeenCalledWith(current.pluginConnectionId, expect.any(AbortSignal))
+    expect(
+      [...host.querySelectorAll("button")].filter(({ textContent }) => textContent?.includes("Sync now"))
+    ).toHaveLength(1)
+  })
+
   it("shows synchronization loading and error states and refreshes them", async () => {
     const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
       ...Schema.encodeSync(PluginConnectionSummary)(connection),
       providerId: "codecommit",
-      displayName: "Payments CodeCommit"
+      displayName: "Payments CodeCommit",
+      supportsSynchronization: true
     })
     const never = Schema.decodeUnknownSync(PluginSynchronizationState)({
       pluginConnectionId: codeCommitConnection.pluginConnectionId,

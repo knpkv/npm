@@ -586,7 +586,7 @@ export const ServicesPage = ({
   useEffect(() => {
     if (connectionsState._tag !== "ready" || transport.synchronization === undefined) return
     const synchronizable = connectionsState.overview.connections.filter(
-      ({ providerId }) => providerId === "codecommit" || providerId === "codepipeline" || providerId === "clockify"
+      ({ supportsSynchronization }) => supportsSynchronization
     )
     for (const connection of synchronizable) refreshSynchronization(connection.pluginConnectionId)
     return () => {

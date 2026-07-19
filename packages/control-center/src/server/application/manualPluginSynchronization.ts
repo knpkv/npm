@@ -12,6 +12,7 @@ import * as Stream from "effect/Stream"
 import type { PluginSynchronizationState } from "../../api/plugins.js"
 import { PluginHealth, type PluginHealth as PluginHealthType } from "../../domain/freshness.js"
 import type { PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import { NegotiatedPluginDescriptorV1 } from "../../domain/plugins/descriptor.js"
 import { PluginCheckpointV1, type PluginSyncPageV1, PluginSyncRequestV1 } from "../../domain/plugins/events.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -30,6 +31,7 @@ import type {
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginFailure } from "../plugins/failures.js"
 import { pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
+import { hasPluginCapability } from "../plugins/negotiation.js"
 import { PluginConnection, type PluginConnectionV1 } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
@@ -257,6 +259,16 @@ export const makeManualPluginSynchronization = Effect.fn(
     ).pipe(Effect.mapError(mapPersistenceRead))
     const driver = drivers.get(connection.providerId)
     if (Option.isNone(driver)) return yield* new ApplicationInvalidRequest()
+    const runtime = yield* persistence.pluginRuntime.getRuntime(
+      input.workspaceId,
+      input.pluginConnectionId
+    ).pipe(Effect.mapError(mapPersistenceRead))
+    const descriptor = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(NegotiatedPluginDescriptorV1))(
+      runtime.descriptorJson
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    if (!hasPluginCapability(descriptor, "sync.incremental", 1)) {
+      return yield* new ApplicationInvalidRequest()
+    }
     const streamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(driver.value.streamKey).pipe(
       Effect.mapError(() => new ApplicationInvalidRequest())
     )

@@ -257,12 +257,14 @@ interface BoundedPrefixCheckpoint {
 interface SyncCheckpointState {
   readonly boundedPrefix: BoundedPrefixCheckpoint | null
   readonly cursor: string | null
+  readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
   readonly inventoryDigest: string | null
 }
 
 const initialSyncCheckpointState: SyncCheckpointState = {
   boundedPrefix: null,
   cursor: null,
+  expectedBoundedPrefix: null,
   inventoryDigest: null
 }
 
@@ -281,9 +283,10 @@ const syncCursorFromCheckpoint = (
     if (match !== null && validSyncCursor(match[3] ?? "")) {
       const boundedPrefix = { inventoryDigest: match[2]!, cursor: match[3]! }
       return Effect.succeed({
-        boundedPrefix,
-        cursor: boundedPrefix.cursor,
-        inventoryDigest: boundedPrefix.inventoryDigest
+        boundedPrefix: null,
+        cursor: null,
+        expectedBoundedPrefix: boundedPrefix,
+        inventoryDigest: null
       })
     }
     return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
@@ -302,6 +305,7 @@ const syncCursorFromCheckpoint = (
       return Effect.succeed({
         boundedPrefix,
         cursor: boundedPrefix.cursor,
+        expectedBoundedPrefix: null,
         inventoryDigest: boundedPrefix.inventoryDigest
       })
     }
@@ -312,7 +316,7 @@ const syncCursorFromCheckpoint = (
     if (!checkpoint.startsWith(prefix)) continue
     const cursor = checkpoint.slice(prefix.length)
     return validSyncCursor(cursor)
-      ? Effect.succeed({ boundedPrefix: null, cursor, inventoryDigest: null })
+      ? Effect.succeed({ boundedPrefix: null, cursor, expectedBoundedPrefix: null, inventoryDigest: null })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
   }
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
@@ -911,6 +915,7 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   pageNumber: number,
   previousInventoryDigest: string | null,
   previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  expectedBoundedPrefix: BoundedPrefixCheckpoint | null,
   seenCursors: Set<string>
 ) {
   const raw = yield* providerCall(input.client.getSpacePages(input.configuration.spaceId, cursor))
@@ -939,18 +944,33 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
     events,
     previousInventoryDigest
   })
-  const bounded = following !== null && pageNumber >= MAXIMUM_SPACE_PAGES_PER_SYNC
+  const verifiedBoundedPrefix = following !== null &&
+      expectedBoundedPrefix?.cursor === following &&
+      expectedBoundedPrefix.inventoryDigest === inventoryDigest
+    ? expectedBoundedPrefix
+    : null
+  const bounded = following !== null &&
+    pageNumber >= MAXIMUM_SPACE_PAGES_PER_SYNC &&
+    verifiedBoundedPrefix === null
   const hasMore = following !== null && !bounded
-  const normalized = yield* splitSyncPage({
-    events,
-    logicalCheckpoint: checkpointAfterPage(following, bounded, inventoryDigest, previousBoundedPrefix),
-    logicalHasMore: hasMore,
-    restartCheckpoint: checkpointBeforePage(cursor)
-  })
+  const normalized = verifiedBoundedPrefix === null
+    ? yield* splitSyncPage({
+      events,
+      logicalCheckpoint: checkpointAfterPage(following, bounded, inventoryDigest, previousBoundedPrefix),
+      logicalHasMore: hasMore,
+      restartCheckpoint: checkpointBeforePage(cursor)
+    })
+    : []
   return {
     normalized,
     nextState: hasMore
-      ? Option.some({ cursor: following, inventoryDigest, pageNumber: pageNumber + 1, previousBoundedPrefix })
+      ? Option.some({
+        cursor: following,
+        expectedBoundedPrefix: verifiedBoundedPrefix === null ? expectedBoundedPrefix : null,
+        inventoryDigest,
+        pageNumber: verifiedBoundedPrefix === null ? pageNumber + 1 : 1,
+        previousBoundedPrefix: verifiedBoundedPrefix ?? previousBoundedPrefix
+      })
       : Option.none()
   }
 })
@@ -1155,11 +1175,13 @@ export const makeConfluencePageAdapter = (
               const initialState: {
                 readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
                 readonly cursor: string | null
+                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
                 readonly inventoryDigest: string | null
                 readonly pageNumber: number
               } = {
                 previousBoundedPrefix: checkpointState.boundedPrefix,
                 cursor: checkpointState.cursor,
+                expectedBoundedPrefix: checkpointState.expectedBoundedPrefix,
                 inventoryDigest: checkpointState.inventoryDigest,
                 pageNumber: 1
               }
@@ -1172,6 +1194,7 @@ export const makeConfluencePageAdapter = (
                     state.pageNumber,
                     state.inventoryDigest,
                     state.previousBoundedPrefix,
+                    state.expectedBoundedPrefix,
                     seenCursors
                   )
                   return [result.normalized, result.nextState]

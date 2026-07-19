@@ -60,7 +60,7 @@ import {
 import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
-import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
+import { hasPluginCapability, negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
@@ -262,6 +262,7 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
       providerId: connection.providerId,
       displayName: connection.displayName,
       isEnabled: false,
+      supportsSynchronization: false,
       health: { _tag: "disabled", checkedAt: connection.updatedAt },
       updatedAt: connection.updatedAt
     } satisfies PluginConnectionSummary
@@ -274,6 +275,13 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
     Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none())),
     Effect.mapError(() => unavailable())
   )
+  const supportsSynchronization = Option.match(runtime, {
+    onNone: () => false,
+    onSome: ({ descriptorJson }) => {
+      const descriptor = decodeNegotiatedDescriptor(descriptorJson)
+      return Result.isSuccess(descriptor) && hasPluginCapability(descriptor.success, "sync.incremental", 1)
+    }
+  })
   return {
     pluginConnectionId: connection.pluginConnectionId,
     providerAccountId: connection.providerAccountId,
@@ -281,6 +289,7 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
     providerId: connection.providerId,
     displayName: connection.displayName,
     isEnabled: connection.isEnabled,
+    supportsSynchronization,
     health: Option.isSome(runtime) ? runtime.value.health : null,
     updatedAt: connection.updatedAt
   } satisfies PluginConnectionSummary

@@ -368,17 +368,25 @@ describe("ControlCenterApi contract", () => {
   })
 
   it("preserves the v1 plugin-list payload and exposes the catalog overview additively", () => {
+    const currentPluginListFixture = v1PluginListCompatibilityFixture.map((connection) => ({
+      ...connection,
+      supportsSynchronization: false
+    }))
+
     assert.deepStrictEqual(
       Schema.encodeSync(PluginListResponse)(
         Schema.decodeUnknownSync(PluginListResponse)(v1PluginListCompatibilityFixture)
       ),
-      v1PluginListCompatibilityFixture
+      currentPluginListFixture
     )
     assert.deepStrictEqual(
       Schema.encodeSync(PluginOverviewResponse)(
         Schema.decodeUnknownSync(PluginOverviewResponse)(pluginOverviewCompatibilityFixture)
       ),
-      pluginOverviewCompatibilityFixture
+      {
+        ...pluginOverviewCompatibilityFixture,
+        connections: currentPluginListFixture
+      }
     )
 
     const specification = OpenApi.fromApi(ControlCenterApi)

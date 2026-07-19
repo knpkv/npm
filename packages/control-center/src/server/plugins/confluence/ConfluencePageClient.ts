@@ -1,9 +1,10 @@
 /**
  * Narrow Confluence read boundary used by the Control Center adapter.
  *
- * The generated API owns HTTP request and wire-schema decoding. This module
- * translates its open error surface into a small, secret-free transport model
- * and keeps tests independent of the generated client's broad interface.
+ * The generated API owns most HTTP request and wire-schema decoding. This
+ * module keeps the watcher read narrow because Atlassian can return redacted
+ * identities and numeric content IDs that its generated schema rejects. It
+ * translates the open error surface into a small, secret-free transport model.
  *
  * @module
  */
@@ -16,6 +17,10 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Headers from "effect/unstable/http/Headers"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+
+import { RawConfluenceWatcherPage } from "./ConfluencePageSchemas.js"
 
 const Operation = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
@@ -160,9 +165,16 @@ export const makeConfluencePageClient = (
   getPageWatchers: (pageId, start) =>
     bounded(
       "confluence-page-watchers",
-      api.v1.getWatchesForPage(pageId, {
-        params: { limit: 50, start }
-      })
+      // Atlassian redacts account IDs and rounds int64 content IDs in JSON, so
+      // this endpoint intentionally uses the adapter's more faithful schema.
+      api.v1.httpClient.execute(
+        HttpClientRequest.get(
+          `/wiki/rest/api/content/${encodeURIComponent(pageId)}/notification/child-created`
+        ).pipe(HttpClientRequest.setUrlParams({ limit: 50, start }))
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluenceWatcherPage))
+      )
     ),
   getPageVersions: (pageId, cursor) =>
     bounded(
