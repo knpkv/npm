@@ -50,6 +50,9 @@ const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
   const descriptor = providerId === "jira" ? historicalJiraDescriptor : confluencePagePluginDescriptor
   return {
     ...descriptor,
+    capabilities: providerId === "confluence"
+      ? descriptor.capabilities.filter(({ capabilityId }) => capabilityId !== "sync.incremental")
+      : descriptor.capabilities,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
       if (providerId === "jira" && (field.key === "siteId" || field.key === "projectId")) return []
       if (field.key === "authMode" || field.key === "oauthProfileId") return []
@@ -282,12 +285,20 @@ describe("first-party plugin runtime", () => {
         })
         const cases: ReadonlyArray<{
           readonly expectedDiagnosticCode: string | null
+          readonly historicalDescriptor?: boolean
           readonly profileId: "valid-profile" | "expired-profile"
           readonly providerId: "jira" | "confluence"
           readonly siteId: string
         }> = [
           { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
           { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            historicalDescriptor: true,
+            providerId: "confluence",
+            profileId: "valid-profile",
+            siteId: "cloud-1"
+          },
           {
             expectedDiagnosticCode: "plugin-oauth-profile-site-mismatch",
             providerId: "jira",
@@ -351,7 +362,16 @@ describe("first-party plugin runtime", () => {
             WORKSPACE_ID,
             pluginConnectionId,
             testCase.providerId,
-            testCase.providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor,
+            testCase.providerId === "jira"
+              ? jiraReadPluginDescriptor
+              : testCase.historicalDescriptor === true
+              ? {
+                ...confluencePagePluginDescriptor,
+                capabilities: confluencePagePluginDescriptor.capabilities.filter(
+                  ({ capabilityId }) => capabilityId !== "sync.incremental"
+                )
+              }
+              : confluencePagePluginDescriptor,
             0,
             CREATED_AT
           )

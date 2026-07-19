@@ -327,8 +327,15 @@ const historicalJiraDescriptors = [
   jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
 ]
 
+const confluenceDescriptorWithoutSync = () => ({
+  ...confluencePagePluginDescriptor,
+  capabilities: confluencePagePluginDescriptor.capabilities.filter(
+    ({ capabilityId }) => capabilityId !== "sync.incremental"
+  )
+})
+
 const legacyConfluenceDescriptor = () => {
-  const descriptor = confluencePagePluginDescriptor
+  const descriptor = confluenceDescriptorWithoutSync()
   return {
     ...descriptor,
     configurationFields: descriptor.configurationFields.flatMap((field) => {
@@ -345,7 +352,9 @@ const legacyConfluenceDescriptor = () => {
 
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
-  if (providerId === "confluence") return [confluencePagePluginDescriptor, legacyConfluenceDescriptor()]
+  if (providerId === "confluence") {
+    return [confluencePagePluginDescriptor, confluenceDescriptorWithoutSync(), legacyConfluenceDescriptor()]
+  }
   return [expectedDescriptor(providerId)]
 }
 

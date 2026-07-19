@@ -1,6 +1,8 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import type { MarkdownConverter } from "@knpkv/confluence-to-markdown"
 import * as Cause from "effect/Cause"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
@@ -116,10 +118,12 @@ const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
   configured: ConfluencePageAdapterConfiguration = configuration
 ) {
   const descriptor = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
+  const cryptoService = yield* Crypto.Crypto.pipe(Effect.provide(NodeServices.layer))
   return makeConfluencePageAdapter({
     client,
     configuration: configured,
     converter: converter(markdown, onConvert),
+    cryptoService,
     descriptor
   })
 })
@@ -356,6 +360,222 @@ describe("Confluence page adapter", () => {
       assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
     }))
 
+  it.effect("caps new watcher contributors while retaining watcher roles for known contributors", () =>
+    Effect.gen(function*() {
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        authorId: `v${String(index).padStart(3, "0")}`
+      }))
+      const page = {
+        ...currentPage,
+        ownerId: "page-owner",
+        version: { ...currentPage.version, authorId: "page-author" }
+      }
+      const makeVersionReader = () => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const watcherPage = (accountId: string) => ({
+        results: [{ type: "watch", contentId: Number(PAGE_ID), watcher: { accountId } }],
+        start: 0,
+        limit: 50,
+        size: 1
+      })
+      const cappedAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: makeVersionReader(),
+        getPageWatchers: () => Effect.succeed(watcherPage("watcher-over-budget"))
+      }))
+      const cappedPages = yield* cappedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const cappedEntity = cappedPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(cappedEntity)
+      if (cappedEntity?._tag !== "UpsertEntity") return
+      const capped = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(cappedEntity.attributes)
+      assert.strictEqual(capped.contributors.length, 502)
+      assert.isFalse(capped.contributors.some(({ accountId }) => accountId === "watcher-over-budget"))
+      assert.deepStrictEqual(capped.watcherInventory, { complete: false, pagesFetched: 1 })
+
+      const retainedAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: makeVersionReader(),
+        getPageWatchers: () => Effect.succeed(watcherPage("v000"))
+      }))
+      const retainedPages = yield* retainedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const retainedEntity = retainedPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(retainedEntity)
+      if (retainedEntity?._tag !== "UpsertEntity") return
+      const retained = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(retainedEntity.attributes)
+      assert.strictEqual(retained.contributors.length, 502)
+      assert.include(
+        retained.contributors.find(({ accountId }) => accountId === "v000")?.roles ?? [],
+        "watcher"
+      )
+      assert.deepStrictEqual(retained.watcherInventory, { complete: true, pagesFetched: 1 })
+    }))
+
+  it.effect("omits version messages to keep sync attributes within the byte budget", () =>
+    Effect.gen(function*() {
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        message: `${index}-${"m".repeat(1_990)}`,
+        authorId: "account-author"
+      }))
+      const makeVersionReader = () => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const largeAdapter = yield* makeAdapter(defaultClient({
+        getPageVersions: makeVersionReader()
+      }))
+      const largePages = yield* largeAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const largeEntity = largePages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(largeEntity)
+      if (largeEntity?._tag !== "UpsertEntity") return
+      const large = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(largeEntity.attributes)
+      assert.strictEqual(large.versions.length, 500)
+      assert.isFalse(large.versionHistory.complete)
+      assert.isTrue(large.versions.some(({ message }) => message === null))
+      assert.isAtMost(jsonBytes(large), MaximumPluginPayloadBytes)
+
+      const smallAdapter = yield* makeAdapter(defaultClient({
+        getPageVersions: () => Effect.succeed({ results: [currentPage.version] })
+      }))
+      const smallPages = yield* smallAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const smallEntity = smallPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(smallEntity)
+      if (smallEntity?._tag !== "UpsertEntity") return
+      const small = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(smallEntity.attributes)
+      assert.strictEqual(small.versions[0]?.message, currentPage.version.message)
+      assert.isTrue(small.versionHistory.complete)
+    }))
+
+  it.effect("marks a full synthesized history incomplete only when synthesis drops a provider version", () =>
+    Effect.gen(function*() {
+      const withoutCurrent = Array.from({ length: 500 }, (_, index) => ({
+        number: 1_000 + index,
+        createdAt: UPDATED_AT,
+        authorId: "account-author"
+      }))
+      const withCurrent = [currentPage.version, ...withoutCurrent.slice(0, 499)]
+      const readHistory = (versions: ReadonlyArray<(typeof withoutCurrent)[number] | typeof currentPage.version>) => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const missingAdapter = yield* makeAdapter(defaultClient({ getPageVersions: readHistory(withoutCurrent) }))
+      const missingPages = yield* missingAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const missingEntity = missingPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(missingEntity)
+      if (missingEntity?._tag !== "UpsertEntity") return
+      const missing = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(missingEntity.attributes)
+      assert.strictEqual(missing.versions.length, 500)
+      assert.strictEqual(missing.versions[0]?.number, currentPage.version.number)
+      assert.isFalse(missing.versionHistory.complete)
+
+      const presentAdapter = yield* makeAdapter(defaultClient({ getPageVersions: readHistory(withCurrent) }))
+      const presentPages = yield* presentAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const presentEntity = presentPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(presentEntity)
+      if (presentEntity?._tag !== "UpsertEntity") return
+      const present = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(presentEntity.attributes)
+      assert.strictEqual(present.versions.length, 500)
+      assert.isTrue(present.versionHistory.complete)
+    }))
+
+  it.effect("keeps privacy-limited contributors out of people events", () =>
+    Effect.gen(function*() {
+      const unresolvedAdapter = yield* makeAdapter(defaultClient({
+        getUsers: () => Effect.succeed({ results: [] })
+      }))
+      const unresolvedPages = yield* unresolvedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const unresolvedPeople = unresolvedPages.flatMap(({ events }) =>
+        events.filter((event) => event._tag === "UpsertPerson")
+      )
+      assert.lengthOf(unresolvedPeople, 0)
+
+      const resolvedAdapter = yield* makeAdapter(defaultClient({
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName: `Resolved ${accountId}`,
+              accountStatus: "active"
+            }))
+          })
+      }))
+      const resolvedPages = yield* resolvedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const resolvedPeople = resolvedPages.flatMap(({ events }) =>
+        events.filter((event) => event._tag === "UpsertPerson")
+      )
+      assert.isAbove(resolvedPeople.length, 0)
+      for (const person of resolvedPeople) {
+        if (person._tag === "UpsertPerson") assert.match(person.displayName, /^Resolved /u)
+      }
+    }))
+
+  it.effect("accepts privacy-redacted watchers and minimal attachment versions", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [{
+              type: "watch",
+              contentId: Number(PAGE_ID),
+              watcher: { accountId: "account-watcher", displayName: "" }
+            }],
+            start: 0,
+            limit: 50,
+            size: 1
+          }),
+        getPageAttachments: () =>
+          Effect.succeed({
+            results: [{
+              id: "attachment-minimal-version",
+              status: "current",
+              title: "release.txt",
+              createdAt: UPDATED_AT,
+              pageId: PAGE_ID,
+              version: { number: 1 }
+            }]
+          })
+      }))
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepStrictEqual(attributes.attachments?.map(({ id, version }) => ({ id, version })), [{
+        id: "attachment-minimal-version",
+        version: 1
+      }])
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: true, pagesFetched: 1 })
+    }))
+
   it.effect("rejects pages from another space before reading their attachments", () =>
     Effect.gen(function*() {
       const spaces: Array<string> = []
@@ -408,6 +628,111 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(resumed.length, 1)
       assert.strictEqual(resumed[0]?.checkpointAfterPage, "complete")
       assert.deepStrictEqual(cursors, ["c5"])
+    }))
+
+  it.effect("rejects non-advancing resumed cursors before reading page metadata", () =>
+    Effect.gen(function*() {
+      let metadataCalls = 0
+      const repeating = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.succeed({ results: [currentPage], _links: { next: `/pages?cursor=${cursor}` } }),
+        getPageVersions: () =>
+          Effect.sync(() => {
+            metadataCalls += 1
+            return { results: [currentPage.version] }
+          })
+      }))
+      const repeated = yield* repeating.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "pages", checkpoint: "next:c1" })
+      ).pipe(Stream.runCollect, Effect.result)
+      assert.isTrue(Result.isFailure(repeated))
+      assert.strictEqual(metadataCalls, 0)
+
+      const cursors: Array<string | null> = []
+      const advancing = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            return cursor === "c1"
+              ? { results: [], _links: { next: "/pages?cursor=c2" } }
+              : { results: [] }
+          })
+      }))
+      const advanced = yield* advancing.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "pages", checkpoint: "next:c1" })
+      ).pipe(Stream.runCollect)
+      assert.deepStrictEqual(cursors, ["c1", "c2"])
+      assert.deepStrictEqual(advanced.map(({ checkpointAfterPage }) => checkpointAfterPage), ["next:c2", "complete"])
+    }))
+
+  it.effect("reserves the longest checkpoint prefix when accepting resumed cursors", () =>
+    Effect.gen(function*() {
+      const maximumCursor = "c".repeat(2_048 - "restart:cursor:".length)
+      const validCalls: Array<string | null> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            validCalls.push(cursor)
+            return { results: [] }
+          })
+      }))
+      const valid = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: `bounded:${maximumCursor}`
+        })
+      ).pipe(Stream.runCollect)
+      assert.deepStrictEqual(validCalls, [maximumCursor])
+      assert.strictEqual(valid[0]?.checkpointAfterPage, "complete")
+
+      const overlongCursor = "c".repeat(2_048 - "bounded:".length)
+      const invalid = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: `bounded:${overlongCursor}`
+        })
+      ).pipe(Stream.runCollect, Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+      assert.deepStrictEqual(validCalls, [maximumCursor])
+    }))
+
+  it.effect("changes sync event identity only when mutable inventory changes", () =>
+    Effect.gen(function*() {
+      let attachmentTitle = "release-v1.txt"
+      let displayName = "Avery One"
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageAttachments: () =>
+          Effect.sync(() => ({
+            results: [{
+              id: "attachment-1",
+              status: "current",
+              title: attachmentTitle,
+              createdAt: UPDATED_AT,
+              pageId: PAGE_ID,
+              version: { number: 1 }
+            }]
+          })),
+        getUsers: (accountIds) =>
+          Effect.sync(() => ({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName,
+              accountStatus: "active"
+            }))
+          }))
+      }))
+      const eventIds = Effect.fn("ConfluencePageAdapterTest.eventIds")(function*() {
+        const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+        return pages.flatMap(({ events }) => events.map(({ eventId }) => eventId))
+      })
+      const initial = yield* eventIds()
+      const replay = yield* eventIds()
+      assert.deepStrictEqual(replay, initial)
+
+      attachmentTitle = "release-v2.txt"
+      displayName = "Avery Two"
+      const changed = yield* eventIds()
+      assert.notDeepEqual(changed, initial)
     }))
 
   it.effect("splits attachment-heavy provider pages without losing restart safety", () =>

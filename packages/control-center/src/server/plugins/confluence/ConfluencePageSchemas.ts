@@ -68,7 +68,9 @@ export const RawConfluenceAttachment = Schema.Struct({
   pageId: boundedString(512),
   mediaType: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(255))),
   fileSize: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
-  version: Schema.optionalKey(RawConfluenceVersion)
+  version: Schema.optionalKey(Schema.Struct({
+    number: Schema.Int.check(Schema.isGreaterThan(0))
+  }))
 })
 
 /** One bounded attachment metadata page. @internal */
@@ -88,10 +90,7 @@ export const RawConfluenceWatcherPage = Schema.Struct({
     type: boundedString(100),
     contentId: Schema.Int.check(Schema.isGreaterThan(0)),
     watcher: Schema.Struct({
-      accountId: boundedString(512),
-      displayName: boundedString(200),
-      isExternalCollaborator: Schema.optionalKey(Schema.Boolean),
-      isGuest: Schema.optionalKey(Schema.NullOr(Schema.Boolean))
+      accountId: boundedString(512)
     })
   })).check(Schema.isMaxLength(50)),
   start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
