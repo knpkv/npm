@@ -11,6 +11,7 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
 import { NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
@@ -39,6 +40,7 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -590,6 +592,132 @@ describe("normalized plugin page materialization", () => {
         assert.strictEqual(details.environment, "Payments production")
         assert.strictEqual(details.collaborators?.[0]?.displayName, "Ari Chen")
         assert.strictEqual(details.comments?.[0]?.body, "Ready for review.")
+      })
+    ))
+
+  it.effect("persists a rich issue whose valid attributes leave only projection-wrapper headroom", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const comment = (sourceId: string, body: string) => ({
+          sourceId,
+          authorSourcePersonId: null,
+          updateAuthorSourcePersonId: null,
+          body,
+          createdAt: null,
+          updatedAt: null
+        })
+        const fixedComments = Array.from(
+          { length: 16 },
+          (_, index) => comment(`fixed-${String(index)}`, "x".repeat(16_000))
+        )
+        const attributes = {
+          key: "PAY-NEAR-LIMIT",
+          status: "Open",
+          priority: null,
+          estimatePoints: null,
+          comments: [...fixedComments, comment("remainder", "")],
+          commentTotal: 17,
+          commentsTruncated: false,
+          truncatedFields: []
+        }
+        const targetBytes = MaximumPluginPayloadBytes - 1
+        const remainderLength = targetBytes - jsonBytes(attributes)
+        assert.isAtLeast(remainderLength, 1)
+        assert.isAtMost(remainderLength, 16_000)
+        attributes.comments[attributes.comments.length - 1] = comment("remainder", "x".repeat(remainderLength))
+        assert.strictEqual(jsonBytes(attributes), targetBytes)
+        assert.isAbove(jsonBytes({ _tag: "issue", ...attributes }), MaximumPluginPayloadBytes)
+
+        const page = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "near-limit-rich-issue",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "near-limit-rich-issue",
+            observedAt: "2026-07-19T09:01:00.000Z",
+            revision: "near-limit-rich-issue-1",
+            entityType: "jira.issue",
+            vendorImmutableId: "near-limit-rich-issue",
+            sourceUrl: "https://jira.example/browse/PAY-NEAR-LIMIT",
+            title: "PAY-NEAR-LIMIT · Exercise projection headroom",
+            attributes
+          }]
+        })
+        const receipt = yield* materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }, page)
+
+        assert.strictEqual(receipt.entityProjectionCount, 1)
+      })
+    ))
+
+  it.effect("rejects malformed rich issue fields without breaking compact legacy issues", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const scope: NormalizedPluginPageMaterializationScope = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }
+        const page = (checkpointAfterPage: string, attributes: Readonly<Record<string, Schema.Json>>) =>
+          Schema.decodeSync(PluginSyncPageV1)({
+            checkpointAfterPage,
+            hasMore: false,
+            events: [{
+              _tag: "UpsertEntity",
+              eventId: checkpointAfterPage,
+              observedAt: "2026-07-19T09:01:00.000Z",
+              revision: `${checkpointAfterPage}-1`,
+              entityType: "jira.issue",
+              vendorImmutableId: checkpointAfterPage,
+              sourceUrl: null,
+              title: checkpointAfterPage,
+              attributes
+            }]
+          })
+
+        const failure = yield* materializeNormalizedPluginPage(
+          scope,
+          page("malformed-rich-issue", {
+            key: "PAY-42",
+            status: "Open",
+            priority: null,
+            estimatePoints: null,
+            collaborators: [{
+              sourcePersonId: "ari",
+              displayName: "Ari Chen",
+              avatarUrl: "javascript:alert(1)",
+              active: true,
+              roles: ["assignee"]
+            }]
+          })
+        ).pipe(Effect.flip)
+        if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+          return yield* Effect.die("expected malformed rich issue failure")
+        }
+        assert.strictEqual(failure.diagnosticCode, "normalized-issue-attributes-invalid")
+
+        const legacy = yield* materializeNormalizedPluginPage(
+          scope,
+          page("compact-legacy-issue", {
+            key: "LEGACY-42",
+            status: { name: "Open" },
+            priority: { name: "High" }
+          })
+        )
+        assert.strictEqual(legacy.entityProjectionCount, 1)
       })
     ))
 

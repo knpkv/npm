@@ -87,6 +87,7 @@ const LegacyIssueAttributes = Schema.Struct({
   priority: Schema.optionalKey(Schema.NullOr(NamedText)),
   estimatePoints: Schema.optionalKey(Schema.NullOr(Schema.Number))
 })
+const LegacyIssueAttributeKeys: ReadonlySet<string> = new Set(["key", "status", "priority", "estimatePoints"])
 const ReleaseAttributes = Schema.Struct({
   serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
@@ -135,6 +136,9 @@ const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.de
 ) {
   const normalized = Schema.decodeUnknownResult(NormalizedIssueAttributes)(event.attributes)
   if (Result.isSuccess(normalized)) return normalized.success
+  if (Object.keys(event.attributes).some((key) => !LegacyIssueAttributeKeys.has(key))) {
+    return yield* malformed("normalized-issue-attributes-invalid", event.eventId)
+  }
 
   const legacy = yield* Schema.decodeUnknownEffect(LegacyIssueAttributes)(event.attributes).pipe(
     Effect.mapError(() => malformed("normalized-issue-attributes-invalid", event.eventId))

@@ -64,4 +64,18 @@ describe("WorkspaceRichText", () => {
     expect(host.textContent).toContain("Unsafe")
     expect(host.querySelector("script")).toBeNull()
   })
+
+  it("renders a Jira ADF link beside unmarked text as one safe external anchor", async () => {
+    const host = await renderRichText(
+      "Keep retry state durable. Read the [runbook](<https://wiki.example.test/runbook>) before rollout."
+    )
+
+    expect(host.textContent).toBe("Keep retry state durable. Read the runbook before rollout.")
+    const links = [...host.querySelectorAll("a")]
+    expect(links).toHaveLength(1)
+    expect(links[0]?.textContent).toBe("runbook")
+    expect(links[0]?.getAttribute("href")).toBe("https://wiki.example.test/runbook")
+    expect(links[0]?.getAttribute("target")).toBe("_blank")
+    expect(links[0]?.getAttribute("rel")).toBe("noreferrer")
+  })
 })

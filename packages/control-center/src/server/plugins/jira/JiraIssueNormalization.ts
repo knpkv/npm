@@ -173,6 +173,23 @@ const normalizedRenderedText = (value: string, maximum: number | null = MAX_RICH
 const adfContent = (record: typeof JsonRecord.Type): ReadonlyArray<Schema.Json> =>
   Array.isArray(record.content) ? record.content : []
 
+const markdownLinkLabel = (value: string): string =>
+  value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]")
+
+const adfTextWithLinkMark = (record: typeof JsonRecord.Type, value: string): string => {
+  if (!Array.isArray(record.marks)) return value
+  for (const markValue of record.marks) {
+    const mark = decodedJsonRecord(markValue)
+    if (mark?.type !== "link") continue
+    const attrs = mark.attrs === undefined ? null : decodedJsonRecord(mark.attrs)
+    if (typeof attrs?.href !== "string") continue
+    const decoded = Schema.decodeUnknownResult(SourceUrl)(attrs.href)
+    if (Result.isFailure(decoded)) continue
+    return `[${markdownLinkLabel(value)}](<${Schema.encodeSync(SourceUrl)(decoded.success)}>)`
+  }
+  return value
+}
+
 const adfText = (value: Schema.Json): string => {
   if (typeof value === "string") return value
   if (Array.isArray(value)) return value.map(adfText).join("")
@@ -183,7 +200,9 @@ const adfText = (value: Schema.Json): string => {
     const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
     return typeof attrs?.text === "string" ? attrs.text : ""
   }
-  return typeof record.text === "string" ? record.text : adfContent(record).map(adfText).join("")
+  return typeof record.text === "string"
+    ? adfTextWithLinkMark(record, record.text)
+    : adfContent(record).map(adfText).join("")
 }
 
 const indented = (value: string, prefix: string): string =>

@@ -49,7 +49,18 @@ const issue = {
     description: {
       type: "doc",
       content: [
-        { type: "paragraph", content: [{ type: "text", text: "Keep retry state durable." }] },
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "Keep retry state durable. Read the " },
+            {
+              type: "text",
+              text: "runbook",
+              marks: [{ type: "link", attrs: { href: "https://wiki.example.test/runbook" } }]
+            },
+            { type: "text", text: " before rollout." }
+          ]
+        },
         { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Acceptance Criteria" }] },
         {
           type: "bulletList",
@@ -113,7 +124,18 @@ const comments = [
     author: { accountId: "sam", displayName: "Sam Rivera", active: true },
     body: {
       type: "doc",
-      content: [{ type: "paragraph", content: [{ type: "text", text: "Ready for review." }] }]
+      content: [{
+        type: "paragraph",
+        content: [
+          { type: "text", text: "Ready for " },
+          {
+            type: "text",
+            text: "review",
+            marks: [{ type: "link", attrs: { href: "https://wiki.example.test/review-checklist" } }]
+          },
+          { type: "text", text: "." }
+        ]
+      }]
     },
     created: "2026-07-16T10:00:00.000Z",
     updated: "2026-07-16T10:00:00.000Z"
@@ -295,7 +317,7 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(
         attributes.description,
         [
-          "Keep retry state durable.",
+          "Keep retry state durable. Read the [runbook](<https://wiki.example.test/runbook>) before rollout.",
           "## Acceptance Criteria",
           "- Retry survives restart.\n- Timeout is covered.",
           "```\nretry();\n```",
@@ -310,6 +332,10 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(attributes.environment, "Production and staging")
       assert.strictEqual(attributes.status, "In Review")
       assert.strictEqual(attributes.comments?.length, 3)
+      assert.strictEqual(
+        attributes.comments?.[0]?.body,
+        "Ready for [review](<https://wiki.example.test/review-checklist>)."
+      )
       assert.strictEqual(attributes.comments?.[1]?.body, "Please cover the timeout path.")
       assert.strictEqual(attributes.history?.length, 2)
       assert.isFalse(attributes.commentsTruncated)
