@@ -308,11 +308,21 @@ const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
 }
 
+const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
+  jira: JIRA_REQUIRED_SCOPES,
+  confluence: CONFLUENCE_REQUIRED_SCOPES
+}
+
 const scopesForProviders = (providers: AtlassianOAuthProviderIntent): ReadonlyArray<string> =>
   Array.from(new Set(providers.flatMap((provider) => oauthScopes[provider])))
 
 const supportsProducts = (site: AccessibleResource, providers: AtlassianOAuthProviderIntent): boolean =>
   providers.every((provider) => requiredSiteScopes[provider].every((scope) => site.scopes.includes(scope)))
+
+const tokenSupportsProducts = (token: TokenResponse, providers: AtlassianOAuthProviderIntent): boolean => {
+  const grantedScopes = new Set(token.scope.split(/\s+/).filter((scope) => scope.length > 0))
+  return providers.every((provider) => requiredTokenScopes[provider].every((scope) => grantedScopes.has(scope)))
+}
 
 const captureFile = Effect.fn("AtlassianOAuthGrants.captureFile")(function*(filePath: string) {
   const fileSystem = yield* FileSystem.FileSystem
@@ -462,6 +472,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         redirectUri: pending.redirectUri,
         codeVerifier: pending.codeVerifier
       }).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
+      if (!tokenSupportsProducts(tokens, pending.providers)) return yield* unavailable()
       const tokenExchangeAtMilliseconds = yield* Clock.currentTimeMillis
       const [sites, providerUser] = yield* Effect.all([
         getAccessibleResources(tokens.access_token),

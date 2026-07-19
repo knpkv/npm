@@ -116,7 +116,8 @@ const makeConcurrentProviderClient = (): HttpClient.HttpClient => {
 
 const makeProductScopedProviderClient = (
   cloudId: string,
-  tokenScopes: ReadonlyArray<string>
+  tokenScopes: ReadonlyArray<string>,
+  siteScopes: ReadonlyArray<string> = tokenScopes
 ): HttpClient.HttpClient =>
   HttpClient.make((request) => {
     const body = request.url.endsWith("/oauth/token")
@@ -132,7 +133,7 @@ const makeProductScopedProviderClient = (
         id: cloudId,
         name: `Acme ${cloudId}`,
         url: `https://${cloudId}.atlassian.net/`,
-        scopes: tokenScopes
+        scopes: siteScopes
       }]
       : { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
     return Effect.succeed(
@@ -256,6 +257,43 @@ describe("AtlassianOAuthGrants", () => {
           name: "A".repeat(501),
           email: "avery@example.com"
         })
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("rejects a token missing scopes required by the requested products", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-token-scopes-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+
+      const exchanged = yield* Effect.result(grants.exchange(owner, grantId, "authorization-code"))
+
+      assert.isTrue(Result.isFailure(exchanged))
+      if (Result.isFailure(exchanged)) assert.strictEqual(exchanged.failure._tag, "ApplicationServiceUnavailable")
+      assert.strictEqual(yield* grants.pendingGrantCount, 0)
+    }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        makeProductScopedProviderClient(
+          "cloud-1",
+          JIRA_SCOPES,
+          [...JIRA_SCOPES, ...CONFLUENCE_SCOPES]
+        )
       ),
       Effect.provide(NodeServices.layer),
       Effect.scoped
