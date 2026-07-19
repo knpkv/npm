@@ -6,7 +6,7 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 - Extend automatic account/resource materialization beyond AWS. Successful CodeCommit and CodePipeline setup now reuses the discovered AWS account, follows the discovered repository or pipeline, and binds the executable connection transactionally. Atlassian discovery still needs a site-first identity contract before Jira projects and Confluence spaces can use the same flow.
 - Move setup and listing APIs onto provider accounts so local credential profiles remain machine-local authentication selectors rather than persisted account identity.
-- Make multi-resource setup atomic. Today resources are connected sequentially, so an unavailable later resource can leave earlier healthy resources connected and visible.
+- Make multi-resource setup atomic. The browser now submits one bounded server batch and receives ordered per-resource results, but the server deliberately commits each connection independently. An unavailable later resource can therefore leave earlier healthy resources connected and visible; a future unit-of-work boundary should either commit all selected resources together or roll back the batch.
 - Add account-level editing so profile or region changes can be validated once and applied safely to every followed resource.
 
 ## Atlassian authorization

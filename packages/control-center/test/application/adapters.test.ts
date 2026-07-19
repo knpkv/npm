@@ -874,47 +874,55 @@ describe("application adapters", () => {
         invalidate: () => Effect.void
       })
       const connect = administration.connectAndTest
+      const connectBatch = administration.connectAndTestBatch
       assert.isDefined(connect)
+      assert.isDefined(connectBatch)
 
-      const repository = yield* connect({
+      const batch = yield* connectBatch({
         workspaceId: WORKSPACE_ID,
-        request: {
-          pluginConnectionId: PROVISIONED_PLUGIN_ID,
-          providerId: "codecommit",
-          displayName: "Payments repository",
-          values: [
-            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
-            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
-            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
-          ]
-        }
+        requests: [
+          {
+            pluginConnectionId: PROVISIONED_PLUGIN_ID,
+            providerId: "codecommit",
+            displayName: "Payments repository",
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          },
+          {
+            pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+            providerId: "codepipeline",
+            displayName: "Payments release pipeline",
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("pipelineName"), value: "payments-release" }
+            ]
+          },
+          {
+            pluginConnectionId: FAILED_PLUGIN_ID,
+            providerId: "codecommit",
+            displayName: "Payments repository in us-east-1",
+            values: [
+              { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
+              { _tag: "text", key: PluginConfigurationKey.make("region"), value: "us-east-1" },
+              { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
+            ]
+          }
+        ]
       })
-      const pipeline = yield* connect({
-        workspaceId: WORKSPACE_ID,
-        request: {
-          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
-          providerId: "codepipeline",
-          displayName: "Payments release pipeline",
-          values: [
-            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
-            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "eu-west-1" },
-            { _tag: "text", key: PluginConfigurationKey.make("pipelineName"), value: "payments-release" }
-          ]
-        }
-      })
-      const otherRegionRepository = yield* connect({
-        workspaceId: WORKSPACE_ID,
-        request: {
-          pluginConnectionId: FAILED_PLUGIN_ID,
-          providerId: "codecommit",
-          displayName: "Payments repository in us-east-1",
-          values: [
-            { _tag: "text", key: PluginConfigurationKey.make("profile"), value: "delivery" },
-            { _tag: "text", key: PluginConfigurationKey.make("region"), value: "us-east-1" },
-            { _tag: "text", key: PluginConfigurationKey.make("repositoryName"), value: "payments" }
-          ]
-        }
-      })
+      assert.deepEqual(batch.results.map(({ _tag }) => _tag), ["succeeded", "succeeded", "succeeded"])
+      const [repositoryResult, pipelineResult, otherRegionRepositoryResult] = batch.results
+      if (
+        repositoryResult?._tag !== "succeeded" ||
+        pipelineResult?._tag !== "succeeded" ||
+        otherRegionRepositoryResult?._tag !== "succeeded"
+      ) return assert.fail("healthy AWS setup batch did not succeed in request order")
+      const repository = repositoryResult.response
+      const pipeline = pipelineResult.response
+      const otherRegionRepository = otherRegionRepositoryResult.response
       const duplicatePipeline = yield* connect({
         workspaceId: WORKSPACE_ID,
         request: {

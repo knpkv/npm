@@ -28,6 +28,7 @@ import type {
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
+  CreatePluginConnectionsResponse,
   DiscoveredAtlassianProfile,
   PatchPluginConfigurationRequest,
   PluginConfiguration,
@@ -149,6 +150,10 @@ export interface PluginAdministrationService {
     CreatePluginConnectionResponse,
     ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
   >
+  readonly connectAndTestBatch?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly requests: ReadonlyArray<CreatePluginConnectionRequest>
+  }) => Effect.Effect<CreatePluginConnectionsResponse>
   readonly setConnectionEnabled?: (input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId

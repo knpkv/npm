@@ -395,6 +395,21 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("createConnections", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const connectAndTestBatch = plugins.connectAndTestBatch
+            if (connectAndTestBatch === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* connectAndTestBatch({
+              requests: payload.connections,
+              workspaceId: session.workspaceId
+            })
+          }))
         .handle("setConnectionEnabled", ({ params, payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

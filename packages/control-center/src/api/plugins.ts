@@ -502,6 +502,62 @@ export const CreatePluginConnectionResponse = Schema.Struct({
 /** Decoded redacted first-party connection setup response. */
 export type CreatePluginConnectionResponse = typeof CreatePluginConnectionResponse.Type
 
+const MAXIMUM_BATCH_PLUGIN_CONNECTIONS = 40
+
+/** Bounded setup batch owned by one authenticated workspace. */
+export const CreatePluginConnectionsRequest = Schema.Struct({
+  connections: Schema.Array(CreatePluginConnectionRequest).check(
+    Schema.makeFilter(
+      (connections) => connections.length >= 1 && connections.length <= MAXIMUM_BATCH_PLUGIN_CONNECTIONS,
+      { expected: `between 1 and ${MAXIMUM_BATCH_PLUGIN_CONNECTIONS} plugin connections` }
+    ),
+    Schema.makeFilter(
+      (connections) =>
+        new Set(connections.map(({ pluginConnectionId }) => pluginConnectionId)).size === connections.length,
+      { expected: "unique plugin connection identifiers" }
+    )
+  )
+}).annotate({ identifier: "CreatePluginConnectionsRequest" })
+
+/** Decoded bounded multi-connection setup request. */
+export type CreatePluginConnectionsRequest = typeof CreatePluginConnectionsRequest.Type
+
+export const PluginConnectionSetupFailureClass = Schema.Literals([
+  "conflict",
+  "invalid-request",
+  "not-found",
+  "rate-limited",
+  "service-unavailable"
+])
+
+/** Safe classification for one failed setup item. */
+export type PluginConnectionSetupFailureClass = typeof PluginConnectionSetupFailureClass.Type
+
+/** One ordered result from a multi-connection setup request. */
+export const CreatePluginConnectionBatchResult = Schema.Union([
+  Schema.TaggedStruct("succeeded", { response: CreatePluginConnectionResponse }),
+  Schema.TaggedStruct("failed", {
+    pluginConnectionId: PluginConnectionId,
+    failureClass: PluginConnectionSetupFailureClass
+  })
+]).pipe(Schema.toTaggedUnion("_tag"))
+
+/** Decoded result for one connection in a setup batch. */
+export type CreatePluginConnectionBatchResult = typeof CreatePluginConnectionBatchResult.Type
+
+/** Ordered redacted results for a bounded setup batch. */
+export const CreatePluginConnectionsResponse = Schema.Struct({
+  results: Schema.Array(CreatePluginConnectionBatchResult).check(
+    Schema.makeFilter(
+      (results) => results.length >= 1 && results.length <= MAXIMUM_BATCH_PLUGIN_CONNECTIONS,
+      { expected: `between 1 and ${MAXIMUM_BATCH_PLUGIN_CONNECTIONS} plugin connection results` }
+    )
+  )
+}).annotate({ identifier: "CreatePluginConnectionsResponse" })
+
+/** Decoded ordered multi-connection setup response. */
+export type CreatePluginConnectionsResponse = typeof CreatePluginConnectionsResponse.Type
+
 /** Owner-only transition for independently enabling or disabling one connection. */
 export const SetPluginConnectionEnabledRequest = Schema.Struct({
   isEnabled: Schema.Boolean
@@ -607,6 +663,14 @@ const createConnection = HttpApiEndpoint.post("createConnection", "/connections"
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const createConnections = HttpApiEndpoint.post("createConnections", "/connections/batch", {
+  payload: CreatePluginConnectionsRequest,
+  success: CreatePluginConnectionsResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const setConnectionEnabled = HttpApiEndpoint.patch("setConnectionEnabled", "/connections/:pluginConnectionId", {
   params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
   payload: SetPluginConnectionEnabledRequest,
@@ -666,6 +730,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     exchangeAtlassianOAuthGrant,
     completeAtlassianOAuthGrant,
     createConnection,
+    createConnections,
     setConnectionEnabled,
     health,
     testConnection,

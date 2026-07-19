@@ -9,6 +9,8 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  CreatePluginConnectionRequest,
+  CreatePluginConnectionResponse,
   CreatePluginConnectionValue,
   PluginConnectionSummary,
   PluginOverviewResponse,
@@ -614,45 +616,82 @@ export const ServicesPage = ({
       createRequest.current = request
       setSubmittingProvider(originProvider)
       let hasFailedTest = false
+      let hasSetupFailure = false
       let shouldRefreshOverview = false
       const completed = completedBatchDrafts.current.get(originProvider) ?? new Set<string>()
       completedBatchDrafts.current.set(originProvider, completed)
+      const acceptResponse = (draftKey: string, response: CreatePluginConnectionResponse): void => {
+        completed.add(draftKey)
+        hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
+        shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
+        setConnectionsState((current) =>
+          current._tag === "ready"
+            ? {
+                _tag: "ready",
+                overview: {
+                  ...current.overview,
+                  connections: [...current.overview.connections, response.connection]
+                }
+              }
+            : current
+        )
+        setTestStates((current) =>
+          new Map(current).set(response.connection.pluginConnectionId, {
+            _tag: "result",
+            result: response.test
+          })
+        )
+      }
       try {
-        for (const draft of drafts) {
-          const draftKey = setupDraftKey(draft)
-          if (completed.has(draftKey)) continue
-          const pluginConnectionId = await transport.makeConnectionId()
-          const response = await transport.create(
-            {
+        const pending = drafts.filter((draft) => !completed.has(setupDraftKey(draft)))
+        if (transport.createBatch !== undefined && pending.length > 0) {
+          const draftKeysByConnectionId = new Map<PluginConnectionId, string>()
+          const connections: Array<CreatePluginConnectionRequest> = []
+          for (const draft of pending) {
+            const pluginConnectionId = await transport.makeConnectionId()
+            draftKeysByConnectionId.set(pluginConnectionId, setupDraftKey(draft))
+            connections.push({
               pluginConnectionId,
               providerId: draft.catalog.providerId,
               displayName: draft.displayName,
               values: draft.values
-            },
-            request.signal
-          )
-          if (request.signal.aborted) return false
-          completed.add(draftKey)
-          hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
-          shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
-          setConnectionsState((current) =>
-            current._tag === "ready"
-              ? {
-                  _tag: "ready",
-                  overview: {
-                    ...current.overview,
-                    connections: [...current.overview.connections, response.connection]
-                  }
-                }
-              : current
-          )
-          setTestStates((current) =>
-            new Map(current).set(response.connection.pluginConnectionId, {
-              _tag: "result",
-              result: response.test
             })
-          )
-        }
+          }
+          const batch = await transport.createBatch({ connections }, request.signal)
+          if (request.signal.aborted) return false
+          const completedConnectionIds = new Set<PluginConnectionId>()
+          for (const result of batch.results) {
+            const pluginConnectionId =
+              result._tag === "failed" ? result.pluginConnectionId : result.response.connection.pluginConnectionId
+            if (!draftKeysByConnectionId.has(pluginConnectionId) || completedConnectionIds.has(pluginConnectionId)) {
+              hasSetupFailure = true
+              continue
+            }
+            completedConnectionIds.add(pluginConnectionId)
+            if (result._tag === "failed") {
+              hasSetupFailure = true
+              continue
+            }
+            const draftKey = draftKeysByConnectionId.get(result.response.connection.pluginConnectionId)
+            if (draftKey !== undefined) acceptResponse(draftKey, result.response)
+          }
+          hasSetupFailure = hasSetupFailure || completedConnectionIds.size !== connections.length
+        } else
+          for (const draft of pending) {
+            const draftKey = setupDraftKey(draft)
+            const pluginConnectionId = await transport.makeConnectionId()
+            const response = await transport.create(
+              {
+                pluginConnectionId,
+                providerId: draft.catalog.providerId,
+                displayName: draft.displayName,
+                values: draft.values
+              },
+              request.signal
+            )
+            if (request.signal.aborted) return false
+            acceptResponse(draftKey, response)
+          }
         if (shouldRefreshOverview) {
           try {
             const refreshedOverview = await transport.overview(request.signal)
@@ -662,11 +701,12 @@ export const ServicesPage = ({
             if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           }
         }
-        completedBatchDrafts.current.delete(originProvider)
+        if (hasSetupFailure) completedBatchDrafts.current.set(originProvider, completed)
+        else completedBatchDrafts.current.delete(originProvider)
         createRequest.current = null
-        setOpenProvider(hasFailedTest ? originProvider : null)
+        setOpenProvider(hasFailedTest || hasSetupFailure ? originProvider : null)
         setSubmittingProvider(null)
-        return true
+        return !hasSetupFailure
       } catch (failure: unknown) {
         if (request.signal.aborted) return false
         createRequest.current = null
@@ -894,7 +934,9 @@ export const ServicesPage = ({
                     setOpenProvider(null)
                   }}
                   onOpen={() => {
-                    completedBatchDrafts.current.delete(catalog.providerId)
+                    if (openProvider !== catalog.providerId) {
+                      completedBatchDrafts.current.delete(catalog.providerId)
+                    }
                     if (catalog.providerId === "jira" || catalog.providerId === "confluence") {
                       setAtlassianSetupIntent(missingAtlassianIntent)
                     }

@@ -5,6 +5,8 @@ import {
   ControlCenterLiveEvent,
   CorrelationResponseHeaders,
   CreatePluginConnectionRequest,
+  CreatePluginConnectionsRequest,
+  CreatePluginConnectionsResponse,
   CurrentSessionResponse,
   EventCursorFromString,
   MediaResponseHeaders,
@@ -319,6 +321,27 @@ describe("public API schemas", () => {
         values: [{ ...request.values[0], value: "x".repeat(16_385) }]
       })
     ))
+  })
+
+  it("bounds connection setup batches and requires unique connection identifiers", () => {
+    const request = {
+      pluginConnectionId,
+      providerId: "jira",
+      displayName: "Delivery Jira",
+      values: [{ _tag: "secret", key: "apiToken", value: "secret-value" }]
+    }
+    const decode = Schema.decodeUnknownResult(CreatePluginConnectionsRequest)
+
+    assert.isTrue(Result.isSuccess(decode({ connections: [request] })))
+    assert.isTrue(Result.isFailure(decode({ connections: [] })))
+    assert.isTrue(Result.isFailure(decode({ connections: [request, request] })))
+    assert.isTrue(Result.isFailure(decode({
+      connections: Array.from({ length: 41 }, (_, index) => ({
+        ...request,
+        pluginConnectionId: `01890f6f-6d6a-7cc0-98d2-${index.toString(16).padStart(12, "0")}`
+      }))
+    })))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(CreatePluginConnectionsResponse)({ results: [] })))
   })
 
   it("bounds named release collaborators and requires explicit release roles", () => {

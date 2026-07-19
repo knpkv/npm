@@ -14,6 +14,8 @@ import type {
   AwsProfileDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
+  CreatePluginConnectionsRequest,
+  CreatePluginConnectionsResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginOverviewResponse
@@ -46,6 +48,10 @@ export interface ConnectionTestTransport {
     request: CreatePluginConnectionRequest,
     signal: AbortSignal
   ) => Promise<CreatePluginConnectionResponse>
+  readonly createBatch?: (
+    request: CreatePluginConnectionsRequest,
+    signal: AbortSignal
+  ) => Promise<CreatePluginConnectionsResponse>
   readonly makeConnectionId: () => Promise<PluginConnectionId>
   readonly setEnabled: (
     pluginConnectionId: PluginConnectionId,
@@ -116,6 +122,14 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
         return yield* client.plugins.createConnection({ payload: request })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  createBatch: (request, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.createConnections({ payload: request })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
