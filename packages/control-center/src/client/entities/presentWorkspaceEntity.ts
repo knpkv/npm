@@ -244,6 +244,14 @@ const endpointFor = (
         service: serviceFor(target.entityKind)
       }
     }
+    if (projection.entityState === "deleted") {
+      return {
+        state: "missing",
+        label: `${projection.title} · Deleted`,
+        reason: "The related object was deleted.",
+        service: serviceFor(projection.entityType)
+      }
+    }
     return {
       state: "present",
       href: workspaceEntityPath(workspaceId, projection.entityId),

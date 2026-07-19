@@ -11,7 +11,7 @@ import {
   type RlyCollaboratorCategory
 } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
-import { type MouseEvent as ReactMouseEvent, type ReactElement, useEffect, useRef, useState } from "react"
+import { type ReactElement, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
 
 import type { EntityId as EntityIdType, WorkspaceId as WorkspaceIdType } from "../../domain/identifiers.js"
@@ -269,7 +269,6 @@ const EntityContent = ({
 interface WorkspaceEntityViewProps {
   readonly onAskAgent: () => void
   readonly originHref: string
-  readonly isStoredOrigin: boolean
   readonly originLabel: string
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
@@ -279,7 +278,6 @@ interface WorkspaceEntityViewProps {
 
 /** Pure state renderer for the canonical entity route. */
 export const WorkspaceEntityView = ({
-  isStoredOrigin,
   onAskAgent,
   originHref,
   originLabel: backLabel,
@@ -289,13 +287,6 @@ export const WorkspaceEntityView = ({
   workspaceId
 }: WorkspaceEntityViewProps): ReactElement => {
   const focusRef = useRef<HTMLElement>(null)
-  const navigate = useNavigate()
-  const returnToStoredOrigin = (event: ReactMouseEvent<HTMLAnchorElement>): void => {
-    if (!isStoredOrigin || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
-      return
-    event.preventDefault()
-    navigate(-1)
-  }
   const visibleEntityId =
     state._tag === "ready" || state._tag === "stale" ? state.inspection.entity.projection.entityId : state._tag
   useEffect(() => focusRef.current?.focus(), [visibleEntityId])
@@ -304,7 +295,7 @@ export const WorkspaceEntityView = ({
     return (
       <RouteState
         action={
-          <Link onClick={returnToStoredOrigin} state={originState} to={originHref}>
+          <Link state={originState} to={originHref}>
             {backLabel}
           </Link>
         }
@@ -318,7 +309,7 @@ export const WorkspaceEntityView = ({
     return (
       <RouteState
         action={
-          <Link onClick={returnToStoredOrigin} state={originState} to={originHref}>
+          <Link state={originState} to={originHref}>
             {backLabel}
           </Link>
         }
@@ -367,7 +358,7 @@ export const WorkspaceEntityView = ({
         freshnessDateTime={presentation.freshnessDateTime}
         freshnessTime={presentation.freshnessTime}
         navigation={
-          <Link className={styles.back} onClick={returnToStoredOrigin} state={originState} to={originHref}>
+          <Link className={styles.back} state={originState} to={originHref}>
             {backLabel}
           </Link>
         }
@@ -411,7 +402,6 @@ const ConnectedWorkspaceEntity = ({
       onAskAgent={() =>
         navigate(contextualAgentPath(location.pathname, location.search, location.hash), { state: location.state })
       }
-      isStoredOrigin={resolvedOrigin.isStored}
       originHref={resolvedOriginHref}
       originLabel={originLabel(resolvedOriginHref, workspaceId)}
       originState={resolvedOrigin.origin.state}

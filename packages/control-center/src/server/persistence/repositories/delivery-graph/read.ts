@@ -484,6 +484,13 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       }
       case "entitySlice": {
         const projection = yield* loadProjection(workspaceId, query.entityId, null)
+        if (projection.projection.entityState === "deleted") {
+          return yield* new RecordNotFoundError({
+            workspaceId,
+            recordKind: "entity-projection",
+            recordKey: query.entityId
+          })
+        }
         const { owners, ownersTruncated } = yield* loadWorkspaceEntityOwners(workspaceId, query.entityId)
         const { releaseIds, releaseMembershipsTruncated } = yield* loadWorkspaceEntityReleaseIds(
           workspaceId,

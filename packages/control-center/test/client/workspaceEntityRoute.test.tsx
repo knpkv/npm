@@ -3,7 +3,7 @@
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { MemoryRouter } from "react-router"
+import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -116,7 +116,6 @@ const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
     <MemoryRouter>
       <WorkspaceEntityView
         onAskAgent={onAskAgent}
-        isStoredOrigin={false}
         originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
         originLabel="Back to items"
         originState={null}
@@ -128,6 +127,11 @@ const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
   )
   await act(async () => mountedRoot?.render(view))
   return host
+}
+
+const LocationProbe = (): ReactElement => {
+  const location = useLocation()
+  return <output data-location>{`${location.pathname}${location.search}${location.hash}`}</output>
 }
 
 describe("canonical workspace entity", () => {
@@ -158,6 +162,66 @@ describe("canonical workspace entity", () => {
       "The relationship graph is partial; additional delivery links exist.",
       "The activity list is partial; older events are not shown."
     ])
+  })
+
+  it("presents deleted related entities as unavailable", () => {
+    const related = inspection.graph.relatedEntityProjections[0]
+    if (related === undefined) throw new Error("Expected a related entity projection fixture")
+    const deletedRelated = {
+      ...related,
+      projection: { ...related.projection, entityState: "deleted" }
+    } satisfies typeof related
+    const withDeletedRelated = {
+      ...inspection,
+      graph: {
+        ...inspection.graph,
+        relatedEntityProjections: inspection.graph.relatedEntityProjections.map((entry) =>
+          entry.projection.entityId === related.projection.entityId ? deletedRelated : entry
+        )
+      }
+    }
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, withDeletedRelated)
+    const endpoints = presentation.relationships.flatMap(({ source, target }) => [source, target])
+
+    expect(endpoints).toContainEqual({
+      state: "missing",
+      label: `${related.projection.title} · Deleted`,
+      reason: "The related object was deleted.",
+      service: "jira"
+    })
+  })
+
+  it("returns a chained entity directly to its stored origin", async () => {
+    const originHref = `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview?filter=attention`
+    const firstEntityHref = `/w/${WORKSET_WORKSPACE_ID}/items/01890f6f-6d6a-7cc0-98d3-000000000002`
+    const currentEntityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${inspection.entity.projection.entityId}`
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <MemoryRouter initialEntries={[originHref, firstEntityHref, currentEntityHref]} initialIndex={2}>
+          <LocationProbe />
+          <WorkspaceEntityView
+            onAskAgent={() => undefined}
+            originHref={originHref}
+            originLabel="Back to release"
+            originState={null}
+            retry={() => undefined}
+            state={state}
+            workspaceId={WORKSET_WORKSPACE_ID}
+          />
+        </MemoryRouter>
+      )
+    )
+    const backLink = [...host.querySelectorAll<HTMLAnchorElement>("a")].find(
+      (link) => link.textContent === "Back to release"
+    )
+    if (backLink === undefined) throw new Error("Expected the stored-origin Back link")
+
+    await act(async () => backLink.click())
+
+    expect(host.querySelector("[data-location]")?.textContent).toBe(originHref)
   })
 
   it("renders the complete stale partial state and launches the contextual agent", async () => {

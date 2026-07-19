@@ -2456,6 +2456,28 @@ describe("application adapters", () => {
       assert.strictEqual(stale.freshness?._tag, "stale")
       if (stale.freshness?._tag !== "stale") return yield* Effect.die("Expected stale freshness")
       assert.deepStrictEqual(stale.freshness.evaluatedAt, expiredAt)
+
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            ...current.entity.projection,
+            projectionRevision: 2,
+            supersedesProjectionRevision: 1,
+            entityState: "deleted"
+          },
+          recordedAt: Schema.encodeSync(UtcTimestamp)(expiredAt)
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const deleted = yield* inspection.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: INSPECTED_ENTITY_ID
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(deleted))
+      if (Result.isFailure(deleted)) assert.instanceOf(deleted.failure, ApplicationResourceNotFound)
     })))
 
   it.effect("drafts only the exact current repair head within its workspace and release scope", () =>

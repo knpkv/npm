@@ -1,6 +1,7 @@
 import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
+import { workspaceEntityStateForHref } from "../../src/client/entities/WorkspaceEntityLink.js"
 import {
   decodeEntityRouteId,
   entityOriginFromLocation,
@@ -86,6 +87,18 @@ describe("workspace entity routes", () => {
       origin: entityOrigin
     })
     expect(Object.keys(relatedState)).toEqual(["entityOrigin"])
+
+    const entityLocation = {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "",
+      state: firstState
+    }
+    expect(workspaceEntityStateForHref(workspaceEntityPath(workspaceId, relatedEntityId), entityLocation)).toEqual(
+      relatedState
+    )
+    expect(workspaceEntityStateForHref(`/w/${workspaceId}/releases/${releaseId}`, entityLocation)).toBeUndefined()
+    expect(workspaceEntityStateForHref("https://jira.example.test/browse/OPS-428", entityLocation)).toBeUndefined()
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {

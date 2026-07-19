@@ -19,7 +19,7 @@ interface RouterLocationParts {
 export const workspaceEntityStateForHref = (href: string, location: RouterLocationParts): unknown => {
   const target = workspaceEntityTargetFromHref(href)
   return target === null
-    ? location.state
+    ? undefined
     : makeWorkspaceEntityRouteState(
         location.state,
         target.workspaceId,
