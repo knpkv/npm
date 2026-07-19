@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, AgentProviderId } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Ref, Schema } from "effect"
+import { DateTime, Effect, Ref, Result, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -17,11 +17,18 @@ import {
   AgentThreadEvent,
   EnqueueAgentJobInput
 } from "../../src/server/persistence/repositories/agentJobModels.js"
-import { RecordRevision, ReleaseSnapshotRecord } from "../../src/server/persistence/repositories/models.js"
+import {
+  RecordRevision,
+  ReleaseSnapshotRecord,
+  WorkspaceName
+} from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000201")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000202")
+const MISSING_RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000206")
+const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000207")
+const UNAUTHORIZED_RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000208")
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000203")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000204")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000205")
@@ -53,6 +60,13 @@ const release = Schema.decodeSync(Release)({
 const releaseSnapshot = ReleaseSnapshotRecord.make({
   release,
   revision: RecordRevision.make(7)
+})
+
+const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
+  ...release,
+  id: UNAUTHORIZED_RELEASE_ID,
+  workspaceId: OTHER_WORKSPACE_ID,
+  relay: deriveReleaseRelay(UNAUTHORIZED_RELEASE_ID)
 })
 
 const threadEvent = (
@@ -107,6 +121,52 @@ const withPersistence = <Success, Failure>(use: Effect.Effect<Success, Failure, 
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("release agent jobs", () => {
+  it.effect("returns an empty cursor-preserving replay only for an existing release", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* persistence.workspaces.create(WORKSPACE_ID, {
+        displayName: WorkspaceName.make("Release agent jobs"),
+        createdAt: STARTED_AT
+      })
+      yield* persistence.workspaces.create(OTHER_WORKSPACE_ID, {
+        displayName: WorkspaceName.make("Other release agent jobs"),
+        createdAt: STARTED_AT
+      })
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      yield* persistence.releases.create(OTHER_WORKSPACE_ID, unauthorizedRelease)
+      const service = yield* makeReleaseAgentJobs
+      const after = ReleaseAgentThreadCursor.make(17)
+
+      const page = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after,
+        limit: 5
+      })
+      const missing = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: MISSING_RELEASE_ID,
+        after,
+        limit: 5
+      }).pipe(Effect.result)
+      const unauthorized = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: UNAUTHORIZED_RELEASE_ID,
+        after,
+        limit: 5
+      }).pipe(Effect.result)
+
+      assert.deepStrictEqual(page, { releaseId: RELEASE_ID, events: [], nextCursor: after })
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) {
+        assert.strictEqual(missing.failure._tag, "ApplicationResourceNotFound")
+      }
+      assert.isTrue(Result.isFailure(unauthorized))
+      if (Result.isFailure(unauthorized)) {
+        assert.strictEqual(unauthorized.failure._tag, "ApplicationResourceNotFound")
+      }
+    })))
+
   it.effect("derives immutable job context and returns a redacted ordered replay", () =>
     withPersistence(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))

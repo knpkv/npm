@@ -1,3 +1,4 @@
+import { MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
@@ -165,12 +166,12 @@ const ReleaseAgentJobStartedEvent = Schema.TaggedStruct("job-started", releaseAg
 
 const ReleaseAgentAssistantOutputEvent = Schema.TaggedStruct("assistant-output", {
   ...releaseAgentThreadEventFields,
-  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_REPLY_LENGTH))
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
 })
 
 const ReleaseAgentProgressEvent = Schema.TaggedStruct("progress", {
   ...releaseAgentThreadEventFields,
-  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_REPLY_LENGTH))
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
 })
 
 const ReleaseAgentUsageEvent = Schema.TaggedStruct("usage", {
@@ -272,6 +273,7 @@ const enqueueJob = HttpApiEndpoint.post("enqueueJob", "/releases/:releaseId/jobs
     NotFoundApiError,
     RequestTimedOutApiError,
     PayloadTooLargeApiError,
+    RateLimitedApiError,
     ServiceUnavailableApiError
   ]
 })
@@ -291,6 +293,7 @@ const replayThread = HttpApiEndpoint.get("replayThread", "/releases/:releaseId/t
     ForbiddenApiError,
     NotFoundApiError,
     RequestTimedOutApiError,
+    RateLimitedApiError,
     ServiceUnavailableApiError
   ]
 }).middleware(SessionCookieAuth)

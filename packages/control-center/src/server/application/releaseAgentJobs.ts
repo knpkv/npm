@@ -171,18 +171,25 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
     replay: Effect.fn("ReleaseAgentJobs.replay")(function*(input) {
+      yield* mapPersistenceRead(
+        persistence.releases.get(input.workspaceId, input.releaseId)
+      )
       const after = yield* Schema.decodeUnknownEffect(AgentEventCursor)(input.after).pipe(
         Effect.mapError(unavailable)
       )
       const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(input.limit).pipe(
         Effect.mapError(unavailable)
       )
-      const page = yield* mapPersistenceRead(persistence.agentJobs.threadAfter({
-        workspaceId: input.workspaceId,
-        releaseId: input.releaseId,
-        after,
-        limit
-      }))
+      const page = yield* mapPersistenceRead(
+        persistence.agentJobs.threadAfter({
+          workspaceId: input.workspaceId,
+          releaseId: input.releaseId,
+          after,
+          limit
+        }).pipe(
+          Effect.catchTag("RecordNotFoundError", () => Effect.succeed({ events: [], nextCursor: after }))
+        )
+      )
       const events = yield* Effect.forEach(page.events, mapThreadEvent)
       const nextCursor = yield* Schema.decodeUnknownEffect(ReleaseAgentThreadCursor)(page.nextCursor).pipe(
         Effect.mapError(unavailable)
@@ -196,4 +203,21 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
 export const releaseAgentJobsLayer: Layer.Layer<ReleaseAgentJobs, never, Crypto.Crypto | Persistence> = Layer.effect(
   ReleaseAgentJobs,
   makeReleaseAgentJobs
+)
+
+/** Durable replay remains readable while enqueue is disabled without a configured runtime. */
+export const releaseAgentJobsUnavailableLayer: Layer.Layer<
+  ReleaseAgentJobs,
+  never,
+  Crypto.Crypto | Persistence
+> = Layer.effect(
+  ReleaseAgentJobs,
+  makeReleaseAgentJobs.pipe(
+    Effect.map((jobs) =>
+      ReleaseAgentJobs.of({
+        enqueue: () => Effect.fail(unavailable()),
+        replay: jobs.replay
+      })
+    )
+  )
 )

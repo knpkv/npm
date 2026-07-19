@@ -677,6 +677,38 @@ describe("public API schemas", () => {
       nextCursor: 6
     }
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentThreadPage)(page)))
+    const replayOutputKinds: ReadonlyArray<"assistant-output" | "progress"> = [
+      "assistant-output",
+      "progress"
+    ]
+    for (const eventKind of replayOutputKinds) {
+      for (const length of [32_001, 32_768]) {
+        assert.isTrue(Result.isSuccess(
+          Schema.decodeUnknownResult(ReleaseAgentThreadPage)({
+            ...page,
+            events: [{
+              _tag: eventKind,
+              eventSequence: 1,
+              jobId,
+              occurredAt: timestamp,
+              text: "x".repeat(length)
+            }]
+          })
+        ))
+      }
+    }
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(ReleaseAgentThreadPage)({
+        ...page,
+        events: [{
+          _tag: "progress",
+          eventSequence: 1,
+          jobId,
+          occurredAt: timestamp,
+          text: "x".repeat(32_769)
+        }]
+      })
+    ))
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(ReleaseAgentThreadPage)({
         ...page,

@@ -179,6 +179,7 @@ describe("ControlCenterApi contract", () => {
       "404",
       "408",
       "413",
+      "429",
       "503"
     ])
     const agentThreadPath = specification.paths["/api/v1/agent/releases/{releaseId}/thread/events"]
@@ -191,6 +192,7 @@ describe("ControlCenterApi contract", () => {
       "403",
       "404",
       "408",
+      "429",
       "503"
     ])
 

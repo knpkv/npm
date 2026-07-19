@@ -48,6 +48,7 @@ import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
   DeliveryGraphInspection,
@@ -1741,6 +1742,50 @@ describe("Control Center API handlers", () => {
         after,
         limit: 7
       })
+    }))
+
+  it.effect("returns an empty replay for an existing release and NotFound for a missing release", () =>
+    Effect.gen(function*() {
+      const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000033")
+      const missingReleaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000034")
+      const after = ReleaseAgentThreadCursor.make(19)
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        replay: (input) =>
+          input.releaseId === releaseId
+            ? Effect.succeed({ releaseId, events: [], nextCursor: input.after })
+            : Effect.fail(new ApplicationResourceNotFound())
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const empty = yield* client.agent.replayThread({
+          params: { releaseId },
+          query: { after, limit: 7 }
+        })
+        const missing = yield* client.agent.replayThread({
+          params: { releaseId: missingReleaseId },
+          query: { after, limit: 7 }
+        }).pipe(Effect.result)
+        return { empty, missing }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.empty, { releaseId, events: [], nextCursor: after })
+      assert.isTrue(Result.isFailure(result.missing))
+      if (Result.isFailure(result.missing)) {
+        assert.strictEqual(result.missing.failure._tag, "NotFoundApiError")
+      }
     }))
 
   it.effect("rejects a watcher before the local agent runtime is invoked", () =>

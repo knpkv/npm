@@ -31,6 +31,7 @@ import {
   portfolioSnapshotsLayer,
   relationshipRepairProposalsLayer,
   releaseAgentJobsLayer,
+  releaseAgentJobsUnavailableLayer,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
@@ -197,7 +198,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const releaseAgent = options.releaseAgent === undefined || options.releaseAgent === null
     ? releaseAgentUnavailableLayer
     : releaseAgentTurnsLayer(options.releaseAgent).pipe(Layer.provide(applicationServices))
-  const releaseAgentJobs = releaseAgentJobsLayer.pipe(Layer.provide(persistence))
+  const releaseAgentJobs = (
+    options.releaseAgent === undefined || options.releaseAgent === null
+      ? releaseAgentJobsUnavailableLayer
+      : releaseAgentJobsLayer
+  ).pipe(Layer.provide(persistence))
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),

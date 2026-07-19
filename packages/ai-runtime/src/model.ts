@@ -77,9 +77,12 @@ const AgentStarted = Schema.TaggedStruct("started", {
   sessionRef: Schema.NullOr(AgentSessionRef)
 })
 
+/** Maximum text characters emitted by one provider-neutral output event. */
+export const MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH = 32_768
+
 const AgentOutput = Schema.TaggedStruct("output", {
   channel: Schema.Literals(["assistant", "progress"]),
-  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(32_768))
+  text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
 })
 
 const AgentUsage = Schema.TaggedStruct("usage", {
