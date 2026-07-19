@@ -217,6 +217,11 @@ in `implementation-plan.md` and the milestone files under `plan/`.
   people with explicit truncation flags; agent-owned work and role-specific filter facets remain a
   later extension. Text, owner, service, type, and status filters plus aggregate counts are
   server-authoritative; provider-specific full-text indexes remain a later scale optimization.
+- Normalized plugin pages now have one atomic, replay-safe seam into canonical people, entity
+  projections, tombstones, evidence, and relationships, and Items reads those projections rather
+  than plugin cache rows. CodePipeline pipeline, stage, and action records remain ancillary
+  cache-only entities until the delivery graph gains matching canonical detail schemas. The
+  owner-only manual-sync action, progress UI, and per-provider runner wiring remain later work.
 - The workspace query retains every current release membership up to an explicit per-object bound of 500. The first sorted membership remains the compatibility canonical identifier, while the client
   requires an exact choice whenever more than one membership exists. Memberships outside the current
   bounded portfolio are counted but do not yet expose a release route. Unlinked objects remain on the

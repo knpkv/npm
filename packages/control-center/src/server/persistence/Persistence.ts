@@ -226,6 +226,8 @@ const makePersistence = Effect.gen(function*() {
     entities: {
       create: (...args: Parameters<EntityRepositoryService["create"]>) =>
         publicOperation("entity.create", entities.create(...args)),
+      findBySourceIdentity: (...args: Parameters<EntityRepositoryService["findBySourceIdentity"]>) =>
+        publicOperation("entity.find-by-source-identity", entities.findBySourceIdentity(...args)),
       get: (...args: Parameters<EntityRepositoryService["get"]>) =>
         publicOperation("entity.get", entities.get(...args)),
       list: (...args: Parameters<EntityRepositoryService["list"]>) =>
@@ -294,6 +296,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.begin-sync-attempt", pluginRuntime.beginSyncAttempt(...args)),
       commitNormalizedPage: (...args: Parameters<PluginRuntimeRepositoryService["commitNormalizedPage"]>) =>
         publicOperation("plugin-runtime.commit-normalized-page", pluginRuntime.commitNormalizedPage(...args)),
+      commitNormalizedPageReceipt: (
+        ...args: Parameters<PluginRuntimeRepositoryService["commitNormalizedPageReceipt"]>
+      ) =>
+        publicOperation(
+          "plugin-runtime.commit-normalized-page-receipt",
+          pluginRuntime.commitNormalizedPageReceipt(...args)
+        ),
       completeSyncAttempt: (...args: Parameters<PluginRuntimeRepositoryService["completeSyncAttempt"]>) =>
         publicOperation("plugin-runtime.complete-sync-attempt", pluginRuntime.completeSyncAttempt(...args)),
       getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>

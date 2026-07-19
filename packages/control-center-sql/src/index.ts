@@ -12,6 +12,7 @@ export {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentThreadReplayQuery
 } from "./agentJobs.js"
+export { type EntitySourceIdentityQueryInput, renderEntitySourceIdentityQuery } from "./entities.js"
 export {
   type CreateFollowedResourceQueryInput,
   type FollowedResourceQueryInput,
