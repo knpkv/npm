@@ -99,6 +99,7 @@ describe("Control Center observability", () => {
     }).pipe(
       Effect.provide(
         testLayer({
+          OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
           OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "http://127.0.0.1:43110/ingest/otlp/v1/logs/control-center",
           OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
           OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "http://127.0.0.1:43110/ingest/otlp/v1/traces/control-center",
@@ -207,6 +208,38 @@ describe("Control Center observability", () => {
       for (const environment of fixtures) {
         const result = yield* Layer.build(testLayer(environment)).pipe(Effect.scoped, Effect.result)
         assert.isTrue(Result.isFailure(result))
+      }
+    }))
+
+  it.effect("rejects a malformed shared endpoint when an active signal has no override", () =>
+    Effect.gen(function*() {
+      const fixtures: ReadonlyArray<{
+        readonly environment: Readonly<Record<string, string>>
+        readonly signal: "logs" | "traces"
+      }> = [
+        {
+          environment: {
+            OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+            OTEL_LOGS_EXPORTER: "otlp"
+          },
+          signal: "logs"
+        },
+        {
+          environment: {
+            OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+            OTEL_TRACES_EXPORTER: "otlp"
+          },
+          signal: "traces"
+        }
+      ]
+
+      for (const fixture of fixtures) {
+        const failure = yield* Effect.flip(Layer.build(testLayer(fixture.environment)).pipe(Effect.scoped))
+        assert.strictEqual(failure._tag, "ObservabilityConfigurationError")
+        if (failure._tag === "ObservabilityConfigurationError") {
+          assert.strictEqual(failure.reason, "invalid-endpoint")
+          assert.strictEqual(failure.signal, fixture.signal)
+        }
       }
     }))
 

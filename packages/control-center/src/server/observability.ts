@@ -11,6 +11,7 @@ const resource = {
 }
 
 const activation = Config.all({
+  baseEndpoint: Config.string("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(Config.withDefault("")),
   disabled: Config.boolean("OTEL_SDK_DISABLED").pipe(Config.withDefault(false)),
   logsEndpoint: Config.string("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.withDefault("")),
   logsExporters: Config.string("OTEL_LOGS_EXPORTER").pipe(Config.withDefault("")),
@@ -82,8 +83,18 @@ export const controlCenterTelemetryLayer = Effect.gen(function*() {
 
   const logsEnabled = includesOtlp(configured.logsExporters)
   const tracesEnabled = includesOtlp(configured.tracesExporters)
-  if (logsEnabled) yield* validateSignalEndpoint("logs", configured.logsEndpoint)
-  if (tracesEnabled) yield* validateSignalEndpoint("traces", configured.tracesEndpoint)
+  if (logsEnabled) {
+    yield* validateSignalEndpoint(
+      "logs",
+      configured.logsEndpoint === "" ? configured.baseEndpoint : configured.logsEndpoint
+    )
+  }
+  if (tracesEnabled) {
+    yield* validateSignalEndpoint(
+      "traces",
+      configured.tracesEndpoint === "" ? configured.baseEndpoint : configured.tracesEndpoint
+    )
+  }
   const logsProtocol = logsEnabled
     ? yield* resolveProtocol("logs", configured.logsProtocol, configured.protocol)
     : "http/protobuf"
