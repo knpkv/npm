@@ -524,6 +524,78 @@ describe("normalized plugin page materialization", () => {
       })
     })))
 
+  it.effect("reconciles one Jira issue without decoding unrelated stream cache entries", () =>
+    withMaterializer(Effect.gen(function*() {
+      const database = yield* Database
+      const persistence = yield* Persistence
+      yield* setup
+      const unrelatedPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "jira-unrelated-cache",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "jira-unrelated-cache-event",
+          observedAt: DateTime.formatIso(T1),
+          revision: "unrelated-revision",
+          entityType: "jira.issue",
+          vendorImmutableId: "unrelated-issue",
+          sourceUrl: null,
+          title: "Unrelated cached issue",
+          attributes: { key: "OTHER-1", fixVersions: [], truncatedFields: [] }
+        }]
+      })
+      yield* persistence.pluginRuntime.commitNormalizedPage(
+        WORKSPACE_ID,
+        PLUGIN_ID,
+        "jira",
+        MATERIALIZED_STREAM,
+        0,
+        unrelatedPage,
+        T1,
+        { _tag: "healthy", checkedAt: T1 }
+      )
+      yield* database.sql`UPDATE plugin_cache_entries SET payload_json = '{}'
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${PLUGIN_ID}
+          AND stream_key = ${MATERIALIZED_STREAM}`
+
+      const events = yield* normalizeJiraIssueEvents({
+        comments: { values: [], total: 0, truncated: false },
+        changelogs: { values: [], total: 0, truncated: false },
+        observedAt: T2,
+        webBaseUrl: new URL("https://jira.example"),
+        issue: {
+          id: "10042",
+          key: "PAY-42",
+          fields: {
+            summary: "Reconcile only this issue",
+            updated: DateTime.formatIso(T2),
+            project: { id: "10000", key: "PAY", name: "Payments" },
+            fixVersions: []
+          }
+        }
+      })
+      const receipt = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 1,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+          checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("jira-targeted-reconciliation"),
+          hasMore: false,
+          events
+        })
+      )
+
+      assert.isTrue(receipt.pageCommitted)
+      assert.deepStrictEqual((yield* items()).items.map(({ projection }) => projection.displayKey), ["PAY-42"])
+    })))
+
   it.effect("retires a Jira release containment when an issue moves to another fix version", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
