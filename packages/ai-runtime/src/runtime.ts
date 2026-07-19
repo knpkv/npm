@@ -1,11 +1,12 @@
 /**
  * Deep interface around provider-specific local agent implementations.
- * The runtime validates the terminal-event invariant while interruption remains
- * the cancellation mechanism for the underlying provider stream.
+ * The first terminal event ends runtime ownership immediately. The runtime
+ * interrupts the adapter stream at that boundary rather than waiting for its
+ * transport to close or inspecting impossible post-terminal output.
  *
  * @module
  */
-import { Cause, Context, Effect, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Schema, Stream } from "effect"
 
 import {
   AgentContextMismatchError,
@@ -60,6 +61,7 @@ const validateAdapterStream = (
       const failure = Cause.hasDies(cause) ? undefined : Option.getOrUndefined(Cause.findErrorOption(cause))
       return Stream.fail(normalizeAdapterFailure(request.providerId, failure))
     }),
+    Stream.rechunk(1),
     Stream.mapEffect((event) =>
       decodeAgentRuntimeEvent(event).pipe(
         Effect.mapError((cause) => new AgentRuntimeProtocolError({ reason: "invalid-event", cause }))
@@ -70,58 +72,11 @@ const validateAdapterStream = (
 const guardTerminalEvent = (
   events: Stream.Stream<AgentRuntimeEvent, AgentRuntimeError>
 ): Stream.Stream<AgentRuntimeEvent, AgentRuntimeError> =>
-  Stream.unwrap(
-    Ref.make<Option.Option<AgentRuntimeEvent>>(Option.none()).pipe(
-      Effect.map((terminalEvent): Stream.Stream<AgentRuntimeEvent, AgentRuntimeError> => {
-        const source = events.pipe(
-          Stream.catchCause((cause) =>
-            Stream.unwrap(
-              Ref.get(terminalEvent).pipe(
-                Effect.map((terminal) =>
-                  Option.isSome(terminal)
-                    ? Stream.fail(
-                      new AgentRuntimeProtocolError({
-                        reason: "failure-after-terminal",
-                        cause
-                      })
-                    )
-                    : Stream.failCause(cause)
-                )
-              )
-            )
-          )
-        )
-        const checked = source.pipe(
-          Stream.filterMapEffect((event) =>
-            Effect.gen(function*(): Effect.fn.Return<
-              Result.Result<AgentRuntimeEvent, void>,
-              AgentRuntimeProtocolError
-            > {
-              const terminal = yield* Ref.get(terminalEvent)
-              if (Option.isSome(terminal)) {
-                return yield* new AgentRuntimeProtocolError({
-                  reason: event._tag === "completed" ? "duplicate-terminal-event" : "event-after-terminal"
-                })
-              }
-              if (event._tag === "completed") {
-                yield* Ref.set(terminalEvent, Option.some(event))
-                return Result.fail(undefined)
-              }
-              return Result.succeed(event)
-            })
-          )
-        )
-        const emitTerminal = Ref.get(terminalEvent).pipe(
-          Effect.flatMap((terminal) =>
-            Option.match(terminal, {
-              onNone: () => Effect.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" })),
-              onSome: Effect.succeed
-            })
-          )
-        )
-        return checked.pipe(Stream.concat(Stream.fromEffect(emitTerminal)))
-      })
-    )
+  events.pipe(
+    Stream.concat(
+      Stream.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" }))
+    ),
+    Stream.takeUntil((event) => event._tag === "completed")
   )
 
 /** Constructs the runtime implementation around a provider adapter. */

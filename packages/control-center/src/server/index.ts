@@ -5,6 +5,7 @@
  *
  * @packageDocumentation
  */
+export * from "./agent/index.js"
 export * from "./api/index.js"
 export * from "./application/index.js"
 export * from "./auth/index.js"

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Deferred, Effect, Fiber, Stream } from "effect"
+import { Deferred, Effect, Fiber, Stream } from "effect"
 
 import {
   AgentContextFingerprint,
@@ -81,9 +81,8 @@ describe("AgentRuntime", () => {
       })
     }))
 
-  it.effect("rejects output after the terminal event", () =>
+  it.effect("stops before output after the first terminal event", () =>
     Effect.gen(function*() {
-      const observed = new Array<AgentRuntimeEvent>()
       const lateOutput: AgentRuntimeEvent = {
         _tag: "output",
         channel: "progress",
@@ -92,16 +91,9 @@ describe("AgentRuntime", () => {
       const runtime = makeAgentRuntime({
         run: () => Stream.fromIterable([events[3]!, lateOutput])
       })
-      const error = yield* runtime.run(request).pipe(
-        Stream.runForEach((event) => Effect.sync(() => observed.push(event))),
-        Effect.flip
-      )
+      const observed = yield* runtime.run(request).pipe(Stream.runCollect)
 
-      expect(observed).toEqual([])
-      expect(error).toMatchObject({
-        _tag: "AgentRuntimeProtocolError",
-        reason: "event-after-terminal"
-      })
+      expect(Array.from(observed)).toEqual([events[3]])
     }))
 
   it.effect("normalizes adapter defects without exposing native details", () =>
@@ -123,35 +115,33 @@ describe("AgentRuntime", () => {
       expect(error).not.toHaveProperty("cause")
     }))
 
-  it.effect("rejects a duplicate terminal event", () =>
+  it.effect("stops before a duplicate terminal event", () =>
     Effect.gen(function*() {
       const runtime = makeAgentRuntime({ run: () => Stream.make(events[3]!, events[3]!) })
-      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+      const observed = yield* runtime.run(request).pipe(Stream.runCollect)
 
-      expect(error).toMatchObject({
-        _tag: "AgentRuntimeProtocolError",
-        reason: "duplicate-terminal-event"
-      })
+      expect(Array.from(observed)).toEqual([events[3]])
     }))
 
-  it.effect("rejects a provider failure after the terminal event", () =>
+  it.effect("emits the first terminal event promptly and releases its adapter stream", () =>
     Effect.gen(function*() {
-      const providerFailure = new AgentProviderError({
-        providerId: AgentProviderId.make("fake"),
-        phase: "execution",
-        message: "late failure",
-        retryable: false
-      })
+      const released = yield* Deferred.make<void>()
       const runtime = makeAgentRuntime({
-        run: () => Stream.make(events[3]!).pipe(Stream.concat(Stream.fail(providerFailure)))
+        run: () =>
+          Stream.fromEffect(
+            Effect.acquireRelease(
+              Effect.void,
+              () => Deferred.succeed(released, void 0)
+            )
+          ).pipe(
+            Stream.flatMap(() => Stream.make(events[3]!).pipe(Stream.concat(Stream.never))),
+            Stream.scoped
+          )
       })
-      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+      const observed = yield* runtime.run(request).pipe(Stream.runCollect)
 
-      expect(error).toMatchObject({
-        _tag: "AgentRuntimeProtocolError",
-        reason: "failure-after-terminal"
-      })
-      expect(error.cause).toEqual(Cause.fail(providerFailure))
+      expect(Array.from(observed)).toEqual([events[3]])
+      expect(yield* Deferred.isDone(released)).toBe(true)
     }))
 
   it.effect("forwards sanitized provider failure fields as the alternative terminal", () =>
