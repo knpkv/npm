@@ -4,6 +4,15 @@ import * as Sqlite from "effect-qb/sqlite"
 import type { RenderedSql } from "./types.js"
 
 export {
+  type AgentJobClaimQueryInput,
+  type AgentJobDispatchCandidatesQueryInput,
+  type AgentThreadReplayQueryInput,
+  type ClaimableAgentJobState,
+  renderAgentJobClaimQuery,
+  renderAgentJobDispatchCandidatesQuery,
+  renderAgentThreadReplayQuery
+} from "./agentJobs.js"
+export {
   type CreateFollowedResourceQueryInput,
   type FollowedResourceQueryInput,
   renderCreateFollowedResourceQuery,
