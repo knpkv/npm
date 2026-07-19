@@ -15,11 +15,24 @@ export const selectedServiceProvider = (searchParams: URLSearchParams, key: "ena
 /** Post-pairing destination that opens the selected service setup in place. */
 export const serviceSetupPath = (providerId: ProviderId): string => `/services?enable=${providerId}`
 
-/** Post-OAuth destination that preserves the products granted by the completed Atlassian profile. */
-export const atlassianOAuthSetupPath = (providers: AtlassianOAuthProviderIntent): string => {
-  const searchParams = new URLSearchParams({ enable: providers.includes("jira") ? "jira" : "confluence" })
+/** Post-OAuth destination that preserves the completed Atlassian profile and its granted products. */
+export const atlassianOAuthSetupPath = (providers: AtlassianOAuthProviderIntent, profileId: string): string => {
+  const searchParams = new URLSearchParams({
+    enable: providers.includes("jira") ? "jira" : "confluence",
+    atlassianProfile: profileId
+  })
   for (const provider of providers) searchParams.append("atlassianProvider", provider)
   return `/services?${searchParams.toString()}`
+}
+
+/** Completed Atlassian profile selected by a bounded, untrusted browser query parameter. */
+export const selectedAtlassianOAuthProfileId = (searchParams: URLSearchParams): string | null => {
+  const profiles = searchParams.getAll("atlassianProfile")
+  if (profiles.length !== 1) return null
+  const [profileId] = profiles
+  return profileId !== undefined && profileId.length > 0 && profileId.length <= 500 && profileId.trim() === profileId
+    ? profileId
+    : null
 }
 
 /** Atlassian product intent selected by repeated, untrusted browser query parameters. */

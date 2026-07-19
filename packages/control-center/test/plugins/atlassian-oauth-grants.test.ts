@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { CONFLUENCE_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
 import { HomeDirectoryLive, loadProfiles, type OAuthToken, saveProfileToken } from "@knpkv/atlassian-common/config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
@@ -69,6 +69,17 @@ const providerClient = HttpClient.make((request) => {
     )
   )
 })
+
+const makeUserMetadataProviderClient = (user: UserInfo): HttpClient.HttpClient =>
+  HttpClient.make((request) => {
+    if (!request.url.endsWith("/me")) return providerClient.execute(request)
+    return Effect.succeed(
+      HttpClientResponse.fromWeb(
+        request,
+        new Response(JSON.stringify(user), { status: 200, headers: { "content-type": "application/json" } })
+      )
+    )
+  })
 
 const makeConcurrentProviderClient = (): HttpClient.HttpClient => {
   let issuedTokens = 0
@@ -209,6 +220,43 @@ describe("AtlassianOAuthGrants", () => {
       assert.deepStrictEqual(completed.providers, ["jira"])
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("rejects overlong provider user metadata without retaining site selection", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-user-metadata-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+
+      const exchanged = yield* Effect.result(grants.exchange(owner, grantId, "authorization-code"))
+
+      assert.isTrue(Result.isFailure(exchanged))
+      if (Result.isFailure(exchanged)) assert.strictEqual(exchanged.failure._tag, "ApplicationServiceUnavailable")
+      assert.strictEqual(yield* grants.pendingGrantCount, 0)
+    }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        makeUserMetadataProviderClient({
+          account_id: "account-1",
+          name: "A".repeat(501),
+          email: "avery@example.com"
+        })
+      ),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))

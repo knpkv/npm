@@ -25,6 +25,7 @@ import {
   type OAuthConfig,
   type OAuthToken,
   profileIdFromToken,
+  profileNameFromToken,
   saveOAuthConfig,
   saveProfileToken,
   writeSecureFile
@@ -43,12 +44,12 @@ import * as Semaphore from "effect/Semaphore"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
-  type AtlassianOAuthGrantExchangeResponse,
+  AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   type AtlassianOAuthGrantStartResponse,
   type AtlassianOAuthProviderIntent,
   AtlassianOAuthSite,
-  type DiscoveredAtlassianProfile
+  DiscoveredAtlassianProfile
 } from "../../../api/plugins.js"
 import type { SessionId, WorkspaceId } from "../../../domain/identifiers.js"
 import {
@@ -65,6 +66,12 @@ const MAXIMUM_PENDING_GRANTS = 20
 const MAXIMUM_ACCESSIBLE_SITES = 100
 const JIRA_AUTH_STORE_NAME = "jira-cli"
 const CONFLUENCE_AUTH_STORE_NAME = "confluence-to-markdown"
+
+const AtlassianOAuthUserMetadata = Schema.Struct({
+  account_id: Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  name: Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  email: Schema.Trim.check(Schema.isMaxLength(500))
+})
 
 interface GrantOwner {
   readonly sessionId: SessionId
@@ -253,6 +260,42 @@ const decodeSites = Effect.fn("AtlassianOAuthGrants.decodeSites")(function*(site
     }).pipe(Effect.mapError(unavailable)))
 })
 
+const tokenForSite = (
+  tokens: TokenResponse,
+  tokenExpiresAtMilliseconds: number,
+  user: UserInfo,
+  site: AccessibleResource
+): OAuthToken => ({
+  access_token: tokens.access_token,
+  refresh_token: tokens.refresh_token,
+  expires_at: tokenExpiresAtMilliseconds,
+  scope: tokens.scope,
+  cloud_id: site.id,
+  site_url: site.url,
+  user: {
+    account_id: user.account_id,
+    name: user.name,
+    email: user.email
+  }
+})
+
+const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileMetadata")(function*(
+  token: OAuthToken,
+  providers: AtlassianOAuthProviderIntent
+) {
+  const accountEmail = token.user?.email ?? ""
+  yield* Schema.decodeUnknownEffect(DiscoveredAtlassianProfile)({
+    profileId: profileIdFromToken(token),
+    name: profileNameFromToken(token),
+    siteUrl: token.site_url,
+    cloudId: token.cloud_id,
+    accountName: token.user?.name ?? null,
+    accountEmail: accountEmail.length === 0 ? null : accountEmail,
+    status: "valid",
+    providers
+  }).pipe(Effect.mapError(unavailable))
+})
+
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
 const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
@@ -420,13 +463,29 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         codeVerifier: pending.codeVerifier
       }).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
       const tokenExchangeAtMilliseconds = yield* Clock.currentTimeMillis
-      const [sites, user] = yield* Effect.all([
+      const [sites, providerUser] = yield* Effect.all([
         getAccessibleResources(tokens.access_token),
         getUserInfo(tokens.access_token)
       ]).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
       const supportedSites = sites.filter((site) => supportsProducts(site, pending.providers))
       const safeSites = yield* decodeSites(supportedSites)
-      return { safeSites, sites: supportedSites, tokenExchangeAtMilliseconds, tokens, user }
+      const user = yield* Schema.decodeUnknownEffect(AtlassianOAuthUserMetadata)(providerUser).pipe(
+        Effect.mapError(unavailable)
+      )
+      const tokenExpiresAtMilliseconds = tokenExchangeAtMilliseconds + tokens.expires_in * 1_000
+      yield* Effect.forEach(
+        supportedSites,
+        (site) =>
+          validateProfileMetadata(tokenForSite(tokens, tokenExpiresAtMilliseconds, user, site), pending.providers)
+      )
+      const accountEmail = user.email.length === 0 ? null : user.email
+      const response = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantExchangeResponse)({
+        grantId,
+        accountName: user.name,
+        accountEmail,
+        sites: safeSites
+      }).pipe(Effect.mapError(unavailable))
+      return { response, sites: supportedSites, tokenExpiresAtMilliseconds, tokens, user }
     }).pipe(Effect.tapError(() => removeExchange(grants, grantId, pending.createdAtMilliseconds)))
     const nowMilliseconds = yield* Clock.currentTimeMillis
     const didTransition = yield* Ref.modify(grants, (current): readonly [boolean, PendingGrants] => {
@@ -444,20 +503,14 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         createdAtMilliseconds: pending.createdAtMilliseconds,
         providers: pending.providers,
         sites: exchanged.sites,
-        tokenExpiresAtMilliseconds: exchanged.tokenExchangeAtMilliseconds + exchanged.tokens.expires_in * 1_000,
+        tokenExpiresAtMilliseconds: exchanged.tokenExpiresAtMilliseconds,
         tokens: exchanged.tokens,
         user: exchanged.user
       })
       return [true, active]
     })
     if (!didTransition) return yield* new ApplicationResourceNotFound()
-    const accountEmail = exchanged.user.email.trim()
-    return {
-      grantId,
-      accountName: exchanged.user.name,
-      accountEmail: accountEmail.length === 0 ? null : accountEmail,
-      sites: exchanged.safeSites
-    }
+    return exchanged.response
   })
 
   const complete: AtlassianOAuthGrantOperations["complete"] = Effect.fn("AtlassianOAuthGrants.complete")(function*(
@@ -469,19 +522,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     if (pending === null || pending._tag !== "site-selection") return yield* new ApplicationResourceNotFound()
     const site = pending.sites.find((candidate) => candidate.id === cloudId)
     if (site === undefined) return yield* new ApplicationInvalidRequest()
-    const token: OAuthToken = {
-      access_token: pending.tokens.access_token,
-      refresh_token: pending.tokens.refresh_token,
-      expires_at: pending.tokenExpiresAtMilliseconds,
-      scope: pending.tokens.scope,
-      cloud_id: site.id,
-      site_url: site.url,
-      user: {
-        account_id: pending.user.account_id,
-        name: pending.user.name,
-        email: pending.user.email
-      }
-    }
+    const token = tokenForSite(pending.tokens, pending.tokenExpiresAtMilliseconds, pending.user, site)
     const profile = yield* profileStoreLock.withPermit(
       Effect.gen(function*() {
         const snapshots = yield* Effect.forEach([CONTROL_CENTER_AUTH_STORE_NAME], captureAuthStore).pipe(
@@ -506,7 +547,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         )
       })
     ).pipe(Effect.uninterruptible)
-    const accountEmail = pending.user.email.trim()
+    const accountEmail = pending.user.email
     return {
       profileId: profile.id,
       name: profile.name,

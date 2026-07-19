@@ -45,17 +45,18 @@ const callbackReturnCases: ReadonlyArray<{
   readonly providers: AtlassianOAuthProviderIntent
 }> = [
   {
-    destination: "/services?enable=confluence&atlassianProvider=confluence",
+    destination: "/services?enable=confluence&atlassianProfile=account-1%40cloud-2&atlassianProvider=confluence",
     label: "Confluence-only",
     providers: ["confluence"]
   },
   {
-    destination: "/services?enable=jira&atlassianProvider=jira",
+    destination: "/services?enable=jira&atlassianProfile=account-1%40cloud-2&atlassianProvider=jira",
     label: "Jira-only",
     providers: ["jira"]
   },
   {
-    destination: "/services?enable=jira&atlassianProvider=jira&atlassianProvider=confluence",
+    destination:
+      "/services?enable=jira&atlassianProfile=account-1%40cloud-2&atlassianProvider=jira&atlassianProvider=confluence",
     label: "combined Jira and Confluence",
     providers: ["jira", "confluence"]
   }

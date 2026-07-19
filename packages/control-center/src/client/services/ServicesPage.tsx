@@ -25,7 +25,12 @@ import { browserConnectionTestTransport, type ConnectionTestTransport } from "./
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import { ProviderAccountCard } from "./ProviderAccountCard.js"
 import { type ServiceConnectionDraft, serviceSetupValue } from "./serviceSetupValues.js"
-import { selectedAtlassianOAuthProviders, selectedServiceProvider, servicePairingPath } from "./serviceOnboarding.js"
+import {
+  selectedAtlassianOAuthProfileId,
+  selectedAtlassianOAuthProviders,
+  selectedServiceProvider,
+  servicePairingPath
+} from "./serviceOnboarding.js"
 import styles from "./ServicesPage.module.css"
 
 type AwsProfilesState =
@@ -48,13 +53,74 @@ type ConnectionsState =
 
 const setupDraftKey = (draft: ServiceConnectionDraft): string => `${draft.catalog.providerId}\0${draft.displayName}`
 
-const allAtlassianProductsIntent: AtlassianSetupIntent = { providers: ["jira", "confluence"] }
+const allAtlassianProducts: AtlassianOAuthProviderIntent = ["jira", "confluence"]
 
-const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnectionSummary>): AtlassianSetupIntent => {
-  const providers = allAtlassianProductsIntent.providers.filter(
+const allAtlassianProductsIntent: AtlassianSetupIntent = {
+  preferredProfileId: null,
+  providers: allAtlassianProducts,
+  requestedOAuthProviders: allAtlassianProducts
+}
+
+const missingAtlassianProducts = (
+  connections: ReadonlyArray<PluginConnectionSummary>
+): AtlassianOAuthProviderIntent => {
+  const providers = allAtlassianProducts.filter(
     (providerId) => !connections.some((connection) => connection.providerId === providerId)
   )
-  return providers.length === 0 ? allAtlassianProductsIntent : { providers }
+  return providers.length === 0 ? allAtlassianProducts : providers
+}
+
+const hasCanonicalProfileForConnectedProduct = (
+  connections: ReadonlyArray<PluginConnectionSummary>,
+  profiles: AtlassianProfileDiscoveryResponse,
+  setupProviders: AtlassianOAuthProviderIntent
+): boolean =>
+  setupProviders.length === 1 &&
+  allAtlassianProducts.some(
+    (providerId) =>
+      !setupProviders.includes(providerId) &&
+      connections.some((connection) => connection.providerId === providerId) &&
+      profiles.some((profile) => !profile.profileId.startsWith("legacy:") && profile.providers.includes(providerId))
+  )
+
+const hasConnectedProductOutsideSetup = (
+  connections: ReadonlyArray<PluginConnectionSummary>,
+  setupProviders: AtlassianOAuthProviderIntent
+): boolean =>
+  setupProviders.length === 1 &&
+  allAtlassianProducts.some(
+    (providerId) =>
+      !setupProviders.includes(providerId) && connections.some((connection) => connection.providerId === providerId)
+  )
+
+const missingAtlassianProductsIntent = (connections: ReadonlyArray<PluginConnectionSummary>): AtlassianSetupIntent => {
+  const providers = missingAtlassianProducts(connections)
+  return {
+    preferredProfileId: null,
+    providers,
+    requestedOAuthProviders: null
+  }
+}
+
+const resolvedAtlassianSetupIntent = (
+  intent: AtlassianSetupIntent,
+  connections: ReadonlyArray<PluginConnectionSummary>,
+  profilesState: AtlassianProfilesState
+): AtlassianSetupIntent => {
+  if (intent.requestedOAuthProviders !== null) return intent
+  if (
+    hasConnectedProductOutsideSetup(connections, intent.providers) &&
+    (profilesState._tag === "idle" || profilesState._tag === "loading")
+  ) {
+    return intent
+  }
+  const profiles = profilesState._tag === "ready" ? profilesState.profiles : []
+  return {
+    ...intent,
+    requestedOAuthProviders: hasCanonicalProfileForConnectedProduct(connections, profiles, intent.providers)
+      ? allAtlassianProducts
+      : intent.providers
+  }
 }
 
 const ConnectionCard = ({
@@ -500,12 +566,17 @@ export const ServicesPage = ({
       setAtlassianSetupIntent(
         callbackProviders === null
           ? missingAtlassianProductsIntent(connectionsState.overview.connections)
-          : { providers: callbackProviders }
+          : {
+              preferredProfileId: selectedAtlassianOAuthProfileId(searchParams),
+              providers: callbackProviders,
+              requestedOAuthProviders: callbackProviders
+            }
       )
     }
     setOpenProvider(requestedProvider)
     const nextSearchParams = new URLSearchParams(searchParams)
     nextSearchParams.delete("enable")
+    nextSearchParams.delete("atlassianProfile")
     nextSearchParams.delete("atlassianProvider")
     setSearchParams(nextSearchParams, { replace: true })
   }, [connectionsState, searchParams, sessionState, setSearchParams])
@@ -777,6 +848,11 @@ export const ServicesPage = ({
                 ({ followedResourceId }) => followedResourceId === null || !groupedResourceIds.has(followedResourceId)
               )
               const missingAtlassianIntent = missingAtlassianProductsIntent(connectionsState.overview.connections)
+              const setupIntent = resolvedAtlassianSetupIntent(
+                atlassianSetupIntent ?? missingAtlassianIntent,
+                connectionsState.overview.connections,
+                atlassianProfilesState
+              )
               const cards = standaloneConnections.map((connection) => (
                 <ConnectionCard
                   canConfigure={canConfigure}
@@ -801,7 +877,7 @@ export const ServicesPage = ({
                 <CatalogCard
                   atlassianProfiles={atlassianProfilesState._tag === "ready" ? atlassianProfilesState.profiles : []}
                   atlassianProfilesState={atlassianProfilesState._tag}
-                  atlassianSetupIntent={atlassianSetupIntent ?? missingAtlassianIntent}
+                  atlassianSetupIntent={setupIntent}
                   awsProfiles={awsProfilesState._tag === "ready" ? awsProfilesState.profiles : []}
                   awsProfilesState={awsProfilesState._tag}
                   canConfigure={canConfigure}

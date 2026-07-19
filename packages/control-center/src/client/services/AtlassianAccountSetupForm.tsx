@@ -13,7 +13,9 @@ import { type ServiceConnectionDraft, serviceSetupValues } from "./serviceSetupV
 
 type AuthenticationMode = "oauth" | "api-token"
 export interface AtlassianSetupIntent {
+  readonly preferredProfileId: string | null
   readonly providers: AtlassianOAuthProviderIntent
+  readonly requestedOAuthProviders: AtlassianOAuthProviderIntent | null
 }
 
 const selectedProfile = (
@@ -76,8 +78,13 @@ export const AtlassianAccountSetupForm = ({
 
   useEffect(() => {
     if (authenticationMode !== "oauth" || profileId.length > 0) return
-    const firstUsableProfile = profiles.find((profile) => isUsableProfile(profile, setupIntent))
-    if (firstUsableProfile !== undefined) setProfileId(firstUsableProfile.profileId)
+    const preferredProfile =
+      setupIntent.preferredProfileId === null ? undefined : selectedProfile(profiles, setupIntent.preferredProfileId)
+    const initialProfile =
+      preferredProfile !== undefined && isUsableProfile(preferredProfile, setupIntent)
+        ? preferredProfile
+        : profiles.find((profile) => isUsableProfile(profile, setupIntent))
+    if (initialProfile !== undefined) setProfileId(initialProfile.profileId)
   }, [authenticationMode, profileId, profiles, setupIntent])
 
   useEffect(() => {
@@ -164,13 +171,14 @@ export const AtlassianAccountSetupForm = ({
   }
 
   const startOAuth = (): void => {
+    if (setupIntent.requestedOAuthProviders === null) return
     setSetupError(null)
     setOAuthCallbackUrl(null)
     setIsStartingOAuth(true)
     startRequest.current?.abort()
     const request = new AbortController()
     startRequest.current = request
-    void onStartOAuth(setupIntent.providers, request.signal).then(
+    void onStartOAuth(setupIntent.requestedOAuthProviders, request.signal).then(
       (result) => {
         if (request.signal.aborted) return
         if (result._tag === "configuration-required") {
@@ -234,7 +242,13 @@ export const AtlassianAccountSetupForm = ({
       </Field>
       {authenticationMode === "oauth" ? (
         <>
-          <Button loading={isStartingOAuth} onClick={startOAuth} type="button" variant="primary">
+          <Button
+            disabled={setupIntent.requestedOAuthProviders === null}
+            loading={isStartingOAuth}
+            onClick={startOAuth}
+            type="button"
+            variant="primary"
+          >
             Sign in with Atlassian
           </Button>
           {oauthCallbackUrl === null ? null : (

@@ -85,7 +85,8 @@ export const AtlassianOAuthCallbackPage = ({
     setState({ _tag: "saving", grant, cloudId })
     void save(grant.grantId, cloudId, request.signal).then(
       (profile) => {
-        if (!request.signal.aborted) navigate(atlassianOAuthSetupPath(profile.providers), { replace: true })
+        if (!request.signal.aborted)
+          navigate(atlassianOAuthSetupPath(profile.providers, profile.profileId), { replace: true })
       },
       () => {
         if (!request.signal.aborted) setState({ _tag: "selecting", grant, saveFailed: true })
