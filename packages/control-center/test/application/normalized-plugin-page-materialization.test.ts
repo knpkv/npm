@@ -586,12 +586,12 @@ describe("normalized plugin page materialization", () => {
         if (details._tag !== "issue") return yield* Effect.die("expected presentation-ready Jira issue details")
         assert.strictEqual(
           details.description,
-          "Persist retry state.\n\n## Acceptance Criteria\n\n- Retry survives restart."
+          "Persist retry state\\.\n\n## Acceptance Criteria\n\n- Retry survives restart\\."
         )
-        assert.strictEqual(details.acceptanceCriteria, "- Retry survives restart.")
+        assert.strictEqual(details.acceptanceCriteria, "- Retry survives restart\\.")
         assert.strictEqual(details.environment, "Payments production")
         assert.strictEqual(details.collaborators?.[0]?.displayName, "Ari Chen")
-        assert.strictEqual(details.comments?.[0]?.body, "Ready for review.")
+        assert.strictEqual(details.comments?.[0]?.body, "Ready for review\\.")
       })
     ))
 
@@ -712,7 +712,9 @@ describe("normalized plugin page materialization", () => {
         const legacy = yield* materializeNormalizedPluginPage(
           scope,
           page("compact-legacy-issue", {
+            schemaVersion: 1,
             key: "LEGACY-42",
+            summary: "Historical compact issue",
             status: { name: "Open" },
             priority: { name: "High" }
           })

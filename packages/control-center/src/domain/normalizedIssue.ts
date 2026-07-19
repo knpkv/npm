@@ -159,6 +159,7 @@ export const NormalizedIssueAttributes = Schema.Struct({
   comments: Schema.optionalKey(boundedArray(NormalizedIssueComment, MAXIMUM_NORMALIZED_ISSUE_COMMENTS)),
   commentTotal: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   commentsTruncated: Schema.optionalKey(Schema.Boolean),
+  commentBodiesTruncated: Schema.optionalKey(Schema.Boolean),
   history: Schema.optionalKey(boundedArray(NormalizedIssueHistoryEntry, MAXIMUM_NORMALIZED_ISSUE_HISTORY)),
   historyTotal: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   historyTruncated: Schema.optionalKey(Schema.Boolean),

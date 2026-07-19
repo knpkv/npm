@@ -173,11 +173,15 @@ const normalizedRenderedText = (value: string, maximum: number | null = MAX_RICH
 const adfContent = (record: typeof JsonRecord.Type): ReadonlyArray<Schema.Json> =>
   Array.isArray(record.content) ? record.content : []
 
-const markdownLinkLabel = (value: string): string =>
-  value.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]")
+const MarkdownAsciiPunctuation: ReadonlySet<string> = new Set(
+  Array.from("!\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~")
+)
+
+const escapedMarkdownText = (value: string): string =>
+  Array.from(value, (character) => MarkdownAsciiPunctuation.has(character) ? `\\${character}` : character).join("")
 
 const adfTextWithLinkMark = (record: typeof JsonRecord.Type, value: string): string => {
-  if (!Array.isArray(record.marks)) return value
+  if (!Array.isArray(record.marks)) return escapedMarkdownText(value)
   for (const markValue of record.marks) {
     const mark = decodedJsonRecord(markValue)
     if (mark?.type !== "link") continue
@@ -185,24 +189,32 @@ const adfTextWithLinkMark = (record: typeof JsonRecord.Type, value: string): str
     if (typeof attrs?.href !== "string") continue
     const decoded = Schema.decodeUnknownResult(SourceUrl)(attrs.href)
     if (Result.isFailure(decoded)) continue
-    return `[${markdownLinkLabel(value)}](<${Schema.encodeSync(SourceUrl)(decoded.success)}>)`
+    return `[${escapedMarkdownText(value)}](<${Schema.encodeSync(SourceUrl)(decoded.success)}>)`
   }
-  return value
+  return escapedMarkdownText(value)
 }
 
 const adfText = (value: Schema.Json): string => {
-  if (typeof value === "string") return value
+  if (typeof value === "string") return escapedMarkdownText(value)
   if (Array.isArray(value)) return value.map(adfText).join("")
   const record = decodedJsonRecord(value)
   if (record === null) return ""
   if (record.type === "hardBreak") return "\n"
   if (record.type === "mention") {
     const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
-    return typeof attrs?.text === "string" ? attrs.text : ""
+    return typeof attrs?.text === "string" ? escapedMarkdownText(attrs.text) : ""
   }
   return typeof record.text === "string"
     ? adfTextWithLinkMark(record, record.text)
     : adfContent(record).map(adfText).join("")
+}
+
+const rawAdfText = (value: Schema.Json): string => {
+  if (typeof value === "string") return value
+  if (Array.isArray(value)) return value.map(rawAdfText).join("")
+  const record = decodedJsonRecord(value)
+  if (record === null) return ""
+  return typeof record.text === "string" ? record.text : adfContent(record).map(rawAdfText).join("")
 }
 
 const indented = (value: string, prefix: string): string =>
@@ -212,7 +224,7 @@ const indented = (value: string, prefix: string): string =>
     .join("\n")
 
 const renderAdfBlock = (value: Schema.Json): string => {
-  if (typeof value === "string") return value
+  if (typeof value === "string") return escapedMarkdownText(value)
   if (Array.isArray(value)) {
     return value
       .map(renderAdfBlock)
@@ -252,7 +264,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
     case "codeBlock": {
       const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
       const language = typeof attrs?.language === "string" ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
-      return `\`\`\`${language}\n${content.map(adfText).join("")}\n\`\`\``
+      return `\`\`\`${language}\n${content.map(rawAdfText).join("")}\n\`\`\``
     }
     case "blockquote":
       return content
@@ -267,7 +279,7 @@ const renderAdfBlock = (value: Schema.Json): string => {
       return "\n"
     default:
       return typeof record.text === "string"
-        ? record.text
+        ? adfText(record)
         : content
           .map(renderAdfBlock)
           .filter((part) => part.length > 0)
@@ -298,7 +310,7 @@ const acceptanceCriteriaFromAdf = (
     if (typeof block !== "object" || block === null || Array.isArray(block)) continue
     const heading = decodedJsonRecord(block)
     if (heading?.type !== "heading") continue
-    const headingText = normalizedRenderedText(adfContent(heading).map(adfText).join(""), 255)
+    const headingText = normalizedRenderedText(adfContent(heading).map(rawAdfText).join(""), 255)
     if (headingText === null || !/^acceptance criteria:?$/iu.test(headingText)) continue
     const attrs = heading.attrs === undefined ? null : decodedJsonRecord(heading.attrs)
     const level = typeof attrs?.level === "number" && Number.isInteger(attrs.level) ? attrs.level : 1
@@ -410,8 +422,8 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   const sourceUrl = new URL(`${baseUrl}/browse/${encodeURIComponent(issue.key)}`)
 
   const truncatedFields = new Set<string>()
-  const retainedComments = comments.slice(0, MAXIMUM_NORMALIZED_ISSUE_COMMENTS)
-  const retainedChangelogs = changelogs.slice(0, MAXIMUM_NORMALIZED_ISSUE_HISTORY)
+  const retainedComments = comments.slice(-MAXIMUM_NORMALIZED_ISSUE_COMMENTS)
+  const retainedChangelogs = changelogs.slice(-MAXIMUM_NORMALIZED_ISSUE_HISTORY)
   const retainedLabels = (issue.fields.labels ?? [])
     .map((label) => label.trim().slice(0, 255))
     .filter((label) => label.length > 0)
@@ -476,7 +488,10 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   ) {
     truncatedFields.add("subtasks")
   }
-  if (comments.some((comment) => (unboundedRichText(comment.body)?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS)) {
+  const commentBodiesTruncated = comments.some(
+    (comment) => (unboundedRichText(comment.body)?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS
+  )
+  if (commentBodiesTruncated) {
     truncatedFields.add("comments")
   }
   if (
@@ -590,6 +605,7 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       comments: normalizedComments,
       commentTotal: input.comments.total,
       commentsTruncated: input.comments.truncated || retainedComments.length < comments.length,
+      commentBodiesTruncated,
       history: normalizedHistory,
       historyTotal: input.changelogs.total,
       historyTruncated: input.changelogs.truncated || retainedChangelogs.length < changelogs.length

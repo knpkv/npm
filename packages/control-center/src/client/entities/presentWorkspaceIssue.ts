@@ -38,6 +38,7 @@ export interface WorkspaceIssuePresentation {
   readonly collaborators: ReadonlyArray<RlyPerson>
   readonly commentCount: number
   readonly comments: ReadonlyArray<WorkspaceIssueCommentPresentation>
+  readonly commentBodiesTruncated: boolean
   readonly commentsTruncated: boolean
   readonly description: string | null
   readonly environment: string | null
@@ -167,13 +168,14 @@ export const presentWorkspaceIssue = (
   const commentCount = details.commentTotal ?? comments.length
   const historyCount = details.historyTotal ?? history.length
   const reducedFields = [...truncatedFields].filter((field) => field !== "comments" && field !== "history")
+  const commentsTruncated = (details.commentsTruncated ?? false) || commentCount > comments.length
   return {
     acceptanceCriteria: details.acceptanceCriteria ?? null,
     collaborators: [...people.values()],
     commentCount,
     comments,
-    commentsTruncated: (details.commentsTruncated ?? false) || truncatedFields.has("comments") ||
-      commentCount > comments.length,
+    commentBodiesTruncated: details.commentBodiesTruncated ?? (truncatedFields.has("comments") && !commentsTruncated),
+    commentsTruncated,
     description: details.description ?? null,
     environment: details.environment ?? null,
     history,

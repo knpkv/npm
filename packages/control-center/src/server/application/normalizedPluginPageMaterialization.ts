@@ -87,7 +87,14 @@ const LegacyIssueAttributes = Schema.Struct({
   priority: Schema.optionalKey(Schema.NullOr(NamedText)),
   estimatePoints: Schema.optionalKey(Schema.NullOr(Schema.Number))
 })
-const LegacyIssueAttributeKeys: ReadonlySet<string> = new Set(["key", "status", "priority", "estimatePoints"])
+const LegacyIssueAttributeKeys: ReadonlySet<string> = new Set([
+  "key",
+  "status",
+  "priority",
+  "estimatePoints",
+  "schemaVersion",
+  "summary"
+])
 const ReleaseAttributes = Schema.Struct({
   serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),

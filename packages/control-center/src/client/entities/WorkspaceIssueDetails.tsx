@@ -127,6 +127,11 @@ export const WorkspaceIssueDetails = ({ issue }: { readonly issue: WorkspaceIssu
     )}
 
     <Section heading="Comments" meta={`${String(issue.commentCount)} comments`}>
+      {issue.commentBodiesTruncated ? (
+        <Text className={styles.collectionNotice} tone="secondary">
+          Jira shortened comment bodies to keep this synchronized view bounded.
+        </Text>
+      ) : null}
       {issue.commentsTruncated ? (
         <Text className={styles.collectionNotice} tone="secondary">
           Only the newest synchronized comments are shown.

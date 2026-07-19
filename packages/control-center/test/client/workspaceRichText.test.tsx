@@ -78,4 +78,18 @@ describe("WorkspaceRichText", () => {
     expect(links[0]?.getAttribute("target")).toBe("_blank")
     expect(links[0]?.getAttribute("rel")).toBe("noreferrer")
   })
+
+  it("renders literal Jira Markdown controls as text while preserving an intentional ADF link", async () => {
+    const host = await renderRichText(
+      "\\# Incident notes \\[not a link\\]\\(https\\:\\/\\/wiki\\.example\\.test\\) Read the " +
+        "[runbook](<https://wiki.example.test/runbook>)\\."
+    )
+
+    expect(host.textContent).toBe("# Incident notes [not a link](https://wiki.example.test) Read the runbook.")
+    expect(host.querySelector("h1, h2, h3, h4, h5, h6")).toBeNull()
+    const links = [...host.querySelectorAll("a")]
+    expect(links).toHaveLength(1)
+    expect(links[0]?.textContent).toBe("runbook")
+    expect(links[0]?.getAttribute("href")).toBe("https://wiki.example.test/runbook")
+  })
 })

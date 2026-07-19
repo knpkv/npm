@@ -61,6 +61,10 @@ const issue = {
             { type: "text", text: " before rollout." }
           ]
         },
+        {
+          type: "paragraph",
+          content: [{ type: "text", text: "# Incident notes [not a link](https://wiki.example.test)" }]
+        },
         { type: "heading", attrs: { level: 2 }, content: [{ type: "text", text: "Acceptance Criteria" }] },
         {
           type: "bulletList",
@@ -317,26 +321,27 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(
         attributes.description,
         [
-          "Keep retry state durable. Read the [runbook](<https://wiki.example.test/runbook>) before rollout.",
+          "Keep retry state durable\\. Read the [runbook](<https://wiki.example.test/runbook>) before rollout\\.",
+          "\\# Incident notes \\[not a link\\]\\(https\\:\\/\\/wiki\\.example\\.test\\)",
           "## Acceptance Criteria",
-          "- Retry survives restart.\n- Timeout is covered.",
+          "- Retry survives restart\\.\n- Timeout is covered\\.",
           "```\nretry();\n```",
           "## Notes",
-          "Legacy retries are out of scope."
+          "Legacy retries are out of scope\\."
         ].join("\n\n")
       )
       assert.strictEqual(
         attributes.acceptanceCriteria,
-        "- Retry survives restart.\n- Timeout is covered.\n\n```\nretry();\n```"
+        "- Retry survives restart\\.\n- Timeout is covered\\.\n\n```\nretry();\n```"
       )
       assert.strictEqual(attributes.environment, "Production and staging")
       assert.strictEqual(attributes.status, "In Review")
       assert.strictEqual(attributes.comments?.length, 3)
       assert.strictEqual(
         attributes.comments?.[0]?.body,
-        "Ready for [review](<https://wiki.example.test/review-checklist>)."
+        "Ready for [review](<https://wiki.example.test/review-checklist>)\\."
       )
-      assert.strictEqual(attributes.comments?.[1]?.body, "Please cover the timeout path.")
+      assert.strictEqual(attributes.comments?.[1]?.body, "Please cover the timeout path\\.")
       assert.strictEqual(attributes.history?.length, 2)
       assert.isFalse(attributes.commentsTruncated)
       assert.isFalse(attributes.historyTruncated)
@@ -413,6 +418,60 @@ describe("JiraReadPlugin", () => {
       assert.lengthOf(yield* Ref.get(requests), 1)
       assert.strictEqual(attributes.commentTotal, 10)
       assert.isTrue(attributes.commentsTruncated)
+    }))
+
+  it.effect("retains the newest Jira activity in chronological order when normalized collections reach their cap", () =>
+    Effect.gen(function*() {
+      const ascendingComments = Array.from({ length: 201 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: `Comment ${String(index)}`,
+        created: `2026-07-${String(Math.floor(index / 24) + 1).padStart(2, "0")}T${
+          String(index % 24).padStart(2, "0")
+        }:00:00.000Z`
+      }))
+      const ascendingChangelogs = Array.from({ length: 201 }, (_, index) => ({
+        ...changelogs[0],
+        id: `history-${String(index)}`,
+        created: `2026-07-${String(Math.floor(index / 24) + 1).padStart(2, "0")}T${
+          String(index % 24).padStart(2, "0")
+        }:30:00.000Z`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Effect.succeed({
+            comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: ascendingComments.length
+          }),
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed({
+            values: ascendingChangelogs.slice(request.startAt, request.startAt + request.maxResults),
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: ascendingChangelogs.length
+          })
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 5 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(
+        attributes.comments?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 200 }, (_, index) => `comment-${String(index + 1)}`)
+      )
+      assert.deepStrictEqual(
+        attributes.history?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 200 }, (_, index) => `history-${String(index + 1)}`)
+      )
+      assert.isTrue(attributes.commentsTruncated)
+      assert.isTrue(attributes.historyTruncated)
     }))
 
   it.effect("trims combined comment and history activity to the normalized payload budget", () =>
@@ -509,6 +568,9 @@ describe("JiraReadPlugin", () => {
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
       assert.lengthOf(attributes.description ?? "", 16_000)
       assert.lengthOf(attributes.acceptanceCriteria ?? "", 16_000)
+      assert.lengthOf(attributes.comments?.[0]?.body ?? "", 16_000)
+      assert.isFalse(attributes.commentsTruncated)
+      assert.isTrue(attributes.commentBodiesTruncated)
       assert.isTrue(attributes.truncatedFields?.includes("acceptanceCriteria"))
       assert.isTrue(attributes.truncatedFields?.includes("comments"))
       assert.isTrue(attributes.truncatedFields?.includes("components"))

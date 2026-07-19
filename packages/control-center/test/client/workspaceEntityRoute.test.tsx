@@ -189,7 +189,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
+const renderView = async (onAskAgent: () => void, viewState: WorkspaceEntityState = state): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
@@ -201,7 +201,7 @@ const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
         originLabel="Back to items"
         originState={null}
         retry={() => undefined}
-        state={state}
+        state={viewState}
         workspaceId={WORKSET_WORKSPACE_ID}
       />
     </MemoryRouter>
@@ -357,5 +357,41 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-429"]')).not.toBeNull()
     expect(host.querySelector("textarea")).toBeNull()
     expect(host.textContent).not.toContain("Edit issue")
+  })
+
+  it("distinguishes a shortened comment body from an omitted-comments collection", async () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const clippedInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            comments: [
+              {
+                sourceId: "comment-41",
+                authorSourcePersonId: "account-mina",
+                updateAuthorSourcePersonId: null,
+                body: "m".repeat(16_000),
+                createdAt: "2026-07-14T09:30:00.000Z",
+                updatedAt: null
+              }
+            ],
+            commentTotal: 1,
+            commentsTruncated: false,
+            commentBodiesTruncated: true,
+            truncatedFields: ["comments"]
+          }
+        }
+      }
+    } satisfies Inspection
+    const clippedState = { ...state, inspection: clippedInspection } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, clippedState)
+
+    expect(host.textContent).toContain("Jira shortened comment bodies to keep this synchronized view bounded.")
+    expect(host.textContent).not.toContain("Only the newest synchronized comments are shown.")
   })
 })
