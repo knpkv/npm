@@ -3,6 +3,31 @@
   "objects": [
     {
       "type": "table",
+      "name": "agent_job_attempts",
+      "sql": "CREATE TABLE agent_job_attempts (\n    workspace_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence BETWEEN 1 AND 9007199254740991),\n    context_snapshot_json TEXT NOT NULL CHECK(length(context_snapshot_json) BETWEEN 2 AND 65536),\n    context_snapshot_digest TEXT NOT NULL CHECK(\n      length(context_snapshot_digest) = 71 AND context_snapshot_digest GLOB 'sha256:*'\n        AND substr(context_snapshot_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    output_bytes INTEGER NOT NULL DEFAULT 0 CHECK(output_bytes BETWEEN 0 AND 1048576),\n    provider_run_ref TEXT CHECK(provider_run_ref IS NULL OR length(provider_run_ref) BETWEEN 1 AND 1000),\n    session_ref TEXT CHECK(session_ref IS NULL OR length(session_ref) BETWEEN 1 AND 200),\n    started_at TEXT NOT NULL,\n    completed_at TEXT,\n    outcome TEXT CHECK(outcome IS NULL OR outcome IN ('success', 'failed', 'cancelled', 'max-steps')),\n    error_json TEXT CHECK(error_json IS NULL OR length(error_json) BETWEEN 2 AND 8192),\n    PRIMARY KEY (workspace_id, job_id, attempt_sequence),\n    FOREIGN KEY (workspace_id, job_id)\n      REFERENCES agent_jobs(workspace_id, job_id)\n      ON DELETE RESTRICT,\n    CHECK(\n      (completed_at IS NULL AND outcome IS NULL AND error_json IS NULL) OR\n      (completed_at IS NOT NULL AND outcome IS NOT NULL AND started_at <= completed_at)\n    ),\n    CHECK(error_json IS NULL OR outcome = 'failed')\n  )"
+    },
+    {
+      "type": "table",
+      "name": "agent_job_leases",
+      "sql": "CREATE TABLE agent_job_leases (\n    workspace_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence BETWEEN 1 AND 9007199254740991),\n    lease_owner TEXT NOT NULL CHECK(length(lease_owner) BETWEEN 1 AND 200),\n    lease_token TEXT NOT NULL CHECK(\n      length(lease_token) = 64 AND lease_token NOT GLOB '*[^0-9a-f]*'\n    ),\n    acquired_at TEXT NOT NULL,\n    last_renewed_at TEXT NOT NULL,\n    lease_expires_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, job_id, attempt_sequence),\n    UNIQUE (lease_token),\n    FOREIGN KEY (workspace_id, job_id, attempt_sequence)\n      REFERENCES agent_job_attempts(workspace_id, job_id, attempt_sequence)\n      ON DELETE RESTRICT,\n    CHECK(acquired_at <= last_renewed_at),\n    CHECK(last_renewed_at < lease_expires_at)\n  )"
+    },
+    {
+      "type": "table",
+      "name": "agent_jobs",
+      "sql": "CREATE TABLE agent_jobs (\n    workspace_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 200),\n    model TEXT CHECK(model IS NULL OR length(model) BETWEEN 1 AND 500),\n    access TEXT NOT NULL CHECK(access IN ('read-only', 'workspace-write')),\n    prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 131072),\n    context_fingerprint TEXT NOT NULL CHECK(\n      length(context_fingerprint) = 71 AND context_fingerprint GLOB 'sha256:*'\n        AND substr(context_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    subject_revision TEXT NOT NULL CHECK(length(subject_revision) BETWEEN 1 AND 500),\n    state TEXT NOT NULL CHECK(state IN (\n      'queued', 'running', 'cancel-requested', 'succeeded', 'failed', 'cancelled'\n    )),\n    created_at TEXT NOT NULL,\n    cancel_requested_at TEXT,\n    terminal_at TEXT,\n    PRIMARY KEY (workspace_id, job_id),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    CHECK(cancel_requested_at IS NULL OR created_at <= cancel_requested_at),\n    CHECK(terminal_at IS NULL OR created_at <= terminal_at),\n    CHECK(\n      (state IN ('queued', 'running') AND cancel_requested_at IS NULL AND terminal_at IS NULL) OR\n      (state = 'cancel-requested' AND cancel_requested_at IS NOT NULL AND terminal_at IS NULL) OR\n      (state IN ('succeeded', 'failed') AND terminal_at IS NOT NULL) OR\n      (state = 'cancelled' AND terminal_at IS NOT NULL)\n    )\n  )"
+    },
+    {
+      "type": "table",
+      "name": "agent_thread_events",
+      "sql": "CREATE TABLE agent_thread_events (\n    workspace_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    event_sequence INTEGER NOT NULL CHECK(event_sequence BETWEEN 1 AND 9007199254740991),\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER,\n    event_kind TEXT NOT NULL CHECK(event_kind IN (\n      'user-message', 'job-queued', 'job-started', 'assistant-output', 'progress',\n      'usage', 'job-completed', 'job-failed', 'cancel-requested'\n    )),\n    payload_json TEXT NOT NULL CHECK(length(payload_json) BETWEEN 2 AND 32768),\n    payload_digest TEXT NOT NULL CHECK(\n      length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'\n        AND substr(payload_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    payload_byte_length INTEGER NOT NULL CHECK(payload_byte_length BETWEEN 2 AND 32768),\n    occurred_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, thread_id, event_sequence),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id)\n      REFERENCES agent_jobs(workspace_id, job_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id, attempt_sequence)\n      REFERENCES agent_job_attempts(workspace_id, job_id, attempt_sequence)\n      ON DELETE RESTRICT,\n    CHECK(payload_byte_length = length(CAST(payload_json AS BLOB))),\n    CHECK(\n      (event_kind IN ('user-message', 'job-queued', 'cancel-requested') AND attempt_sequence IS NULL) OR\n      (event_kind IN (\n        'job-started', 'assistant-output', 'progress', 'usage', 'job-completed', 'job-failed'\n      ) AND attempt_sequence IS NOT NULL)\n    )\n  )"
+    },
+    {
+      "type": "table",
+      "name": "agent_threads",
+      "sql": "CREATE TABLE agent_threads (\n    workspace_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    release_id TEXT NOT NULL,\n    next_event_sequence INTEGER NOT NULL DEFAULT 1 CHECK(\n      next_event_sequence BETWEEN 1 AND 9007199254740991\n    ),\n    created_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, thread_id),\n    UNIQUE (workspace_id, release_id),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "audit_events",
       "sql": "CREATE TABLE audit_events (\n    workspace_id TEXT NOT NULL,\n    action_id TEXT NOT NULL,\n    transition_id TEXT NOT NULL,\n    audit_event_id TEXT NOT NULL,\n    event_kind TEXT NOT NULL CHECK(event_kind IN (\n      'proposed', 'authorized', 'denied', 'expired', 'cancelled', 'started',\n      'cancel-requested', 'cancel-requested-unknown', 'succeeded', 'failed', 'unknown'\n    )),\n    cause_kind TEXT NOT NULL CHECK(cause_kind IN ('human', 'agent', 'system')),\n    actor_id TEXT CHECK(actor_id IS NULL OR length(actor_id) BETWEEN 1 AND 512),\n    session_id TEXT,\n    job_id TEXT CHECK(job_id IS NULL OR length(job_id) BETWEEN 1 AND 512),\n    system_component TEXT CHECK(\n      system_component IS NULL OR length(system_component) BETWEEN 1 AND 200\n    ),\n    causation_id TEXT,\n    correlation_id TEXT CHECK(\n      correlation_id IS NULL OR length(correlation_id) BETWEEN 1 AND 128\n    ),\n    payload_digest TEXT NOT NULL CHECK(\n      length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'\n        AND substr(payload_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    payload_json TEXT NOT NULL CHECK(length(payload_json) BETWEEN 2 AND 262144),\n    occurred_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, audit_event_id),\n    UNIQUE (workspace_id, action_id, transition_id),\n    FOREIGN KEY (workspace_id, action_id, transition_id)\n      REFERENCES governed_action_transitions(workspace_id, action_id, transition_id),\n    FOREIGN KEY (workspace_id, session_id)\n      REFERENCES sessions(workspace_id, session_id),\n    CHECK(\n      (cause_kind = 'human' AND actor_id IS NOT NULL AND session_id IS NOT NULL\n        AND job_id IS NULL AND system_component IS NULL) OR\n      (cause_kind = 'agent' AND actor_id IS NOT NULL AND session_id IS NULL\n        AND job_id IS NOT NULL AND system_component IS NULL) OR\n      (cause_kind = 'system' AND actor_id IS NULL AND session_id IS NULL\n        AND job_id IS NULL AND system_component IS NOT NULL)\n    )\n  )"
     },
@@ -340,6 +365,21 @@
       "type": "table",
       "name": "workspaces",
       "sql": "CREATE TABLE workspaces (\n    workspace_id TEXT NOT NULL,\n    display_name TEXT NOT NULL CHECK(length(display_name) BETWEEN 1 AND 200),\n    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id),\n    CHECK(created_at <= updated_at)\n  )"
+    },
+    {
+      "type": "index",
+      "name": "agent_job_leases_recovery_idx",
+      "sql": "CREATE INDEX agent_job_leases_recovery_idx\n    ON agent_job_leases(workspace_id, lease_expires_at, job_id, attempt_sequence)"
+    },
+    {
+      "type": "index",
+      "name": "agent_jobs_state_idx",
+      "sql": "CREATE INDEX agent_jobs_state_idx\n    ON agent_jobs(workspace_id, state, created_at, job_id)"
+    },
+    {
+      "type": "index",
+      "name": "agent_thread_events_job_idx",
+      "sql": "CREATE INDEX agent_thread_events_job_idx\n    ON agent_thread_events(workspace_id, job_id, attempt_sequence, event_sequence)"
     },
     {
       "type": "index",

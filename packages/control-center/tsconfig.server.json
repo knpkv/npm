@@ -15,6 +15,7 @@
   "references": [
     { "path": "../ai-claude/tsconfig.build.json" },
     { "path": "../ai-codex/tsconfig.build.json" },
+    { "path": "../ai-runtime/tsconfig.json" },
     { "path": "../atlassian-common/tsconfig.build.json" },
     { "path": "../clockify-api-client/tsconfig.json" },
     { "path": "../control-center-sql/tsconfig.build.json" },

@@ -21,4 +21,5 @@ export {
   type PersistenceService
 } from "./Persistence.js"
 export * from "./PersistenceConfig.js"
+export * from "./repositories/agentJobModels.js"
 export * from "./repositories/models.js"

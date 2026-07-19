@@ -7,6 +7,8 @@ description: Typed effect-qb query plans behind the Control Center persistence b
 
 The current release-readiness plan accepts one workspace and a non-empty, bounded release set. It renders one parameterized SQLite query that joins readiness heads, immutable history, and assessments while checking release and environment invalidation queues. Control Center executes the plan through its scoped Effect SQL client, then applies its existing Schema decoding, digest/materialization verification, and quarantine rules.
 
+Durable agent workers use the same boundary for three concurrency-sensitive reads and writes: a stable workspace-scoped dispatch scan, an `UPDATE … RETURNING` claim compare-and-set, and cursor-bounded release-thread replay. Dispatch includes the latest attempt sequence and only returns queued jobs or active jobs whose lease is no longer live. Claiming rechecks the expected job state, attempt sequence, and lease inside the write transaction, while preserving durable cancellation intent during restart recovery.
+
 The package deliberately does not own connections, transactions, schema creation, backup, or restore. Control Center owns those policies. During the MVP, the database uses one exact unstable schema snapshot; versioned migrations start only after the persistence model is stable and released database files require upgrades.
 
 Effect Persistence was evaluated but is not the relational storage foundation: its key/value cache and persisted queue abstractions do not replace joins, constraints, cross-operation transactions, or persisted-record quarantine. A later agent-job queue or disposable projection cache may use it behind a separate boundary.

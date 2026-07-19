@@ -1,4 +1,6 @@
 /** Workspace, plugin, entity, release, people, blob-metadata, and quarantine repositories. */
+export * from "./agentJobModels.js"
+export * from "./agentJobRepository.js"
 export * from "./authorizedShareRepository.js"
 export * from "./contentBlobMetadataRepository.js"
 export * from "./deliveryGraphRepository.js"
