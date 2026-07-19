@@ -98,12 +98,13 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
 const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
   client: ConfluencePageClientShape,
   markdown?: string,
-  onConvert?: () => void
+  onConvert?: () => void,
+  configured: ConfluencePageAdapterConfiguration = configuration
 ) {
   const descriptor = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
   return makeConfluencePageAdapter({
     client,
-    configuration,
+    configuration: configured,
     converter: converter(markdown, onConvert),
     descriptor
   })
@@ -210,6 +211,18 @@ describe("Confluence page adapter", () => {
           assert.strictEqual(outcome.failure.diagnosticCode, "confluence-site-identity-mismatch")
         }
       }
+    }))
+
+  it.effect("uses the already-verified OAuth cloud ID without requesting system information", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({ getSystemInfo: Effect.die("OAuth discovery must not require Confluence settings scope") }),
+        undefined,
+        undefined,
+        { ...configuration, oauthVerifiedSiteId: "site-acme" }
+      )
+      const discovery = yield* adapter.connection.discover
+      assert.strictEqual(discovery.workspace?.providerImmutableId, "site-acme")
     }))
 
   it.effect("uses the public name for a privacy-limited current-user profile", () =>

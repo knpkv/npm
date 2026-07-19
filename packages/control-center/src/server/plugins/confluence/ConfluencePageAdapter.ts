@@ -92,7 +92,8 @@ export const ConfluencePageAdapterConfiguration = Schema.Struct({
   siteBaseUrl: SiteUrl,
   siteId: Identifier,
   spaceId: Identifier,
-  probePageId: Identifier
+  probePageId: Identifier,
+  oauthVerifiedSiteId: Schema.optionalKey(Identifier)
 })
 
 /** Decoded Confluence page adapter configuration. @internal */
@@ -422,14 +423,19 @@ export const makeConfluencePageAdapter = (
     descriptor: input.descriptor,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
-      const rawSystemInfo = yield* providerCall(input.client.getSystemInfo)
-      const systemInfo = yield* decodeProvider(
-        "confluence-system-info",
-        "confluence-system-info-invalid",
-        RawConfluenceSystemInfo,
-        rawSystemInfo
-      )
-      if (systemInfo.cloudId !== input.configuration.siteId) {
+      const verifiedSite = input.configuration.oauthVerifiedSiteId === undefined
+        ? yield* providerCall(input.client.getSystemInfo).pipe(
+          Effect.flatMap((rawSystemInfo) =>
+            decodeProvider(
+              "confluence-system-info",
+              "confluence-system-info-invalid",
+              RawConfluenceSystemInfo,
+              rawSystemInfo
+            )
+          )
+        )
+        : { cloudId: input.configuration.oauthVerifiedSiteId, siteTitle: undefined }
+      if (verifiedSite.cloudId !== input.configuration.siteId) {
         return yield* malformed("confluence-system-info", "confluence-site-identity-mismatch")
       }
       const rawUser = yield* providerCall(input.client.getCurrentUser)
@@ -448,8 +454,8 @@ export const makeConfluencePageAdapter = (
           displayName: currentUserDisplayName(user.displayName, user.publicName)
         },
         workspace: {
-          providerImmutableId: systemInfo.cloudId,
-          displayName: systemInfo.siteTitle ?? input.configuration.siteBaseUrl.hostname
+          providerImmutableId: verifiedSite.cloudId,
+          displayName: verifiedSite.siteTitle ?? input.configuration.siteBaseUrl.hostname
         },
         resource: {
           providerImmutableId: input.configuration.spaceId,

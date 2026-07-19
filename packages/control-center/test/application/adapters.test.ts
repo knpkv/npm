@@ -1044,6 +1044,203 @@ describe("application adapters", () => {
       assert.isNull(duplicateDraft.followedResourceId)
     })))
 
+  it.effect("never binds stale Atlassian discovery after a concurrent identity patch", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const discoveryEntered = yield* Deferred.make<void>()
+      const releaseDiscovery = yield* Deferred.make<void>()
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Deferred.succeed(discoveryEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseDiscovery)),
+          Effect.as({
+            account: { providerImmutableId: "account-1", displayName: "Avery Bell" },
+            workspace: { providerImmutableId: "site-a", displayName: "Site A" },
+            resource: { providerImmutableId: "project-a", displayName: "Project A" },
+            endpoints: [],
+            discoveredAt: T0
+          })
+        ),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      })
+      const connect = administration.connectAndTest
+      assert.isDefined(connect)
+      const setupFiber = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: FAILED_PLUGIN_ID,
+          providerId: "jira",
+          displayName: "Racing Jira",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://a.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-a" },
+            { _tag: "text", key: PluginConfigurationKey.make("projectId"), value: "project-a" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "token" }
+          ]
+        }
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(discoveryEntered)
+      yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "api-token" },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("email"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 50 },
+            { _tag: "text", key: PluginConfigurationKey.make("projectId"), value: "project-b" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-b" },
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://b.atlassian.net/" }
+          ]
+        }
+      })
+      yield* Deferred.succeed(releaseDiscovery, undefined)
+      const outcome = yield* Fiber.join(setupFiber).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      const persistence = yield* Persistence
+      assert.lengthOf(yield* persistence.providerAccounts.list(WORKSPACE_ID), 0)
+      const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      assert.isNull(record.providerAccountId)
+      assert.isNull(record.followedResourceId)
+      const configuration = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      assert.isTrue(Option.isSome(configuration))
+      if (Option.isSome(configuration)) {
+        const projectId = configuration.value.values.find(({ key }) => key === "projectId")
+        assert.strictEqual(projectId?._tag, "text")
+        if (projectId?._tag === "text") assert.strictEqual(projectId.value, "project-b")
+      }
+    })))
+
+  it.effect("rejects an identity patch that was prepared before Atlassian ownership became bound", () =>
+    withApplication(Effect.gen(function*() {
+      yield* setup
+      const discoveryEntered = yield* Deferred.make<void>()
+      const releaseDiscovery = yield* Deferred.make<void>()
+      const secretResolutionEntered = yield* Deferred.make<void>()
+      const releaseSecretResolution = yield* Deferred.make<void>()
+      const actualSecrets = yield* SecretStore
+      const resolutions = yield* Ref.make(0)
+      const instrumentedSecrets = SecretStore.of({
+        ...actualSecrets,
+        resolve: (ref) =>
+          Ref.getAndUpdate(resolutions, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 0
+                ? Deferred.succeed(secretResolutionEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseSecretResolution)),
+                  Effect.andThen(actualSecrets.resolve(ref))
+                )
+                : actualSecrets.resolve(ref)
+            )
+          )
+      })
+      const connection: PluginConnectionV1 = {
+        descriptor: negotiatedDescriptor,
+        discover: Deferred.succeed(discoveryEntered, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseDiscovery)),
+          Effect.as({
+            account: { providerImmutableId: "account-1", displayName: "Avery Bell" },
+            workspace: { providerImmutableId: "site-a", displayName: "Site A" },
+            resource: { providerImmutableId: "project-a", displayName: "Project A" },
+            endpoints: [],
+            discoveredAt: T0
+          })
+        ),
+        health: Effect.succeed({ _tag: "healthy", checkedAt: T0 }),
+        sync: () => Stream.die("not used"),
+        readEntity: () => Effect.die("not used"),
+        diff: Option.none(),
+        proposeAction: () => Effect.die("not used")
+      }
+      const administration = yield* makePluginAdministrationWithConnections({
+        contextEffect: () => Effect.succeed(Context.make(PluginConnection, connection)),
+        invalidate: () => Effect.void
+      }).pipe(Effect.provideService(SecretStore, instrumentedSecrets))
+      const connect = administration.connectAndTest
+      assert.isDefined(connect)
+      const setupFiber = yield* connect({
+        workspaceId: WORKSPACE_ID,
+        request: {
+          pluginConnectionId: FAILED_PLUGIN_ID,
+          providerId: "jira",
+          displayName: "Racing Jira",
+          values: [
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://a.atlassian.net/" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-a" },
+            { _tag: "text", key: PluginConfigurationKey.make("projectId"), value: "project-a" },
+            { _tag: "text", key: PluginConfigurationKey.make("email"), value: "owner@example.com" },
+            { _tag: "secret", key: PluginConfigurationKey.make("apiToken"), value: "token" }
+          ]
+        }
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(discoveryEntered)
+      const patchFiber = yield* administration.patchConfiguration({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: FAILED_PLUGIN_ID,
+        patch: {
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: PluginConfigurationKey.make("authMode"), value: "api-token" },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("apiToken"),
+              operation: { _tag: "keep" }
+            },
+            {
+              _tag: "secret-reference",
+              key: PluginConfigurationKey.make("email"),
+              operation: { _tag: "keep" }
+            },
+            { _tag: "integer", key: PluginConfigurationKey.make("maximumPages"), value: 5 },
+            { _tag: "integer", key: PluginConfigurationKey.make("operationTimeoutMillis"), value: 30_000 },
+            { _tag: "integer", key: PluginConfigurationKey.make("pageSize"), value: 50 },
+            { _tag: "text", key: PluginConfigurationKey.make("projectId"), value: "project-b" },
+            { _tag: "text", key: PluginConfigurationKey.make("siteId"), value: "site-b" },
+            { _tag: "url", key: PluginConfigurationKey.make("webBaseUrl"), value: "https://b.atlassian.net/" }
+          ]
+        }
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(secretResolutionEntered)
+      yield* Deferred.succeed(releaseDiscovery, undefined)
+      yield* Fiber.join(setupFiber)
+      yield* Deferred.succeed(releaseSecretResolution, undefined)
+      const patchOutcome = yield* Fiber.join(patchFiber).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(patchOutcome))
+      if (Result.isFailure(patchOutcome)) assert.instanceOf(patchOutcome.failure, ApplicationInvalidRequest)
+      const persistence = yield* Persistence
+      const record = yield* persistence.pluginConnections.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      assert.isNotNull(record.providerAccountId)
+      assert.isNotNull(record.followedResourceId)
+      const configuration = yield* persistence.pluginConfigurations.get(WORKSPACE_ID, FAILED_PLUGIN_ID)
+      assert.isTrue(Option.isSome(configuration))
+      if (Option.isSome(configuration)) {
+        const projectId = configuration.value.values.find(({ key }) => key === "projectId")
+        assert.strictEqual(projectId?._tag, "text")
+        if (projectId?._tag === "text") assert.strictEqual(projectId.value, "project-a")
+      }
+    })))
+
   it.effect("shares an AWS account while region-scoping resources and rejecting duplicate bindings", () =>
     withApplication(Effect.gen(function*() {
       yield* setup

@@ -155,6 +155,10 @@ export const AtlassianAccountSetupForm = ({
       setSetupError("Add the Atlassian email and API token.")
       return
     }
+    if (authenticationMode === "api-token" && setupJira && setupIntent.preferredSiteId !== null) {
+      setSetupError("Use a matching OAuth profile to add a Jira project to this Atlassian site.")
+      return
+    }
     const sharedValues: ReadonlyArray<readonly [string, string]> = [
       ...authentication,
       ["webBaseUrl", normalizedSiteUrl],
@@ -302,9 +306,11 @@ export const AtlassianAccountSetupForm = ({
               </select>
             )}
           </Field>
-          <Button onClick={useApiToken} type="button" variant="quiet">
-            Use API token instead
-          </Button>
+          {setupJira && setupIntent.preferredSiteId !== null ? null : (
+            <Button onClick={useApiToken} type="button" variant="quiet">
+              Use API token instead
+            </Button>
+          )}
         </>
       ) : (
         <div className={styles.fallback}>

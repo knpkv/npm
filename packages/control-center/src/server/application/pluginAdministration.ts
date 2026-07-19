@@ -994,7 +994,7 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
       createdAt,
       maximum: MAXIMUM_PLUGIN_CONNECTIONS
     }).pipe(Effect.mapError(mapPersistenceWriteError))
-    yield* persistence.pluginConfigurations.update(
+    const setupConfiguration = yield* persistence.pluginConfigurations.update(
       workspaceId,
       request.pluginConnectionId,
       values,
@@ -1037,7 +1037,13 @@ const connectAndTest = Effect.fn("PluginAdministration.connectAndTest")(function
         request.pluginConnectionId
       )
       const bound = tested.test._tag === "healthy"
-        ? yield* materializeConnectionOwnership(persistence, cryptoService, enabled, tested.discovery)
+        ? yield* materializeConnectionOwnership(
+          persistence,
+          cryptoService,
+          enabled,
+          tested.discovery,
+          setupConfiguration.revision
+        )
         : enabled
       cleanupConnection = bound
       yield* persistSetupTestHealth(
@@ -1278,22 +1284,28 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         path
       )
       const updatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-      yield* Effect.uninterruptible(
-        persistence.pluginConfigurations.update(
-          workspaceId,
-          pluginConnectionId,
-          values,
-          patch.expectedRevision,
-          updatedAt
-        ).pipe(
-          Effect.mapError(mapPersistenceWriteError),
-          Effect.andThen(
-            pluginConnections === null
-              ? Effect.void
-              : pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      yield* Effect.uninterruptible(Effect.gen(function*() {
+        const updated = yield* persistence.transact(Effect.gen(function*() {
+          const latestConnection = yield* persistence.pluginConnections.get(workspaceId, pluginConnectionId)
+          const identityCheck = yield* rejectBoundAtlassianIdentityChange(
+            latestConnection,
+            Option.isSome(current) ? current.value.values : [],
+            patch.values
+          ).pipe(Effect.result)
+          if (Result.isFailure(identityCheck)) return null
+          return yield* persistence.pluginConfigurations.update(
+            workspaceId,
+            pluginConnectionId,
+            values,
+            patch.expectedRevision,
+            updatedAt
           )
-        )
-      )
+        })).pipe(Effect.mapError(mapPersistenceWriteError))
+        if (updated === null) return yield* new ApplicationInvalidRequest()
+        if (pluginConnections !== null) {
+          yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+        }
+      }))
       return yield* configuration(persistence, secrets, workspaceId, pluginConnectionId)
     })
   } satisfies PluginAdministrationService

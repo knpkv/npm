@@ -1,11 +1,12 @@
 import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 
 import { FollowedResourceId, ProviderAccountId } from "../../domain/identifiers.js"
 import type { PluginDiscoveryV1 } from "../../domain/plugins/discovery.js"
 import { ApplicationInvalidRequest, ApplicationServiceUnavailable } from "../api/ApplicationServices.js"
-import { RecordAlreadyExistsError } from "../persistence/errors.js"
+import { RecordAlreadyExistsError, RevisionConflictError } from "../persistence/errors.js"
 import type { Persistence } from "../persistence/Persistence.js"
 import type { PluginConnectionRecord, ProviderFamily } from "../persistence/repositories/models.js"
 import {
@@ -51,7 +52,8 @@ export const materializeConnectionOwnership = Effect.fn(
   persistence: Persistence["Service"],
   cryptoService: Crypto.Crypto,
   connection: PluginConnectionRecord,
-  discovery: PluginDiscoveryV1 | null
+  discovery: PluginDiscoveryV1 | null,
+  expectedConfigurationRevision: number
 ) {
   const ownership = ownershipDiscovery(connection, discovery)
   if (ownership === null) return connection
@@ -65,6 +67,20 @@ export const materializeConnectionOwnership = Effect.fn(
     yield* cryptoService.randomUUIDv7.pipe(Effect.mapError(() => unavailable()))
   )
   return yield* persistence.transact(Effect.gen(function*() {
+    const configuration = yield* persistence.pluginConfigurations.get(
+      connection.workspaceId,
+      connection.pluginConnectionId
+    )
+    const actualConfigurationRevision = Option.isSome(configuration) ? configuration.value.revision : null
+    if (actualConfigurationRevision !== expectedConfigurationRevision) {
+      return yield* new RevisionConflictError({
+        actualRevision: actualConfigurationRevision,
+        expectedRevision: expectedConfigurationRevision,
+        recordKey: connection.pluginConnectionId,
+        recordKind: "plugin-configuration",
+        workspaceId: connection.workspaceId
+      })
+    }
     const accounts = yield* persistence.providerAccounts.list(connection.workspaceId)
     const accountIdentity = VendorAccountId.make(ownership.account.providerImmutableId)
     const account = accounts.find(

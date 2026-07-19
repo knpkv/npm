@@ -648,6 +648,23 @@ describe("ServicesPage connection tests", () => {
     await act(async () => useApiToken?.click())
     expect(pinnedSiteId?.value).toBe("cloud-2")
     expect(pinnedSiteId?.disabled).toBe(true)
+
+    const cancel = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Cancel")
+    )
+    await act(async () => cancel?.click())
+    const addJira = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Add Jira project")
+    )
+    await act(async () => addJira?.click())
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Jira project ID")
+    expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).not.toContain(
+      "Use API token instead"
+    )
+    expect(
+      [...host.querySelectorAll<HTMLOptionElement>("option")].some(({ value }) => value === "account-2@cloud-2")
+    ).toBe(true)
   })
 
   it("surfaces failed enablement for a resource inside an AWS account", async () => {

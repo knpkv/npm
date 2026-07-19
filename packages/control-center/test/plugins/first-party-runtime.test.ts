@@ -59,6 +59,18 @@ const preOAuthDescriptor = (providerId: "jira" | "confluence") => {
   }
 }
 
+const jiraOAuthDescriptorWithoutIdentity = {
+  ...jiraReadPluginDescriptor,
+  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(
+    ({ key }) => key !== "siteId" && key !== "projectId"
+  )
+}
+
+const jiraOAuthDescriptorWithSiteOnly = {
+  ...jiraReadPluginDescriptor,
+  configurationFields: jiraReadPluginDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
+}
+
 const oauthProfile = (id: string, expiresAt: number) => ({
   id,
   name: `${id} @ knpkv.atlassian.net`,
@@ -116,13 +128,16 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
+          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only"
           readonly missing: "none" | "apiToken" | "email"
           readonly providerId: "jira" | "confluence"
         }> = [
-          { providerId: "jira", missing: "none" },
-          { providerId: "confluence", missing: "none" },
-          { providerId: "jira", missing: "email" },
-          { providerId: "confluence", missing: "apiToken" }
+          { providerId: "jira", generation: "pre-oauth", missing: "none" },
+          { providerId: "jira", generation: "oauth-without-identity", missing: "none" },
+          { providerId: "jira", generation: "oauth-with-site-only", missing: "none" },
+          { providerId: "confluence", generation: "pre-oauth", missing: "none" },
+          { providerId: "jira", generation: "pre-oauth", missing: "email" },
+          { providerId: "confluence", generation: "pre-oauth", missing: "apiToken" }
         ]
 
         for (const [index, testCase] of cases.entries()) {
@@ -149,11 +164,17 @@ describe("first-party plugin runtime", () => {
             testCase.providerId === "jira"
               ? [
                 ...credentials,
+                ...(testCase.generation === "pre-oauth"
+                  ? []
+                  : [{ _tag: "text", key: "authMode", value: "api-token" }]),
+                ...(testCase.generation === "oauth-with-site-only"
+                  ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
+                  : []),
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
                 { _tag: "integer", key: "pageSize", value: 10 },
                 { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
-              ]
+              ].sort((left, right) => left.key.localeCompare(right.key))
               : [
                 ...credentials,
                 { _tag: "text", key: "probePageId", value: "page-1" },
@@ -173,7 +194,13 @@ describe("first-party plugin runtime", () => {
             WORKSPACE_ID,
             pluginConnectionId,
             testCase.providerId,
-            preOAuthDescriptor(testCase.providerId),
+            testCase.providerId === "confluence"
+              ? preOAuthDescriptor("confluence")
+              : testCase.generation === "pre-oauth"
+              ? preOAuthDescriptor("jira")
+              : testCase.generation === "oauth-without-identity"
+              ? jiraOAuthDescriptorWithoutIdentity
+              : jiraOAuthDescriptorWithSiteOnly,
             0,
             CREATED_AT
           )
