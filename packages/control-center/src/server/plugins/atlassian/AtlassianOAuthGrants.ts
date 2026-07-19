@@ -366,6 +366,22 @@ const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray
   confluence: CONFLUENCE_REQUIRED_SCOPES
 }
 
+const mergeProductResourceScopes = (
+  resources: ReadonlyArray<AccessibleResource>
+): ReadonlyArray<AccessibleResource> => {
+  const sitesByCloudId = new Map<string, AccessibleResource>()
+  for (const resource of resources) {
+    const existing = sitesByCloudId.get(resource.id)
+    sitesByCloudId.set(
+      resource.id,
+      existing === undefined
+        ? { ...resource, scopes: Array.from(new Set(resource.scopes)) }
+        : { ...existing, scopes: Array.from(new Set([...existing.scopes, ...resource.scopes])) }
+    )
+  }
+  return Array.from(sitesByCloudId.values())
+}
+
 const scopesForProviders = (providers: AtlassianOAuthProviderIntent): ReadonlyArray<string> =>
   Array.from(new Set(providers.flatMap((provider) => oauthScopes[provider])))
 
@@ -549,7 +565,9 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         getAccessibleResources(tokens.access_token),
         getUserInfo(tokens.access_token)
       ]).pipe(Effect.provide(providerHttpLayer), Effect.mapError(unavailable))
-      const supportedSites = sites.filter((site) => supportsProducts(site, pending.providers))
+      const supportedSites = mergeProductResourceScopes(sites).filter((site) =>
+        supportsProducts(site, pending.providers)
+      )
       const safeSites = yield* decodeSites(supportedSites)
       const user = yield* Schema.decodeUnknownEffect(AtlassianOAuthUserMetadata)(providerUser).pipe(
         Effect.mapError(unavailable)
