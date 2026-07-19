@@ -41,6 +41,33 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
+### Local OpenTelemetry
+
+Control Center can export Effect traces and structured logs to an OTLP/HTTP collector. Export is opt-in and disabled unless the corresponding OpenTelemetry exporters are enabled. Metrics are not exported in this initial slice.
+
+For example, start [motel](https://github.com/kitlangton/motel), then run Control Center against its default local listener:
+
+```sh
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:27686 \
+OTEL_LOGS_EXPORTER=otlp \
+OTEL_TRACES_EXPORTER=otlp \
+pnpm --filter @knpkv/control-center start
+```
+
+To use [Lensflare](https://lensflare.dev/), create or select a dataset in its local UI and substitute that dataset's slug below. Lensflare listens on port `43110` by default and uses dataset-specific ingest routes:
+
+```sh
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://127.0.0.1:43110/ingest/otlp/v1/logs/<dataset-slug> \
+OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:43110/ingest/otlp/v1/traces/<dataset-slug> \
+OTEL_LOGS_EXPORTER=otlp \
+OTEL_TRACES_EXPORTER=otlp \
+pnpm --filter @knpkv/control-center start
+```
+
+Lensflare's optional MCP endpoint for querying the captured telemetry is `http://127.0.0.1:43110/mcp`; it is separate from the ingest endpoints above.
+
+For a standard OTLP base endpoint, logs are sent to `/v1/logs` and traces to `/v1/traces`. `OTEL_SERVICE_NAME` may override the default `control-center` service name, while the standard signal-specific endpoint and header variables can target another compatible collector. Exporters flush their bounded batches when the scoped Control Center runtime shuts down; collector outages do not fail application work.
+
 `SIGINT` and `SIGTERM` begin graceful drain before scoped runtime resources close. The server rejects new authenticated mutations and live-event streams with a retryable `503`, closes existing live-event streams, and gives already-admitted mutations or startup background jobs up to ten seconds to finish. After that work and existing streams clear, one stable snapshot of named subsystem hooks runs sequentially. The governed worker appends immutable shutdown expirations for its still-live recovery claims so another process can reclaim them immediately; then the local SQLite hook checkpoints and truncates the WAL. Hook defects are reported by secret-free hook identity, and the hard deadline still bounds the complete work-and-flush sequence. Mutation-only callers retain a separate barrier that does not wait for startup background jobs or flush hooks. Startup release synchronization and governed-action recovery share the full-work admission barrier.
 
 Fake release synchronization records an immutable attempt before acquiring its provider and appends a completion only after the synchronized page boundary is durable. Startup first reconciles every still-open attempt for the configured fake-provider stream as `interrupted`, using the stream's current durable revision and exact committed-page delta, then admits the next attempt. A provider outage completes as `source-unavailable`; cancellation, defects, and persistence failures never become successful synchronization records.

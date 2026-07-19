@@ -22,6 +22,7 @@ import {
   prepareControlCenterDataRoot,
   resolvePreparedControlCenterDataRoot
 } from "./cliConfiguration.js"
+import { ControlCenterObservabilityLive } from "./observability.js"
 import {
   type BackupVerification,
   createOfflineVerifiedBackup,
@@ -44,9 +45,7 @@ const commaSeparated = (value: string): ReadonlyArray<string> =>
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
 
-const dataRootConfiguration = Config.string("CONTROL_CENTER_DATA_ROOT").pipe(
-  Config.withDefault(".control-center")
-)
+const dataRootConfiguration = Config.string("CONTROL_CENTER_DATA_ROOT").pipe(Config.withDefault(".control-center"))
 
 const serverConfiguration = Config.all({
   agentClaudeExecutable: Config.string("CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE").pipe(Config.withDefault("")),
@@ -72,11 +71,7 @@ const writeStdoutLine = (value: string) =>
 const writeStderrLine = (value: string) =>
   Stdio.Stdio.use((stdio) => Stream.make(`${value}\n`).pipe(Stream.run(stdio.stderr())))
 
-const verificationLine = (
-  complete: string,
-  degraded: string,
-  verification: BackupVerification
-): string =>
+const verificationLine = (complete: string, degraded: string, verification: BackupVerification): string =>
   verification._tag === "Complete"
     ? complete
     : `${degraded} ${verification.reproducibleBlobGaps.length} reproducible cache gaps.`
@@ -100,9 +95,7 @@ const program = Effect.scoped(
 
     if (invocation._tag === "verify-backup") {
       const verification = yield* verifyBackup(invocation.archiveRoot)
-      yield* writeStdoutLine(
-        verificationLine("Backup verified.", "Backup verified with", verification)
-      )
+      yield* writeStdoutLine(verificationLine("Backup verified.", "Backup verified with", verification))
       return
     }
 
@@ -112,9 +105,7 @@ const program = Effect.scoped(
         archiveRoot: invocation.archiveRoot,
         configuredDataRoot
       })
-      yield* writeStdoutLine(
-        verificationLine("Backup restored.", "Backup restored with", restored.verification)
-      )
+      yield* writeStdoutLine(verificationLine("Backup restored.", "Backup restored with", restored.verification))
       return
     }
 
@@ -125,9 +116,7 @@ const program = Effect.scoped(
         destination: invocation.archiveRoot,
         persistenceConfig: existingDataPaths.persistenceConfig
       })
-      yield* writeStdoutLine(
-        verificationLine("Backup created.", "Backup created with", published.verification)
-      )
+      yield* writeStdoutLine(verificationLine("Backup created.", "Backup created with", published.verification))
       return
     }
 
@@ -146,14 +135,14 @@ const program = Effect.scoped(
     }
 
     const configured = yield* serverConfiguration
-    const agentProviders = yield* Schema.decodeUnknownEffect(
-      Schema.Array(AgentProvider).check(Schema.isUnique())
-    )(commaSeparated(configured.agentProviders))
+    const agentProviders = yield* Schema.decodeUnknownEffect(Schema.Array(AgentProvider).check(Schema.isUnique()))(
+      commaSeparated(configured.agentProviders)
+    )
     const agentCwd = agentProviders.length === 0
       ? null
-      : yield* Schema.decodeUnknownEffect(
-        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
-      )(configured.agentCwd)
+      : yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))(
+        configured.agentCwd
+      )
     const allowedHosts = commaSeparated(configured.allowedHosts)
     const allowedOrigins = commaSeparated(configured.allowedOrigins)
     const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -225,9 +214,7 @@ const program = Effect.scoped(
               case "DeadlineExceeded":
                 return writeStderrLine("Control Center drain deadline reached.")
               case "HooksFailed":
-                return writeStderrLine(
-                  `Control Center drain hooks failed: ${result.hookIds.join(", ")}.`
-                )
+                return writeStderrLine(`Control Center drain hooks failed: ${result.hookIds.join(", ")}.`)
             }
           })
         )
@@ -292,6 +279,11 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
   return writeStderrLine(message).pipe(Effect.andThen(Effect.failCause(cause)))
 }
 
-NodeRuntime.runMain(program.pipe(Effect.catchCause(reportProgramFailure), Effect.provide(NodeServices.layer)), {
-  disableErrorReporting: true
-})
+NodeRuntime.runMain(
+  program.pipe(
+    Effect.catchCause(reportProgramFailure),
+    Effect.provide(NodeServices.layer),
+    Effect.provide(ControlCenterObservabilityLive)
+  ),
+  { disableErrorReporting: true }
+)
