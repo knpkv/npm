@@ -83,6 +83,7 @@ const mapIdentityFailure = (failure: CodeCommit.CodeCommitReadError): AwsIdentit
     if (isAuthenticationCause(failure.cause) || isAuthorizationCause(failure.cause)) {
       return new ApplicationInvalidRequest()
     }
+    if (isRateLimitCause(failure.cause)) return new ApplicationRateLimited({ retryAt: null })
   }
   return new ApplicationServiceUnavailable({ retryAt: null })
 }

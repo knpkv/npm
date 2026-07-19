@@ -9,6 +9,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { AwsResourceDiscoveryRequest } from "../../src/api/plugins.js"
+import { ApplicationInvalidRequest, ApplicationRateLimited } from "../../src/server/api/ApplicationServices.js"
 import { AwsResourceDiscovery, makeAwsResourceDiscovery } from "../../src/server/application/awsResourceDiscovery.js"
 import {
   CodePipelineNamePage,
@@ -236,6 +237,50 @@ describe("AWS resource discovery", () => {
       assert.isTrue(Result.isFailure(result))
       assert.strictEqual(yield* Ref.get(listCalls), 0)
     }))
+
+  it.effect("maps a wrapped STS throttle to an application rate limit", () =>
+    runDiscovery(
+      codeCommitClient({
+        discoverAccount: (account) =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "discoverAccount",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "ThrottlingException", secret: "must-not-cross-api" }
+            })
+          )
+      }),
+      codePipelineClient(),
+      Effect.gen(function*() {
+        const discovery = yield* AwsResourceDiscovery
+        const result = yield* discovery.discover(request).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationRateLimited)
+      })
+    ))
+
+  it.effect("keeps a wrapped STS authorization failure invalid", () =>
+    runDiscovery(
+      codeCommitClient({
+        discoverAccount: (account) =>
+          Effect.fail(
+            new AwsApiError({
+              operation: "discoverAccount",
+              profile: account.profile,
+              region: account.region,
+              cause: { _tag: "AccessDeniedException", secret: "must-not-cross-api" }
+            })
+          )
+      }),
+      codePipelineClient(),
+      Effect.gen(function*() {
+        const discovery = yield* AwsResourceDiscovery
+        const result = yield* discovery.discover(request).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, ApplicationInvalidRequest)
+      })
+    ))
 
   it.effect("redacts a typed CodePipeline permission failure independently", () =>
     runDiscovery(

@@ -261,7 +261,9 @@ export const AwsAccountSetupForm = ({
 
   useEffect(() => {
     const detectedRegion = awsProfiles.find((candidate) => candidate.profile === profile)?.region
-    if (detectedRegion !== null && detectedRegion !== undefined) setRegion(detectedRegion)
+    if (detectedRegion !== null && detectedRegion !== undefined) {
+      setRegion((current) => (current.trim().length === 0 ? detectedRegion : current))
+    }
   }, [awsProfiles, profile])
 
   const resetDiscovery = (): void => {
@@ -311,8 +313,8 @@ export const AwsAccountSetupForm = ({
       setSetupError("Add an account name, AWS profile, and region.")
       return
     }
-    const repositories = mergeResourceNames(selectedRepositories, repositoryNames)
-    const pipelines = mergeResourceNames(selectedPipelines, pipelineNames)
+    const repositories = mergeResourceNames(selectedRepositories, isManualEntryOpen ? repositoryNames : "")
+    const pipelines = mergeResourceNames(selectedPipelines, isManualEntryOpen ? pipelineNames : "")
     if (repositories.length === 0 && pipelines.length === 0) {
       setSetupError("Select or manually add at least one repository or pipeline to follow.")
       return
@@ -370,7 +372,10 @@ export const AwsAccountSetupForm = ({
             list={awsProfiles.length > 0 ? "aws-account-profiles" : undefined}
             maxLength={200}
             onChange={(event) => {
-              setProfile(event.currentTarget.value)
+              const nextProfile = event.currentTarget.value
+              const detectedRegion = awsProfiles.find((candidate) => candidate.profile === nextProfile)?.region
+              setProfile(nextProfile)
+              setRegion(detectedRegion ?? "")
               resetDiscovery()
             }}
             value={profile}

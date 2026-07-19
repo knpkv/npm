@@ -220,6 +220,30 @@ describe("CodePipelinePlugin", () => {
       )
     ))
 
+  it.effect("accepts a full-length pipeline discovery cursor", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const page = yield* client.listPipelinesPage({
+        account: { profile: "production", region: "eu-west-1", operationTimeoutMillis: 10_000 },
+        nextToken: null
+      })
+      assert.strictEqual(page.nextToken, "x".repeat(2_048))
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(
+            Layer.succeed(
+              CodePipelineReadProvider,
+              baseProvider({
+                listPipelinesPage: () =>
+                  Effect.succeed({ pipelines: [{ name: "payments-production" }], nextToken: "x".repeat(2_048) })
+              })
+            )
+          )
+        )
+      )
+    ))
+
   it.effect("rejects malformed pipeline discovery output", () =>
     Effect.gen(function*() {
       const client = yield* CodePipelineReadClient

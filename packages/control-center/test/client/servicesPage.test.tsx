@@ -7,6 +7,7 @@ import { MemoryRouter, useLocation } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  type AwsProfileDiscoveryResponse,
   type AtlassianProfileDiscoveryResponse,
   type AtlassianOAuthGrantStartResponse,
   type AtlassianOAuthProviderIntent,
@@ -396,6 +397,11 @@ describe("ServicesPage connection tests", () => {
       { profile: "default", region: "us-east-1" },
       { profile: "production", region: "eu-west-1" }
     ])
+    const discoverAwsResources = vi.fn().mockResolvedValue({
+      accountId: "123456789012",
+      codeCommit: { _tag: "available", names: [], truncated: false },
+      codePipeline: { _tag: "available", names: [], truncated: false }
+    })
     const codeCommit = catalogEntry("codecommit")
     const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
       catalog: [
@@ -427,6 +433,7 @@ describe("ServicesPage connection tests", () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
       discoverAwsProfiles,
+      discoverAwsResources,
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       setEnabled: vi.fn(),
@@ -444,6 +451,14 @@ describe("ServicesPage connection tests", () => {
     }
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("production")
     expect([...host.querySelectorAll<HTMLInputElement>("input")].map(({ value }) => value)).toContain("eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    expect(discoverAwsResources).toHaveBeenCalledWith(
+      { profile: "production", region: "eu-west-1" },
+      expect.any(AbortSignal)
+    )
   })
 
   it("groups repositories and pipelines under their verified AWS account", async () => {
@@ -1990,6 +2005,12 @@ describe("ServicesPage connection tests", () => {
       create,
       createBatch,
       discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: [], truncated: false },
+          codePipeline: { _tag: "available", names: ["payments-production"], truncated: false }
+        }),
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId,
       setEnabled: vi.fn(),
@@ -2001,9 +2022,16 @@ describe("ServicesPage connection tests", () => {
     const inputs = host.querySelectorAll<HTMLInputElement>("input")
     if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
     if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const pipelineChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-production"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => pipelineChoice?.click())
     const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
     if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
-    if (textareas[1] !== undefined) await setControlValue(textareas[1], "payments-production")
     const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Connect AWS account")
     )
@@ -2080,6 +2108,118 @@ describe("ServicesPage connection tests", () => {
       ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     expect(refreshedPayment?.checked).toBe(true)
     expect(host.textContent).toContain("No pipelines were found")
+  })
+
+  it("preserves a verified manual region when profile discovery finishes later", async () => {
+    let resolveProfiles: ((profiles: AwsProfileDiscoveryResponse) => void) | undefined
+    const profiles = new Promise<AwsProfileDiscoveryResponse>((resolve) => {
+      resolveProfiles = resolve
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsProfiles: () => profiles,
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: ["payments-api"], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        }),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "us-east-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const repositoryChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-api"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => repositoryChoice?.click())
+
+    await act(async () => resolveProfiles?.([{ profile: "default", region: "eu-west-1" }]))
+
+    expect(region?.value).toBe("us-east-1")
+    expect(host.textContent).toContain("Verified AWS account 123456789012")
+    expect(repositoryChoice?.checked).toBe(true)
+  })
+
+  it("does not submit manual AWS names while their entry panel is hidden", async () => {
+    const field = (key: string, defaultValue: string | null = null) => ({
+      key,
+      label: key,
+      description: `Configure ${key}.`,
+      kind: "text",
+      scope: "adapter",
+      required: true,
+      defaultValue,
+      isReadOnly: false,
+      minimum: null,
+      maximum: null
+    })
+    const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        {
+          ...catalogEntry("codecommit"),
+          configurationFields: [field("profile", "default"), field("region"), field("repositoryName")]
+        },
+        {
+          ...catalogEntry("codepipeline"),
+          configurationFields: [field("profile", "default"), field("region"), field("pipelineName")]
+        },
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: []
+    })
+    const create = vi.fn<ConnectionTestTransport["create"]>(() => new Promise(() => undefined))
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: [], truncated: false },
+          codePipeline: { _tag: "available", names: ["payments-production"], truncated: false }
+        }),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const repositoryNames = host.querySelectorAll<HTMLTextAreaElement>("textarea")[0]
+    if (repositoryNames !== undefined) await setControlValue(repositoryNames, "manual-repository")
+    const pipelineChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-production"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => pipelineChoice?.click())
+    const hideManualEntry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Hide manual name entry")
+    )
+    await act(async () => hideManualEntry?.click())
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+
+    expect(host.querySelectorAll("textarea")).toHaveLength(0)
+    expect(create).toHaveBeenCalledTimes(1)
+    const request = create.mock.calls[0]?.[0]
+    expect(request?.providerId).toBe("codepipeline")
+    expect(request?.values.find(({ key }) => key === "pipelineName")?.value).toBe("payments-production")
   })
 
   it("keeps selections visible and removable when AWS refresh loses service access", async () => {
