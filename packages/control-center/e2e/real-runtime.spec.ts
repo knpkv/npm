@@ -77,12 +77,13 @@ test.describe("repository-managed real runtime", () => {
     await page.getByRole("link", { name: "Services" }).click()
     await expect(page).toHaveURL(`${realRuntime.origin}/services`)
     await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
-    await expect(page.getByRole("article")).toHaveCount(5)
+    await expect(page.getByRole("article")).toHaveCount(6)
     for (const service of ["CodeCommit", "CodePipeline", "Runtime Jira", "Confluence", "Clockify"]) {
       await expect(page.getByRole("heading", { level: 2, name: service })).toBeVisible()
     }
     await expect(page.getByRole("button", { name: "Configure AWS account" })).toHaveCount(2)
     await expect(page.getByRole("button", { name: "Configure Atlassian" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Add Jira project" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Enable service" })).toHaveCount(1)
     await expect(page.getByRole("button", { name: "Test connection" })).toBeVisible()
     const jiraService = page.getByRole("article").filter({ has: page.getByRole("heading", { name: "Runtime Jira" }) })
