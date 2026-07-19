@@ -459,12 +459,15 @@ test("preserves a filtered overview through every release-work object link", asy
     const link = objectLink.selector === null
       ? preview.getByRole("link", { name: /Payments release runbook/u })
       : preview.locator(objectLink.selector).first()
+    const href = await link.getAttribute("href")
+    if (href === null) throw new Error(`${objectLink.kind} link must expose its canonical entity URL`)
+    expect(href).toMatch(new RegExp(`^/w/${snapshot.workspaceId}/items/`))
 
     await link.click()
-    await expect(page, `${objectLink.kind} link opens the canonical full release`).toHaveURL(
-      new RegExp(`${fullPath}\\?object=`)
-    )
-    await page.getByRole("link", { name: "Back to overview" }).click()
+    await expect(page, `${objectLink.kind} link opens its canonical full entity`).toHaveURL(href)
+    await page.getByRole("link", { name: "Back to release" }).click()
+    await expect(page, `${objectLink.kind} link returns to its release preview`).toHaveURL(previewPath)
+    await page.getByRole("button", { name: "Close preview" }).click()
     await expect(page, `${objectLink.kind} link retains the filtered origin`).toHaveURL(filteredOverviewPath)
   }
 })
@@ -486,8 +489,11 @@ test("shows six Jira items as one release workset with PR and pipeline dimension
   const firstJiraId = await firstJiraItem.getAttribute("data-rly-workset-jira-id")
   if (firstJiraId === null) throw new Error("Expected the first Jira work item to expose its entity id")
   await firstJiraItem.getByRole("link").click()
-  await expect(page).toHaveURL(new RegExp(`object=${firstJiraId}`))
-  await expect(page.getByText("Selected object · OPS-428")).toBeVisible()
+  await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/items/${firstJiraId}`)
+  await expect(page.locator(`[data-workspace-entity-id="${firstJiraId}"]`)).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Review payment capture safeguards" })).toBeVisible()
+  await page.getByRole("link", { name: "Back to release" }).click()
+  await expect(page).toHaveURL(fullPath)
   await page.getByRole("link", { name: "Back to overview" }).click()
   await expect(page).toHaveURL(overviewPath)
 })
