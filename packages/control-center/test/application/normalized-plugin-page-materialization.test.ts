@@ -34,6 +34,10 @@ const OTHER_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc
 const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000196")
 const AGENT_ID = Schema.decodeSync(AgentId)("01890f6f-6d6a-7cc0-98d2-000000000197")
 const ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-000000000198")
+const CODECOMMIT_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000199")
+const CODEPIPELINE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000200")
+const CLOCKIFY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000201")
+const CONFLUENCE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000202")
 const CACHE_STREAM = Schema.decodeSync(PluginStreamKey)("cache-only")
 const MATERIALIZED_STREAM = Schema.decodeSync(PluginStreamKey)("delivery-items")
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
@@ -55,6 +59,12 @@ const descriptor = {
     requirement: "required"
   }]
 }
+
+const descriptorFor = (providerId: "clockify" | "codecommit" | "codepipeline" | "confluence" | "jira") => ({
+  ...descriptor,
+  pluginId: `dev.knpkv.${providerId}`,
+  displayName: providerId
+})
 
 const cacheOnlyPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "cache-complete",
@@ -351,6 +361,157 @@ const jiraReleaseRepeatedObservationPage = Schema.decodeSync(PluginSyncPageV1)({
   }]
 })
 
+const inferenceJiraReleasePage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "jira-inference-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "jira-inference-issue-pay-42",
+    observedAt: "2026-07-19T09:01:20.000Z",
+    revision: "issue-revision-1",
+    entityType: "jira.issue",
+    vendorImmutableId: "issue-42",
+    sourceUrl: "https://jira.example/browse/PAY-42",
+    title: "PAY-42 · Ship guarded refunds",
+    attributes: { key: "PAY-42", status: { name: "Ready" } }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "jira-inference-version-2026-29",
+    observedAt: "2026-07-19T09:01:30.000Z",
+    revision: "candidate:2026-07-29:2026.29",
+    entityType: "release",
+    vendorImmutableId: "jira-version:2026.29",
+    sourceUrl: "https://jira.example/plugins/servlet/project-config/PAY/versions",
+    title: "Payments · 2026.29",
+    attributes: { serviceName: "Payments", version: "2026.29", lifecycle: "candidate" }
+  }, {
+    _tag: "AppendEvidence",
+    eventId: "jira-inference-fix-version-evidence",
+    observedAt: "2026-07-19T09:01:30.000Z",
+    revision: "issue-revision-1",
+    evidenceId: "jira:issue:issue-42:fix-version:2026.29",
+    subject: { entityType: "jira.issue", vendorImmutableId: "issue-42" },
+    evidenceType: "relationship-observed",
+    summary: "Jira fix version 2026.29",
+    capturedAt: "2026-07-19T09:01:30.000Z",
+    data: { predicate: "relationship-observed", value: { _tag: "state", value: "2026.29" } }
+  }, {
+    _tag: "ProposeRelationship",
+    eventId: "jira-inference-release-contains-pay-42",
+    observedAt: "2026-07-19T09:01:30.000Z",
+    revision: "issue-revision-1",
+    relationshipId: "jira-version:2026.29:contains:issue-42",
+    from: { entityType: "release", vendorImmutableId: "jira-version:2026.29" },
+    to: { entityType: "jira.issue", vendorImmutableId: "issue-42" },
+    relationshipType: "contains",
+    confidence: 1,
+    evidenceIds: ["jira:issue:issue-42:fix-version:2026.29"]
+  }]
+})
+
+const codeCommitRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "codecommit-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "codecommit-pr-17-abc123",
+    observedAt: "2026-07-19T09:02:10.000Z",
+    revision: "abc123",
+    entityType: "pull-request",
+    vendorImmutableId: "17",
+    sourceUrl: "https://console.aws.example/codecommit/pull-requests/17",
+    title: "PAY-42 guard refund writes",
+    attributes: {
+      repository: "payments-api",
+      sourceBranch: "feat/PAY-42-refund-guard",
+      targetBranch: "main",
+      headRevision: "abc123",
+      reviewState: "requested"
+    }
+  }]
+})
+
+const codeCommitUnlinkedPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "codecommit-unlinked-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "codecommit-pr-17-def456",
+    observedAt: "2026-07-19T09:02:50.000Z",
+    revision: "def456",
+    entityType: "pull-request",
+    vendorImmutableId: "17",
+    sourceUrl: "https://console.aws.example/codecommit/pull-requests/17",
+    title: "Guard refund writes",
+    attributes: {
+      repository: "payments-api",
+      sourceBranch: "feat/refund-guard",
+      targetBranch: "main",
+      headRevision: "abc123",
+      reviewState: "requested"
+    }
+  }]
+})
+
+const codePipelineRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "codepipeline-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "codepipeline-payments-9001",
+    observedAt: "2026-07-19T09:02:20.000Z",
+    revision: "execution-9001",
+    entityType: "aws.codepipeline.execution",
+    vendorImmutableId: "payments:9001",
+    sourceUrl: "https://console.aws.example/codepipeline/payments/9001",
+    title: "Payments deploy 9001",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9001",
+      status: "InProgress",
+      triggerRevision: "abc123"
+    }
+  }]
+})
+
+const clockifyRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "clockify-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "clockify-time-1",
+    observedAt: "2026-07-19T09:02:30.000Z",
+    revision: "time-1-revision",
+    entityType: "clockify.time-entry",
+    vendorImmutableId: "time-1",
+    sourceUrl: "https://app.clockify.me/tracker",
+    title: "PAY-42 review and rollout",
+    attributes: { durationMinutes: 45, billable: true, approvalState: "approved" }
+  }]
+})
+
+const confluenceRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "confluence-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "confluence-page-991-v8",
+    observedAt: "2026-07-19T09:02:40.000Z",
+    revision: "8",
+    entityType: "confluence-page",
+    vendorImmutableId: "991",
+    sourceUrl: "https://acme.atlassian.net/wiki/spaces/PAY/pages/991",
+    title: "Payments 2026.29 runbook",
+    attributes: {
+      spaceKey: "PAY",
+      currentVersion: 8,
+      status: "current",
+      linkedIssueKeys: ["PAY-42"],
+      linkedReleaseVersions: ["2026.29"]
+    }
+  }]
+})
+
 const invalidRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "invalid-relationship-complete",
   hasMore: false,
@@ -406,6 +567,28 @@ const setup = Effect.gen(function*() {
     PLUGIN_ID,
     "jira",
     descriptor,
+    0,
+    T0
+  )
+})
+
+const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
+  pluginConnectionId: PluginConnectionId,
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence"
+) {
+  const persistence = yield* Persistence
+  yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+    pluginConnectionId,
+    providerId,
+    displayName: PluginConnectionDisplayName.make(providerId),
+    isEnabled: true,
+    createdAt: T0
+  })
+  yield* persistence.pluginRuntime.acceptPluginDescriptor(
+    WORKSPACE_ID,
+    pluginConnectionId,
+    providerId,
+    descriptorFor(providerId),
     0,
     T0
   )
@@ -722,6 +905,101 @@ describe("normalized plugin page materialization", () => {
         assert.strictEqual(legacy.entityProjectionCount, 1)
       })
     ))
+  it.effect("materializes inferred relationships across synchronized provider evidence", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+
+      const synchronize = (
+        pluginConnectionId: PluginConnectionId,
+        providerId: "clockify" | "codecommit" | "codepipeline" | "confluence" | "jira",
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId,
+          providerId,
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        }, page)
+
+      yield* synchronize(PLUGIN_ID, "jira", inferenceJiraReleasePage)
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", codeCommitRelationshipPage)
+      yield* synchronize(CODEPIPELINE_PLUGIN_ID, "codepipeline", codePipelineRelationshipPage)
+      yield* synchronize(CLOCKIFY_PLUGIN_ID, "clockify", clockifyRelationshipPage)
+      yield* synchronize(CONFLUENCE_PLUGIN_ID, "confluence", confluenceRelationshipPage)
+
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected synchronized release")
+      const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      const current = slice.value.relationships.filter(
+        ({ lifecycle }) => lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
+      )
+      assert.sameMembers(
+        current.map(({ kind, lifecycle }) => `${kind}:${lifecycle._tag}`),
+        [
+          "contains:proposed",
+          "implements:inferred",
+          "delivered-by:inferred",
+          "tracks-time-for:inferred",
+          "documented-by:inferred",
+          "documented-by:inferred"
+        ]
+      )
+      assert.isFalse(current.some(({ lifecycle }) => lifecycle._tag === "missing"))
+      assert.lengthOf(
+        slice.value.relationships.filter(({ lifecycle }) => lifecycle._tag === "superseded"),
+        2
+      )
+      assert.isTrue(
+        current
+          .filter(({ lifecycle }) => lifecycle._tag === "inferred")
+          .every(
+            ({ confidence, evidenceClaimIds, provenance }) =>
+              confidence._tag === "inferred" && evidenceClaimIds.length === 1 && provenance._tag === "rule"
+          )
+      )
+      assert.lengthOf(slice.value.entityProjections, 5)
+      assert.lengthOf(slice.value.evidenceClaims, 6)
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 1,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, codeCommitUnlinkedPage)
+      const changed = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (changed._tag !== "releaseSlice") return yield* Effect.die("expected updated release slice")
+      const changedCurrent = changed.value.relationships.filter(
+        ({ lifecycle }) => lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
+      )
+      assert.isTrue(
+        changedCurrent.some(({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "missing")
+      )
+      assert.isFalse(
+        changedCurrent.some(({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred")
+      )
+    })))
 
   it.effect("projects a normalized Jira fix version into the canonical release repository", () =>
     withMaterializer(Effect.gen(function*() {

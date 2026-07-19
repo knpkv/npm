@@ -1,0 +1,231 @@
+import { assert, describe, it } from "@effect/vitest"
+import * as Schema from "effect/Schema"
+
+import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
+import { GraphNodeId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  deriveRelationshipInference,
+  type RelationshipInferenceEntity
+} from "../../src/server/application/relationshipInference.js"
+
+const workspaceId = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000211")
+const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000212")
+const nodeId = (suffix: string) => GraphNodeId.make(`01890f6f-6d6a-7cc0-98d2-${suffix.padStart(12, "0")}`)
+
+const entity = (
+  index: number,
+  projection: Readonly<Record<string, unknown>>,
+  releaseIds: ReadonlyArray<ReleaseId> = []
+): RelationshipInferenceEntity => ({
+  nodeId: nodeId(String(100 + index)),
+  projection: Schema.decodeUnknownSync(DeliveryEntityProjection)({
+    ...projection,
+    entityId: `01890f6f-6d6a-7cc0-98d2-${String(200 + index).padStart(12, "0")}`,
+    workspaceId
+  }),
+  releaseIds
+})
+
+const common = {
+  projectionRevision: 1,
+  sourceEntityRevision: 1,
+  supersedesProjectionRevision: null,
+  projectionSchemaVersion: 1,
+  entityState: "present"
+}
+
+describe("relationship inference", () => {
+  it("builds one release journey while keeping missing and inferred links distinct", () => {
+    const issue = entity(
+      1,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "PAY-42 · Guard refunds",
+        details: { _tag: "issue", key: "PAY-42", status: "Ready", priority: "High", estimatePoints: 3 }
+      },
+      [releaseId]
+    )
+    const issueWithoutPr = entity(
+      2,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-43",
+        title: "PAY-43 · Bound retries",
+        details: { _tag: "issue", key: "PAY-43", status: "Ready", priority: null, estimatePoints: 2 }
+      },
+      [releaseId]
+    )
+    const pullRequest = entity(3, {
+      ...common,
+      entityType: "pull-request",
+      displayKey: "17",
+      title: "PAY-42 guard refund writes",
+      details: {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feat/PAY-42-refund-guard",
+        targetBranch: "main",
+        headRevision: "abc123",
+        reviewState: "requested"
+      }
+    })
+    const pipeline = entity(4, {
+      ...common,
+      entityType: "pipeline-execution",
+      displayKey: "payments/9001",
+      title: "Payments deploy",
+      details: {
+        _tag: "pipeline-execution",
+        pipelineName: "payments",
+        executionId: "9001",
+        status: "running",
+        triggerRevision: "abc123"
+      }
+    })
+    const runbook = entity(5, {
+      ...common,
+      entityType: "page",
+      displayKey: "PAY/991",
+      title: "Payments 2026.29 runbook",
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "8",
+        status: "current",
+        linkedIssueKeys: ["PAY-42"],
+        linkedReleaseVersions: ["2026.29"]
+      }
+    })
+    const timeEntry = entity(6, {
+      ...common,
+      entityType: "time-entry",
+      displayKey: "time-1",
+      title: "PAY-42 review and rollout",
+      details: { _tag: "time-entry", durationMinutes: 45, billable: true, approvalState: "approved" }
+    })
+
+    const result = deriveRelationshipInference({
+      entities: [issue, issueWithoutPr, pullRequest, pipeline, runbook, timeEntry],
+      releases: [{ nodeId: nodeId("9"), releaseId, version: "2026.29" }],
+      relationships: []
+    })
+
+    assert.sameMembers(
+      result.candidates.map(({ kind, lifecycle }) => `${kind}:${lifecycle}`),
+      [
+        "implements:inferred",
+        "implements:missing",
+        "delivered-by:inferred",
+        "documented-by:inferred",
+        "documented-by:inferred",
+        "tracks-time-for:inferred"
+      ]
+    )
+    assert.isTrue(
+      result.candidates.every(
+        (candidate) =>
+          candidate.lifecycle !== "inferred" || (candidate.confidence !== null && candidate.evidenceEntityId !== null)
+      )
+    )
+    const gap = result.candidates.find(({ lifecycle }) => lifecycle === "missing")
+    assert.strictEqual(gap?.source._tag, "missing")
+    if (gap?.source._tag === "missing") assert.strictEqual(gap.source.missingKey, "PAY-43:pull-request")
+    assert.isTrue(result.obsoleteGapIdentityKeys.some((key) => key.includes(issue.nodeId)))
+  })
+
+  it("requires token boundaries and exact immutable revisions", () => {
+    const issue = entity(
+      11,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "PAY-42 · Guard refunds",
+        details: { _tag: "issue", key: "PAY-42", status: "Ready", priority: null, estimatePoints: null }
+      },
+      [releaseId]
+    )
+    const pullRequest = entity(
+      12,
+      {
+        ...common,
+        entityType: "pull-request",
+        displayKey: "18",
+        title: "Do not match XPAY-420",
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: "feat/XPAY-420",
+          targetBranch: "main",
+          headRevision: "ABC123",
+          reviewState: "requested"
+        }
+      },
+      [releaseId]
+    )
+    const pipeline = entity(13, {
+      ...common,
+      entityType: "pipeline-execution",
+      displayKey: "payments/9002",
+      title: "Payments deploy",
+      details: {
+        _tag: "pipeline-execution",
+        pipelineName: "payments",
+        executionId: "9002",
+        status: "running",
+        triggerRevision: "abc123"
+      }
+    })
+
+    const result = deriveRelationshipInference({
+      entities: [issue, pullRequest, pipeline],
+      releases: [],
+      relationships: []
+    })
+    assert.isFalse(result.candidates.some(({ lifecycle }) => lifecycle === "inferred"))
+    assert.sameMembers(
+      result.candidates.map(({ kind }) => kind),
+      ["implements", "delivered-by"]
+    )
+    assert.isTrue(result.candidates.every(({ lifecycle }) => lifecycle === "missing"))
+  })
+
+  it("marks oversized candidate sets truncated so materialization can fail closed", () => {
+    const issueKeys = Array.from({ length: 100 }, (_, index) => `PAY-${index + 1}`)
+    const issues = issueKeys.map((key, index) =>
+      entity(
+        100 + index,
+        {
+          ...common,
+          entityType: "issue",
+          displayKey: key,
+          title: `${key} · Delivery work`,
+          details: { _tag: "issue", key, status: "Ready", priority: null, estimatePoints: null }
+        },
+        [releaseId]
+      )
+    )
+    const pages = Array.from({ length: 21 }, (_, index) =>
+      entity(300 + index, {
+        ...common,
+        entityType: "page",
+        displayKey: `PAY/${index + 1}`,
+        title: `Runbook ${index + 1}`,
+        details: {
+          _tag: "page",
+          spaceKey: "PAY",
+          revision: "1",
+          status: "current",
+          linkedIssueKeys: issueKeys
+        }
+      }))
+
+    const result = deriveRelationshipInference({ entities: [...issues, ...pages], releases: [], relationships: [] })
+
+    assert.isTrue(result.truncated)
+    assert.lengthOf(result.candidates, 2_000)
+  })
+})
