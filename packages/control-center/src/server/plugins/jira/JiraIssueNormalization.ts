@@ -156,17 +156,29 @@ const jsonEncoder = new TextEncoder()
 
 const jsonByteLength = (value: unknown): number => jsonEncoder.encode(JSON.stringify(value)).byteLength
 
+const protectedFencedCodeBlock = /^(`{3,})[^\n]*\n[\s\S]*?^\1$/gmu
+
 const decodedJsonRecord = (value: Schema.Json): typeof JsonRecord.Type | null => {
   const decoded = Schema.decodeUnknownResult(JsonRecord)(value)
   return Result.isSuccess(decoded) ? decoded.success : null
 }
 
 const normalizedRenderedText = (value: string, maximum: number | null = MAX_RICH_TEXT_CHARACTERS): string | null => {
-  const text = value
+  const codeBlocks: Array<string> = []
+  let codeMarker = "jiraProtectedCode"
+  while (value.includes(codeMarker)) codeMarker = `_${codeMarker}`
+  const protectedValue = value.replace(protectedFencedCodeBlock, (block) => {
+    const index = codeBlocks.push(block) - 1
+    return `${codeMarker}${String(index)}${codeMarker}`
+  })
+  let text = protectedValue
     .replace(/\r\n?/gu, "\n")
     .replace(/[\t ]+\n/gu, "\n")
     .replace(/\n{3,}/gu, "\n\n")
     .trim()
+  for (let index = 0; index < codeBlocks.length; index += 1) {
+    text = text.replace(`${codeMarker}${String(index)}${codeMarker}`, codeBlocks[index] ?? "")
+  }
   return text.length === 0 ? null : maximum === null ? text : text.slice(0, maximum)
 }
 
@@ -179,6 +191,17 @@ const MarkdownAsciiPunctuation: ReadonlySet<string> = new Set(
 
 const escapedMarkdownText = (value: string): string =>
   Array.from(value, (character) => MarkdownAsciiPunctuation.has(character) ? `\\${character}` : character).join("")
+
+const cardMarkdownLink = (record: typeof JsonRecord.Type): string => {
+  const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
+  const data = attrs?.data === undefined ? null : decodedJsonRecord(attrs.data)
+  const candidate = typeof attrs?.url === "string" ? attrs.url : typeof data?.url === "string" ? data.url : null
+  if (candidate === null) return ""
+  const decoded = Schema.decodeUnknownResult(SourceUrl)(candidate)
+  if (Result.isFailure(decoded)) return ""
+  const url = Schema.encodeSync(SourceUrl)(decoded.success)
+  return `[${escapedMarkdownText(url)}](<${url}>)`
+}
 
 const markdownInlineCode = (value: string): string => {
   let longestBacktickRun = 0
@@ -225,6 +248,7 @@ const adfText = (value: Schema.Json): string => {
   const record = decodedJsonRecord(value)
   if (record === null) return ""
   if (record.type === "hardBreak") return "\\\n"
+  if (record.type === "inlineCard" || record.type === "blockCard") return cardMarkdownLink(record)
   if (record.type === "mention") {
     const attrs = record.attrs === undefined ? null : decodedJsonRecord(record.attrs)
     return typeof attrs?.text === "string" ? escapedMarkdownText(attrs.text) : ""
@@ -299,8 +323,11 @@ const renderAdfBlock = (value: Schema.Json): string => {
       const language = typeof attrs?.language === "string" ? attrs.language.replace(/[^a-z0-9_+-]/giu, "") : ""
       const code = content.map(rawAdfText).join("")
       const fence = markdownCodeFence(code)
-      return `${fence}${language}\n${code}\n${fence}`
+      return `${fence}${language}\n${code}${code.endsWith("\n") ? "" : "\n"}${fence}`
     }
+    case "inlineCard":
+    case "blockCard":
+      return cardMarkdownLink(record)
     case "blockquote":
       return content
         .map(renderAdfBlock)
@@ -481,7 +508,7 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   if ((issue.fields.components?.length ?? 0) > retainedComponents.length) truncatedFields.add("components")
   if ((issue.fields.fixVersions?.length ?? 0) > retainedFixVersions.length) truncatedFields.add("fixVersions")
   if ((issue.fields.subtasks?.length ?? 0) > retainedSubtasks.length) truncatedFields.add("subtasks")
-  if (changelogs.some(({ items }) => (items?.length ?? 0) > MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES)) {
+  if (retainedChangelogs.some(({ items }) => (items?.length ?? 0) > MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES)) {
     truncatedFields.add("history")
   }
   if (issue.key.length > 100) truncatedFields.add("key")
@@ -523,14 +550,13 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   ) {
     truncatedFields.add("subtasks")
   }
-  const commentBodiesTruncated = comments.some(
-    (comment) => (unboundedRichText(comment.body)?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS
-  )
-  if (commentBodiesTruncated) {
+  const retainedCommentBodiesTruncated = () =>
+    retainedComments.some((comment) => (unboundedRichText(comment.body)?.length ?? 0) > MAX_RICH_TEXT_CHARACTERS)
+  if (retainedCommentBodiesTruncated()) {
     truncatedFields.add("comments")
   }
   if (
-    changelogs.some(({ items }) =>
+    retainedChangelogs.some(({ items }) =>
       (items ?? []).some(
         (item) =>
           (item.field ?? item.fieldId ?? "unknown").length > 255 ||
@@ -640,7 +666,7 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       comments: normalizedComments,
       commentTotal: input.comments.total,
       commentsTruncated: input.comments.truncated || retainedComments.length < comments.length,
-      commentBodiesTruncated,
+      commentBodiesTruncated: retainedCommentBodiesTruncated(),
       history: normalizedHistory,
       historyTotal: input.changelogs.total,
       historyTruncated: input.changelogs.truncated || retainedChangelogs.length < changelogs.length

@@ -167,8 +167,11 @@ export const presentWorkspaceIssue = (
   }))
   const commentCount = details.commentTotal ?? comments.length
   const historyCount = details.historyTotal ?? history.length
-  const reducedFields = [...truncatedFields].filter((field) => field !== "comments" && field !== "history")
   const commentsTruncated = (details.commentsTruncated ?? false) || commentCount > comments.length
+  const historyTruncated = (details.historyTruncated ?? false) || historyCount > history.length
+  const reducedFields = [...truncatedFields].filter(
+    (field) => field !== "comments" && (field !== "history" || !historyTruncated)
+  )
   return {
     acceptanceCriteria: details.acceptanceCriteria ?? null,
     collaborators: [...people.values()],
@@ -180,8 +183,7 @@ export const presentWorkspaceIssue = (
     environment: details.environment ?? null,
     history,
     historyCount,
-    historyTruncated: (details.historyTruncated ?? false) || truncatedFields.has("history") ||
-      historyCount > history.length,
+    historyTruncated,
     metadata: metadataFor(details),
     parent: details.parent === null || details.parent === undefined ? null : relatedIssue(details.parent, sourceUrl),
     subtasks: (details.subtasks ?? []).map((subtask) => relatedIssue(subtask, sourceUrl)),

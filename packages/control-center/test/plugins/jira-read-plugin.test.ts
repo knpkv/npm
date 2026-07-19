@@ -382,6 +382,75 @@ describe("JiraReadPlugin", () => {
       assert.strictEqual(attributes.description, `\`\`\`\`\n${fencedCode}\n\`\`\`\``)
     }))
 
+  it.effect("preserves whitespace inside Jira code blocks while normalizing outer spacing", () =>
+    Effect.gen(function*() {
+      const code = "a\n\n\nb  \n"
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              description: {
+                type: "doc",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "Before" }] },
+                  { type: "codeBlock", content: [{ type: "text", text: code }] },
+                  { type: "paragraph", content: [{ type: "text", text: "After" }] }
+                ]
+              }
+            }
+          }))
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.strictEqual(attributes.description, `Before\n\n\`\`\`\n${code}\`\`\`\n\nAfter`)
+    }))
+
+  it.effect("preserves safe Jira smart-link cards and omits unsafe card URLs", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              description: {
+                type: "doc",
+                content: [
+                  {
+                    type: "paragraph",
+                    content: [
+                      { type: "text", text: "Read " },
+                      { type: "inlineCard", attrs: { url: "https://wiki.example.test/runbook" } },
+                      { type: "inlineCard", attrs: { url: "javascript:alert(1)" } }
+                    ]
+                  },
+                  { type: "blockCard", attrs: { data: { url: "https://jira.example.test/browse/PAY-42" } } }
+                ]
+              }
+            }
+          }))
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.include(attributes.description ?? "", "](<https://wiki.example.test/runbook>)")
+      assert.include(attributes.description ?? "", "](<https://jira.example.test/browse/PAY-42>)")
+      assert.notInclude(attributes.description ?? "", "javascript")
+    }))
+
   it.effect("preserves a Jira ADF hard break without adding one to plain text", () =>
     Effect.gen(function*() {
       const provider = baseProvider({
@@ -612,6 +681,41 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(attributes.commentsTruncated)
     }))
 
+  it.effect("discards the discovery prefix when four pages can retain only the newest Jira comment tail", () =>
+    Effect.gen(function*() {
+      const starts = yield* Ref.make<ReadonlyArray<number>>([])
+      const ascendingComments = Array.from({ length: 300 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: `Comment ${String(index)}`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Ref.update(starts, (current) => [...current, request.startAt]).pipe(
+            Effect.as({
+              comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: ascendingComments.length
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 4 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(yield* Ref.get(starts), [0, 100, 150, 200, 250])
+      assert.deepStrictEqual(
+        attributes.comments?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 200 }, (_, index) => `comment-${String(index + 100)}`)
+      )
+    }))
+
   it.effect("trims combined comment and history activity to the normalized payload budget", () =>
     Effect.gen(function*() {
       const largeComments = Array.from({ length: 250 }, (_, index) => ({
@@ -717,6 +821,35 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(attributes.truncatedFields?.includes("history"))
       assert.isTrue(attributes.truncatedFields?.includes("labels"))
       assert.isTrue(attributes.truncatedFields?.includes("subtasks"))
+    }))
+
+  it.effect("does not report body clipping from an old comment omitted by the retained tail", () =>
+    Effect.gen(function*() {
+      const ascendingComments = Array.from({ length: 201 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: index === 0 ? "x".repeat(20_000) : `Comment ${String(index)}`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Effect.succeed({
+            comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+            startAt: request.startAt,
+            maxResults: request.maxResults,
+            total: ascendingComments.length
+          })
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 5 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.isTrue(attributes.commentsTruncated)
+      assert.isFalse(attributes.commentBodiesTruncated)
     }))
 
   it.effect("trims oversized fixed issue attributes with explicit field metadata", () =>

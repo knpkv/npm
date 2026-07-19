@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { PluginHealth } from "../../../domain/freshness.js"
+import { MAXIMUM_NORMALIZED_ISSUE_COMMENTS, MAXIMUM_NORMALIZED_ISSUE_HISTORY } from "../../../domain/normalizedIssue.js"
 import {
   PluginDiscoveryV1,
   PluginSyncPageV1,
@@ -281,6 +282,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   readonly operation: string
   readonly configuration: JiraReadPluginConfiguration
   readonly load: (request: JiraPageRequest) => Effect.Effect<ProviderPage<Value>, PluginFailure>
+  readonly maximumValues: number
 }): Effect.fn.Return<JiraFetchedCollection<Value>, PluginFailure> {
   const values: Array<Value> = []
   let total = 0
@@ -289,7 +291,8 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   let exhausted = false
   let skippedPrefix = false
 
-  for (let page = 0; page < options.configuration.maximumPages; page += 1) {
+  let page = 0
+  while (page < options.configuration.maximumPages) {
     const response = yield* withTimeout(
       options.operation,
       options.configuration.operationTimeoutMillis,
@@ -303,12 +306,20 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
-    const remainingPages = options.configuration.maximumPages - page - 1
-    if (page === 0 && totalKnown && remainingPages > 0) {
-      const tailStart = Math.max(startAt, total - remainingPages * options.configuration.pageSize)
-      skippedPrefix = tailStart > startAt
-      startAt = tailStart
+    if (page === 0 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
+      const tailCapacity = Math.min(
+        options.maximumValues,
+        options.configuration.maximumPages * options.configuration.pageSize
+      )
+      const tailStart = Math.max(startAt, total - tailCapacity)
+      if (tailStart > startAt) {
+        values.length = 0
+        skippedPrefix = true
+        startAt = tailStart
+        continue
+      }
     }
+    page += 1
     if (totalKnown && startAt >= total) {
       exhausted = true
       break
@@ -337,7 +348,8 @@ const collectIssueActivity = Effect.fn("JiraReadPlugin.collectIssueActivity")(fu
     load: (page) =>
       provider.getComments(issueId, page).pipe(
         Effect.map((response) => ({ values: response.comments, total: response.total }))
-      )
+      ),
+    maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
   })
   const changelogs = yield* collectPages({
     operation: "jira-get-changelogs",
@@ -345,7 +357,8 @@ const collectIssueActivity = Effect.fn("JiraReadPlugin.collectIssueActivity")(fu
     load: (page) =>
       provider.getChangelogs(issueId, page).pipe(
         Effect.map((response) => ({ values: response.values, total: response.total }))
-      )
+      ),
+    maximumValues: MAXIMUM_NORMALIZED_ISSUE_HISTORY
   })
   return { comments, changelogs }
 })

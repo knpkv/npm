@@ -394,4 +394,29 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Jira shortened comment bodies to keep this synchronized view bounded.")
     expect(host.textContent).not.toContain("Only the newest synchronized comments are shown.")
   })
+
+  it("distinguishes clipped history values from omitted history entries", async () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const clippedInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            historyTotal: details.history?.length ?? 0,
+            historyTruncated: false,
+            truncatedFields: ["history"]
+          }
+        }
+      }
+    } satisfies Inspection
+    const clippedState = { ...state, inspection: clippedInspection } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, clippedState)
+
+    expect(host.textContent).toContain("Jira shortened History to keep this synchronized view bounded.")
+    expect(host.textContent).not.toContain("Only the newest synchronized history is shown.")
+  })
 })
