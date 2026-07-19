@@ -515,7 +515,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         providerImmutableId: response.identity.accountId,
         displayName: response.identity.accountId
       },
-      workspace: {
+      workspace: null,
+      resource: {
         providerImmutableId: response.pipeline.arn,
         displayName: response.pipeline.name
       },

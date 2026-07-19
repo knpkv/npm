@@ -190,6 +190,7 @@ describe("Confluence page adapter", () => {
         providerImmutableId: "space-payments",
         displayName: "Confluence space"
       })
+      assert.isNull(discovery.resource)
     }))
 
   it.effect("uses the public name for a privacy-limited current-user profile", () =>

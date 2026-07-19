@@ -297,6 +297,7 @@ const makeRuntime = (
               providerImmutableId: server.baseUrl ?? decoded.webBaseUrl.href,
               displayName: server.serverTitle ?? "Jira"
             },
+            resource: null,
             endpoints: [
               { kind: "web", url: decoded.webBaseUrl, label: "Jira" },
               {

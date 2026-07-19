@@ -192,6 +192,22 @@ const runWithProvider = <Value, Error>(
   )
 
 describe("CodePipelinePlugin", () => {
+  it.effect("discovers one AWS account and identifies the configured pipeline as its resource", () =>
+    Effect.gen(function*() {
+      const discovery = yield* runWithProvider(
+        baseProvider(),
+        Effect.flatMap(PluginConnection, (connection) => connection.discover)
+      )
+
+      assert.strictEqual(discovery.account?.providerImmutableId, "123456789012")
+      assert.isNull(discovery.workspace)
+      assert.strictEqual(
+        discovery.resource?.providerImmutableId,
+        "arn:aws:codepipeline:eu-west-1:123456789012:release"
+      )
+      assert.strictEqual(discovery.resource?.displayName, "release")
+    }))
+
   it.effect("normalizes bounded pipeline, execution, stage, and action reads with stable provenance", () =>
     Effect.gen(function*() {
       const executionRequests = yield* Ref.make<

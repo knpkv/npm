@@ -44,6 +44,7 @@ export type PluginDiscoveryEndpointV1 = typeof PluginDiscoveryEndpointV1.Type
 export const PluginDiscoveryV1 = Schema.Struct({
   account: Schema.NullOr(ProviderContainer),
   workspace: Schema.NullOr(ProviderContainer),
+  resource: Schema.NullOr(ProviderContainer),
   endpoints: Schema.Array(PluginDiscoveryEndpointV1).check(
     Schema.makeFilter(
       (endpoints) => endpoints.length <= 20,

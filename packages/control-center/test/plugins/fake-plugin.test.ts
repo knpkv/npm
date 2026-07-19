@@ -102,6 +102,7 @@ const baseScenario = (overrides: Partial<FakePluginScenario> = {}): FakePluginSc
       providerImmutableId: "workspace-1",
       displayName: "Payments"
     },
+    resource: null,
     endpoints: [
       {
         kind: "web",

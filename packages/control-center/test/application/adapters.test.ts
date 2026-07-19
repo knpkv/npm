@@ -546,6 +546,7 @@ describe("application adapters", () => {
         discover: Effect.succeed({
           account: { providerImmutableId: "atlassian-account-789", displayName: "Provisioned Owner" },
           workspace: { providerImmutableId: "site-789", displayName: "Provisioned Jira" },
+          resource: null,
           endpoints: [],
           discoveredAt: T0
         }),
@@ -555,6 +556,16 @@ describe("application adapters", () => {
         diff: Option.none(),
         proposeAction: () => Effect.die("not used")
       }
+      const awsConnection: PluginConnectionV1 = {
+        ...connection,
+        discover: Effect.succeed({
+          account: { providerImmutableId: "123456789012", displayName: "123456789012" },
+          workspace: null,
+          resource: { providerImmutableId: "eu-west-1:payments", displayName: "payments" },
+          endpoints: [],
+          discoveredAt: T0
+        })
+      }
       const pluginConnections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId, workspaceId }) =>
           workspaceId === WORKSPACE_ID && [
@@ -562,7 +573,10 @@ describe("application adapters", () => {
               CONFLUENCE_PLUGIN_ID,
               CODEPIPELINE_PLUGIN_ID
             ].includes(pluginConnectionId)
-            ? Effect.succeed(Context.make(PluginConnection, connection))
+            ? Effect.succeed(Context.make(
+              PluginConnection,
+              pluginConnectionId === CODEPIPELINE_PLUGIN_ID ? awsConnection : connection
+            ))
             : Effect.die("provisioning crossed its requested scope"),
         invalidate: () => Ref.update(invalidations, (count) => count + 1)
       }
@@ -817,12 +831,13 @@ describe("application adapters", () => {
     withApplication(Effect.gen(function*() {
       yield* setup
       const awsConnection = (
-        workspace: { readonly providerImmutableId: string; readonly displayName: string }
+        resource: { readonly providerImmutableId: string; readonly displayName: string }
       ): PluginConnectionV1 => ({
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
           account: { providerImmutableId: "123456789012", displayName: "123456789012" },
-          workspace,
+          workspace: null,
+          resource,
           endpoints: [],
           discoveredAt: T0
         }),
@@ -1018,7 +1033,8 @@ describe("application adapters", () => {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
           account: { providerImmutableId: "123456789012", displayName: "123456789012" },
-          workspace: { providerImmutableId: "eu-west-1:payments", displayName: "payments" },
+          workspace: null,
+          resource: { providerImmutableId: "eu-west-1:payments", displayName: "payments" },
           endpoints: [],
           discoveredAt: T0
         }),
@@ -1172,6 +1188,7 @@ describe("application adapters", () => {
         discover: Effect.succeed({
           account: { providerImmutableId: "account-1", displayName: "Avery Bell" },
           workspace: { providerImmutableId: "cloud-1", displayName: "Knpkv Jira" },
+          resource: null,
           endpoints: [],
           discoveredAt: T0
         }),
@@ -1553,7 +1570,8 @@ describe("application adapters", () => {
         descriptor: negotiatedDescriptor,
         discover: Effect.succeed({
           account: { providerImmutableId: "account-100", displayName: "Connection 100" },
-          workspace: { providerImmutableId: "payments", displayName: "payments" },
+          workspace: null,
+          resource: { providerImmutableId: "payments", displayName: "payments" },
           endpoints: [],
           discoveredAt: T0
         }),
@@ -2867,6 +2885,7 @@ describe("application adapters", () => {
         discover: Effect.succeed({
           account: { providerImmutableId: "atlassian-account-123", displayName: "Avery Bell" },
           workspace: { providerImmutableId: "site-456", displayName: "Payments Jira" },
+          resource: null,
           endpoints: [],
           discoveredAt: T0
         }),
@@ -2982,6 +3001,7 @@ describe("application adapters", () => {
           discover: Effect.succeed({
             account: { providerImmutableId: "user-123", displayName: "Avery Bell" },
             workspace: { providerImmutableId: "site-456", displayName: "Payments Jira" },
+            resource: null,
             endpoints: [],
             discoveredAt: T0
           }),

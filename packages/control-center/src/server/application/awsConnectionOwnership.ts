@@ -33,12 +33,12 @@ export const materializeAwsConnectionOwnership = Effect.fn(
   discovery: PluginDiscoveryV1 | null
 ) {
   if (!isAwsProvider(connection.providerId)) return connection
-  if (discovery === null || discovery.account === null || discovery.workspace === null) {
+  if (discovery === null || discovery.account === null || discovery.resource === null) {
     return yield* new ApplicationInvalidRequest()
   }
 
   const discoveredAccount = discovery.account
-  const discoveredResource = discovery.workspace
+  const discoveredResource = discovery.resource
   const materializedAt = yield* DateTime.now
   const candidateAccountId = ProviderAccountId.make(
     yield* cryptoService.randomUUIDv7.pipe(Effect.mapError(() => unavailable()))

@@ -124,7 +124,7 @@ const runAfterRetryWindow = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Ef
  */
 export const runPluginContractSuite = (name: string, harness: PluginContractHarness): void => {
   describe(`${name} plugin contract`, () => {
-    it.effect("decodes safe provider account, workspace, and endpoint discovery", () =>
+    it.effect("decodes safe provider account, workspace, resource, and endpoint discovery", () =>
       Effect.gen(function*() {
         const runtime = yield* harness.makeRuntime("healthy")
         const discovery = yield* provideRuntime(
@@ -134,6 +134,7 @@ export const runPluginContractSuite = (name: string, harness: PluginContractHarn
 
         assert.strictEqual(discovery.account?.providerImmutableId, harness.expectedDiscovery.accountId)
         assert.strictEqual(discovery.workspace?.providerImmutableId, harness.expectedDiscovery.workspaceId)
+        assert.isNull(discovery.resource)
         assert.strictEqual(discovery.endpoints[0]?.url.toString(), harness.expectedDiscovery.endpointUrl)
       }))
 

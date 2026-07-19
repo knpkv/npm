@@ -618,6 +618,7 @@ describe("first-party plugin runtime", () => {
           providerImmutableId: "clockify-workspace",
           displayName: "Delivery"
         })
+        assert.isNull(discovery.resource)
         assert.strictEqual(requests.length, 2)
         assert.isTrue(requests.every(({ headers }) => headers["x-api-key"] === "clockify-secret"))
 
