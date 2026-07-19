@@ -1,6 +1,7 @@
 import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
-import { AwsClientConfig, ReadClient } from "@knpkv/codecommit-core"
+import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
+import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
 import {
   AdfSchemaValidatorLayer,

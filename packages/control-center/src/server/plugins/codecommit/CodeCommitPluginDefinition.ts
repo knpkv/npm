@@ -7,7 +7,8 @@
  *
  * @internal
  */
-import { Domain, ReadClient } from "@knpkv/codecommit-core"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import * as Clock from "effect/Clock"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
