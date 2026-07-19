@@ -313,6 +313,34 @@ const withRuntime = <A, E>(
   })
 
 describe("FakePlugin", () => {
+  it.effect("defaults the missing resource field from a legacy wrapped discovery result", () =>
+    Effect.gen(function*() {
+      const runtime = yield* makeFakePluginRuntime(baseScenario())
+      const services = yield* Effect.all({
+        connection: PluginConnection,
+        executor: AuthorizedPluginExecutor
+      }).pipe(Effect.provide(runtime.layer), Effect.scoped)
+      const legacyDiscovery = { ...(yield* services.connection.discover) }
+      assert.isTrue(Reflect.deleteProperty(legacyDiscovery, "resource"))
+      const definition = definePluginV1({
+        rawDescriptor: descriptor(),
+        configurationSchema: Schema.Unknown,
+        capabilityCodecs: pluginCapabilityCodecsV1,
+        make: () =>
+          Effect.succeed({
+            connection: { ...services.connection, discover: Effect.succeed(legacyDiscovery) },
+            executor: services.executor
+          })
+      })
+      const discovery = yield* PluginConnection.pipe(
+        Effect.flatMap((connection) => connection.discover),
+        Effect.provide(buildPluginDefinitionLayer(definition, null)),
+        Effect.scoped
+      )
+
+      assert.isNull(discovery.resource)
+    }))
+
   it.effect("constructs the adapter in Layer scope with required services", () =>
     Effect.gen(function*() {
       const runtime = yield* makeFakePluginRuntime(baseScenario())

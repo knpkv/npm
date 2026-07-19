@@ -114,6 +114,11 @@ const decodeBoundary = <S extends Schema.Codec<unknown, unknown, never, never>>(
     )
   )
 
+const normalizeLegacyDiscoveryOutput = (value: unknown): unknown =>
+  typeof value === "object" && value !== null && !Array.isArray(value) && !Object.hasOwn(value, "resource")
+    ? { ...value, resource: null }
+    : value
+
 const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContentRange")(function*(
   request: DiffContentRangeRequestV1,
   response: DiffContentRangeV1
@@ -187,7 +192,11 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
     discover: retryPluginOperation({
       operation: services.connection.discover,
       safety: "safe-read"
-    }).pipe(Effect.flatMap((value) => decodeBoundary("discover", "output", PluginDiscoveryV1, value))),
+    }).pipe(
+      Effect.flatMap((value) =>
+        decodeBoundary("discover", "output", PluginDiscoveryV1, normalizeLegacyDiscoveryOutput(value))
+      )
+    ),
     health: retryPluginOperation({
       operation: services.connection.health,
       safety: "safe-read"
