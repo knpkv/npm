@@ -12,7 +12,7 @@ const resource = {
 
 const activation = Config.all({
   baseEndpoint: Config.string("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(Config.withDefault("")),
-  disabled: Config.boolean("OTEL_SDK_DISABLED").pipe(Config.withDefault(false)),
+  disabled: Config.string("OTEL_SDK_DISABLED").pipe(Config.withDefault("")),
   logsEndpoint: Config.string("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.withDefault("")),
   logsExporters: Config.string("OTEL_LOGS_EXPORTER").pipe(Config.withDefault("")),
   logsProtocol: Config.string("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL").pipe(Config.withDefault("")),
@@ -29,6 +29,18 @@ const OtlpHttpProtocol = Schema.Literals(["http/json", "http/protobuf"])
 type OtlpHttpProtocol = typeof OtlpHttpProtocol.Type
 type OtlpSignal = "logs" | "traces"
 
+const optionalIntegerConfigurationKeys = new Set([
+  "OTEL_BLRP_EXPORT_TIMEOUT",
+  "OTEL_BLRP_MAX_EXPORT_BATCH_SIZE",
+  "OTEL_BLRP_SCHEDULE_DELAY",
+  "OTEL_BSP_EXPORT_TIMEOUT",
+  "OTEL_BSP_MAX_EXPORT_BATCH_SIZE",
+  "OTEL_BSP_SCHEDULE_DELAY",
+  "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_TIMEOUT",
+  "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"
+])
+
 class ObservabilityConfigurationError extends Schema.TaggedErrorClass<ObservabilityConfigurationError>()(
   "ObservabilityConfigurationError",
   {
@@ -42,9 +54,12 @@ const validateSignalEndpoint = Effect.fn("ControlCenterObservability.validateSig
   endpoint: string
 ) {
   if (endpoint === "") return
-  yield* Schema.decodeUnknownEffect(Schema.URLFromString)(endpoint).pipe(
+  const url = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(endpoint).pipe(
     Effect.mapError(() => new ObservabilityConfigurationError({ reason: "invalid-endpoint", signal }))
   )
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    return yield* new ObservabilityConfigurationError({ reason: "invalid-endpoint", signal })
+  }
 })
 
 const resolveProtocol = Effect.fn("ControlCenterObservability.resolveProtocol")(function*(
@@ -61,6 +76,43 @@ const resolveProtocol = Effect.fn("ControlCenterObservability.resolveProtocol")(
 const defaultEndpointLayer = ConfigProvider.layerAdd(
   ConfigProvider.fromEnv({ env: { OTEL_EXPORTER_OTLP_ENDPOINT: "http://localhost:4318" } })
 )
+
+const parseSdkDisabled = Effect.fn("ControlCenterObservability.parseSdkDisabled")(function*(value: string) {
+  const normalized = value.trim().toLowerCase()
+  if (normalized === "true") return true
+  if (normalized === "" || normalized === "false") return false
+  yield* Effect.logWarning("Ignoring invalid OTEL_SDK_DISABLED value; expected true or false.")
+  return false
+})
+
+const isIntegerConfigurationValue = (value: string): boolean => {
+  const parsed = Number(value)
+  return value.trim() !== "" && Number.isFinite(parsed) && Number.isInteger(parsed)
+}
+
+const sanitizedConfigProvider = (
+  provider: ConfigProvider.ConfigProvider,
+  sdkDisabled: boolean
+): ConfigProvider.ConfigProvider =>
+  ConfigProvider.make((path) => {
+    if (path.length === 1 && path[0] === "OTEL_SDK_DISABLED") {
+      return Effect.succeed(ConfigProvider.makeValue(sdkDisabled ? "true" : "false"))
+    }
+    return provider.load(path).pipe(
+      Effect.map((node) => {
+        if (
+          path.length !== 1 ||
+          typeof path[0] !== "string" ||
+          !optionalIntegerConfigurationKeys.has(path[0]) ||
+          node === undefined
+        ) {
+          return node
+        }
+        const value = node.value
+        return value === undefined || !isIntegerConfigurationValue(value) ? undefined : node
+      })
+    )
+  })
 
 const serializationLayer = (protocol: OtlpHttpProtocol) =>
   protocol === "http/json" ? OtlpSerialization.layerJson : OtlpSerialization.layerProtobuf
@@ -79,7 +131,10 @@ const tracerLayer = (protocol: OtlpHttpProtocol) =>
 
 export const controlCenterTelemetryLayer = Effect.gen(function*() {
   const configured = yield* activation
-  if (configured.disabled) return Layer.empty
+  const sdkDisabled = yield* parseSdkDisabled(configured.disabled)
+  if (sdkDisabled) return Layer.empty
+
+  const provider = yield* ConfigProvider.ConfigProvider
 
   const logsEnabled = includesOtlp(configured.logsExporters)
   const tracesEnabled = includesOtlp(configured.tracesExporters)
@@ -105,7 +160,7 @@ export const controlCenterTelemetryLayer = Effect.gen(function*() {
   return Layer.merge(
     logsEnabled ? loggerLayer(logsProtocol) : Layer.empty,
     tracesEnabled ? tracerLayer(tracesProtocol) : Layer.empty
-  )
+  ).pipe(Layer.provide(ConfigProvider.layer(sanitizedConfigProvider(provider, sdkDisabled))))
 }).pipe(Layer.unwrap)
 
 export const ControlCenterObservabilityLive = controlCenterTelemetryLayer.pipe(Layer.provide(FetchHttpClient.layer))

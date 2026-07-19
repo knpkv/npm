@@ -220,7 +220,8 @@ describe("Control Center observability", () => {
         {
           environment: {
             OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
-            OTEL_LOGS_EXPORTER: "otlp"
+            OTEL_LOGS_EXPORTER: "otlp",
+            OTEL_SDK_DISABLED: "false"
           },
           signal: "logs"
         },
@@ -243,6 +244,27 @@ describe("Control Center observability", () => {
       }
     }))
 
+  it.effect("rejects non-HTTP endpoints for active OTLP signals", () =>
+    Effect.gen(function*() {
+      const endpoints = ["localhost:4318", "ftp://collector.test"]
+      const signals: ReadonlyArray<"logs" | "traces"> = ["logs", "traces"]
+
+      for (const endpoint of endpoints) {
+        for (const signal of signals) {
+          const environment = signal === "logs"
+            ? { OTEL_EXPORTER_OTLP_ENDPOINT: endpoint, OTEL_LOGS_EXPORTER: "otlp" }
+            : { OTEL_EXPORTER_OTLP_ENDPOINT: endpoint, OTEL_TRACES_EXPORTER: "otlp" }
+          const failure = yield* Effect.flip(Layer.build(testLayer(environment)).pipe(Effect.scoped))
+
+          assert.strictEqual(failure._tag, "ObservabilityConfigurationError")
+          if (failure._tag === "ObservabilityConfigurationError") {
+            assert.strictEqual(failure.reason, "invalid-endpoint")
+            assert.strictEqual(failure.signal, signal)
+          }
+        }
+      }
+    }))
+
   it.effect("ignores malformed endpoints when the OpenTelemetry SDK is disabled", () =>
     Effect.gen(function*() {
       yield* Effect.logInfo("Disabled SDK malformed endpoint probe")
@@ -257,4 +279,39 @@ describe("Control Center observability", () => {
         OTEL_SDK_DISABLED: "true"
       }))
     ))
+
+  it.effect("parses the OpenTelemetry SDK disabled flag case-insensitively", () =>
+    Effect.gen(function*() {
+      yield* Effect.logInfo("Case-insensitive disabled SDK probe")
+
+      const capturedRequests = yield* CapturedRequests
+      assert.deepStrictEqual(yield* capturedRequests.requests, [])
+    }).pipe(
+      Effect.provide(testLayer({
+        OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+        OTEL_LOGS_EXPORTER: "otlp",
+        OTEL_SDK_DISABLED: "True"
+      }))
+    ))
+
+  it.effect("ignores malformed optional OTLP batch tuning", () =>
+    Effect.gen(function*() {
+      const fixtures: ReadonlyArray<Readonly<Record<string, string>>> = [
+        {
+          OTEL_BLRP_MAX_EXPORT_BATCH_SIZE: "abc",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+          OTEL_LOGS_EXPORTER: "otlp"
+        },
+        {
+          OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "abc",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+          OTEL_TRACES_EXPORTER: "otlp"
+        }
+      ]
+
+      for (const environment of fixtures) {
+        const result = yield* Layer.build(testLayer(environment)).pipe(Effect.scoped, Effect.result)
+        assert.isTrue(Result.isSuccess(result))
+      }
+    }))
 })
