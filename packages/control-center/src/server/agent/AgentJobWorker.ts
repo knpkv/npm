@@ -23,6 +23,7 @@ import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
 import {
+  AgentJobInputError,
   type AgentLeaseOwner,
   AgentLeaseToken,
   type ClaimedAgentJob
@@ -52,6 +53,15 @@ const AgentRuntimeFailure = Schema.Union([
   AgentRuntimeProtocolError
 ])
 const isAgentRuntimeFailure = Schema.is(AgentRuntimeFailure)
+const isAgentJobInputError = Schema.is(AgentJobInputError)
+
+const isDurableBoundFailure = (
+  failure: unknown
+): failure is AgentJobInputError & {
+  readonly reason: "event-limit-exceeded" | "output-limit-exceeded"
+} =>
+  isAgentJobInputError(failure) &&
+  (failure.reason === "event-limit-exceeded" || failure.reason === "output-limit-exceeded")
 
 const normalizeRuntimeFailure = (
   providerId: ClaimedAgentJob["providerId"],
@@ -80,6 +90,21 @@ const normalizeRuntimeFailure = (
     retryable: false
   })
 }
+
+const normalizeDurableBoundFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  failure: AgentJobInputError & {
+    readonly reason: "event-limit-exceeded" | "output-limit-exceeded"
+  }
+): AgentProviderError =>
+  new AgentProviderError({
+    providerId,
+    phase: "protocol",
+    message: failure.reason === "output-limit-exceeded"
+      ? "Agent runtime output exceeded the durable attempt limit."
+      : "Agent runtime event exceeded the durable event limit.",
+    retryable: false
+  })
 
 const makeAgentJobWorker = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -143,8 +168,8 @@ const makeAgentJobWorker = Effect.gen(function*() {
       continuation
     }
     const execution = yield* selected.success.run(request).pipe(
+      Stream.takeUntil((event) => event._tag === "completed"),
       Stream.runForEach((event) => {
-        if (event._tag === "completed") return Ref.set(terminal, event)
         return DateTime.now.pipe(
           Effect.flatMap((occurredAt) =>
             jobs.appendEvent({
@@ -156,7 +181,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
               occurredAt
             })
           ),
-          Effect.asVoid
+          Effect.andThen(event._tag === "completed" ? Ref.set(terminal, event) : Effect.void)
         )
       }),
       Effect.result
@@ -165,6 +190,9 @@ const makeAgentJobWorker = Effect.gen(function*() {
       const failure = execution.failure
       if (isAgentRuntimeFailure(failure)) {
         return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, failure))
+      }
+      if (isDurableBoundFailure(failure)) {
+        return yield* failClaim(claim, normalizeDurableBoundFailure(claim.providerId, failure))
       }
       return yield* Effect.fail(failure)
     }
@@ -179,15 +207,6 @@ const makeAgentJobWorker = Effect.gen(function*() {
         )
       )
     }
-    const occurredAt = yield* DateTime.now
-    yield* jobs.appendEvent({
-      workspaceId: claim.workspaceId,
-      jobId: claim.jobId,
-      attemptSequence: claim.attemptSequence,
-      leaseToken: claim.leaseToken,
-      event: completed,
-      occurredAt
-    })
     return {
       _tag: "completed",
       jobId: claim.jobId,

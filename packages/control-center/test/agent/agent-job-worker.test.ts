@@ -9,7 +9,7 @@ import {
   type AgentRuntimeService,
   makeAgentRuntime
 } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Layer, Option, Schema, Stream } from "effect"
+import { DateTime, Effect, Fiber, Layer, Option, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
@@ -19,9 +19,11 @@ import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRe
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
+  AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
-  AgentThreadEventPageSize
+  AgentThreadEventPageSize,
+  MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -41,6 +43,17 @@ const completedEvents: ReadonlyArray<AgentRuntimeEvent> = [
   { _tag: "output", channel: "assistant", text: "Durable answer" },
   { _tag: "usage", inputTokens: 12, outputTokens: 3 },
   { _tag: "completed", outcome: "success", sessionRef: null }
+]
+
+const OUTPUT_CHUNK_BYTES = 32_000
+const outputEvents = (count: number): ReadonlyArray<AgentRuntimeEvent> => [
+  completedEvents[0]!,
+  ...Array.from({ length: count }, (): AgentRuntimeEvent => ({
+    _tag: "output",
+    channel: "assistant",
+    text: "x".repeat(OUTPUT_CHUNK_BYTES)
+  })),
+  completedEvents.at(-1)!
 ]
 
 const setupFoundation = Effect.gen(function*() {
@@ -151,6 +164,155 @@ describe("agent job worker", () => {
         assert.strictEqual(requests.length, 1)
         assert.strictEqual(requests[0]?.runId, AgentRunId.make(JOB_ID))
         assert.strictEqual(requests[0]?.context.workspaceId, WORKSPACE_ID)
+      })
+    )
+  })
+
+  it.effect("completes an attempt whose cumulative output remains under the durable limit", () => {
+    const outputCount = Math.floor(MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES / OUTPUT_CHUNK_BYTES)
+    const runtime = makeAgentRuntime({ run: () => Stream.fromIterable(outputEvents(outputCount)) })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const database = yield* Database
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const rows = yield* database.sql<{
+          readonly leaseCount: number
+          readonly outputBytes: number
+          readonly state: string
+        }>`SELECT job.state, attempt.output_bytes AS outputBytes,
+        (SELECT COUNT(*) FROM agent_job_leases lease
+          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
+        FROM agent_jobs job
+        JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id AND attempt.job_id = job.job_id
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.strictEqual(rows[0]?.state, "succeeded")
+        assert.strictEqual(rows[0]?.outputBytes, outputCount * OUTPUT_CHUNK_BYTES)
+        assert.strictEqual(rows[0]?.leaseCount, 0)
+      })
+    )
+  })
+
+  it.effect("terminally fails an attempt whose cumulative output exceeds the durable limit", () => {
+    const outputCount = Math.floor(MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES / OUTPUT_CHUNK_BYTES) + 1
+    const runtime = makeAgentRuntime({ run: () => Stream.fromIterable(outputEvents(outputCount)) })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const database = yield* Database
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const rows = yield* database.sql<{
+          readonly leaseCount: number
+          readonly outcome: string
+          readonly state: string
+        }>`SELECT job.state, attempt.outcome,
+        (SELECT COUNT(*) FROM agent_job_leases lease
+          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
+        FROM agent_jobs job
+        JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id AND attempt.job_id = job.job_id
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
+
+        assert.deepStrictEqual(result, { _tag: "failed", jobId: JOB_ID })
+        assert.strictEqual(rows[0]?.state, "failed")
+        assert.strictEqual(rows[0]?.outcome, "failed")
+        assert.strictEqual(rows[0]?.leaseCount, 0)
+        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-failed")
+      })
+    )
+  })
+
+  it.effect(
+    "persists the first terminal event without waiting for the provider stream to end",
+    () => {
+      const runtime = makeAgentRuntime({
+        run: () => Stream.fromIterable(completedEvents).pipe(Stream.concat(Stream.never))
+      })
+      return withWorker(
+        runtime,
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+          yield* setupFoundation
+          yield* enqueue
+
+          const observed = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+          const rows = yield* database.sql<{
+            readonly leaseCount: number
+            readonly state: string
+          }>`SELECT job.state,
+        (SELECT COUNT(*) FROM agent_job_leases lease
+          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
+        FROM agent_jobs job
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
+
+          assert.deepStrictEqual(observed, {
+            _tag: "completed",
+            jobId: JOB_ID,
+            outcome: "success"
+          })
+          assert.strictEqual(rows[0]?.state, "succeeded")
+          assert.strictEqual(rows[0]?.leaseCount, 0)
+          assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
+        })
+      )
+    }
+  )
+
+  it.effect("does not terminalize an attempt after its lease expires", () => {
+    const runtime = makeAgentRuntime({
+      run: () =>
+        Stream.fromEffect(
+          Effect.sleep("6 minutes").pipe(Effect.as(completedEvents[0]!))
+        )
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const database = yield* Database
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(
+          Effect.result,
+          Effect.forkChild
+        )
+        yield* TestClock.adjust("6 minutes")
+        const observed = yield* Fiber.join(fiber)
+        const rows = yield* database.sql<{
+          readonly leaseCount: number
+          readonly outcome: null | string
+          readonly state: string
+        }>`SELECT job.state, attempt.outcome,
+        (SELECT COUNT(*) FROM agent_job_leases lease
+          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
+        FROM agent_jobs job
+        JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id AND attempt.job_id = job.job_id
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
+
+        assert.isTrue(Result.isFailure(observed))
+        if (Result.isFailure(observed)) {
+          assert.isTrue(Schema.is(AgentJobInputError)(observed.failure))
+          if (Schema.is(AgentJobInputError)(observed.failure)) {
+            assert.strictEqual(observed.failure.reason, "lease-expired")
+          }
+        }
+        assert.strictEqual(rows[0]?.state, "running")
+        assert.isNull(rows[0]?.outcome)
+        assert.strictEqual(rows[0]?.leaseCount, 1)
       })
     )
   })
