@@ -1,11 +1,11 @@
 /**
  * Deletes an approval rule from a pull request via
- * `distilled-aws/codecommit.deletePullRequestApprovalRule`, wrapped with
+ * `@distilled.cloud/aws/codecommit.deletePullRequestApprovalRule`, wrapped with
  * {@link withAwsContext} for credential acquisition and retry.
  *
  * @internal
  */
-import * as codecommit from "distilled-aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect } from "effect"
 import { type DeleteApprovalRuleParams, makeApiError, withAwsContext } from "./internal.js"
 

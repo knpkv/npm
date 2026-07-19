@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-network-packed-install
+language: tsx
+severity: error
+message: "Packed-package tests must install consumers from pnpm's local store"
+
+rule:
+  any:
+    - pattern: run("npm", ["install", $$$ARGS])
+    - pattern: run("npm", ["install", $$$ARGS], $CWD)
+    - pattern: ChildProcess.make("npm", ["install", $$$ARGS])
+    - pattern: ChildProcess.make("npm", ["install", $$$ARGS], $OPTIONS)
+
+files:
+  - "packages/*/scripts/test-packed-package.ts"
+
+note: |
+  Registry-backed npm installs make packed-package validation depend on network
+  availability even though the workspace install already populated pnpm's store.
+  Use `pnpm install --offline --ignore-scripts --no-frozen-lockfile` instead.
+  Deliberate network smoke tests must use an explicitly named network-smoke script
+  so their external dependency remains visible during review.

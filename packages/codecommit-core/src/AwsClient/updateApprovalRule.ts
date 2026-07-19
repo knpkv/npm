@@ -1,11 +1,11 @@
 /**
  * Updates an approval rule's content on a pull request via
- * `distilled-aws/codecommit.updatePullRequestApprovalRuleContent`, wrapped
+ * `@distilled.cloud/aws/codecommit.updatePullRequestApprovalRuleContent`, wrapped
  * with {@link withAwsContext} for credential acquisition and retry.
  *
  * @internal
  */
-import * as codecommit from "distilled-aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect } from "effect"
 import { makeApiError, type UpdateApprovalRuleParams, withAwsContext } from "./internal.js"
 

@@ -5,7 +5,7 @@ settings:
   excludeLinksFromLockfile: false
 
 overrides:
-  distilled-aws>fast-xml-parser: ^5.3.4
+  '@distilled.cloud/aws>fast-xml-parser': ^5.3.4
   vitest: ^4.1.10
   '@effect/vitest': 4.0.0-beta.98
   '@effect/platform-bun': 4.0.0-beta.98
@@ -24,7 +24,6 @@ overrides:
 
 patchedDependencies:
   '@changesets/assemble-release-plan': 29cf7a343aefd3c59ad238a4cb067f0a1a0adbeed07b6d57d6f31d6c80a5e25e
-  distilled-aws@0.1.1: 1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c
 
 importers:
 
@@ -321,18 +320,22 @@ importers:
       '@aws-sdk/credential-providers':
         specifier: ^3.1085.0
         version: 3.1085.0
+      '@distilled.cloud/aws':
+        specifier: 0.29.1
+        version: 0.29.1(effect@4.0.0-beta.98)
       '@effect/sql-libsql':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@libsql/client':
         specifier: ^0.17.4
         version: 0.17.4
-      distilled-aws:
-        specifier: 0.1.1
-        version: 0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98)
       effect:
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98
+    devDependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)(ioredis@5.11.1)
 
   packages/codecommit-web:
     dependencies:
@@ -524,6 +527,9 @@ importers:
       '@aws-sdk/credential-providers':
         specifier: ^3.1085.0
         version: 3.1085.0
+      '@distilled.cloud/aws':
+        specifier: 0.29.1
+        version: 0.29.1(effect@4.0.0-beta.98)
       '@effect/platform-browser':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)
@@ -542,30 +548,27 @@ importers:
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common
-      '@knpkv/codecommit-core':
-        specifier: workspace:^
-        version: link:../codecommit-core
       '@knpkv/clockify-api-client':
         specifier: workspace:^
         version: link:../clockify-api-client
-      '@knpkv/control-center-sql':
+      '@knpkv/codecommit-core':
         specifier: workspace:^
-        version: link:../control-center-sql
+        version: link:../codecommit-core
       '@knpkv/confluence-api-client':
         specifier: workspace:^
         version: link:../confluence-api-client
       '@knpkv/confluence-to-markdown':
         specifier: workspace:^
         version: link:../confluence-to-markdown
+      '@knpkv/control-center-sql':
+        specifier: workspace:^
+        version: link:../control-center-sql
       '@knpkv/jira-api-client':
         specifier: workspace:^
         version: link:../jira-api-client
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
-      distilled-aws:
-        specifier: 0.1.1
-        version: 0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98)
       effect:
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98
@@ -1394,6 +1397,16 @@ packages:
 
   '@dimforge/rapier2d-simd-compat@0.17.3':
     resolution: {integrity: sha512-bijvwWz6NHsNj5e5i1vtd3dU2pDhthSaTUZSh14DUGGKJfw8eMnlWZsxwHBxB/a3AXVNDjL9abuHw1k9FGR+jg==}
+
+  '@distilled.cloud/aws@0.29.1':
+    resolution: {integrity: sha512-PyckEEQny1QyuLQwHnTprtirUysGKfdYIBn2hi7K7ZEHQ0DaPgOb5Snj7Jg1peRREKZmJ6GIKC7zBKogZQUVxA==}
+    peerDependencies:
+      effect: 4.0.0-beta.98
+
+  '@distilled.cloud/core@0.29.1':
+    resolution: {integrity: sha512-iEsRbvrmpjwqfHy1Bpkwdnoa7OIyoTFUwD4Cg6h7IRDUolvb2RJQUnrV6LDCV9DPJyZcjN5Vnd5zPagPfqz8dg==}
+    peerDependencies:
+      effect: 4.0.0-beta.98
 
   '@dprint/formatter@0.4.1':
     resolution: {integrity: sha512-IB/GXdlMOvi0UhQQ9mcY15Fxcrc2JPadmo6tqefCNV0bptFq7YBpggzpqYXldBXDa04CbKJ+rDwO2eNRPE2+/g==}
@@ -4763,11 +4776,6 @@ packages:
 
   discontinuous-range@1.0.0:
     resolution: {integrity: sha512-c68LpLbO+7kP/b1Hr1qs8/BJ09F5khZGTxqxZuhzxpmwJKOgRFHJWIb9/KmqnqHhLdO55aOxFH/EGBvUQbL/RQ==}
-
-  distilled-aws@0.1.1:
-    resolution: {integrity: sha512-FloVUMgHCvdGjxGBc6VBWEMkY/nDeK8ItJhRBfKxXepG8G0FXCQ+oUT48q+12ytEtyONesZ9prUvrBshb8Drbg==}
-    peerDependencies:
-      effect: 4.0.0-beta.98
 
   doctrine@3.0.0:
     resolution: {integrity: sha512-yS+Q5i3hBf7GBkd4KG8a7eBNNWNGLTaEwwYWUijIYM7zrlYDM0BFXHjjPWlWZ1Rg7UaddZeIDmi9jF3HmqiQ2w==}
@@ -8358,6 +8366,24 @@ snapshots:
   '@dimforge/rapier2d-simd-compat@0.17.3':
     optional: true
 
+  '@distilled.cloud/aws@0.29.1(effect@4.0.0-beta.98)':
+    dependencies:
+      '@aws-crypto/crc32': 5.2.0
+      '@aws-crypto/util': 5.2.0
+      '@aws-sdk/credential-providers': 3.1085.0
+      '@aws-sdk/types': 3.974.0
+      '@distilled.cloud/core': 0.29.1(effect@4.0.0-beta.98)
+      '@smithy/shared-ini-file-loader': 4.6.8
+      '@smithy/types': 4.16.1
+      '@smithy/util-base64': 4.5.8
+      aws4fetch: 1.0.20
+      effect: 4.0.0-beta.98
+      fast-xml-parser: 5.9.3
+
+  '@distilled.cloud/core@0.29.1(effect@4.0.0-beta.98)':
+    dependencies:
+      effect: 4.0.0-beta.98
+
   '@dprint/formatter@0.4.1': {}
 
   '@dprint/typescript@0.91.8': {}
@@ -11651,19 +11677,6 @@ snapshots:
   direction@2.0.1: {}
 
   discontinuous-range@1.0.0: {}
-
-  distilled-aws@0.1.1(patch_hash=1f471e51aba96881975d842ac1f7764f27e4f2d1d2fc725de7906964e761781c)(effect@4.0.0-beta.98):
-    dependencies:
-      '@aws-crypto/crc32': 5.2.0
-      '@aws-crypto/util': 5.2.0
-      '@aws-sdk/credential-providers': 3.1085.0
-      '@aws-sdk/types': 3.974.0
-      '@smithy/shared-ini-file-loader': 4.6.8
-      '@smithy/types': 4.16.1
-      '@smithy/util-base64': 4.5.8
-      aws4fetch: 1.0.20
-      effect: 4.0.0-beta.98
-      fast-xml-parser: 5.9.3
 
   doctrine@3.0.0:
     dependencies:

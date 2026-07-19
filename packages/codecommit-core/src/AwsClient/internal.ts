@@ -26,8 +26,8 @@
  * @internal
  */
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import * as DistilledCredentials from "distilled-aws/Credentials"
-import * as DistilledRegion from "distilled-aws/Region"
+import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
+import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Duration, Effect, Layer, Schedule, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import { HttpClient } from "effect/unstable/http"
@@ -164,7 +164,7 @@ export const withAwsContext = <A, E>(
       Layer.mergeAll(
         DistilledCredentials.fromCredentials(credentials),
         Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(DistilledRegion.Region, account.region),
+        Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(AwsClientConfig, config)
       )
     )

@@ -249,7 +249,7 @@ export const createPullRequest = (params: CreatePullRequestParams) =>
   })
 ```
 
-Why `Layer.mergeAll` over chained `provideService`? Single `provide` call, reads cleaner, and the distilled-aws library expects services via Layer context.
+Why `Layer.mergeAll` over chained `provideService`? Single `provide` call, reads cleaner, and the Distilled AWS client expects services via Layer context.
 
 ### Extracted Sub-Helpers Pattern
 

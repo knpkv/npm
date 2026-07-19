@@ -63,6 +63,7 @@
   },
   "dependencies": {
     "@aws-sdk/credential-providers": "^3.1085.0",
+    "@distilled.cloud/aws": "0.29.1",
     "@effect/platform-browser": "4.0.0-beta.98",
     "@effect/platform-node": "4.0.0-beta.98",
     "@effect/sql-libsql": "4.0.0-beta.98",
@@ -76,7 +77,6 @@
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "distilled-aws": "0.1.1",
     "effect": "4.0.0-beta.98",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

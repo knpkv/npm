@@ -1,0 +1,12 @@
+id: no-unchecked-packed-child-process
+valid:
+  - |
+    yield* runCheckedCommand(spawner, "pnpm", ["pack"], packageRoot)
+  - |
+    const handle = yield* spawner.spawn(ChildProcess.make("pnpm", ["pack"]))
+    const exitCode = yield* handle.exitCode
+invalid:
+  - |
+    yield* spawner.string(ChildProcess.make("pnpm", ["pack"], { cwd: packageRoot }))
+  - |
+    yield* spawner.lines(ChildProcess.make("node", ["verify.mjs"], { cwd: consumer }))

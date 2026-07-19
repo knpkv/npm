@@ -314,6 +314,6 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
     })
   )
 
-  /** Production client layer backed by distilled-aws. */
+  /** Production client layer backed by @distilled.cloud/aws. */
   static readonly live = CodeCommitReadClient.layer.pipe(Layer.provide(CodeCommitReadProviderLive))
 }

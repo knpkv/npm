@@ -1,17 +1,17 @@
 /**
  * Direct AWS CodePipeline read boundary.
  *
- * The live implementation owns credential acquisition and distilled-aws
+ * The live implementation owns credential acquisition and @distilled.cloud/aws
  * runtime provision. Every response remains `unknown` until the read client
  * applies repository-owned Schema contracts.
  *
  * @internal
  */
 import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
-import * as codepipeline from "distilled-aws/codepipeline"
-import * as DistilledCredentials from "distilled-aws/Credentials"
-import * as DistilledRegion from "distilled-aws/Region"
-import * as sts from "distilled-aws/sts"
+import * as codepipeline from "@distilled.cloud/aws/codepipeline"
+import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
+import * as DistilledRegion from "@distilled.cloud/aws/Region"
+import * as sts from "@distilled.cloud/aws/sts"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -182,7 +182,7 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
     Effect.provide(
       Layer.mergeAll(
         DistilledCredentials.fromCredentials(credentials),
-        Layer.succeed(DistilledRegion.Region, account.region),
+        Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
         Layer.succeed(HttpClient.HttpClient, httpClient)
       )
     ),
@@ -198,7 +198,7 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
   )
 })
 
-/** Live raw provider backed only by direct distilled-aws CodePipeline and STS operations. @internal */
+/** Live raw provider backed only by direct @distilled.cloud/aws CodePipeline and STS operations. @internal */
 export const CodePipelineReadProviderLive = Layer.effect(
   CodePipelineReadProvider,
   Effect.gen(function*() {

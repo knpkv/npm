@@ -1,11 +1,11 @@
 /**
  * Creates an approval rule on a pull request via
- * `distilled-aws/codecommit.createPullRequestApprovalRule`, wrapped with
+ * `@distilled.cloud/aws/codecommit.createPullRequestApprovalRule`, wrapped with
  * {@link withAwsContext} for credential acquisition and retry.
  *
  * @internal
  */
-import * as codecommit from "distilled-aws/codecommit"
+import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect } from "effect"
 import { type CreateApprovalRuleParams, makeApiError, withAwsContext } from "./internal.js"
 

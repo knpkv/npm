@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unchecked-packed-child-process
+language: tsx
+severity: error
+message: "Packed-package commands must check their child process exit code"
+
+rule:
+  any:
+    - pattern: $SPAWNER.string(ChildProcess.make($$$ARGS))
+    - pattern: $SPAWNER.lines(ChildProcess.make($$$ARGS))
+    - pattern: $SPAWNER.streamString(ChildProcess.make($$$ARGS))
+    - pattern: $SPAWNER.streamLines(ChildProcess.make($$$ARGS))
+
+files:
+  - "packages/codecommit-core/scripts/test-packed-package.ts"
+
+note: |
+  ChildProcessSpawner output collectors complete successfully when the command
+  exits non-zero. Use a checked helper built on `exitCode`, or use `spawn` and
+  explicitly reject every non-zero handle exit code after consuming output.

@@ -1,13 +1,13 @@
 /**
  * AWS CodeCommit API client service.
  *
- * Provides an Effect `Context.Tag`-based service wrapping distilled-aws
+ * Provides an Effect `Context.Tag`-based service wrapping @distilled.cloud/aws
  * CodeCommit calls. Exposes PR CRUD, branch listing, comments, diff stats,
  * caller identity, and approval rule management (create/update/delete).
  *
  * **Mental model**
  *
- * - Thin Effect wrappers over distilled-aws CodeCommit calls
+ * - Thin Effect wrappers over @distilled.cloud/aws CodeCommit calls
  * - Each method acquires credentials and provides region/HTTP context
  *
  * @category Client
