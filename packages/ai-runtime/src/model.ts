@@ -117,6 +117,7 @@ export class AgentRuntimeProtocolError extends Schema.TaggedErrorClass<AgentRunt
   "AgentRuntimeProtocolError",
   {
     reason: Schema.Literals([
+      "invalid-event",
       "missing-terminal-event",
       "duplicate-terminal-event",
       "event-after-terminal",
