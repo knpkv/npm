@@ -919,6 +919,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             WHERE revision.workspace_id = ${workspaceId}
               AND revision.release_id = ${query.releaseId}
               AND revision.environment_id IS NULL
+              AND revision.lifecycle NOT IN ('rejected', 'superseded')
           ), endpoints AS (
             SELECT source_node_id AS node_id, source_node_kind AS endpoint_kind
             FROM current_relationships
