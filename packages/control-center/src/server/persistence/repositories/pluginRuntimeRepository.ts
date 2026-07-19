@@ -639,7 +639,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     })).pipe(mapPersistenceOperation("plugin-runtime.complete-sync-attempt"))
   })
 
-  const commitPage = Effect.fn("PluginRuntimeRepository.commitPage")(function*(
+  const commitPageReceipt = Effect.fn("PluginRuntimeRepository.commitPageReceipt")(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
     input: unknown
@@ -686,6 +686,8 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       (event) => event._tag === "upsert" ? digestText(event.payloadJson) : Effect.succeed(null)
     )
     const eventDigests = yield* Effect.forEach(page.events, (event) => digestText(event.eventJson))
+    const acceptedEventIds: Array<string> = []
+    let pageCommitted = false
 
     const committed = yield* database.transaction(
       Effect.gen(function*() {
@@ -760,6 +762,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
             ${event.eventId}, ${eventDigest}, ${event._tag}, ${event.recordKey}, ${event.sourceRevision},
             ${event.eventJson}, ${observedAtText}
           )`
+          acceptedEventIds.push(event.eventId)
           if (event._tag === "upsert") {
             yield* sql`INSERT INTO plugin_cache_entries (
               workspace_id, plugin_connection_id, stream_key, record_key, state,
@@ -799,6 +802,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
             actualRevision: null
           })
         }
+        pageCommitted = true
       })
     ).pipe(mapPersistenceOperation("plugin-runtime.commit-page"), Effect.result)
     if (Result.isFailure(committed)) {
@@ -821,10 +825,24 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       }
       return yield* Effect.fail(failure)
     }
-    return yield* getStream(workspaceId, pluginConnectionId, page.streamKey)
+    return {
+      acceptedEventIds,
+      pageCommitted,
+      stream: yield* getStream(workspaceId, pluginConnectionId, page.streamKey)
+    }
   })
 
-  const commitNormalizedPage = Effect.fn("PluginRuntimeRepository.commitNormalizedPage")(function*(
+  const commitPage = Effect.fn("PluginRuntimeRepository.commitPage")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    input: unknown
+  ) {
+    return (yield* commitPageReceipt(workspaceId, pluginConnectionId, input)).stream
+  })
+
+  const commitNormalizedPageReceipt = Effect.fn(
+    "PluginRuntimeRepository.commitNormalizedPageReceipt"
+  )(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
     providerId: typeof ProviderId.Type,
@@ -911,7 +929,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
           }
         }
       }))
-    return yield* commitPage(workspaceId, pluginConnectionId, {
+    return yield* commitPageReceipt(workspaceId, pluginConnectionId, {
       providerId,
       streamKey,
       pageId,
@@ -922,6 +940,28 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       committedAt: encodeTimestamp(committedAt),
       events
     })
+  })
+
+  const commitNormalizedPage = Effect.fn("PluginRuntimeRepository.commitNormalizedPage")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    providerId: typeof ProviderId.Type,
+    streamKey: PluginStreamKey,
+    expectedRevision: number,
+    page: PluginSyncPageV1,
+    committedAt: UtcTimestamp,
+    successfulHealth: PluginHealth
+  ) {
+    return (yield* commitNormalizedPageReceipt(
+      workspaceId,
+      pluginConnectionId,
+      providerId,
+      streamKey,
+      expectedRevision,
+      page,
+      committedAt,
+      successfulHealth
+    )).stream
   })
 
   const getLastSuccessfulHealth = Effect.fn("PluginRuntimeRepository.getLastSuccessfulHealth")(function*(
@@ -1174,6 +1214,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     acceptPluginDescriptor,
     beginSyncAttempt,
     commitNormalizedPage,
+    commitNormalizedPageReceipt,
     commitPage,
     completeSyncAttempt,
     getCache,

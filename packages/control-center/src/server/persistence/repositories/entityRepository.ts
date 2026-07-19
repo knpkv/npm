@@ -1,3 +1,4 @@
+import { type RenderedSql, renderEntitySourceIdentityQuery } from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -9,7 +10,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 
-import { EntityId, WorkspaceId } from "../../../domain/identifiers.js"
+import { EntityId, type PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import {
   NormalizationSchemaVersion,
   ProviderId,
@@ -110,6 +111,7 @@ const makeEntityRepository = Effect.gen(function*() {
   const database = yield* Database
   const quarantine = yield* QuarantineRepository
   const sql = database.sql
+  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
 
   const digestPersistedRow = Effect.fn("EntityRepository.digestPersistedRow")(function*(row: unknown) {
     const serialized = yield* Effect.try({
@@ -298,6 +300,36 @@ const makeEntityRepository = Effect.gen(function*() {
     WHERE workspace_id = ${workspaceId}
     ORDER BY entity_id`
 
+  const findBySourceIdentity = Effect.fn("EntityRepository.findBySourceIdentity")(function*(
+    workspaceId: WorkspaceId,
+    identity: {
+      readonly pluginConnectionId: PluginConnectionId
+      readonly providerId: ProviderId
+      readonly vendorImmutableId: VendorImmutableId
+    }
+  ) {
+    const rows = yield* run(renderEntitySourceIdentityQuery({ workspaceId, ...identity })).pipe(
+      mapPersistenceOperation("entity.find-by-source-identity")
+    )
+    if (rows.length === 0) {
+      return yield* new RecordNotFoundError({
+        workspaceId,
+        recordKind: "entity-source-identity",
+        recordKey: identity.pluginConnectionId
+      })
+    }
+    const decoded = Schema.decodeUnknownResult(Schema.Struct({ entityId: EntityId }))(rows[0])
+    if (Result.isFailure(decoded)) {
+      return yield* new PersistedRecordError({
+        workspaceId,
+        recordKind: "entity-source-identity",
+        recordKey: identity.pluginConnectionId,
+        diagnosticCode: "entity-revision-schema-invalid"
+      })
+    }
+    return yield* get(workspaceId, decoded.success.entityId)
+  })
+
   return {
     create: Effect.fn("EntityRepository.create")(function*(
       workspaceId: WorkspaceId,
@@ -325,6 +357,7 @@ const makeEntityRepository = Effect.gen(function*() {
       )
       return yield* get(workspaceId, input.entityId)
     }),
+    findBySourceIdentity,
     get,
     list: Effect.fn("EntityRepository.list")(function*(workspaceId: WorkspaceId) {
       const headRows = yield* listIdentityHeadRows(workspaceId).pipe(
