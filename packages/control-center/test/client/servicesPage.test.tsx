@@ -14,7 +14,8 @@ import {
   CreatePluginConnectionsResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
-  PluginOverviewResponse
+  PluginOverviewResponse,
+  PluginSynchronizationState
 } from "../../src/api/plugins.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
@@ -2021,6 +2022,191 @@ describe("ServicesPage connection tests", () => {
         (request) => request.values.find(({ key }) => key === "repositoryName" || key === "pipelineName")?.value
       )
     ).toEqual(["payments-api", "risk-engine", "payments-production"])
+  })
+
+  it("discovers, searches, selects, and preserves AWS resources across refresh", async () => {
+    const discoverAwsResources = vi
+      .fn<NonNullable<ConnectionTestTransport["discoverAwsResources"]>>()
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: ["payments-api", "risk-engine"], truncated: false },
+        codePipeline: { _tag: "failed", failureClass: "authorization" }
+      })
+      .mockResolvedValueOnce({
+        accountId: "123456789012",
+        codeCommit: { _tag: "available", names: ["risk-engine"], truncated: false },
+        codePipeline: { _tag: "available", names: [], truncated: false }
+      })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsResources,
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+
+    expect(discoverAwsResources).toHaveBeenCalledWith(
+      { profile: "default", region: "eu-west-1" },
+      expect.any(AbortSignal)
+    )
+    expect(host.textContent).toContain("Verified AWS account 123456789012")
+    expect(host.textContent).toContain("CodePipeline access was denied")
+    const search = host.querySelector<HTMLInputElement>('input[type="search"]')
+    if (search !== null) await setControlValue(search, "payments")
+    expect(host.textContent).toContain("payments-api")
+    expect(host.textContent).not.toContain("risk-engine")
+    const paymentChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-api"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    await act(async () => paymentChoice?.click())
+
+    const refresh = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Refresh discovery")
+    )
+    await act(async () => refresh?.click())
+    expect(host.textContent).toContain("payments-api")
+    const refreshedPayment = [...host.querySelectorAll<HTMLLabelElement>("label")]
+      .find(({ textContent }) => textContent?.includes("payments-api"))
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    expect(refreshedPayment?.checked).toBe(true)
+    expect(host.textContent).toContain("No pipelines were found")
+  })
+
+  it("keeps manual AWS resource entry available when account discovery fails", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      discoverAwsResources: () => Promise.reject(new Error("provider secret must not render")),
+      overview: () => Promise.resolve({ ...overview, connections: [] }),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const region = host.querySelectorAll<HTMLInputElement>("input")[2]
+    if (region !== undefined) await setControlValue(region, "eu-west-1")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+
+    expect(host.textContent).toContain("Account verification failed")
+    expect(host.textContent).not.toContain("provider secret")
+    expect(host.querySelectorAll("textarea")).toHaveLength(2)
+  })
+
+  it("loads durable synchronization state and runs Sync now", async () => {
+    const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(connection),
+      providerId: "codecommit",
+      displayName: "Payments CodeCommit"
+    })
+    const synchronization = vi.fn<NonNullable<ConnectionTestTransport["synchronization"]>>().mockResolvedValue(
+      Schema.decodeUnknownSync(PluginSynchronizationState)({
+        pluginConnectionId: codeCommitConnection.pluginConnectionId,
+        providerId: "codecommit",
+        streamKey: "pull-requests",
+        lastAttemptAt: null,
+        lastSuccessAt: null,
+        result: "never",
+        pagesCommitted: 0
+      })
+    )
+    const synchronized = Schema.decodeUnknownSync(PluginSynchronizationState)({
+      pluginConnectionId: codeCommitConnection.pluginConnectionId,
+      providerId: "codecommit",
+      streamKey: "pull-requests",
+      lastAttemptAt: "2026-07-19T10:00:00.000Z",
+      lastSuccessAt: "2026-07-19T10:00:01.000Z",
+      result: "synchronized",
+      pagesCommitted: 3
+    })
+    let completeSynchronization: (() => void) | undefined
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>(
+      () =>
+        new Promise((resolve) => {
+          completeSynchronization = () => resolve(synchronized)
+        })
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [codeCommitConnection] }),
+      setEnabled: vi.fn(),
+      synchronization,
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Never synchronized")
+    const syncNow = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Sync now")
+    )
+    await act(async () => syncNow?.click())
+    expect(synchronize).toHaveBeenCalledWith(codeCommitConnection.pluginConnectionId, expect.any(AbortSignal))
+    expect(syncNow?.disabled).toBe(true)
+    expect(host.textContent).toContain("Never synchronized")
+    await act(async () => completeSynchronization?.())
+    expect(host.textContent).toContain("Synchronized")
+    expect(host.textContent).toContain("3 pages")
+    expect(host.textContent).toContain("2026-07-19T10:00:01.000Z")
+  })
+
+  it("shows synchronization loading and error states and refreshes them", async () => {
+    const codeCommitConnection = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(connection),
+      providerId: "codecommit",
+      displayName: "Payments CodeCommit"
+    })
+    const never = Schema.decodeUnknownSync(PluginSynchronizationState)({
+      pluginConnectionId: codeCommitConnection.pluginConnectionId,
+      providerId: "codecommit",
+      streamKey: "pull-requests",
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      result: "never",
+      pagesCommitted: 0
+    })
+    let failInitialLoad: (() => void) | undefined
+    const synchronization = vi
+      .fn<NonNullable<ConnectionTestTransport["synchronization"]>>()
+      .mockImplementationOnce(
+        () =>
+          new Promise((_resolve, reject) => {
+            failInitialLoad = () => reject(new Error("unavailable"))
+          })
+      )
+      .mockResolvedValue(never)
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve({ ...overview, connections: [codeCommitConnection] }),
+      setEnabled: vi.fn(),
+      synchronization,
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Loading synchronization state")
+    await act(async () => failInitialLoad?.())
+    expect(host.textContent).toContain("Synchronization state is unavailable")
+    const refresh = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Refresh state")
+    )
+    await act(async () => refresh?.click())
+    expect(synchronization).toHaveBeenCalledTimes(2)
+    expect(host.textContent).toContain("Never synchronized")
   })
 
   it("retries only AWS drafts that did not create successfully", async () => {

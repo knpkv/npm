@@ -85,6 +85,18 @@
   gap: var(--rly-space-16);
 }
 
+.synchronization,
+.syncState {
+  display: grid;
+  gap: var(--rly-space-6);
+}
+
+.syncActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
 .connectionIdentity {
   display: flex;
   min-inline-size: 0;

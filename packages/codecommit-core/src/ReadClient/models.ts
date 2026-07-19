@@ -58,6 +58,16 @@ export const CodeCommitReadAccount = Schema.Struct({
 /** Decoded account coordinates used by CodeCommit provider reads. */
 export type CodeCommitReadAccount = typeof CodeCommitReadAccount.Type
 
+/** One bounded provider page of CodeCommit repository names. */
+export class CodeCommitRepositoryPage extends Schema.Class<CodeCommitRepositoryPage>(
+  "CodeCommitRepositoryPage"
+)({
+  repositoryNames: Schema.Array(
+    RepositoryName.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+  ).check(Schema.isMaxLength(1_000)),
+  nextToken: Schema.NullOr(CodeCommitPageToken)
+}) {}
+
 /** Secret-free identity returned by AWS STS for a configured account. */
 export class CodeCommitAccountIdentity extends Schema.Class<CodeCommitAccountIdentity>(
   "CodeCommitAccountIdentity"

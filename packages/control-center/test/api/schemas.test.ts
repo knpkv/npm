@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Result, Schema } from "effect"
 
 import {
+  AwsResourceDiscoveryRequest,
   ControlCenterLiveEvent,
   CorrelationResponseHeaders,
   CreatePluginConnectionRequest,
@@ -92,6 +93,27 @@ const encodedCatalog = [
 ]
 
 describe("public API schemas", () => {
+  it("accepts one bounded AWS profile and region while rejecting unsafe selectors", () => {
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(AwsResourceDiscoveryRequest)({
+        profile: "production-read_only",
+        region: "eu-west-1"
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(AwsResourceDiscoveryRequest)({
+        profile: "../../credentials",
+        region: "eu-west-1"
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(AwsResourceDiscoveryRequest)({
+        profile: "production",
+        region: "all-regions"
+      })
+    ))
+  })
+
   it("exports and decodes relationship repair proposal drafts", () => {
     const relationshipId = "01890f6f-6d6a-7cc0-98d2-000000000061"
     const candidate = {

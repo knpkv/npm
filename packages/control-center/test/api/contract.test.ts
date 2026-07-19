@@ -281,6 +281,7 @@ describe("ControlCenterApi contract", () => {
         ["list", "GET", "/api/v1/plugins"],
         ["overview", "GET", "/api/v1/plugins/overview"],
         ["discoverAwsProfiles", "GET", "/api/v1/plugins/discovery/aws-profiles"],
+        ["discoverAwsResources", "POST", "/api/v1/plugins/discovery/aws-resources"],
         ["discoverAtlassianProfiles", "GET", "/api/v1/plugins/discovery/atlassian-profiles"],
         ["createAtlassianOAuthGrant", "POST", "/api/v1/plugins/oauth/atlassian/grants"],
         [
@@ -409,6 +410,7 @@ describe("ControlCenterApi contract", () => {
       list: [SessionCookieAuth.key],
       overview: [SessionCookieAuth.key],
       discoverAwsProfiles: [SessionCookieAuth.key],
+      discoverAwsResources: [SessionCookieAuth.key, SessionMutationAuth.key],
       discoverAtlassianProfiles: [SessionCookieAuth.key],
       createAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],
       exchangeAtlassianOAuthGrant: [SessionCookieAuth.key, SessionMutationAuth.key],

@@ -66,10 +66,42 @@ const baseProvider = (overrides: Partial<CodeCommitReadProviderService> = {}): C
   listPullRequestsPage: () => Effect.succeed({ pullRequestIds: ["17"], nextToken: "next-pr-page" }),
   getPullRequest: ({ pullRequestId }) => Effect.succeed(pullRequestResponse(pullRequestId)),
   getDifferencesPage: () => Effect.succeed({ differences: [] }),
+  listRepositoriesPage: () => Effect.succeed({ repositories: [] }),
   ...overrides
 })
 
 describe("CodeCommitReadClient", () => {
+  it.effect("decodes a bounded repository discovery page", () =>
+    runWithProvider(
+      baseProvider({
+        listRepositoriesPage: () =>
+          Effect.succeed({
+            repositories: [
+              { repositoryName: "payments-api", repositoryId: "repo-1" },
+              { repositoryName: "risk-engine", repositoryId: "repo-2" }
+            ],
+            nextToken: "repositories-page-2"
+          })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const page = yield* client.listRepositoriesPage({ account, nextToken: null })
+        assert.deepStrictEqual(page.repositoryNames, ["payments-api", "risk-engine"])
+        assert.strictEqual(page.nextToken, "repositories-page-2")
+      })
+    ))
+
+  it.effect("rejects malformed repository discovery output", () =>
+    runWithProvider(
+      baseProvider({ listRepositoriesPage: () => Effect.succeed({ repositories: [{ repositoryName: "" }] }) }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const result = yield* client.listRepositoriesPage({ account, nextToken: null }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
+      })
+    ))
+
   it.effect("reads one immutable blob through the bounded public model", () =>
     runWithProvider(
       baseProvider(),

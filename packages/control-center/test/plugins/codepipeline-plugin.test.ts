@@ -157,6 +157,7 @@ const baseProvider = (
       ],
       ...(request.nextToken === null ? { nextToken: "execution-page-2" } : {})
     }),
+  listPipelinesPage: () => Effect.succeed({ pipelines: [] }),
   getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "Succeeded")),
   listActionExecutionsPage: (request) =>
     Effect.succeed(
@@ -192,6 +193,79 @@ const runWithProvider = <Value, Error>(
   )
 
 describe("CodePipelinePlugin", () => {
+  it.effect("decodes a bounded pipeline discovery page", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const page = yield* client.listPipelinesPage({
+        account: { profile: "production", region: "eu-west-1", operationTimeoutMillis: 10_000 },
+        nextToken: null
+      })
+      assert.deepStrictEqual(page.pipelineNames, ["payments-production", "risk-production"])
+      assert.strictEqual(page.nextToken, "pipelines-page-2")
+      assert.strictEqual(page.providerPageLimit, 100)
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(Layer.succeed(
+            CodePipelineReadProvider,
+            baseProvider({
+              listPipelinesPage: () =>
+                Effect.succeed({
+                  pipelines: [{ name: "payments-production" }, { name: "risk-production" }],
+                  nextToken: "pipelines-page-2"
+                })
+            })
+          ))
+        )
+      )
+    ))
+
+  it.effect("rejects malformed pipeline discovery output", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const result = yield* client.listPipelinesPage({
+        account: { profile: "production", region: "eu-west-1", operationTimeoutMillis: 10_000 },
+        nextToken: null
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginMalformedResponseFailure)
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(Layer.succeed(
+            CodePipelineReadProvider,
+            baseProvider({
+              listPipelinesPage: () => Effect.succeed({ pipelines: [{ name: "" }] })
+            })
+          ))
+        )
+      )
+    ))
+
+  it.effect("rejects overlong pipeline names at the provider boundary", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const result = yield* client.listPipelinesPage({
+        account: { profile: "production", region: "eu-west-1", operationTimeoutMillis: 10_000 },
+        nextToken: null
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "PluginMalformedResponseFailure")
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(
+            Layer.succeed(
+              CodePipelineReadProvider,
+              baseProvider({
+                listPipelinesPage: () => Effect.succeed({ pipelines: [{ name: "p".repeat(101) }] })
+              })
+            )
+          )
+        )
+      )
+    ))
+
   it.effect("discovers one AWS account and identifies the configured pipeline as its resource", () =>
     Effect.gen(function*() {
       const discovery = yield* runWithProvider(
@@ -386,8 +460,8 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(valid[0]?.checkpointAfterPage.length, 2_048)
     }))
 
-  it("keeps default and named AWS profiles explicit for credential acquisition", () => {
-    assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), { profile: "default" })
+  it("uses the default provider chain while keeping named AWS profiles explicit", () => {
+    assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), {})
     assert.deepStrictEqual(codePipelineCredentialProviderOptions("production"), { profile: "production" })
   })
 

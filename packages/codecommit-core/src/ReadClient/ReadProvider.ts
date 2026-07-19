@@ -53,6 +53,12 @@ export interface GetDifferencesProviderPageRequest {
   readonly maximumResults: number
 }
 
+/** Parameters for one CodeCommit repository-list page. */
+export interface ListRepositoriesProviderPageRequest {
+  readonly account: CodeCommitReadAccount
+  readonly nextToken: string | null
+}
+
 /** Raw provider methods consumed only by the Schema-decoding read client. */
 export interface CodeCommitReadProviderService {
   readonly getCallerIdentity: (account: CodeCommitReadAccount) => Effect.Effect<unknown, AwsClientError>
@@ -63,6 +69,9 @@ export interface CodeCommitReadProviderService {
   readonly getPullRequest: (request: GetPullRequestProviderRequest) => Effect.Effect<unknown, AwsClientError>
   readonly getDifferencesPage: (
     request: GetDifferencesProviderPageRequest
+  ) => Effect.Effect<unknown, AwsClientError>
+  readonly listRepositoriesPage: (
+    request: ListRepositoriesProviderPageRequest
   ) => Effect.Effect<unknown, AwsClientError>
 }
 
@@ -147,6 +156,18 @@ export const CodeCommitReadProviderLive = Layer.effect(
               afterCommitSpecifier: request.afterCommitSpecifier,
               MaxResults: request.maximumResults,
               ...(request.nextToken === null ? {} : { NextToken: request.nextToken })
+            })
+          )
+        ),
+      listRepositoriesPage: (request) =>
+        provideRuntime(
+          callProvider(
+            "listRepositoriesPage",
+            request.account,
+            codecommit.listRepositories({
+              sortBy: "repositoryName",
+              order: "ascending",
+              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
             })
           )
         )
