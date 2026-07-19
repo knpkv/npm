@@ -2,6 +2,7 @@ import * as Config from "effect/Config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { FetchHttpClient } from "effect/unstable/http"
 import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
@@ -39,6 +40,11 @@ const optionalIntegerConfigurationKeys = new Set([
   "OTEL_EXPORTER_OTLP_LOGS_TIMEOUT",
   "OTEL_EXPORTER_OTLP_TIMEOUT",
   "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT"
+])
+
+const positiveScheduleDelayConfigurationKeys = new Set([
+  "OTEL_BLRP_SCHEDULE_DELAY",
+  "OTEL_BSP_SCHEDULE_DELAY"
 ])
 
 class ObservabilityConfigurationError extends Schema.TaggedErrorClass<ObservabilityConfigurationError>()(
@@ -85,10 +91,7 @@ const parseSdkDisabled = Effect.fn("ControlCenterObservability.parseSdkDisabled"
   return false
 })
 
-const isIntegerConfigurationValue = (value: string): boolean => {
-  const parsed = Number(value)
-  return value.trim() !== "" && Number.isFinite(parsed) && Number.isInteger(parsed)
-}
+const decodeIntegerConfigurationValue = Schema.decodeUnknownOption(Schema.toCodecStringTree(Schema.Int))
 
 const sanitizedConfigProvider = (
   provider: ConfigProvider.ConfigProvider,
@@ -109,7 +112,12 @@ const sanitizedConfigProvider = (
           return node
         }
         const value = node.value
-        return value === undefined || !isIntegerConfigurationValue(value) ? undefined : node
+        if (value === undefined) return undefined
+        const integer = decodeIntegerConfigurationValue(value)
+        return Option.isNone(integer) ||
+            (positiveScheduleDelayConfigurationKeys.has(path[0]) && integer.value <= 0)
+          ? undefined
+          : node
       })
     )
   })

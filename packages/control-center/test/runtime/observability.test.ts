@@ -1,11 +1,13 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
+import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Metric from "effect/Metric"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
+import * as TestClock from "effect/testing/TestClock"
 import type { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 
@@ -53,6 +55,27 @@ const testLayer = (env: Record<string, string>) =>
     Layer.provideMerge(HttpClientLayer),
     Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env })))
   )
+
+const yieldNowN = (times: number) =>
+  Effect.forEach(Array.from({ length: times }), () => Effect.yieldNow, { discard: true })
+
+const emitTelemetry = (signal: "logs" | "traces") =>
+  signal === "logs"
+    ? Effect.logInfo("Schedule delay log probe")
+    : Effect.void.pipe(Effect.withSpan("schedule-delay.trace-probe"))
+
+const captureScheduledRequests = (
+  environment: Record<string, string>,
+  signal: "logs" | "traces",
+  adjustment: Duration.Input
+) =>
+  Effect.gen(function*() {
+    yield* emitTelemetry(signal)
+    const capturedRequests = yield* CapturedRequests
+    yield* TestClock.adjust(adjustment)
+    yield* yieldNowN(3)
+    return yield* capturedRequests.requests
+  }).pipe(Effect.provide(testLayer(environment)))
 
 describe("Control Center observability", () => {
   it.effect("exports traces and logs to a configured OTLP base endpoint without exporting metrics", () =>
@@ -313,5 +336,69 @@ describe("Control Center observability", () => {
         const result = yield* Layer.build(testLayer(environment)).pipe(Effect.scoped, Effect.result)
         assert.isTrue(Result.isSuccess(result))
       }
+    }))
+
+  it.effect("uses default schedule delays for non-positive and non-Config.int values", () =>
+    Effect.gen(function*() {
+      const fixtures: ReadonlyArray<{
+        readonly key: string
+        readonly signal: "logs" | "traces"
+      }> = [
+        { key: "OTEL_BLRP_SCHEDULE_DELAY", signal: "logs" },
+        { key: "OTEL_BSP_SCHEDULE_DELAY", signal: "traces" }
+      ]
+
+      for (const fixture of fixtures) {
+        for (const value of ["0", "-1", " 1 ", "0x10"]) {
+          const requests = yield* captureScheduledRequests(
+            {
+              OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+              [fixture.key]: value,
+              [fixture.signal === "logs" ? "OTEL_LOGS_EXPORTER" : "OTEL_TRACES_EXPORTER"]: "otlp"
+            },
+            fixture.signal,
+            "20 millis"
+          )
+
+          assert.deepStrictEqual(requests, [])
+        }
+      }
+    }))
+
+  it.effect("accepts positive Config.int schedule delays", () =>
+    Effect.gen(function*() {
+      const fixtures: ReadonlyArray<{
+        readonly key: string
+        readonly signal: "logs" | "traces"
+        readonly url: string
+      }> = [
+        { key: "OTEL_BLRP_SCHEDULE_DELAY", signal: "logs", url: "http://collector.test/v1/logs" },
+        { key: "OTEL_BSP_SCHEDULE_DELAY", signal: "traces", url: "http://collector.test/v1/traces" }
+      ]
+
+      for (const fixture of fixtures) {
+        const requests = yield* captureScheduledRequests(
+          {
+            OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+            [fixture.key]: "1",
+            [fixture.signal === "logs" ? "OTEL_LOGS_EXPORTER" : "OTEL_TRACES_EXPORTER"]: "otlp"
+          },
+          fixture.signal,
+          "1 millis"
+        )
+
+        assert.include(requests.map((request) => request.url), fixture.url)
+      }
+
+      const exponentEnvironment = {
+        OTEL_BSP_SCHEDULE_DELAY: "1e3",
+        OTEL_EXPORTER_OTLP_ENDPOINT: "http://collector.test",
+        OTEL_TRACES_EXPORTER: "otlp"
+      }
+      const beforeExponentDelay = yield* captureScheduledRequests(exponentEnvironment, "traces", "999 millis")
+      const afterExponentDelay = yield* captureScheduledRequests(exponentEnvironment, "traces", "1 second")
+
+      assert.deepStrictEqual(beforeExponentDelay, [])
+      assert.include(afterExponentDelay.map((request) => request.url), "http://collector.test/v1/traces")
     }))
 })
