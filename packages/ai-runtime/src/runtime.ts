@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Ref, Schema, Stream } from "effect"
+import { Cause, Context, Effect, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 
 import {
   AgentContextMismatchError,
@@ -55,7 +55,11 @@ const validateAdapterStream = (
   events: Stream.Stream<AgentRuntimeEvent, AgentProviderError>
 ): Stream.Stream<AgentRuntimeEvent, AgentProviderError | AgentRuntimeProtocolError> =>
   events.pipe(
-    Stream.catch((failure) => Stream.fail(normalizeAdapterFailure(request.providerId, failure))),
+    Stream.catchCause((cause) => {
+      if (Cause.hasInterrupts(cause)) return Stream.failCause(cause)
+      const failure = Cause.hasDies(cause) ? undefined : Option.getOrUndefined(Cause.findErrorOption(cause))
+      return Stream.fail(normalizeAdapterFailure(request.providerId, failure))
+    }),
     Stream.mapEffect((event) =>
       decodeAgentRuntimeEvent(event).pipe(
         Effect.mapError((cause) => new AgentRuntimeProtocolError({ reason: "invalid-event", cause }))
@@ -67,14 +71,14 @@ const guardTerminalEvent = (
   events: Stream.Stream<AgentRuntimeEvent, AgentRuntimeError>
 ): Stream.Stream<AgentRuntimeEvent, AgentRuntimeError> =>
   Stream.unwrap(
-    Ref.make<boolean>(false).pipe(
-      Effect.map((terminalSeen): Stream.Stream<AgentRuntimeEvent, AgentRuntimeError> => {
+    Ref.make<Option.Option<AgentRuntimeEvent>>(Option.none()).pipe(
+      Effect.map((terminalEvent): Stream.Stream<AgentRuntimeEvent, AgentRuntimeError> => {
         const source = events.pipe(
           Stream.catchCause((cause) =>
             Stream.unwrap(
-              Ref.get(terminalSeen).pipe(
-                Effect.map((seen) =>
-                  seen
+              Ref.get(terminalEvent).pipe(
+                Effect.map((terminal) =>
+                  Option.isSome(terminal)
                     ? Stream.fail(
                       new AgentRuntimeProtocolError({
                         reason: "failure-after-terminal",
@@ -88,27 +92,34 @@ const guardTerminalEvent = (
           )
         )
         const checked = source.pipe(
-          Stream.mapEffect((event) =>
-            Effect.gen(function*(): Effect.fn.Return<AgentRuntimeEvent, AgentRuntimeProtocolError> {
-              const seen = yield* Ref.get(terminalSeen)
-              if (seen) {
+          Stream.filterMapEffect((event) =>
+            Effect.gen(function*(): Effect.fn.Return<
+              Result.Result<AgentRuntimeEvent, void>,
+              AgentRuntimeProtocolError
+            > {
+              const terminal = yield* Ref.get(terminalEvent)
+              if (Option.isSome(terminal)) {
                 return yield* new AgentRuntimeProtocolError({
                   reason: event._tag === "completed" ? "duplicate-terminal-event" : "event-after-terminal"
                 })
               }
-              if (event._tag === "completed") yield* Ref.set(terminalSeen, true)
-              return event
+              if (event._tag === "completed") {
+                yield* Ref.set(terminalEvent, Option.some(event))
+                return Result.fail(undefined)
+              }
+              return Result.succeed(event)
             })
           )
         )
-        const verifyTerminal = Ref.get(terminalSeen).pipe(
-          Effect.flatMap((seen) =>
-            seen
-              ? Effect.void
-              : Effect.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" }))
+        const emitTerminal = Ref.get(terminalEvent).pipe(
+          Effect.flatMap((terminal) =>
+            Option.match(terminal, {
+              onNone: () => Effect.fail(new AgentRuntimeProtocolError({ reason: "missing-terminal-event" })),
+              onSome: Effect.succeed
+            })
           )
         )
-        return checked.pipe(Stream.concat(Stream.fromEffect(verifyTerminal).pipe(Stream.drain)))
+        return checked.pipe(Stream.concat(Stream.fromEffect(emitTerminal)))
       })
     )
   )

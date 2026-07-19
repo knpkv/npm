@@ -83,6 +83,7 @@ describe("AgentRuntime", () => {
 
   it.effect("rejects output after the terminal event", () =>
     Effect.gen(function*() {
+      const observed = new Array<AgentRuntimeEvent>()
       const lateOutput: AgentRuntimeEvent = {
         _tag: "output",
         channel: "progress",
@@ -91,12 +92,35 @@ describe("AgentRuntime", () => {
       const runtime = makeAgentRuntime({
         run: () => Stream.fromIterable([events[3]!, lateOutput])
       })
-      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+      const error = yield* runtime.run(request).pipe(
+        Stream.runForEach((event) => Effect.sync(() => observed.push(event))),
+        Effect.flip
+      )
 
+      expect(observed).toEqual([])
       expect(error).toMatchObject({
         _tag: "AgentRuntimeProtocolError",
         reason: "event-after-terminal"
       })
+    }))
+
+  it.effect("normalizes adapter defects without exposing native details", () =>
+    Effect.gen(function*() {
+      const runtime = makeAgentRuntime({
+        run: () => Stream.die(new Error("secret-token"))
+      })
+      const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+      expect(error).toBeInstanceOf(AgentProviderError)
+      expect(error).toMatchObject({
+        _tag: "AgentProviderError",
+        providerId: request.providerId,
+        phase: "protocol",
+        message: "Agent adapter emitted an invalid failure.",
+        retryable: false
+      })
+      expect(String(error)).not.toContain("secret-token")
+      expect(error).not.toHaveProperty("cause")
     }))
 
   it.effect("rejects a duplicate terminal event", () =>
