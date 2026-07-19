@@ -273,14 +273,17 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
   const retainedChangelogs = [...changelogs]
   const retainedLabels = [...(issue.fields.labels ?? [])]
   const retainedComponents = (issue.fields.components ?? []).map(namedValue)
-  const retainedFixVersions = (issue.fields.fixVersions ?? []).map((version) => ({
+  const normalizedFixVersions = (issue.fields.fixVersions ?? []).map((version) => ({
     id: version.id ?? null,
     name: version.name ?? null,
     released: version.released ?? false,
     releaseDate: version.releaseDate ?? null
   }))
+  const retainedFixVersions = normalizedFixVersions.slice(0, MAXIMUM_MATERIALIZED_FIX_VERSIONS)
   const retainedSubtasks = (issue.fields.subtasks ?? []).map(relatedIssue)
-  const truncatedFields = new Set<string>()
+  const truncatedFields = new Set<string>(
+    normalizedFixVersions.length > retainedFixVersions.length ? ["fixVersions"] : []
+  )
   let compactCollaborators = false
   let retainedDescription = normalizeRichText(issue.fields.description)
   let retainedEnvironment = normalizeRichText(issue.fields.environment)

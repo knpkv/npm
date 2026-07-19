@@ -10,7 +10,7 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import { type NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -664,6 +664,91 @@ describe("normalized plugin page materialization", () => {
         newSlice.value.entityProjections.map(({ projection }) => projection.displayKey),
         ["PAY-43"]
       )
+    })))
+
+  it.effect("preserves capped Jira memberships until a complete fix-version snapshot removes them", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const version = (id: string) => ({ id, name: id, released: false })
+      const normalize = (updated: string, fixVersions: ReadonlyArray<ReturnType<typeof version>>) =>
+        normalizeJiraIssueEvents({
+          comments: { values: [], total: 0, truncated: false },
+          changelogs: { values: [], total: 0, truncated: false },
+          observedAt: Schema.decodeSync(UtcTimestamp)(updated),
+          webBaseUrl: new URL("https://jira.example"),
+          issue: {
+            id: "10099",
+            key: "PAY-99",
+            fields: {
+              summary: "Keep every Jira release membership",
+              updated,
+              project: { id: "10000", key: "PAY", name: "Payments" },
+              fixVersions
+            }
+          }
+        })
+      const page = (checkpoint: string, events: ReadonlyArray<NormalizedPluginEventV1>) =>
+        Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+          checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)(checkpoint),
+          hasMore: false,
+          events
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T1,
+        successfulHealth: { _tag: "healthy", checkedAt: T1 }
+      }
+
+      yield* materializeNormalizedPluginPage(
+        scope,
+        page("jira-fix-version-cap-initial", yield* normalize(DateTime.formatIso(T1), [version("protected")]))
+      )
+      const protectedRelease = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]
+      if (protectedRelease === undefined) return yield* Effect.die("expected protected Jira release")
+      const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: protectedRelease.release.id,
+        environmentId: null,
+        limit: 10
+      })
+      if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected protected release slice")
+      const protectedRelationship = initialSlice.value.relationships[0]
+      if (protectedRelationship === undefined) return yield* Effect.die("expected protected membership")
+
+      const retainedVersions = [
+        ...Array.from({ length: 99 }, (_, index) => version(`candidate-${String(index)}`)),
+        version("protected")
+      ]
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T2, successfulHealth: { _tag: "healthy", checkedAt: T2 } },
+        page("jira-fix-version-cap-bounded", yield* normalize(DateTime.formatIso(T2), retainedVersions))
+      )
+      const retainedHistory = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: protectedRelationship.relationshipId,
+        limit: 10
+      })
+      if (retainedHistory._tag !== "relationshipHistory") return yield* Effect.die("expected retained history")
+      assert.lengthOf(retainedHistory.value, 1)
+      assert.strictEqual(retainedHistory.value[0]?.lifecycle._tag, "proposed")
+
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        page("jira-fix-version-cap-complete", yield* normalize(DateTime.formatIso(T3), retainedVersions.slice(0, 99)))
+      )
+      const removedHistory = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: protectedRelationship.relationshipId,
+        limit: 10
+      })
+      if (removedHistory._tag !== "relationshipHistory") return yield* Effect.die("expected removed history")
+      assert.lengthOf(removedHistory.value, 2)
+      assert.strictEqual(removedHistory.value[0]?.lifecycle._tag, "superseded")
     })))
 
   it.effect("atomically applies all five operations and makes replay a canonical no-op", () =>
