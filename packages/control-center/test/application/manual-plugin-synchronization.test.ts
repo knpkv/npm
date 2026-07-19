@@ -30,6 +30,7 @@ import {
   type ConfluencePageClientShape
 } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { PluginOutageFailure } from "../../src/server/plugins/failures.js"
 import {
   jiraReadPluginDescriptor,
   makeJiraReadPluginRuntimeFromProvider
@@ -1129,6 +1130,97 @@ describe("manual plugin synchronization", () => {
       )
       assert.match(
         completedStream.checkpointJson ?? "",
+        /^"complete:v2:0:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u
+      )
+    })))
+
+  it.effect("preserves bounded state when a split suffix page is interrupted", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "confluence")
+      if (fixture === undefined) return yield* Effect.die("confluence fixture not found")
+      const { persistence, streamKey } = yield* setupFixture(fixture)
+      const sourcePages = Array.from({ length: 20 }, (_, index) => ({
+        ...confluencePage,
+        id: `page-${index}`,
+        title: `Operations runbook ${index}`,
+        _links: { webui: `/wiki/spaces/PAY/pages/page-${index}` }
+      }))
+      const cursors: Array<string | null> = []
+      const connection = yield* makeConfluenceConnection(confluenceClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            if (index < 5) return { results: [], _links: { next: `/pages?cursor=c${index + 1}` } }
+            if (index === 5) return { results: sourcePages, _links: { next: "/pages?cursor=c6" } }
+            return { results: [] }
+          }),
+        getPageAttachments: (pageId, cursor) => {
+          const offset = cursor === null ? 0 : 25
+          return Effect.succeed({
+            results: Array.from({ length: 25 }, (_, index) => ({
+              id: `${pageId}-attachment-${offset + index}-${"i".repeat(440)}`,
+              status: "current",
+              title: `artifact-${offset + index}-${"t".repeat(470)}`,
+              createdAt: CONFLUENCE_UPDATED_AT,
+              pageId,
+              mediaType: `application/vnd.${"m".repeat(230)}`,
+              fileSize: index,
+              version: confluencePage.version
+            })),
+            ...(cursor === null ? { _links: { next: `/attachments?cursor=second` } } : {})
+          })
+        }
+      }))
+      let interruptSuffix = true
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: (pluginConnection, request) => {
+          const pages = pluginConnection.sync(request)
+          if (request.checkpoint === null || !interruptSuffix) return pages
+          interruptSuffix = false
+          return pages.pipe(
+            Stream.take(1),
+            Stream.concat(Stream.fail(new PluginOutageFailure({ operation: "confluence-split-sync" })))
+          )
+        }
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(
+        confluenceConnections(fixture, connection),
+        drivers
+      )
+      const input = { workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId }
+
+      const bounded = yield* synchronization.synchronize(input)
+      const interrupted = yield* synchronization.synchronize(input)
+      const interruptedStream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+
+      assert.strictEqual(bounded.pagesCommitted, 5)
+      assert.strictEqual(interrupted.result, "source-unavailable")
+      assert.strictEqual(interrupted.pagesCommitted, 1)
+      assert.match(
+        interruptedStream.checkpointJson ?? "",
+        /^"bounded:v2:0:[0-9a-f]{64}:2:c5[0-9a-f]{64}:c5"$/u
+      )
+
+      const recovered = yield* synchronization.synchronize(input)
+
+      assert.strictEqual(recovered.result, "synchronized")
+      assert.isAbove(recovered.pagesCommitted, 0)
+      assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4", "c5", "c5", "c6"])
+      const recoveredStream = yield* persistence.pluginRuntime.getStream(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.match(
+        recoveredStream.checkpointJson ?? "",
         /^"complete:v2:0:[0-9a-f]{64}:[0-9a-f]{64}:c5"$/u
       )
     })))

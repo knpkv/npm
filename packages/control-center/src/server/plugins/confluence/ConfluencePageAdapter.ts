@@ -397,6 +397,14 @@ const syncCursorFromCheckpoint = (
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
 }
 
+const durableMultiBoundedCheckpoint = (
+  cursor: string,
+  inventoryDigest: string,
+  boundedPrefix: BoundedPrefixCheckpoint,
+  checkpointGeneration: number
+): string =>
+  `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${boundedPrefix.inventoryDigest}:${boundedPrefix.cursor.length}:${boundedPrefix.cursor}${inventoryDigest}:${cursor}`
+
 const checkpointAfterPage = (
   cursor: string | null,
   bounded: boolean,
@@ -407,7 +415,12 @@ const checkpointAfterPage = (
 ): string => {
   if (cursor !== null) {
     if (previousBoundedPrefix !== null) {
-      return `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor.length}:${previousBoundedPrefix.cursor}${inventoryDigest}:${cursor}`
+      return durableMultiBoundedCheckpoint(
+        cursor,
+        inventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration
+      )
     }
     return bounded
       ? `${DURABLE_BOUNDED_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor}`
@@ -420,8 +433,22 @@ const checkpointAfterPage = (
     : `${DURABLE_COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor}`
 }
 
-const checkpointBeforePage = (cursor: string | null): string =>
-  cursor === null ? RESTART_INITIAL_CHECKPOINT : `${RESTART_CURSOR_PREFIX}${cursor}`
+const checkpointBeforePage = (
+  cursor: string | null,
+  previousInventoryDigest: string | null,
+  previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number
+): string => {
+  if (cursor === null) return RESTART_INITIAL_CHECKPOINT
+  return previousInventoryDigest !== null && previousBoundedPrefix !== null
+    ? durableMultiBoundedCheckpoint(
+      cursor,
+      previousInventoryDigest,
+      previousBoundedPrefix,
+      checkpointGeneration
+    )
+    : `${RESTART_CURSOR_PREFIX}${cursor}`
+}
 
 const jsonByteLength = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
@@ -1049,7 +1076,12 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
         usesGenerationCheckpoint
       ),
       logicalHasMore: hasMore,
-      restartCheckpoint: checkpointBeforePage(cursor)
+      restartCheckpoint: checkpointBeforePage(
+        cursor,
+        previousInventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration
+      )
     })
     : []
   return {
