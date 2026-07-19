@@ -24,7 +24,8 @@ import {
   CodeCommitPageToken,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
-  type CodeCommitReadAccount
+  type CodeCommitReadAccount,
+  CodeCommitRepositoryPage
 } from "./models.js"
 import {
   CodeCommitReadProvider,
@@ -32,7 +33,8 @@ import {
   type GetBlobProviderRequest,
   type GetDifferencesProviderPageRequest,
   type GetPullRequestProviderRequest,
-  type ListPullRequestsProviderPageRequest
+  type ListPullRequestsProviderPageRequest,
+  type ListRepositoriesProviderPageRequest
 } from "./ReadProvider.js"
 
 const PROVIDER_PAGE_LIMIT = 100
@@ -92,6 +94,16 @@ const RawDifference = Schema.Union([
 const RawDifferencesPage = Schema.Struct({
   differences: Schema.optional(Schema.Array(RawDifference).check(Schema.isMaxLength(PROVIDER_PAGE_LIMIT))),
   NextToken: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))
+})
+
+const RawRepositoryPage = Schema.Struct({
+  repositories: Schema.optional(
+    Schema.Array(Schema.Struct({
+      repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
+      repositoryId: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))
+    })).check(Schema.isMaxLength(1_000))
+  ),
+  nextToken: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))
 })
 
 const malformed = (operation: string) =>
@@ -178,6 +190,9 @@ export interface CodeCommitReadClientService {
   readonly discoverAccount: (
     account: CodeCommitReadAccount
   ) => Effect.Effect<CodeCommitAccountIdentity, CodeCommitReadError>
+  readonly listRepositoriesPage: (
+    request: ListRepositoriesProviderPageRequest
+  ) => Effect.Effect<CodeCommitRepositoryPage, CodeCommitReadError>
   readonly getBlob: (
     request: GetBlobProviderRequest
   ) => Effect.Effect<CodeCommitBlobContent, CodeCommitReadError>
@@ -225,6 +240,19 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
           Effect.mapError(mapProviderError("get-pull-request"))
         )
         return yield* decodePullRequest(raw)
+      })
+
+      const listRepositoriesPage = Effect.fn("CodeCommitReadClient.listRepositoriesPage")(function*(
+        request: ListRepositoriesProviderPageRequest
+      ) {
+        const raw = yield* provider.listRepositoriesPage(request).pipe(
+          Effect.mapError(mapProviderError("list-repositories"))
+        )
+        const page = yield* decodeProvider("list-repositories", RawRepositoryPage, raw)
+        return yield* Schema.decodeUnknownEffect(CodeCommitRepositoryPage)({
+          repositoryNames: (page.repositories ?? []).map(({ repositoryName }) => repositoryName),
+          nextToken: page.nextToken ?? null
+        }).pipe(Effect.mapError(() => malformed("list-repositories")))
       })
 
       const getBlob = Effect.fn("CodeCommitReadClient.getBlob")(function*(request: GetBlobProviderRequest) {
@@ -308,6 +336,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         getChangedFilesPage,
         getPullRequest,
         listPullRequestsPage,
+        listRepositoriesPage,
         streamChangedFiles,
         streamPullRequests
       } satisfies CodeCommitReadClientService

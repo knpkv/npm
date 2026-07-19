@@ -10,6 +10,8 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  AwsResourceDiscoveryRequest,
+  AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionValue,
@@ -24,6 +26,7 @@ import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.
 import { AtlassianAccountSetupForm, type AtlassianSetupIntent } from "./AtlassianAccountSetupForm.js"
 import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
+import { ConnectionSynchronization, type ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import { ProviderAccountCard } from "./ProviderAccountCard.js"
@@ -141,8 +144,11 @@ const ConnectionCard = ({
   connection,
   enablementState,
   onConfigure,
+  onRefreshSynchronization,
   onSetEnabled,
+  onSynchronize,
   onTest,
+  synchronizationState,
   testState
 }: {
   readonly canConfigure: boolean
@@ -151,6 +157,9 @@ const ConnectionCard = ({
   readonly enablementState: ConnectionEnablementState | undefined
   readonly onConfigure: () => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
+  readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
+  readonly synchronizationState: ConnectionSynchronizationViewState | undefined
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testState: ConnectionTestState | undefined
 }): ReactElement => {
@@ -170,6 +179,12 @@ const ConnectionCard = ({
         <StateLabel label={status.label} size="compact" tone={status.tone} />
       </div>
       <ConnectionTestEvidence state={testState} />
+      <ConnectionSynchronization
+        canSynchronize={canConfigure && connection.isEnabled}
+        onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
+        onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
+        state={synchronizationState}
+      />
       <div className={styles.cardAction}>
         <Button
           disabled={!canTest || isChanging || isTesting || !connection.isEnabled}
@@ -321,6 +336,7 @@ const CatalogCard = ({
   isRecovery,
   isSubmitting,
   onCancel,
+  onDiscoverAws,
   onOpen,
   onStartAtlassianOAuth,
   onSubmit,
@@ -340,6 +356,10 @@ const CatalogCard = ({
   readonly isSubmitting: boolean
   readonly isRecovery: boolean
   readonly onCancel: () => void
+  readonly onDiscoverAws: (
+    request: AwsResourceDiscoveryRequest,
+    signal: AbortSignal
+  ) => Promise<AwsResourceDiscoveryResponse>
   readonly onOpen: () => void
   readonly onStartAtlassianOAuth: (
     providers: AtlassianOAuthProviderIntent,
@@ -378,6 +398,7 @@ const CatalogCard = ({
             catalogs={catalogs}
             isSubmitting={isSubmitting}
             onCancel={onCancel}
+            onDiscover={onDiscoverAws}
             onSubmit={onSubmitAws}
           />
         ) : isAtlassian ? (
@@ -472,6 +493,9 @@ export const ServicesPage = ({
   const [enablementStates, setEnablementStates] = useState<ReadonlyMap<PluginConnectionId, ConnectionEnablementState>>(
     new Map()
   )
+  const [synchronizationStates, setSynchronizationStates] = useState<
+    ReadonlyMap<PluginConnectionId, ConnectionSynchronizationViewState>
+  >(new Map())
   const [openProvider, setOpenProvider] = useState<ProviderId | null>(null)
   const [atlassianSetupIntent, setAtlassianSetupIntent] = useState<AtlassianSetupIntent | null>(null)
   const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
@@ -481,6 +505,63 @@ export const ServicesPage = ({
   const enablementRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const awsProfileRequest = useRef<AbortController | null>(null)
   const atlassianProfileRequest = useRef<AbortController | null>(null)
+  const synchronizationRequests = useRef(new Map<PluginConnectionId, AbortController>())
+
+  const refreshSynchronization = useCallback(
+    (pluginConnectionId: PluginConnectionId): void => {
+      if (sessionKey === null || transport.synchronization === undefined) return
+      synchronizationRequests.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      synchronizationRequests.current.set(pluginConnectionId, request)
+      setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "loading" }))
+      transport.synchronization(pluginConnectionId, request.signal).then(
+        (synchronization) => {
+          if (request.signal.aborted) return
+          synchronizationRequests.current.delete(pluginConnectionId)
+          setSynchronizationStates((current) =>
+            new Map(current).set(pluginConnectionId, { _tag: "ready", synchronization })
+          )
+        },
+        (failure) => {
+          if (request.signal.aborted) return
+          synchronizationRequests.current.delete(pluginConnectionId)
+          if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+          setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
+        }
+      )
+    },
+    [invalidateSession, sessionKey, transport]
+  )
+
+  const synchronizeConnection = useCallback(
+    (pluginConnectionId: PluginConnectionId): void => {
+      if (sessionKey === null || transport.synchronize === undefined) return
+      synchronizationRequests.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      synchronizationRequests.current.set(pluginConnectionId, request)
+      setSynchronizationStates((current) => {
+        const existing = current.get(pluginConnectionId)
+        const previous = existing?._tag === "ready" ? existing.synchronization : null
+        return new Map(current).set(pluginConnectionId, { _tag: "syncing", previous })
+      })
+      transport.synchronize(pluginConnectionId, request.signal).then(
+        (synchronization) => {
+          if (request.signal.aborted) return
+          synchronizationRequests.current.delete(pluginConnectionId)
+          setSynchronizationStates((current) =>
+            new Map(current).set(pluginConnectionId, { _tag: "ready", synchronization })
+          )
+        },
+        (failure) => {
+          if (request.signal.aborted) return
+          synchronizationRequests.current.delete(pluginConnectionId)
+          if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+          setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
+        }
+      )
+    },
+    [invalidateSession, sessionKey, transport]
+  )
 
   useEffect(() => {
     if (sessionKey === null) {
@@ -501,6 +582,20 @@ export const ServicesPage = ({
     )
     return () => request.abort()
   }, [invalidateSession, requestRevision, sessionKey, transport])
+
+  useEffect(() => {
+    if (connectionsState._tag !== "ready" || transport.synchronization === undefined) return
+    const synchronizable = connectionsState.overview.connections.filter(
+      ({ providerId }) => providerId === "codecommit" || providerId === "codepipeline" || providerId === "clockify"
+    )
+    for (const connection of synchronizable) refreshSynchronization(connection.pluginConnectionId)
+    return () => {
+      for (const connection of synchronizable) {
+        synchronizationRequests.current.get(connection.pluginConnectionId)?.abort()
+        synchronizationRequests.current.delete(connection.pluginConnectionId)
+      }
+    }
+  }, [connectionsState, refreshSynchronization, transport.synchronization])
 
   useEffect(() => {
     if (sessionKey === null || (openProvider !== "codecommit" && openProvider !== "codepipeline")) return
@@ -553,6 +648,7 @@ export const ServicesPage = ({
   useEffect(() => {
     setTestStates(new Map())
     setEnablementStates(new Map())
+    setSynchronizationStates(new Map())
     setOpenProvider(null)
     setAtlassianSetupIntent(null)
     setSubmittingProvider(null)
@@ -568,6 +664,8 @@ export const ServicesPage = ({
       awsProfileRequest.current = null
       atlassianProfileRequest.current?.abort()
       atlassianProfileRequest.current = null
+      for (const request of synchronizationRequests.current.values()) request.abort()
+      synchronizationRequests.current.clear()
       for (const request of enablementRequests.current.values()) request.abort()
       enablementRequests.current.clear()
     }
@@ -901,6 +999,9 @@ export const ServicesPage = ({
                       setOpenProvider(providerId)
                     }}
                     onSetEnabled={setConnectionEnabled}
+                    onRefreshSynchronization={refreshSynchronization}
+                    onSynchronize={synchronizeConnection}
+                    synchronizationStates={synchronizationStates}
                     onTest={testConnection}
                     testStates={testStates}
                   />
@@ -944,7 +1045,10 @@ export const ServicesPage = ({
                     setOpenProvider(catalog.providerId)
                   }}
                   onSetEnabled={setConnectionEnabled}
+                  onRefreshSynchronization={refreshSynchronization}
+                  onSynchronize={synchronizeConnection}
                   onTest={testConnection}
+                  synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}
                   testState={testStates.get(connection.pluginConnectionId)}
                 />
               ))
@@ -977,6 +1081,17 @@ export const ServicesPage = ({
                     completedBatchDrafts.current.delete(catalog.providerId)
                     setAtlassianSetupIntent(null)
                     setOpenProvider(null)
+                  }}
+                  onDiscoverAws={(request, signal) => {
+                    const discover = transport.discoverAwsResources
+                    if (discover === undefined)
+                      return Promise.reject(new Error("AWS resource discovery is unavailable"))
+                    return discover(request, signal).catch((failure: unknown) => {
+                      if (sessionKey !== null && Predicate.isTagged("UnauthorizedApiError")(failure)) {
+                        invalidateSession(sessionKey)
+                      }
+                      return Promise.reject(failure)
+                    })
                   }}
                   onOpen={() => {
                     if (openProvider !== catalog.providerId) {

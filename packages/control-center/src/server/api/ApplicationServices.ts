@@ -36,6 +36,8 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  AwsResourceDiscoveryRequest,
+  AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionsResponse,
@@ -124,6 +126,12 @@ export interface PluginAdministrationService {
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<ProviderAccountSummary>, ApplicationServiceUnavailable>
   readonly discoverAwsProfiles?: () => Effect.Effect<AwsProfileDiscoveryResponse, ApplicationServiceUnavailable>
+  readonly discoverAwsResources?: (
+    request: AwsResourceDiscoveryRequest
+  ) => Effect.Effect<
+    AwsResourceDiscoveryResponse,
+    ApplicationInvalidRequest | ApplicationRateLimited | ApplicationServiceUnavailable
+  >
   readonly discoverAtlassianProfiles?: () => Effect.Effect<
     AtlassianProfileDiscoveryResponse,
     ApplicationServiceUnavailable

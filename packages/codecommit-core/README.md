@@ -21,7 +21,7 @@ Methods: `getPullRequests`, `getPullRequest`, `createPullRequest`, `updatePullRe
 
 ### ReadClient
 
-The supported `@knpkv/codecommit-core/ReadClient.js` entry exposes a production read boundary for integrations. `CodeCommitReadProviderLive` performs real `@distilled.cloud/aws` calls, while `CodeCommitReadClient.layer` Schema-decodes the unknown responses into immutable pull request revisions and bounded changed-file pages.
+The supported `@knpkv/codecommit-core/ReadClient.js` entry exposes a production read boundary for integrations. `CodeCommitReadProviderLive` performs real `@distilled.cloud/aws` calls, while `CodeCommitReadClient.layer` Schema-decodes the unknown responses into immutable pull request revisions, bounded changed-file pages, and repository-discovery pages. Repository discovery returns names and an opaque continuation token only; account identity and credential material remain behind the read boundary.
 
 ```typescript
 import { ReadClient } from "@knpkv/codecommit-core"

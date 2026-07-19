@@ -19,19 +19,27 @@ import {
   CodePipelineReadProviderLive,
   type GetPipelineExecutionProviderRequest,
   type GetPipelineProviderRequest,
-  type ListPipelineExecutionsProviderRequest
+  type ListPipelineExecutionsProviderRequest,
+  type ListPipelinesProviderRequest
 } from "./CodePipelineReadProvider.js"
 
 const EXECUTION_PROVIDER_PAGE_LIMIT = 1
 const ACTION_PROVIDER_PAGE_LIMIT = 100
 const PIPELINE_STAGE_LIMIT = 50
 const STAGE_ACTION_LIMIT = 50
-// Plugin checkpoints allow 2,048 characters and sync prefixes provider cursors with `next:`.
+const PROVIDER_PAGE_TOKEN_LIMIT = 2_048
+// Plugin checkpoints allow 2,048 characters and execution sync prefixes provider cursors with `next:`.
 const CHECKPOINT_PROVIDER_TOKEN_LIMIT = 2_043
 
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const PipelineName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const Summary = Schema.String.check(Schema.isMaxLength(4_000))
-const PageToken = Schema.String.check(
+const ProviderPageToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(PROVIDER_PAGE_TOKEN_LIMIT)
+)
+const CheckpointProviderPageToken = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
   Schema.isMaxLength(CHECKPOINT_PROVIDER_TOKEN_LIMIT)
@@ -110,7 +118,21 @@ const RawExecutionPage = Schema.Struct({
   pipelineExecutionSummaries: Schema.optionalKey(
     Schema.Array(RawExecutionSummary).check(Schema.isMaxLength(EXECUTION_PROVIDER_PAGE_LIMIT))
   ),
-  nextToken: Schema.optionalKey(PageToken)
+  nextToken: Schema.optionalKey(CheckpointProviderPageToken)
+})
+
+const RawPipelinePage = Schema.Struct({
+  pipelines: Schema.optionalKey(
+    Schema.Array(Schema.Struct({
+      name: PipelineName,
+      version: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+      pipelineType: Schema.optionalKey(Identifier),
+      executionMode: Schema.optionalKey(Identifier),
+      created: Schema.optionalKey(Schema.Date),
+      updated: Schema.optionalKey(Schema.Date)
+    })).check(Schema.isMaxLength(100))
+  ),
+  nextToken: Schema.optionalKey(ProviderPageToken)
 })
 
 const RawArtifactRevision = Schema.Struct({
@@ -184,7 +206,7 @@ const RawActionPage = Schema.Struct({
   actionExecutionDetails: Schema.optionalKey(
     Schema.Array(RawActionDetail).check(Schema.isMaxLength(ACTION_PROVIDER_PAGE_LIMIT))
   ),
-  nextToken: Schema.optionalKey(PageToken)
+  nextToken: Schema.optionalKey(ProviderPageToken)
 })
 
 /** Secret-free AWS identity used for discovery. @internal */
@@ -254,11 +276,20 @@ export type CodePipelineExecutionSummary = typeof CodePipelineExecutionSummary.T
 /** One decoded execution-list page. @internal */
 export const CodePipelineExecutionPage = Schema.Struct({
   executions: Schema.Array(CodePipelineExecutionSummary).check(Schema.isMaxLength(EXECUTION_PROVIDER_PAGE_LIMIT)),
-  nextToken: Schema.NullOr(PageToken),
+  nextToken: Schema.NullOr(CheckpointProviderPageToken),
   providerPageLimit: Schema.Literal(EXECUTION_PROVIDER_PAGE_LIMIT)
 })
 /** @internal */
 export type CodePipelineExecutionPage = typeof CodePipelineExecutionPage.Type
+
+/** One decoded, bounded pipeline-name page. @internal */
+export const CodePipelineNamePage = Schema.Struct({
+  pipelineNames: Schema.Array(PipelineName).check(Schema.isMaxLength(100)),
+  nextToken: Schema.NullOr(ProviderPageToken),
+  providerPageLimit: Schema.Literal(100)
+})
+/** @internal */
+export type CodePipelineNamePage = typeof CodePipelineNamePage.Type
 
 const CodePipelineArtifactRevision = Schema.Struct({
   name: Schema.NullOr(Identifier),
@@ -404,6 +435,9 @@ export interface CodePipelineReadClientService {
   readonly listExecutionsPage: (
     request: Omit<ListPipelineExecutionsProviderRequest, "maximumResults">
   ) => Effect.Effect<CodePipelineExecutionPage, CodePipelineProviderFailure>
+  readonly listPipelinesPage: (
+    request: Omit<ListPipelinesProviderRequest, "maximumResults">
+  ) => Effect.Effect<CodePipelineNamePage, CodePipelineProviderFailure>
   readonly getExecutionSnapshot: (
     request: GetPipelineExecutionProviderRequest & {
       readonly actionBounds: CodePipelineActionReadBounds
@@ -497,6 +531,18 @@ export class CodePipelineReadClient extends Context.Service<
           executions,
           nextToken: response.nextToken ?? null,
           providerPageLimit: EXECUTION_PROVIDER_PAGE_LIMIT
+        })
+      })
+
+      const listPipelinesPage = Effect.fn("CodePipelineReadClient.listPipelinesPage")(function*(
+        request: Omit<ListPipelinesProviderRequest, "maximumResults">
+      ) {
+        const raw = yield* provider.listPipelinesPage({ ...request, maximumResults: 100 })
+        const response = yield* decodeProvider("codepipeline-list-pipelines", RawPipelinePage, raw)
+        return yield* decodeModel("codepipeline-list-pipelines", CodePipelineNamePage, {
+          pipelineNames: (response.pipelines ?? []).map(({ name }) => name),
+          nextToken: response.nextToken ?? null,
+          providerPageLimit: 100
         })
       })
 
@@ -620,7 +666,8 @@ export class CodePipelineReadClient extends Context.Service<
         discoverAccount,
         getExecutionSnapshot,
         getPipeline,
-        listExecutionsPage
+        listExecutionsPage,
+        listPipelinesPage
       } satisfies CodePipelineReadClientService
     })
   )

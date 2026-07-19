@@ -13,13 +13,16 @@ import type {
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   AwsProfileDiscoveryResponse,
+  AwsResourceDiscoveryRequest,
+  AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   CreatePluginConnectionsRequest,
   CreatePluginConnectionsResponse,
   PluginConnectionSummary,
   PluginConnectionTestResult,
-  PluginOverviewResponse
+  PluginOverviewResponse,
+  PluginSynchronizationState
 } from "../../api/index.js"
 import type { DiscoveredAtlassianProfile } from "../../api/plugins.js"
 import { PluginConnectionId } from "../../domain/identifiers.js"
@@ -29,6 +32,10 @@ import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.
 export interface ConnectionTestTransport {
   /** Optional only for injected legacy/test transports; the browser transport always discovers profiles. */
   readonly discoverAwsProfiles?: (signal: AbortSignal) => Promise<AwsProfileDiscoveryResponse>
+  readonly discoverAwsResources?: (
+    request: AwsResourceDiscoveryRequest,
+    signal: AbortSignal
+  ) => Promise<AwsResourceDiscoveryResponse>
   readonly discoverAtlassianProfiles?: (signal: AbortSignal) => Promise<AtlassianProfileDiscoveryResponse>
   readonly startAtlassianOAuthGrant?: (
     providers: AtlassianOAuthProviderIntent,
@@ -61,6 +68,14 @@ export interface ConnectionTestTransport {
     signal: AbortSignal
   ) => Promise<PluginConnectionSummary>
   readonly test: (pluginConnectionId: PluginConnectionId, signal: AbortSignal) => Promise<PluginConnectionTestResult>
+  readonly synchronization?: (
+    pluginConnectionId: PluginConnectionId,
+    signal: AbortSignal
+  ) => Promise<PluginSynchronizationState>
+  readonly synchronize?: (
+    pluginConnectionId: PluginConnectionId,
+    signal: AbortSignal
+  ) => Promise<PluginSynchronizationState>
 }
 
 /** Generated-client transport carrying cookies and the current tab's mutation proof. */
@@ -113,6 +128,14 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
+  discoverAwsResources: (request, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.discoverAwsResources({ payload: request })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   overview: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
@@ -160,6 +183,22 @@ export const browserConnectionTestTransport: ConnectionTestTransport = {
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
         return yield* client.plugins.testConnection({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  synchronization: (pluginConnectionId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.plugins.synchronization({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  synchronize: (pluginConnectionId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId } })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     )

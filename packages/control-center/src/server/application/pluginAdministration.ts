@@ -66,6 +66,7 @@ import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
 import { SecretRef } from "../secrets/SecretRef.js"
 import { SecretStore } from "../secrets/SecretStore.js"
+import { AwsResourceDiscovery, awsResourceDiscoveryLayer } from "./awsResourceDiscovery.js"
 import { materializeConnectionOwnership } from "./connectionOwnership.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import { appendPortfolioInvalidation } from "./portfolioInvalidation.js"
@@ -1107,6 +1108,9 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
   const secrets = yield* SecretStore
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const awsResourceDiscovery = yield* Effect.contextWith((context: Context.Context<never>) =>
+    Effect.succeed(Context.getOption(context, AwsResourceDiscovery))
+  )
   const manualSynchronization = pluginConnections === null
     ? null
     : yield* Effect.flatMap(
@@ -1131,6 +1135,9 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
         .map(({ name, region }) => ({ profile: name, region: region ?? null }))
         .sort((left, right) => left.profile.localeCompare(right.profile))
     }),
+    ...(Option.isNone(awsResourceDiscovery)
+      ? {}
+      : { discoverAwsResources: awsResourceDiscovery.value.discover }),
     discoverAtlassianProfiles: Effect.fn("PluginAdministration.discoverAtlassianProfiles")(function*() {
       const profiles = yield* discoverAtlassianProfiles().pipe(
         Effect.provide([
@@ -1336,26 +1343,35 @@ export const makePluginAdministrationWithOAuth = Effect.fn("PluginAdministration
 })
 
 /** Live plugin administration layer. */
-export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration)
+export const pluginAdministrationLayer = Layer.effect(PluginAdministration, makePluginAdministration).pipe(
+  Layer.provide(awsResourceDiscoveryLayer)
+)
 
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
   publicOrigin: string
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
-  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin))
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin)).pipe(
+    Layer.provide(awsResourceDiscoveryLayer)
+  )
 
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
 export const pluginAdministrationLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin?: string
-) => Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections, publicOrigin))
+) =>
+  Layer.effect(PluginAdministration, makePluginAdministrationWithConnections(pluginConnections, publicOrigin)).pipe(
+    Layer.provide(awsResourceDiscoveryLayer)
+  )
 
 /** Live administration layer backed by provider runtimes and browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
   publicOrigin: string
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
-  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin))
+  Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin)).pipe(
+    Layer.provide(awsResourceDiscoveryLayer)
+  )
 
 /** Internal factual projection reused by the portfolio adapter. */
 export const listPluginConnectionSummaries = listPluginConnections

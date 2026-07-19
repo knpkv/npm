@@ -6,6 +6,7 @@ import type { PluginConnectionSummary, ProviderAccountSummary } from "../../api/
 import type { PluginConnectionId } from "../../domain/identifiers.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
+import { ConnectionSynchronization, type ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import styles from "./ServicesPage.module.css"
 
@@ -31,8 +32,11 @@ export const ProviderAccountCard = ({
   connections,
   enablementStates,
   onAdd,
+  onRefreshSynchronization,
   onSetEnabled,
+  onSynchronize,
   onTest,
+  synchronizationStates,
   testStates
 }: {
   readonly account: ProviderAccountSummary
@@ -41,6 +45,9 @@ export const ProviderAccountCard = ({
   readonly enablementStates: ReadonlyMap<PluginConnectionId, ConnectionEnablementState>
   readonly onAdd: (providerId: ProviderId, providerImmutableId: string) => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
+  readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
+  readonly synchronizationStates: ReadonlyMap<PluginConnectionId, ConnectionSynchronizationViewState>
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testStates: ReadonlyMap<PluginConnectionId, ConnectionTestState>
 }): ReactElement => (
@@ -94,6 +101,12 @@ export const ProviderAccountCard = ({
             {connection === undefined ? null : (
               <>
                 <ConnectionTestEvidence state={testState} />
+                <ConnectionSynchronization
+                  canSynchronize={canConfigure && connection.isEnabled}
+                  onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
+                  onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
+                  state={synchronizationStates.get(connection.pluginConnectionId)}
+                />
                 <div className={styles.resourceActions}>
                   <Button
                     disabled={!canConfigure || isChanging || isTesting || !connection.isEnabled}

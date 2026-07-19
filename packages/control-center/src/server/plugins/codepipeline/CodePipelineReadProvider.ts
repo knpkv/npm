@@ -51,6 +51,13 @@ export interface ListPipelineExecutionsProviderRequest extends GetPipelineProvid
   readonly nextToken: string | null
 }
 
+/** Request for one bounded page of pipelines in an account and region. @internal */
+export interface ListPipelinesProviderRequest {
+  readonly account: CodePipelineAwsAccount
+  readonly maximumResults: number
+  readonly nextToken: string | null
+}
+
 /** Request for one pipeline execution. @internal */
 export interface GetPipelineExecutionProviderRequest extends GetPipelineProviderRequest {
   readonly pipelineExecutionId: string
@@ -81,6 +88,9 @@ export interface CodePipelineReadProviderService {
   ) => Effect.Effect<unknown, CodePipelineProviderFailure>
   readonly listPipelineExecutionsPage: (
     request: ListPipelineExecutionsProviderRequest
+  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  readonly listPipelinesPage: (
+    request: ListPipelinesProviderRequest
   ) => Effect.Effect<unknown, CodePipelineProviderFailure>
   readonly getPipelineExecution: (
     request: GetPipelineExecutionProviderRequest
@@ -143,8 +153,10 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
   return yield* new PluginOutageFailure({ operation })
 })
 
-/** Keep the configured shared profile explicit, including `default`. @internal */
-export const codePipelineCredentialProviderOptions = (profile: string): { readonly profile: string } => ({ profile })
+/** Use the standard AWS provider chain for `default`; select named shared profiles explicitly. @internal */
+export const codePipelineCredentialProviderOptions = (
+  profile: string
+): { readonly profile?: string } => profile === "default" ? {} : { profile }
 
 const acquireCredentials = Effect.fn("CodePipelineReadProvider.acquireCredentials")(function*(
   operation: string,
@@ -225,6 +237,17 @@ export const CodePipelineReadProviderLive = Layer.effect(
             request.account,
             codepipeline.listPipelineExecutions({
               pipelineName: request.pipelineName,
+              maxResults: request.maximumResults,
+              ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
+            })
+          )
+        ),
+      listPipelinesPage: (request) =>
+        provideHttp(
+          callProvider(
+            "codepipeline-list-pipelines",
+            request.account,
+            codepipeline.listPipelines({
               maxResults: request.maximumResults,
               ...(request.nextToken === null ? {} : { nextToken: request.nextToken })
             })

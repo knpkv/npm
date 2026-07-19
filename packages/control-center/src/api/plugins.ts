@@ -31,6 +31,7 @@ const MAXIMUM_PLUGIN_CONNECTIONS = 100
 const MAXIMUM_PROVIDER_ACCOUNTS = 100
 const MAXIMUM_FOLLOWED_RESOURCES = 100
 const MAXIMUM_DISCOVERED_AWS_PROFILES = 100
+const MAXIMUM_DISCOVERED_AWS_RESOURCES = 20
 const MAXIMUM_DISCOVERED_ATLASSIAN_PROFILES = 100
 const MAXIMUM_ATLASSIAN_OAUTH_SITES = 100
 const MAXIMUM_CONFIGURATION_VALUES = 100
@@ -273,6 +274,54 @@ export const AwsProfileDiscoveryResponse = Schema.Array(DiscoveredAwsProfile).ch
 
 /** Decoded bounded AWS profile discovery response. */
 export type AwsProfileDiscoveryResponse = typeof AwsProfileDiscoveryResponse.Type
+
+/** Validated local AWS credential selector for one explicit discovery request. */
+export const AwsResourceDiscoveryRequest = Schema.Struct({
+  profile: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(200),
+    Schema.isPattern(/^[A-Za-z0-9_+=,.@ -]+$/u, { expected: "a valid AWS profile name" })
+  ),
+  region: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(100),
+    Schema.isPattern(/^[a-z]{2}(?:-[a-z0-9]+)+-[0-9]+$/u, { expected: "a valid AWS region" })
+  )
+}).annotate({ identifier: "AwsResourceDiscoveryRequest" })
+
+/** Decoded profile and single-region discovery request. */
+export type AwsResourceDiscoveryRequest = typeof AwsResourceDiscoveryRequest.Type
+
+const AwsResourceName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+const AwsResourceNames = Schema.Array(AwsResourceName).check(
+  Schema.makeFilter((names) => names.length <= MAXIMUM_DISCOVERED_AWS_RESOURCES, {
+    expected: `at most ${MAXIMUM_DISCOVERED_AWS_RESOURCES} discovered AWS resources`
+  }),
+  Schema.makeFilter((names) => new Set(names).size === names.length, { expected: "unique AWS resource names" })
+)
+
+/** Safe per-service AWS resource discovery result. */
+export const AwsServiceResourceDiscovery = Schema.Union([
+  Schema.TaggedStruct("available", { names: AwsResourceNames, truncated: Schema.Boolean }),
+  Schema.TaggedStruct("failed", {
+    failureClass: Schema.Literals(["authorization", "malformed-response", "rate-limit", "timeout", "unavailable"])
+  })
+]).pipe(Schema.toTaggedUnion("_tag"), Schema.annotate({ identifier: "AwsServiceResourceDiscovery" }))
+
+/** Decoded per-service AWS resource discovery result. */
+export type AwsServiceResourceDiscovery = typeof AwsServiceResourceDiscovery.Type
+
+/** Identity-verified, secret-free AWS resource discovery response. */
+export const AwsResourceDiscoveryResponse = Schema.Struct({
+  accountId: Schema.String.check(Schema.isPattern(/^[0-9]{12}$/u, { expected: "a 12-digit AWS account id" })),
+  codeCommit: AwsServiceResourceDiscovery,
+  codePipeline: AwsServiceResourceDiscovery
+}).annotate({ identifier: "AwsResourceDiscoveryResponse" })
+
+/** Decoded identity and independent service discovery outcomes. */
+export type AwsResourceDiscoveryResponse = typeof AwsResourceDiscoveryResponse.Type
 
 /** One local OAuth profile available to first-party Atlassian adapters. */
 export const DiscoveredAtlassianProfile = Schema.Struct({
@@ -644,6 +693,14 @@ const discoverAwsProfiles = HttpApiEndpoint.get("discoverAwsProfiles", "/discove
   error: pluginReadErrors
 }).middleware(SessionCookieAuth)
 
+const discoverAwsResources = HttpApiEndpoint.post("discoverAwsResources", "/discovery/aws-resources", {
+  payload: AwsResourceDiscoveryRequest,
+  success: AwsResourceDiscoveryResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const discoverAtlassianProfiles = HttpApiEndpoint.get(
   "discoverAtlassianProfiles",
   "/discovery/atlassian-profiles",
@@ -775,6 +832,7 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     list,
     overview,
     discoverAwsProfiles,
+    discoverAwsResources,
     discoverAtlassianProfiles,
     createAtlassianOAuthGrant,
     exchangeAtlassianOAuthGrant,

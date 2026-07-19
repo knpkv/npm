@@ -12,6 +12,7 @@ import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
   type AtlassianOAuthGrantStartResponse,
   type AtlassianProfileDiscoveryResponse,
+  type AwsResourceDiscoveryResponse,
   CreatePluginConnectionRequest,
   CreatePluginConnectionResponse,
   PluginConfiguration,
@@ -1079,6 +1080,47 @@ describe("Control Center API handlers", () => {
       ]))
 
       assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("runs bounded AWS resource discovery through the owner mutation boundary", () =>
+    Effect.gen(function*() {
+      const expected: AwsResourceDiscoveryResponse = {
+        accountId: "123456789012",
+        codeCommit: { _tag: "failed", failureClass: "authorization" },
+        codePipeline: { _tag: "available", names: ["release"], truncated: false }
+      }
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        discoverAwsResources: (request) => {
+          assert.deepStrictEqual(request, { profile: "production", region: "eu-west-1" })
+          return Effect.succeed(expected)
+        },
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.discoverAwsResources({
+          payload: { profile: "production", region: "eu-west-1" }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+      assert.notInclude(JSON.stringify(result), "arn:")
+      assert.notInclude(JSON.stringify(result), "credential")
     }))
 
   it.effect("discovers secret-free Atlassian OAuth profile metadata for workspace owners", () =>

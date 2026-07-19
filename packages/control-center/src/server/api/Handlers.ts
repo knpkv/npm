@@ -301,6 +301,22 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
           }))
+        .handle("discoverAwsResources", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const discoverAwsResources = plugins.discoverAwsResources
+            if (discoverAwsResources === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* discoverAwsResources(payload).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("discoverAtlassianProfiles", () =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

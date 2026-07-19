@@ -75,6 +75,8 @@ const baseReadClient = (
         arn: "arn:aws:sts::123456789012:assumed-role/Developer/alice"
       })
     ),
+  listRepositoriesPage: () =>
+    Effect.succeed(new ReadClient.CodeCommitRepositoryPage({ repositoryNames: [], nextToken: null })),
   getBlob: () =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({
