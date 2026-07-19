@@ -336,6 +336,27 @@ const makeAgentJobRepository = Effect.gen(function*() {
     readonly leaseToken: typeof AgentLeaseToken.Type
     readonly observedAt: typeof UtcTimestamp.Type
   }) {
+    const currentTime = yield* DateTime.now
+    const leaseRows = yield* sql<Record<string, unknown>>`SELECT
+      lease.lease_token AS leaseToken, lease.lease_expires_at AS leaseExpiresAt
+      FROM agent_job_leases lease
+      WHERE lease.workspace_id = ${options.workspaceId}
+        AND lease.job_id = ${options.jobId}
+        AND lease.attempt_sequence = ${options.attemptSequence}
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_job_attempts newer
+          WHERE newer.workspace_id = lease.workspace_id
+            AND newer.job_id = lease.job_id
+            AND newer.attempt_sequence > lease.attempt_sequence
+        )`
+    const lease = Schema.decodeUnknownResult(LeaseRow)(leaseRows[0])
+    if (Result.isFailure(lease) || lease.success.leaseToken !== options.leaseToken) {
+      return yield* new AgentJobInputError({
+        workspaceId: options.workspaceId,
+        jobId: options.jobId,
+        reason: "lease-lost"
+      })
+    }
     const attemptRows = yield* sql<Record<string, unknown>>`SELECT
       started_at AS startedAt, completed_at AS completedAt
       FROM agent_job_attempts
@@ -350,21 +371,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
         reason: "invalid-transition"
       })
     }
-    const leaseRows = yield* sql<Record<string, unknown>>`SELECT
-      lease_token AS leaseToken, lease_expires_at AS leaseExpiresAt
-      FROM agent_job_leases
-      WHERE workspace_id = ${options.workspaceId}
-        AND job_id = ${options.jobId}
-        AND attempt_sequence = ${options.attemptSequence}`
-    const lease = Schema.decodeUnknownResult(LeaseRow)(leaseRows[0])
-    if (Result.isFailure(lease) || lease.success.leaseToken !== options.leaseToken) {
-      return yield* new AgentJobInputError({
-        workspaceId: options.workspaceId,
-        jobId: options.jobId,
-        reason: "lease-lost"
-      })
-    }
-    if (DateTime.Order(options.observedAt, lease.success.leaseExpiresAt) >= 0) {
+    if (
+      DateTime.Order(currentTime, lease.success.leaseExpiresAt) >= 0 ||
+      DateTime.Order(options.observedAt, lease.success.leaseExpiresAt) >= 0
+    ) {
       return yield* new AgentJobInputError({
         workspaceId: options.workspaceId,
         jobId: options.jobId,
@@ -614,8 +624,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
 
     claimNext: Effect.fn("AgentJobRepository.claimNext")(function*(input: typeof ClaimAgentJobInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(ClaimAgentJobInput))(input)
-      const observedAt = encodeTimestamp(request.claimedAt)
       return yield* database.transaction(Effect.gen(function*() {
+        const claimedAt = yield* DateTime.now
+        const observedAt = encodeTimestamp(claimedAt)
         const dispatch = renderAgentJobDispatchCandidatesQuery({
           workspaceId: request.workspaceId,
           observedAt,
@@ -635,7 +646,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
           )
         }
         for (const candidate of candidates.success) {
-          if (DateTime.Order(request.claimedAt, request.leaseExpiresAt) >= 0) {
+          if (DateTime.Order(claimedAt, request.leaseExpiresAt) >= 0) {
             return yield* new AgentJobInputError({
               workspaceId: request.workspaceId,
               jobId: candidate.jobId,

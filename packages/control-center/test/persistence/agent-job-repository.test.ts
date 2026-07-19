@@ -1,7 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentContextFingerprint, AgentProviderError, AgentProviderId, AgentSessionRef } from "@knpkv/ai-runtime"
-import { Effect, Layer, Option, Result, Schema } from "effect"
+import { DateTime, Effect, Layer, Option, Result, Schema } from "effect"
+import * as TestClock from "effect/testing/TestClock"
 
 import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -13,6 +14,7 @@ import {
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
+  EnqueueAgentJobInput,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
@@ -119,6 +121,37 @@ const replay = Effect.gen(function*() {
 })
 
 describe("agent job repository", () => {
+  it.effect("rejects prompts that cannot fit their durable user-message event", () =>
+    withRepository(Effect.gen(function*() {
+      const database = yield* Database
+      const repository = yield* AgentJobRepository
+      yield* setupFoundation
+      const oversized = {
+        ...enqueueInput(JOB_ID),
+        prompt: "x".repeat(40 * 1_024)
+      }
+      assert.isTrue(Result.isFailure(
+        Schema.decodeUnknownResult(Schema.toType(EnqueueAgentJobInput))(oversized)
+      ))
+      assert.isTrue(Result.isFailure(yield* repository.enqueue(oversized).pipe(Effect.result)))
+
+      yield* repository.enqueue(enqueueInput(JOB_ID))
+      const rows = yield* database.sql<{
+        readonly eventBytes: number
+        readonly prompt: string
+      }>`SELECT job.prompt,
+          event.payload_byte_length AS eventBytes
+        FROM agent_jobs job
+        JOIN agent_thread_events event
+          ON event.workspace_id = job.workspace_id AND event.job_id = job.job_id
+        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}
+          AND event.event_kind = 'user-message'`
+      assert.deepStrictEqual(rows, [{
+        eventBytes: 57,
+        prompt: `Explain ${JOB_ID}`
+      }])
+    })))
+
   it.effect("enqueues job and message events atomically into one workspace/release thread", () =>
     withRepository(Effect.gen(function*() {
       const repository = yield* AgentJobRepository
@@ -187,6 +220,7 @@ describe("agent job repository", () => {
       const repository = yield* AgentJobRepository
       yield* setupFoundation
       yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
 
       const claims = yield* Effect.all([
         repository.claimNext(claimInput(FIRST_TOKEN)),
@@ -220,6 +254,7 @@ describe("agent job repository", () => {
         requestedAt: T1
       })
 
+      yield* TestClock.setTime(DateTime.toEpochMillis(T3))
       const reclaimed = yield* repository.claimNext(claimInput(THIRD_TOKEN, T3, T4))
       assert.isTrue(Option.isSome(reclaimed))
       if (Option.isNone(reclaimed)) return yield* Effect.die("reclaim missing")
@@ -234,6 +269,7 @@ describe("agent job repository", () => {
         event: { _tag: "started", providerRunRef: "provider-run-two", sessionRef: null },
         occurredAt: T3
       })
+      yield* TestClock.setTime(DateTime.toEpochMillis(T5))
       const reclaimedAgain = yield* repository.claimNext(claimInput(FOURTH_TOKEN, T5, T6))
       assert.isTrue(Option.isSome(reclaimedAgain))
       if (Option.isNone(reclaimedAgain)) return yield* Effect.die("second reclaim missing")
@@ -257,12 +293,113 @@ describe("agent job repository", () => {
       assert.strictEqual(attemptRows[1]?.contextSnapshotJson, attemptRows[2]?.contextSnapshotJson)
     })))
 
+  it.effect("uses trusted time and the latest attempt generation for lease ownership", () =>
+    withRepository(Effect.gen(function*() {
+      const database = yield* Database
+      const repository = yield* AgentJobRepository
+      yield* setupFoundation
+      yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
+
+      const first = yield* repository.claimNext(claimInput(FIRST_TOKEN, T1, T4))
+      assert.isTrue(Option.isSome(first))
+      if (Option.isNone(first)) return yield* Effect.die("first claim missing")
+
+      const futureDatedClaim = yield* repository.claimNext(claimInput(SECOND_TOKEN, T5, T6))
+      assert.isTrue(Option.isNone(futureDatedClaim))
+
+      yield* TestClock.setTime(DateTime.toEpochMillis(T5))
+      const recovered = yield* repository.claimNext(claimInput(SECOND_TOKEN, T1, T6))
+      assert.isTrue(Option.isSome(recovered))
+      if (Option.isNone(recovered)) return yield* Effect.die("recovery claim missing")
+      assert.strictEqual(recovered.value.attemptSequence, 2)
+      const ownership = yield* database.sql<{
+        readonly acquiredAt: string
+        readonly attemptSequence: number
+        readonly startedAt: string
+      }>`SELECT attempt.attempt_sequence AS attemptSequence,
+          attempt.started_at AS startedAt, lease.acquired_at AS acquiredAt
+        FROM agent_job_attempts attempt
+        JOIN agent_job_leases lease
+          ON lease.workspace_id = attempt.workspace_id
+          AND lease.job_id = attempt.job_id
+          AND lease.attempt_sequence = attempt.attempt_sequence
+        WHERE attempt.workspace_id = ${WORKSPACE_ID} AND attempt.job_id = ${JOB_ID}
+        ORDER BY attempt.attempt_sequence`
+      assert.deepStrictEqual(ownership, [
+        { acquiredAt: "2026-07-19T09:01:00.000Z", attemptSequence: 1, startedAt: "2026-07-19T09:01:00.000Z" },
+        { acquiredAt: "2026-07-19T09:05:00.000Z", attemptSequence: 2, startedAt: "2026-07-19T09:05:00.000Z" }
+      ])
+
+      const staleAttempt = yield* repository.appendEvent({
+        workspaceId: WORKSPACE_ID,
+        jobId: JOB_ID,
+        attemptSequence: first.value.attemptSequence,
+        leaseToken: FIRST_TOKEN,
+        event: { _tag: "usage", inputTokens: 1, outputTokens: 1 },
+        occurredAt: T2
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(staleAttempt))
+      if (Result.isFailure(staleAttempt)) {
+        assert.instanceOf(staleAttempt.failure, AgentJobInputError)
+        if (staleAttempt.failure._tag === "AgentJobInputError") {
+          assert.strictEqual(staleAttempt.failure.reason, "lease-lost")
+        }
+      }
+
+      const currentAttempt = yield* repository.appendEvent({
+        workspaceId: WORKSPACE_ID,
+        jobId: JOB_ID,
+        attemptSequence: recovered.value.attemptSequence,
+        leaseToken: SECOND_TOKEN,
+        event: { _tag: "usage", inputTokens: 1, outputTokens: 1 },
+        occurredAt: T5
+      })
+      assert.strictEqual(currentAttempt.attemptSequence, recovered.value.attemptSequence)
+      assert.strictEqual(currentAttempt.eventKind, "usage")
+    })))
+
+  it.effect("rejects backdated events after the trusted clock passes lease expiry", () =>
+    withRepository(Effect.gen(function*() {
+      const repository = yield* AgentJobRepository
+      yield* setupFoundation
+      yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
+      const claimed = yield* repository.claimNext(claimInput(FIRST_TOKEN, T1, T4))
+      assert.isTrue(Option.isSome(claimed))
+      if (Option.isNone(claimed)) return yield* Effect.die("claim missing")
+
+      yield* TestClock.setTime(DateTime.toEpochMillis(T5))
+      const backdated = yield* repository.appendEvent({
+        workspaceId: WORKSPACE_ID,
+        jobId: JOB_ID,
+        attemptSequence: claimed.value.attemptSequence,
+        leaseToken: FIRST_TOKEN,
+        event: { _tag: "usage", inputTokens: 1, outputTokens: 1 },
+        occurredAt: T2
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(backdated))
+      if (Result.isFailure(backdated)) {
+        assert.instanceOf(backdated.failure, AgentJobInputError)
+        if (backdated.failure._tag === "AgentJobInputError") {
+          assert.strictEqual(backdated.failure.reason, "lease-expired")
+        }
+      }
+
+      const page = yield* replay
+      assert.deepStrictEqual(page.events.map(({ eventKind }) => eventKind), [
+        "user-message",
+        "job-queued"
+      ])
+    })))
+
   it.effect("bounds cumulative provider output and commits a terminal event with attempt and job", () =>
     withRepository(Effect.gen(function*() {
       const database = yield* Database
       const repository = yield* AgentJobRepository
       yield* setupFoundation
       yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
       const claimed = yield* repository.claimNext(claimInput(FIRST_TOKEN, T1, T5))
       if (Option.isNone(claimed)) return yield* Effect.die("claim missing")
 
@@ -341,6 +478,7 @@ describe("agent job repository", () => {
       const repository = yield* AgentJobRepository
       yield* setupFoundation
       yield* repository.enqueue(enqueueInput(JOB_ID))
+      yield* TestClock.setTime(DateTime.toEpochMillis(T1))
       const claimed = yield* repository.claimNext(claimInput(FIRST_TOKEN, T1, T5))
       if (Option.isNone(claimed)) return yield* Effect.die("claim missing")
       const providerError = new AgentProviderError({
@@ -383,6 +521,7 @@ describe("agent job repository", () => {
           const repository = yield* AgentJobRepository
           yield* setupFoundation
           yield* repository.enqueue(enqueueInput(JOB_ID))
+          yield* TestClock.setTime(DateTime.toEpochMillis(T1))
           const claimed = yield* repository.claimNext(claimInput(FIRST_TOKEN))
           assert.isTrue(Option.isSome(claimed))
           yield* repository.requestCancellation({
@@ -397,6 +536,7 @@ describe("agent job repository", () => {
         config,
         Effect.gen(function*() {
           const repository = yield* AgentJobRepository
+          yield* TestClock.setTime(DateTime.toEpochMillis(T3))
           const recovered = yield* repository.claimNext(claimInput(SECOND_TOKEN, T3, T4))
           assert.isTrue(Option.isSome(recovered))
           if (Option.isNone(recovered)) return yield* Effect.die("recovery claim missing")
@@ -410,30 +550,43 @@ describe("agent job repository", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("rejects replay when a persisted payload digest no longer matches", () =>
+  it.effect("prevents updates and deletes of immutable thread events", () =>
     withRepository(Effect.gen(function*() {
       const database = yield* Database
       const repository = yield* AgentJobRepository
       yield* setupFoundation
       yield* repository.enqueue(enqueueInput(JOB_ID))
-      yield* database.sql`UPDATE agent_thread_events
+
+      const update = yield* database.sql`UPDATE agent_thread_events
         SET payload_digest = ${`sha256:${"b".repeat(64)}`}
         WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}
-          AND event_sequence = 1`
+          AND event_sequence = 1`.pipe(Effect.result)
+      const deletion = yield* database.sql`DELETE FROM agent_thread_events
+        WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}
+          AND event_sequence = 1`.pipe(Effect.result)
+      assert.isTrue(Result.isFailure(update))
+      assert.isTrue(Result.isFailure(deletion))
+
+      const page = yield* replay
+      assert.deepStrictEqual(page.events.map(({ eventSequence }) => eventSequence), [1, 2])
+    })))
+
+  it.effect("rejects replay when an inserted payload digest does not match", () =>
+    withRepository(Effect.gen(function*() {
+      const database = yield* Database
+      const repository = yield* AgentJobRepository
+      yield* setupFoundation
+      const threadId = yield* repository.enqueue(enqueueInput(JOB_ID))
+
+      yield* database.sql`INSERT INTO agent_thread_events (
+        workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+        event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${threadId}, 3, ${JOB_ID}, NULL, 'user-message', '{}',
+        ${`sha256:${"b".repeat(64)}`}, 2, ${"2026-07-19T09:01:00.000Z"}
+      )`
       const result = yield* replay.pipe(Effect.result)
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, PersistedRecordError)
-
-      yield* database.sql`UPDATE agent_thread_events
-        SET payload_json = '{}',
-            payload_digest = 'sha256:44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',
-            payload_byte_length = 2
-        WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${JOB_ID}
-          AND event_sequence = 1`
-      const invalidPayload = yield* replay.pipe(Effect.result)
-      assert.isTrue(Result.isFailure(invalidPayload))
-      if (Result.isFailure(invalidPayload)) {
-        assert.instanceOf(invalidPayload.failure, PersistedRecordError)
-      }
     })))
 })

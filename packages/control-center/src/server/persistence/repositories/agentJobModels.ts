@@ -8,6 +8,14 @@ import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 /** Maximum persisted provider output across one attempt. */
 export const MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES = 1_048_576
 
+/**
+ * Maximum prompt characters accepted by durable enqueue.
+ *
+ * JSON may escape one UTF-16 code unit to six bytes. This conservative bound
+ * therefore keeps the complete `{ "prompt": ... }` event below 32 KiB.
+ */
+export const MAXIMUM_AGENT_JOB_PROMPT_LENGTH = 5_000
+
 /** Maximum thread events returned by one replay page. */
 export const MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE = 128
 
@@ -53,6 +61,13 @@ const AgentModel = Schema.NullOr(
   Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
 )
 
+/** Prompt guaranteed to fit the durable user-message event envelope. */
+export const AgentJobPrompt = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(MAXIMUM_AGENT_JOB_PROMPT_LENGTH)
+)
+export type AgentJobPrompt = typeof AgentJobPrompt.Type
+
 /** Lifecycle state of one durable agent job. */
 export const AgentJobState = Schema.Literals([
   "queued",
@@ -72,7 +87,7 @@ export const EnqueueAgentJobInput = Schema.Struct({
   providerId: AgentProviderId,
   model: AgentModel,
   access: Schema.Literals(["read-only", "workspace-write"]),
-  prompt: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(131_072)),
+  prompt: AgentJobPrompt,
   contextFingerprint: AgentContextFingerprint,
   subjectRevision: SubjectRevision,
   createdAt: UtcTimestamp
@@ -101,14 +116,19 @@ export const ClaimedAgentJob = Schema.Struct({
   providerId: AgentProviderId,
   model: AgentModel,
   access: Schema.Literals(["read-only", "workspace-write"]),
-  prompt: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(131_072)),
+  prompt: AgentJobPrompt,
   context: AgentContextSnapshotRecord,
   sessionRef: Schema.NullOr(AgentSessionRef),
   cancellationRequested: Schema.Boolean
 })
 export type ClaimedAgentJob = typeof ClaimedAgentJob.Type
 
-/** Identity and expiration used to claim or reclaim one queued job. */
+/**
+ * Identity and expiration used to claim or reclaim one queued job.
+ *
+ * `claimedAt` is caller-reported context only; repository clock time owns
+ * lease eligibility and the durable acquisition timestamp.
+ */
 export const ClaimAgentJobInput = Schema.Struct({
   workspaceId: WorkspaceId,
   leaseOwner: AgentLeaseOwner,
