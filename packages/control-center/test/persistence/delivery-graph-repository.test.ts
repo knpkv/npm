@@ -1011,6 +1011,52 @@ describe("DeliveryGraphRepository", () => {
         const repository = yield* DeliveryGraphRepository
         const database = yield* Database
         yield* repository.write(WORKSPACE_A, initialBatch)
+        const excludedAssignmentPersonId = Schema.decodeSync(PersonId)(
+          "01890f6f-6d6a-7cc0-98d2-300000000010"
+        )
+        const inactivePersonId = Schema.decodeSync(PersonId)(
+          "01890f6f-6d6a-7cc0-98d2-300000000011"
+        )
+        yield* database.sql`INSERT INTO persons (
+          workspace_id, person_id, display_name, avatar_json, is_active,
+          revision, created_at, updated_at
+        ) VALUES
+          (${WORKSPACE_A}, ${excludedAssignmentPersonId}, 'Excluded Assignment',
+            ${JSON.stringify({ _tag: "initials", text: "EA" })}, 1, 1, ${CREATED_AT}, ${UPDATED_AT}),
+          (${WORKSPACE_A}, ${inactivePersonId}, 'Inactive Person',
+            ${JSON.stringify({ _tag: "initials", text: "IP" })}, 0, 1, ${CREATED_AT}, ${UPDATED_AT})`
+        yield* database.sql`INSERT INTO role_assignments (
+          workspace_id, assignment_id, actor_kind, person_id, agent_id, role,
+          scope_kind, release_id, environment_id, entity_id, lifecycle_kind,
+          assigned_at, ended_at, revoked_at, revision, created_at, updated_at
+        ) VALUES
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000001', 'human', ${OWNER_PERSON_ID}, NULL,
+            'contributor', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000002', 'human', ${OWNER_PERSON_ID}, NULL,
+            'reviewer', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000003', 'human', ${OWNER_PERSON_ID}, NULL,
+            'watcher', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000004', 'human', ${OWNER_PERSON_ID}, NULL,
+            'deployment-approver', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000005', 'human', ${OWNER_PERSON_ID}, NULL,
+            'merge-approver', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000006', 'human', ${OWNER_PERSON_ID}, NULL,
+            'workspace-owner', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000007', 'human', ${excludedAssignmentPersonId}, NULL,
+            'contributor', 'entity', NULL, NULL, ${ISSUE_ID}, 'ended',
+            ${CREATED_AT}, ${UPDATED_AT}, NULL, 1, ${CREATED_AT}, ${UPDATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000008', 'human', ${excludedAssignmentPersonId}, NULL,
+            'reviewer', 'release', ${RELEASE_ID}, NULL, NULL, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT}),
+          (${WORKSPACE_A}, '01890f6f-6d6a-7cc0-98d2-300000000009', 'human', ${inactivePersonId}, NULL,
+            'watcher', 'entity', NULL, NULL, ${ISSUE_ID}, 'active',
+            ${CREATED_AT}, NULL, NULL, 1, ${CREATED_AT}, ${CREATED_AT})`
 
         const bounded = yield* repository.read(WORKSPACE_A, {
           _tag: "workspaceEntityProjections",
@@ -1033,14 +1079,34 @@ describe("DeliveryGraphRepository", () => {
             avatarFallback: "AB",
             displayName: "Avery Bell",
             personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+            roles: [
+              "author",
+              "contributor",
+              "deployment-approver",
+              "issue-assignee",
+              "issue-owner",
+              "merge-approver",
+              "operator",
+              "reviewer",
+              "watcher"
+            ]
           }])
           assert.isFalse(bounded.value.items[0]?.ownersTruncated)
           assert.deepStrictEqual(bounded.value.ownerOptions, [{
             avatarFallback: "AB",
             displayName: "Avery Bell",
             personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+            roles: [
+              "author",
+              "contributor",
+              "deployment-approver",
+              "issue-assignee",
+              "issue-owner",
+              "merge-approver",
+              "operator",
+              "reviewer",
+              "watcher"
+            ]
           }])
           assert.isFalse(bounded.value.ownerOptionsTruncated)
         }

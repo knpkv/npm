@@ -129,7 +129,12 @@ export const renderWorkspaceEntityOwnersQuery = (input: WorkspaceEntityQueryInpu
           "issue-assignee",
           "page-owner",
           "author",
-          "operator"
+          "operator",
+          "contributor",
+          "reviewer",
+          "watcher",
+          "deployment-approver",
+          "merge-approver"
         )
       )
     ),

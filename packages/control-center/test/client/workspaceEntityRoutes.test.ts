@@ -64,7 +64,8 @@ describe("workspace entity routes", () => {
     const entityOrigin = entityOriginFromLocation({
       hash: "#release-work",
       pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
-      search: `?object=${entityId}`
+      search: `?object=${entityId}`,
+      state: releaseState
     })
     const firstState = makeWorkspaceEntityRouteState(releaseState, workspaceId, entityId, entityOrigin)
     const relatedState = makeWorkspaceEntityRouteState(
@@ -78,17 +79,18 @@ describe("workspace entity routes", () => {
       })
     )
 
-    expect(readReleaseOrigin(firstState, workspaceId, releaseId)).toEqual(releaseOrigin)
-    expect(resolveWorkspaceEntityOrigin(relatedState, workspaceId, relatedEntityId)).toEqual({
+    const resolvedRelatedOrigin = resolveWorkspaceEntityOrigin(relatedState, workspaceId, relatedEntityId)
+    expect(readReleaseOrigin(resolvedRelatedOrigin.origin.state, workspaceId, releaseId)).toEqual(releaseOrigin)
+    expect(resolvedRelatedOrigin).toEqual({
       isStored: true,
       origin: entityOrigin
     })
-    expect(relatedState).toMatchObject(releaseState)
+    expect(Object.keys(relatedState)).toEqual(["entityOrigin"])
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {
-    const fallback = { hash: "", pathname: workspaceEntityParentPath(workspaceId), search: "" }
-    const validOrigin = { hash: "", pathname: `/w/${workspaceId}/timeline`, search: "" }
+    const fallback = { hash: "", pathname: workspaceEntityParentPath(workspaceId), search: "", state: null }
+    const validOrigin = { hash: "", pathname: `/w/${workspaceId}/timeline`, search: "", state: null }
     const valid = makeWorkspaceEntityRouteState(null, workspaceId, entityId, validOrigin)
     const unsafeOrigins = [
       { ...validOrigin, pathname: `/w/${otherWorkspaceId}/timeline` },
@@ -99,11 +101,23 @@ describe("workspace entity routes", () => {
       { ...validOrigin, hash: `#${"x".repeat(1_024)}` }
     ]
 
+    const unsafeNestedState = entityOriginFromLocation({
+      hash: "#release-work",
+      pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
+      search: `?object=${entityId}`,
+      state: makeReleaseRouteState(workspaceId, releaseId, {
+        hash: "",
+        pathname: "https://attacker.example.test/steal",
+        search: ""
+      })
+    })
+
     expect(resolveWorkspaceEntityOrigin(null, workspaceId, entityId)).toEqual({ isStored: false, origin: fallback })
     expect(resolveWorkspaceEntityOrigin(valid, workspaceId, relatedEntityId)).toEqual({
       isStored: false,
       origin: fallback
     })
+    expect(unsafeNestedState.state).toBeNull()
     for (const origin of unsafeOrigins) {
       expect(isSafeWorkspaceEntityOrigin(origin, workspaceId)).toBe(false)
       const state = makeWorkspaceEntityRouteState([], workspaceId, entityId, origin)

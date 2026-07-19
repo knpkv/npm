@@ -205,7 +205,7 @@ describe("command search", () => {
       search: "",
       state: {
         entityOrigin: {
-          _tag: "entity-origin/v1",
+          _tag: "entity-origin/v2",
           entityId: selectedEntity,
           origin: {
             hash: "",

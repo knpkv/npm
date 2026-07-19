@@ -89,7 +89,7 @@ describe("renderTimelineQueries", () => {
     }
   })
 
-  it("attributes only exact entity activity and excludes workspace-wide sync rows", () => {
+  it("attributes exact entity activity including evidence-backed sync rows", () => {
     const rendered = renderTimelineQueries({
       actorKind: null,
       before: null,
@@ -100,9 +100,18 @@ describe("renderTimelineQueries", () => {
       workspaceId: "workspace-1"
     })
 
-    expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual(["action", "relationship", "system"])
+    expect(rendered.map(({ sourceKind }) => sourceKind)).toEqual([
+      "action",
+      "relationship",
+      "plugin-sync",
+      "system"
+    ])
     expect(rendered.every(({ params }) => params.includes("entity-42"))).toBe(true)
     expect(rendered.find(({ sourceKind }) => sourceKind === "relationship")?.sql).toContain("delivery_nodes")
+    const sync = rendered.find(({ sourceKind }) => sourceKind === "plugin-sync")
+    expect(sync?.sql).toContain("plugin_sync_evidence")
+    expect(sync?.sql).toContain("entities")
+    expect(sync?.sql).toContain("exists")
   })
 
   it("rejects unknown and empty detail-key namespaces before rendering SQL", () => {

@@ -1,5 +1,6 @@
 import type { EntityId, WorkspaceId } from "../../domain/identifiers.js"
 import { workspaceItemsPath } from "../releases/releasePaths.js"
+import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 const searchParameters = (query: string): URLSearchParams => {
   const parameters = new URLSearchParams()
@@ -19,4 +20,4 @@ export const commandSearchItemsHref = (workspaceId: WorkspaceId, query: string):
 export const commandSearchItemHref = (
   workspaceId: WorkspaceId,
   entityId: EntityId
-): string => `${workspaceItemsPath(workspaceId)}/${encodeURIComponent(entityId)}`
+): string => workspaceEntityPath(workspaceId, entityId)

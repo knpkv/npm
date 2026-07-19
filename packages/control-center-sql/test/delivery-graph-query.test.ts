@@ -25,4 +25,17 @@ describe("canonical workspace entity queries", () => {
     expect(releases.params).toContain("rejected")
     expect(releases.params).toContain("superseded")
   })
+
+  it("includes every active entity collaborator role used by the owner projection", () => {
+    const owners = renderWorkspaceEntityOwnersQuery(entity)
+
+    expect(owners.params).toEqual(expect.arrayContaining([
+      "contributor",
+      "reviewer",
+      "watcher",
+      "deployment-approver",
+      "merge-approver"
+    ]))
+    expect(owners.params).toEqual(expect.arrayContaining(["entity", "human", "active", 1]))
+  })
 })

@@ -13,8 +13,13 @@ import type {
   WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
 import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
+import { evaluateFreshnessAt } from "../../domain/freshness.js"
 import type { EntityId, EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
-import { ApplicationResourceNotFound, DeliveryGraphInspection } from "../api/ApplicationServices.js"
+import {
+  ApplicationResourceNotFound,
+  ApplicationServiceUnavailable,
+  DeliveryGraphInspection
+} from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { mapPersistenceRead } from "./errors.js"
 import { presentTimelineEvent } from "./timelineReads.js"
@@ -146,6 +151,12 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
     const directEvidence = result.value.evidenceItems
       .filter(({ evidenceId }) => directEvidenceIds.has(evidenceId))
       .sort((left, right) => DateTime.Order(right.recordedAt, left.recordedAt))[0]
+    const evaluatedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+    const freshness = directEvidence === undefined
+      ? null
+      : yield* evaluateFreshnessAt(directEvidence.freshness, evaluatedAt).pipe(
+        Effect.mapError(() => new ApplicationServiceUnavailable({ retryAt: null }))
+      )
     const activityRecords = yield* mapPersistenceRead(persistence.timeline.page({
       workspaceId: input.workspaceId,
       actorKind: null,
@@ -160,7 +171,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       entity: result.value.entity,
       source: entityRecord.sourceRevision,
       isSourceCurrent: Number(entityRecord.revision) === Number(result.value.entity.projection.sourceEntityRevision),
-      freshness: directEvidence?.freshness ?? null,
+      freshness,
       graph: {
         truncated: result.value.truncated,
         nodes: result.value.nodes,

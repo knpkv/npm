@@ -1,26 +1,31 @@
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 import {
   EntityId,
   type EntityId as EntityIdType,
   ReleaseId,
+  type ReleaseId as ReleaseIdType,
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
+import { type ReleaseRouteState, ReleaseRouteStateSchema, retainReleaseRouteState } from "../releases/releaseRoutes.js"
+import { workspaceEntityParentPath } from "../workspaceEntityPaths.js"
+
+export { workspaceEntityParentPath, workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 /** Exact in-application location preserved while a canonical entity route is open. */
 export interface WorkspaceEntityOrigin {
   readonly hash: string
   readonly pathname: string
   readonly search: string
+  readonly state: ReleaseRouteState | null
 }
 
-/** Versioned marker merged into router state for one canonical entity activation. */
+/** Versioned, bounded router state for one canonical entity activation. */
 export interface WorkspaceEntityRouteState {
   readonly entityOrigin: {
-    readonly _tag: "entity-origin/v1"
+    readonly _tag: "entity-origin/v2"
     readonly entityId: EntityIdType
     readonly origin: WorkspaceEntityOrigin
     readonly workspaceId: WorkspaceIdType
@@ -43,31 +48,24 @@ interface LocationParts {
   readonly hash: string
   readonly pathname: string
   readonly search: string
+  readonly state?: unknown
 }
 
 const WorkspaceEntityOriginSchema = Schema.Struct({
   hash: Schema.String,
   pathname: Schema.String,
-  search: Schema.String
+  search: Schema.String,
+  state: Schema.NullOr(ReleaseRouteStateSchema)
 })
 
 const WorkspaceEntityRouteStateSchema = Schema.Struct({
   entityOrigin: Schema.Struct({
-    _tag: Schema.Literal("entity-origin/v1"),
+    _tag: Schema.Literal("entity-origin/v2"),
     entityId: EntityId,
     origin: WorkspaceEntityOriginSchema,
     workspaceId: WorkspaceId
   })
 })
-
-const segment = (value: string): string => encodeURIComponent(value)
-
-/** Build the workspace-wide normalized delivery item index path. */
-export const workspaceEntityParentPath = (workspaceId: WorkspaceIdType): string => `/w/${segment(workspaceId)}/items`
-
-/** Build the canonical full-page path for one normalized workspace entity. */
-export const workspaceEntityPath = (workspaceId: WorkspaceIdType, entityId: EntityIdType): string =>
-  `${workspaceEntityParentPath(workspaceId)}/${segment(entityId)}`
 
 /** Decode only an exact canonical entity path, rejecting query, hash, and extra path material. */
 export const workspaceEntityTargetFromHref = (href: string): WorkspaceEntityTarget | null => {
@@ -87,29 +85,26 @@ export const decodeEntityRouteId = (value: unknown): EntityIdType | null => {
   return Option.isSome(decoded) ? decoded.value : null
 }
 
-/** Capture a location without retaining mutable router objects. */
-export const entityOriginFromLocation = ({
-  hash,
-  pathname,
-  search
-}: LocationParts): WorkspaceEntityOrigin => ({ hash, pathname, search })
-
 const fallbackOrigin = (workspaceId: WorkspaceIdType): WorkspaceEntityOrigin => ({
   hash: "",
   pathname: workspaceEntityParentPath(workspaceId),
-  search: ""
+  search: "",
+  state: null
 })
 
 const isSearch = (search: string): boolean => search.length <= 2_048 && (search.length === 0 || search.startsWith("?"))
 
 const isHash = (hash: string): boolean => hash.length <= 1_024 && (hash.length === 0 || hash.startsWith("#"))
 
-const isReleaseOriginPath = (parts: ReadonlyArray<string>, workspaceId: WorkspaceIdType): boolean => {
-  if (parts.length !== 5 && parts.length !== 6) return false
-  if (parts[0] !== "" || parts[1] !== "w" || parts[2] !== workspaceId || parts[3] !== "releases") return false
+const releaseOriginTarget = (
+  parts: ReadonlyArray<string>,
+  workspaceId: WorkspaceIdType
+): { readonly releaseId: ReleaseIdType; readonly workspaceId: WorkspaceIdType } | null => {
+  if (parts.length !== 5 && parts.length !== 6) return null
+  if (parts[0] !== "" || parts[1] !== "w" || parts[2] !== workspaceId || parts[3] !== "releases") return null
   const releaseId = Schema.decodeUnknownOption(ReleaseId)(parts[4])
-  if (Option.isNone(releaseId)) return false
-  return parts.length === 5 || parts[5] === "preview"
+  if (Option.isNone(releaseId) || (parts.length === 6 && parts[5] !== "preview")) return null
+  return { releaseId: releaseId.value, workspaceId }
 }
 
 const isRecognizedOriginPath = (pathname: string, workspaceId: WorkspaceIdType): boolean => {
@@ -117,14 +112,38 @@ const isRecognizedOriginPath = (pathname: string, workspaceId: WorkspaceIdType):
   const parts = pathname.split("/")
   if (parts[0] !== "" || parts[1] !== "w" || parts[2] !== workspaceId) return false
   if (parts.length === 4) return ["overview", "work", "items", "timeline"].includes(parts[3] ?? "")
-  return isReleaseOriginPath(parts, workspaceId)
+  return releaseOriginTarget(parts, workspaceId) !== null
+}
+
+/** Capture an exact location while retaining only matching, bounded release origin state. */
+export const entityOriginFromLocation = ({
+  hash,
+  pathname,
+  search,
+  state
+}: LocationParts): WorkspaceEntityOrigin => {
+  const workspaceId = Schema.decodeUnknownOption(WorkspaceId)(pathname.split("/")[2])
+  const target = Option.isSome(workspaceId) ? releaseOriginTarget(pathname.split("/"), workspaceId.value) : null
+  return {
+    hash,
+    pathname,
+    search,
+    state: target === null ? null : retainReleaseRouteState(state, target.workspaceId, target.releaseId)
+  }
 }
 
 /** Confirm an origin is bounded and belongs to a supported page in the exact workspace. */
 export const isSafeWorkspaceEntityOrigin = (
   origin: WorkspaceEntityOrigin,
   workspaceId: WorkspaceIdType
-): boolean => isRecognizedOriginPath(origin.pathname, workspaceId) && isSearch(origin.search) && isHash(origin.hash)
+): boolean => {
+  if (!isRecognizedOriginPath(origin.pathname, workspaceId) || !isSearch(origin.search) || !isHash(origin.hash)) {
+    return false
+  }
+  if (origin.state === null) return true
+  const target = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
+  return target !== null && retainReleaseRouteState(origin.state, workspaceId, target.releaseId) !== null
+}
 
 const reusableStoredOrigin = (
   state: unknown,
@@ -139,7 +158,7 @@ const reusableStoredOrigin = (
 }
 
 /**
- * Merge a bounded entity marker into existing router state.
+ * Construct bounded entity route state.
  *
  * A previously validated entity origin is carried through related-entity navigation so the
  * shell's explicit Back action still returns to the root activation surface.
@@ -150,9 +169,8 @@ export const makeWorkspaceEntityRouteState = (
   entityId: EntityIdType,
   origin: WorkspaceEntityOrigin
 ): WorkspaceEntityRouteState => ({
-  ...(Predicate.isObject(state) ? state : {}),
   entityOrigin: {
-    _tag: "entity-origin/v1",
+    _tag: "entity-origin/v2",
     entityId,
     origin: reusableStoredOrigin(state, workspaceId) ??
       (isSafeWorkspaceEntityOrigin(origin, workspaceId) ? origin : fallbackOrigin(workspaceId)),

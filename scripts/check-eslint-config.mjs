@@ -106,6 +106,48 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    const direct = \`/w/\${workspaceId}/items/\${entityId}\`
+    const encoded = \`/w/\${workspaceId}/items/\${encodeURIComponent(relatedEntityId)}\`
+  `,
+  expected: 2,
+  filePath: "packages/control-center/src/client/entities/eslint-workspace-entity-path-invalid.ts",
+  ruleId: "local-rules/no-ad-hoc-workspace-entity-path"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const releaseItem = \`/w/\${workspaceId}/items/\${releaseId}\`
+    const unrelated = \`/w/\${workspaceId}/releases/\${entityId}\`
+    const canonical = workspaceEntityPath(workspaceId, entityId)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/client/entities/eslint-workspace-entity-path-valid.ts",
+  ruleId: "local-rules/no-ad-hoc-workspace-entity-path"
+})
+
+await assertRuleDiagnostics({
+  code: `const testHref = \`/w/\${workspaceId}/items/\${entityId}\``,
+  expected: 0,
+  filePath: "packages/control-center/test/client/eslint-workspace-entity-path.test.ts",
+  ruleId: "local-rules/no-ad-hoc-workspace-entity-path"
+})
+
+await assertRuleDiagnostics({
+  code: `const generatedHref = \`/w/\${workspaceId}/items/\${entityId}\``,
+  expected: 0,
+  filePath: "packages/control-center/src/client/generated/eslint-workspace-entity-path.ts",
+  ruleId: "local-rules/no-ad-hoc-workspace-entity-path"
+})
+
+await assertRuleDiagnostics({
+  code: `export const workspaceEntityPath = (workspaceId, entityId) => \`/w/\${workspaceId}/items/\${entityId}\``,
+  expected: 0,
+  filePath: "packages/control-center/src/client/workspaceEntityPaths.ts",
+  ruleId: "local-rules/no-ad-hoc-workspace-entity-path"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Process from "effect/unstable/process/ChildProcess"
     import { ChildProcess as AliasedProcess } from "effect/unstable/process"
     import { make as makeProcess } from "effect/unstable/process/ChildProcess"

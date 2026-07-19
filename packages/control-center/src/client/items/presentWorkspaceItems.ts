@@ -14,6 +14,7 @@ import type {
   DeliveryEntityStatusGroup
 } from "../../domain/deliveryGraph.js"
 import type { EntityId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
+import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 export type WorkspaceItemStatus = DeliveryEntityStatusGroup
 
@@ -129,9 +130,6 @@ export const workspaceItemReleaseHref = (
   entityId: EntityId
 ): string => `/w/${workspaceId}/releases/${releaseId}?object=${encodeURIComponent(entityId)}#release-work`
 
-const itemHref = (workspaceId: WorkspaceId, entityId: EntityId): string =>
-  `/w/${workspaceId}/items/${encodeURIComponent(entityId)}`
-
 const presentProjection = (
   workspaceId: WorkspaceId,
   entry: ReleaseDeliveryGraphInspection["entityProjections"][number] & {
@@ -166,7 +164,7 @@ const presentProjection = (
   return {
     entityId: projection.entityId,
     freshness: DateTime.formatIso(entry.recordedAt),
-    href: itemHref(workspaceId, projection.entityId),
+    href: workspaceEntityPath(workspaceId, projection.entityId),
     key: projection.displayKey,
     kind: projection.entityType,
     owner: owners.length === 0 ? "Unassigned" : owners.map(({ name }) => name).join(", "),

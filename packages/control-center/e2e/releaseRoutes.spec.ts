@@ -1,6 +1,7 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
+import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
@@ -82,6 +83,45 @@ const fullPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}`
 const heldFullPath = `/w/${snapshot.workspaceId}/releases/${heldRelease.releaseId}`
 const agentPath = `${fullPath}/agent`
 const unknownReleaseId = "01890f6f-6d6a-7cc0-98d2-000000000098"
+const encodedWorkset = Schema.encodeSync(ReleaseDeliveryGraphInspection)(releaseWorksetFixture)
+const canonicalEntityEntry = encodedWorkset.entityProjections[0]
+if (canonicalEntityEntry === undefined) throw new Error("Expected one canonical entity browser fixture")
+const canonicalEntityId = canonicalEntityEntry.projection.entityId
+const canonicalEntityPath = `/w/${snapshot.workspaceId}/items/${canonicalEntityId}`
+const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
+  Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+    activity: { events: [], truncated: false },
+    entity: {
+      ...canonicalEntityEntry,
+      canonicalReleaseId: encodedWorkset.releaseId,
+      owners: [],
+      ownersTruncated: false,
+      releaseIds: [encodedWorkset.releaseId],
+      releaseMembershipsTruncated: false
+    },
+    freshness: null,
+    graph: {
+      evidenceClaims: encodedWorkset.evidenceClaims,
+      evidenceItems: encodedWorkset.evidenceItems,
+      nodes: encodedWorkset.nodes,
+      relatedEntityProjections: encodedWorkset.entityProjections.slice(1),
+      relationships: encodedWorkset.relationships,
+      truncated: false
+    },
+    isSourceCurrent: true,
+    source: {
+      firstObservedAt: "2026-07-14T10:00:00.000Z",
+      lastObservedAt: "2026-07-14T10:00:00.000Z",
+      normalizationSchemaVersion: 1,
+      pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000081",
+      providerId: "jira",
+      revision: "rev-8",
+      sourceUrl: "https://jira.example.test/browse/OPS-428",
+      synchronizedAt: "2026-07-14T10:01:00.000Z",
+      vendorImmutableId: "jira-issue-ops-428"
+    }
+  })
+)
 
 const unauthorizedBody = {
   _tag: "UnauthorizedApiError",
@@ -134,6 +174,13 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   })
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
+  })
+  await context.route("**/api/v1/items/*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(canonicalEntityInspection),
+      contentType: "application/json",
+      status: 200
+    })
   })
   await context.route("**/api/v1/relationships/repair-proposals/*/reviews", async (route) => {
     const payload = Schema.decodeUnknownSync(ReviewPayload)(route.request().postDataJSON())
@@ -349,6 +396,30 @@ test("preserves a filtered overview origin through a preview verdict action", as
   await expect(page).toHaveURL(`${heldFullPath}#release-work`)
   await page.getByRole("link", { name: "Back to overview" }).click()
   await expect(page).toHaveURL(filteredOverviewPath)
+})
+
+test("preserves the exact overview origin through preview and canonical entity Back actions", async ({ page }) => {
+  const filteredOverviewPath = `${overviewPath}?status=attention#release-list`
+  await page.goto(filteredOverviewPath)
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+
+  const preview = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
+  await preview.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`).click()
+  await expect(page).toHaveURL(canonicalEntityPath)
+  await expect(page.locator(`[data-workspace-entity-id="${canonicalEntityId}"]`)).toBeVisible()
+
+  await page.getByRole("link", { name: "Back to release" }).click()
+  await expect(page).toHaveURL(previewPath)
+  await page.getByRole("button", { name: "Close preview" }).click()
+  await expect(page).toHaveURL(filteredOverviewPath)
+})
+
+test("returns a directly loaded canonical entity to Items", async ({ page }) => {
+  await page.goto(canonicalEntityPath)
+  await expect(page.locator(`[data-workspace-entity-id="${canonicalEntityId}"]`)).toBeVisible()
+
+  await page.getByRole("link", { name: "Back to items" }).click()
+  await expect(page).toHaveURL(`/w/${snapshot.workspaceId}/items`)
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

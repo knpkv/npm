@@ -116,8 +116,10 @@ const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
     <MemoryRouter>
       <WorkspaceEntityView
         onAskAgent={onAskAgent}
+        isStoredOrigin={false}
         originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
         originLabel="Back to items"
+        originState={null}
         retry={() => undefined}
         state={state}
         workspaceId={WORKSET_WORKSPACE_ID}

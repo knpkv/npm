@@ -20,6 +20,7 @@ import type {
 import type { EntityId, GraphNodeId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
+import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 export interface WorkspaceEntityFact {
   readonly label: string
@@ -115,9 +116,6 @@ const sourceHref = (source: SourceRevision): string | null => source.sourceUrl =
 
 const releaseHref = (workspaceId: WorkspaceId, releaseId: ReleaseId): string =>
   `/w/${encodeURIComponent(workspaceId)}/releases/${encodeURIComponent(releaseId)}`
-
-const entityHref = (workspaceId: WorkspaceId, entityId: EntityId): string =>
-  `/w/${encodeURIComponent(workspaceId)}/items/${encodeURIComponent(entityId)}`
 
 const shortIdentity = (identity: string): string => identity.slice(-8)
 
@@ -248,7 +246,7 @@ const endpointFor = (
     }
     return {
       state: "present",
-      href: entityHref(workspaceId, projection.entityId),
+      href: workspaceEntityPath(workspaceId, projection.entityId),
       id: projection.entityId,
       reference: projection.displayKey,
       service: serviceFor(projection.entityType),

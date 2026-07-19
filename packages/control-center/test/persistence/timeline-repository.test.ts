@@ -25,6 +25,7 @@ const detailWorkspaces = [
   {
     workspaceId,
     entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014a"),
+    siblingEntityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014c"),
     suffix: "payments",
     displayName: "Payments",
     providerId: "jira",
@@ -35,6 +36,7 @@ const detailWorkspaces = [
   {
     workspaceId: Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000149"),
     entityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014b"),
+    siblingEntityId: Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014d"),
     suffix: "identity",
     displayName: "Identity",
     providerId: "confluence",
@@ -45,6 +47,7 @@ const detailWorkspaces = [
 ] satisfies ReadonlyArray<{
   readonly workspaceId: typeof workspaceId
   readonly entityId: EntityId
+  readonly siblingEntityId: EntityId
   readonly suffix: string
   readonly displayName: string
   readonly providerId: "jira" | "confluence"
@@ -112,6 +115,7 @@ const seedTimelineDetailSources = Effect.gen(function*() {
     Effect.gen(function*() {
       const connectionId = `connection-${fixture.suffix}`
       const entityId = fixture.entityId
+      const siblingEntityId = fixture.siblingEntityId
       const releaseId = `release-${fixture.suffix}`
       const personId = `person-${fixture.suffix}`
       const agentId = `agent-${fixture.suffix}`
@@ -140,6 +144,9 @@ const seedTimelineDetailSources = Effect.gen(function*() {
       ) VALUES (
         ${fixture.workspaceId}, ${entityId}, ${connectionId}, ${fixture.providerId},
         ${`vendor-${fixture.suffix}`}, 'issue', 1, ${occurredAt}, ${occurredAt}
+      ), (
+        ${fixture.workspaceId}, ${siblingEntityId}, ${connectionId}, ${fixture.providerId},
+        ${`vendor-sibling-${fixture.suffix}`}, 'issue', 1, ${occurredAt}, ${occurredAt}
       )`
       yield* sql`INSERT INTO entity_revisions (
         workspace_id, entity_id, revision, source_revision, normalization_schema_version,
@@ -214,6 +221,34 @@ const seedTimelineDetailSources = Effect.gen(function*() {
       ) VALUES (
         ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'detail-page', 0,
         ${"9".repeat(64)}, ${"8".repeat(64)}, ${detailSyncEventDigest}, 1, ${occurredAt}
+      )`
+      yield* sql`INSERT INTO plugin_sync_evidence (
+        workspace_id, plugin_connection_id, stream_key, page_id, ordinal,
+        event_id, event_digest, event_kind, record_key, source_revision,
+        payload_json, observed_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'detail-page', 0,
+        ${`target-event-${fixture.suffix}`}, ${"a".repeat(64)}, 'upsert',
+        ${`vendor-${fixture.suffix}`}, 'source-1', '{}', ${occurredAt}
+      )`
+      yield* sql`INSERT INTO plugin_sync_pages (
+        workspace_id, plugin_connection_id, stream_key, page_id, expected_revision,
+        page_digest, checkpoint_digest, timeline_event_digest, event_count, committed_at
+      ) VALUES
+        (${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'sibling-page', 1,
+          ${"b".repeat(64)}, ${"c".repeat(64)},
+          ${fixture.suffix === "payments" ? "e".repeat(64) : "f".repeat(64)}, 1, ${occurredAt}),
+        (${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'batch-only-page', 2,
+          ${"d".repeat(64)}, ${"e".repeat(64)},
+          ${fixture.suffix === "payments" ? "0".repeat(64) : "1".repeat(64)}, 0, ${occurredAt})`
+      yield* sql`INSERT INTO plugin_sync_evidence (
+        workspace_id, plugin_connection_id, stream_key, page_id, ordinal,
+        event_id, event_digest, event_kind, record_key, source_revision,
+        payload_json, observed_at
+      ) VALUES (
+        ${fixture.workspaceId}, ${connectionId}, 'timeline-detail', 'sibling-page', 0,
+        ${`sibling-event-${fixture.suffix}`}, ${"f".repeat(64)}, 'upsert',
+        ${`vendor-sibling-${fixture.suffix}`}, 'source-1', '{}', ${occurredAt}
       )`
 
       yield* sql`INSERT INTO delivery_nodes (
@@ -357,7 +392,7 @@ describe("TimelineRepository", () => {
       }
       const paymentsEntityId = paymentsWorkspace.entityId
       const identityEntityId = identityWorkspace.entityId
-      const absentEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-00000000014c")
+      const siblingEntityId = paymentsWorkspace.siblingEntityId
 
       const payments = yield* repository.page({
         actorKind: null,
@@ -373,22 +408,30 @@ describe("TimelineRepository", () => {
         [
           `audit:${detailAuditEventId}`,
           `domain:${detailDomainEventId}`,
-          `relationship:${detailRelationshipEventDigest}`
+          `relationship:${detailRelationshipEventDigest}`,
+          `sync:${detailSyncEventDigest}`
         ].sort()
       )
       assert.isTrue(payments.every(({ entityId }) => entityId === paymentsEntityId))
-      assert.isFalse(payments.some(({ sourceKind }) => sourceKind === "plugin-sync"))
+      assert.deepStrictEqual(
+        payments.filter(({ sourceKind }) => sourceKind === "plugin-sync").map(({ eventKey }) => eventKey),
+        [`sync:${detailSyncEventDigest}`]
+      )
 
-      const absent = yield* repository.page({
+      const sibling = yield* repository.page({
         actorKind: null,
         before: null,
-        entityId: absentEntityId,
+        entityId: siblingEntityId,
         from: null,
         limit: 20,
         to: null,
         workspaceId: paymentsWorkspace.workspaceId
       })
-      assert.deepStrictEqual(absent, [])
+      assert.deepStrictEqual(
+        sibling.map(({ eventKey }) => eventKey),
+        [`sync:${"e".repeat(64)}`]
+      )
+      assert.isTrue(sibling.every(({ entityId }) => entityId === siblingEntityId))
 
       const identity = yield* repository.page({
         actorKind: null,
@@ -399,7 +442,7 @@ describe("TimelineRepository", () => {
         to: null,
         workspaceId: identityWorkspace.workspaceId
       })
-      assert.lengthOf(identity, 3)
+      assert.lengthOf(identity, 4)
       assert.isTrue(identity.every(({ entityId }) => entityId === identityEntityId))
     })))
 

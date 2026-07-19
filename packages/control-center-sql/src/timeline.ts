@@ -81,6 +81,21 @@ const pluginConnections = table("pluginConnections", {
   displayName: Column.text()
 })
 
+const pluginSyncEvidence = table("pluginSyncEvidence", {
+  workspaceId: Column.text(),
+  pluginConnectionId: Column.text(),
+  streamKey: Column.text(),
+  pageId: Column.text(),
+  recordKey: Column.text()
+})
+
+const entities = table("entities", {
+  workspaceId: Column.text(),
+  entityId: Column.text(),
+  pluginConnectionId: Column.text(),
+  vendorImmutableId: Column.text()
+})
+
 const relationshipRevisions = table("relationshipRevisions", {
   workspaceId: Column.text(),
   relationshipId: Column.text(),
@@ -206,6 +221,32 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
         Query.lt(eventKey, input.before.eventKey)
       )
     )
+  const attributableEntity = input.entityId === null
+    ? null
+    : Query.select({ entityId: entities.entityId }).pipe(
+      Query.from(entities),
+      Query.innerJoin(
+        pluginSyncEvidence,
+        Query.and(
+          Query.eq(pluginSyncEvidence.workspaceId, entities.workspaceId),
+          Query.eq(pluginSyncEvidence.pluginConnectionId, entities.pluginConnectionId),
+          Query.eq(pluginSyncEvidence.recordKey, entities.vendorImmutableId)
+        )
+      ),
+      Query.where(
+        Query.and(
+          Query.eq(entities.workspaceId, input.workspaceId),
+          Query.eq(entities.entityId, input.entityId),
+          Query.eq(pluginSyncEvidence.workspaceId, pluginSyncPages.workspaceId),
+          Query.eq(pluginSyncEvidence.pluginConnectionId, pluginSyncPages.pluginConnectionId),
+          Query.eq(pluginSyncEvidence.streamKey, pluginSyncPages.streamKey),
+          Query.eq(pluginSyncEvidence.pageId, pluginSyncPages.pageId)
+        )
+      )
+    )
+  const entityPredicate = attributableEntity === null
+    ? Query.eq(1, 1)
+    : Query.exists(attributableEntity)
   const plan = Query.select({
     eventKey,
     occurredAt: pluginSyncPages.committedAt,
@@ -216,7 +257,7 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
     sourceKind: Query.literal("plugin-sync"),
     service: pluginConnections.providerId,
     releaseId: nullText,
-    entityId: nullText,
+    entityId: input.entityId === null ? nullText : Query.literal(input.entityId),
     actionId: nullText,
     relationshipId: nullText,
     pluginConnectionId: pluginSyncPages.pluginConnectionId,
@@ -234,6 +275,7 @@ const syncQuery = (input: TimelineQueryInput): RenderedTimelineQuery => {
       Query.and(
         Query.eq(pluginSyncPages.workspaceId, input.workspaceId),
         eventPredicate,
+        entityPredicate,
         fromPredicate,
         toPredicate,
         cursorPredicate
@@ -395,7 +437,7 @@ export const renderTimelineQueries = (input: TimelineQueryInput): ReadonlyArray<
   if (input.actorKind !== "plugin") {
     queries.push(auditQuery(input), relationshipQuery(input))
   }
-  if (input.entityId === null && (input.actorKind === null || input.actorKind === "plugin")) {
+  if (input.actorKind === null || input.actorKind === "plugin") {
     queries.push(syncQuery(input))
   }
   if (input.actorKind === null || input.actorKind === "system") {

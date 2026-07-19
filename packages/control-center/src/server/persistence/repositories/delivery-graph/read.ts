@@ -8,7 +8,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 import { derivePersonInitials, PersonAvatar, Role } from "../../../../domain/actors.js"
-import { LedgerRevision } from "../../../../domain/deliveryGraph.js"
+import { type DeliveryNode, type DeliveryRelationship, LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
 import { Database } from "../../Database.js"
@@ -398,6 +398,46 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     }
   })
 
+  const hydrateRelationshipClosure = Effect.fn(
+    "DeliveryGraphRepository.hydrateRelationshipClosure"
+  )(function*(
+    workspaceId: WorkspaceId,
+    candidateRelationships: ReadonlyArray<DeliveryRelationship>,
+    bounds: { readonly relationships: number; readonly nodes: number; readonly evidenceClaims: number },
+    projectionPolicy: (nodes: ReadonlyArray<DeliveryNode>) => ReadonlyArray<EntityId>
+  ) {
+    const bounded = selectBoundedRelationshipClosure(candidateRelationships, bounds)
+    const relationships = bounded.relationships
+    const nodeIds = Array.from(
+      new Set(relationships.flatMap(({ sourceNodeId, targetNodeId }) => [sourceNodeId, targetNodeId]))
+    )
+    const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
+    const entityProjections = yield* Effect.forEach(
+      projectionPolicy(nodes),
+      (entityId) => loadProjection(workspaceId, entityId, null)
+    )
+    const claimIds = Array.from(
+      new Set(relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds))
+    )
+    const evidenceClaims = yield* Effect.forEach(
+      claimIds,
+      (evidenceClaimId) => loadClaim(workspaceId, evidenceClaimId)
+    )
+    const evidenceIds = Array.from(new Set(evidenceClaims.map(({ evidenceId }) => evidenceId)))
+    const evidenceItems = yield* Effect.forEach(
+      evidenceIds,
+      (evidenceId) => loadEvidence(workspaceId, evidenceId)
+    )
+    return {
+      entityProjections,
+      evidenceClaims,
+      evidenceItems,
+      nodes,
+      relationships,
+      truncated: bounded.truncated
+    }
+  })
+
   const readDecoded = Effect.fn("DeliveryGraphRepository.readDecoded")(function*(
     workspaceId: WorkspaceId,
     query: DeliveryGraphQuery
@@ -461,39 +501,20 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           identityRows.slice(0, query.limit),
           ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
         )
-        const bounded = selectBoundedRelationshipClosure(candidateRelationships, {
+        const closure = yield* hydrateRelationshipClosure(workspaceId, candidateRelationships, {
           relationships: query.limit,
           nodes: 200,
           evidenceClaims: 200
+        }, (nodes) => {
+          const relatedEntityIds = new Set<EntityId>()
+          for (const node of nodes) {
+            if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") continue
+            if (node.resolution.target.entityId !== query.entityId) {
+              relatedEntityIds.add(node.resolution.target.entityId)
+            }
+          }
+          return [...relatedEntityIds]
         })
-        const relationships = bounded.relationships
-        const nodeIds = Array.from(
-          new Set(relationships.flatMap(({ sourceNodeId, targetNodeId }) => [
-            sourceNodeId,
-            targetNodeId
-          ]))
-        )
-        const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
-        const relatedEntityIds = Array.from(
-          new Set(nodes.flatMap((node): ReadonlyArray<EntityId> => {
-            if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") return []
-            return node.resolution.target.entityId === query.entityId ? [] : [node.resolution.target.entityId]
-          }))
-        )
-        const relatedEntityProjections = yield* Effect.forEach(
-          relatedEntityIds,
-          (entityId) => loadProjection(workspaceId, entityId, null)
-        )
-        const claimIds = Array.from(new Set(relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)))
-        const evidenceClaims = yield* Effect.forEach(
-          claimIds,
-          (evidenceClaimId) => loadClaim(workspaceId, evidenceClaimId)
-        )
-        const evidenceIds = Array.from(new Set(evidenceClaims.map(({ evidenceId }) => evidenceId)))
-        const evidenceItems = yield* Effect.forEach(
-          evidenceIds,
-          (evidenceId) => loadEvidence(workspaceId, evidenceId)
-        )
         return DeliveryGraphReadResult.make({
           _tag: "entitySlice",
           value: {
@@ -505,12 +526,12 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               releaseMembershipsTruncated,
               ...projection
             },
-            truncated: identityRows.length > query.limit || bounded.truncated,
-            nodes,
-            relatedEntityProjections,
-            relationships,
-            evidenceClaims,
-            evidenceItems
+            truncated: identityRows.length > query.limit || closure.truncated,
+            nodes: closure.nodes,
+            relatedEntityProjections: closure.entityProjections,
+            relationships: closure.relationships,
+            evidenceClaims: closure.evidenceClaims,
+            evidenceItems: closure.evidenceItems
           }
         })
       }
@@ -544,60 +565,34 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           identities.slice(0, query.limit),
           ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
         )
-        const bounded = selectBoundedRelationshipClosure(candidateRelationships, {
+        const closure = yield* hydrateRelationshipClosure(workspaceId, candidateRelationships, {
           relationships: query.limit,
           nodes: 500,
           evidenceClaims: 500
-        })
-        const relationships = bounded.relationships
-        const nodeIds = Array.from(
-          new Set(relationships.flatMap((relationship) => [
-            relationship.sourceNodeId,
-            relationship.targetNodeId
-          ]))
-        )
-        const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
-        const entityProjections = yield* Effect.forEach(
-          nodes.filter((node) => node.resolution._tag === "resolved" && node.resolution.target._tag === "entity"),
-          (node) => {
-            if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") {
-              return Effect.die("unreachable delivery-node narrowing")
-            }
-            return loadProjection(workspaceId, node.resolution.target.entityId, null)
-          }
-        )
-        const claimIds = Array.from(
-          new Set(
-            relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds)
-          )
-        )
-        const evidenceClaims = yield* Effect.forEach(
-          claimIds,
-          (evidenceClaimId) => loadClaim(workspaceId, evidenceClaimId)
-        )
-        const evidenceIds = Array.from(new Set(evidenceClaims.map(({ evidenceId }) => evidenceId)))
-        const evidenceItems = yield* Effect.forEach(
-          evidenceIds,
-          (evidenceId) => loadEvidence(workspaceId, evidenceId)
-        )
+        }, (nodes) =>
+          nodes.flatMap((node): ReadonlyArray<EntityId> => {
+            if (node.resolution._tag !== "resolved" || node.resolution.target._tag !== "entity") return []
+            return [node.resolution.target.entityId]
+          }))
         return DeliveryGraphReadResult.make({
           _tag: "releaseSlice",
           value: {
             releaseId: query.releaseId,
             environmentId: query.environmentId,
-            truncated: identities.length > query.limit || bounded.truncated,
-            nodes,
-            entityProjections,
-            relationships,
-            evidenceClaims,
-            evidenceItems
+            truncated: identities.length > query.limit || closure.truncated,
+            nodes: closure.nodes,
+            entityProjections: closure.entityProjections,
+            relationships: closure.relationships,
+            evidenceClaims: closure.evidenceClaims,
+            evidenceItems: closure.evidenceItems
           }
         })
       }
       case "workspaceEntityProjections": {
         const rowLimit = query.limit + 1
         const ownerRole = sql`assignment.role IN (
-          'change-owner', 'issue-owner', 'issue-assignee', 'page-owner', 'author', 'operator'
+          'change-owner', 'issue-owner', 'issue-assignee', 'page-owner', 'author', 'operator',
+          'contributor', 'reviewer', 'watcher', 'deployment-approver', 'merge-approver'
         )`
         const activeOwner = sql`assignment.workspace_id = projection.workspace_id
           AND assignment.entity_id = projection.entity_id
