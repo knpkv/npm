@@ -12,9 +12,11 @@ const resource = {
 
 const activation = Config.all({
   disabled: Config.boolean("OTEL_SDK_DISABLED").pipe(Config.withDefault(false)),
+  logsEndpoint: Config.string("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.withDefault("")),
   logsExporters: Config.string("OTEL_LOGS_EXPORTER").pipe(Config.withDefault("")),
   logsProtocol: Config.string("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL").pipe(Config.withDefault("")),
   protocol: Config.string("OTEL_EXPORTER_OTLP_PROTOCOL").pipe(Config.withDefault("http/protobuf")),
+  tracesEndpoint: Config.string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").pipe(Config.withDefault("")),
   tracesExporters: Config.string("OTEL_TRACES_EXPORTER").pipe(Config.withDefault("")),
   tracesProtocol: Config.string("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL").pipe(Config.withDefault(""))
 })
@@ -29,10 +31,20 @@ type OtlpSignal = "logs" | "traces"
 class ObservabilityConfigurationError extends Schema.TaggedErrorClass<ObservabilityConfigurationError>()(
   "ObservabilityConfigurationError",
   {
-    reason: Schema.Literal("unsupported-protocol"),
+    reason: Schema.Literals(["invalid-endpoint", "unsupported-protocol"]),
     signal: Schema.Literals(["logs", "traces"])
   }
 ) {}
+
+const validateSignalEndpoint = Effect.fn("ControlCenterObservability.validateSignalEndpoint")(function*(
+  signal: OtlpSignal,
+  endpoint: string
+) {
+  if (endpoint === "") return
+  yield* Schema.decodeUnknownEffect(Schema.URLFromString)(endpoint).pipe(
+    Effect.mapError(() => new ObservabilityConfigurationError({ reason: "invalid-endpoint", signal }))
+  )
+})
 
 const resolveProtocol = Effect.fn("ControlCenterObservability.resolveProtocol")(function*(
   signal: OtlpSignal,
@@ -70,6 +82,8 @@ export const controlCenterTelemetryLayer = Effect.gen(function*() {
 
   const logsEnabled = includesOtlp(configured.logsExporters)
   const tracesEnabled = includesOtlp(configured.tracesExporters)
+  if (logsEnabled) yield* validateSignalEndpoint("logs", configured.logsEndpoint)
+  if (tracesEnabled) yield* validateSignalEndpoint("traces", configured.tracesEndpoint)
   const logsProtocol = logsEnabled
     ? yield* resolveProtocol("logs", configured.logsProtocol, configured.protocol)
     : "http/protobuf"

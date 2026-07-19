@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Metric from "effect/Metric"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import type { HttpClientError, HttpClientRequest } from "effect/unstable/http"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 
@@ -91,6 +92,10 @@ describe("Control Center observability", () => {
 
       assert.include(urls, "http://127.0.0.1:43110/ingest/otlp/v1/logs/control-center")
       assert.include(urls, "http://127.0.0.1:43110/ingest/otlp/v1/traces/control-center")
+      assert.isTrue(urls.every((url) =>
+        url === "http://127.0.0.1:43110/ingest/otlp/v1/logs/control-center" ||
+        url === "http://127.0.0.1:43110/ingest/otlp/v1/traces/control-center"
+      ))
     }).pipe(
       Effect.provide(
         testLayer({
@@ -180,9 +185,30 @@ describe("Control Center observability", () => {
       assert.deepStrictEqual(yield* capturedRequests.requests, [])
     }).pipe(
       Effect.provide(testLayer({
-        OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url"
+        OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+        OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "also-not-a-url",
+        OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "still-not-a-url"
       }))
     ))
+
+  it.effect("rejects malformed signal-specific endpoints while their exporters are active", () =>
+    Effect.gen(function*() {
+      const fixtures: ReadonlyArray<Readonly<Record<string, string>>> = [
+        {
+          OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "not-a-url",
+          OTEL_LOGS_EXPORTER: "otlp"
+        },
+        {
+          OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: "not-a-url",
+          OTEL_TRACES_EXPORTER: "otlp"
+        }
+      ]
+
+      for (const environment of fixtures) {
+        const result = yield* Layer.build(testLayer(environment)).pipe(Effect.scoped, Effect.result)
+        assert.isTrue(Result.isFailure(result))
+      }
+    }))
 
   it.effect("ignores malformed endpoints when the OpenTelemetry SDK is disabled", () =>
     Effect.gen(function*() {

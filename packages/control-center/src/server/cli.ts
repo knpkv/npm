@@ -4,12 +4,14 @@ import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 
@@ -134,92 +136,101 @@ const program = Effect.scoped(
       return
     }
 
-    const configured = yield* serverConfiguration
-    const agentProviders = yield* Schema.decodeUnknownEffect(Schema.Array(AgentProvider).check(Schema.isUnique()))(
-      commaSeparated(configured.agentProviders)
-    )
-    const agentCwd = agentProviders.length === 0
-      ? null
-      : yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))(
-        configured.agentCwd
+    const programScope = yield* Effect.scope
+    const observabilityScope = yield* Scope.fork(programScope)
+    const observabilityServices = yield* Layer.buildWithScope(ControlCenterObservabilityLive, observabilityScope)
+    return yield* Effect.gen(function*() {
+      const configured = yield* serverConfiguration
+      const agentProviders = yield* Schema.decodeUnknownEffect(Schema.Array(AgentProvider).check(Schema.isUnique()))(
+        commaSeparated(configured.agentProviders)
       )
-    const allowedHosts = commaSeparated(configured.allowedHosts)
-    const allowedOrigins = commaSeparated(configured.allowedOrigins)
-    const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
-    const hasDirectTlsInput = configured.directTlsCertificateRef.length > 0 ||
-      configured.directTlsPrivateKeyRef.length > 0
-    const bindConfig = yield* decodeBindConfig({
-      host: configured.host,
-      port: configured.port,
-      allowInsecureLan: configured.allowInsecureLan,
-      ...(configured.publicOrigin.length > 0 ? { publicOrigin: configured.publicOrigin } : {}),
-      ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
-      ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
-      ...(trustedProxyAddresses.length > 0 ? { trustedProxyAddresses } : {}),
-      ...(hasDirectTlsInput
-        ? {
-          directTls: {
-            certificateRef: configured.directTlsCertificateRef,
-            privateKeyRef: configured.directTlsPrivateKeyRef
-          }
-        }
-        : {})
-    })
-    const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
-    const services = yield* Layer.build(
-      makeControlCenterServer({
-        bindConfig,
-        firstPartyPluginRuntime: true,
-        bootstrap: {
-          owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
-          workspaceId: DEFAULT_WORKSPACE_ID,
-          workspaceName: WorkspaceName.make("Control Center")
-        },
-        persistenceConfig: dataPaths.persistenceConfig,
-        releaseAgent: agentCwd === null
-          ? null
-          : {
-            cwd: agentCwd,
-            enabledProviders: agentProviders,
-            ...(configured.agentCodexExecutable.length > 0
-              ? { codexExecutable: configured.agentCodexExecutable }
-              : {}),
-            ...(configured.agentCodexModel.length > 0 ? { codexModel: configured.agentCodexModel } : {}),
-            ...(configured.agentClaudeExecutable.length > 0
-              ? { claudeExecutable: configured.agentClaudeExecutable }
-              : {}),
-            ...(configured.agentClaudeModel.length > 0 ? { claudeModel: configured.agentClaudeModel } : {})
-          },
-        secretRoot: dataPaths.secretRoot,
-        staticAssets: { root: staticRoot }
-      })
-    )
-    const bootstrap = Context.get(services, ControlCenterBootstrap)
-    const lifecycle = Context.get(services, ServerLifecycle)
-
-    yield* writeStdoutLine(`Control Center listening at ${bindConfig.publicOrigin}`)
-    if (bootstrap._tag === "pairing-issued") {
-      yield* writeStdoutLine(`Pairing code: ${Redacted.value(bootstrap.pairingCode)}`)
-    } else if (bootstrap._tag === "already-initialized") {
-      yield* writeStdoutLine("Workspace ready. Use an existing paired browser.")
-    }
-    return yield* Effect.never.pipe(
-      Effect.onInterrupt(() =>
-        writeStdoutLine("Control Center draining.").pipe(
-          Effect.andThen(lifecycle.drainWithin("10 seconds")),
-          Effect.flatMap((result) => {
-            switch (result._tag) {
-              case "Drained":
-                return writeStdoutLine("Control Center drained.")
-              case "DeadlineExceeded":
-                return writeStderrLine("Control Center drain deadline reached.")
-              case "HooksFailed":
-                return writeStderrLine(`Control Center drain hooks failed: ${result.hookIds.join(", ")}.`)
+      const agentCwd = agentProviders.length === 0
+        ? null
+        : yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))(
+          configured.agentCwd
+        )
+      const allowedHosts = commaSeparated(configured.allowedHosts)
+      const allowedOrigins = commaSeparated(configured.allowedOrigins)
+      const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
+      const hasDirectTlsInput = configured.directTlsCertificateRef.length > 0 ||
+        configured.directTlsPrivateKeyRef.length > 0
+      const bindConfig = yield* decodeBindConfig({
+        host: configured.host,
+        port: configured.port,
+        allowInsecureLan: configured.allowInsecureLan,
+        ...(configured.publicOrigin.length > 0 ? { publicOrigin: configured.publicOrigin } : {}),
+        ...(allowedHosts.length > 0 ? { allowedHosts } : {}),
+        ...(allowedOrigins.length > 0 ? { allowedOrigins } : {}),
+        ...(trustedProxyAddresses.length > 0 ? { trustedProxyAddresses } : {}),
+        ...(hasDirectTlsInput
+          ? {
+            directTls: {
+              certificateRef: configured.directTlsCertificateRef,
+              privateKeyRef: configured.directTlsPrivateKeyRef
             }
-          })
+          }
+          : {})
+      })
+      const staticRoot = yield* path.fromFileUrl(new URL("../../client", import.meta.url))
+      const services = yield* Layer.build(
+        makeControlCenterServer({
+          bindConfig,
+          firstPartyPluginRuntime: true,
+          bootstrap: {
+            owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
+            workspaceId: DEFAULT_WORKSPACE_ID,
+            workspaceName: WorkspaceName.make("Control Center")
+          },
+          persistenceConfig: dataPaths.persistenceConfig,
+          releaseAgent: agentCwd === null
+            ? null
+            : {
+              cwd: agentCwd,
+              enabledProviders: agentProviders,
+              ...(configured.agentCodexExecutable.length > 0
+                ? { codexExecutable: configured.agentCodexExecutable }
+                : {}),
+              ...(configured.agentCodexModel.length > 0 ? { codexModel: configured.agentCodexModel } : {}),
+              ...(configured.agentClaudeExecutable.length > 0
+                ? { claudeExecutable: configured.agentClaudeExecutable }
+                : {}),
+              ...(configured.agentClaudeModel.length > 0 ? { claudeModel: configured.agentClaudeModel } : {})
+            },
+          secretRoot: dataPaths.secretRoot,
+          staticAssets: { root: staticRoot }
+        })
+      )
+      const bootstrap = Context.get(services, ControlCenterBootstrap)
+      const lifecycle = Context.get(services, ServerLifecycle)
+      yield* lifecycle.registerDrainHook({
+        hookId: "telemetry.otlp-export",
+        run: Scope.close(observabilityScope, Exit.void)
+      })
+
+      yield* writeStdoutLine(`Control Center listening at ${bindConfig.publicOrigin}`)
+      if (bootstrap._tag === "pairing-issued") {
+        yield* writeStdoutLine(`Pairing code: ${Redacted.value(bootstrap.pairingCode)}`)
+      } else if (bootstrap._tag === "already-initialized") {
+        yield* writeStdoutLine("Workspace ready. Use an existing paired browser.")
+      }
+      return yield* Effect.never.pipe(
+        Effect.onInterrupt(() =>
+          writeStdoutLine("Control Center draining.").pipe(
+            Effect.andThen(lifecycle.drainWithin("10 seconds")),
+            Effect.flatMap((result) => {
+              switch (result._tag) {
+                case "Drained":
+                  return writeStdoutLine("Control Center drained.")
+                case "DeadlineExceeded":
+                  return writeStderrLine("Control Center drain deadline reached.")
+                case "HooksFailed":
+                  return writeStderrLine(`Control Center drain hooks failed: ${result.hookIds.join(", ")}.`)
+              }
+            })
+          )
         )
       )
-    )
+    }).pipe(Effect.provide(observabilityServices))
   })
 )
 
@@ -281,7 +292,6 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
 
 NodeRuntime.runMain(
   program.pipe(
-    Effect.provide(ControlCenterObservabilityLive),
     Effect.catchCause(reportProgramFailure),
     Effect.provide(NodeServices.layer)
   ),

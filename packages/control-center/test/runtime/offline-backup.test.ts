@@ -167,6 +167,13 @@ const makePreparedRoot = Effect.fn("OfflineBackupTest.makePreparedRoot")(functio
   return { configured, configuredRoot, parent, prepared }
 })
 
+const inactiveTelemetryEnvironment = {
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf",
+  OTEL_LOGS_EXPORTER: "none",
+  OTEL_SDK_DISABLED: "false",
+  OTEL_TRACES_EXPORTER: "none"
+}
+
 const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
   cliEntry: string,
   args: ReadonlyArray<string>,
@@ -176,6 +183,7 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
 ) {
   const handle = yield* ChildProcess.make("node", [cliEntry, ...args], {
     env: {
+      ...inactiveTelemetryEnvironment,
       ...extraEnvironment,
       CONTROL_CENTER_DATA_ROOT: configuredDataRoot,
       ...(port === undefined ? {} : { CONTROL_CENTER_PORT: String(port) })
@@ -472,6 +480,7 @@ describe("offline backup commands", () => {
       const port = yield* acquireEphemeralPort
       const handle = yield* ChildProcess.make("node", [cliEntry], {
         env: {
+          ...inactiveTelemetryEnvironment,
           CONTROL_CENTER_DATA_ROOT: configuredRoot,
           CONTROL_CENTER_PORT: String(port)
         },
@@ -515,6 +524,225 @@ describe("offline backup commands", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
   it.effect(
+    "flushes OTLP before reporting the server drained",
+    () =>
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const parent = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-built-otel-drain-" })
+        const configuredRoot = path.join(parent, "data")
+        const flushSentinel = path.join(parent, "collector-flush-complete")
+        const cliEntry = yield* path.fromFileUrl(
+          new URL("../../dist/server/server/cli.js", import.meta.url)
+        )
+        assert.isTrue(
+          yield* fileSystem.exists(cliEntry),
+          "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
+        )
+
+        const collectorPort = yield* acquireEphemeralPort
+        const collectorScript = `
+          import { writeFileSync } from "node:fs"
+          import { createServer } from "node:http"
+          import { argv } from "node:process"
+
+          const server = createServer((request, response) => {
+            request.resume()
+            request.on("end", () => {
+              console.log("REQUEST_RECEIVED")
+              setTimeout(() => {
+                writeFileSync(argv[2], "flushed")
+                response.writeHead(200, { "content-type": "application/json" })
+                response.end("{}")
+                console.log("RESPONSE_SENT")
+              }, 250)
+            })
+          })
+          server.listen(Number(argv[1]), "127.0.0.1", () => console.log("READY"))
+        `
+        const collector = yield* ChildProcess.make(
+          "node",
+          [
+            "--no-warnings",
+            "--input-type=module",
+            "--eval",
+            collectorScript,
+            String(collectorPort),
+            flushSentinel
+          ]
+        )
+        yield* Effect.addFinalizer(() => collector.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore))
+        const collectorOutput = yield* Ref.make("")
+        const collectorError = yield* Ref.make("")
+        const collectorReady = yield* Deferred.make<void>()
+        const collectorStdoutFiber = yield* collector.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) =>
+            Ref.updateAndGet(collectorOutput, (current) => current + chunk).pipe(
+              Effect.flatMap((current) =>
+                current.includes("READY") ? Deferred.succeed(collectorReady, undefined) : Effect.void
+              )
+            )
+          ),
+          Effect.forkScoped
+        )
+        const collectorStderrFiber = yield* collector.stderr.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) => Ref.update(collectorError, (current) => current + chunk)),
+          Effect.forkScoped
+        )
+        yield* Deferred.await(collectorReady).pipe(Effect.timeout("5 seconds"))
+
+        const serverPort = yield* acquireEphemeralPort
+        const server = yield* ChildProcess.make("node", [cliEntry], {
+          env: {
+            ...inactiveTelemetryEnvironment,
+            CONTROL_CENTER_DATA_ROOT: configuredRoot,
+            CONTROL_CENTER_PORT: String(serverPort),
+            OTEL_BSP_EXPORT_TIMEOUT: "1000",
+            OTEL_BSP_MAX_EXPORT_BATCH_SIZE: "512",
+            OTEL_BSP_SCHEDULE_DELAY: "60000",
+            OTEL_EXPORTER_OTLP_PROTOCOL: "http/json",
+            OTEL_EXPORTER_OTLP_TRACES_ENDPOINT: `http://127.0.0.1:${collectorPort}/v1/traces`,
+            OTEL_TRACES_EXPORTER: "otlp"
+          },
+          extendEnv: true
+        })
+        yield* Effect.addFinalizer(() => server.kill({ killSignal: "SIGKILL" }).pipe(Effect.ignore))
+        const stdout = yield* Ref.make("")
+        const stderr = yield* Ref.make("")
+        const listening = yield* Deferred.make<void>()
+        const drained = yield* Deferred.make<void>()
+        const drainedAfterFlush = yield* Ref.make<boolean | null>(null)
+        const stdoutFiber = yield* server.stdout.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) =>
+            Effect.gen(function*() {
+              const current = yield* Ref.updateAndGet(stdout, (output) => output + chunk)
+              if (current.includes("Control Center listening at")) {
+                yield* Deferred.succeed(listening, undefined)
+              }
+              if (current.includes("Control Center drained.") && (yield* Ref.get(drainedAfterFlush)) === null) {
+                yield* Ref.set(drainedAfterFlush, yield* fileSystem.exists(flushSentinel))
+                yield* Deferred.succeed(drained, undefined)
+              }
+            })
+          ),
+          Effect.forkScoped
+        )
+        const stderrFiber = yield* server.stderr.pipe(
+          Stream.decodeText(),
+          Stream.runForEach((chunk) => Ref.update(stderr, (current) => current + chunk)),
+          Effect.forkScoped
+        )
+
+        yield* Deferred.await(listening).pipe(Effect.timeout("15 seconds"))
+        const request = yield* ChildProcess.make(
+          "curl",
+          [
+            "--fail",
+            "--max-time",
+            "5",
+            "--output",
+            "/dev/null",
+            "--silent",
+            `http://127.0.0.1:${serverPort}`
+          ]
+        )
+        const [requestError, requestExitCode] = yield* Effect.all([
+          request.stderr.pipe(Stream.decodeText(), Stream.runFold(() => "", (output, chunk) => output + chunk)),
+          request.exitCode
+        ], { concurrency: "unbounded" })
+        assert.strictEqual(requestExitCode, ChildProcessSpawner.ExitCode(0), requestError)
+        assert.notInclude(yield* Ref.get(collectorOutput), "REQUEST_RECEIVED")
+
+        const terminateFiber = yield* server.kill({ killSignal: "SIGTERM" }).pipe(Effect.forkChild)
+        yield* Deferred.await(drained).pipe(Effect.timeout("5 seconds"))
+        const exitCode = yield* server.exitCode
+        yield* Fiber.join(terminateFiber)
+        yield* Fiber.join(stdoutFiber)
+        yield* Fiber.join(stderrFiber)
+
+        yield* collector.kill({ killSignal: "SIGTERM" })
+        yield* collector.exitCode.pipe(Effect.result)
+        yield* Fiber.join(collectorStdoutFiber)
+        yield* Fiber.join(collectorStderrFiber)
+        const serverError = yield* Ref.get(stderr)
+        const capturedCollectorOutput = yield* Ref.get(collectorOutput)
+
+        assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(130), serverError)
+        assert.strictEqual(yield* Ref.get(drainedAfterFlush), true)
+        assert.include(capturedCollectorOutput, "REQUEST_RECEIVED")
+        assert.include(capturedCollectorOutput, "RESPONSE_SENT")
+        assert.strictEqual(serverError, "")
+        assert.strictEqual(yield* Ref.get(collectorError), "")
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    { timeout: 30_000 }
+  )
+
+  it.effect(
+    "keeps usage and offline backup commands independent from active OTLP configuration",
+    () =>
+      Effect.gen(function*() {
+        const { configured, configuredRoot, parent } = yield* makePreparedRoot(
+          "control-center-built-otel-command-scope-"
+        )
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const cliEntry = yield* path.fromFileUrl(
+          new URL("../../dist/server/server/cli.js", import.meta.url)
+        )
+        assert.isTrue(
+          yield* fileSystem.exists(cliEntry),
+          "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
+        )
+        const source = yield* resolvePreparedControlCenterDataRoot(configured)
+        const archiveRoot = path.join(parent, "archive")
+        yield* createOfflineVerifiedBackup({
+          destination: archiveRoot,
+          persistenceConfig: source.persistenceConfig
+        })
+        const invalidActiveTelemetry = {
+          OTEL_EXPORTER_OTLP_PROTOCOL: "grpc",
+          OTEL_LOGS_EXPORTER: "otlp",
+          OTEL_SDK_DISABLED: "false"
+        }
+
+        const verified = yield* runBuiltCli(
+          cliEntry,
+          ["verify-backup", archiveRoot],
+          configuredRoot,
+          undefined,
+          invalidActiveTelemetry
+        )
+        assert.strictEqual(verified.exitCode, ChildProcessSpawner.ExitCode(0))
+        assert.strictEqual(verified.stdout, "Backup verified.\n")
+        assert.strictEqual(verified.stderr, "")
+
+        const unsupported = yield* runBuiltCli(
+          cliEntry,
+          ["unsupported"],
+          configuredRoot,
+          undefined,
+          invalidActiveTelemetry
+        )
+        assert.strictEqual(unsupported.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.strictEqual(unsupported.stdout, "")
+        assert.strictEqual(
+          unsupported.stderr,
+          "Usage: control-center [recover-owner | backup <archive> | verify-backup <archive> | restore <archive>]\n"
+        )
+
+        const server = yield* runBuiltCli(cliEntry, [], configuredRoot, undefined, invalidActiveTelemetry)
+        assert.strictEqual(server.exitCode, ChildProcessSpawner.ExitCode(1))
+        assert.strictEqual(server.stdout, "")
+        assert.include(server.stderr, "Control Center command failed")
+        assert.notInclude(server.stderr, "grpc")
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    { timeout: 30_000 }
+  )
+
+  it.effect(
     "reports active OTLP configuration failures without exposing configuration values",
     () =>
       Effect.gen(function*() {
@@ -530,7 +758,7 @@ describe("offline backup commands", () => {
         )
 
         const result = yield* runBuiltCli(cliEntry, [], configuredRoot, undefined, {
-          OTEL_EXPORTER_OTLP_ENDPOINT: "not-a-url",
+          OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: "not-a-url",
           OTEL_LOGS_EXPORTER: "otlp",
           OTEL_SDK_DISABLED: "false",
           OTEL_TRACES_EXPORTER: "none"
