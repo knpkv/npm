@@ -118,7 +118,8 @@ export interface AtlassianOAuthGrantOperations {
   readonly start: (
     owner: AtlassianOAuthGrantOwner,
     publicOrigin: string,
-    providers: AtlassianOAuthProviderIntent
+    providers: AtlassianOAuthProviderIntent,
+    configuration?: OAuthConfig
   ) => Effect.Effect<AtlassianOAuthGrantStartResponse, ApplicationConflict | ApplicationServiceUnavailable>
   readonly exchange: (
     owner: AtlassianOAuthGrantOwner,
@@ -150,6 +151,15 @@ interface AuthStoreWritePlan {
   readonly storeName: string
 }
 
+type AuthStoreWriteDecision =
+  | { readonly _tag: "ready"; readonly plan: AuthStoreWritePlan }
+  | { readonly _tag: "stale-config" }
+
+interface ConfiguredOAuth {
+  readonly config: OAuthConfig
+  readonly didReplace: boolean
+}
+
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
 const isExpired = (grant: PendingGrant, nowMilliseconds: number): boolean =>
@@ -178,13 +188,40 @@ const preservesStoredScopes = (stored: OAuthToken, replacement: OAuthToken): boo
 }
 
 const loadSharedOAuthConfig = Effect.fn("AtlassianOAuthGrants.loadSharedOAuthConfig")(function*() {
-  const [jiraConfig, confluenceConfig] = yield* Effect.all([
-    loadOAuthConfig(JIRA_AUTH_STORE_NAME),
-    loadOAuthConfig(CONFLUENCE_AUTH_STORE_NAME)
+  const [controlCenterConfig, controlCenterProfiles, jiraConfig, confluenceConfig] = yield* Effect.all(
+    [
+      loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME),
+      loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME),
+      loadOAuthConfig(JIRA_AUTH_STORE_NAME),
+      loadOAuthConfig(CONFLUENCE_AUTH_STORE_NAME)
+    ],
+    { concurrency: 1 }
+  )
+  if (controlCenterConfig !== null && controlCenterProfiles.profiles.length > 0) {
+    return { config: controlCenterConfig, didReplace: false } satisfies ConfiguredOAuth
+  }
+  if (jiraConfig === null || confluenceConfig === null || !sameOAuthConfig(jiraConfig, confluenceConfig)) return null
+  const didReplace = controlCenterConfig !== null && !sameOAuthConfig(controlCenterConfig, jiraConfig)
+  if (didReplace) yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, jiraConfig)
+  return { config: jiraConfig, didReplace } satisfies ConfiguredOAuth
+})
+
+const configureControlCenterOAuth = Effect.fn("AtlassianOAuthGrants.configureControlCenterOAuth")(function*(
+  configuration: OAuthConfig
+) {
+  const [currentConfig, profiles] = yield* Effect.all([
+    loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME),
+    loadProfiles(CONTROL_CENTER_AUTH_STORE_NAME)
   ], { concurrency: 1 })
-  return jiraConfig !== null && confluenceConfig !== null && sameOAuthConfig(jiraConfig, confluenceConfig)
-    ? jiraConfig
-    : null
+  if (currentConfig !== null) {
+    if (sameOAuthConfig(currentConfig, configuration)) return { config: currentConfig, didReplace: false }
+    if (profiles.profiles.length > 0) return yield* new ApplicationConflict()
+    yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, configuration)
+    return { config: configuration, didReplace: true }
+  }
+  if (profiles.profiles.length > 0) return yield* unavailable()
+  yield* saveOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME, configuration)
+  return { config: configuration, didReplace: false }
 })
 
 const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(function*(
@@ -197,7 +234,10 @@ const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(
     loadProfiles(storeName)
   ], { concurrency: 1 })
   const hasMatchingConfig = currentConfig !== null && sameOAuthConfig(currentConfig, sharedConfig)
-  if (profiles.profiles.length > 0 && !hasMatchingConfig) return yield* unavailable()
+  if (currentConfig !== null && !hasMatchingConfig) {
+    return { _tag: "stale-config" } satisfies AuthStoreWriteDecision
+  }
+  if (profiles.profiles.length > 0 && currentConfig === null) return yield* unavailable()
   const existingProfile = profiles.profiles.find((profile) => profile.id === profileIdFromToken(token))
   if (existingProfile === undefined && profiles.profiles.length >= MAXIMUM_CANONICAL_PROFILES) {
     return yield* unavailable()
@@ -206,9 +246,12 @@ const planAuthStoreWrite = Effect.fn("AtlassianOAuthGrants.planAuthStoreWrite")(
     return yield* unavailable()
   }
   return {
-    storeName,
-    shouldWriteConfig: !hasMatchingConfig
-  } satisfies AuthStoreWritePlan
+    _tag: "ready",
+    plan: {
+      storeName,
+      shouldWriteConfig: !hasMatchingConfig
+    }
+  } satisfies AuthStoreWriteDecision
 })
 
 const takeSiteSelectionGrant = Effect.fn("AtlassianOAuthGrants.takeSiteSelectionGrant")(function*(
@@ -416,12 +459,30 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const start: AtlassianOAuthGrantOperations["start"] = Effect.fn("AtlassianOAuthGrants.start")(function*(
     owner,
     publicOrigin,
-    providers
+    providers,
+    configuration
   ) {
     const redirectUri = callbackUrl(publicOrigin)
-    const config = yield* loadSharedOAuthConfig().pipe(
+    const config = yield* profileStoreLock.withPermit(
+      Effect.gen(function*() {
+        const configured = configuration === undefined
+          ? yield* loadSharedOAuthConfig()
+          : yield* configureControlCenterOAuth(configuration)
+        if (configured === null) return null
+        if (configured.didReplace) {
+          const nowMilliseconds = yield* Clock.currentTimeMillis
+          yield* Ref.update(grants, (current) =>
+            new Map(
+              [...activeGrants(current, nowMilliseconds)].filter(([, grant]) =>
+                sameOAuthConfig(grant.config, configured.config)
+              )
+            ))
+        }
+        return configured.config
+      })
+    ).pipe(
       Effect.provide(localStorageLayer),
-      Effect.mapError(unavailable)
+      Effect.mapError((error) => error._tag === "ApplicationConflict" ? error : unavailable())
     )
     if (config === null) return { _tag: "configuration-required", callbackUrl: redirectUri }
 
@@ -546,11 +607,13 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     const token = tokenForSite(pending.tokens, pending.tokenExpiresAtMilliseconds, pending.user, site)
     const profile = yield* profileStoreLock.withPermit(
       Effect.gen(function*() {
-        const plan = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config, token).pipe(
+        const decision = yield* planAuthStoreWrite(CONTROL_CENTER_AUTH_STORE_NAME, pending.config, token).pipe(
           Effect.provide(localStorageLayer),
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
           Effect.mapError(unavailable)
         )
+        if (decision._tag === "stale-config") return yield* new ApplicationResourceNotFound()
+        const plan = decision.plan
         const snapshots = yield* Effect.forEach([CONTROL_CENTER_AUTH_STORE_NAME], captureAuthStore).pipe(
           Effect.provide(localStorageLayer),
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),

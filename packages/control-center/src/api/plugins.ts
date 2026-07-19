@@ -325,9 +325,19 @@ export const AtlassianOAuthProviderIntent = Schema.Array(AtlassianOAuthProvider)
 /** Decoded one- or two-product Atlassian OAuth intent. */
 export type AtlassianOAuthProviderIntent = typeof AtlassianOAuthProviderIntent.Type
 
+/** OAuth app credentials entered once in Control Center and retained only by its server. */
+export const AtlassianOAuthClientConfiguration = Schema.Struct({
+  clientId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500)),
+  clientSecret: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_SECRET_VALUE_LENGTH))
+}).annotate({ identifier: "AtlassianOAuthClientConfiguration" })
+
+/** Decoded local Atlassian OAuth app configuration. */
+export type AtlassianOAuthClientConfiguration = typeof AtlassianOAuthClientConfiguration.Type
+
 /** Owner request to start OAuth for the products currently being configured. */
 export const CreateAtlassianOAuthGrantRequest = Schema.Struct({
-  providers: AtlassianOAuthProviderIntent
+  providers: AtlassianOAuthProviderIntent,
+  configuration: Schema.optional(AtlassianOAuthClientConfiguration)
 }).annotate({ identifier: "CreateAtlassianOAuthGrantRequest" })
 
 /** Decoded owner request to start OAuth for the products currently being configured. */

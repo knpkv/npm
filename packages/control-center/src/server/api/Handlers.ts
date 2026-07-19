@@ -324,7 +324,8 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             return yield* startAtlassianOAuthGrant({
               workspaceId: session.workspaceId,
               sessionId: session.sessionId,
-              providers: payload.providers
+              providers: payload.providers,
+              ...(payload.configuration === undefined ? {} : { configuration: payload.configuration })
             }).pipe(Effect.catchTags({
               ApplicationConflict: mapApplicationConflict,
               ApplicationServiceUnavailable: mapApplicationUnavailable

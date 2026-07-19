@@ -3,6 +3,7 @@ import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "
 
 import type {
   AtlassianOAuthGrantStartResponse,
+  AtlassianOAuthClientConfiguration,
   AtlassianOAuthProviderIntent,
   AtlassianProfileDiscoveryResponse,
   DiscoveredAtlassianProfile,
@@ -53,7 +54,8 @@ export const AtlassianAccountSetupForm = ({
   readonly onCancel: () => void
   readonly onStartOAuth: (
     providers: AtlassianOAuthProviderIntent,
-    signal: AbortSignal
+    signal: AbortSignal,
+    configuration?: AtlassianOAuthClientConfiguration
   ) => Promise<AtlassianOAuthGrantStartResponse>
   readonly onSubmit: (drafts: ReadonlyArray<ServiceConnectionDraft>) => Promise<boolean>
   readonly profiles: AtlassianProfileDiscoveryResponse
@@ -76,6 +78,8 @@ export const AtlassianAccountSetupForm = ({
   const [apiToken, setApiToken] = useState("")
   const [isStartingOAuth, setIsStartingOAuth] = useState(false)
   const [oauthCallbackUrl, setOAuthCallbackUrl] = useState<string | null>(null)
+  const [oauthClientId, setOAuthClientId] = useState("")
+  const [oauthClientSecret, setOAuthClientSecret] = useState("")
   const [setupError, setSetupError] = useState<string | null>(null)
   const startRequest = useRef<AbortController | null>(null)
 
@@ -194,7 +198,7 @@ export const AtlassianAccountSetupForm = ({
     })
   }
 
-  const startOAuth = (): void => {
+  const startOAuth = (configuration?: AtlassianOAuthClientConfiguration): void => {
     if (setupIntent.requestedOAuthProviders === null) return
     setSetupError(null)
     setOAuthCallbackUrl(null)
@@ -202,7 +206,7 @@ export const AtlassianAccountSetupForm = ({
     startRequest.current?.abort()
     const request = new AbortController()
     startRequest.current = request
-    void onStartOAuth(setupIntent.requestedOAuthProviders, request.signal).then(
+    void onStartOAuth(setupIntent.requestedOAuthProviders, request.signal, configuration).then(
       (result) => {
         if (request.signal.aborted) return
         if (result._tag === "configuration-required") {
@@ -229,6 +233,15 @@ export const AtlassianAccountSetupForm = ({
         setIsStartingOAuth(false)
       }
     )
+  }
+
+  const configureOAuth = (): void => {
+    const clientId = oauthClientId.trim()
+    if (clientId.length === 0 || oauthClientSecret.length === 0) {
+      setSetupError("Add the Atlassian OAuth client ID and client secret.")
+      return
+    }
+    startOAuth({ clientId, clientSecret: oauthClientSecret })
   }
 
   const useApiToken = (): void => {
@@ -279,17 +292,45 @@ export const AtlassianAccountSetupForm = ({
           <Button
             disabled={setupIntent.requestedOAuthProviders === null}
             loading={isStartingOAuth}
-            onClick={startOAuth}
+            onClick={() => startOAuth()}
             type="button"
             variant="primary"
           >
             Sign in with Atlassian
           </Button>
           {oauthCallbackUrl === null ? null : (
-            <Text as="p" tone="secondary" variant="meta">
-              Add <code>{oauthCallbackUrl}</code> as the callback URL, then run <code>jira auth configure</code> and
-              <code> confluence auth configure</code> on this machine.
-            </Text>
+            <div className={styles.fallback}>
+              <Text as="p" tone="secondary" variant="meta">
+                Create an OAuth 2.0 integration in Atlassian Developer Console and add <code>{oauthCallbackUrl}</code>
+                as its callback URL. The credentials stay on this Control Center machine.
+              </Text>
+              <Field label="OAuth client ID" required size="compact">
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    autoComplete="off"
+                    maxLength={500}
+                    onChange={(event) => setOAuthClientId(event.currentTarget.value)}
+                    value={oauthClientId}
+                  />
+                )}
+              </Field>
+              <Field label="OAuth client secret" required size="compact">
+                {(controlProps) => (
+                  <input
+                    {...controlProps}
+                    autoComplete="off"
+                    maxLength={16_384}
+                    onChange={(event) => setOAuthClientSecret(event.currentTarget.value)}
+                    type="password"
+                    value={oauthClientSecret}
+                  />
+                )}
+              </Field>
+              <Button loading={isStartingOAuth} onClick={configureOAuth} type="button" variant="primary">
+                Save OAuth app and continue
+              </Button>
+            </div>
           )}
           <Field label="OAuth profile" required size="compact">
             {(controlProps) => (

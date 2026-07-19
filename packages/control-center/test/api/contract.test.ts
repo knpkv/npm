@@ -85,9 +85,21 @@ describe("ControlCenterApi contract", () => {
     assert.isTrue(isCreateGrantRequest({ providers: ["jira"] }))
     assert.isTrue(isCreateGrantRequest({ providers: ["confluence"] }))
     assert.isTrue(isCreateGrantRequest({ providers: ["jira", "confluence"] }))
+    assert.isTrue(isCreateGrantRequest({
+      providers: ["jira", "confluence"],
+      configuration: { clientId: "oauth-client", clientSecret: "oauth-secret" }
+    }))
     assert.isFalse(isCreateGrantRequest({ providers: [] }))
     assert.isFalse(isCreateGrantRequest({ providers: ["jira", "jira"] }))
     assert.isFalse(isCreateGrantRequest({ providers: ["jira", "bitbucket"] }))
+    assert.isFalse(isCreateGrantRequest({
+      providers: ["jira"],
+      configuration: { clientId: "", clientSecret: "oauth-secret" }
+    }))
+    assert.isFalse(isCreateGrantRequest({
+      providers: ["jira"],
+      configuration: { clientId: "oauth-client", clientSecret: "" }
+    }))
   })
 
   it("publishes stable error discriminators and HTTP statuses", () => {

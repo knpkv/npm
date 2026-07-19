@@ -1,7 +1,13 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
-import { HomeDirectoryLive, loadProfiles, type OAuthToken, saveProfileToken } from "@knpkv/atlassian-common/config"
+import {
+  HomeDirectoryLive,
+  loadOAuthConfig,
+  loadProfiles,
+  type OAuthToken,
+  saveProfileToken
+} from "@knpkv/atlassian-common/config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -145,6 +151,171 @@ const makeProductScopedProviderClient = (
   })
 
 describe("AtlassianOAuthGrants", () => {
+  it.effect("configures its own OAuth app without Jira or Confluence CLI stores", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-owned-atlassian-config-" })
+      const path = yield* Path.Path
+      const configHome = path.join(home, "config")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+
+      const missing = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(missing._tag, "configuration-required")
+
+      const configured = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira", "confluence"],
+        SHARED_OAUTH_CONFIG
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(configured._tag, "ready")
+      if (configured._tag !== "ready") return
+
+      const stored = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(stored, SHARED_OAUTH_CONFIG)
+
+      const failedExchange = yield* Effect.result(
+        grants.exchange(
+          owner,
+          yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+            new URL(configured.authorizationUrl).searchParams.get("state")
+          ),
+          "invalid-authorization-code"
+        ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      )
+      assert.isTrue(Result.isFailure(failedExchange))
+
+      const unverifiedRestart = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(unverifiedRestart, {
+        _tag: "configuration-required",
+        callbackUrl: "http://127.0.0.1:4173/services/oauth/atlassian/callback"
+      })
+
+      const replacementConfig = { clientId: "replacement-client", clientSecret: "replacement-secret" }
+      const replacement = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira"],
+        replacementConfig
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(replacement._tag, "ready")
+      const replaced = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(replaced, replacementConfig)
+
+      const token: OAuthToken = {
+        access_token: "saved-access",
+        refresh_token: "saved-refresh",
+        expires_at: 4_102_444_800_000,
+        scope: JIRA_SCOPES.join(" "),
+        cloud_id: "saved-cloud",
+        site_url: "https://saved.atlassian.net/",
+        user: { account_id: "saved-user", name: "Saved User", email: "saved@example.com" }
+      }
+      yield* saveProfileToken(CONTROL_CENTER_AUTH_STORE_NAME, token).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const protectedReplacement = yield* Effect.result(
+        grants.start(
+          owner,
+          "http://127.0.0.1:4173",
+          ["jira"],
+          { clientId: "protected-client", clientSecret: "protected-secret" }
+        ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      )
+      assert.isTrue(Result.isFailure(protectedReplacement))
+      if (Result.isFailure(protectedReplacement)) {
+        assert.strictEqual(protectedReplacement.failure._tag, "ApplicationConflict")
+      }
+      const preserved = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(preserved, replacementConfig)
+
+      assert.isFalse(yield* fileSystem.exists(path.join(configHome, "atlassian", "jira-cli")))
+      assert.isFalse(yield* fileSystem.exists(path.join(configHome, "atlassian", "confluence-to-markdown")))
+
+      const restarted = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.strictEqual(restarted._tag, "ready")
+    }).pipe(
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.succeed(HttpClientResponse.fromWeb(request, new Response("invalid OAuth code", { status: 401 })))
+        )
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("invalidates grants created with replaced OAuth app credentials", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-replaced-config-" })
+      const path = yield* Path.Path
+      const configHome = path.join(home, "config")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+      const original = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira", "confluence"],
+        SHARED_OAUTH_CONFIG
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(original._tag, "ready")
+      if (original._tag !== "ready") return
+      const originalGrantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(original.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, originalGrantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      const replacementConfig = { clientId: "replacement-client", clientSecret: "replacement-secret" }
+      const replacement = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira", "confluence"],
+        replacementConfig
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(replacement._tag, "ready")
+      assert.strictEqual(yield* grants.pendingGrantCount, 1)
+
+      const staleCompletion = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(staleCompletion))
+      if (Result.isFailure(staleCompletion)) {
+        assert.strictEqual(staleCompletion.failure._tag, "ApplicationResourceNotFound")
+      }
+      const stored = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(stored, replacementConfig)
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
   it.effect("requires the same shared OAuth app in both destination stores", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -181,6 +352,49 @@ describe("AtlassianOAuthGrants", () => {
       if (ready._tag !== "ready") return
       const requestedScopes = new URL(ready.authorizationUrl).searchParams.get("scope")?.split(" ").sort()
       assert.deepStrictEqual(requestedScopes, Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).sort())
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("falls back to matching legacy OAuth apps when the canonical store has no profiles", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-empty-canonical-" })
+      const path = yield* Path.Path
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME, {
+        clientId: "unused-canonical-client",
+        clientSecret: "unused-canonical-secret"
+      })
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      const grants = yield* makeAtlassianOAuthGrants()
+
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      assert.strictEqual(started._tag, "ready")
+      if (started._tag !== "ready") return
+      assert.strictEqual(new URL(started.authorizationUrl).searchParams.get("client_id"), SHARED_OAUTH_CONFIG.clientId)
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      const canonicalConfig = yield* loadOAuthConfig(CONTROL_CENTER_AUTH_STORE_NAME).pipe(
+        Effect.provide(HomeDirectoryLive),
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      assert.deepStrictEqual(canonicalConfig, SHARED_OAUTH_CONFIG)
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),
@@ -858,7 +1072,7 @@ describe("AtlassianOAuthGrants", () => {
       Effect.scoped
     ))
 
-  it.effect("preserves an incompatible populated destination and restores the grant", () =>
+  it.effect("rejects a grant whose OAuth app no longer matches the destination", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -869,9 +1083,12 @@ describe("AtlassianOAuthGrants", () => {
       const canonicalStore = yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME)
       const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
       const grants = yield* makeAtlassianOAuthGrants()
-      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
-        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
-      )
+      const started = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira", "confluence"],
+        SHARED_OAUTH_CONFIG
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
       assert.strictEqual(started._tag, "ready")
       if (started._tag !== "ready") return
       const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
@@ -908,24 +1125,28 @@ describe("AtlassianOAuthGrants", () => {
         )
       )
       assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) assert.strictEqual(rejected.failure._tag, "ApplicationResourceNotFound")
       const after = yield* Effect.all([
         fileSystem.readFileString(path.join(canonicalStore, "oauth.json")),
         fileSystem.readFileString(path.join(canonicalStore, "profiles.json")),
         fileSystem.readFileString(path.join(canonicalStore, "auth.json"))
       ])
       assert.deepStrictEqual(after, before)
+      assert.strictEqual(yield* grants.pendingGrantCount, 0)
 
       yield* fileSystem.remove(path.join(canonicalStore, "profiles.json"))
       yield* fileSystem.remove(path.join(canonicalStore, "auth.json"))
-      const completed = yield* grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
-        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      const replay = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
       )
-      assert.strictEqual(completed.cloudId, "cloud-2")
+      assert.isTrue(Result.isFailure(replay))
+      if (Result.isFailure(replay)) assert.strictEqual(replay.failure._tag, "ApplicationResourceNotFound")
       assert.deepStrictEqual(
         JSON.parse(yield* fileSystem.readFileString(path.join(canonicalStore, "oauth.json"))),
-        SHARED_OAUTH_CONFIG
+        incompatibleConfig
       )
-      assert.include(yield* fileSystem.readFileString(path.join(canonicalStore, "profiles.json")), completed.profileId)
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),

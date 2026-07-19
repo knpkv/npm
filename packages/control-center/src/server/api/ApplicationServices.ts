@@ -20,6 +20,7 @@ import type {
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
+  AtlassianOAuthClientConfiguration,
   AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   AtlassianOAuthGrantStartResponse,
@@ -121,6 +122,7 @@ export interface PluginAdministrationService {
     readonly workspaceId: WorkspaceId
     readonly sessionId: SessionId
     readonly providers: AtlassianOAuthProviderIntent
+    readonly configuration?: AtlassianOAuthClientConfiguration
   }) => Effect.Effect<
     AtlassianOAuthGrantStartResponse,
     ApplicationConflict | ApplicationServiceUnavailable

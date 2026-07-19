@@ -1037,6 +1037,10 @@ describe("Control Center API handlers", () => {
           assert.strictEqual(input.workspaceId, session.workspaceId)
           assert.strictEqual(input.sessionId, session.sessionId)
           assert.deepStrictEqual(input.providers, ["confluence"])
+          assert.deepStrictEqual(input.configuration, {
+            clientId: "control-center-client",
+            clientSecret: "control-center-secret"
+          })
           return Effect.succeed(expected)
         },
         testConnection: () => Effect.die("not used")
@@ -1049,7 +1053,13 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
         return yield* client.plugins.createAtlassianOAuthGrant({
-          payload: { providers: ["confluence"] }
+          payload: {
+            providers: ["confluence"],
+            configuration: {
+              clientId: "control-center-client",
+              clientSecret: "control-center-secret"
+            }
+          }
         })
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,

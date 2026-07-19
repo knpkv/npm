@@ -84,6 +84,12 @@ People synchronization, Jira association evidence, rollups, approval and attribu
 
 ## Configure local providers
 
+### Atlassian OAuth
+
+Choose **Sign in with Atlassian** from Services. On first use, Control Center shows the exact callback URL to add to an Atlassian OAuth 2.0 integration and asks for that app's client ID and client secret. It stores the credentials in its own machine-local auth store, then continues the Jira and Confluence sign-in flow. The separate `jira` and `confluence` CLIs do not need to be installed or configured.
+
+For the default local server, register `http://127.0.0.1:4173/services/oauth/atlassian/callback`. A non-loopback deployment uses its configured HTTPS public origin with the same `/services/oauth/atlassian/callback` path. OAuth setup is owner-only, CSRF-protected, and unavailable over insecure LAN mode. A mistyped credential can be corrected until the first profile is saved; after that, existing app credentials are reused and cannot be silently replaced during sign-in.
+
 For Confluence Cloud page reads, see the [Control Center Confluence adapter](/control-center-confluence/). The first production slice is intentionally read-only and server-composed.
 
 Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:

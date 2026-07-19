@@ -11,7 +11,7 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Atlassian authorization
 
-- Move OAuth client registration into a dedicated owner settings view. The MVP reports the callback URL and reuses the secure CLI client configuration files rather than accepting a client secret in browser state.
+- Move the inline first-run OAuth app form into a dedicated owner settings view with an explicit credential-rotation flow. Control Center already stores first-run client credentials in its own machine-local auth store and does not require the Jira or Confluence CLI.
 - Add revocation, reauthorization, and expired-profile recovery controls without exposing access or refresh tokens.
 - Resolve richer provider-owned Jira project and Confluence space metadata, including avatars and canonical browser links, beyond the names already returned during verification.
 

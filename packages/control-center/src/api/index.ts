@@ -53,6 +53,7 @@ export {
 } from "./liveEvents.js"
 export { MediaApiGroup, MediaResponseHeaders, OpaqueMediaId, SafeMediaContentType } from "./media.js"
 export {
+  AtlassianOAuthClientConfiguration,
   AtlassianOAuthGrantExchangeResponse,
   AtlassianOAuthGrantId,
   AtlassianOAuthGrantStartResponse,

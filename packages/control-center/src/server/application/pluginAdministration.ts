@@ -1140,8 +1140,8 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     ...(atlassianOAuthGrants === undefined
       ? {}
       : {
-        startAtlassianOAuthGrant: ({ providers, sessionId, workspaceId }) =>
-          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers),
+        startAtlassianOAuthGrant: ({ configuration, providers, sessionId, workspaceId }) =>
+          atlassianOAuthGrants.start({ sessionId, workspaceId }, publicOrigin, providers, configuration),
         exchangeAtlassianOAuthGrant: ({ code, grantId, sessionId, workspaceId }) =>
           atlassianOAuthGrants.exchange({ sessionId, workspaceId }, grantId, code),
         completeAtlassianOAuthGrant: Effect.fn("PluginAdministration.completeAtlassianOAuthGrant")(function*({
