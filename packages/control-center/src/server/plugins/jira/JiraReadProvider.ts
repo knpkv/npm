@@ -43,6 +43,7 @@ export interface JiraProjectIssuePageRequest {
   readonly watermark: JiraIssueWatermark | null
   readonly nextPageToken: string | null
   readonly maxResults: number
+  readonly timeZone: string
 }
 
 const JiraProviderIdentifier = Schema.String.check(
@@ -201,7 +202,15 @@ const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
         diagnosticCode: "jira-project-search-watermark-invalid"
       })
   )
-  const parts = DateTime.toPartsUtc(updated)
+  const zoned = yield* Effect.fromOption(
+    DateTime.makeZoned(updated, { timeZone: request.timeZone }),
+    () =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-project-search-time-zone-invalid"
+      })
+  )
+  const parts = DateTime.toParts(zoned)
   const updatedAt = `${String(parts.year).padStart(4, "0")}-${twoDigits(parts.month)}-${twoDigits(parts.day)} ${
     twoDigits(parts.hour)
   }:${twoDigits(parts.minute)}`

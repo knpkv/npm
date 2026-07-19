@@ -57,21 +57,39 @@ const JiraSynchronizedIssueIdentity = Schema.Struct({
     updated: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
   })
 })
-const JiraSyncCheckpoint = Schema.Struct({
+const JiraCheckpointIssueId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64),
+  Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
+)
+const JiraCheckpointPageToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+)
+const JiraSyncCheckpointV1 = Schema.Struct({
   version: Schema.Literal(1),
   updatedAt: Schema.NullOr(UtcTimestamp),
-  issueId: Schema.NullOr(Schema.String.check(
-    Schema.isTrimmed(),
-    Schema.isNonEmpty(),
-    Schema.isMaxLength(64),
-    Schema.makeFilter((value) => /^\d+$/u.test(value), { expected: "a numeric Jira issue ID" })
-  ))
+  issueId: Schema.NullOr(JiraCheckpointIssueId)
 }).check(
   Schema.makeFilter(
     ({ issueId, updatedAt }) => (issueId === null) === (updatedAt === null),
     { expected: "both Jira watermark fields or neither" }
   )
 )
+const JiraSyncCheckpointV2 = Schema.Struct({
+  version: Schema.Literal(2),
+  updatedAt: Schema.NullOr(UtcTimestamp),
+  issueId: Schema.NullOr(JiraCheckpointIssueId),
+  nextPageToken: Schema.NullOr(JiraCheckpointPageToken)
+}).check(
+  Schema.makeFilter(
+    ({ issueId, updatedAt }) => (issueId === null) === (updatedAt === null),
+    { expected: "both Jira watermark fields or neither" }
+  )
+)
+const JiraSyncCheckpoint = Schema.Union([JiraSyncCheckpointV1, JiraSyncCheckpointV2])
 const JiraSyncCheckpointJson = Schema.fromJsonString(JiraSyncCheckpoint)
 const JIRA_ISSUE_STREAM_KEY = "project-issues"
 const JiraWebBaseUrl = SourceUrl.pipe(
@@ -346,20 +364,30 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
   return { _tag: "found", event }
 })
 
-const checkpointWatermark = Effect.fn("JiraReadPlugin.checkpointWatermark")(function*(
+interface JiraSyncResumeState {
+  readonly watermark: JiraIssueWatermark | null
+  readonly nextPageToken: string | null
+}
+
+const checkpointState = Effect.fn("JiraReadPlugin.checkpointState")(function*(
   checkpoint: PluginSyncRequestV1["checkpoint"]
-): Effect.fn.Return<JiraIssueWatermark | null, PluginConfigurationFailure> {
-  if (checkpoint === null) return null
+): Effect.fn.Return<JiraSyncResumeState, PluginConfigurationFailure> {
+  if (checkpoint === null) return { watermark: null, nextPageToken: null }
   const decoded = yield* Schema.decodeUnknownEffect(JiraSyncCheckpointJson)(checkpoint).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
   )
-  return decoded.updatedAt === null || decoded.issueId === null
+  const watermark = decoded.updatedAt === null || decoded.issueId === null
     ? null
     : { updatedAt: DateTime.formatIso(decoded.updatedAt), issueId: decoded.issueId }
+  return {
+    watermark,
+    nextPageToken: decoded.version === 2 ? decoded.nextPageToken : null
+  }
 })
 
-const checkpointFromWatermark = Effect.fn("JiraReadPlugin.checkpointFromWatermark")(function*(
-  watermark: JiraIssueWatermark | null
+const checkpointFromState = Effect.fn("JiraReadPlugin.checkpointFromState")(function*(
+  watermark: JiraIssueWatermark | null,
+  nextPageToken: string | null
 ) {
   const updatedAt = watermark === null
     ? null
@@ -367,9 +395,10 @@ const checkpointFromWatermark = Effect.fn("JiraReadPlugin.checkpointFromWatermar
       Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
     )
   return yield* Schema.encodeEffect(JiraSyncCheckpointJson)({
-    version: 1,
+    version: 2,
     updatedAt,
-    issueId: watermark?.issueId ?? null
+    issueId: watermark?.issueId ?? null,
+    nextPageToken
   }).pipe(
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "jira-sync-checkpoint-invalid" }))
   )
@@ -406,7 +435,33 @@ const issueWatermark = Effect.fn("JiraReadPlugin.issueWatermark")(function*(
       diagnosticCode: "jira-sync-issue-project-mismatch"
     })
   }
-  return { updatedAt: identity.fields.updated, issueId: identity.id }
+  const updatedAt = yield* Schema.decodeUnknownEffect(UtcTimestamp)(identity.fields.updated).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-search-project-issues",
+        diagnosticCode: "jira-sync-issue-updated-invalid"
+      })
+    )
+  )
+  return { updatedAt: DateTime.formatIso(updatedAt), issueId: identity.id }
+})
+
+const currentUserTimeZone = Effect.fn("JiraReadPlugin.currentUserTimeZone")(function*(
+  provider: JiraReadProvider,
+  operationTimeoutMillis: number
+): Effect.fn.Return<string, PluginFailure> {
+  const currentUser = yield* withTimeout(
+    "jira-current-user",
+    operationTimeoutMillis,
+    provider.getCurrentUser
+  )
+  if (currentUser.timeZone === undefined || Option.isNone(DateTime.zoneFromString(currentUser.timeZone))) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "jira-current-user",
+      diagnosticCode: "jira-current-user-time-zone-invalid"
+    })
+  }
+  return currentUser.timeZone
 })
 
 interface JiraSyncState {
@@ -427,13 +482,15 @@ const syncProject = (
     return Stream.fail(new PluginConfigurationFailure({ diagnosticCode: "jira-sync-stream-unsupported" }))
   }
   return Stream.unwrap(
-    checkpointWatermark(request.checkpoint).pipe(
-      Effect.map((watermark) =>
+    Effect.gen(function*() {
+      const checkpoint = yield* checkpointState(request.checkpoint)
+      const timeZone = yield* currentUserTimeZone(provider, configuration.operationTimeoutMillis)
+      return (
         Stream.paginate<JiraSyncState, typeof PluginSyncPageV1.Type, PluginFailure>(
           {
-            queryWatermark: watermark,
-            committedWatermark: watermark,
-            nextPageToken: null,
+            queryWatermark: checkpoint.watermark,
+            committedWatermark: checkpoint.watermark,
+            nextPageToken: checkpoint.nextPageToken,
             remainingPages: configuration.maximumPages,
             remainingResults: configuration.pageSize * configuration.maximumPages,
             seenPageTokens: new Set()
@@ -448,7 +505,8 @@ const syncProject = (
                   projectId: configuration.projectId,
                   watermark: state.queryWatermark,
                   nextPageToken: state.nextPageToken,
-                  maxResults: requestedResults
+                  maxResults: requestedResults,
+                  timeZone
                 })
               )
               if (providerPage.issues.length > requestedResults) {
@@ -466,7 +524,7 @@ const syncProject = (
                 }
                 const terminal = yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
                   events: [],
-                  checkpointAfterPage: yield* checkpointFromWatermark(state.committedWatermark),
+                  checkpointAfterPage: yield* checkpointFromState(state.committedWatermark, null),
                   hasMore: false
                 }).pipe(
                   Effect.mapError(() =>
@@ -498,14 +556,6 @@ const syncProject = (
                 const issue = providerPage.issues[index]
                 if (issue === undefined) continue
                 const watermark = yield* issueWatermark(issue, configuration)
-                yield* Schema.decodeUnknownEffect(UtcTimestamp)(watermark.updatedAt).pipe(
-                  Effect.mapError(() =>
-                    new PluginMalformedResponseFailure({
-                      operation: "jira-search-project-issues",
-                      diagnosticCode: "jira-sync-issue-updated-invalid"
-                    })
-                  )
-                )
                 if (state.queryWatermark !== null && compareWatermarks(watermark, state.queryWatermark) <= 0) {
                   if (
                     committedWatermark !== null &&
@@ -537,7 +587,10 @@ const syncProject = (
                 normalizedPages.push(
                   yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
                     events,
-                    checkpointAfterPage: yield* checkpointFromWatermark(committedWatermark),
+                    checkpointAfterPage: yield* checkpointFromState(
+                      committedWatermark,
+                      index === providerPage.issues.length - 1 ? providerPage.nextPageToken : null
+                    ),
                     hasMore: index < providerPage.issues.length - 1 || canContinue
                   }).pipe(
                     Effect.mapError(() =>
@@ -563,7 +616,10 @@ const syncProject = (
                 normalizedPages.push(
                   yield* Schema.decodeUnknownEffect(Schema.toType(PluginSyncPageV1))({
                     events: [],
-                    checkpointAfterPage: yield* checkpointFromWatermark(committedWatermark),
+                    checkpointAfterPage: yield* checkpointFromState(
+                      committedWatermark,
+                      providerPage.nextPageToken
+                    ),
                     hasMore: false
                   }).pipe(
                     Effect.mapError(() =>
@@ -579,7 +635,7 @@ const syncProject = (
             })
         )
       )
-    )
+    })
   )
 }
 

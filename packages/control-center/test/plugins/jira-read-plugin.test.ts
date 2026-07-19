@@ -125,7 +125,12 @@ const changelogs = [
 ]
 
 const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvider => ({
-  getCurrentUser: Effect.succeed({ accountId: "ari", displayName: "Ari Chen", active: true }),
+  getCurrentUser: Effect.succeed({
+    accountId: "ari",
+    displayName: "Ari Chen",
+    active: true,
+    timeZone: "UTC"
+  }),
   getServerInfo: Effect.succeed({
     baseUrl: "https://acme.atlassian.net",
     serverTitle: "Acme Jira"
@@ -645,6 +650,147 @@ describe("JiraReadPlugin", () => {
         updatedAt: "2026-07-17T09:31:00.000Z",
         issueId: "10043"
       })
+    }))
+
+  it.effect("compares resumed watermarks after normalizing equivalent Jira timestamp offsets", () =>
+    Effect.gen(function*() {
+      const laterIssueAtSameInstant = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: {
+          ...issue.fields,
+          summary: "Continue the same update batch",
+          updated: "2026-07-17T09:30:00.000+0000"
+        }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [laterIssueAtSameInstant], nextPageToken: null })
+      })
+      const checkpoint = "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}"
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint))))
+        )
+      )
+
+      assert.lengthOf(pages, 1)
+      assert.isNotEmpty(pages[0]?.events ?? [])
+      assert.include(pages[0]?.checkpointAfterPage ?? "", "10043")
+      assert.include(pages[0]?.checkpointAfterPage ?? "", "2026-07-17T09:30:00.000Z")
+    }))
+
+  it.effect("searches incremental Jira pages in the authenticated user's time zone", () =>
+    Effect.gen(function*() {
+      const requestedTimeZones = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        getCurrentUser: Effect.succeed({
+          accountId: "ari",
+          displayName: "Ari Chen",
+          active: true,
+          timeZone: "America/Los_Angeles"
+        }),
+        searchProjectIssues: (request) =>
+          Ref.update(requestedTimeZones, (timeZones) => [...timeZones, request.timeZone]).pipe(
+            Effect.as({ issues: [], nextPageToken: null })
+          )
+      })
+
+      yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+
+      assert.deepStrictEqual(yield* Ref.get(requestedTimeZones), ["America/Los_Angeles"])
+    }))
+
+  it.effect("revisions mutable fix-version evidence identities with the Jira issue", () =>
+    Effect.gen(function*() {
+      const searchCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        searchProjectIssues: () =>
+          Ref.getAndUpdate(searchCalls, (count) => count + 1).pipe(
+            Effect.map((count) => ({
+              issues: [{
+                ...issue,
+                fields: {
+                  ...issue.fields,
+                  updated: count === 0
+                    ? "2026-07-17T09:30:00.000Z"
+                    : "2026-07-17T09:31:00.000Z"
+                }
+              }],
+              nextPageToken: null
+            }))
+          )
+      })
+      const readEvidenceId = PluginConnection.pipe(
+        Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest()))),
+        Effect.map((pages) =>
+          pages.flatMap(({ events }) => events).find(
+            (event) => event._tag === "AppendEvidence" && event.summary.startsWith("Jira fix version")
+          )
+        ),
+        Effect.flatMap((event) =>
+          event?._tag === "AppendEvidence"
+            ? Effect.succeed(event.evidenceId)
+            : Effect.die("expected Jira fix-version evidence")
+        )
+      )
+
+      const firstEvidenceId = yield* withConnection(provider, readEvidenceId)
+      const secondEvidenceId = yield* withConnection(provider, readEvidenceId)
+
+      assert.notStrictEqual(firstEvidenceId, secondEvidenceId)
+      assert.include(firstEvidenceId, "2026-07-17T09:30:00.000Z")
+      assert.include(secondEvidenceId, "2026-07-17T09:31:00.000Z")
+    }))
+
+  it.effect("persists a provider cursor when skipped rows exhaust the invocation bound", () =>
+    Effect.gen(function*() {
+      const pageTokens = yield* Ref.make<ReadonlyArray<string | null>>([])
+      const oldIssue = (id: string) => ({
+        ...issue,
+        id,
+        key: `PAY-${id}`,
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      })
+      const newerIssue = oldIssue("10043")
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(pageTokens, (tokens) => [...tokens, request.nextPageToken]).pipe(
+            Effect.as(
+              request.nextPageToken === null
+                ? { issues: [oldIssue("10040"), oldIssue("10041")], nextPageToken: "page-2" }
+                : { issues: [newerIssue], nextPageToken: null }
+            )
+          )
+      })
+      const checkpoint = "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}"
+      const configured = { ...configuration, maximumPages: 1, pageSize: 2 }
+      const synchronize = (resumeFrom: string) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(resumeFrom)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const skipped = yield* synchronize(checkpoint)
+      assert.lengthOf(skipped, 1)
+      assert.deepStrictEqual(skipped[0]?.events, [])
+      assert.include(skipped[0]?.checkpointAfterPage ?? "", "page-2")
+
+      const resumed = yield* synchronize(skipped[0]?.checkpointAfterPage ?? checkpoint)
+      assert.isNotEmpty(resumed[0]?.events ?? [])
+      assert.include(resumed[0]?.checkpointAfterPage ?? "", "10043")
+      assert.deepStrictEqual(yield* Ref.get(pageTokens), [null, "page-2"])
     }))
 
   it.effect("rejects an invalid persisted watermark before searching Jira", () =>

@@ -625,7 +625,7 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
         eventId: `jira:evidence:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision: issueEvent.revision,
-        evidenceId: `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}`,
+        evidenceId: `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
         subject: {
           entityType: issueEvent.entityType,
           vendorImmutableId: issueEvent.vendorImmutableId

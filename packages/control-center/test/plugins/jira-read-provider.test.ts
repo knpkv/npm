@@ -76,7 +76,8 @@ describe("JiraReadProvider", () => {
         projectId: "10\" OR project = 20",
         watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueId: "10042" },
         nextPageToken: "provider-page-2",
-        maxResults: 25
+        maxResults: 25,
+        timeZone: "UTC"
       })
 
       assert.lengthOf(page.issues, 1)
@@ -96,11 +97,24 @@ describe("JiraReadProvider", () => {
         projectId: "10",
         watermark: null,
         nextPageToken: null,
-        maxResults: 25
+        maxResults: 25,
+        timeZone: "UTC"
       })
       assert.strictEqual(
         new Map(requests[1]?.urlParams ?? []).get("jql"),
         "project = \"10\" ORDER BY updated ASC, id ASC"
+      )
+
+      yield* provider.searchProjectIssues({
+        projectId: "10",
+        watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueId: "10042" },
+        nextPageToken: null,
+        maxResults: 25,
+        timeZone: "America/Los_Angeles"
+      })
+      assert.strictEqual(
+        new Map(requests[2]?.urlParams ?? []).get("jql"),
+        "project = \"10\" AND updated >= \"2026-07-17 02:30\" ORDER BY updated ASC, id ASC"
       )
     }).pipe(Effect.provide(jiraClientLayer({
       issues: [{
@@ -125,7 +139,8 @@ describe("JiraReadProvider", () => {
         projectId: "10",
         watermark: null,
         nextPageToken: null,
-        maxResults: 25
+        maxResults: 25,
+        timeZone: "UTC"
       }).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(outcome))
