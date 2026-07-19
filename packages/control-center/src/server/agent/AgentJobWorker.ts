@@ -55,6 +55,30 @@ const AgentRuntimeFailure = Schema.Union([
 const isAgentRuntimeFailure = Schema.is(AgentRuntimeFailure)
 const isAgentJobInputError = Schema.is(AgentJobInputError)
 
+// JSON string encoding may expand one Unicode code point to six UTF-8 bytes
+// (for example, `\u0000`). Five thousand leaves more than 2.7 KB for the
+// output-event envelope beneath the repository's 32,768-byte event limit.
+const MAXIMUM_DURABLE_OUTPUT_CHUNK_CODE_POINTS = 5_000
+
+const chunkOutputEvent = (event: AgentRuntimeEvent): ReadonlyArray<AgentRuntimeEvent> => {
+  if (event._tag !== "output") return [event]
+
+  const events = new Array<AgentRuntimeEvent>()
+  let chunk = ""
+  let chunkCodePoints = 0
+  for (const codePoint of event.text) {
+    chunk += codePoint
+    chunkCodePoints += 1
+    if (chunkCodePoints === MAXIMUM_DURABLE_OUTPUT_CHUNK_CODE_POINTS) {
+      events.push({ ...event, text: chunk })
+      chunk = ""
+      chunkCodePoints = 0
+    }
+  }
+  if (chunk.length > 0) events.push({ ...event, text: chunk })
+  return events
+}
+
 const isDurableBoundFailure = (
   failure: unknown
 ): failure is AgentJobInputError & {
@@ -169,6 +193,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
     }
     const execution = yield* selected.success.run(request).pipe(
       Stream.takeUntil((event) => event._tag === "completed"),
+      Stream.flatMap((event) => Stream.fromIterable(chunkOutputEvent(event))),
       Stream.runForEach((event) => {
         return DateTime.now.pipe(
           Effect.flatMap((occurredAt) =>

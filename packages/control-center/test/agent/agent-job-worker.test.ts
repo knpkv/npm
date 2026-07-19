@@ -5,7 +5,7 @@ import {
   AgentProviderError,
   AgentProviderId,
   AgentRunId,
-  type AgentRuntimeEvent,
+  AgentRuntimeEvent,
   type AgentRuntimeService,
   makeAgentRuntime
 } from "@knpkv/ai-runtime"
@@ -22,6 +22,7 @@ import {
   AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
+  type AgentThreadEvent,
   AgentThreadEventPageSize,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
 } from "../../src/server/persistence/repositories/agentJobModels.js"
@@ -37,6 +38,7 @@ const LEASE_OWNER = AgentLeaseOwner.make("agent-worker-test")
 const CURSOR_ZERO = AgentEventCursor.make(0)
 const PAGE_SIZE = AgentThreadEventPageSize.make(128)
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
+type AgentOutputEvent = Extract<AgentRuntimeEvent, { readonly _tag: "output" }>
 
 const completedEvents: ReadonlyArray<AgentRuntimeEvent> = [
   { _tag: "started", providerRunRef: "provider-run-1", sessionRef: null },
@@ -46,6 +48,7 @@ const completedEvents: ReadonlyArray<AgentRuntimeEvent> = [
 ]
 
 const OUTPUT_CHUNK_BYTES = 32_000
+const MAXIMUM_RUNTIME_OUTPUT_CHARACTERS = 32_768
 const outputEvents = (count: number): ReadonlyArray<AgentRuntimeEvent> => [
   completedEvents[0]!,
   ...Array.from({ length: count }, (): AgentRuntimeEvent => ({
@@ -96,6 +99,23 @@ const replay = Effect.gen(function*() {
     after: CURSOR_ZERO,
     limit: PAGE_SIZE
   })
+})
+
+const replayAll = Effect.gen(function*() {
+  const jobs = yield* AgentJobRepository
+  const events = new Array<AgentThreadEvent>()
+  let after = CURSOR_ZERO
+  while (true) {
+    const page = yield* jobs.threadAfter({
+      workspaceId: WORKSPACE_ID,
+      releaseId: RELEASE_ID,
+      after,
+      limit: PAGE_SIZE
+    })
+    for (const event of page.events) events.push(event)
+    if (page.events.length < PAGE_SIZE) return events
+    after = page.nextCursor
+  }
 })
 
 const withDatabaseConfig = <Success, Failure>(
@@ -168,6 +188,72 @@ describe("agent job worker", () => {
     )
   })
 
+  it.effect("persists and replays one maximum-sized assistant output event exactly", () => {
+    const output = "x".repeat(MAXIMUM_RUNTIME_OUTPUT_CHARACTERS)
+    const runtime = makeAgentRuntime({
+      run: () =>
+        Stream.fromIterable([
+          completedEvents[0]!,
+          { _tag: "output", channel: "assistant", text: output },
+          completedEvents.at(-1)!
+        ])
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const page = yield* replay
+        const persistedOutputs = page.events
+          .filter(({ eventKind }) => eventKind === "assistant-output")
+          .map(({ payload }) => Schema.decodeUnknownSync(AgentRuntimeEvent)(payload))
+          .filter((event): event is AgentOutputEvent => event._tag === "output")
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.isAbove(persistedOutputs.length, 1)
+        assert.isTrue(persistedOutputs.every(({ channel }) => channel === "assistant"))
+        assert.strictEqual(persistedOutputs.map(({ text }) => text).join(""), output)
+        assert.strictEqual(page.events.at(-1)?.eventKind, "job-completed")
+      })
+    )
+  })
+
+  it.effect("preserves Unicode and ordering while chunking progress output", () => {
+    const output = `${"α".repeat(4_999)}😀${"β".repeat(5_001)}`
+    const runtime = makeAgentRuntime({
+      run: () =>
+        Stream.fromIterable([
+          completedEvents[0]!,
+          { _tag: "output", channel: "progress", text: output },
+          completedEvents.at(-1)!
+        ])
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const page = yield* replay
+        const persistedOutputs = page.events
+          .filter(({ eventKind }) => eventKind === "progress")
+          .map(({ payload }) => Schema.decodeUnknownSync(AgentRuntimeEvent)(payload))
+          .filter((event): event is AgentOutputEvent => event._tag === "output")
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.isAbove(persistedOutputs.length, 1)
+        assert.isTrue(persistedOutputs.every(({ channel }) => channel === "progress"))
+        assert.strictEqual(persistedOutputs.map(({ text }) => text).join(""), output)
+        assert.strictEqual(page.events.at(-1)?.eventKind, "job-completed")
+      })
+    )
+  })
+
   it.effect("completes an attempt whose cumulative output remains under the durable limit", () => {
     const outputCount = Math.floor(MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES / OUTPUT_CHUNK_BYTES)
     const runtime = makeAgentRuntime({ run: () => Stream.fromIterable(outputEvents(outputCount)) })
@@ -228,7 +314,7 @@ describe("agent job worker", () => {
         assert.strictEqual(rows[0]?.state, "failed")
         assert.strictEqual(rows[0]?.outcome, "failed")
         assert.strictEqual(rows[0]?.leaseCount, 0)
-        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-failed")
+        assert.strictEqual((yield* replayAll).at(-1)?.eventKind, "job-failed")
       })
     )
   })
