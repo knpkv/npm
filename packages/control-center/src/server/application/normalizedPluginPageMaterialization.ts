@@ -391,6 +391,36 @@ const nodeIdFor = Effect.fn("NormalizedPluginPageMaterialization.nodeIdFor")(fun
   )
 })
 
+const releaseIdFor = Effect.fn("NormalizedPluginPageMaterialization.releaseIdFor")(function*(
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  vendorImmutableId: string,
+  eventId: string
+) {
+  return ReleaseId.make(
+    yield* stableUuid(
+      cryptoService,
+      materializationKey(scope, "release", vendorImmutableId),
+      eventId
+    )
+  )
+})
+
+const releaseNodeIdFor = Effect.fn("NormalizedPluginPageMaterialization.releaseNodeIdFor")(function*(
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  vendorImmutableId: string,
+  eventId: string
+) {
+  return GraphNodeId.make(
+    yield* stableUuid(
+      cryptoService,
+      materializationKey(scope, "release-node", vendorImmutableId),
+      eventId
+    )
+  )
+})
+
 const sourceRevision = (
   scope: NormalizedPluginPageMaterializationScope,
   event: EntityUpsert | EntityTombstone,
@@ -505,13 +535,7 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
   const attributes = yield* Schema.decodeUnknownEffect(ReleaseAttributes)(event.attributes).pipe(
     Effect.mapError(() => malformed("normalized-release-attributes-invalid", event.eventId))
   )
-  const releaseId = ReleaseId.make(
-    yield* stableUuid(
-      cryptoService,
-      materializationKey(scope, "release", event.vendorImmutableId),
-      event.eventId
-    )
-  )
+  const releaseId = yield* releaseIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId)
   const existing = yield* persistence.releases.get(scope.workspaceId, releaseId).pipe(Effect.result)
   if (Result.isFailure(existing) && existing.failure._tag !== "RecordNotFoundError") {
     return yield* existing.failure
@@ -523,8 +547,6 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
       providerId === scope.providerId &&
       vendorImmutableId === event.vendorImmutableId
   )
-  if (previousSource?.revision === event.revision) return 0
-
   const source = sourceRevision(
     scope,
     event,
@@ -549,20 +571,50 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
     id: releaseId,
     lifecycle: attributes.lifecycle,
     relay: deriveReleaseRelay(releaseId),
-    roleAssignments: [],
+    roleAssignments: previous?.release.roleAssignments ?? [],
     serviceName: attributes.serviceName,
-    sourceRevisions: [source],
-    targetEnvironmentIds: [],
+    sourceRevisions: [
+      ...(previous?.release.sourceRevisions.filter(
+        ({ pluginConnectionId, providerId, vendorImmutableId }) =>
+          pluginConnectionId !== scope.pluginConnectionId ||
+          providerId !== scope.providerId ||
+          vendorImmutableId !== event.vendorImmutableId
+      ) ?? []),
+      source
+    ],
+    targetEnvironmentIds: previous?.release.targetEnvironmentIds ?? [],
     updatedAt: scope.committedAt,
     version: attributes.version,
     workspaceId: scope.workspaceId
   }).pipe(Effect.mapError(() => malformed("normalized-release-invalid", event.eventId)))
-  if (previous === null) {
-    yield* persistence.releases.create(scope.workspaceId, release)
-  } else {
-    yield* persistence.releases.append(scope.workspaceId, release, previous.revision)
+  if (previousSource?.revision !== event.revision) {
+    if (previous === null) {
+      yield* persistence.releases.create(scope.workspaceId, release)
+    } else {
+      yield* persistence.releases.append(scope.workspaceId, release, previous.revision)
+    }
   }
-  return 1
+  const nodeId = yield* releaseNodeIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId)
+  const existingNode = yield* persistence.deliveryGraph.read(scope.workspaceId, {
+    _tag: "node",
+    nodeId
+  }).pipe(Effect.result)
+  if (Result.isSuccess(existingNode)) return { nodeCount: 0 }
+  if (existingNode.failure._tag !== "RecordNotFoundError") return yield* existingNode.failure
+  const receipt = yield* writeGraph(persistence, scope.workspaceId, {
+    entityProjections: [],
+    nodes: [{
+      workspaceId: scope.workspaceId,
+      nodeId,
+      endpointKind: "release",
+      resolution: { _tag: "resolved", target: { _tag: "release", releaseId } },
+      createdAt: scope.committedAt
+    }],
+    evidenceItems: [],
+    evidenceClaims: [],
+    relationships: []
+  }, event.eventId)
+  return { nodeCount: receipt.nodeCount }
 })
 
 const materializeTombstoneEntity = Effect.fn(
@@ -772,19 +824,25 @@ const materializeRelationship = Effect.fn(
   scope: NormalizedPluginPageMaterializationScope,
   event: RelationshipProposal
 ) {
-  const source = yield* findEntity(persistence, scope, event.from.vendorImmutableId)
   const target = yield* findEntity(persistence, scope, event.to.vendorImmutableId)
-  if (source === null || target === null) {
-    return yield* malformed("normalized-relationship-endpoint-missing", event.eventId)
-  }
-  const sourceKind = canonicalKind(event.from.entityType)
   const targetKind = canonicalKind(event.to.entityType)
-  if (sourceKind === null || targetKind === null) {
-    return yield* malformed("normalized-relationship-endpoint-unsupported", event.eventId)
-  }
   const kind = yield* Schema.decodeUnknownEffect(RelationshipKind)(event.relationshipType).pipe(
     Effect.mapError(() => malformed("normalized-relationship-kind-invalid", event.eventId))
   )
+  const isReleaseContainment = kind === "contains" && event.from.entityType === "release"
+  const source = isReleaseContainment
+    ? target
+    : yield* findEntity(persistence, scope, event.from.vendorImmutableId)
+  if (source === null || target === null) {
+    return yield* malformed("normalized-relationship-endpoint-missing", event.eventId)
+  }
+  const sourceKind = isReleaseContainment ? "release" : canonicalKind(event.from.entityType)
+  if (sourceKind === null || targetKind === null) {
+    return yield* malformed("normalized-relationship-endpoint-unsupported", event.eventId)
+  }
+  const releaseId = isReleaseContainment
+    ? yield* releaseIdFor(cryptoService, scope, event.from.vendorImmutableId, event.eventId)
+    : null
   const relationshipId = RelationshipId.make(
     yield* stableUuid(
       cryptoService,
@@ -816,11 +874,13 @@ const materializeRelationship = Effect.fn(
       revision,
       supersedesRevision: previous?.revision ?? null,
       kind,
-      sourceNodeId: yield* nodeIdFor(cryptoService, scope, event.from.vendorImmutableId, event.eventId),
+      sourceNodeId: isReleaseContainment
+        ? yield* releaseNodeIdFor(cryptoService, scope, event.from.vendorImmutableId, event.eventId)
+        : yield* nodeIdFor(cryptoService, scope, event.from.vendorImmutableId, event.eventId),
       sourceNodeKind: sourceKind,
       targetNodeId: yield* nodeIdFor(cryptoService, scope, event.to.vendorImmutableId, event.eventId),
       targetNodeKind: targetKind,
-      scope: null,
+      scope: releaseId === null ? null : { _tag: "release", releaseId },
       lifecycle: { _tag: "proposed", effectiveAt: event.observedAt },
       confidence: {
         _tag: "inferred",
@@ -919,7 +979,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
     for (const event of events) {
       if (event._tag === "UpsertEntity") {
         if (event.entityType === "release") {
-          yield* materializeRelease(persistence, cryptoService, scope, event)
+          nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
           continue
         }
         const receipt = yield* materializeUpsertEntity(persistence, cryptoService, scope, event)

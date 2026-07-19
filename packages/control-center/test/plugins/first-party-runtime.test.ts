@@ -113,7 +113,7 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
-  it.effect("loads pre-OAuth Atlassian descriptors only with their legacy credential pair", () =>
+  it.effect("loads compatible historical descriptors while rejecting pre-scope Jira descriptors", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-legacy-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
@@ -134,13 +134,14 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
-          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only"
+          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only" | "scoped"
           readonly missing: "none" | "apiToken" | "email"
           readonly providerId: "jira" | "confluence"
         }> = [
           { providerId: "jira", generation: "pre-oauth", missing: "none" },
           { providerId: "jira", generation: "oauth-without-identity", missing: "none" },
           { providerId: "jira", generation: "oauth-with-site-only", missing: "none" },
+          { providerId: "jira", generation: "scoped", missing: "none" },
           { providerId: "confluence", generation: "pre-oauth", missing: "none" },
           { providerId: "jira", generation: "pre-oauth", missing: "email" },
           { providerId: "confluence", generation: "pre-oauth", missing: "apiToken" }
@@ -173,8 +174,11 @@ describe("first-party plugin runtime", () => {
                 ...(testCase.generation === "pre-oauth"
                   ? []
                   : [{ _tag: "text", key: "authMode", value: "api-token" }]),
-                ...(testCase.generation === "oauth-with-site-only"
+                ...(testCase.generation === "oauth-with-site-only" || testCase.generation === "scoped"
                   ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
+                  : []),
+                ...(testCase.generation === "scoped"
+                  ? [{ _tag: "text", key: "projectId", value: "project-1" }]
                   : []),
                 { _tag: "integer", key: "maximumPages", value: 3 },
                 { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
@@ -206,6 +210,8 @@ describe("first-party plugin runtime", () => {
               ? preOAuthDescriptor("jira")
               : testCase.generation === "oauth-without-identity"
               ? jiraOAuthDescriptorWithoutIdentity
+              : testCase.generation === "scoped"
+              ? historicalJiraDescriptor
               : jiraOAuthDescriptorWithSiteOnly,
             0,
             CREATED_AT
@@ -215,7 +221,7 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.providerId === "jira") {
+          if (testCase.providerId === "jira" && testCase.generation !== "scoped") {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure" && outcome.failure._tag === "PluginConfigurationFailure") {
               assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-migration-required")

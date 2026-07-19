@@ -3,9 +3,16 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
-import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
-import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
+import {
+  AgentId,
+  EnvironmentId,
+  PluginConnectionId,
+  RoleAssignmentId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
+import { PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import { Release } from "../../src/domain/release.js"
+import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   materializeNormalizedPluginPage,
@@ -15,10 +22,15 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
+const OTHER_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
+const ENVIRONMENT_ID = Schema.decodeSync(EnvironmentId)("01890f6f-6d6a-7cc0-98d2-000000000196")
+const AGENT_ID = Schema.decodeSync(AgentId)("01890f6f-6d6a-7cc0-98d2-000000000197")
+const ASSIGNMENT_ID = Schema.decodeSync(RoleAssignmentId)("01890f6f-6d6a-7cc0-98d2-000000000198")
 const CACHE_STREAM = Schema.decodeSync(PluginStreamKey)("cache-only")
 const MATERIALIZED_STREAM = Schema.decodeSync(PluginStreamKey)("delivery-items")
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
@@ -173,6 +185,27 @@ const jiraReleasePage = Schema.decodeSync(PluginSyncPageV1)({
   }]
 })
 
+const jiraReleaseUpdatePage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "jira-release-updated",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "jira-version-2026-29-released",
+    observedAt: "2026-07-19T09:02:30.000Z",
+    revision: "released:2026-07-29:2026.29",
+    entityType: "release",
+    vendorImmutableId: "jira-version:2026.29",
+    sourceUrl: "https://jira.example/plugins/servlet/project-config/PAY/versions",
+    title: "Payments API · 2026.29",
+    attributes: {
+      source: "jira-fix-version",
+      serviceName: "Payments API",
+      version: "2026.29",
+      lifecycle: "released"
+    }
+  }]
+})
+
 const invalidRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "invalid-relationship-complete",
   hasMore: false,
@@ -266,18 +299,144 @@ describe("normalized plugin page materialization", () => {
       const receipt = yield* materializeNormalizedPluginPage(scope, jiraReleasePage)
       assert.strictEqual(receipt.acceptedEventCount, 1)
       assert.strictEqual(receipt.entityProjectionCount, 0)
+      assert.strictEqual(receipt.nodeCount, 1)
       assert.strictEqual((yield* items()).totalCount, 0)
 
       const releases = yield* persistence.releases.list(WORKSPACE_ID, 10)
       assert.lengthOf(releases, 1)
-      assert.strictEqual(releases[0]?.release.serviceName, "Payments")
-      assert.strictEqual(releases[0]?.release.version, "2026.29")
-      assert.strictEqual(releases[0]?.release.lifecycle, "candidate")
-      assert.strictEqual(releases[0]?.release.sourceRevisions[0]?.vendorImmutableId, "jira-version:2026.29")
+      const initial = releases[0]
+      if (initial === undefined) return yield* Effect.die("expected materialized release")
+      assert.strictEqual(initial.release.serviceName, "Payments")
+      assert.strictEqual(initial.release.version, "2026.29")
+      assert.strictEqual(initial.release.lifecycle, "candidate")
+      assert.deepStrictEqual(initial.release.roleAssignments, [])
+      assert.deepStrictEqual(initial.release.targetEnvironmentIds, [])
+      assert.strictEqual(initial.release.sourceRevisions[0]?.vendorImmutableId, "jira-version:2026.29")
 
       const replay = yield* materializeNormalizedPluginPage(scope, jiraReleasePage)
       assert.isFalse(replay.pageCommitted)
       assert.lengthOf(yield* persistence.releases.list(WORKSPACE_ID, 10), 1)
+
+      const nonJiraSource = Schema.decodeSync(SourceRevision)({
+        pluginConnectionId: OTHER_PLUGIN_ID,
+        providerId: "confluence",
+        vendorImmutableId: "release-page-2026-29",
+        revision: "page-revision-7",
+        sourceUrl: "https://wiki.example/releases/2026.29",
+        firstObservedAt: "2026-07-19T09:01:00.000Z",
+        lastObservedAt: "2026-07-19T09:01:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      const enriched = Schema.decodeSync(Schema.toType(Release))({
+        ...initial.release,
+        roleAssignments: [{
+          assignmentId: ASSIGNMENT_ID,
+          actor: { _tag: "agent", agentId: AGENT_ID },
+          role: "release-owner",
+          scope: { _tag: "release", workspaceId: WORKSPACE_ID, releaseId: initial.release.id },
+          lifecycle: { _tag: "active", assignedAt: T2 }
+        }],
+        sourceRevisions: [...initial.release.sourceRevisions, nonJiraSource],
+        targetEnvironmentIds: [ENVIRONMENT_ID],
+        updatedAt: T2
+      })
+      yield* persistence.releases.append(WORKSPACE_ID, enriched, initial.revision)
+
+      yield* materializeNormalizedPluginPage({
+        ...scope,
+        expectedRevision: 1,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, jiraReleaseUpdatePage)
+      const updated = yield* persistence.releases.get(WORKSPACE_ID, initial.release.id)
+      assert.strictEqual(updated.release.serviceName, "Payments API")
+      assert.strictEqual(updated.release.lifecycle, "released")
+      assert.deepStrictEqual(updated.release.roleAssignments, enriched.roleAssignments)
+      assert.deepStrictEqual(updated.release.targetEnvironmentIds, [ENVIRONMENT_ID])
+      assert.deepStrictEqual(
+        updated.release.sourceRevisions.filter(({ providerId }) => providerId !== "jira"),
+        [nonJiraSource]
+      )
+      assert.strictEqual(
+        updated.release.sourceRevisions.find(({ providerId }) => providerId === "jira")?.revision,
+        "released:2026-07-29:2026.29"
+      )
+    })))
+
+  it.effect("materializes Jira fix versions into the release workset only for linked issues", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const common = {
+        comments: { values: [], total: 0, truncated: false },
+        changelogs: { values: [], total: 0, truncated: false },
+        observedAt: T1,
+        webBaseUrl: new URL("https://jira.example")
+      }
+      const linkedEvents = yield* normalizeJiraIssueEvents({
+        ...common,
+        issue: {
+          id: "10042",
+          key: "PAY-42",
+          fields: {
+            summary: "Ship guarded refunds",
+            updated: "2026-07-19T09:01:00.000Z",
+            project: { id: "10000", key: "PAY", name: "Payments" },
+            fixVersions: [{ id: "2026.29", name: "2026.29", released: false }]
+          }
+        }
+      })
+      const unlinkedEvents = yield* normalizeJiraIssueEvents({
+        ...common,
+        issue: {
+          id: "10043",
+          key: "PAY-43",
+          fields: {
+            summary: "Keep investigating retries",
+            updated: "2026-07-19T09:01:00.000Z",
+            project: { id: "10000", key: "PAY", name: "Payments" }
+          }
+        }
+      })
+      const page = Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+        checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("jira-fix-version-workset"),
+        hasMore: false,
+        events: [...linkedEvents, ...unlinkedEvents]
+      })
+
+      const receipt = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }, page)
+      assert.strictEqual(receipt.relationshipCount, 1)
+      assert.strictEqual((yield* items()).totalCount, 2)
+
+      const releases = yield* persistence.releases.list(WORKSPACE_ID, 10)
+      const release = releases[0]
+      if (release === undefined) return yield* Effect.die("expected fix-version release")
+      const result = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (result._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      assert.deepStrictEqual(
+        result.value.entityProjections.map(({ projection }) => projection.displayKey),
+        ["PAY-42"]
+      )
+      assert.lengthOf(result.value.relationships, 1)
+      assert.strictEqual(result.value.relationships[0]?.kind, "contains")
+      assert.deepStrictEqual(result.value.relationships[0]?.scope, {
+        _tag: "release",
+        releaseId: release.release.id
+      })
     })))
 
   it.effect("atomically applies all five operations and makes replay a canonical no-op", () =>

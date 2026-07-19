@@ -571,7 +571,7 @@ describe("JiraReadPlugin", () => {
         ReadonlyArray<{
           readonly projectId: string
           readonly nextPageToken: string | null
-          readonly watermark: { readonly updatedAt: string; readonly issueId: string } | null
+          readonly watermark: { readonly updatedAt: string; readonly issueKey: string | null } | null
         }>
       >([])
       const secondIssue = {
@@ -607,7 +607,7 @@ describe("JiraReadPlugin", () => {
       assert.lengthOf(pages, 2)
       assert.isTrue(pages[0]?.hasMore)
       assert.isFalse(pages[1]?.hasMore)
-      assert.include(pages[1]?.checkpointAfterPage ?? "", "10043")
+      assert.include(pages[1]?.checkpointAfterPage ?? "", "PAY-43")
       assert.deepStrictEqual((yield* Ref.get(searches)).map(({ projectId }) => projectId), ["10", "10"])
       assert.deepStrictEqual(
         pages[0]?.events.flatMap((event) => event._tag === "UpsertEntity" ? [event.entityType] : []),
@@ -622,7 +622,8 @@ describe("JiraReadPlugin", () => {
           "UpsertPerson",
           "AppendEvidence",
           "UpsertEntity",
-          "AppendEvidence"
+          "AppendEvidence",
+          "ProposeRelationship"
         ]
       )
       const releaseEventIds = pages.flatMap(({ events }) =>
@@ -648,7 +649,7 @@ describe("JiraReadPlugin", () => {
       assert.deepStrictEqual(replay[0]?.events, [])
       assert.deepStrictEqual((yield* Ref.get(searches))[2]?.watermark, {
         updatedAt: "2026-07-17T09:31:00.000Z",
-        issueId: "10043"
+        issueKey: "PAY-43"
       })
     }))
 
@@ -678,8 +679,41 @@ describe("JiraReadPlugin", () => {
 
       assert.lengthOf(pages, 1)
       assert.isNotEmpty(pages[0]?.events ?? [])
-      assert.include(pages[0]?.checkpointAfterPage ?? "", "10043")
+      assert.include(pages[0]?.checkpointAfterPage ?? "", "PAY-43")
       assert.include(pages[0]?.checkpointAfterPage ?? "", "2026-07-17T09:30:00.000Z")
+    }))
+
+  it.effect("accepts provider-ordered ties whose immutable numeric IDs decrease", () =>
+    Effect.gen(function*() {
+      const firstIssue = {
+        ...issue,
+        id: "10000",
+        key: "PAY-9",
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      }
+      const secondIssue = {
+        ...issue,
+        id: "9999",
+        key: "PAY-10",
+        fields: { ...issue.fields, updated: "2026-07-17T09:30:00.000Z" }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: () => Effect.succeed({ issues: [firstIssue, secondIssue], nextPageToken: null })
+      })
+
+      const pages = yield* withConnection(
+        provider,
+        PluginConnection.pipe(
+          Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest())))
+        )
+      )
+
+      assert.lengthOf(pages, 2)
+      assert.isTrue(
+        pages[1]?.events.some(
+          (event) => event._tag === "UpsertEntity" && event.vendorImmutableId === "9999"
+        )
+      )
     }))
 
   it.effect("searches incremental Jira pages in the authenticated user's time zone", () =>
@@ -770,7 +804,15 @@ describe("JiraReadPlugin", () => {
             )
           )
       })
-      const checkpoint = "{\"version\":1,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\"}"
+      const checkpoint = JSON.stringify({
+        version: 3,
+        updatedAt: "2026-07-17T09:30:00.000Z",
+        issueKey: "PAY-10042",
+        queryUpdatedAt: "2026-07-17T09:30:00.000Z",
+        queryIssueKey: "PAY-10042",
+        nextPageToken: null,
+        cursorExpiresAt: null
+      })
       const configured = { ...configuration, maximumPages: 1, pageSize: 2 }
       const synchronize = (resumeFrom: string) =>
         withConnection(
@@ -789,8 +831,89 @@ describe("JiraReadPlugin", () => {
 
       const resumed = yield* synchronize(skipped[0]?.checkpointAfterPage ?? checkpoint)
       assert.isNotEmpty(resumed[0]?.events ?? [])
-      assert.include(resumed[0]?.checkpointAfterPage ?? "", "10043")
+      assert.include(resumed[0]?.checkpointAfterPage ?? "", "PAY-10043")
       assert.deepStrictEqual(yield* Ref.get(pageTokens), [null, "page-2"])
+    }))
+
+  it.effect("binds a bounded provider cursor to its original query and drops it after expiry", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe("2026-07-19T10:00:00.000Z")))
+      const searches = yield* Ref.make<
+        ReadonlyArray<{
+          readonly projectId: string
+          readonly nextPageToken: string | null
+          readonly watermark: { readonly updatedAt: string; readonly issueKey: string | null } | null
+          readonly maxResults: number
+          readonly timeZone: string
+        }>
+      >([])
+      const nextIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43",
+        fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+      }
+      const provider = baseProvider({
+        searchProjectIssues: (request) =>
+          Ref.update(searches, (current) => [...current, request]).pipe(
+            Effect.as(
+              request.nextPageToken === null && request.watermark === null
+                ? { issues: [issue], nextPageToken: "page-2" }
+                : { issues: [nextIssue], nextPageToken: null }
+            )
+          )
+      })
+      const configured = { ...configuration, maximumPages: 1, pageSize: 1 }
+      const synchronize = (checkpoint: string | null) =>
+        withConnection(
+          provider,
+          PluginConnection.pipe(
+            Effect.flatMap((connection) => Stream.runCollect(connection.sync(syncRequest(checkpoint)))),
+            Effect.map((pages) => [...pages])
+          ),
+          configured
+        )
+
+      const initial = yield* synchronize(null)
+      const boundedCheckpoint = initial[0]?.checkpointAfterPage ?? null
+      assert.isNotNull(boundedCheckpoint)
+      assert.isTrue(initial[0]?.hasMore)
+
+      yield* synchronize(boundedCheckpoint)
+      assert.deepStrictEqual((yield* Ref.get(searches))[1], {
+        projectId: "10",
+        watermark: null,
+        nextPageToken: "page-2",
+        maxResults: 1,
+        timeZone: "UTC"
+      })
+
+      yield* TestClock.adjust("8 days")
+      yield* synchronize(boundedCheckpoint)
+      assert.deepStrictEqual((yield* Ref.get(searches))[2], {
+        projectId: "10",
+        watermark: {
+          updatedAt: "2026-07-17T09:30:00.000Z",
+          issueKey: "PAY-42"
+        },
+        nextPageToken: null,
+        maxResults: 1,
+        timeZone: "UTC"
+      })
+
+      yield* synchronize(
+        "{\"version\":2,\"updatedAt\":\"2026-07-17T09:30:00.000Z\",\"issueId\":\"10042\",\"nextPageToken\":\"legacy-page-2\"}"
+      )
+      assert.deepStrictEqual((yield* Ref.get(searches))[3], {
+        projectId: "10",
+        watermark: {
+          updatedAt: "2026-07-17T09:30:00.000Z",
+          issueKey: null
+        },
+        nextPageToken: null,
+        maxResults: 1,
+        timeZone: "UTC"
+      })
     }))
 
   it.effect("rejects an invalid persisted watermark before searching Jira", () =>

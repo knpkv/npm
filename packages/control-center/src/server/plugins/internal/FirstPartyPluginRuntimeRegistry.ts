@@ -106,7 +106,7 @@ interface LoadedRuntime {
   readonly configurationRevision: number
   readonly connectionRevision: number
   readonly descriptor: NegotiatedPluginDescriptorV1
-  readonly descriptorGeneration: "current" | "legacy-atlassian"
+  readonly descriptorGeneration: "current" | "compatible-atlassian" | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
 
@@ -237,6 +237,13 @@ const jiraSiteIdField = {
   description: "Stable Atlassian cloud identity, discovered automatically by OAuth.",
   required: true
 }
+const jiraProjectIdField = {
+  _tag: "text",
+  key: "projectId",
+  label: "Project ID",
+  description: "Immutable Jira project ID followed by this connection.",
+  required: true
+}
 const jiraOAuthFields = [
   {
     _tag: "text",
@@ -308,6 +315,13 @@ const jiraReaderFields = [
   }
 ]
 const historicalJiraDescriptors = [
+  jiraDescriptorSnapshot([
+    jiraWebBaseUrlField,
+    jiraSiteIdField,
+    jiraProjectIdField,
+    ...jiraOAuthFields,
+    ...jiraReaderFields
+  ]),
   jiraDescriptorSnapshot([jiraWebBaseUrlField, ...jiraLegacyCredentialFields, ...jiraReaderFields]),
   jiraDescriptorSnapshot([jiraWebBaseUrlField, ...jiraOAuthFields, ...jiraReaderFields]),
   jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
@@ -373,7 +387,11 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
     configurationRevision: configurationOption.value.revision,
     connectionRevision: connection.revision,
     descriptor,
-    descriptorGeneration: descriptorGeneration === 0 ? "current" : "legacy-atlassian",
+    descriptorGeneration: descriptorGeneration === 0
+      ? "current"
+      : connection.providerId === "jira" && descriptorGeneration === 1
+      ? "compatible-atlassian"
+      : "legacy-atlassian",
     runtime
   } satisfies LoadedRuntime
 })

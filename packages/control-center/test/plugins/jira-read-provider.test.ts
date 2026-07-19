@@ -74,7 +74,7 @@ describe("JiraReadProvider", () => {
       const provider = makeJiraReadProvider(client)
       const page = yield* provider.searchProjectIssues({
         projectId: "10\" OR project = 20",
-        watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueId: "10042" },
+        watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueKey: "PAY-42" },
         nextPageToken: "provider-page-2",
         maxResults: 25,
         timeZone: "UTC"
@@ -86,7 +86,7 @@ describe("JiraReadProvider", () => {
       if (jql === undefined) return yield* Effect.die("expected generated JQL")
       assert.strictEqual(
         jql,
-        "project = \"10\\\" OR project = 20\" AND updated >= \"2026-07-17 09:30\" ORDER BY updated ASC, id ASC"
+        "project = \"10\\\" OR project = 20\" AND updated >= \"2026-07-17 09:30\" ORDER BY updated ASC, key ASC"
       )
       assert.notInclude(jql, "T09:30")
       assert.notInclude(jql, ":00.000Z")
@@ -102,19 +102,19 @@ describe("JiraReadProvider", () => {
       })
       assert.strictEqual(
         new Map(requests[1]?.urlParams ?? []).get("jql"),
-        "project = \"10\" ORDER BY updated ASC, id ASC"
+        "project = \"10\" ORDER BY updated ASC, key ASC"
       )
 
       yield* provider.searchProjectIssues({
         projectId: "10",
-        watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueId: "10042" },
+        watermark: { updatedAt: "2026-07-17T09:30:00.000Z", issueKey: "PAY-42" },
         nextPageToken: null,
         maxResults: 25,
         timeZone: "America/Los_Angeles"
       })
       assert.strictEqual(
         new Map(requests[2]?.urlParams ?? []).get("jql"),
-        "project = \"10\" AND updated >= \"2026-07-17 02:30\" ORDER BY updated ASC, id ASC"
+        "project = \"10\" AND updated >= \"2026-07-17 02:30\" ORDER BY updated ASC, key ASC"
       )
     }).pipe(Effect.provide(jiraClientLayer({
       issues: [{
@@ -146,8 +146,28 @@ describe("JiraReadProvider", () => {
       assert.isTrue(Result.isFailure(outcome))
       if (Result.isFailure(outcome)) {
         assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-project-search-cursor-invalid")
+        }
       }
     }).pipe(Effect.provide(jiraClientLayer({ issues: [], isLast: false }, []))))
+
+  it.effect("accepts a terminal project-search response that omits optional isLast", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+      const page = yield* provider.searchProjectIssues({
+        projectId: "10",
+        watermark: null,
+        nextPageToken: null,
+        maxResults: 25,
+        timeZone: "UTC"
+      })
+
+      assert.deepStrictEqual(page, { issues: [], nextPageToken: null })
+    }).pipe(Effect.provide(jiraClientLayer({ issues: [], nextPageToken: null }, requests)))
+  })
 
   it.effect("maps a numeric Retry-After delta from the current Effect clock", () =>
     Effect.gen(function*() {

@@ -34,7 +34,7 @@ export interface JiraPageRequest {
 /** Stable provider-independent lower bound for one incremental project query. @internal */
 export interface JiraIssueWatermark {
   readonly updatedAt: string
-  readonly issueId: string
+  readonly issueKey: string | null
 }
 
 /** One bounded project search request. @internal */
@@ -68,7 +68,7 @@ export type JiraProjectIssue = typeof JiraProjectIssue.Type
 
 const JiraProjectIssuePageResponse = Schema.Struct({
   issues: Schema.Array(JiraProjectIssue),
-  isLast: Schema.Boolean,
+  isLast: Schema.optionalKey(Schema.Boolean),
   nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderIdentifier))
 })
 
@@ -193,7 +193,7 @@ const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
   request: JiraProjectIssuePageRequest
 ): Effect.fn.Return<string, PluginMalformedResponseFailure> {
   const project = `project = "${escapeJqlString(request.projectId)}"`
-  if (request.watermark === null) return `${project} ORDER BY updated ASC, id ASC`
+  if (request.watermark === null) return `${project} ORDER BY updated ASC, key ASC`
   const updated = yield* Effect.fromOption(
     DateTime.make(request.watermark.updatedAt),
     () =>
@@ -214,7 +214,7 @@ const projectJql = Effect.fn("JiraReadProvider.projectJql")(function*(
   const updatedAt = `${String(parts.year).padStart(4, "0")}-${twoDigits(parts.month)}-${twoDigits(parts.day)} ${
     twoDigits(parts.hour)
   }:${twoDigits(parts.minute)}`
-  return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, id ASC`
+  return `${project} AND updated >= "${updatedAt}" ORDER BY updated ASC, key ASC`
 })
 
 const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePage")(function*(
@@ -229,7 +229,10 @@ const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePag
     )
   )
   const nextPageToken = decoded.nextPageToken ?? null
-  if ((!decoded.isLast && nextPageToken === null) || (decoded.isLast && nextPageToken !== null)) {
+  if (
+    (decoded.isLast === false && nextPageToken === null) ||
+    (decoded.isLast === true && nextPageToken !== null)
+  ) {
     return yield* new PluginMalformedResponseFailure({
       operation: "jira-search-project-issues",
       diagnosticCode: "jira-project-search-cursor-invalid"

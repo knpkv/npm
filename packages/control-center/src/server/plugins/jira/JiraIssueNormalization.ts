@@ -139,7 +139,8 @@ const NormalizedJiraIssueAttributes = Schema.Struct({
 })
 
 const MAXIMUM_MATERIALIZED_COLLABORATORS = 200
-const MAXIMUM_MATERIALIZED_FIX_VERSIONS = 100
+// One issue, its activity evidence, 200 people, and three events per fix version must fit one 500-event page.
+const MAXIMUM_MATERIALIZED_FIX_VERSIONS = 99
 
 /** One bounded collection fetched from Jira. @internal */
 export interface JiraFetchedCollection<Value> {
@@ -591,6 +592,8 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
     const revision = releaseRevision(version)
     const releaseVendorId = `jira-version:${version.id}`
     const projectKey = attributes.project?.key
+    const fixVersionEvidenceId =
+      `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`
     events.push(
       yield* normalizedEvent({
         _tag: "UpsertEntity",
@@ -625,7 +628,7 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
         eventId: `jira:evidence:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
         observedAt: issueEvent.observedAt,
         revision: issueEvent.revision,
-        evidenceId: `jira:issue:${issueEvent.vendorImmutableId}:fix-version:${version.id}:${issueEvent.revision}`,
+        evidenceId: fixVersionEvidenceId,
         subject: {
           entityType: issueEvent.entityType,
           vendorImmutableId: issueEvent.vendorImmutableId
@@ -637,6 +640,26 @@ export const normalizeJiraIssueEvents = Effect.fn("JiraIssueNormalization.normal
           predicate: "relationship-observed",
           value: { _tag: "state", value: version.name.slice(0, 500) }
         }
+      })
+    )
+    events.push(
+      yield* normalizedEvent({
+        _tag: "ProposeRelationship",
+        eventId: `jira:relationship:${releaseVendorId}:contains:${issueEvent.vendorImmutableId}:${issueEvent.revision}`,
+        observedAt: issueEvent.observedAt,
+        revision: issueEvent.revision,
+        relationshipId: `${releaseVendorId}:contains:${issueEvent.vendorImmutableId}`,
+        from: {
+          entityType: "release",
+          vendorImmutableId: releaseVendorId
+        },
+        to: {
+          entityType: issueEvent.entityType,
+          vendorImmutableId: issueEvent.vendorImmutableId
+        },
+        relationshipType: "contains",
+        confidence: 1,
+        evidenceIds: [fixVersionEvidenceId]
       })
     )
   }
