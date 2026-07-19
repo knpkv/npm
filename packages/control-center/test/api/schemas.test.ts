@@ -16,6 +16,7 @@ import {
   PatchPluginConfigurationRequest,
   PluginListResponse,
   PluginOverviewResponse,
+  PluginSynchronizationState,
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
@@ -346,6 +347,25 @@ describe("public API schemas", () => {
       }))
     })))
     assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(CreatePluginConnectionsResponse)({ results: [] })))
+  })
+
+  it("decodes bounded durable plugin synchronization state", () => {
+    const state = {
+      pluginConnectionId,
+      providerId: "codecommit",
+      streamKey: "pull-requests",
+      lastAttemptAt: timestamp,
+      lastSuccessAt: timestamp,
+      result: "synchronized",
+      pagesCommitted: 2
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginSynchronizationState)(state)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PluginSynchronizationState)({ ...state, pagesCommitted: -1 })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PluginSynchronizationState)({ ...state, result: "provider-error" })
+    ))
   })
 
   it("bounds named release collaborators and requires explicit release roles", () => {

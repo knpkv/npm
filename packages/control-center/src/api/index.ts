@@ -97,6 +97,8 @@ export {
   PluginsApiGroup,
   PluginServiceCatalogEntry,
   PluginServiceCatalogField,
+  PluginSynchronizationResult,
+  PluginSynchronizationState,
   RedactedPluginConfigurationValue,
   SetPluginConnectionEnabledRequest
 } from "./plugins.js"

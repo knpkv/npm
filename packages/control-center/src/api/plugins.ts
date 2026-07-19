@@ -502,6 +502,32 @@ export const PluginConnectionTestResult = Schema.Union([
 /** Decoded live connection test result. */
 export type PluginConnectionTestResult = typeof PluginConnectionTestResult.Type
 
+/** Durable result of the most recent bounded synchronization invocation. */
+export const PluginSynchronizationResult = Schema.Literals([
+  "never",
+  "running",
+  "synchronized",
+  "source-unavailable",
+  "interrupted"
+])
+
+/** Decoded synchronization result presented without provider diagnostics. */
+export type PluginSynchronizationResult = typeof PluginSynchronizationResult.Type
+
+/** Secret-free durable synchronization state for one negotiated connection stream. */
+export const PluginSynchronizationState = Schema.Struct({
+  pluginConnectionId: PluginConnectionId,
+  providerId: ProviderId,
+  streamKey: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
+  lastAttemptAt: Schema.NullOr(UtcTimestamp),
+  lastSuccessAt: Schema.NullOr(UtcTimestamp),
+  result: PluginSynchronizationResult,
+  pagesCommitted: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+}).annotate({ identifier: "PluginSynchronizationState" })
+
+/** Decoded manual synchronization state. */
+export type PluginSynchronizationState = typeof PluginSynchronizationState.Type
+
 /** Redacted result of durable setup and its immediate live identity check. */
 export const CreatePluginConnectionResponse = Schema.Struct({
   connection: PluginConnectionSummary,
@@ -704,6 +730,20 @@ const testConnection = HttpApiEndpoint.post("testConnection", "/:pluginConnectio
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const synchronization = HttpApiEndpoint.get("synchronization", "/:pluginConnectionId/synchronization", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  success: PluginSynchronizationState,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError]
+}).middleware(SessionCookieAuth)
+
+const synchronizeConnection = HttpApiEndpoint.post("synchronizeConnection", "/:pluginConnectionId/sync", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  success: PluginSynchronizationState,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const configurationMetadata = HttpApiEndpoint.get(
   "configurationMetadata",
   "/:pluginConnectionId/configuration-metadata",
@@ -744,6 +784,8 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     setConnectionEnabled,
     health,
     testConnection,
+    synchronization,
+    synchronizeConnection,
     configurationMetadata,
     configuration,
     patchConfiguration

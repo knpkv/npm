@@ -18,6 +18,7 @@ import {
   PluginConfigurationKey,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  PluginSynchronizationState,
   ProviderAccountSummary
 } from "../../src/api/plugins.js"
 import { PortfolioSnapshot } from "../../src/api/portfolio.js"
@@ -832,6 +833,48 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
         return yield* client.plugins.testConnection({ params: { pluginConnectionId } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, expected)
+    }))
+
+  it.effect("runs an owner-only bounded connection synchronization through the generated client", () =>
+    Effect.gen(function*() {
+      const expected = Schema.decodeSync(PluginSynchronizationState)({
+        pluginConnectionId,
+        providerId: "codecommit",
+        streamKey: "pull-requests",
+        lastAttemptAt: "2026-07-14T10:03:00.000Z",
+        lastSuccessAt: "2026-07-14T10:03:01.000Z",
+        result: "synchronized",
+        pagesCommitted: 1
+      })
+      const plugins = PluginAdministration.of({
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        synchronization: () => Effect.die("not used"),
+        synchronizeConnection: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(expected)
+            : Effect.die("manual synchronization crossed its authenticated scope"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return yield* client.plugins.synchronizeConnection({ params: { pluginConnectionId } })
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2454,6 +2497,7 @@ describe("Control Center API handlers", () => {
       list: () => Effect.succeed([]),
       patchConfiguration: () => Effect.die("non-owner reached plugin mutation"),
       setConnectionEnabled: () => Effect.die("non-owner reached connection enablement"),
+      synchronizeConnection: () => Effect.die("non-owner reached manual synchronization"),
       testConnection: () => Effect.die("non-owner reached connection test")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
@@ -2518,6 +2562,19 @@ describe("Control Center API handlers", () => {
         requestContext
       )
       assert.strictEqual(testResponse.status, 403)
+      const synchronizationResponse = await webHandler.handler(
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/sync", {
+          method: "POST",
+          headers: {
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          }
+        }),
+        requestContext
+      )
+      assert.strictEqual(synchronizationResponse.status, 403)
       const createResponse = await webHandler.handler(
         new Request("http://127.0.0.1:4173/api/v1/plugins/connections", {
           method: "POST",

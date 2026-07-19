@@ -46,6 +46,7 @@ import type {
   PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginHealthResponse,
+  PluginSynchronizationState,
   ProviderAccountSummary
 } from "../../api/plugins.js"
 import type { PortfolioSnapshot } from "../../api/portfolio.js"
@@ -181,6 +182,20 @@ export interface PluginAdministrationService {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId
   }) => Effect.Effect<PluginConnectionTestResult, PluginAdministrationError>
+  readonly synchronization?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) => Effect.Effect<
+    PluginSynchronizationState,
+    ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly synchronizeConnection?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) => Effect.Effect<
+    PluginSynchronizationState,
+    ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly configurationMetadata: (input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId
