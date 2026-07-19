@@ -10,12 +10,15 @@ shared AWS profile discovery, preferred Atlassian OAuth, live connection tests, 
 ownership.
 
 The remaining goal is to turn those foundations into a useful real-data product without waiting for
-complete native-service parity. Each item below is a small independently reviewable PR. It must leave
-an explicit extension seam and must not advertise capabilities that are still absent.
+complete native-service parity. Each item below is a small independently reviewable slice intended
+to land as one commit in the implementation plan's reviewed series. No slice is an independently
+mergeable PR: the completed series follows H08's single draft-PR and release-gate protocol. Each
+slice must leave an explicit extension seam and must not advertise capabilities that are still absent.
 
 ## Delivery rules
 
-- Prefer a thin end-to-end journey over a broad provider abstraction. Ship one visible result per PR.
+- Prefer a thin end-to-end journey over a broad provider abstraction. Ship one visible result per
+  slice/commit in the reviewed series.
 - Keep provider credentials and types behind the existing adapter and `SecretStore` boundaries.
 - All provider writes go through the existing governed-action authority, idempotency, receipt, and
   reconciliation path. Agents may propose actions but never authorize them.
@@ -52,27 +55,44 @@ an explicit extension seam and must not advertise capabilities that are still ab
 
 - Add an owner-only **Sync now** action and last-attempt/last-success/result state to each connection
   that already negotiates synchronization: CodeCommit, CodePipeline, and Clockify.
+- Add the production materialization path from decoded `NormalizedPluginEventV1` pages into the
+  canonical delivery-graph/entity repositories. Apply `UpsertEntity`, `TombstoneEntity`,
+  `AppendEvidence`, `UpsertPerson`, and `ProposeRelationship` with host-assigned scope, stable
+  identities, and replay-safe semantics. A durable plugin cache page or checkpoint without its
+  durable normalized projections is not a successful synchronization result.
 - Reuse the existing connection runtime, bounded checkpoint transaction, Timeline event, and
   invalidation path. Do not introduce a scheduler or webhook.
-- **Acceptance:** connect one fixture provider, sync it, and see its normalized entities in Items and
-  its attributed commit in Timeline; retrying a completed checkpoint does not duplicate entities.
+- **Acceptance:** exercise CodeCommit, CodePipeline, and Clockify fixture connections separately
+  through the owner-only, CSRF-protected action. Each produces its own normalized Item—a pull request,
+  pipeline execution, or time entry respectively—and an attributed plugin-sync Timeline event;
+  replaying its completed checkpoint duplicates neither projections nor events. The application
+  materialization suite covers all five normalized event operations and proves Items reads from the
+  resulting current projections rather than from plugin-cache pages alone.
 
 #### M1.2 — Add bounded Jira project synchronization
 
 - Extend the owning Jira package with bounded, cancellable project issue iteration, then negotiate
   incremental synchronization in the Jira adapter.
+- As soon as the adapter negotiates synchronization, expose the same owner-only, CSRF-protected
+  **Sync now** application and UI boundary, result state, and invalidation contract as M1.1. Do not
+  defer reachability to scheduled synchronization or provider administration.
 - Materialize issues, versions, people, comments/history freshness, and fix-version release evidence.
-- **Acceptance:** one followed Jira project populates Items and a release without requiring an issue
-  key to be entered manually; another project on the same OAuth site stays isolated.
+- **Acceptance:** an owner follows one Jira project, invokes **Sync now**, and sees Items and a release
+  populate without entering an issue key manually; another project on the same OAuth site stays
+  isolated. The owner flow covers the shared mutation security boundary and bounded completion state.
 
 #### M1.3 — Add bounded Confluence space synchronization
 
 - Extend the owning Confluence packages with bounded, cancellable space page/activity iteration,
   then negotiate synchronization in the Confluence adapter.
+- As soon as the adapter negotiates synchronization, expose the same owner-only, CSRF-protected
+  **Sync now** application and UI boundary, result state, and invalidation contract as M1.1. Do not
+  defer reachability to scheduled synchronization or provider administration.
 - Materialize pages, revisions, owners/contributors/watchers, attachments metadata, and safe runbook
   evidence. Content remains lazy and bounded.
-- **Acceptance:** one followed space populates Items and runbook candidates while another space on
-  the same OAuth site stays isolated.
+- **Acceptance:** an owner follows one Confluence space, invokes **Sync now**, and sees Items and
+  runbook candidates populate while another space on the same OAuth site stays isolated. The owner
+  flow covers the shared mutation security boundary and bounded completion state.
 
 #### M1.4 — Infer cross-service relationship candidates
 

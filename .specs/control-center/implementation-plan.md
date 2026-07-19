@@ -9,7 +9,9 @@ This index turns the approved [requirements](./requirements.md) and [design](./d
 The source-backed status and smaller post-checkpoint delivery sequence are maintained in
 [remaining work](./remaining-work.md). The milestone files below remain the normative capability
 definitions; the remaining-work specification splits their unfinished portions into faster vertical
-slices without weakening their security or authority boundaries.
+slices without weakening their security or authority boundaries. Each remaining-work slice is one
+intended commit in this reviewed series, not an independently mergeable PR; the single draft-PR
+publication rule at H08 remains unchanged.
 
 ## Milestones
 
