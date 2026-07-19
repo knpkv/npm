@@ -31,7 +31,8 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
-    "check": "tsc --noEmit && tsc -p tsconfig.contract.json",
+    "check": "tsc --noEmit && pnpm check:contract",
+    "check:contract": "sh -c '../../node_modules/.bin/tsc -p tsconfig.contract.json && tsc -p tsconfig.contract-fixture.json && rimraf tsconfig.contract-invalid.tsbuildinfo && ! ../../node_modules/.bin/tsc -p tsconfig.contract-invalid.json'",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run"

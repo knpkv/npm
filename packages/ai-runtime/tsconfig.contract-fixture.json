@@ -1,0 +1,8 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "dtslint/public-contract.ts"],
+  "exclude": ["node_modules", "dist"]
+}

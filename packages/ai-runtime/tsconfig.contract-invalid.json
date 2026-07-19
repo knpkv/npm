@@ -1,7 +1,6 @@
 {
-  "extends": "../../tsconfig.base.jsonc",
+  "extends": "./tsconfig.contract.json",
   "compilerOptions": {
-    "noEmit": true,
     "plugins": [
       {
         "name": "@effect/language-service",
@@ -16,6 +15,6 @@
       }
     ]
   },
-  "include": ["src/**/*.ts", "dtslint/valid-contract.ts"],
+  "include": ["src/**/*.ts", "dtslint/public-contract.ts"],
   "exclude": ["node_modules", "dist"]
 }
