@@ -170,10 +170,14 @@ const makePreparedRoot = Effect.fn("OfflineBackupTest.makePreparedRoot")(functio
 const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
   cliEntry: string,
   args: ReadonlyArray<string>,
-  configuredDataRoot: string
+  configuredDataRoot: string,
+  port?: number
 ) {
   const handle = yield* ChildProcess.make("node", [cliEntry, ...args], {
-    env: { CONTROL_CENTER_DATA_ROOT: configuredDataRoot },
+    env: {
+      CONTROL_CENTER_DATA_ROOT: configuredDataRoot,
+      ...(port === undefined ? {} : { CONTROL_CENTER_PORT: String(port) })
+    },
     extendEnv: true
   })
   const [stdout, stderr, exitCode] = yield* Effect.all([
@@ -188,6 +192,40 @@ const runBuiltCli = Effect.fn("OfflineBackupTest.runBuiltCli")(function*(
     handle.exitCode
   ], { concurrency: "unbounded" })
   return { exitCode, stderr, stdout }
+})
+
+const removeProviderOwnershipTables = Effect.fn(
+  "OfflineBackupTest.removeProviderOwnershipTables"
+)(function*(databaseFile: string) {
+  const fixtureScript = `
+    import { DatabaseSync } from "node:sqlite"
+    import { argv } from "node:process"
+
+    const database = new DatabaseSync(argv[1])
+    database.exec(\`
+      PRAGMA foreign_keys=OFF;
+      DROP TABLE followed_resources;
+      DROP TABLE provider_accounts;
+    \`)
+    database.close()
+  `
+  const handle = yield* ChildProcess.make(
+    "node",
+    ["--no-warnings", "--input-type=module", "--eval", fixtureScript, databaseFile]
+  )
+  const [stdout, stderr, exitCode] = yield* Effect.all([
+    handle.stdout.pipe(
+      Stream.decodeText(),
+      Stream.runFold(() => "", (output, chunk) => output + chunk)
+    ),
+    handle.stderr.pipe(
+      Stream.decodeText(),
+      Stream.runFold(() => "", (output, chunk) => output + chunk)
+    ),
+    handle.exitCode
+  ], { concurrency: "unbounded" })
+  assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(0), stderr)
+  assert.strictEqual(stdout, "")
 })
 
 const acquireEphemeralPort = Effect.tryPromise({
@@ -416,7 +454,7 @@ describe("offline backup commands", () => {
       assert.isTrue(yield* fileSystem.exists(path.join(restoredTarget, "control-center.db")))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
-  it.effect("drains the built server before exiting on SIGTERM", () =>
+  it.effect("starts the built CLI from a fresh data root and drains on SIGTERM", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -467,9 +505,42 @@ describe("offline backup commands", () => {
 
       const output = yield* Ref.get(stdout)
       assert.strictEqual(exitCode, ChildProcessSpawner.ExitCode(130), yield* Ref.get(stderr))
+      assert.include(output, `Control Center listening at http://127.0.0.1:${port}\n`)
+      assert.include(output, "Pairing code: ")
       assert.include(output, "Control Center draining.\n")
       assert.include(output, "Control Center drained.\n")
       assert.strictEqual(yield* Ref.get(stderr), "")
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
+
+  it.effect("explains pre-stable schema drift without recreating the database", () =>
+    Effect.gen(function*() {
+      const { configuredRoot, prepared } = yield* makePreparedRoot("control-center-built-schema-drift-")
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const cliEntry = yield* path.fromFileUrl(
+        new URL("../../dist/server/server/cli.js", import.meta.url)
+      )
+      assert.isTrue(
+        yield* fileSystem.exists(cliEntry),
+        "built CLI is missing; run pnpm --filter @knpkv/control-center build before this test"
+      )
+      yield* removeProviderOwnershipTables(path.join(prepared.dataRoot, "control-center.db"))
+      const port = yield* acquireEphemeralPort
+
+      const result = yield* runBuiltCli(cliEntry, [], configuredRoot, port)
+
+      assert.strictEqual(result.exitCode, ChildProcessSpawner.ExitCode(1))
+      assert.strictEqual(result.stdout, "")
+      assert.strictEqual(
+        result.stderr,
+        "Control Center command failed (DatabaseInitializationError: verify-schema).\n" +
+          "The database schema does not match this pre-stable build. Back up the data root if needed, " +
+          "then explicitly recreate local development data or choose a new CONTROL_CENTER_DATA_ROOT. " +
+          "Automatic migrations are disabled until schema stability.\n"
+      )
+      const verification = yield* runBuiltCli(cliEntry, [], configuredRoot, port)
+      assert.strictEqual(verification.exitCode, ChildProcessSpawner.ExitCode(1))
+      assert.strictEqual(verification.stderr, result.stderr)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped), { timeout: 30_000 })
 
   it.effect("fails before creating an archive when the configured database is absent", () =>

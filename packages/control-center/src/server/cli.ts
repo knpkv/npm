@@ -28,6 +28,7 @@ import {
   restoreBackup,
   verifyBackup
 } from "./persistence/backup/index.js"
+import { DatabaseInitializationError } from "./persistence/errors.js"
 import { WorkspaceName } from "./persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "./runtime/Bootstrap.js"
 import { makeControlCenterServer } from "./runtime/ControlCenterServer.js"
@@ -235,6 +236,22 @@ const program = Effect.scoped(
   })
 )
 
+const findDatabaseInitializationError = (
+  value: unknown,
+  remainingWrapperDepth = 2
+): DatabaseInitializationError | null => {
+  if (Schema.is(DatabaseInitializationError)(value)) return value
+  if (
+    remainingWrapperDepth > 0 &&
+    Predicate.hasProperty(value, "_tag") &&
+    value._tag === "ServeError" &&
+    Predicate.hasProperty(value, "cause")
+  ) {
+    return findDatabaseInitializationError(value.cause, remainingWrapperDepth - 1)
+  }
+  return null
+}
+
 const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
   const error = Cause.findErrorOption(cause)
   const isUsageError = Option.exists(
@@ -242,6 +259,25 @@ const reportProgramFailure = <E>(cause: Cause.Cause<E>) => {
     (value) => Predicate.hasProperty(value, "_tag") && value._tag === "ControlCenterCliUsageError"
   )
   if (isUsageError) return Effect.failCause(cause)
+  const databaseInitializationError = Option.flatMap(
+    error,
+    (value) => Option.fromNullishOr(findDatabaseInitializationError(value))
+  )
+  if (Option.isSome(databaseInitializationError)) {
+    const operation = databaseInitializationError.value.operation
+    return writeStderrLine(`Control Center command failed (DatabaseInitializationError: ${operation}).`).pipe(
+      Effect.andThen(
+        operation === "verify-schema"
+          ? writeStderrLine(
+            "The database schema does not match this pre-stable build. Back up the data root if needed, " +
+              "then explicitly recreate local development data or choose a new CONTROL_CENTER_DATA_ROOT. " +
+              "Automatic migrations are disabled until schema stability."
+          )
+          : Effect.void
+      ),
+      Effect.andThen(Effect.failCause(cause))
+    )
+  }
   const errorTag = Option.flatMap(
     error,
     (value) =>
