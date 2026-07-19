@@ -1,9 +1,12 @@
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -109,6 +112,17 @@ const sourceFailure = (failure: unknown): PluginFailure | null => {
       diagnosticCode: "normalized-plugin-page-rejected"
     })
   }
+  if (
+    Predicate.hasProperty(failure, "_tag") &&
+    failure._tag === "SourceIdentityMismatchError" &&
+    Predicate.hasProperty(failure, "recordKind") &&
+    (failure.recordKind === "plugin-sync-event" || failure.recordKind === "plugin-sync-page")
+  ) {
+    return new PluginMalformedResponseFailure({
+      operation: "manual-sync",
+      diagnosticCode: "plugin-sync-source-identity-conflict"
+    })
+  }
   return null
 }
 
@@ -189,6 +203,24 @@ interface BoundManualSync {
   readonly streamKey: PluginStreamKey
 }
 
+interface SynchronizingActivity {
+  readonly _tag: "synchronizing"
+}
+
+interface ReconcilingActivity {
+  readonly _tag: "reconciling"
+  readonly completion: Deferred.Deferred<void, ApplicationServiceUnavailable>
+}
+
+type ManualSyncActivity = SynchronizingActivity | ReconcilingActivity
+
+type StateReadClaim =
+  | { readonly _tag: "active" }
+  | { readonly _tag: "reconcile"; readonly activity: ReconcilingActivity }
+  | { readonly _tag: "wait"; readonly completion: Deferred.Deferred<void, ApplicationServiceUnavailable> }
+
+const activityKey = (bound: BoundManualSync): string => `${bound.workspaceId}/${bound.pluginConnectionId}`
+
 export interface ManualPluginSynchronizationService {
   readonly state: (input: {
     readonly workspaceId: WorkspaceId
@@ -210,6 +242,7 @@ export const makeManualPluginSynchronization = Effect.fn(
   const persistence = yield* Persistence
   const wakeups = yield* DomainEventWakeups
   const cryptoService = yield* Crypto.Crypto
+  const activities = yield* Ref.make<ReadonlyMap<string, ManualSyncActivity>>(new Map())
 
   const bind = Effect.fn("ManualPluginSynchronization.bind")(function*(input: {
     readonly workspaceId: WorkspaceId
@@ -227,11 +260,56 @@ export const makeManualPluginSynchronization = Effect.fn(
     return { ...input, providerId: connection.providerId, driver: driver.value, streamKey }
   })
 
-  const readState = Effect.fn("ManualPluginSynchronization.state")(function*(input: {
-    readonly workspaceId: WorkspaceId
-    readonly pluginConnectionId: PluginConnectionId
-  }) {
-    const bound = yield* bind(input)
+  const releaseActivity = Effect.fn("ManualPluginSynchronization.releaseActivity")(function*(
+    key: string,
+    activity: ManualSyncActivity
+  ) {
+    yield* Ref.update(activities, (current) => {
+      if (current.get(key) !== activity) return current
+      const updated = new Map(current)
+      updated.delete(key)
+      return updated
+    })
+  })
+
+  const claimSynchronization = Effect.fn(
+    "ManualPluginSynchronization.claimSynchronization"
+  )(function*(key: string) {
+    const activity: SynchronizingActivity = { _tag: "synchronizing" }
+    const claimed = yield* Ref.modify(activities, (current): readonly [
+      boolean,
+      ReadonlyMap<string, ManualSyncActivity>
+    ] => {
+      if (current.has(key)) return [false, current]
+      const updated = new Map(current)
+      updated.set(key, activity)
+      return [true, updated]
+    })
+    if (!claimed) return yield* unavailable()
+    return activity
+  })
+
+  const claimStateRead = Effect.fn("ManualPluginSynchronization.claimStateRead")(function*(
+    key: string
+  ): Effect.fn.Return<StateReadClaim> {
+    const completion = yield* Deferred.make<void, ApplicationServiceUnavailable>()
+    const activity: ReconcilingActivity = { _tag: "reconciling", completion }
+    return yield* Ref.modify(activities, (current): readonly [
+      StateReadClaim,
+      ReadonlyMap<string, ManualSyncActivity>
+    ] => {
+      const existing = current.get(key)
+      if (existing?._tag === "synchronizing") return [{ _tag: "active" }, current]
+      if (existing?._tag === "reconciling") {
+        return [{ _tag: "wait", completion: existing.completion }, current]
+      }
+      const updated = new Map(current)
+      updated.set(key, activity)
+      return [{ _tag: "reconcile", activity }, updated]
+    })
+  })
+
+  const stateFor = Effect.fn("ManualPluginSynchronization.stateFor")(function*(bound: BoundManualSync) {
     const attempts = yield* persistence.pluginRuntime.listSyncAttempts(
       bound.workspaceId,
       bound.pluginConnectionId,
@@ -242,6 +320,46 @@ export const makeManualPluginSynchronization = Effect.fn(
       bound.providerId,
       bound.streamKey,
       attempts
+    )
+  })
+
+  const readState = Effect.fn("ManualPluginSynchronization.state")(function*(input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) {
+    const bound = yield* bind(input)
+    const key = activityKey(bound)
+    return yield* Effect.acquireUseRelease(
+      claimStateRead(key),
+      (claim) => {
+        switch (claim._tag) {
+          case "active":
+            return stateFor(bound)
+          case "wait":
+            return Deferred.await(claim.completion).pipe(Effect.andThen(stateFor(bound)))
+          case "reconcile":
+            return Effect.gen(function*() {
+              const reconciledAt = DateTime.makeUnsafe(
+                yield* Effect.clockWith((clock) => clock.currentTimeMillis)
+              )
+              yield* persistence.pluginRuntime.reconcileSyncAttempts(
+                bound.workspaceId,
+                bound.pluginConnectionId,
+                bound.providerId,
+                bound.streamKey,
+                reconciledAt
+              ).pipe(Effect.mapError(() => unavailable()))
+              return yield* stateFor(bound)
+            })
+        }
+      },
+      (claim, exit) =>
+        claim._tag === "reconcile"
+          ? releaseActivity(key, claim.activity).pipe(
+            Effect.andThen(Deferred.done(claim.activity.completion, Exit.asVoid(exit))),
+            Effect.asVoid
+          )
+          : Effect.void
     )
   })
 
@@ -343,11 +461,13 @@ export const makeManualPluginSynchronization = Effect.fn(
     )
   })
 
-  const synchronize = Effect.fn("ManualPluginSynchronization.synchronize")(function*(input: {
-    readonly workspaceId: WorkspaceId
-    readonly pluginConnectionId: PluginConnectionId
-  }) {
-    const bound = yield* bind(input)
+  const synchronizeBound = Effect.fn("ManualPluginSynchronization.synchronizeBound")(function*(
+    input: {
+      readonly workspaceId: WorkspaceId
+      readonly pluginConnectionId: PluginConnectionId
+    },
+    bound: BoundManualSync
+  ) {
     const connectionRecord = yield* persistence.pluginConnections.get(
       bound.workspaceId,
       bound.pluginConnectionId
@@ -407,6 +527,19 @@ export const makeManualPluginSynchronization = Effect.fn(
       completedAt
     ).pipe(Effect.mapError(() => unavailable()))
     return yield* readState(input)
+  })
+
+  const synchronize = Effect.fn("ManualPluginSynchronization.synchronize")(function*(input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) {
+    const bound = yield* bind(input)
+    const key = activityKey(bound)
+    return yield* Effect.acquireUseRelease(
+      claimSynchronization(key),
+      () => synchronizeBound(input, bound),
+      (activity) => releaseActivity(key, activity)
+    )
   })
 
   return { state: readState, synchronize }
