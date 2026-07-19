@@ -10,7 +10,8 @@ export {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
-  RelationshipRepairProposals
+  RelationshipRepairProposals,
+  ReleaseAgentJobs
 } from "./ApplicationServices.js"
 export {
   controlCenterApiHandlersLayer,

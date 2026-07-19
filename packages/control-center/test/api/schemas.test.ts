@@ -8,6 +8,7 @@ import {
   CreatePluginConnectionsRequest,
   CreatePluginConnectionsResponse,
   CurrentSessionResponse,
+  EnqueueReleaseAgentJobRequest,
   EventCursorFromString,
   MediaResponseHeaders,
   OpaqueMediaId,
@@ -19,6 +20,9 @@ import {
   PortfolioReleaseSummary,
   PortfolioSnapshot,
   RelationshipRepairProposalDraft,
+  ReleaseAgentThreadCursorFromString,
+  ReleaseAgentThreadEventLimitFromString,
+  ReleaseAgentThreadPage,
   ReleaseAgentTurnRequest,
   ReleaseAgentTurnResponse,
   SessionListResponse,
@@ -633,6 +637,63 @@ describe("public API schemas", () => {
     assert.isTrue(
       Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentTurnResponse)({ ...valid, reply: "r".repeat(32_001) }))
     )
+  })
+
+  it("bounds durable release-agent enqueue and ordered replay contracts", () => {
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
+        providerId: "codex",
+        prompt: "Explain the current release blockers."
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
+        providerId: " padded ",
+        prompt: "Explain the current release blockers."
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
+        providerId: "codex",
+        prompt: "x".repeat(5_001)
+      })
+    ))
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentThreadCursorFromString)("0")))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentThreadCursorFromString)("01")))
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentThreadEventLimitFromString)("128")))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentThreadEventLimitFromString)("0")))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(ReleaseAgentThreadEventLimitFromString)("129")))
+
+    const page = {
+      releaseId,
+      events: [
+        { _tag: "user-message", eventSequence: 1, jobId, occurredAt: timestamp, prompt: "Explain blockers." },
+        { _tag: "job-queued", eventSequence: 2, jobId, occurredAt: timestamp, providerId: "deterministic" },
+        { _tag: "job-started", eventSequence: 3, jobId, occurredAt: timestamp },
+        { _tag: "assistant-output", eventSequence: 4, jobId, occurredAt: timestamp, text: "No blockers." },
+        { _tag: "usage", eventSequence: 5, jobId, occurredAt: timestamp, inputTokens: 12, outputTokens: 3 },
+        { _tag: "job-completed", eventSequence: 6, jobId, occurredAt: timestamp, outcome: "success" }
+      ],
+      nextCursor: 6
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentThreadPage)(page)))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(ReleaseAgentThreadPage)({
+        ...page,
+        events: [{ ...page.events[0], eventSequence: 0 }]
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(ReleaseAgentThreadPage)({
+        ...page,
+        events: Array.from({ length: 129 }, (_, index) => ({
+          _tag: "job-started",
+          eventSequence: index + 1,
+          jobId,
+          occurredAt: timestamp
+        }))
+      })
+    ))
   })
 
   it("accepts only canonical unsigned-decimal browser cursors", () => {

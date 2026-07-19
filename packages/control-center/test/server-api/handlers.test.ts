@@ -6,6 +6,7 @@ import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
 
+import { DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
 import {
@@ -33,6 +34,7 @@ import {
   EntityId,
   EventCursor,
   FollowedResourceId,
+  JobId,
   PluginConnectionId,
   ProviderAccountId,
   RelationshipId,
@@ -54,6 +56,7 @@ import {
   PluginAdministration,
   PortfolioSnapshots,
   RelationshipRepairProposals,
+  ReleaseAgentJobs,
   ReleaseAgentTurns,
   TimelineExportAudits,
   TimelineReads
@@ -301,9 +304,15 @@ const authorizedSharesLayer = Layer.succeed(AuthorizedShares, {
   revoke: () => Effect.die("not used")
 })
 
-const agentLayer = Layer.succeed(ReleaseAgentTurns, {
-  runTurn: () => Effect.die("not used")
+const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
+  enqueue: () => Effect.die("not used"),
+  replay: () => Effect.die("not used")
 })
+
+const agentLayer = Layer.merge(
+  Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }),
+  releaseAgentJobsLayer
+)
 
 const liveEvents = LiveEvents.of({ open: () => Effect.succeed(Stream.never) })
 const liveEventsLayer = Layer.succeed(LiveEvents, liveEvents)
@@ -1611,6 +1620,7 @@ describe("Control Center API handlers", () => {
       const handler = agentHandlersLayer.pipe(
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: (input) =>
             Ref.set(requestedWorkspace, input.workspaceId).pipe(
@@ -1642,6 +1652,97 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.reply, "The release is waiting for approval.")
     }))
 
+  it.effect("enqueues a durable agent job in the owner session workspace", () =>
+    Effect.gen(function*() {
+      const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000022")
+      const received = yield* Ref.make<unknown>(null)
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: (input) =>
+          Ref.set(received, input).pipe(
+            Effect.as({ releaseId: input.releaseId, jobId, state: "queued" })
+          ),
+        replay: () => Effect.die("not used")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.enqueueJob({
+          params: { releaseId },
+          payload: { prompt: "Explain the release blockers.", providerId: DurableAgentProviderId.make("codex") }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, { releaseId, jobId, state: "queued" })
+      assert.deepStrictEqual(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        releaseId,
+        request: { prompt: "Explain the release blockers.", providerId: DurableAgentProviderId.make("codex") }
+      })
+    }))
+
+  it.effect("replays only the authenticated workspace thread with caller bounds", () =>
+    Effect.gen(function*() {
+      const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000032")
+      const after = ReleaseAgentThreadCursor.make(4)
+      const received = yield* Ref.make<unknown>(null)
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        replay: (input) =>
+          Ref.set(received, input).pipe(
+            Effect.as({
+              releaseId: input.releaseId,
+              events: [{
+                _tag: "assistant-output",
+                eventSequence: ReleaseAgentThreadCursor.make(5),
+                jobId,
+                occurredAt: session.lastSeenAt,
+                text: "The release is ready."
+              }],
+              nextCursor: ReleaseAgentThreadCursor.make(5)
+            })
+          )
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.replayThread({ params: { releaseId }, query: { after, limit: 7 } })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      const event = result.events[0]
+      assert.strictEqual(event?._tag, "assistant-output")
+      if (event?._tag === "assistant-output") assert.strictEqual(event.text, "The release is ready.")
+      assert.deepStrictEqual(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        releaseId,
+        after,
+        limit: 7
+      })
+    }))
+
   it.effect("rejects a watcher before the local agent runtime is invoked", () =>
     Effect.gen(function*() {
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
@@ -1650,6 +1751,7 @@ describe("Control Center API handlers", () => {
       const handler = agentHandlersLayer.pipe(
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("watcher reached the local agent runtime")
         }))
@@ -1672,6 +1774,44 @@ describe("Control Center API handlers", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
+    }))
+
+  it.effect("rejects watcher durable enqueue and thread replay before application access", () =>
+    Effect.gen(function*() {
+      const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("watcher reached durable enqueue"),
+        replay: () => Effect.die("watcher reached durable replay")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+      const attempted = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const enqueue = yield* client.agent.enqueueJob({
+          params: { releaseId },
+          payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+        }).pipe(Effect.result)
+        const replay = yield* client.agent.replayThread({
+          params: { releaseId },
+          query: {}
+        }).pipe(Effect.result)
+        return { enqueue, replay }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        watcherMiddlewareLayer,
+        handler
+      ]))
+
+      assertForbidden(attempted.enqueue)
+      assertForbidden(attempted.replay)
     }))
 
   it.effect("rejects conflicting live-event resume cursors", () =>
