@@ -298,6 +298,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
       options.configuration.operationTimeoutMillis,
       options.load({ startAt, maxResults: options.configuration.pageSize })
     )
+    page += 1
     const pageValues = response.values ?? []
     if (response.total !== undefined) {
       totalKnown = true
@@ -306,20 +307,20 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
-    if (page === 0 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
-      const tailCapacity = Math.min(
-        options.maximumValues,
-        options.configuration.maximumPages * options.configuration.pageSize
-      )
-      const tailStart = Math.max(startAt, total - tailCapacity)
-      if (tailStart > startAt) {
+    if (page === 1 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
+      const sequentialCapacity = options.configuration.maximumPages * options.configuration.pageSize
+      if (total > sequentialCapacity) {
+        const tailCapacity = Math.min(
+          options.maximumValues,
+          (options.configuration.maximumPages - page) * options.configuration.pageSize
+        )
+        const tailStart = Math.max(startAt, total - tailCapacity)
         values.length = 0
         skippedPrefix = true
         startAt = tailStart
         continue
       }
     }
-    page += 1
     if (totalKnown && startAt >= total) {
       exhausted = true
       break

@@ -681,7 +681,7 @@ describe("JiraReadPlugin", () => {
       assert.isTrue(attributes.commentsTruncated)
     }))
 
-  it.effect("discards the discovery prefix when four pages can retain only the newest Jira comment tail", () =>
+  it.effect("counts discovery against four pages while retaining the newest Jira comment tail", () =>
     Effect.gen(function*() {
       const starts = yield* Ref.make<ReadonlyArray<number>>([])
       const ascendingComments = Array.from({ length: 300 }, (_, index) => ({
@@ -709,11 +709,82 @@ describe("JiraReadPlugin", () => {
       if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
 
-      assert.deepStrictEqual(yield* Ref.get(starts), [0, 100, 150, 200, 250])
+      assert.deepStrictEqual(yield* Ref.get(starts), [0, 150, 200, 250])
       assert.deepStrictEqual(
         attributes.comments?.map(({ sourceId }) => sourceId),
-        Array.from({ length: 200 }, (_, index) => `comment-${String(index + 100)}`)
+        Array.from({ length: 150 }, (_, index) => `comment-${String(index + 150)}`)
       )
+    }))
+
+  it.effect("drops the discovery page at the tail-window equality boundary", () =>
+    Effect.gen(function*() {
+      const starts = yield* Ref.make<ReadonlyArray<number>>([])
+      const ascendingComments = Array.from({ length: 250 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: `Comment ${String(index)}`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Ref.update(starts, (current) => [...current, request.startAt]).pipe(
+            Effect.as({
+              comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: ascendingComments.length
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 4 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a bounded Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(yield* Ref.get(starts), [0, 100, 150, 200])
+      assert.deepStrictEqual(
+        attributes.comments?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 150 }, (_, index) => `comment-${String(index + 100)}`)
+      )
+    }))
+
+  it.effect("uses all four pages sequentially when the complete collection fits", () =>
+    Effect.gen(function*() {
+      const starts = yield* Ref.make<ReadonlyArray<number>>([])
+      const ascendingComments = Array.from({ length: 200 }, (_, index) => ({
+        ...comments[0],
+        id: `comment-${String(index)}`,
+        body: `Comment ${String(index)}`
+      }))
+      const provider = baseProvider({
+        getComments: (_issueId, request) =>
+          Ref.update(starts, (current) => [...current, request.startAt]).pipe(
+            Effect.as({
+              comments: ascendingComments.slice(request.startAt, request.startAt + request.maxResults),
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: ascendingComments.length
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042")))),
+        { ...configuration, pageSize: 50, maximumPages: 4 }
+      )
+      if (result._tag !== "found") return assert.fail("expected a complete Jira issue event")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(yield* Ref.get(starts), [0, 50, 100, 150])
+      assert.deepStrictEqual(
+        attributes.comments?.map(({ sourceId }) => sourceId),
+        Array.from({ length: 200 }, (_, index) => `comment-${String(index)}`)
+      )
+      assert.isFalse(attributes.commentsTruncated)
     }))
 
   it.effect("trims combined comment and history activity to the normalized payload budget", () =>

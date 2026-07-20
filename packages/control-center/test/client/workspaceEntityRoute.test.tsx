@@ -253,6 +253,60 @@ describe("canonical workspace entity", () => {
     ])
   })
 
+  it("keeps distinct Jira accounts with the same display name in the working circle", () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const duplicateNameInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            collaborators: [
+              ...(details.collaborators ?? []),
+              {
+                sourcePersonId: "account-alex-assignee",
+                displayName: "Alex Lee",
+                avatarUrl: null,
+                active: true,
+                roles: ["assignee"]
+              },
+              {
+                sourcePersonId: "account-alex-commenter",
+                displayName: "Alex Lee",
+                avatarUrl: null,
+                active: true,
+                roles: ["commenter"]
+              }
+            ]
+          }
+        }
+      }
+    } satisfies Inspection
+
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, duplicateNameInspection)
+
+    expect(presentation.collaborators.owners).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "account-alex-assignee", name: "Alex Lee", role: "Assignee" })
+      ])
+    )
+    expect(presentation.collaborators.authors).toEqual([
+      expect.objectContaining({ id: "account-alex-commenter", name: "Alex Lee", role: "Commenter" })
+    ])
+    expect(
+      [
+        ...presentation.collaborators.approvers,
+        ...presentation.collaborators.authors,
+        ...presentation.collaborators.operators,
+        ...presentation.collaborators.owners,
+        ...presentation.collaborators.reviewers
+      ].filter(({ name }) => name === "Ada Kline")
+    ).toHaveLength(1)
+  })
+
   it("presents deleted related entities as unavailable", () => {
     const related = inspection.graph.relatedEntityProjections[0]
     if (related === undefined) throw new Error("Expected a related entity projection fixture")

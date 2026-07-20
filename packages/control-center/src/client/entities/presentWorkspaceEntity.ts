@@ -211,7 +211,7 @@ const collaboratorsWithIssue = (
   if (issue === null) return collaborators
   const owners = [...collaborators.owners]
   const authors = [...collaborators.authors]
-  const existingNames = new Set(
+  const canonicalNames = new Set(
     [
       ...collaborators.approvers,
       ...collaborators.authors,
@@ -220,10 +220,12 @@ const collaboratorsWithIssue = (
       ...collaborators.reviewers
     ].map((person) => person.name.toLocaleLowerCase("en-US"))
   )
+  const issuePersonIds = new Set<string>()
   for (const person of issue.collaborators) {
+    if (issuePersonIds.has(person.id)) continue
+    issuePersonIds.add(person.id)
     const normalizedName = person.name.toLocaleLowerCase("en-US")
-    if (existingNames.has(normalizedName)) continue
-    existingNames.add(normalizedName)
+    if (canonicalNames.has(normalizedName)) continue
     if (person.role.includes("Assignee")) owners.push(person)
     else authors.push(person)
   }
