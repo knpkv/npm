@@ -26,7 +26,6 @@ describe("package contract", () => {
       "radix-ui": "1.6.2"
     })
     expect(manifest.name).toBe("@knpkv/rly")
-    expect(manifest.version).toBe("0.0.0")
   })
 
   it("keeps every source module inside the framework-neutral boundary", () => {

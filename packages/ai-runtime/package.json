@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/ai-runtime",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Provider-neutral Effect runtime protocol for durable local AI agents",
   "license": "MIT",
   "author": "knpkv",

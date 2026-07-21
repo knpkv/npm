@@ -6,11 +6,10 @@ The package is intentionally application-independent: it contains no vendor clie
 
 ## Status
 
-The first `0.1.0` surface is complete behind the package's `0.0.0`
-development version. Tokens, foundations, primitives, delivery patterns,
-contextual-agent patterns, and the isolated diff workbench are available
-through explicit, generated exports. The package remains presentation-only;
-application and provider integrations live outside rly.
+The initial public surface is complete. Tokens, foundations, primitives,
+delivery patterns, contextual-agent patterns, and the isolated diff workbench
+are available through explicit, generated exports. The package remains
+presentation-only; application and provider integrations live outside rly.
 
 ## Tokens and global styles
 

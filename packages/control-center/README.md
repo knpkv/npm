@@ -2,7 +2,7 @@
 
 Control Center is a local, human- and agent-oriented delivery application. It connects release work across CodeCommit, CodePipeline, Jira, Confluence, and Clockify without allowing vendor models or server capabilities to leak into the browser.
 
-This package is under active development. Its first public release will be `0.1.0`.
+This package is under active development, and its public API remains subject to change before `1.0.0`.
 
 ## Development
 
