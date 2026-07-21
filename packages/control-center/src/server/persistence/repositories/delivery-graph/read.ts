@@ -635,6 +635,35 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           }
         })
       }
+      case "componentRelationships": {
+        const identityRows = yield* sql`SELECT revision.relationship_id AS relationshipId
+          FROM relationship_revisions revision
+          INNER JOIN relationship_heads head
+            ON head.workspace_id = revision.workspace_id
+           AND head.relationship_id = revision.relationship_id
+           AND head.current_revision = revision.revision
+          WHERE revision.workspace_id = ${workspaceId}
+            AND (${query.releaseId} IS NULL OR revision.release_id = ${query.releaseId})
+            AND revision.environment_id IS NULL
+            AND revision.lifecycle NOT IN ('rejected', 'superseded')
+            AND revision.recorded_by_kind = 'system'
+            AND revision.recorded_by_component = ${query.component}
+          ORDER BY revision.relationship_id
+          LIMIT ${query.limit + 1}`
+        const identities = yield* decodeRows(Schema.Struct({ relationshipId: RelationshipId }), identityRows)
+        const relationships = yield* Effect.forEach(
+          identities.slice(0, query.limit),
+          ({ relationshipId }) => loadRelationship(workspaceId, relationshipId, null)
+        )
+        return DeliveryGraphReadResult.make({
+          _tag: "componentRelationships",
+          value: {
+            releaseId: query.releaseId,
+            truncated: identities.length > query.limit,
+            relationships
+          }
+        })
+      }
       case "workspaceEntityProjections": {
         const rowLimit = query.limit + 1
         const ownerRole = sql`assignment.role IN (

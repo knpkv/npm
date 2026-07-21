@@ -19,3 +19,9 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 - Profile and reduce the forced declaration build and distribution validation stages; these currently dominate the apparent pause after the Vite bundles finish.
 - Cache or avoid unchanged dependency builds in local end-to-end workflows.
+
+## Relationship inference
+
+- Replace bounded workspace-wide reconciliation with incremental recomputation from the entities and releases affected by each committed synchronization page. The MVP deliberately skips inference when its complete bounded snapshot cannot be proven.
+- Extract explicit Jira and release links from bounded Confluence page bodies when lazy content is materialized. The MVP understands normalized link metadata and falls back to bounded page-title metadata during space synchronization.
+- Model multi-source releases explicitly instead of deriving the release graph-node identity from the first synchronized source revision. The MVP-created Jira releases have one authoritative source revision.

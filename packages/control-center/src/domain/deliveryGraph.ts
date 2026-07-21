@@ -88,7 +88,13 @@ const PullRequestDetails = Schema.TaggedStruct("pull-request", {
 const PageDetails = Schema.TaggedStruct("page", {
   spaceKey: boundedText(100, "SpaceKey"),
   revision: boundedText(512, "PageRevision"),
-  status: Schema.Literals(["draft", "current", "superseded"])
+  status: Schema.Literals(["draft", "current", "superseded"]),
+  linkedIssueKeys: Schema.optional(
+    Schema.Array(boundedText(100, "LinkedIssueKey")).check(Schema.isUnique(), Schema.isMaxLength(100))
+  ),
+  linkedReleaseVersions: Schema.optional(
+    Schema.Array(boundedText(100, "LinkedReleaseVersion")).check(Schema.isUnique(), Schema.isMaxLength(100))
+  )
 })
 
 const PipelineDetails = Schema.TaggedStruct("pipeline-execution", {

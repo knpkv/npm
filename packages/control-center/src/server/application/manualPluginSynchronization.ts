@@ -31,7 +31,7 @@ import type {
 import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginFailure } from "../plugins/failures.js"
 import { pluginFailureClass, PluginMalformedResponseFailure } from "../plugins/failures.js"
-import { supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
+import { firstPartySyncStreamKey, supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
 import { PluginConnection, type PluginConnectionV1 } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { DomainEventWakeups } from "../runtime/DomainEventWakeups.js"
@@ -94,11 +94,11 @@ const connectionSync = (
 
 /** Production drivers for first-party connections that currently negotiate synchronization. */
 export const firstPartyManualPluginSyncDrivers = makeManualPluginSyncDriverRegistry([
-  { providerId: "codecommit", streamKey: "pull-requests", sync: connectionSync },
-  { providerId: "codepipeline", streamKey: "executions", sync: connectionSync },
-  { providerId: "jira", streamKey: "project-issues", sync: connectionSync },
-  { providerId: "clockify", streamKey: "time-entries", sync: connectionSync },
-  { providerId: "confluence", streamKey: "pages", sync: connectionSync }
+  { providerId: "codecommit", streamKey: firstPartySyncStreamKey("codecommit"), sync: connectionSync },
+  { providerId: "codepipeline", streamKey: firstPartySyncStreamKey("codepipeline"), sync: connectionSync },
+  { providerId: "jira", streamKey: firstPartySyncStreamKey("jira"), sync: connectionSync },
+  { providerId: "clockify", streamKey: firstPartySyncStreamKey("clockify"), sync: connectionSync },
+  { providerId: "confluence", streamKey: firstPartySyncStreamKey("confluence"), sync: connectionSync }
 ])
 
 const unavailable = () => new ApplicationServiceUnavailable({ retryAt: null })

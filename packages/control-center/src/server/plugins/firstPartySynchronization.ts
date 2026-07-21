@@ -4,6 +4,16 @@ import { jiraReadPluginDescriptor } from "./jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "./negotiation.js"
 
 const compatibleHistoricalJiraAdapterVersion = { major: 0, minor: 1, patch: 0 }
+const FIRST_PARTY_SYNC_STREAMS: Readonly<Record<ProviderId, string>> = {
+  codecommit: "pull-requests",
+  codepipeline: "executions",
+  jira: "project-issues",
+  clockify: "time-entries",
+  confluence: "pages"
+}
+
+/** Resolve the production synchronization stream owned by a first-party provider. */
+export const firstPartySyncStreamKey = (providerId: ProviderId): string => FIRST_PARTY_SYNC_STREAMS[providerId]
 
 const sameVersion = (
   left: { readonly major: number; readonly minor: number; readonly patch: number },
