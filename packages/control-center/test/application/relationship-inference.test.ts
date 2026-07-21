@@ -277,6 +277,66 @@ describe("relationship inference", () => {
     assert.isFalse(result.candidates.some(({ lifecycle }) => lifecycle === "missing"))
   })
 
+  it("does not propagate a rejected implementation into pipeline delivery", () => {
+    const issue = entity(
+      17,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "PAY-42 · Guard refunds",
+        details: { _tag: "issue", key: "PAY-42", status: "Ready", priority: null, estimatePoints: null }
+      },
+      [releaseId]
+    )
+    const pullRequest = entity(18, {
+      ...common,
+      entityType: "pull-request",
+      displayKey: "18",
+      title: "PAY-42 guard refund writes",
+      details: {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feat/PAY-42-refund-guard",
+        targetBranch: "main",
+        headRevision: "abc123",
+        reviewState: "requested"
+      }
+    })
+    const pipeline = entity(19, {
+      ...common,
+      entityType: "pipeline-execution",
+      displayKey: "payments/9003",
+      title: "Payments deploy",
+      details: {
+        _tag: "pipeline-execution",
+        pipelineName: "payments",
+        executionId: "9003",
+        status: "running",
+        triggerRevision: "abc123"
+      }
+    })
+    const input = { entities: [issue, pullRequest, pipeline], releases: [], relationships: [] }
+    const accepted = deriveRelationshipInference(input)
+    const implementation = accepted.candidates.find(
+      ({ kind, lifecycle }) => kind === "implements" && lifecycle === "inferred"
+    )
+    if (implementation === undefined) throw new Error("expected inferred implementation fixture")
+    assert.isTrue(
+      accepted.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "inferred")
+    )
+
+    const rejected = deriveRelationshipInference({
+      ...input,
+      rejectedCandidateIdentityKeys: new Set([implementation.identityKey])
+    })
+
+    assert.isTrue(rejected.candidates.some(({ kind, lifecycle }) => kind === "implements" && lifecycle === "missing"))
+    assert.isFalse(
+      rejected.candidates.some(({ kind, lifecycle }) => kind === "delivered-by" && lifecycle === "inferred")
+    )
+  })
+
   it("matches exact current release documentation without using version prefixes or superseded pages", () => {
     const issue = entity(
       20,

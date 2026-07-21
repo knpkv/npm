@@ -17,7 +17,8 @@ import { PersistenceOperationError } from "../persistence/errors.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord } from "../persistence/repositories/models.js"
-import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import { firstPartySyncStreamKey } from "../plugins/firstPartySynchronization.js"
 import {
   deriveRelationshipInference,
   type RelationshipInferenceCandidate,
@@ -28,7 +29,7 @@ import {
 
 const MAXIMUM_INFERENCE_ENTITIES = 500
 const MAXIMUM_INFERENCE_RELEASES = 50
-const MAXIMUM_RELEASE_RETIREMENT_SCAN = 200
+const MAXIMUM_INFERENCE_RELATIONSHIPS = 2_000
 const COMPONENT = "relationship-inference"
 
 export interface RelationshipInferenceMaterializationScope {
@@ -174,10 +175,13 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
     yield* identity(evidenceIdentity(scope.workspaceId, candidate.identityKey, candidate.observationKey, "claim"))
   )
   const source = entity.sourceRevision
+  const sourceStreamKey = yield* Schema.decodeUnknownEffect(PluginStreamKey)(
+    firstPartySyncStreamKey(source.providerId)
+  ).pipe(Effect.mapError(() => new PersistenceOperationError({ operation: "relationship-inference.source-stream" })))
   const pluginHealth = yield* persistence.pluginRuntime.getLastSuccessfulHealth(
     scope.workspaceId,
     source.pluginConnectionId,
-    scope.streamKey
+    sourceStreamKey
   )
   if (pluginHealth === null) {
     return yield* new PersistenceOperationError({ operation: "relationship-inference.source-health" })
@@ -399,29 +403,31 @@ const emptyReceipt = (skippedDueToBounds: boolean): RelationshipInferenceMateria
   skippedDueToBounds
 })
 
-const retireInferenceAtEntityBound = Effect.fn(
-  "RelationshipInferenceMaterialization.retireInferenceAtEntityBound"
+const retireInferenceForReleases = Effect.fn(
+  "RelationshipInferenceMaterialization.retireInferenceForReleases"
 )(function*(
   persistence: PersistenceService,
-  scope: RelationshipInferenceMaterializationScope
+  scope: RelationshipInferenceMaterializationScope,
+  releaseIds: ReadonlyArray<RelationshipInferenceRelease["releaseId"]> | null,
+  reason: string
 ) {
-  const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_RELEASE_RETIREMENT_SCAN)
-  const slices = yield* Effect.forEach(releases, ({ release }) =>
-    persistence.deliveryGraph.read(scope.workspaceId, {
-      _tag: "releaseSlice",
-      releaseId: release.id,
-      environmentId: null,
-      limit: MAXIMUM_INFERENCE_ENTITIES
-    }))
-  if (slices.some((slice) => slice._tag !== "releaseSlice" || slice.value.truncated)) return emptyReceipt(true)
+  const reads = yield* Effect.forEach(
+    releaseIds ?? [null],
+    (releaseId) =>
+      persistence.deliveryGraph.read(scope.workspaceId, {
+        _tag: "componentRelationships",
+        releaseId,
+        component: COMPONENT,
+        limit: MAXIMUM_INFERENCE_RELATIONSHIPS
+      })
+  )
+  if (
+    reads.some((read) => read._tag !== "componentRelationships" || read.value.truncated)
+  ) return emptyReceipt(true)
   const relationshipIds = new Set(
-    slices.flatMap((slice) =>
-      slice._tag === "releaseSlice"
-        ? slice.value.relationships.flatMap((relationship) =>
-          relationship.recordedBy._tag === "system" && relationship.recordedBy.component === COMPONENT
-            ? [relationship.relationshipId]
-            : []
-        )
+    reads.flatMap((read) =>
+      read._tag === "componentRelationships"
+        ? read.value.relationships.map(({ relationshipId }) => relationshipId)
         : []
     )
   )
@@ -431,10 +437,24 @@ const retireInferenceAtEntityBound = Effect.fn(
       persistence,
       scope,
       relationshipId,
-      "Inference inputs exceeded the bounded workspace snapshot, so this relationship can no longer be proven."
+      reason
     )
   }
   return { ...emptyReceipt(true), relationshipCount }
+})
+
+const retireInferenceAtEntityBound = Effect.fn(
+  "RelationshipInferenceMaterialization.retireInferenceAtEntityBound"
+)(function*(
+  persistence: PersistenceService,
+  scope: RelationshipInferenceMaterializationScope
+) {
+  return yield* retireInferenceForReleases(
+    persistence,
+    scope,
+    null,
+    "Inference inputs exceeded the bounded workspace snapshot, so this relationship can no longer be proven."
+  )
 })
 
 /** Persist current rule candidates after a normalized page has committed. */
@@ -518,7 +538,18 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
       environmentId: null,
       limit: MAXIMUM_INFERENCE_ENTITIES
     }))
-  if (slices.some((slice) => slice._tag !== "releaseSlice" || slice.value.truncated)) return emptyReceipt(true)
+  const truncatedReleaseIds = slices.flatMap((slice, index) => {
+    const releaseId = releaseIds[index]
+    return releaseId !== undefined && (slice._tag !== "releaseSlice" || slice.value.truncated) ? [releaseId] : []
+  })
+  if (truncatedReleaseIds.length > 0) {
+    return yield* retireInferenceForReleases(
+      persistence,
+      scope,
+      truncatedReleaseIds,
+      "The bounded release relationship snapshot was incomplete, so this inference can no longer be proven."
+    )
+  }
   const relationships = slices.flatMap((slice) => (slice._tag === "releaseSlice" ? slice.value.relationships : []))
   const inferenceInput = {
     entities,
@@ -536,7 +567,7 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
   const inference = rejectedCandidateIdentityKeys.size === 0
     ? initialInference
     : deriveRelationshipInference({ ...inferenceInput, rejectedCandidateIdentityKeys })
-  if (inference.truncated) return emptyReceipt(true)
+  if (inference.truncated) return yield* retireInferenceAtEntityBound(persistence, scope)
   let receipt = emptyReceipt(false)
   const missingReleaseNodes = inferenceReleases.flatMap(({ node }) => node === null ? [] : [node])
   if (missingReleaseNodes.length > 0) {

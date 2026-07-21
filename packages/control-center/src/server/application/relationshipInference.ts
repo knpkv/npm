@@ -403,9 +403,9 @@ export const deriveRelationshipInference = (input: {
       const issueDetails = issue.projection.details
       if (issueDetails._tag !== "issue" || !containsToken(metadata(pullRequest), issueDetails.key)) continue
       for (const releaseId of issue.releaseIds) {
-        releaseIds.add(releaseId)
         const identityKey = candidateIdentity("implements", releaseId, pullRequest.nodeId, issue.nodeId)
         if (!(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
+          releaseIds.add(releaseId)
           inferredIssueLinks.add(`${releaseId}:${issue.nodeId}`)
           obsoleteGaps.add(issueGapIdentity(releaseId, issue.nodeId))
         }

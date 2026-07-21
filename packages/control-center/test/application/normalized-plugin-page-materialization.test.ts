@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Schema } from "effect"
+import { DateTime, Effect, Layer, Option, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -18,6 +18,7 @@ import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { makeDeliveryGraphInspection } from "../../src/server/application/deliveryGraphInspection.js"
+import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
 import {
   materializeNormalizedPluginPage,
   type NormalizedPluginPageMaterializationScope
@@ -41,6 +42,9 @@ const CLOCKIFY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-
 const CONFLUENCE_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000202")
 const CACHE_STREAM = Schema.decodeSync(PluginStreamKey)("cache-only")
 const MATERIALIZED_STREAM = Schema.decodeSync(PluginStreamKey)("delivery-items")
+const firstPartyStream = (
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence" | "jira"
+) => Schema.decodeSync(PluginStreamKey)(Option.getOrThrow(firstPartyManualPluginSyncDrivers.get(providerId)).streamKey)
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
@@ -928,7 +932,7 @@ describe("normalized plugin page materialization", () => {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId,
           providerId,
-          streamKey: MATERIALIZED_STREAM,
+          streamKey: firstPartyStream(providerId),
           expectedRevision: 0,
           committedAt: T3,
           successfulHealth
@@ -1010,7 +1014,7 @@ describe("normalized plugin page materialization", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: CODECOMMIT_PLUGIN_ID,
         providerId: "codecommit",
-        streamKey: MATERIALIZED_STREAM,
+        streamKey: firstPartyStream("codecommit"),
         expectedRevision: 1,
         committedAt: T3,
         successfulHealth: { _tag: "healthy", checkedAt: T3 }
@@ -1043,17 +1047,27 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(deliveredHistory.value[0]?.lifecycle._tag, "superseded")
     })))
 
-  it.effect("uses the evidence provider health when another provider triggers inference", () =>
+  it.effect("uses the evidence provider stream and health when another provider triggers inference", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
       yield* setup
       yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
 
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, inferenceJiraReleasePage)
       yield* materializeNormalizedPluginPage({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: CODECOMMIT_PLUGIN_ID,
         providerId: "codecommit",
-        streamKey: MATERIALIZED_STREAM,
+        streamKey: firstPartyStream("codecommit"),
         expectedRevision: 0,
         committedAt: T3,
         successfulHealth: {
@@ -1064,15 +1078,51 @@ describe("normalized plugin page materialization", () => {
           safeMessage: "CodeCommit returned a partial successful response."
         }
       }, codeCommitRelationshipPage)
+      const repeatedPullRequest = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "codecommit-source-stream-repeat",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "codecommit-pr-17-source-stream-repeat",
+          observedAt: "2026-07-19T09:03:00.000Z",
+          revision: "abc123-source-stream-repeat",
+          entityType: "pull-request",
+          vendorImmutableId: "17",
+          sourceUrl: "https://console.aws.example/codecommit/pull-requests/17",
+          title: "PAY-42 guard refund writes",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/PAY-42-refund-guard",
+            targetBranch: "main",
+            headRevision: "abc123",
+            reviewState: "requested"
+          }
+        }]
+      })
       yield* materializeNormalizedPluginPage({
         workspaceId: WORKSPACE_ID,
-        pluginConnectionId: PLUGIN_ID,
-        providerId: "jira",
-        streamKey: MATERIALIZED_STREAM,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: firstPartyStream("codecommit"),
+        expectedRevision: 1,
+        committedAt: T3,
+        successfulHealth: {
+          _tag: "degraded",
+          checkedAt: T3,
+          failureClass: "rate-limit",
+          retryAt: null,
+          safeMessage: "CodeCommit returned a partial successful response."
+        }
+      }, repeatedPullRequest)
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
         expectedRevision: 0,
         committedAt: T3,
         successfulHealth: { _tag: "healthy", checkedAt: T3 }
-      }, inferenceJiraReleasePage)
+      }, codePipelineRelationshipPage)
 
       const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
       if (release === undefined) return yield* Effect.die("expected synchronized release")
@@ -1115,7 +1165,7 @@ describe("normalized plugin page materialization", () => {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId,
           providerId,
-          streamKey: MATERIALIZED_STREAM,
+          streamKey: firstPartyStream(providerId),
           expectedRevision,
           committedAt: T3,
           successfulHealth: { _tag: "healthy", checkedAt: T3 }
@@ -1209,7 +1259,7 @@ describe("normalized plugin page materialization", () => {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId,
           providerId,
-          streamKey: MATERIALIZED_STREAM,
+          streamKey: firstPartyStream(providerId),
           expectedRevision,
           committedAt: T3,
           successfulHealth: { _tag: "healthy", checkedAt: T3 }
@@ -1266,6 +1316,230 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(history.value[0]?.lifecycle._tag, "superseded")
     })))
 
+  it.effect(
+    "supersedes rule-owned inference only after the candidate snapshot exceeds its bound",
+    () =>
+      withMaterializer(Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+        yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+        const synchronize = (
+          pluginConnectionId: PluginConnectionId,
+          providerId: "codecommit" | "confluence" | "jira",
+          expectedRevision: number,
+          page: typeof PluginSyncPageV1.Type
+        ) =>
+          materializeNormalizedPluginPage({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId,
+            providerId,
+            streamKey: firstPartyStream(providerId),
+            expectedRevision,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          }, page)
+        const versions = ["2026.29", ...Array.from({ length: 36 }, (_, index) => `cap-${String(index + 1)}`)]
+        const additionalReleases = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "jira-candidate-cap-releases",
+          hasMore: false,
+          events: versions.slice(1).map((version): typeof NormalizedPluginEventV1.Encoded => ({
+            _tag: "UpsertEntity",
+            eventId: `jira-candidate-cap-release-${version}`,
+            observedAt: "2026-07-19T09:02:40.000Z",
+            revision: `candidate:${version}`,
+            entityType: "release",
+            vendorImmutableId: `jira-version:${version}`,
+            sourceUrl: null,
+            title: `Payments ${version}`,
+            attributes: { serviceName: "Payments", version, lifecycle: "candidate" }
+          }))
+        })
+        const documentationPage = (start: number, count: number, checkpointAfterPage: string) =>
+          Schema.decodeSync(PluginSyncPageV1)({
+            checkpointAfterPage,
+            hasMore: false,
+            events: Array.from({ length: count }, (_, offset): typeof NormalizedPluginEventV1.Encoded => {
+              const index = start + offset
+              return {
+                _tag: "UpsertEntity",
+                eventId: `confluence-candidate-cap-${String(index)}`,
+                observedAt: "2026-07-19T09:02:50.000Z",
+                revision: "1",
+                entityType: "confluence-page",
+                vendorImmutableId: `candidate-cap-${String(index)}`,
+                sourceUrl: null,
+                title: `Candidate cap page ${String(index)}`,
+                attributes: {
+                  spaceKey: "PAY",
+                  currentVersion: 1,
+                  status: "current",
+                  linkedReleaseVersions: versions
+                }
+              }
+            })
+          })
+
+        yield* synchronize(PLUGIN_ID, "jira", 0, inferenceJiraReleasePage)
+        yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 0, codeCommitRelationshipPage)
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))
+          .find(({ release }) => release.version === "2026.29")?.release
+        if (release === undefined) return yield* Effect.die("expected synchronized release")
+        const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+        const inferred = initialSlice.value.relationships.find(
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        )
+        if (inferred === undefined) return yield* Effect.die("expected inferred implementation relationship")
+
+        yield* synchronize(PLUGIN_ID, "jira", 1, additionalReleases)
+        yield* synchronize(CONFLUENCE_PLUGIN_ID, "confluence", 0, documentationPage(1, 54, "candidate-cap-2000"))
+        const atBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationship",
+          relationshipId: inferred.relationshipId,
+          revision: null
+        })
+        if (atBound._tag !== "relationship") return yield* Effect.die("expected relationship at candidate bound")
+        assert.strictEqual(atBound.value.lifecycle._tag, "inferred")
+
+        yield* synchronize(CONFLUENCE_PLUGIN_ID, "confluence", 1, documentationPage(55, 1, "candidate-cap-2001"))
+        const beyondBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationship",
+          relationshipId: inferred.relationshipId,
+          revision: null
+        })
+        if (beyondBound._tag !== "relationship") {
+          return yield* Effect.die("expected relationship beyond candidate bound")
+        }
+        assert.strictEqual(beyondBound.value.lifecycle._tag, "superseded")
+      })),
+    60_000
+  )
+
+  it.effect(
+    "supersedes rule-owned inference only after a release slice exceeds its bound",
+    () =>
+      withMaterializer(Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+        const synchronize = (
+          pluginConnectionId: PluginConnectionId,
+          providerId: "codecommit" | "jira",
+          expectedRevision: number,
+          page: typeof PluginSyncPageV1.Type
+        ) =>
+          materializeNormalizedPluginPage({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId,
+            providerId,
+            streamKey: firstPartyStream(providerId),
+            expectedRevision,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          }, page)
+        const documentationRelationships = (
+          start: number,
+          count: number,
+          checkpointAfterPage: string,
+          includeExistingNodeRelationship = false
+        ) => {
+          const existingNodeRelationships: ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> =
+            includeExistingNodeRelationship
+              ? [{
+                _tag: "ProposeRelationship",
+                eventId: "release-slice-bound-existing-node-relationship",
+                observedAt: "2026-07-19T09:02:50.000Z",
+                revision: "1",
+                relationshipId: "release-slice-bound-existing-node-relationship",
+                from: { entityType: "release", vendorImmutableId: "jira-version:2026.29" },
+                to: { entityType: "jira.issue", vendorImmutableId: "issue-42" },
+                relationshipType: "depends-on",
+                confidence: 1,
+                evidenceIds: []
+              }]
+              : []
+          return Schema.decodeSync(PluginSyncPageV1)({
+            checkpointAfterPage,
+            hasMore: false,
+            events: [
+              ...existingNodeRelationships,
+              ...Array.from({ length: count }, (_, offset) => start + offset).flatMap(
+                (index): ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> => {
+                  const pageId = `release-slice-bound-page-${String(index)}`
+                  return [{
+                    _tag: "UpsertEntity",
+                    eventId: `release-slice-bound-page-${String(index)}`,
+                    observedAt: "2026-07-19T09:02:40.000Z",
+                    revision: "1",
+                    entityType: "confluence-page",
+                    vendorImmutableId: pageId,
+                    sourceUrl: null,
+                    title: `Release slice bound target ${String(index)}`,
+                    attributes: { spaceKey: "PAY", currentVersion: 1, status: "current" }
+                  }, {
+                    _tag: "ProposeRelationship",
+                    eventId: `release-slice-bound-relationship-${String(index)}`,
+                    observedAt: "2026-07-19T09:02:50.000Z",
+                    revision: "1",
+                    relationshipId: `release-slice-bound-relationship-${String(index)}`,
+                    from: { entityType: "release", vendorImmutableId: "jira-version:2026.29" },
+                    to: { entityType: "confluence-page", vendorImmutableId: pageId },
+                    relationshipType: "documented-by",
+                    confidence: 1,
+                    evidenceIds: []
+                  }]
+                }
+              )
+            ]
+          })
+        }
+
+        yield* synchronize(PLUGIN_ID, "jira", 0, inferenceJiraReleasePage)
+        yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 0, codeCommitRelationshipPage)
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+        if (release === undefined) return yield* Effect.die("expected synchronized release")
+        const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+        const inferred = initialSlice.value.relationships.find(
+          ({ kind, lifecycle }) => kind === "implements" && lifecycle._tag === "inferred"
+        )
+        if (inferred === undefined) return yield* Effect.die("expected inferred implementation relationship")
+
+        yield* synchronize(PLUGIN_ID, "jira", 1, documentationRelationships(0, 248, "release-slice-bound-fill-1", true))
+        yield* synchronize(PLUGIN_ID, "jira", 2, documentationRelationships(248, 248, "release-slice-bound-500"))
+        const atBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationship",
+          relationshipId: inferred.relationshipId,
+          revision: null
+        })
+        if (atBound._tag !== "relationship") return yield* Effect.die("expected relationship at release slice bound")
+        assert.strictEqual(atBound.value.lifecycle._tag, "inferred")
+
+        yield* synchronize(PLUGIN_ID, "jira", 3, documentationRelationships(496, 1, "release-slice-bound-501"))
+        const beyondBound = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationship",
+          relationshipId: inferred.relationshipId,
+          revision: null
+        })
+        if (beyondBound._tag !== "relationship") {
+          return yield* Effect.die("expected relationship beyond release slice bound")
+        }
+        assert.strictEqual(beyondBound.value.lifecycle._tag, "superseded")
+      })),
+    30_000
+  )
+
   it.effect("supersedes rule-owned inference only after the release snapshot exceeds its bound", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -1281,7 +1555,7 @@ describe("normalized plugin page materialization", () => {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId,
           providerId,
-          streamKey: MATERIALIZED_STREAM,
+          streamKey: firstPartyStream(providerId),
           expectedRevision,
           committedAt: T3,
           successfulHealth: { _tag: "healthy", checkedAt: T3 }
@@ -2273,7 +2547,7 @@ describe("normalized plugin page materialization", () => {
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID,
         providerId: "jira",
-        streamKey: MATERIALIZED_STREAM,
+        streamKey: firstPartyStream("jira"),
         expectedRevision: 0,
         committedAt: T2,
         successfulHealth: { _tag: "healthy", checkedAt: T2 }
