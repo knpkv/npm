@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/ai-codex",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Effect AI language model backed by the local Codex CLI",
   "license": "MIT",
   "author": "knpkv",

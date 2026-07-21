@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/atlassian-common",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Shared utilities for Atlassian tools (AST, serializers, auth, config)",
   "license": "MIT",
   "author": "knpkv",

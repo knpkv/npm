@@ -1,5 +1,21 @@
 # @knpkv/confluence-api-client
 
+## 1.0.0
+
+### Major Changes
+
+- [#125](https://github.com/knpkv/npm/pull/125) [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43) Thanks [@konopkov](https://github.com/konopkov)! - Replace the legacy Atlassian `openapi-fetch` clients with generated,
+  Schema-validated Effect clients. Jira and Confluence now provide direct Effect
+  operations, injected `HttpClient` transports, deterministic local regeneration,
+  structural upstream freshness checks, and scheduled tested update pull requests.
+
+  The legacy `toEffect`, `FetchClientError`, raw `.client` operation surface, and
+  type-only generated subpaths are removed.
+
+### Patch Changes
+
+- [#125](https://github.com/knpkv/npm/pull/125) [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-beta.97 and current compatible dependencies. Replace ad hoc object guards with Effect Predicate helpers and migrate retry schedules to the current Schedule API.
+
 ## 0.4.0
 
 ### Minor Changes

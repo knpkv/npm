@@ -1,5 +1,11 @@
 # @knpkv/agent-skills
 
+## 0.2.3
+
+### Patch Changes
+
+- [#125](https://github.com/knpkv/npm/pull/125) [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-beta.97 and current compatible dependencies. Replace ad hoc object guards with Effect Predicate helpers and migrate retry schedules to the current Schedule API.
+
 ## 0.2.2
 
 ### Patch Changes

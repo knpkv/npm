@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/ai-claude",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Effect AI language model backed by the local Claude CLI",
   "license": "MIT",
   "author": "knpkv",

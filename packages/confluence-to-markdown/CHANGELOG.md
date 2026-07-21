@@ -1,5 +1,26 @@
 # @knpkv/confluence-to-markdown
 
+## 2.1.1
+
+### Patch Changes
+
+- [#125](https://github.com/knpkv/npm/pull/125) [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43) Thanks [@konopkov](https://github.com/konopkov)! - Replace the legacy Atlassian `openapi-fetch` clients with generated,
+  Schema-validated Effect clients. Jira and Confluence now provide direct Effect
+  operations, injected `HttpClient` transports, deterministic local regeneration,
+  structural upstream freshness checks, and scheduled tested update pull requests.
+
+  The legacy `toEffect`, `FetchClientError`, raw `.client` operation surface, and
+  type-only generated subpaths are removed.
+
+- [#125](https://github.com/knpkv/npm/pull/125) [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade the workspace to Effect 4.0.0-beta.97 and current compatible dependencies. Replace ad hoc object guards with Effect Predicate helpers and migrate retry schedules to the current Schedule API.
+
+- [#122](https://github.com/knpkv/npm/pull/122) [`331e503`](https://github.com/knpkv/npm/commit/331e503f66c249276967a78040fa504d708e0244) Thanks [@konopkov](https://github.com/konopkov)! - Honor Markdown table cell edits on push by merging GFM content over sidecar attrs. Rows and columns are aligned by plain-text fingerprint: cell edits merge freely when the shape is unchanged, a single row/column insert or delete merges anywhere in the table, pure reorders keep attrs travelling with the moved content, and edits combined with a tail append are both honored. Header-column identity is restored on rows inserted via GFM, headerless tables keep their synthetic empty GFM header row out of the alignment, and lossy cells (multi-block bodies, hardBreaks, boundary whitespace) keep the authoritative sidecar body instead of adopting the degraded GFM copy — structural changes to tables containing such cells fall back entirely, since those cells can never fingerprint-match their GFM copies. Fingerprints include marks (`foo` vs `**foo**`) and attr-carried content (status lozenges, dates, emoji) so moved formatted or leaf-only cells are recognised, and column identity is judged on the rows both tables share so a column swap combined with a row append merges correctly. Ambiguous shapes fall back to the sidecar node instead of guessing: duplicate-text rows/columns around a structural change (including a duplicate moving past an anchored twin), reorders mixed with edits, rows and columns reordered or resized in the same push, ragged (non-rectangular) tables, and merged-cell tables.
+
+- Updated dependencies [[`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43), [`665cecb`](https://github.com/knpkv/npm/commit/665cecbc3d5f79f9083acb1b393ace9a8ec0b1b8), [`f820c19`](https://github.com/knpkv/npm/commit/f820c1906e00f2f2d17c2e7cc3921ba26522db43), [`1bba5c2`](https://github.com/knpkv/npm/commit/1bba5c282684553fbc670e6dcf2960e8a4e200ed)]:
+  - @knpkv/confluence-api-client@1.0.0
+  - @knpkv/atlassian-common@1.2.0
+  - @knpkv/agent-skills@0.2.3
+
 ## 2.1.0
 
 ### Minor Changes
