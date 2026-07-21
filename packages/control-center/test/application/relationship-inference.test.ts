@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Schema from "effect/Schema"
 
-import { DeliveryEntityProjection } from "../../src/domain/deliveryGraph.js"
+import { DeliveryEntityProjection, DeliveryRelationship } from "../../src/domain/deliveryGraph.js"
 import { GraphNodeId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   deriveRelationshipInference,
@@ -192,6 +192,89 @@ describe("relationship inference", () => {
       ["implements", "delivered-by"]
     )
     assert.isTrue(result.candidates.every(({ lifecycle }) => lifecycle === "missing"))
+  })
+
+  it("keeps governed and verified repairs authoritative over missing gaps", () => {
+    const issue = entity(
+      14,
+      {
+        ...common,
+        entityType: "issue",
+        displayKey: "PAY-42",
+        title: "PAY-42 · Guard refunds",
+        details: { _tag: "issue", key: "PAY-42", status: "Ready", priority: null, estimatePoints: null }
+      },
+      [releaseId]
+    )
+    const pullRequest = entity(15, {
+      ...common,
+      entityType: "pull-request",
+      displayKey: "18",
+      title: "Guard refund writes",
+      details: {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feat/refund-guard",
+        targetBranch: "main",
+        headRevision: "abc123",
+        reviewState: "requested"
+      }
+    })
+    const pipeline = entity(16, {
+      ...common,
+      entityType: "pipeline-execution",
+      displayKey: "payments/9002",
+      title: "Payments deploy",
+      details: {
+        _tag: "pipeline-execution",
+        pipelineName: "payments",
+        executionId: "9002",
+        status: "running",
+        triggerRevision: "different-revision"
+      }
+    })
+    const relationship = (
+      index: number,
+      kind: "implements" | "verified-by",
+      source: RelationshipInferenceEntity,
+      target: RelationshipInferenceEntity,
+      lifecycle: "governed" | "verified"
+    ) =>
+      Schema.decodeUnknownSync(DeliveryRelationship)({
+        workspaceId,
+        relationshipId: `01890f6f-6d6a-7cc0-98d2-${String(500 + index).padStart(12, "0")}`,
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind,
+        sourceNodeId: source.nodeId,
+        sourceNodeKind: source.projection.entityType,
+        targetNodeId: target.nodeId,
+        targetNodeKind: target.projection.entityType,
+        scope: { _tag: "release", releaseId },
+        lifecycle: { _tag: lifecycle, effectiveAt: "2026-07-19T09:03:00.000Z" },
+        confidence: { _tag: "inferred", score: 1, rationale: "Approved repair." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "approved-repair-fixture",
+          ruleVersion: 1,
+          rationale: "Approved repair."
+        },
+        recordedBy: { _tag: "system", component: "relationship-inference-test" },
+        evidenceClaimIds: [],
+        recordedAt: "2026-07-19T09:03:00.000Z"
+      })
+
+    const result = deriveRelationshipInference({
+      entities: [issue, pullRequest, pipeline],
+      releases: [],
+      relationships: [
+        relationship(1, "implements", pullRequest, issue, "governed"),
+        relationship(2, "verified-by", pullRequest, pipeline, "verified")
+      ]
+    })
+
+    assert.isFalse(result.candidates.some(({ lifecycle }) => lifecycle === "missing"))
   })
 
   it("matches exact current release documentation without using version prefixes or superseded pages", () => {

@@ -17,6 +17,7 @@ import { PersistenceOperationError } from "../persistence/errors.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord } from "../persistence/repositories/models.js"
+import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import {
   deriveRelationshipInference,
   type RelationshipInferenceCandidate,
@@ -27,10 +28,12 @@ import {
 
 const MAXIMUM_INFERENCE_ENTITIES = 500
 const MAXIMUM_INFERENCE_RELEASES = 50
+const MAXIMUM_RELEASE_RETIREMENT_SCAN = 200
 const COMPONENT = "relationship-inference"
 
 export interface RelationshipInferenceMaterializationScope {
   readonly committedAt: UtcTimestamp
+  readonly streamKey: PluginStreamKey
   readonly successfulHealth: Extract<PluginHealth, { readonly _tag: "healthy" | "degraded" }>
   readonly workspaceId: WorkspaceId
 }
@@ -130,7 +133,7 @@ const endpointNode = <IdentityError>(
 ) =>
   endpoint._tag === "resolved"
     ? Effect.succeed({ node: null, nodeId: endpoint.nodeId })
-    : identity(missingNodeIdentity(scope.workspaceId, endpoint.kind, endpoint.missingKey)).pipe(
+    : identity(missingNodeIdentity(scope.workspaceId, endpoint.kind, endpoint.identityKey)).pipe(
       Effect.map((value) => {
         const nodeId = GraphNodeId.make(value)
         const node: DeliveryNode = {
@@ -153,13 +156,17 @@ const endpointNode = <IdentityError>(
     )
 
 const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor")(function*<IdentityError>(
+  persistence: PersistenceService,
   identity: StableIdentity<IdentityError>,
   scope: RelationshipInferenceMaterializationScope,
   candidate: RelationshipInferenceCandidate,
   sourceNodeId: GraphNodeId,
   targetNodeId: GraphNodeId,
   entity: EntityRecord
-): Effect.fn.Return<{ readonly claim: EvidenceClaim; readonly item: EvidenceItem }, IdentityError> {
+): Effect.fn.Return<
+  { readonly claim: EvidenceClaim; readonly item: EvidenceItem },
+  IdentityError | PersistenceOperationFailure
+> {
   const evidenceId = EvidenceId.make(
     yield* identity(evidenceIdentity(scope.workspaceId, candidate.identityKey, candidate.observationKey, "item"))
   )
@@ -167,6 +174,14 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
     yield* identity(evidenceIdentity(scope.workspaceId, candidate.identityKey, candidate.observationKey, "claim"))
   )
   const source = entity.sourceRevision
+  const pluginHealth = yield* persistence.pluginRuntime.getLastSuccessfulHealth(
+    scope.workspaceId,
+    source.pluginConnectionId,
+    scope.streamKey
+  )
+  if (pluginHealth === null) {
+    return yield* new PersistenceOperationError({ operation: "relationship-inference.source-health" })
+  }
   const sourceAgeSeconds = Math.max(
     0,
     (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(source.lastObservedAt)) / 1_000
@@ -184,9 +199,7 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
       freshness: {
         _tag: "current",
         evaluatedAt: scope.committedAt,
-        pluginHealth: scope.successfulHealth._tag === "healthy"
-          ? { _tag: "healthy", checkedAt: scope.committedAt }
-          : { ...scope.successfulHealth, checkedAt: scope.committedAt },
+        pluginHealth,
         provenance: { _tag: "provider", sourceRevision: source },
         sourceObservedAt: source.lastObservedAt,
         staleAfterSeconds: Math.max(1, Math.ceil(sourceAgeSeconds) + 86_400),
@@ -255,7 +268,7 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
     : (entityById.get(candidate.evidenceEntityId) ?? null)
   const evidence = evidenceEntity === null
     ? null
-    : yield* evidenceFor(identity, scope, candidate, source.nodeId, target.nodeId, evidenceEntity)
+    : yield* evidenceFor(persistence, identity, scope, candidate, source.nodeId, target.nodeId, evidenceEntity)
   if (unchanged(previous, candidate, source.nodeId, target.nodeId, evidence?.claim.evidenceClaimId ?? null)) {
     return {
       evidenceClaimCount: 0,
@@ -392,8 +405,7 @@ const retireInferenceAtEntityBound = Effect.fn(
   persistence: PersistenceService,
   scope: RelationshipInferenceMaterializationScope
 ) {
-  const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_INFERENCE_RELEASES + 1)
-  if (releases.length > MAXIMUM_INFERENCE_RELEASES) return emptyReceipt(true)
+  const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_RELEASE_RETIREMENT_SCAN)
   const slices = yield* Effect.forEach(releases, ({ release }) =>
     persistence.deliveryGraph.read(scope.workspaceId, {
       _tag: "releaseSlice",
@@ -461,7 +473,9 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     })
   }
   const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_INFERENCE_RELEASES + 1)
-  if (releases.length > MAXIMUM_INFERENCE_RELEASES) return emptyReceipt(true)
+  if (releases.length > MAXIMUM_INFERENCE_RELEASES) {
+    return yield* retireInferenceAtEntityBound(persistence, scope)
+  }
   const inferenceReleases: Array<{
     readonly inferenceRelease: RelationshipInferenceRelease
     readonly node: DeliveryNode | null
@@ -506,11 +520,22 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     }))
   if (slices.some((slice) => slice._tag !== "releaseSlice" || slice.value.truncated)) return emptyReceipt(true)
   const relationships = slices.flatMap((slice) => (slice._tag === "releaseSlice" ? slice.value.relationships : []))
-  const inference = deriveRelationshipInference({
+  const inferenceInput = {
     entities,
     releases: inferenceReleases.map(({ inferenceRelease }) => inferenceRelease),
     relationships
-  })
+  }
+  const initialInference = deriveRelationshipInference(inferenceInput)
+  const rejectedCandidateIdentityKeys = new Set<string>()
+  for (const candidate of initialInference.candidates) {
+    if (candidate.lifecycle !== "inferred") continue
+    const relationshipId = yield* relationshipIdFor(identity, scope.workspaceId, candidate.identityKey)
+    const previous = yield* readRelationship(persistence, scope.workspaceId, relationshipId)
+    if (previous?.lifecycle._tag === "rejected") rejectedCandidateIdentityKeys.add(candidate.identityKey)
+  }
+  const inference = rejectedCandidateIdentityKeys.size === 0
+    ? initialInference
+    : deriveRelationshipInference({ ...inferenceInput, rejectedCandidateIdentityKeys })
   if (inference.truncated) return emptyReceipt(true)
   let receipt = emptyReceipt(false)
   const missingReleaseNodes = inferenceReleases.flatMap(({ node }) => node === null ? [] : [node])

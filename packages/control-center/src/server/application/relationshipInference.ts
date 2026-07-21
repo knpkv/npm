@@ -23,7 +23,12 @@ export interface RelationshipInferenceRelease {
 
 export type RelationshipInferenceEndpoint =
   | Readonly<{ readonly _tag: "resolved"; readonly kind: RelationshipEndpointKind; readonly nodeId: GraphNodeId }>
-  | Readonly<{ readonly _tag: "missing"; readonly kind: DeliveryEntityKind; readonly missingKey: string }>
+  | Readonly<{
+    readonly _tag: "missing"
+    readonly identityKey: string
+    readonly kind: DeliveryEntityKind
+    readonly missingKey: string
+  }>
 
 /** Explainable candidate ready for evidence and ledger materialization. */
 export interface RelationshipInferenceCandidate {
@@ -82,8 +87,13 @@ const resolved = (kind: RelationshipEndpointKind, nodeId: GraphNodeId): Relation
   nodeId
 })
 
-const missing = (kind: DeliveryEntityKind, missingKey: string): RelationshipInferenceEndpoint => ({
+const missing = (
+  kind: DeliveryEntityKind,
+  missingKey: string,
+  identityKey: string
+): RelationshipInferenceEndpoint => ({
   _tag: "missing",
+  identityKey,
   kind,
   missingKey
 })
@@ -345,6 +355,7 @@ const addDocumentationCandidates = (
  */
 export const deriveRelationshipInference = (input: {
   readonly entities: ReadonlyArray<RelationshipInferenceEntity>
+  readonly rejectedCandidateIdentityKeys?: ReadonlySet<string>
   readonly releases: ReadonlyArray<RelationshipInferenceRelease>
   readonly relationships: ReadonlyArray<DeliveryRelationship>
 }): RelationshipInferenceResult => {
@@ -393,8 +404,11 @@ export const deriveRelationshipInference = (input: {
       if (issueDetails._tag !== "issue" || !containsToken(metadata(pullRequest), issueDetails.key)) continue
       for (const releaseId of issue.releaseIds) {
         releaseIds.add(releaseId)
-        inferredIssueLinks.add(`${releaseId}:${issue.nodeId}`)
-        obsoleteGaps.add(issueGapIdentity(releaseId, issue.nodeId))
+        const identityKey = candidateIdentity("implements", releaseId, pullRequest.nodeId, issue.nodeId)
+        if (!(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
+          inferredIssueLinks.add(`${releaseId}:${issue.nodeId}`)
+          obsoleteGaps.add(issueGapIdentity(releaseId, issue.nodeId))
+        }
         addCandidate(
           accumulator,
           inferred({
@@ -403,7 +417,7 @@ export const deriveRelationshipInference = (input: {
               rationale: `The immutable pull-request metadata contains Jira key ${issueDetails.key}.`
             },
             evidenceEntityId: pullRequest.projection.entityId,
-            identityKey: candidateIdentity("implements", releaseId, pullRequest.nodeId, issue.nodeId),
+            identityKey,
             kind: "implements",
             observationKey: observationKey(pullRequest, issue),
             releaseId,
@@ -444,7 +458,7 @@ export const deriveRelationshipInference = (input: {
             identityKey,
             kind: "implements",
             releaseId,
-            source: missing("pull-request", `${details.key}:pull-request`),
+            source: missing("pull-request", `${details.key}:pull-request`, issue.nodeId),
             target: resolved("issue", issue.nodeId)
           })
         )
@@ -465,8 +479,11 @@ export const deriveRelationshipInference = (input: {
         continue
       }
       for (const releaseId of pullRequestReleases.get(pullRequest.nodeId) ?? []) {
-        inferredPipelineLinks.add(`${releaseId}:${pullRequest.nodeId}`)
-        obsoleteGaps.add(pipelineGapIdentity(releaseId, pullRequest.nodeId))
+        const identityKey = candidateIdentity("delivered-by", releaseId, pullRequest.nodeId, pipeline.nodeId)
+        if (!(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
+          inferredPipelineLinks.add(`${releaseId}:${pullRequest.nodeId}`)
+          obsoleteGaps.add(pipelineGapIdentity(releaseId, pullRequest.nodeId))
+        }
         addCandidate(
           accumulator,
           inferred({
@@ -476,7 +493,7 @@ export const deriveRelationshipInference = (input: {
                 `The pipeline trigger revision exactly matches pull-request head ${pullRequestDetails.headRevision}.`
             },
             evidenceEntityId: pipeline.projection.entityId,
-            identityKey: candidateIdentity("delivered-by", releaseId, pullRequest.nodeId, pipeline.nodeId),
+            identityKey,
             kind: "delivered-by",
             observationKey: observationKey(pullRequest, pipeline),
             releaseId,
@@ -506,7 +523,11 @@ export const deriveRelationshipInference = (input: {
             kind: "delivered-by",
             releaseId,
             source: resolved("pull-request", pullRequest.nodeId),
-            target: missing("pipeline-execution", `${pullRequest.projection.displayKey}:pipeline-execution`)
+            target: missing(
+              "pipeline-execution",
+              `${pullRequest.projection.displayKey}:pipeline-execution`,
+              pullRequest.nodeId
+            )
           })
         )
       }
