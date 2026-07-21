@@ -10,6 +10,7 @@ import {
 
 const workspaceId = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000211")
 const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000212")
+const otherReleaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000213")
 const nodeId = (suffix: string) => GraphNodeId.make(`01890f6f-6d6a-7cc0-98d2-${suffix.padStart(12, "0")}`)
 
 const entity = (
@@ -246,6 +247,27 @@ describe("relationship inference", () => {
     if (documentation[0]?.target._tag === "resolved") {
       assert.strictEqual(documentation[0].target.nodeId, exact.nodeId)
     }
+  })
+
+  it("does not infer release documentation from an ambiguous version-only match", () => {
+    const runbook = entity(24, {
+      ...common,
+      entityType: "page",
+      displayKey: "PAY/24",
+      title: "Payments 2026.29 runbook",
+      details: { _tag: "page", spaceKey: "PAY", revision: "1", status: "current" }
+    })
+
+    const result = deriveRelationshipInference({
+      entities: [runbook],
+      releases: [
+        { nodeId: nodeId("29"), releaseId, version: "2026.29" },
+        { nodeId: nodeId("30"), releaseId: otherReleaseId, version: "2026.29" }
+      ],
+      relationships: []
+    })
+
+    assert.isFalse(result.candidates.some(({ kind }) => kind === "documented-by"))
   })
 
   it("marks oversized candidate sets truncated so materialization can fail closed", () => {

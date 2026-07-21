@@ -269,6 +269,11 @@ const addDocumentationCandidates = (
   accumulator: CandidateAccumulator
 ) => {
   const issues = entities.filter((entity) => entity.projection.details._tag === "issue")
+  const releaseVersionCounts = new Map<string, number>()
+  for (const release of releases) {
+    const version = release.version.toUpperCase()
+    releaseVersionCounts.set(version, (releaseVersionCounts.get(version) ?? 0) + 1)
+  }
   const pages = entities.filter(
     (entity) => entity.projection.details._tag === "page" && entity.projection.details.status === "current"
   )
@@ -306,6 +311,7 @@ const addDocumentationCandidates = (
       }
     }
     for (const release of releases) {
+      if ((releaseVersionCounts.get(release.version.toUpperCase()) ?? 0) > 1) continue
       const explicitLink = pageDetails.linkedReleaseVersions?.some(
         (version) => version.toUpperCase() === release.version.toUpperCase()
       ) ?? false

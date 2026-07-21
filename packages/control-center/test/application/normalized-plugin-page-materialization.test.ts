@@ -1042,6 +1042,79 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(deliveredHistory.value[0]?.lifecycle._tag, "superseded")
     })))
 
+  it.effect("supersedes rule-owned inference when the workspace entity snapshot exceeds its bound", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const synchronize = (
+        pluginConnectionId: PluginConnectionId,
+        providerId: "codecommit" | "codepipeline" | "jira",
+        expectedRevision: number,
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId,
+          providerId,
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        }, page)
+
+      yield* synchronize(PLUGIN_ID, "jira", 0, inferenceJiraReleasePage)
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 0, codeCommitRelationshipPage)
+      yield* synchronize(CODEPIPELINE_PLUGIN_ID, "codepipeline", 0, codePipelineRelationshipPage)
+
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected synchronized release")
+      const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+      const delivered = initialSlice.value.relationships.find(
+        ({ kind, lifecycle }) => kind === "delivered-by" && lifecycle._tag === "inferred"
+      )
+      if (delivered === undefined) return yield* Effect.die("expected inferred delivery relationship")
+
+      const unrelated = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "codecommit-workspace-bound",
+        hasMore: false,
+        events: Array.from({ length: 500 }, (_, index): typeof NormalizedPluginEventV1.Encoded => ({
+          _tag: "UpsertEntity",
+          eventId: `codecommit-unrelated-${String(index)}`,
+          observedAt: "2026-07-19T09:02:40.000Z",
+          revision: `unrelated-${String(index)}`,
+          entityType: "pull-request",
+          vendorImmutableId: `unrelated-${String(index)}`,
+          sourceUrl: null,
+          title: `Unrelated pull request ${String(index)}`,
+          attributes: {
+            repository: "unrelated",
+            sourceBranch: `feat/unrelated-${String(index)}`,
+            targetBranch: "main",
+            headRevision: `unrelated-${String(index)}`,
+            reviewState: "requested"
+          }
+        }))
+      })
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 1, unrelated)
+      yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", 2, codeCommitUnlinkedPage)
+
+      const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: delivered.relationshipId,
+        limit: 10
+      })
+      if (history._tag !== "relationshipHistory") return yield* Effect.die("expected delivery history")
+      assert.strictEqual(history.value[0]?.lifecycle._tag, "superseded")
+    })))
+
   it.effect("projects a normalized Jira fix version into the canonical release repository", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -1122,6 +1195,73 @@ describe("normalized plugin page materialization", () => {
         updated.release.sourceRevisions.find(({ providerId }) => providerId === "jira")?.revision,
         "released:2026-07-29:2026.29"
       )
+    })))
+
+  it.effect("scopes a release-authored documentation proposal to its release slice", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "release-authored-documentation",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "release-authored-documentation-release",
+          observedAt: "2026-07-19T09:01:00.000Z",
+          revision: "candidate:2026.31",
+          entityType: "release",
+          vendorImmutableId: "jira-version:2026.31",
+          sourceUrl: null,
+          title: "Payments candidate",
+          attributes: { serviceName: "Payments", version: "2026.31", lifecycle: "candidate" }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "release-authored-documentation-page",
+          observedAt: "2026-07-19T09:01:00.000Z",
+          revision: "1",
+          entityType: "confluence-page",
+          vendorImmutableId: "release-notes",
+          sourceUrl: null,
+          title: "Payments release notes",
+          attributes: { spaceKey: "PAY", currentVersion: 1, status: "current" }
+        }, {
+          _tag: "ProposeRelationship",
+          eventId: "release-authored-documentation-link",
+          observedAt: "2026-07-19T09:01:00.000Z",
+          revision: "1",
+          relationshipId: "jira-version:2026.31:documented-by:release-notes",
+          from: { entityType: "release", vendorImmutableId: "jira-version:2026.31" },
+          to: { entityType: "confluence-page", vendorImmutableId: "release-notes" },
+          relationshipType: "documented-by",
+          confidence: 1,
+          evidenceIds: []
+        }]
+      })
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: MATERIALIZED_STREAM,
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }, page)
+
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected release")
+      const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      const relationship = slice.value.relationships.find(
+        ({ kind, lifecycle, provenance }) =>
+          kind === "documented-by" && lifecycle._tag === "proposed" && provenance._tag === "plugin"
+      )
+      assert.deepStrictEqual(relationship?.scope, { _tag: "release", releaseId: release.id })
     })))
 
   it.effect("refreshes a repeated Jira release observation while exact page replay stays a no-op", () =>
@@ -1334,6 +1474,143 @@ describe("normalized plugin page materialization", () => {
       assert.isTrue(receipt.pageCommitted)
       assert.deepStrictEqual((yield* items()).items.map(({ projection }) => projection.displayKey), ["PAY-42"])
     })))
+
+  it.effect(
+    "fails closed when authoritative Jira containment reconciliation exceeds its neighborhood bound",
+    () =>
+      withMaterializer(Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        const normalizeIssue = (fixVersions: ReadonlyArray<{ readonly id: string; readonly name: string }>) =>
+          normalizeJiraIssueEvents({
+            comments: { values: [], total: 0, truncated: false },
+            changelogs: { values: [], total: 0, truncated: false },
+            observedAt: fixVersions.length === 0 ? T3 : T1,
+            webBaseUrl: new URL("https://jira.example"),
+            issue: {
+              id: "10042",
+              key: "PAY-42",
+              fields: {
+                summary: "Bound containment reconciliation",
+                updated: DateTime.formatIso(fixVersions.length === 0 ? T3 : T1),
+                project: { id: "10000", key: "PAY", name: "Payments" },
+                fixVersions
+              }
+            }
+          })
+        const initialEvents = yield* normalizeIssue([{ id: "2026.29", name: "2026.29" }])
+        const scope: NormalizedPluginPageMaterializationScope = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }
+        yield* materializeNormalizedPluginPage(
+          scope,
+          Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+            checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("jira-containment-bound-initial"),
+            hasMore: false,
+            events: initialEvents
+          })
+        )
+
+        const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+        if (release === undefined) return yield* Effect.die("expected release")
+        const initialSlice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "releaseSlice",
+          releaseId: release.id,
+          environmentId: null,
+          limit: 100
+        })
+        if (initialSlice._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+        const containment = initialSlice.value.relationships.find(({ kind }) => kind === "contains")
+        if (containment === undefined) return yield* Effect.die("expected containment")
+
+        const boundedEvents = (start: number): ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> =>
+          Array.from({ length: 250 }, (_, offset) => start + offset).flatMap(
+            (index): ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> => {
+              const pageId = `bounded-page-${String(index)}`
+              return [{
+                _tag: "UpsertEntity",
+                eventId: `jira-containment-bound-page-${String(index)}`,
+                observedAt: DateTime.formatIso(T3),
+                revision: "1",
+                entityType: "confluence-page",
+                vendorImmutableId: pageId,
+                sourceUrl: null,
+                title: `Bounded relationship target ${String(index)}`,
+                attributes: { spaceKey: "PAY", currentVersion: 1, status: "current" }
+              }, {
+                _tag: "ProposeRelationship",
+                eventId: `jira-containment-bound-relationship-${String(index)}`,
+                observedAt: DateTime.formatIso(T3),
+                revision: "1",
+                relationshipId: `jira-containment-bound-relationship-${String(index)}`,
+                from: { entityType: "jira.issue", vendorImmutableId: "10042" },
+                to: { entityType: "confluence-page", vendorImmutableId: pageId },
+                relationshipType: "documented-by",
+                confidence: 1,
+                evidenceIds: []
+              }]
+            }
+          )
+        const boundedPage = (start: number, checkpointAfterPage: string) =>
+          Schema.decodeSync(PluginSyncPageV1)({
+            checkpointAfterPage,
+            hasMore: false,
+            events: boundedEvents(start)
+          })
+        yield* materializeNormalizedPluginPage(
+          {
+            ...scope,
+            expectedRevision: 1,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          boundedPage(0, "jira-containment-bound-fill-1")
+        )
+        yield* materializeNormalizedPluginPage(
+          {
+            ...scope,
+            expectedRevision: 2,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          boundedPage(250, "jira-containment-bound-fill-2")
+        )
+
+        const failure = yield* materializeNormalizedPluginPage(
+          {
+            ...scope,
+            expectedRevision: 3,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          Schema.decodeSync(Schema.toType(PluginSyncPageV1))({
+            checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)(
+              "jira-containment-bound-authoritative-removal"
+            ),
+            hasMore: false,
+            events: yield* normalizeIssue([])
+          })
+        ).pipe(Effect.flip)
+        if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+          return yield* Effect.die("expected bounded materialization failure")
+        }
+        assert.strictEqual(failure.diagnosticCode, "normalized-jira-containment-neighborhood-truncated")
+        const history = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "relationshipHistory",
+          relationshipId: containment.relationshipId,
+          limit: 10
+        })
+        if (history._tag !== "relationshipHistory") return yield* Effect.die("expected containment history")
+        assert.strictEqual(history.value[0]?.lifecycle._tag, "proposed")
+      })),
+    { timeout: 30_000 }
+  )
 
   it.effect("retires a Jira release containment when an issue moves to another fix version", () =>
     withMaterializer(Effect.gen(function*() {

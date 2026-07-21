@@ -963,7 +963,7 @@ const materializeRelationship = Effect.fn(
   if (provenanceEntity === null) {
     return yield* malformed("normalized-relationship-provenance-entity-missing", event.eventId)
   }
-  const relationshipScope: DeliveryRelationship["scope"] = kind === "contains" && source.releaseId !== null
+  const relationshipScope: DeliveryRelationship["scope"] = source.releaseId !== null
     ? { _tag: "release", releaseId: source.releaseId }
     : null
   const relationshipId = RelationshipId.make(
@@ -1073,7 +1073,10 @@ const retireMissingJiraReleaseContainments = Effect.fn(
       nodeId: issueNodeId,
       limit: 500
     })
-    if (neighborhood._tag !== "nodeRelationships" || neighborhood.value.truncated) continue
+    if (neighborhood._tag !== "nodeRelationships") continue
+    if (neighborhood.value.truncated) {
+      return yield* malformed("normalized-jira-containment-neighborhood-truncated", issue.eventId)
+    }
     const currentRelationshipIds = new Set(
       yield* Effect.forEach(
         acceptedEvents.filter((event) => isReleaseContainmentForIssue(event, issue)),

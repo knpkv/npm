@@ -350,7 +350,8 @@ const supersedeObsoleteRelationship = Effect.fn("RelationshipInferenceMaterializ
   function*(
     persistence: PersistenceService,
     scope: RelationshipInferenceMaterializationScope,
-    relationshipId: RelationshipId
+    relationshipId: RelationshipId,
+    reason?: string
   ) {
     const previous = yield* readRelationship(persistence, scope.workspaceId, relationshipId)
     if (previous?.lifecycle._tag !== "inferred" && previous?.lifecycle._tag !== "missing") return 0
@@ -361,9 +362,9 @@ const supersedeObsoleteRelationship = Effect.fn("RelationshipInferenceMaterializ
       lifecycle: {
         _tag: "superseded",
         effectiveAt: scope.committedAt,
-        reason: previous.lifecycle._tag === "missing"
+        reason: reason ?? (previous.lifecycle._tag === "missing"
           ? "The entity is no longer in the release scope that required this missing link."
-          : "Current synchronized metadata no longer supports this inferred link."
+          : "Current synchronized metadata no longer supports this inferred link.")
       },
       recordedAt: scope.committedAt
     }
@@ -385,6 +386,45 @@ const emptyReceipt = (skippedDueToBounds: boolean): RelationshipInferenceMateria
   skippedDueToBounds
 })
 
+const retireInferenceAtEntityBound = Effect.fn(
+  "RelationshipInferenceMaterialization.retireInferenceAtEntityBound"
+)(function*(
+  persistence: PersistenceService,
+  scope: RelationshipInferenceMaterializationScope
+) {
+  const releases = yield* persistence.releases.list(scope.workspaceId, MAXIMUM_INFERENCE_RELEASES + 1)
+  if (releases.length > MAXIMUM_INFERENCE_RELEASES) return emptyReceipt(true)
+  const slices = yield* Effect.forEach(releases, ({ release }) =>
+    persistence.deliveryGraph.read(scope.workspaceId, {
+      _tag: "releaseSlice",
+      releaseId: release.id,
+      environmentId: null,
+      limit: MAXIMUM_INFERENCE_ENTITIES
+    }))
+  if (slices.some((slice) => slice._tag !== "releaseSlice" || slice.value.truncated)) return emptyReceipt(true)
+  const relationshipIds = new Set(
+    slices.flatMap((slice) =>
+      slice._tag === "releaseSlice"
+        ? slice.value.relationships.flatMap((relationship) =>
+          relationship.recordedBy._tag === "system" && relationship.recordedBy.component === COMPONENT
+            ? [relationship.relationshipId]
+            : []
+        )
+        : []
+    )
+  )
+  let relationshipCount = 0
+  for (const relationshipId of relationshipIds) {
+    relationshipCount += yield* supersedeObsoleteRelationship(
+      persistence,
+      scope,
+      relationshipId,
+      "Inference inputs exceeded the bounded workspace snapshot, so this relationship can no longer be proven."
+    )
+  }
+  return { ...emptyReceipt(true), relationshipCount }
+})
+
 /** Persist current rule candidates after a normalized page has committed. */
 export const materializeRelationshipInference = Effect.fn("RelationshipInferenceMaterialization.reconcile")(function*<
   IdentityError
@@ -403,7 +443,7 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     limit: MAXIMUM_INFERENCE_ENTITIES
   })
   if (projectionResult._tag !== "workspaceEntityProjections") return emptyReceipt(true)
-  if (projectionResult.value.truncated) return emptyReceipt(true)
+  if (projectionResult.value.truncated) return yield* retireInferenceAtEntityBound(persistence, scope)
   const records = yield* Effect.forEach(
     projectionResult.value.items,
     ({ projection }) => persistence.entities.get(scope.workspaceId, projection.entityId),
