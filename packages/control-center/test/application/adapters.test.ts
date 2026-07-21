@@ -180,6 +180,12 @@ const negotiatedDescriptor = Schema.decodeUnknownSync(NegotiatedPluginDescriptor
   capabilities: [{ capabilityId: "entity.read", version: 1 }]
 })
 
+const compatibleHistoricalJiraDescriptor = {
+  ...jiraReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}
+
 const preOAuthAtlassianDescriptor = (providerId: "jira" | "confluence") => {
   const descriptor = providerId === "jira" ? jiraReadPluginDescriptor : confluencePagePluginDescriptor
   return {
@@ -436,7 +442,15 @@ describe("application adapters", () => {
     withApplication(
       Effect.gen(function*() {
         const persistence = yield* setup
-        const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+        const initialRuntime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, PLUGIN_ID)
+        const runtime = yield* persistence.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          compatibleHistoricalJiraDescriptor,
+          initialRuntime.revision,
+          T0
+        )
         yield* persistence.pluginRuntime.recordHealth(
           WORKSPACE_ID,
           PLUGIN_ID,
@@ -471,12 +485,13 @@ describe("application adapters", () => {
           isEnabled: false
         })
         assert.strictEqual(disabled.health?._tag, "disabled")
+        assert.isTrue(disabled.supportsSynchronization)
         assert.deepStrictEqual(yield* Fiber.join(wakeFiber), Option.some(WORKSPACE_ID))
-        assert.strictEqual(
-          (yield* administration.list(WORKSPACE_ID)).find(({ pluginConnectionId }) => pluginConnectionId === PLUGIN_ID)
-            ?.health?._tag,
-          "disabled"
+        const listedDisabled = (yield* administration.list(WORKSPACE_ID)).find(
+          ({ pluginConnectionId }) => pluginConnectionId === PLUGIN_ID
         )
+        assert.strictEqual(listedDisabled?.health?._tag, "disabled")
+        assert.isTrue(listedDisabled?.supportsSynchronization)
         assert.strictEqual(
           (yield* administration.health({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID })).health._tag,
           "disabled"

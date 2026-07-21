@@ -1,14 +1,24 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import type { MarkdownConverter } from "@knpkv/confluence-to-markdown"
 import * as Cause from "effect/Cause"
+import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
 import * as Result from "effect/Result"
+import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 
-import { MaximumPluginPayloadBytes, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
+import {
+  MaximumPluginPayloadBytes,
+  MaximumPluginSyncPageBytes,
+  PluginCheckpointV1,
+  PluginSyncRequestV1,
+  ReadPluginEntityRequestV1
+} from "../../src/domain/plugins/index.js"
 import {
   ConfluencePageAdapterConfiguration,
   makeConfluencePageAdapter
@@ -21,7 +31,7 @@ import { confluencePagePluginDescriptor } from "../../src/server/plugins/conflue
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { negotiatePluginDescriptorV1 } from "../../src/server/plugins/negotiation.js"
 
-const PAGE_ID = "page-42"
+const PAGE_ID = "42"
 const CREATED_AT = "2026-07-01T09:00:00.000Z"
 const UPDATED_AT = "2026-07-17T10:30:00.000Z"
 
@@ -62,6 +72,11 @@ const request = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
   vendorImmutableId: PAGE_ID
 })
 
+const syncRequest = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+  streamKey: "pages",
+  checkpoint: null
+})
+
 const converter = (
   markdown = "Runbook\n",
   onConvert: () => void = () => undefined
@@ -82,6 +97,9 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
   }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
+  getSpacePages: () => Effect.succeed({ results: [currentPage] }),
+  getPageAttachments: () => Effect.succeed({ results: [] }),
+  getPageWatchers: (_pageId, start) => Effect.succeed({ results: [], start, limit: 50, size: 0 }),
   getPageVersions: () => Effect.succeed({ results: [currentPage.version] }),
   getUsers: (accountIds) =>
     Effect.succeed({
@@ -102,10 +120,12 @@ const makeAdapter = Effect.fn("ConfluencePageAdapterTest.make")(function*(
   configured: ConfluencePageAdapterConfiguration = configuration
 ) {
   const descriptor = yield* negotiatePluginDescriptorV1(confluencePagePluginDescriptor)
+  const cryptoService = yield* Crypto.Crypto.pipe(Effect.provide(NodeServices.layer))
   return makeConfluencePageAdapter({
     client,
     configuration: configured,
     converter: converter(markdown, onConvert),
+    cryptoService,
     descriptor
   })
 })
@@ -196,6 +216,801 @@ describe("Confluence page adapter", () => {
         providerImmutableId: "space-payments",
         displayName: "Space · space-payments"
       })
+    }))
+
+  it.effect("synchronizes lazy space pages, people, attachment metadata, and safe runbook evidence", () =>
+    Effect.gen(function*() {
+      const spaces: Array<string> = []
+      const attachmentCursors: Array<string | null> = []
+      let conversions = 0
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getSpacePages: (spaceId) =>
+            Effect.sync(() => {
+              spaces.push(spaceId)
+              return { results: [currentPage] }
+            }),
+          getPageAttachments: (pageId, cursor) =>
+            Effect.sync(() => {
+              assert.strictEqual(pageId, PAGE_ID)
+              attachmentCursors.push(cursor)
+              return cursor === null
+                ? {
+                  results: [{
+                    id: "attachment-1",
+                    status: "current",
+                    title: "rollback-checklist.pdf",
+                    createdAt: UPDATED_AT,
+                    pageId: PAGE_ID,
+                    mediaType: "application/pdf",
+                    fileSize: 42,
+                    version: currentPage.version
+                  }],
+                  _links: { next: "/wiki/api/v2/pages/page-42/attachments?cursor=attachments%2B2" }
+                }
+                : {
+                  results: [{
+                    id: "attachment-2",
+                    status: "current",
+                    title: "release-map.svg",
+                    createdAt: UPDATED_AT,
+                    pageId: PAGE_ID
+                  }]
+                }
+            }),
+          getPageVersions: () =>
+            Effect.succeed({
+              results: [currentPage.version, {
+                number: 2,
+                createdAt: "2026-07-15T08:00:00.000Z",
+                authorId: "account-contributor"
+              }]
+            }),
+          getPageWatchers: (pageId, start) =>
+            Effect.sync(() => {
+              assert.strictEqual(pageId, PAGE_ID)
+              assert.strictEqual(start, 0)
+              return {
+                results: [{
+                  type: "watch",
+                  contentId: Number(PAGE_ID),
+                  watcher: {
+                    accountId: "account-watcher",
+                    displayName: "Watcher",
+                    isExternalCollaborator: false,
+                    isGuest: false
+                  }
+                }],
+                start,
+                limit: 50,
+                size: 1
+              }
+            })
+        }),
+        undefined,
+        () => {
+          conversions += 1
+        }
+      )
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      assert.strictEqual(pages.length, 1)
+      const events = pages[0]?.events ?? []
+      const entity = events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+
+      assert.deepStrictEqual(spaces, ["space-payments"])
+      assert.deepStrictEqual(attachmentCursors, [null, "attachments+2"])
+      assert.strictEqual(conversions, 0)
+      assert.strictEqual(attributes.content, null)
+      assert.strictEqual(attributes.contentState, "lazy")
+      assert.deepStrictEqual(attributes.versions.map(({ number }) => number), [3, 2])
+      assert.deepStrictEqual(attributes.versionHistory, { complete: true, pagesFetched: 1 })
+      assert.deepStrictEqual(attributes.attachmentInventory, { complete: true, pagesFetched: 2 })
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: true, pagesFetched: 1 })
+      assert.deepStrictEqual(attributes.attachments, [{
+        id: "attachment-1",
+        title: "rollback-checklist.pdf",
+        createdAt: UPDATED_AT,
+        mediaType: "application/pdf",
+        fileSize: 42,
+        version: 3
+      }, {
+        id: "attachment-2",
+        title: "release-map.svg",
+        createdAt: UPDATED_AT,
+        mediaType: null,
+        fileSize: null,
+        version: null
+      }])
+      const people = events.filter((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(people.length, 4)
+      assert.exists(people.find(({ vendorPersonId }) => vendorPersonId === "account-watcher"))
+      const runbook = events.find((event) => event._tag === "AppendEvidence")
+      assert.exists(runbook)
+      if (runbook?._tag === "AppendEvidence") {
+        assert.strictEqual(runbook.evidenceType, "confluence.runbook-candidate")
+        assert.deepStrictEqual(runbook.data, {
+          schemaVersion: 1,
+          basis: "title-keyword",
+          pageId: PAGE_ID,
+          spaceId: "space-payments"
+        })
+      }
+    }))
+
+  it.effect("marks watcher metadata incomplete when the OAuth grant lacks watcher scope", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-watchers",
+              reason: "authorization",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
+    }))
+
+  it.effect("caps new watcher contributors while retaining watcher roles for known contributors", () =>
+    Effect.gen(function*() {
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        authorId: `v${String(index).padStart(3, "0")}`
+      }))
+      const page = {
+        ...currentPage,
+        ownerId: "page-owner",
+        version: { ...currentPage.version, authorId: "page-author" }
+      }
+      const makeVersionReader = () => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const watcherPage = (accountId: string) => ({
+        results: [{ type: "watch", contentId: Number(PAGE_ID), watcher: { accountId } }],
+        start: 0,
+        limit: 50,
+        size: 1
+      })
+      const cappedAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: makeVersionReader(),
+        getPageWatchers: () => Effect.succeed(watcherPage("watcher-over-budget"))
+      }))
+      const cappedPages = yield* cappedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const cappedEntity = cappedPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(cappedEntity)
+      if (cappedEntity?._tag !== "UpsertEntity") return
+      const capped = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(cappedEntity.attributes)
+      assert.strictEqual(capped.contributors.length, 502)
+      assert.isFalse(capped.contributors.some(({ accountId }) => accountId === "watcher-over-budget"))
+      assert.deepStrictEqual(capped.watcherInventory, { complete: false, pagesFetched: 1 })
+
+      const retainedAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: makeVersionReader(),
+        getPageWatchers: () => Effect.succeed(watcherPage("v000"))
+      }))
+      const retainedPages = yield* retainedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const retainedEntity = retainedPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(retainedEntity)
+      if (retainedEntity?._tag !== "UpsertEntity") return
+      const retained = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(retainedEntity.attributes)
+      assert.strictEqual(retained.contributors.length, 502)
+      assert.include(
+        retained.contributors.find(({ accountId }) => accountId === "v000")?.roles ?? [],
+        "watcher"
+      )
+      assert.deepStrictEqual(retained.watcherInventory, { complete: true, pagesFetched: 1 })
+    }))
+
+  it.effect("omits version messages to keep sync attributes within the byte budget", () =>
+    Effect.gen(function*() {
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        message: `${index}-${"m".repeat(1_990)}`,
+        authorId: "account-author"
+      }))
+      const makeVersionReader = () => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const largeAdapter = yield* makeAdapter(defaultClient({
+        getPageVersions: makeVersionReader()
+      }))
+      const largePages = yield* largeAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const largeEntity = largePages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(largeEntity)
+      if (largeEntity?._tag !== "UpsertEntity") return
+      const large = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(largeEntity.attributes)
+      assert.strictEqual(large.versions.length, 500)
+      assert.isFalse(large.versionHistory.complete)
+      assert.isTrue(large.versions.some(({ message }) => message === null))
+      assert.isAtMost(jsonBytes(large), MaximumPluginPayloadBytes)
+
+      const smallAdapter = yield* makeAdapter(defaultClient({
+        getPageVersions: () => Effect.succeed({ results: [currentPage.version] })
+      }))
+      const smallPages = yield* smallAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const smallEntity = smallPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(smallEntity)
+      if (smallEntity?._tag !== "UpsertEntity") return
+      const small = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(smallEntity.attributes)
+      assert.strictEqual(small.versions[0]?.message, currentPage.version.message)
+      assert.isTrue(small.versionHistory.complete)
+    }))
+
+  it.effect("marks a full synthesized history incomplete only when synthesis drops a provider version", () =>
+    Effect.gen(function*() {
+      const withoutCurrent = Array.from({ length: 500 }, (_, index) => ({
+        number: 1_000 + index,
+        createdAt: UPDATED_AT,
+        authorId: "account-author"
+      }))
+      const withCurrent = [currentPage.version, ...withoutCurrent.slice(0, 499)]
+      const readHistory = (versions: ReadonlyArray<(typeof withoutCurrent)[number] | typeof currentPage.version>) => {
+        let pageNumber = 0
+        return () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          })
+      }
+      const missingAdapter = yield* makeAdapter(defaultClient({ getPageVersions: readHistory(withoutCurrent) }))
+      const missingPages = yield* missingAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const missingEntity = missingPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(missingEntity)
+      if (missingEntity?._tag !== "UpsertEntity") return
+      const missing = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(missingEntity.attributes)
+      assert.strictEqual(missing.versions.length, 500)
+      assert.strictEqual(missing.versions[0]?.number, currentPage.version.number)
+      assert.isFalse(missing.versionHistory.complete)
+
+      const presentAdapter = yield* makeAdapter(defaultClient({ getPageVersions: readHistory(withCurrent) }))
+      const presentPages = yield* presentAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const presentEntity = presentPages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(presentEntity)
+      if (presentEntity?._tag !== "UpsertEntity") return
+      const present = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(presentEntity.attributes)
+      assert.strictEqual(present.versions.length, 500)
+      assert.isTrue(present.versionHistory.complete)
+    }))
+
+  it.effect("keeps privacy-limited contributors out of people events", () =>
+    Effect.gen(function*() {
+      const unresolvedAdapter = yield* makeAdapter(defaultClient({
+        getUsers: () => Effect.succeed({ results: [] })
+      }))
+      const unresolvedPages = yield* unresolvedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const unresolvedPeople = unresolvedPages.flatMap(({ events }) =>
+        events.filter((event) => event._tag === "UpsertPerson")
+      )
+      assert.lengthOf(unresolvedPeople, 0)
+
+      const resolvedAdapter = yield* makeAdapter(defaultClient({
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName: `Resolved ${accountId}`,
+              accountStatus: "active"
+            }))
+          })
+      }))
+      const resolvedPages = yield* resolvedAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const resolvedPeople = resolvedPages.flatMap(({ events }) =>
+        events.filter((event) => event._tag === "UpsertPerson")
+      )
+      assert.isAbove(resolvedPeople.length, 0)
+      for (const person of resolvedPeople) {
+        if (person._tag === "UpsertPerson") assert.match(person.displayName, /^Resolved /u)
+      }
+    }))
+
+  it.effect("skips privacy-redacted watcher identities and keeps visible watcher roles", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [
+              {
+                type: "watch",
+                contentId: Number(PAGE_ID),
+                watcher: { accountId: "account-watcher", displayName: "" }
+              },
+              {
+                type: "watch",
+                contentId: Number(PAGE_ID),
+                watcher: { accountId: null }
+              }
+            ],
+            start: 0,
+            limit: 50,
+            size: 2
+          }),
+        getPageAttachments: () =>
+          Effect.succeed({
+            results: [{
+              id: "attachment-minimal-version",
+              status: "current",
+              title: "release.txt",
+              createdAt: UPDATED_AT,
+              pageId: PAGE_ID,
+              version: { number: 1 }
+            }]
+          })
+      }))
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepStrictEqual(attributes.attachments?.map(({ id, version }) => ({ id, version })), [{
+        id: "attachment-minimal-version",
+        version: 1
+      }])
+      assert.include(
+        attributes.contributors.find(({ accountId }) => accountId === "account-watcher")?.roles ?? [],
+        "watcher"
+      )
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 1 })
+      assert.isFalse(
+        pages.flatMap(({ events }) => events).some(
+          (event) => event._tag === "UpsertPerson" && event.vendorPersonId === null
+        )
+      )
+    }))
+
+  it.effect("treats watcher ownership for unsafe numeric page ids as unverifiable", () =>
+    Effect.gen(function*() {
+      const unsafePageId = "9007199254740993"
+      const unsafePage = {
+        ...currentPage,
+        id: unsafePageId,
+        _links: { webui: `/wiki/spaces/PAY/pages/${unsafePageId}` }
+      }
+      const unsafeAdapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [unsafePage] }),
+        getPageVersions: () => Effect.succeed({ results: [unsafePage.version] }),
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [{
+              type: "watch",
+              contentId: Number(unsafePageId),
+              watcher: { accountId: "account-watcher" }
+            }],
+            start: 0,
+            limit: 50,
+            size: 1
+          })
+      }))
+
+      const unsafePages = yield* unsafeAdapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const unsafeEntity = unsafePages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(unsafeEntity)
+      if (unsafeEntity?._tag !== "UpsertEntity") return
+      const unsafeAttributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(unsafeEntity.attributes)
+      assert.deepStrictEqual(unsafeAttributes.watcherInventory, { complete: false, pagesFetched: 1 })
+      assert.isFalse(unsafeAttributes.contributors.some(({ accountId }) => accountId === "account-watcher"))
+
+      const mismatchedAdapter = yield* makeAdapter(defaultClient({
+        getPageWatchers: () =>
+          Effect.succeed({
+            results: [{ type: "watch", contentId: 43, watcher: { accountId: "account-watcher" } }],
+            start: 0,
+            limit: 50,
+            size: 1
+          })
+      }))
+      const mismatch = yield* mismatchedAdapter.connection.sync(syncRequest).pipe(
+        Stream.runCollect,
+        Effect.result
+      )
+      assert.isTrue(Result.isFailure(mismatch))
+      if (Result.isFailure(mismatch)) {
+        assert.strictEqual(mismatch.failure._tag, "PluginMalformedResponseFailure")
+        if (mismatch.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(mismatch.failure.diagnosticCode, "confluence-watcher-page-mismatch")
+        }
+      }
+    }))
+
+  it.effect("compacts maximum-length version and contributor identities within the payload bound", () =>
+    Effect.gen(function*() {
+      const accountId = (index: number) => `${String(index).padStart(4, "0")}${"a".repeat(508)}`
+      const versions = Array.from({ length: 500 }, (_, index) => ({
+        number: index + 1,
+        createdAt: UPDATED_AT,
+        message: "bounded message",
+        authorId: accountId(index)
+      }))
+      let pageNumber = 0
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageVersions: () =>
+          Effect.sync(() => {
+            const index = pageNumber
+            pageNumber += 1
+            return {
+              results: versions.slice(index * 100, (index + 1) * 100),
+              ...(index < 4 ? { _links: { next: `/versions?cursor=page-${index + 1}` } } : {})
+            }
+          }),
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName: "Visible contributor",
+              accountStatus: "active"
+            }))
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.isFalse(attributes.versionHistory.complete)
+      assert.isBelow(attributes.versions.length + attributes.contributors.length, 1_002)
+      assert.isAtMost(jsonBytes(attributes), MaximumPluginPayloadBytes)
+    }))
+
+  it.effect("keeps privacy-redacted bulk profiles unresolved without suppressing visible people", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getUsers: (accountIds) =>
+          Effect.succeed({
+            results: accountIds.map((accountId) =>
+              accountId === "account-author"
+                ? { accountId, accountStatus: "active" }
+                : { accountId, displayName: `Visible ${accountId}`, accountStatus: "active" }
+            )
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const events = pages.flatMap(({ events }) => events)
+      const entity = events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepInclude(
+        attributes.contributors.find(({ accountId }) => accountId === "account-author"),
+        { displayName: "Confluence user", resolved: false }
+      )
+      assert.isFalse(
+        events.some((event) => event._tag === "UpsertPerson" && event.vendorPersonId === "account-author")
+      )
+      assert.isTrue(
+        events.some((event) => event._tag === "UpsertPerson" && event.vendorPersonId === "account-owner")
+      )
+    }))
+
+  it.effect("rejects pages from another space before reading their attachments", () =>
+    Effect.gen(function*() {
+      const spaces: Array<string> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (spaceId) =>
+          Effect.sync(() => {
+            spaces.push(spaceId)
+            return { results: [{ ...currentPage, spaceId: "space-other" }] }
+          }),
+        getPageAttachments: () => Effect.die("cross-space pages must be rejected before attachment reads")
+      }))
+
+      const outcome = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect, Effect.result)
+
+      assert.deepStrictEqual(spaces, ["space-payments"])
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
+    }))
+
+  it.effect("stops at the bounded page limit and resumes from its durable cursor", () =>
+    Effect.gen(function*() {
+      const cursors: Array<string | null> = []
+      const client = defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return index < 5
+              ? { results: [], _links: { next: `/wiki/api/v2/spaces/space-payments/pages?cursor=c${index + 1}` } }
+              : { results: [] }
+          })
+      })
+      const adapter = yield* makeAdapter(client)
+
+      const first = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      assert.strictEqual(first.length, 5)
+      assert.strictEqual(first[4]?.hasMore, false)
+      assert.match(first[4]?.checkpointAfterPage ?? "", /^bounded:v1:[0-9a-f]{64}:c5$/u)
+      assert.deepStrictEqual(cursors, [null, "c1", "c2", "c3", "c4"])
+
+      cursors.length = 0
+      const resumed = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: first[4]?.checkpointAfterPage
+        })
+      ).pipe(Stream.runCollect)
+      assert.strictEqual(resumed.length, 1)
+      assert.match(
+        resumed[0]?.checkpointAfterPage ?? "",
+        /^complete:v1:[0-9a-f]{64}:[0-9a-f]{64}:c5$/u
+      )
+      assert.deepStrictEqual(cursors, ["c5"])
+    }))
+
+  it.effect("rejects non-advancing resumed cursors before reading page metadata", () =>
+    Effect.gen(function*() {
+      let metadataCalls = 0
+      const repeating = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.succeed({ results: [currentPage], _links: { next: `/pages?cursor=${cursor}` } }),
+        getPageVersions: () =>
+          Effect.sync(() => {
+            metadataCalls += 1
+            return { results: [currentPage.version] }
+          })
+      }))
+      const repeated = yield* repeating.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "pages", checkpoint: "next:c1" })
+      ).pipe(Stream.runCollect, Effect.result)
+      assert.isTrue(Result.isFailure(repeated))
+      assert.strictEqual(metadataCalls, 0)
+
+      const cursors: Array<string | null> = []
+      const advancing = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            return cursor === "c1"
+              ? { results: [], _links: { next: "/pages?cursor=c2" } }
+              : { results: [] }
+          })
+      }))
+      const advanced = yield* advancing.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "pages", checkpoint: "next:c1" })
+      ).pipe(Stream.runCollect)
+      assert.deepStrictEqual(cursors, ["c1", "c2"])
+      assert.strictEqual(advanced[0]?.checkpointAfterPage, "next:c2")
+      assert.match(advanced[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("tracks pagination cursors independently for each wrapped sync retry", () =>
+    Effect.gen(function*() {
+      let versionCalls = 0
+      const cursors: Array<string | null> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            cursors.push(cursor)
+            return cursor === null
+              ? { results: [currentPage], _links: { next: "/pages?cursor=c1" } }
+              : { results: [] }
+          }),
+        getPageVersions: () =>
+          Effect.suspend(() => {
+            versionCalls += 1
+            return versionCalls === 1
+              ? Effect.fail(
+                new ConfluencePageClientFailure({
+                  operation: "confluence-page-version-history",
+                  reason: "rate-limit",
+                  retryAfterSeconds: 0
+                })
+              )
+              : Effect.succeed({ results: [currentPage.version] })
+          })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(
+        Stream.retry(Schedule.recurs(1)),
+        Stream.runCollect
+      )
+
+      assert.deepStrictEqual(cursors, [null, null, "c1"])
+      assert.strictEqual(versionCalls, 2)
+      assert.strictEqual(pages.length, 2)
+      assert.strictEqual(pages[0]?.checkpointAfterPage, "next:c1")
+      assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+    }))
+
+  it.effect("reserves enough checkpoint budget for two provider cursors", () =>
+    Effect.gen(function*() {
+      const maximumCursorLength = Math.floor(
+        (2_048 - "bounded:v2:".length - 9 - 1 - 64 - 1 - 4 - 1 - 64 - 1) / 2
+      )
+      const prefixCursor = "p".repeat(maximumCursorLength)
+      const suffixCursor = "s".repeat(maximumCursorLength)
+      const validCalls: Array<string | null> = []
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: (_spaceId, cursor) =>
+          Effect.sync(() => {
+            validCalls.push(cursor)
+            if (cursor === suffixCursor) return { results: [] }
+            if (cursor === prefixCursor) return { results: [], _links: { next: `/pages?cursor=${suffixCursor}` } }
+            const index = cursor === null ? 0 : Number(cursor.slice(1))
+            return {
+              results: [],
+              _links: { next: `/pages?cursor=${index === 4 ? prefixCursor : `c${index + 1}`}` }
+            }
+          })
+      }))
+
+      const bounded = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const valid = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: bounded[4]?.checkpointAfterPage
+        })
+      ).pipe(Stream.runCollect)
+      assert.deepStrictEqual(validCalls, [null, "c1", "c2", "c3", "c4", prefixCursor, suffixCursor])
+      assert.lengthOf(valid, 2)
+      for (const page of valid) {
+        assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(PluginCheckpointV1)(page.checkpointAfterPage)))
+      }
+      assert.match(
+        valid[0]?.checkpointAfterPage ?? "",
+        /^bounded:v2:0:[0-9a-f]{64}:[0-9]{3}:[p]+[0-9a-f]{64}:[s]+$/u
+      )
+
+      validCalls.length = 0
+      const overlongCursor = "c".repeat(maximumCursorLength + 1)
+      const invalid = yield* adapter.connection.sync(
+        Schema.decodeUnknownSync(PluginSyncRequestV1)({
+          streamKey: "pages",
+          checkpoint: `bounded:${overlongCursor}`
+        })
+      ).pipe(Stream.runCollect, Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+      assert.deepStrictEqual(validCalls, [])
+
+      assert.isTrue(Result.isFailure(
+        Schema.decodeUnknownResult(PluginCheckpointV1)(
+          `bounded:v2:0:${"a".repeat(64)}:999:${"p".repeat(999)}${"b".repeat(64)}:${"s".repeat(999)}`
+        )
+      ))
+    }))
+
+  it.effect("changes sync event identity only when mutable inventory changes", () =>
+    Effect.gen(function*() {
+      let attachmentTitle = "release-v1.txt"
+      let displayName = "Avery One"
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageAttachments: () =>
+          Effect.sync(() => ({
+            results: [{
+              id: "attachment-1",
+              status: "current",
+              title: attachmentTitle,
+              createdAt: UPDATED_AT,
+              pageId: PAGE_ID,
+              version: { number: 1 }
+            }]
+          })),
+        getUsers: (accountIds) =>
+          Effect.sync(() => ({
+            results: accountIds.map((accountId) => ({
+              accountId,
+              displayName,
+              accountStatus: "active"
+            }))
+          }))
+      }))
+      const eventIds = Effect.fn("ConfluencePageAdapterTest.eventIds")(function*() {
+        const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+        return pages.flatMap(({ events }) => events.map(({ eventId }) => eventId))
+      })
+      const initial = yield* eventIds()
+      const replay = yield* eventIds()
+      assert.deepStrictEqual(replay, initial)
+
+      attachmentTitle = "release-v2.txt"
+      displayName = "Avery Two"
+      const changed = yield* eventIds()
+      assert.notDeepEqual(changed, initial)
+    }))
+
+  it.effect("hashes runbook evidence identity for maximum-length Confluence page ids", () =>
+    Effect.gen(function*() {
+      const pageId = "9".repeat(512)
+      const page = {
+        ...currentPage,
+        id: pageId,
+        _links: { webui: `/wiki/spaces/PAY/pages/${pageId}` }
+      }
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: [page] }),
+        getPageVersions: () => Effect.succeed({ results: [page.version] })
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const evidence = pages.flatMap(({ events }) => events).filter((event) => event._tag === "AppendEvidence")
+      assert.lengthOf(evidence, 1)
+      assert.isAtMost(evidence[0]?.eventId.length ?? Number.POSITIVE_INFINITY, 512)
+      assert.isAtMost(evidence[0]?.evidenceId.length ?? Number.POSITIVE_INFINITY, 512)
+      assert.deepInclude(evidence[0]?.data, { pageId })
+    }))
+
+  it.effect("splits attachment-heavy provider pages without losing restart safety", () =>
+    Effect.gen(function*() {
+      const sourcePages = Array.from({ length: 20 }, (_, index) => ({
+        ...currentPage,
+        id: `page-${index}`,
+        title: `Operations runbook ${index}`,
+        _links: { webui: `/wiki/spaces/PAY/pages/page-${index}` }
+      }))
+      const adapter = yield* makeAdapter(defaultClient({
+        getSpacePages: () => Effect.succeed({ results: sourcePages }),
+        getPageAttachments: (pageId, cursor) => {
+          const offset = cursor === null ? 0 : 25
+          return Effect.succeed({
+            results: Array.from({ length: 25 }, (_, index) => ({
+              id: `${pageId}-attachment-${offset + index}-${"i".repeat(440)}`,
+              status: "current",
+              title: `artifact-${offset + index}-${"t".repeat(470)}`,
+              createdAt: UPDATED_AT,
+              pageId,
+              mediaType: `application/vnd.${"m".repeat(230)}`,
+              fileSize: index,
+              version: currentPage.version
+            })),
+            ...(cursor === null
+              ? { _links: { next: `/wiki/api/v2/pages/${pageId}/attachments?cursor=second` } }
+              : {})
+          })
+        }
+      }))
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+
+      assert.isAbove(pages.length, 1)
+      for (const page of pages) assert.isAtMost(jsonBytes(page), MaximumPluginSyncPageBytes)
+      for (const page of pages.slice(0, -1)) {
+        assert.strictEqual(page.hasMore, true)
+        assert.strictEqual(page.checkpointAfterPage, "restart:initial")
+      }
+      assert.match(pages.at(-1)?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
+      assert.strictEqual(
+        pages.flatMap(({ events }) => events).filter(({ _tag }) => _tag === "UpsertEntity").length,
+        sourcePages.length
+      )
     }))
 
   it.effect("rejects a configured site identity that does not match Confluence", () =>

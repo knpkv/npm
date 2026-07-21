@@ -586,8 +586,24 @@ export const ServicesPage = ({
   useEffect(() => {
     if (connectionsState._tag !== "ready" || transport.synchronization === undefined) return
     const synchronizable = connectionsState.overview.connections.filter(
-      ({ providerId }) => providerId === "codecommit" || providerId === "codepipeline" || providerId === "clockify"
+      ({ supportsSynchronization }) => supportsSynchronization
     )
+    const synchronizableIds = new Set(synchronizable.map(({ pluginConnectionId }) => pluginConnectionId))
+    for (const [pluginConnectionId, request] of synchronizationRequests.current) {
+      if (synchronizableIds.has(pluginConnectionId)) continue
+      request.abort()
+      synchronizationRequests.current.delete(pluginConnectionId)
+    }
+    setSynchronizationStates((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const pluginConnectionId of next.keys()) {
+        if (synchronizableIds.has(pluginConnectionId)) continue
+        next.delete(pluginConnectionId)
+        changed = true
+      }
+      return changed ? next : current
+    })
     for (const connection of synchronizable) refreshSynchronization(connection.pluginConnectionId)
     return () => {
       for (const connection of synchronizable) {

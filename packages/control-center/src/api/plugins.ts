@@ -186,6 +186,12 @@ export const PluginConnectionSummary = Schema.Struct({
   providerId: ProviderId,
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   isEnabled: Schema.Boolean,
+  supportsSynchronization: Schema.optional(Schema.Boolean).pipe(
+    Schema.decodeTo(Schema.Boolean, {
+      decode: SchemaGetter.withDefault(Effect.succeed(false)),
+      encode: SchemaGetter.required()
+    })
+  ),
   health: Schema.NullOr(PluginHealth),
   updatedAt: UtcTimestamp
 }).annotate({ identifier: "PluginConnectionSummary" })

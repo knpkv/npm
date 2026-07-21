@@ -48,6 +48,62 @@ export const RawConfluencePage = Schema.Struct({
 /** Decoded current Confluence page. @internal */
 export type RawConfluencePage = typeof RawConfluencePage.Type
 
+/** One bounded page of current pages from exactly one configured space. @internal */
+export const RawConfluenceSpacePage = Schema.Struct({
+  results: Schema.optionalKey(Schema.Array(RawConfluencePage).check(Schema.isMaxLength(25))),
+  _links: Schema.optionalKey(Schema.Struct({
+    next: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4_096)))
+  }))
+})
+
+/** Decoded current-page listing for one space. @internal */
+export type RawConfluenceSpacePage = typeof RawConfluenceSpacePage.Type
+
+/** Attachment metadata retained without loading attachment bytes. @internal */
+export const RawConfluenceAttachment = Schema.Struct({
+  id: boundedString(512),
+  status: Schema.Literal("current"),
+  title: boundedString(500),
+  createdAt: timestampString,
+  pageId: boundedString(512),
+  mediaType: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(255))),
+  fileSize: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  version: Schema.optionalKey(Schema.Struct({
+    number: Schema.Int.check(Schema.isGreaterThan(0))
+  }))
+})
+
+/** One bounded attachment metadata page. @internal */
+export const RawConfluenceAttachmentPage = Schema.Struct({
+  results: Schema.optionalKey(Schema.Array(RawConfluenceAttachment).check(Schema.isMaxLength(25))),
+  _links: Schema.optionalKey(Schema.Struct({
+    next: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4_096)))
+  }))
+})
+
+/** Decoded attachment metadata page. @internal */
+export type RawConfluenceAttachmentPage = typeof RawConfluenceAttachmentPage.Type
+
+/** One bounded watcher page from the legacy page-notification read endpoint. @internal */
+export const RawConfluenceWatcherPage = Schema.Struct({
+  results: Schema.Array(Schema.Struct({
+    type: boundedString(100),
+    contentId: Schema.Number.check(
+      Schema.makeFilter(Number.isInteger, { expected: "a JSON integer" }),
+      Schema.isGreaterThan(0)
+    ),
+    watcher: Schema.Struct({
+      accountId: Schema.NullOr(boundedString(512))
+    })
+  })).check(Schema.isMaxLength(50)),
+  start: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 50 })),
+  size: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 50 }))
+})
+
+/** Decoded page watcher metadata. @internal */
+export type RawConfluenceWatcherPage = typeof RawConfluenceWatcherPage.Type
+
 /** One decoded page of version history. @internal */
 export const RawConfluenceVersionPage = Schema.Struct({
   results: Schema.optionalKey(Schema.Array(RawConfluenceVersion).check(Schema.isMaxLength(100))),
@@ -75,7 +131,7 @@ export type RawConfluenceCurrentUser = typeof RawConfluenceCurrentUser.Type
 /** Bounded Confluence user returned by current-user and bulk-user reads. @internal */
 export const RawConfluenceUser = Schema.Struct({
   accountId: boundedString(512),
-  displayName: boundedString(200),
+  displayName: Schema.optionalKey(Schema.NullOr(boundedString(200))),
   accountStatus: Schema.optionalKey(Schema.Literals(["active", "inactive", "closed", "unknown"])),
   isExternalCollaborator: Schema.optionalKey(Schema.Boolean)
 })
@@ -102,7 +158,7 @@ const NormalizedContributor = Schema.Struct({
   active: Schema.Boolean,
   external: Schema.Boolean,
   resolved: Schema.Boolean,
-  roles: Schema.Array(Schema.Literals(["owner", "author", "contributor"])).check(
+  roles: Schema.Array(Schema.Literals(["owner", "author", "contributor", "watcher"])).check(
     Schema.isNonEmpty(),
     Schema.isUnique()
   )
@@ -126,7 +182,26 @@ export const ConfluencePageAttributesV1 = Schema.Struct({
     complete: Schema.Boolean,
     pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 }))
   }),
-  contributors: Schema.Array(NormalizedContributor).check(Schema.isMaxLength(502))
+  contributors: Schema.Array(NormalizedContributor).check(Schema.isMaxLength(502)),
+  attachments: Schema.optionalKey(
+    Schema.Array(Schema.Struct({
+      id: boundedString(512),
+      title: boundedString(500),
+      createdAt: timestampString,
+      mediaType: Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(255))),
+      fileSize: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+      version: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0)))
+    })).check(Schema.isMaxLength(50))
+  ),
+  attachmentInventory: Schema.optionalKey(Schema.Struct({
+    complete: Schema.Boolean,
+    pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))
+  })),
+  watcherInventory: Schema.optionalKey(Schema.Struct({
+    complete: Schema.Boolean,
+    pagesFetched: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 2 }))
+  })),
+  contentState: Schema.optionalKey(Schema.Literals(["loaded", "lazy"]))
 }).check(hasMaximumPluginJsonBytes(MaximumPluginPayloadBytes))
 
 /** Decoded normalized Confluence page attributes. @internal */

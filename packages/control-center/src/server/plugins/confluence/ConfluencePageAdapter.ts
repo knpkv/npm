@@ -1,15 +1,17 @@
 /**
  * Production Confluence page-read normalization for the Control Center plugin contract.
  *
- * This slice deliberately offers only `entity.read`. Provider writes, sync,
- * attachments, watchers, and activity stay unadvertised until their complete
- * contracts and recovery behavior exist.
+ * This slice offers lazy `entity.read` plus bounded space-page synchronization.
+ * Provider writes, attachment bytes, watchers, and unbounded activity stay
+ * unadvertised until their complete contracts and recovery behavior exist.
  *
  * @module
  */
 import { MarkdownConverter } from "@knpkv/confluence-to-markdown"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -21,6 +23,8 @@ import {
   hasMaximumPluginJsonBytes,
   MaximumPluginPayloadBytes,
   type NegotiatedPluginDescriptorV1,
+  PluginSyncPageV1,
+  type PluginSyncRequestV1,
   ReadPluginEntityResultV1,
   type ReadPluginEntityResultV1 as ReadPluginEntityResultV1Type
 } from "../../../domain/plugins/index.js"
@@ -28,6 +32,7 @@ import { SourceUrl } from "../../../domain/sourceRevision.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConfigurationFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
@@ -44,19 +49,56 @@ import {
 } from "./ConfluencePageClient.js"
 import {
   ConfluencePageAttributesV1,
+  RawConfluenceAttachmentPage,
+  type RawConfluenceAttachmentPage as RawConfluenceAttachmentPageType,
   RawConfluenceCurrentUser,
   RawConfluencePage,
+  RawConfluenceSpacePage,
+  type RawConfluenceSpacePage as RawConfluenceSpacePageType,
   type RawConfluenceUser,
   RawConfluenceUsers,
   type RawConfluenceVersion,
   RawConfluenceVersionPage,
-  type RawConfluenceVersionPage as RawConfluenceVersionPageType
+  type RawConfluenceVersionPage as RawConfluenceVersionPageType,
+  RawConfluenceWatcherPage,
+  type RawConfluenceWatcherPage as RawConfluenceWatcherPageType
 } from "./ConfluencePageSchemas.js"
 import { toSafeConfluenceMarkdown } from "./SafeConfluenceMarkdown.js"
 
 const MAXIMUM_VERSION_PAGES = 5
+const MAXIMUM_ATTACHMENT_PAGES = 2
+const MAXIMUM_WATCHER_PAGES = 2
+const MAXIMUM_SPACE_PAGES_PER_SYNC = 5
 const MAXIMUM_USERS_PER_REQUEST = 250
+const MAXIMUM_CONTRIBUTORS = 502
+const MAXIMUM_CHECKPOINT_LENGTH = 2_048
 const ConfluencePageEntityType = "confluence-page"
+const CONFLUENCE_PAGE_STREAM_KEY = "pages"
+const LEGACY_COMPLETE_CHECKPOINT = "complete"
+const COMPLETE_CHECKPOINT_PREFIX = "complete:"
+const NEXT_CHECKPOINT_PREFIX = "next:"
+const BOUNDED_CHECKPOINT_PREFIX = "bounded:"
+const DURABLE_BOUNDED_CHECKPOINT_PREFIX = "bounded:v1:"
+const DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX = "bounded:v2:"
+const DURABLE_COMPLETE_CHECKPOINT_PREFIX = "complete:v1:"
+const DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX = "complete:v2:"
+const RESTART_INITIAL_CHECKPOINT = "restart:initial"
+const RESTART_CURSOR_PREFIX = "restart:cursor:"
+const INVENTORY_DIGEST_LENGTH = 64
+const MAXIMUM_CHECKPOINT_GENERATION_DIGITS = 9
+const MAXIMUM_CHECKPOINT_CURSOR_LENGTH_DIGITS = 4
+const MAXIMUM_SYNC_CURSOR_LENGTH = Math.floor(
+  (MAXIMUM_CHECKPOINT_LENGTH
+    - DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX.length
+    - MAXIMUM_CHECKPOINT_GENERATION_DIGITS
+    - 1
+    - INVENTORY_DIGEST_LENGTH
+    - 1
+    - MAXIMUM_CHECKPOINT_CURSOR_LENGTH_DIGITS
+    - 1
+    - INVENTORY_DIGEST_LENGTH
+    - 1) / 2
+)
 
 const SiteUrl = Schema.String.pipe(
   Schema.decodeTo(Schema.URL, SchemaTransformation.urlFromString),
@@ -104,6 +146,7 @@ export interface MakeConfluencePageAdapterInput {
   readonly client: ConfluencePageClientShape
   readonly configuration: ConfluencePageAdapterConfiguration
   readonly converter: MarkdownConverter["Service"]
+  readonly cryptoService: Crypto.Crypto
   readonly descriptor: NegotiatedPluginDescriptorV1
 }
 
@@ -195,6 +238,236 @@ const nextCursor = (
   )
 }
 
+const cursorFromNextLink = (
+  operation: string,
+  diagnosticCode: string,
+  next: string | undefined,
+  maximumLength = MAXIMUM_CHECKPOINT_LENGTH
+): Effect.Effect<string | null, PluginMalformedResponseFailure> => {
+  if (next === undefined) return Effect.succeed(null)
+  const encoded = /(?:[?&])cursor=([^&#]+)/u.exec(next)?.[1]
+  if (encoded === undefined) return Effect.fail(malformed(operation, `${diagnosticCode}-missing`))
+  return Effect.try({
+    try: () => decodeURIComponent(encoded),
+    catch: () => malformed(operation, `${diagnosticCode}-invalid`)
+  }).pipe(
+    Effect.flatMap((cursor) =>
+      cursor.length > 0 && cursor.length <= maximumLength
+        ? Effect.succeed(cursor)
+        : Effect.fail(malformed(operation, `${diagnosticCode}-invalid`))
+    )
+  )
+}
+
+interface BoundedPrefixCheckpoint {
+  readonly cursor: string
+  readonly inventoryDigest: string
+}
+
+interface SyncCheckpointState {
+  readonly boundedPrefix: BoundedPrefixCheckpoint | null
+  readonly checkpointGeneration: number
+  readonly cursor: string | null
+  readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
+  readonly inventoryDigest: string | null
+  readonly usesGenerationCheckpoint: boolean
+}
+
+const initialSyncCheckpointState: SyncCheckpointState = {
+  boundedPrefix: null,
+  checkpointGeneration: 0,
+  cursor: null,
+  expectedBoundedPrefix: null,
+  inventoryDigest: null,
+  usesGenerationCheckpoint: false
+}
+
+const validSyncCursor = (cursor: string): boolean => cursor.length > 0 && cursor.length <= MAXIMUM_SYNC_CURSOR_LENGTH
+
+const syncCursorFromCheckpoint = (
+  checkpoint: PluginSyncRequestV1["checkpoint"]
+): Effect.Effect<SyncCheckpointState, PluginConfigurationFailure> => {
+  if (checkpoint === null || checkpoint === LEGACY_COMPLETE_CHECKPOINT) {
+    return Effect.succeed(initialSyncCheckpointState)
+  }
+  if (checkpoint.startsWith(DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX)) {
+    const match = /^([0-9]{1,9}):([0-9a-f]{64}):([0-9a-f]{64}):(.+)$/u.exec(
+      checkpoint.slice(DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX.length)
+    )
+    const generation = Number(match?.[1])
+    if (
+      match !== null &&
+      Number.isSafeInteger(generation) &&
+      generation < 999_999_999 &&
+      validSyncCursor(match[4] ?? "")
+    ) {
+      return Effect.succeed({
+        boundedPrefix: null,
+        checkpointGeneration: generation + 1,
+        cursor: null,
+        expectedBoundedPrefix: { inventoryDigest: match[3]!, cursor: match[4]! },
+        inventoryDigest: null,
+        usesGenerationCheckpoint: true
+      })
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint.startsWith(DURABLE_COMPLETE_CHECKPOINT_PREFIX)) {
+    const match = /^([0-9a-f]{64}):([0-9a-f]{64}):(.+)$/u.exec(
+      checkpoint.slice(DURABLE_COMPLETE_CHECKPOINT_PREFIX.length)
+    )
+    if (match !== null && validSyncCursor(match[3] ?? "")) {
+      const boundedPrefix = { inventoryDigest: match[2]!, cursor: match[3]! }
+      return Effect.succeed({
+        boundedPrefix: null,
+        checkpointGeneration: 0,
+        cursor: null,
+        expectedBoundedPrefix: boundedPrefix,
+        inventoryDigest: null,
+        usesGenerationCheckpoint: false
+      })
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint.startsWith(COMPLETE_CHECKPOINT_PREFIX)) {
+    return /^[0-9a-f]{64}$/u.test(checkpoint.slice(COMPLETE_CHECKPOINT_PREFIX.length))
+      ? Effect.succeed(initialSyncCheckpointState)
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint.startsWith(DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX)) {
+    const payload = checkpoint.slice(DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX.length)
+    const header = /^([0-9]{1,9}):([0-9a-f]{64}):([0-9]{1,4}):/u.exec(payload)
+    if (header !== null) {
+      const generation = Number(header[1])
+      const prefixCursorLength = Number(header[3])
+      const remaining = payload.slice(header[0].length)
+      const prefixCursor = remaining.slice(0, prefixCursorLength)
+      const current = /^([0-9a-f]{64}):(.+)$/u.exec(remaining.slice(prefixCursorLength))
+      if (
+        Number.isSafeInteger(generation) &&
+        prefixCursor.length === prefixCursorLength &&
+        validSyncCursor(prefixCursor) &&
+        current !== null &&
+        validSyncCursor(current[2] ?? "")
+      ) {
+        return Effect.succeed({
+          boundedPrefix: { inventoryDigest: header[2]!, cursor: prefixCursor },
+          checkpointGeneration: generation,
+          cursor: current[2]!,
+          expectedBoundedPrefix: null,
+          inventoryDigest: current[1]!,
+          usesGenerationCheckpoint: true
+        })
+      }
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint.startsWith(DURABLE_BOUNDED_CHECKPOINT_PREFIX)) {
+    const match = /^([0-9a-f]{64}):(.+)$/u.exec(
+      checkpoint.slice(DURABLE_BOUNDED_CHECKPOINT_PREFIX.length)
+    )
+    if (match !== null && validSyncCursor(match[2] ?? "")) {
+      const boundedPrefix = { inventoryDigest: match[1]!, cursor: match[2]! }
+      return Effect.succeed({
+        boundedPrefix,
+        checkpointGeneration: 0,
+        cursor: boundedPrefix.cursor,
+        expectedBoundedPrefix: null,
+        inventoryDigest: boundedPrefix.inventoryDigest,
+        usesGenerationCheckpoint: false
+      })
+    }
+    return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint === RESTART_INITIAL_CHECKPOINT) return Effect.succeed(initialSyncCheckpointState)
+  for (const prefix of [NEXT_CHECKPOINT_PREFIX, BOUNDED_CHECKPOINT_PREFIX, RESTART_CURSOR_PREFIX]) {
+    if (!checkpoint.startsWith(prefix)) continue
+    const cursor = checkpoint.slice(prefix.length)
+    return validSyncCursor(cursor)
+      ? Effect.succeed({
+        boundedPrefix: null,
+        checkpointGeneration: 0,
+        cursor,
+        expectedBoundedPrefix: null,
+        inventoryDigest: null,
+        usesGenerationCheckpoint: false
+      })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+  }
+  return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-checkpoint-invalid" }))
+}
+
+const durableMultiBoundedCheckpoint = (
+  cursor: string,
+  inventoryDigest: string,
+  boundedPrefix: BoundedPrefixCheckpoint,
+  checkpointGeneration: number
+): string =>
+  `${DURABLE_MULTI_BOUNDED_CHECKPOINT_PREFIX}${checkpointGeneration}:${boundedPrefix.inventoryDigest}:${boundedPrefix.cursor.length}:${boundedPrefix.cursor}${inventoryDigest}:${cursor}`
+
+const checkpointAfterPage = (
+  cursor: string | null,
+  bounded: boolean,
+  inventoryDigest: string,
+  previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number,
+  usesGenerationCheckpoint: boolean
+): string => {
+  if (cursor !== null) {
+    if (previousBoundedPrefix !== null) {
+      return durableMultiBoundedCheckpoint(
+        cursor,
+        inventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration
+      )
+    }
+    return bounded
+      ? `${DURABLE_BOUNDED_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor}`
+      : `${NEXT_CHECKPOINT_PREFIX}${cursor}`
+  }
+  return previousBoundedPrefix === null
+    ? `${COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}`
+    : usesGenerationCheckpoint
+    ? `${DURABLE_MULTI_COMPLETE_CHECKPOINT_PREFIX}${checkpointGeneration}:${inventoryDigest}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor}`
+    : `${DURABLE_COMPLETE_CHECKPOINT_PREFIX}${inventoryDigest}:${previousBoundedPrefix.inventoryDigest}:${previousBoundedPrefix.cursor}`
+}
+
+const checkpointBeforePage = (
+  cursor: string | null,
+  previousInventoryDigest: string | null,
+  previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number
+): string => {
+  if (cursor === null) return RESTART_INITIAL_CHECKPOINT
+  return previousInventoryDigest !== null && previousBoundedPrefix !== null
+    ? durableMultiBoundedCheckpoint(
+      cursor,
+      previousInventoryDigest,
+      previousBoundedPrefix,
+      checkpointGeneration
+    )
+    : `${RESTART_CURSOR_PREFIX}${cursor}`
+}
+
+const jsonByteLength = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
+
+const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(function*(
+  cryptoService: Crypto.Crypto,
+  value: unknown
+) {
+  const serialized = JSON.stringify(value)
+  const bytes = yield* Effect.fromResult(
+    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+  ).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "confluence-sync-identity" }))
+  )
+  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "confluence-sync-identity" }))
+  )
+  return Encoding.encodeHex(digest)
+})
+
 const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(
   client: ConfluencePageClientShape,
   pageId: string
@@ -259,14 +532,13 @@ const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
   return users
 })
 
-type ContributorRole = "owner" | "author" | "contributor"
-const roleOrder: ReadonlyArray<ContributorRole> = ["owner", "author", "contributor"]
+type ContributorRole = "owner" | "author" | "contributor" | "watcher"
+const roleOrder: ReadonlyArray<ContributorRole> = ["owner", "author", "contributor", "watcher"]
 
-const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")(function*(
-  client: ConfluencePageClientShape,
+const contributorRoles = (
   page: typeof RawConfluencePage.Type,
   versions: ReadonlyArray<RawConfluenceVersion>
-) {
+): Map<string, Set<ContributorRole>> => {
   const roles = new Map<string, Set<ContributorRole>>()
   const addRole = (accountId: string | undefined | null, role: ContributorRole): void => {
     if (accountId === undefined || accountId === null) return
@@ -277,20 +549,555 @@ const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")
   addRole(page.ownerId, "owner")
   addRole(page.version.authorId, "author")
   for (const version of versions) addRole(version.authorId, "contributor")
+  return roles
+}
+
+const contributorsFromUsers = (
+  roles: ReadonlyMap<string, ReadonlySet<ContributorRole>>,
+  users: ReadonlyMap<string, RawConfluenceUser>
+) => {
   const accountIds = [...roles.keys()].sort()
-  const users = yield* readUsers(client, accountIds)
   return accountIds.map((accountId) => {
     const user = users.get(accountId)
-    const resolved = user?.accountStatus !== undefined && user.accountStatus !== "unknown"
+    const resolved = user?.displayName !== undefined &&
+      user.displayName !== null &&
+      user.accountStatus !== undefined &&
+      user.accountStatus !== "unknown"
     return {
       accountId,
-      displayName: user?.displayName ?? accountId,
+      displayName: user?.displayName ?? "Confluence user",
       active: resolved && user.accountStatus === "active",
       external: user?.isExternalCollaborator ?? false,
       resolved,
       roles: roleOrder.filter((role) => roles.get(accountId)?.has(role) ?? false)
     }
   })
+}
+
+const normalizedContributors = Effect.fn("ConfluencePage.normalizeContributors")(function*(
+  client: ConfluencePageClientShape,
+  page: typeof RawConfluencePage.Type,
+  versions: ReadonlyArray<RawConfluenceVersion>
+) {
+  const roles = contributorRoles(page, versions)
+  const users = yield* readUsers(client, [...roles.keys()].sort())
+  return contributorsFromUsers(roles, users)
+})
+
+interface AttachmentInventory {
+  readonly attachments: ReadonlyArray<{
+    readonly id: string
+    readonly title: string
+    readonly createdAt: string
+    readonly mediaType: string | null
+    readonly fileSize: number | null
+    readonly version: number | null
+  }>
+  readonly complete: boolean
+  readonly pagesFetched: number
+}
+
+interface WatcherInventory {
+  readonly accountIds: ReadonlyArray<string>
+  readonly complete: boolean
+  readonly pagesFetched: number
+}
+
+interface NormalizedVersion {
+  readonly number: number
+  readonly createdAt: string
+  readonly message: string | null
+  readonly minorEdit: boolean
+  readonly authorId: string | null
+}
+
+interface SyncAttributesInput {
+  readonly schemaVersion: 1
+  readonly status: "current"
+  readonly spaceId: string
+  readonly parentId: string | null
+  readonly createdAt: string
+  readonly updatedAt: string
+  readonly currentVersion: number
+  readonly content: null
+  readonly contentState: "lazy"
+  readonly versions: ReadonlyArray<NormalizedVersion>
+  readonly versionHistory: { readonly complete: boolean; readonly pagesFetched: number }
+  readonly contributors: ReturnType<typeof contributorsFromUsers>
+  readonly attachments: AttachmentInventory["attachments"]
+  readonly attachmentInventory: { readonly complete: boolean; readonly pagesFetched: number }
+  readonly watcherInventory: { readonly complete: boolean; readonly pagesFetched: number }
+}
+
+const fitSyncAttributes = (attributes: SyncAttributesInput): SyncAttributesInput => {
+  if (jsonByteLength(attributes) <= MaximumPluginPayloadBytes) return attributes
+  const versions: Array<NormalizedVersion> = attributes.versions.map((version) => ({
+    ...version,
+    message: null
+  }))
+  const contributors = [...attributes.contributors]
+  const attachments = [...attributes.attachments]
+  let compacted: SyncAttributesInput = {
+    ...attributes,
+    versions,
+    contributors,
+    attachments,
+    versionHistory: { ...attributes.versionHistory, complete: false }
+  }
+  let compactedBytes = jsonByteLength(compacted)
+
+  while (compactedBytes > MaximumPluginPayloadBytes && versions.length > 0) {
+    let historicalIndex = -1
+    for (let index = versions.length - 1; index >= 0; index--) {
+      if (versions[index]?.number !== attributes.currentVersion) {
+        historicalIndex = index
+        break
+      }
+    }
+    const [removed] = versions.splice(historicalIndex >= 0 ? historicalIndex : versions.length - 1, 1)
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (versions.length > 0 ? 1 : 0)
+  }
+  while (compactedBytes > MaximumPluginPayloadBytes && contributors.length > 0) {
+    let lowerPriorityIndex = -1
+    for (let index = contributors.length - 1; index >= 0; index--) {
+      const contributor = contributors[index]
+      if (contributor !== undefined && !contributor.roles.includes("owner") && !contributor.roles.includes("author")) {
+        lowerPriorityIndex = index
+        break
+      }
+    }
+    const [removed] = contributors.splice(
+      lowerPriorityIndex >= 0 ? lowerPriorityIndex : contributors.length - 1,
+      1
+    )
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (contributors.length > 0 ? 1 : 0)
+    if (removed.roles.includes("watcher")) {
+      if (compacted.watcherInventory.complete) compactedBytes += 1
+      compacted = {
+        ...compacted,
+        watcherInventory: { ...compacted.watcherInventory, complete: false }
+      }
+    }
+  }
+  while (compactedBytes > MaximumPluginPayloadBytes && attachments.length > 0) {
+    const removed = attachments.pop()
+    if (removed === undefined) break
+    compactedBytes -= jsonByteLength(removed) + (attachments.length > 0 ? 1 : 0)
+    if (compacted.attachmentInventory.complete) compactedBytes += 1
+    compacted = {
+      ...compacted,
+      attachmentInventory: { ...compacted.attachmentInventory, complete: false }
+    }
+  }
+  return compacted
+}
+
+const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(function*(
+  client: ConfluencePageClientShape,
+  pageId: string
+): Effect.fn.Return<WatcherInventory, PluginFailure> {
+  const accountIds = new Set<string>()
+  let allWatcherIdentitiesVisible = true
+  let pagesFetched = 0
+  let start = 0
+  const numericPageId = Number(pageId)
+  const pageIdCanBeComparedExactly = Number.isSafeInteger(numericPageId) && String(numericPageId) === pageId
+  while (pagesFetched < MAXIMUM_WATCHER_PAGES) {
+    const loaded = yield* providerCall(client.getPageWatchers(pageId, start)).pipe(Effect.result)
+    if (Result.isFailure(loaded)) {
+      if (loaded.failure._tag === "PluginAuthorizationFailure") {
+        return { accountIds: [...accountIds], complete: false, pagesFetched }
+      }
+      return yield* loaded.failure
+    }
+    const page: RawConfluenceWatcherPageType = yield* decodeProvider(
+      "confluence-page-watchers",
+      "confluence-watcher-page-invalid",
+      RawConfluenceWatcherPage,
+      loaded.success
+    )
+    if (page.start !== start || page.size !== page.results.length || page.size > page.limit) {
+      return yield* malformed("confluence-page-watchers", "confluence-watcher-page-inconsistent")
+    }
+    for (const { contentId, watcher } of page.results) {
+      if (!pageIdCanBeComparedExactly) {
+        allWatcherIdentitiesVisible = false
+        continue
+      }
+      if (contentId !== numericPageId) {
+        return yield* malformed("confluence-page-watchers", "confluence-watcher-page-mismatch")
+      }
+      if (watcher.accountId === null) {
+        allWatcherIdentitiesVisible = false
+        continue
+      }
+      accountIds.add(watcher.accountId)
+    }
+    pagesFetched += 1
+    if (page.size < page.limit) {
+      return { accountIds: [...accountIds], complete: allWatcherIdentitiesVisible, pagesFetched }
+    }
+    start += page.size
+  }
+  return { accountIds: [...accountIds], complete: false, pagesFetched }
+})
+
+const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventory")(function*(
+  client: ConfluencePageClientShape,
+  pageId: string
+): Effect.fn.Return<AttachmentInventory, PluginFailure> {
+  const attachments: Array<AttachmentInventory["attachments"][number]> = []
+  const identities = new Set<string>()
+  const seenCursors = new Set<string>()
+  let cursor: string | null = null
+  let pagesFetched = 0
+
+  while (pagesFetched < MAXIMUM_ATTACHMENT_PAGES) {
+    const loaded = yield* providerCall(client.getPageAttachments(pageId, cursor)).pipe(Effect.result)
+    if (Result.isFailure(loaded)) {
+      if (loaded.failure._tag === "PluginAuthorizationFailure") {
+        return { attachments, complete: false, pagesFetched }
+      }
+      return yield* loaded.failure
+    }
+    const page: RawConfluenceAttachmentPageType = yield* decodeProvider(
+      "confluence-page-attachments",
+      "confluence-attachment-page-invalid",
+      RawConfluenceAttachmentPage,
+      loaded.success
+    )
+    pagesFetched += 1
+    for (const attachment of page.results ?? []) {
+      if (attachment.pageId !== pageId) {
+        return yield* malformed("confluence-page-attachments", "confluence-attachment-page-mismatch")
+      }
+      if (identities.has(attachment.id)) {
+        return yield* malformed("confluence-page-attachments", "confluence-attachment-identity-duplicate")
+      }
+      identities.add(attachment.id)
+      attachments.push({
+        id: attachment.id,
+        title: attachment.title,
+        createdAt: attachment.createdAt,
+        mediaType: attachment.mediaType ?? null,
+        fileSize: attachment.fileSize ?? null,
+        version: attachment.version?.number ?? null
+      })
+    }
+    const following = yield* cursorFromNextLink(
+      "confluence-page-attachments",
+      "confluence-attachment-cursor",
+      page._links?.next
+    )
+    if (following === null) return { attachments, complete: true, pagesFetched }
+    if (seenCursors.has(following)) {
+      return yield* malformed("confluence-page-attachments", "confluence-attachment-cursor-loop")
+    }
+    seenCursors.add(following)
+    cursor = following
+  }
+
+  return { attachments, complete: false, pagesFetched }
+})
+
+const isRunbookCandidate = (title: string): boolean => /\b(?:runbook|playbook|rollback|operations?)\b/iu.test(title)
+
+const normalizeSyncEvents = Effect.fn("ConfluencePage.normalizeSyncEvents")(function*(
+  input: MakeConfluencePageAdapterInput,
+  pages: ReadonlyArray<typeof RawConfluencePage.Type>
+) {
+  for (const page of pages) {
+    if (page.spaceId !== input.configuration.spaceId) {
+      return yield* malformed("confluence-space-pages", "confluence-page-space-mismatch")
+    }
+  }
+  const contexts = yield* Effect.forEach(
+    pages,
+    Effect.fn("ConfluencePage.readSyncContext")(function*(page) {
+      const { history, inventory, watchers } = yield* Effect.all({
+        history: readVersions(input.client, page.id),
+        inventory: readAttachmentInventory(input.client, page.id),
+        watchers: readWatcherInventory(input.client, page.id)
+      }, { concurrency: 3 })
+      const hasCurrentVersion = history.versions.some(({ number }) => number === page.version.number)
+      const versions = hasCurrentVersion
+        ? history.versions
+        : [page.version, ...history.versions].slice(0, 500)
+      return {
+        history: {
+          ...history,
+          complete: history.complete && (
+            hasCurrentVersion || versions.length === history.versions.length + 1
+          )
+        },
+        inventory,
+        page,
+        versions,
+        watchers
+      }
+    }),
+    { concurrency: 4 }
+  )
+  const rolesByPage = new Map<string, Map<string, Set<ContributorRole>>>()
+  const watcherCoverageByPage = new Map<string, boolean>()
+  const accountIds = new Set<string>()
+  for (const context of contexts) {
+    const roles = contributorRoles(context.page, context.versions)
+    let allWatchersRetained = true
+    for (const accountId of [...context.watchers.accountIds].sort()) {
+      if (!roles.has(accountId) && roles.size >= MAXIMUM_CONTRIBUTORS) {
+        allWatchersRetained = false
+        continue
+      }
+      const current = roles.get(accountId) ?? new Set<ContributorRole>()
+      current.add("watcher")
+      roles.set(accountId, current)
+    }
+    rolesByPage.set(context.page.id, roles)
+    watcherCoverageByPage.set(
+      context.page.id,
+      context.watchers.complete && allWatchersRetained
+    )
+    for (const accountId of roles.keys()) accountIds.add(accountId)
+  }
+  const users = yield* readUsers(input.client, [...accountIds].sort())
+
+  const eventGroups = yield* Effect.forEach(
+    contexts,
+    Effect.fn("ConfluencePage.normalizeSyncPage")(function*(context) {
+      const { history, inventory, page, versions, watchers } = context
+      const contributors = contributorsFromUsers(rolesByPage.get(page.id) ?? new Map(), users)
+      const attributesInput = fitSyncAttributes({
+        schemaVersion: 1,
+        status: page.status,
+        spaceId: page.spaceId,
+        parentId: page.parentId ?? null,
+        createdAt: page.createdAt,
+        updatedAt: page.version.createdAt,
+        currentVersion: page.version.number,
+        content: null,
+        contentState: "lazy",
+        versions: versions.map((version) => ({
+          number: version.number,
+          createdAt: version.createdAt,
+          message: version.message ?? null,
+          minorEdit: version.minorEdit ?? false,
+          authorId: version.authorId ?? null
+        })),
+        versionHistory: { complete: history.complete, pagesFetched: history.pagesFetched },
+        contributors,
+        attachments: inventory.attachments,
+        attachmentInventory: {
+          complete: inventory.complete,
+          pagesFetched: inventory.pagesFetched
+        },
+        watcherInventory: {
+          complete: watcherCoverageByPage.get(page.id) ?? false,
+          pagesFetched: watchers.pagesFetched
+        }
+      })
+      const attributes = yield* decodeProvider(
+        "confluence-sync",
+        "confluence-sync-page-attributes-invalid",
+        ConfluencePageAttributesV1,
+        attributesInput
+      )
+      const revision = String(page.version.number)
+      const observedAt = page.version.createdAt
+      const normalizedSourceUrl = sourceUrl(input.configuration.siteBaseUrl, page._links?.webui)
+      const identityDigest = yield* digestSyncIdentity(input.cryptoService, {
+        attributes,
+        entityType: ConfluencePageEntityType,
+        observedAt,
+        pageId: page.id,
+        revision,
+        sourceUrl: normalizedSourceUrl,
+        title: page.title
+      })
+      const events: Array<unknown> = [{
+        _tag: "UpsertEntity",
+        eventId: `confluence-page:${identityDigest}`,
+        observedAt,
+        revision,
+        entityType: ConfluencePageEntityType,
+        vendorImmutableId: page.id,
+        sourceUrl: normalizedSourceUrl,
+        title: page.title,
+        attributes
+      }]
+      for (let index = 0; index < contributors.length; index++) {
+        const contributor = contributors[index]
+        if (contributor === undefined || !contributor.resolved) continue
+        events.push({
+          _tag: "UpsertPerson",
+          eventId: `confluence-person:${identityDigest}:${index}`,
+          observedAt,
+          revision,
+          vendorPersonId: contributor.accountId,
+          displayName: contributor.displayName,
+          avatarUrl: null,
+          active: contributor.active
+        })
+      }
+      if (isRunbookCandidate(page.title)) {
+        const evidenceIdentityDigest = yield* digestSyncIdentity(input.cryptoService, {
+          pageId: page.id,
+          revision
+        })
+        const evidenceId = `confluence-runbook:${evidenceIdentityDigest}`
+        events.push({
+          _tag: "AppendEvidence",
+          eventId: evidenceId,
+          observedAt,
+          revision,
+          evidenceId,
+          subject: { entityType: ConfluencePageEntityType, vendorImmutableId: page.id },
+          evidenceType: "confluence.runbook-candidate",
+          summary: `Runbook candidate: ${page.title}`.slice(0, 500).trim(),
+          capturedAt: observedAt,
+          data: {
+            schemaVersion: 1,
+            basis: "title-keyword",
+            pageId: page.id,
+            spaceId: page.spaceId
+          }
+        })
+      }
+      return events
+    }),
+    { concurrency: 4 }
+  )
+  return eventGroups.flat()
+})
+
+const splitSyncPage = Effect.fn("ConfluencePage.splitSyncPage")(function*(options: {
+  readonly events: ReadonlyArray<unknown>
+  readonly logicalCheckpoint: string
+  readonly logicalHasMore: boolean
+  readonly restartCheckpoint: string
+}) {
+  const capacityCheckpoint = options.logicalCheckpoint.length > options.restartCheckpoint.length
+    ? options.logicalCheckpoint
+    : options.restartCheckpoint
+  const chunks: Array<Array<unknown>> = []
+  let current: Array<unknown> = []
+  for (const event of options.events) {
+    const candidate = [...current, event]
+    if (
+      Option.isSome(
+        Schema.decodeUnknownOption(PluginSyncPageV1)({
+          events: candidate,
+          checkpointAfterPage: capacityCheckpoint,
+          hasMore: false
+        })
+      )
+    ) {
+      current = candidate
+      continue
+    }
+    if (current.length === 0) return yield* malformed("confluence-sync", "confluence-sync-page-invalid")
+    chunks.push(current)
+    current = [event]
+  }
+  chunks.push(current)
+
+  return yield* Effect.forEach(chunks, (events, index) => {
+    const isLast = index === chunks.length - 1
+    return decodeProvider(
+      "confluence-sync",
+      "confluence-sync-page-invalid",
+      PluginSyncPageV1,
+      {
+        events,
+        checkpointAfterPage: isLast ? options.logicalCheckpoint : options.restartCheckpoint,
+        hasMore: isLast ? options.logicalHasMore : true
+      }
+    )
+  })
+})
+
+const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function*(
+  input: MakeConfluencePageAdapterInput,
+  cursor: string | null,
+  pageNumber: number,
+  previousInventoryDigest: string | null,
+  previousBoundedPrefix: BoundedPrefixCheckpoint | null,
+  checkpointGeneration: number,
+  usesGenerationCheckpoint: boolean,
+  expectedBoundedPrefix: BoundedPrefixCheckpoint | null,
+  seenCursors: Set<string>
+) {
+  const raw = yield* providerCall(input.client.getSpacePages(input.configuration.spaceId, cursor))
+  const page: RawConfluenceSpacePageType = yield* decodeProvider(
+    "confluence-space-pages",
+    "confluence-space-page-invalid",
+    RawConfluenceSpacePage,
+    raw
+  )
+  const pages = page.results ?? []
+  if (new Set(pages.map(({ id }) => id)).size !== pages.length) {
+    return yield* malformed("confluence-space-pages", "confluence-page-identity-duplicate")
+  }
+  const following = yield* cursorFromNextLink(
+    "confluence-space-pages",
+    "confluence-space-page-cursor",
+    page._links?.next,
+    MAXIMUM_SYNC_CURSOR_LENGTH
+  )
+  if (following !== null && (following === cursor || seenCursors.has(following))) {
+    return yield* malformed("confluence-space-pages", "confluence-space-page-cursor-loop")
+  }
+  if (following !== null) seenCursors.add(following)
+  const events = yield* normalizeSyncEvents(input, pages)
+  const inventoryDigest = yield* digestSyncIdentity(input.cryptoService, {
+    events,
+    previousInventoryDigest
+  })
+  const verifiedBoundedPrefix = following !== null &&
+      expectedBoundedPrefix?.cursor === following &&
+      expectedBoundedPrefix.inventoryDigest === inventoryDigest
+    ? expectedBoundedPrefix
+    : null
+  const bounded = following !== null &&
+    pageNumber >= MAXIMUM_SPACE_PAGES_PER_SYNC &&
+    verifiedBoundedPrefix === null
+  const hasMore = following !== null && !bounded
+  const normalized = verifiedBoundedPrefix === null
+    ? yield* splitSyncPage({
+      events,
+      logicalCheckpoint: checkpointAfterPage(
+        following,
+        bounded,
+        inventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration,
+        usesGenerationCheckpoint
+      ),
+      logicalHasMore: hasMore,
+      restartCheckpoint: checkpointBeforePage(
+        cursor,
+        previousInventoryDigest,
+        previousBoundedPrefix,
+        checkpointGeneration
+      )
+    })
+    : []
+  return {
+    normalized,
+    nextState: hasMore
+      ? Option.some({
+        checkpointGeneration,
+        cursor: following,
+        expectedBoundedPrefix: verifiedBoundedPrefix === null ? expectedBoundedPrefix : null,
+        inventoryDigest,
+        pageNumber: verifiedBoundedPrefix === null ? pageNumber + 1 : 1,
+        previousBoundedPrefix: verifiedBoundedPrefix ?? previousBoundedPrefix,
+        usesGenerationCheckpoint
+      })
+      : Option.none()
+  }
 })
 
 const sourceUrl = (
@@ -478,14 +1285,57 @@ export const makeConfluencePageAdapter = (
       Effect.andThen(DateTime.now),
       Effect.map((checkedAt): PluginHealth => ({ _tag: "healthy", checkedAt }))
     ),
-    sync: () =>
-      Stream.fail(
-        new PluginUnsupportedCapabilityFailure({
-          capabilityId: "sync.incremental",
-          requestedVersion: 1,
-          diagnosticCode: "confluence-read-adapter-capability-unavailable"
+    sync: (request) => {
+      if (request.streamKey !== CONFLUENCE_PAGE_STREAM_KEY) {
+        return Stream.fail(
+          new PluginConfigurationFailure({ diagnosticCode: "confluence-sync-stream-unsupported" })
+        )
+      }
+      return Stream.unwrap(
+        Effect.suspend(() => {
+          const seenCursors = new Set<string>()
+          return syncCursorFromCheckpoint(request.checkpoint).pipe(
+            Effect.map((checkpointState) => {
+              if (checkpointState.cursor !== null) seenCursors.add(checkpointState.cursor)
+              const initialState: {
+                readonly checkpointGeneration: number
+                readonly previousBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly cursor: string | null
+                readonly expectedBoundedPrefix: BoundedPrefixCheckpoint | null
+                readonly inventoryDigest: string | null
+                readonly pageNumber: number
+                readonly usesGenerationCheckpoint: boolean
+              } = {
+                checkpointGeneration: checkpointState.checkpointGeneration,
+                previousBoundedPrefix: checkpointState.boundedPrefix,
+                cursor: checkpointState.cursor,
+                expectedBoundedPrefix: checkpointState.expectedBoundedPrefix,
+                inventoryDigest: checkpointState.inventoryDigest,
+                pageNumber: 1,
+                usesGenerationCheckpoint: checkpointState.usesGenerationCheckpoint
+              }
+              return Stream.paginate(
+                initialState,
+                Effect.fn("ConfluencePage.streamSpacePages")(function*(state) {
+                  const result = yield* readSpaceSyncPage(
+                    input,
+                    state.cursor,
+                    state.pageNumber,
+                    state.inventoryDigest,
+                    state.previousBoundedPrefix,
+                    state.checkpointGeneration,
+                    state.usesGenerationCheckpoint,
+                    state.expectedBoundedPrefix,
+                    seenCursors
+                  )
+                  return [result.normalized, result.nextState]
+                })
+              )
+            })
+          )
         })
-      ),
+      )
+    },
     readEntity: (request) =>
       request.entityType === ConfluencePageEntityType
         ? readPageEntity(input, request.vendorImmutableId)
@@ -516,5 +1366,6 @@ export const acquireConfluencePageAdapter = Effect.fn("ConfluencePage.acquireAda
 ) {
   const client = yield* ConfluencePageClient
   const converter = yield* MarkdownConverter
-  return makeConfluencePageAdapter({ client, configuration, converter, descriptor })
+  const cryptoService = yield* Crypto.Crypto
+  return makeConfluencePageAdapter({ client, configuration, converter, cryptoService, descriptor })
 })

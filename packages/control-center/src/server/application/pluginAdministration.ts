@@ -60,6 +60,7 @@ import {
 import { discoverAtlassianProfiles, loadAtlassianProfile } from "../plugins/atlassian/AtlassianProfiles.js"
 import { firstPartyService, firstPartyServiceCatalog } from "../plugins/catalog/firstPartyServiceCatalog.js"
 import { type PluginFailure, pluginFailureClass } from "../plugins/failures.js"
+import { supportsFirstPartySynchronization } from "../plugins/firstPartySynchronization.js"
 import { negotiatePluginDescriptorV1 } from "../plugins/negotiation.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
@@ -254,18 +255,6 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
   persistence: Persistence["Service"],
   connection: PluginConnectionRecord
 ) {
-  if (!connection.isEnabled) {
-    return {
-      pluginConnectionId: connection.pluginConnectionId,
-      providerAccountId: connection.providerAccountId,
-      followedResourceId: connection.followedResourceId,
-      providerId: connection.providerId,
-      displayName: connection.displayName,
-      isEnabled: false,
-      health: { _tag: "disabled", checkedAt: connection.updatedAt },
-      updatedAt: connection.updatedAt
-    } satisfies PluginConnectionSummary
-  }
   const runtime = yield* persistence.pluginRuntime.getRuntime(
     connection.workspaceId,
     connection.pluginConnectionId
@@ -274,6 +263,14 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
     Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none())),
     Effect.mapError(() => unavailable())
   )
+  const supportsSynchronization = Option.match(runtime, {
+    onNone: () => false,
+    onSome: ({ descriptorJson }) => {
+      const descriptor = decodeNegotiatedDescriptor(descriptorJson)
+      return Result.isSuccess(descriptor) &&
+        supportsFirstPartySynchronization(connection.providerId, descriptor.success)
+    }
+  })
   return {
     pluginConnectionId: connection.pluginConnectionId,
     providerAccountId: connection.providerAccountId,
@@ -281,7 +278,10 @@ const connectionSummary = Effect.fn("PluginAdministration.connectionSummary")(fu
     providerId: connection.providerId,
     displayName: connection.displayName,
     isEnabled: connection.isEnabled,
-    health: Option.isSome(runtime) ? runtime.value.health : null,
+    supportsSynchronization,
+    health: connection.isEnabled
+      ? Option.isSome(runtime) ? runtime.value.health : null
+      : { _tag: "disabled", checkedAt: connection.updatedAt },
     updatedAt: connection.updatedAt
   } satisfies PluginConnectionSummary
 })
