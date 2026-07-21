@@ -37,6 +37,87 @@ const sourceRevision = {
 const inspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
   entity: {
     ...projectionEntry,
+    projection: {
+      ...projectionEntry.projection,
+      details: {
+        _tag: "issue",
+        key: "OPS-428",
+        status: "In review",
+        priority: "High",
+        estimatePoints: 3,
+        summary: "Review payment capture safeguards",
+        description: "Customer impact\n\nCapture retries must never create a second charge.",
+        acceptanceCriteria:
+          "A repeated capture returns the original payment result.\nNo duplicate ledger entry is created.",
+        environment: "Payments production in eu-west-1.",
+        issueType: { sourceId: "10001", name: "Story" },
+        project: { sourceId: "10000", key: "OPS", name: "Operations" },
+        resolution: null,
+        labels: ["payments", "release-blocker"],
+        components: [{ sourceId: "20001", name: "Capture API" }],
+        fixVersions: [{ sourceId: "30001", name: "Payments 2026.07", released: false, releaseDate: null }],
+        createdAt: "2026-07-10T08:00:00.000Z",
+        updatedAt: "2026-07-14T10:00:00.000Z",
+        dueDate: "2026-07-18",
+        resolvedAt: null,
+        parent: {
+          sourceId: "jira-epic-payments",
+          key: "OPS-400",
+          summary: "Harden payment delivery",
+          status: { sourceId: "3", name: "In progress" }
+        },
+        subtasks: [
+          {
+            sourceId: "jira-subtask-429",
+            key: "OPS-429",
+            summary: "Add duplicate capture contract test",
+            status: { sourceId: "2", name: "Ready" }
+          }
+        ],
+        assigneeSourcePersonId: "account-mina",
+        reporterSourcePersonId: "account-ada",
+        creatorSourcePersonId: "account-ada",
+        collaborators: [
+          {
+            sourcePersonId: "account-mina",
+            displayName: "Mina Ortiz",
+            avatarUrl: "https://images.example.test/mina.png",
+            active: true,
+            roles: ["assignee", "commenter"]
+          },
+          {
+            sourcePersonId: "account-ada",
+            displayName: "Ada Kline",
+            avatarUrl: null,
+            active: true,
+            roles: ["creator", "reporter"]
+          }
+        ],
+        comments: [
+          {
+            sourceId: "comment-41",
+            authorSourcePersonId: "account-mina",
+            updateAuthorSourcePersonId: null,
+            body: "Sandbox replay is green. I am waiting for the final reviewer.",
+            createdAt: "2026-07-14T09:30:00.000Z",
+            updatedAt: null
+          }
+        ],
+        commentTotal: 4,
+        commentsTruncated: true,
+        history: [
+          {
+            sourceId: "history-9",
+            authorSourcePersonId: "account-ada",
+            createdAt: "2026-07-14T09:00:00.000Z",
+            changes: [{ field: "Status", from: "In progress", to: "In review" }]
+          }
+        ],
+        historyTotal: 1,
+        historyTruncated: false,
+        truncatedFields: ["comments"]
+      }
+    },
     canonicalReleaseId: encodedWorkset.releaseId,
     owners: [
       {
@@ -108,7 +189,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
+const renderView = async (onAskAgent: () => void, viewState: WorkspaceEntityState = state): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
@@ -120,7 +201,7 @@ const renderView = async (onAskAgent: () => void): Promise<HTMLElement> => {
         originLabel="Back to items"
         originState={null}
         retry={() => undefined}
-        state={state}
+        state={viewState}
         workspaceId={WORKSET_WORKSPACE_ID}
       />
     </MemoryRouter>
@@ -154,6 +235,14 @@ describe("canonical workspace entity", () => {
     expect(presentation.collaborators.reviewers).toEqual([
       expect.objectContaining({ name: "Ada Kline", role: "Issue Owner · Reviewer" })
     ])
+    expect(presentation.collaborators.owners).toEqual([
+      expect.objectContaining({
+        avatarSrc: "https://images.example.test/mina.png",
+        name: "Mina Ortiz",
+        role: "Assignee · Commenter"
+      })
+    ])
+    expect(presentation.agentContext).toContain("1 release · 4 synchronized comments")
     expect(presentation.relationships.length).toBeGreaterThan(0)
     expect(presentation.activity).toEqual([
       expect.objectContaining({ actorKind: "plugin", detail: "Plugin Sync", title: "Issue synchronized" })
@@ -162,6 +251,60 @@ describe("canonical workspace entity", () => {
       "The relationship graph is partial; additional delivery links exist.",
       "The activity list is partial; older events are not shown."
     ])
+  })
+
+  it("keeps distinct Jira accounts with the same display name in the working circle", () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const duplicateNameInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            collaborators: [
+              ...(details.collaborators ?? []),
+              {
+                sourcePersonId: "account-alex-assignee",
+                displayName: "Alex Lee",
+                avatarUrl: null,
+                active: true,
+                roles: ["assignee"]
+              },
+              {
+                sourcePersonId: "account-alex-commenter",
+                displayName: "Alex Lee",
+                avatarUrl: null,
+                active: true,
+                roles: ["commenter"]
+              }
+            ]
+          }
+        }
+      }
+    } satisfies Inspection
+
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, duplicateNameInspection)
+
+    expect(presentation.collaborators.owners).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "account-alex-assignee", name: "Alex Lee", role: "Assignee" })
+      ])
+    )
+    expect(presentation.collaborators.authors).toEqual([
+      expect.objectContaining({ id: "account-alex-commenter", name: "Alex Lee", role: "Commenter" })
+    ])
+    expect(
+      [
+        ...presentation.collaborators.approvers,
+        ...presentation.collaborators.authors,
+        ...presentation.collaborators.operators,
+        ...presentation.collaborators.owners,
+        ...presentation.collaborators.reviewers
+      ].filter(({ name }) => name === "Ada Kline")
+    ).toHaveLength(1)
   })
 
   it("presents deleted related entities as unavailable", () => {
@@ -245,5 +388,89 @@ describe("canonical workspace entity", () => {
     if (agentButton === null) throw new Error("Expected the contextual agent button")
     await act(async () => agentButton.click())
     expect(onAskAgent).toHaveBeenCalledOnce()
+  })
+
+  it("renders a synchronized Jira issue as a complete read-only working document", async () => {
+    const host = await renderView(() => undefined)
+
+    expect(host.textContent).toContain("Customer impact")
+    expect(host.textContent).toContain("Capture retries must never create a second charge.")
+    expect(host.textContent).toContain("Acceptance criteria")
+    expect(host.textContent).toContain("A repeated capture returns the original payment result.")
+    expect(host.textContent).toContain("Mina Ortiz")
+    expect(host.textContent).toContain("Assignee · Commenter")
+    expect(host.textContent).toContain("Sandbox replay is green. I am waiting for the final reviewer.")
+    expect(host.textContent).toContain("4 comments")
+    expect(host.textContent).toContain("Only the newest synchronized comments are shown.")
+    expect(host.textContent).toContain("Status")
+    expect(host.textContent).toContain("In progress → In review")
+    expect(host.textContent).toContain("Payments 2026.07")
+    expect(host.textContent).toContain("OPS-400")
+    expect(host.textContent).toContain("OPS-429")
+    expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-400"]')).not.toBeNull()
+    expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-429"]')).not.toBeNull()
+    expect(host.querySelector("textarea")).toBeNull()
+    expect(host.textContent).not.toContain("Edit issue")
+  })
+
+  it("distinguishes a shortened comment body from an omitted-comments collection", async () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const clippedInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            comments: [
+              {
+                sourceId: "comment-41",
+                authorSourcePersonId: "account-mina",
+                updateAuthorSourcePersonId: null,
+                body: "m".repeat(16_000),
+                createdAt: "2026-07-14T09:30:00.000Z",
+                updatedAt: null
+              }
+            ],
+            commentTotal: 1,
+            commentsTruncated: false,
+            commentBodiesTruncated: true,
+            truncatedFields: ["comments"]
+          }
+        }
+      }
+    } satisfies Inspection
+    const clippedState = { ...state, inspection: clippedInspection } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, clippedState)
+
+    expect(host.textContent).toContain("Jira shortened comment bodies to keep this synchronized view bounded.")
+    expect(host.textContent).not.toContain("Only the newest synchronized comments are shown.")
+  })
+
+  it("distinguishes clipped history values from omitted history entries", async () => {
+    const details = inspection.entity.projection.details
+    if (details._tag !== "issue") throw new Error("Expected an issue projection fixture")
+    const clippedInspection = {
+      ...inspection,
+      entity: {
+        ...inspection.entity,
+        projection: {
+          ...inspection.entity.projection,
+          details: {
+            ...details,
+            historyTotal: details.history?.length ?? 0,
+            historyTruncated: false,
+            truncatedFields: ["history"]
+          }
+        }
+      }
+    } satisfies Inspection
+    const clippedState = { ...state, inspection: clippedInspection } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, clippedState)
+
+    expect(host.textContent).toContain("Jira shortened History to keep this synchronized view bounded.")
+    expect(host.textContent).not.toContain("Only the newest synchronized history is shown.")
   })
 })

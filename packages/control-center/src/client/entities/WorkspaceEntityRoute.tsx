@@ -28,6 +28,7 @@ import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceRelease
 import { presentWorkspaceEntity, type WorkspaceEntityPresentation } from "./presentWorkspaceEntity.js"
 import { WorkspaceEntityLink } from "./WorkspaceEntityLink.js"
 import styles from "./WorkspaceEntityRoute.module.css"
+import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
 const originLabel = (href: string, workspaceId: WorkspaceIdType): string => {
@@ -262,6 +263,7 @@ const EntityContent = ({
     {presentation.partialMessages.map((message) => (
       <StatePanel description={message} key={message} title="Partial canonical view" tone="caution" />
     ))}
+    {presentation.issue === null ? null : <WorkspaceIssueDetails issue={presentation.issue} />}
     <DeliveryPath presentation={presentation} />
   </div>
 )

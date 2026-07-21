@@ -15,6 +15,7 @@ import {
   ReleaseId,
   WorkspaceId
 } from "./identifiers.js"
+import { NormalizedIssueAttributes } from "./normalizedIssue.js"
 import { UtcTimestamp } from "./utcTimestamp.js"
 
 const boundedText = (maximum: number, identifier: string) =>
@@ -73,10 +74,7 @@ export const LedgerRevision = Schema.Int.check(Schema.isGreaterThan(0)).pipe(
 export type LedgerRevision = typeof LedgerRevision.Type
 
 const IssueDetails = Schema.TaggedStruct("issue", {
-  key: boundedText(100, "IssueKey"),
-  status: boundedText(100, "IssueStatus"),
-  priority: Schema.NullOr(boundedText(100, "IssuePriority")),
-  estimatePoints: Schema.NullOr(Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)))
+  ...NormalizedIssueAttributes.fields
 })
 
 const PullRequestDetails = Schema.TaggedStruct("pull-request", {

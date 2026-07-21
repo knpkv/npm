@@ -100,6 +100,41 @@ describe("delivery graph domain", () => {
     assert.isTrue(Result.isFailure(mismatched))
   })
 
+  it("accepts only application-validated HTTP source collaborator avatars", () => {
+    const projectionWithAvatar = (avatarUrl: string) => ({
+      workspaceId,
+      entityId: issueId,
+      projectionRevision: 1,
+      sourceEntityRevision: 1,
+      supersedesProjectionRevision: null,
+      projectionSchemaVersion: 1,
+      entityState: "present",
+      entityType: "issue",
+      displayKey: "PAY-42",
+      title: "Rotate settlement credentials",
+      details: {
+        _tag: "issue",
+        key: "PAY-42",
+        status: "In review",
+        priority: "High",
+        estimatePoints: 3,
+        collaborators: [
+          {
+            sourcePersonId: "ari",
+            displayName: "Ari Chen",
+            avatarUrl,
+            active: true,
+            roles: ["assignee"]
+          }
+        ]
+      }
+    })
+
+    assert.isTrue(Result.isSuccess(decodeProjection(projectionWithAvatar("https://avatar.example/ari.png"))))
+    assert.isTrue(Result.isFailure(decodeProjection(projectionWithAvatar("javascript:alert(1)"))))
+    assert.isTrue(Result.isFailure(decodeProjection(projectionWithAvatar("https://user:pass@example.com/a.png"))))
+  })
+
   it("binds immutable node endpoint kinds to resolved and missing target semantics", () => {
     const resolvedPullRequest = decodeNode({
       workspaceId,

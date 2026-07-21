@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Layer, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
+import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import {
   AgentId,
   EnvironmentId,
@@ -10,10 +11,12 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { type NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
+import { NormalizedPluginEventV1, PluginCheckpointV1, PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { Release } from "../../src/domain/release.js"
 import { SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { makeDeliveryGraphInspection } from "../../src/server/application/deliveryGraphInspection.js"
 import {
   materializeNormalizedPluginPage,
   type NormalizedPluginPageMaterializationScope
@@ -37,6 +40,7 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -133,6 +137,126 @@ const materializedPage = Schema.decodeSync(PluginSyncPageV1)({
     evidenceIds: ["review-ready"]
   }]
 })
+
+const richIssueAttributes = {
+  key: "PAY-42",
+  status: "In Review",
+  priority: "High",
+  estimatePoints: 5,
+  summary: "Protect payment retries",
+  description: "Persist retry state.\n\n## Acceptance Criteria\n\n- Restart-safe\n- Timeout-safe",
+  acceptanceCriteria: "- Restart-safe\n- Timeout-safe",
+  environment: "Production and staging",
+  issueType: { sourceId: "10001", name: "Story" },
+  project: { sourceId: "10", key: "PAY", name: "Payments" },
+  resolution: null,
+  labels: ["payments", "release-candidate"],
+  components: [{ sourceId: "7", name: "Checkout" }],
+  fixVersions: [{ sourceId: "2026.29", name: "2026.29", released: false, releaseDate: null }],
+  createdAt: "2026-07-15T08:00:00.000Z",
+  updatedAt: "2026-07-17T09:30:00.000Z",
+  dueDate: "2026-07-21",
+  resolvedAt: null,
+  parent: {
+    sourceId: "10000",
+    key: "PAY-1",
+    summary: "Payments hardening",
+    status: { sourceId: "3", name: "In Progress" }
+  },
+  subtasks: [
+    {
+      sourceId: "10043",
+      key: "PAY-43",
+      summary: "Cover timeout path",
+      status: { sourceId: "1", name: "Open" }
+    }
+  ],
+  assigneeSourcePersonId: "ari",
+  reporterSourcePersonId: "sam",
+  creatorSourcePersonId: "sam",
+  collaborators: [
+    {
+      sourcePersonId: "ari",
+      displayName: "Ari Chen",
+      avatarUrl: "https://avatar.example/ari.png",
+      active: true,
+      roles: ["assignee", "commenter"]
+    },
+    {
+      sourcePersonId: "sam",
+      displayName: "Sam Rivera",
+      avatarUrl: null,
+      active: true,
+      roles: ["change-author", "creator", "reporter"]
+    }
+  ],
+  comments: [
+    {
+      sourceId: "c1",
+      authorSourcePersonId: "ari",
+      updateAuthorSourcePersonId: null,
+      body: "Ready for review.",
+      createdAt: "2026-07-16T10:00:00.000Z",
+      updatedAt: "2026-07-16T10:00:00.000Z"
+    }
+  ],
+  commentTotal: 2,
+  commentsTruncated: true,
+  history: [
+    {
+      sourceId: "h1",
+      authorSourcePersonId: "sam",
+      createdAt: "2026-07-16T09:00:00.000Z",
+      changes: [{ field: "status", from: "In Progress", to: "In Review" }]
+    }
+  ],
+  historyTotal: 1,
+  historyTruncated: false,
+  truncatedFields: ["comments"]
+}
+
+const richIssuePage = (revision: 1 | 2) =>
+  Schema.decodeSync(PluginSyncPageV1)({
+    checkpointAfterPage: `rich-issue-${revision}`,
+    hasMore: false,
+    events: [
+      {
+        _tag: "UpsertEntity",
+        eventId: `rich-issue-pay-42-${revision}`,
+        observedAt: revision === 1 ? "2026-07-19T09:01:20.000Z" : "2026-07-19T09:02:20.000Z",
+        revision: `issue-revision-${revision}`,
+        entityType: "jira.issue",
+        vendorImmutableId: "rich-issue-42",
+        sourceUrl: "https://jira.example/browse/PAY-42",
+        title: revision === 1 ? "PAY-42 · Protect payment retries" : "PAY-42 · Payment retries protected",
+        attributes: revision === 1
+          ? richIssueAttributes
+          : {
+            ...richIssueAttributes,
+            status: "Done",
+            summary: "Payment retries protected",
+            description: "Retry state is durable in production.",
+            acceptanceCriteria: "- Restart-safe\n- Timeout-safe\n- Verified in production",
+            resolution: { sourceId: "10000", name: "Done" },
+            updatedAt: "2026-07-19T09:02:00.000Z",
+            resolvedAt: "2026-07-19T09:02:00.000Z",
+            comments: [
+              {
+                sourceId: "c2",
+                authorSourcePersonId: "sam",
+                updateAuthorSourcePersonId: "sam",
+                body: "Verified in production.",
+                createdAt: "2026-07-19T09:01:00.000Z",
+                updatedAt: "2026-07-19T09:01:30.000Z"
+              }
+            ],
+            commentTotal: 2,
+            commentsTruncated: false,
+            truncatedFields: []
+          }
+      }
+    ]
+  })
 
 const tombstonePage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "tombstone-complete",
@@ -303,6 +427,302 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* setup
+        const scope: NormalizedPluginPageMaterializationScope = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }
+
+        yield* materializeNormalizedPluginPage(scope, richIssuePage(1))
+        const firstIndex = yield* items()
+        const entityId = firstIndex.items[0]?.projection.entityId
+        if (entityId === undefined) return yield* Effect.die("expected rich Jira entity")
+
+        yield* materializeNormalizedPluginPage(
+          {
+            ...scope,
+            expectedRevision: 1,
+            committedAt: T3,
+            successfulHealth: { _tag: "healthy", checkedAt: T3 }
+          },
+          richIssuePage(2)
+        )
+
+        const first = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "entityProjection",
+          entityId,
+          revision: 1
+        })
+        if (first._tag !== "entityProjection") return yield* Effect.die("expected first projection revision")
+        assert.strictEqual(first.value.projection.details._tag, "issue")
+        if (first.value.projection.details._tag !== "issue") return yield* Effect.die("expected issue detail")
+        assert.strictEqual(first.value.projection.details.description, richIssueAttributes.description)
+        assert.strictEqual(first.value.projection.details.acceptanceCriteria, richIssueAttributes.acceptanceCriteria)
+        assert.strictEqual(first.value.projection.details.comments?.[0]?.sourceId, "c1")
+        assert.strictEqual(first.value.projection.details.history?.[0]?.changes[0]?.to, "In Review")
+        assert.strictEqual(first.value.projection.details.fixVersions?.[0]?.name, "2026.29")
+        assert.deepStrictEqual(first.value.projection.details.truncatedFields, ["comments"])
+
+        const inspectionService = yield* makeDeliveryGraphInspection
+        const inspection = yield* inspectionService.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+        assert.strictEqual(inspection.entity.projection.projectionRevision, 2)
+        assert.strictEqual(inspection.entity.projection.sourceEntityRevision, 2)
+        assert.strictEqual(inspection.entity.projection.details._tag, "issue")
+        if (inspection.entity.projection.details._tag !== "issue") return yield* Effect.die("expected issue detail")
+        const details = inspection.entity.projection.details
+        assert.strictEqual(details.status, "Done")
+        assert.strictEqual(details.description, "Retry state is durable in production.")
+        assert.strictEqual(details.acceptanceCriteria, "- Restart-safe\n- Timeout-safe\n- Verified in production")
+        assert.strictEqual(details.comments?.[0]?.sourceId, "c2")
+        assert.strictEqual(details.comments?.[0]?.updateAuthorSourcePersonId, "sam")
+        assert.strictEqual(details.history?.[0]?.sourceId, "h1")
+        assert.strictEqual(details.collaborators?.[0]?.sourcePersonId, "ari")
+        assert.strictEqual(details.collaborators?.[0]?.avatarUrl, "https://avatar.example/ari.png")
+        assert.strictEqual(details.fixVersions?.[0]?.sourceId, "2026.29")
+        assert.isFalse(details.commentsTruncated)
+        assert.deepStrictEqual(details.truncatedFields, [])
+        assert.isTrue(inspection.isSourceCurrent)
+      })
+    ))
+
+  it.effect("produces presentation-ready inspection from a provider-normalized Jira issue", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const events = yield* normalizeJiraIssueEvents({
+          issue: {
+            id: "10042",
+            key: "PAY-42",
+            fields: {
+              summary: "Protect payment retries",
+              updated: "2026-07-19T09:01:00.000Z",
+              description: {
+                type: "doc",
+                content: [
+                  { type: "paragraph", content: [{ type: "text", text: "Persist retry state." }] },
+                  {
+                    type: "heading",
+                    attrs: { level: 2 },
+                    content: [{ type: "text", text: "Acceptance Criteria" }]
+                  },
+                  {
+                    type: "bulletList",
+                    content: [{
+                      type: "listItem",
+                      content: [{
+                        type: "paragraph",
+                        content: [{ type: "text", text: "Retry survives restart." }]
+                      }]
+                    }]
+                  }
+                ]
+              },
+              environment: "Payments production",
+              status: { id: "3", name: "In Review" },
+              assignee: {
+                accountId: "ari",
+                displayName: "Ari Chen",
+                avatarUrls: { "48x48": "https://avatar.example/ari.png" },
+                active: true
+              }
+            }
+          },
+          comments: {
+            values: [{
+              id: "c1",
+              author: { accountId: "ari", displayName: "Ari Chen", active: true },
+              body: "Ready for review.",
+              created: "2026-07-18T10:00:00.000Z",
+              updated: "2026-07-18T10:00:00.000Z"
+            }],
+            total: 1,
+            truncated: false
+          },
+          changelogs: {
+            values: [],
+            total: 0,
+            truncated: false
+          },
+          observedAt: T1,
+          webBaseUrl: new URL("https://jira.example/")
+        })
+        const page = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "provider-normalized-issue",
+          hasMore: false,
+          events: events.map((event) => Schema.encodeSync(NormalizedPluginEventV1)(event))
+        })
+        yield* materializeNormalizedPluginPage(
+          {
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: PLUGIN_ID,
+            providerId: "jira",
+            streamKey: MATERIALIZED_STREAM,
+            expectedRevision: 0,
+            committedAt: T2,
+            successfulHealth: { _tag: "healthy", checkedAt: T2 }
+          },
+          page
+        )
+
+        const index = yield* items()
+        const entityId = index.items[0]?.projection.entityId
+        if (entityId === undefined) return yield* Effect.die("expected normalized Jira issue")
+        const inspectionService = yield* makeDeliveryGraphInspection
+        const inspection = yield* inspectionService.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+        const presentationInput = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+        assert.strictEqual(presentationInput.entity.projection.displayKey, "PAY-42")
+        assert.strictEqual(presentationInput.entity.projection.title, "PAY-42 · Protect payment retries")
+        assert.strictEqual(presentationInput.source.sourceUrl, "https://jira.example/browse/PAY-42")
+        const details = presentationInput.entity.projection.details
+        if (details._tag !== "issue") return yield* Effect.die("expected presentation-ready Jira issue details")
+        assert.strictEqual(
+          details.description,
+          "Persist retry state\\.\n\n## Acceptance Criteria\n\n- Retry survives restart\\."
+        )
+        assert.strictEqual(details.acceptanceCriteria, "- Retry survives restart\\.")
+        assert.strictEqual(details.environment, "Payments production")
+        assert.strictEqual(details.collaborators?.[0]?.displayName, "Ari Chen")
+        assert.strictEqual(details.comments?.[0]?.body, "Ready for review\\.")
+      })
+    ))
+
+  it.effect("persists a rich issue whose valid attributes leave only projection-wrapper headroom", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const comment = (sourceId: string, body: string) => ({
+          sourceId,
+          authorSourcePersonId: null,
+          updateAuthorSourcePersonId: null,
+          body,
+          createdAt: null,
+          updatedAt: null
+        })
+        const fixedComments = Array.from(
+          { length: 16 },
+          (_, index) => comment(`fixed-${String(index)}`, "x".repeat(16_000))
+        )
+        const attributes = {
+          key: "PAY-NEAR-LIMIT",
+          status: "Open",
+          priority: null,
+          estimatePoints: null,
+          comments: [...fixedComments, comment("remainder", "")],
+          commentTotal: 17,
+          commentsTruncated: false,
+          truncatedFields: []
+        }
+        const targetBytes = MaximumPluginPayloadBytes - 1
+        const remainderLength = targetBytes - jsonBytes(attributes)
+        assert.isAtLeast(remainderLength, 1)
+        assert.isAtMost(remainderLength, 16_000)
+        attributes.comments[attributes.comments.length - 1] = comment("remainder", "x".repeat(remainderLength))
+        assert.strictEqual(jsonBytes(attributes), targetBytes)
+        assert.isAbove(jsonBytes({ _tag: "issue", ...attributes }), MaximumPluginPayloadBytes)
+
+        const page = Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "near-limit-rich-issue",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "near-limit-rich-issue",
+            observedAt: "2026-07-19T09:01:00.000Z",
+            revision: "near-limit-rich-issue-1",
+            entityType: "jira.issue",
+            vendorImmutableId: "near-limit-rich-issue",
+            sourceUrl: "https://jira.example/browse/PAY-NEAR-LIMIT",
+            title: "PAY-NEAR-LIMIT · Exercise projection headroom",
+            attributes
+          }]
+        })
+        const receipt = yield* materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }, page)
+
+        assert.strictEqual(receipt.entityProjectionCount, 1)
+      })
+    ))
+
+  it.effect("rejects malformed rich issue fields without breaking compact legacy issues", () =>
+    withMaterializer(
+      Effect.gen(function*() {
+        yield* setup
+        const scope: NormalizedPluginPageMaterializationScope = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: MATERIALIZED_STREAM,
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        }
+        const page = (checkpointAfterPage: string, attributes: Readonly<Record<string, Schema.Json>>) =>
+          Schema.decodeSync(PluginSyncPageV1)({
+            checkpointAfterPage,
+            hasMore: false,
+            events: [{
+              _tag: "UpsertEntity",
+              eventId: checkpointAfterPage,
+              observedAt: "2026-07-19T09:01:00.000Z",
+              revision: `${checkpointAfterPage}-1`,
+              entityType: "jira.issue",
+              vendorImmutableId: checkpointAfterPage,
+              sourceUrl: null,
+              title: checkpointAfterPage,
+              attributes
+            }]
+          })
+
+        const failure = yield* materializeNormalizedPluginPage(
+          scope,
+          page("malformed-rich-issue", {
+            key: "PAY-42",
+            status: "Open",
+            priority: null,
+            estimatePoints: null,
+            collaborators: [{
+              sourcePersonId: "ari",
+              displayName: "Ari Chen",
+              avatarUrl: "javascript:alert(1)",
+              active: true,
+              roles: ["assignee"]
+            }]
+          })
+        ).pipe(Effect.flip)
+        if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+          return yield* Effect.die("expected malformed rich issue failure")
+        }
+        assert.strictEqual(failure.diagnosticCode, "normalized-issue-attributes-invalid")
+
+        const legacy = yield* materializeNormalizedPluginPage(
+          scope,
+          page("compact-legacy-issue", {
+            schemaVersion: 1,
+            key: "LEGACY-42",
+            summary: "Historical compact issue",
+            status: { name: "Open" },
+            priority: { name: "High" }
+          })
+        )
+        assert.strictEqual(legacy.entityProjectionCount, 1)
+      })
+    ))
+
   it.effect("projects a normalized Jira fix version into the canonical release repository", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence

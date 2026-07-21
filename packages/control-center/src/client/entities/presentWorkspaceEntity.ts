@@ -21,6 +21,7 @@ import type { EntityId, GraphNodeId, ReleaseId, WorkspaceId } from "../../domain
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
+import { presentWorkspaceIssue, type WorkspaceIssuePresentation } from "./presentWorkspaceIssue.js"
 
 export interface WorkspaceEntityFact {
   readonly label: string
@@ -71,6 +72,7 @@ export interface WorkspaceEntityPresentation {
   readonly freshnessDateTime: string
   readonly freshnessTime: string
   readonly kindLabel: string
+  readonly issue: WorkspaceIssuePresentation | null
   readonly partialMessages: ReadonlyArray<string>
   readonly primaryAction: WorkspaceEntityActionPresentation
   readonly relationships: ReadonlyArray<RlyRelationship>
@@ -199,6 +201,44 @@ const collaboratorsFor = (
     ...categories,
     emptyLabel: "No collaborator is assigned to this object.",
     expandedCategories
+  }
+}
+
+const collaboratorsWithIssue = (
+  collaborators: WorkspaceEntityCollaboratorsPresentation,
+  issue: WorkspaceIssuePresentation | null
+): WorkspaceEntityCollaboratorsPresentation => {
+  if (issue === null) return collaborators
+  const owners = [...collaborators.owners]
+  const authors = [...collaborators.authors]
+  const canonicalNames = new Set(
+    [
+      ...collaborators.approvers,
+      ...collaborators.authors,
+      ...collaborators.operators,
+      ...collaborators.owners,
+      ...collaborators.reviewers
+    ].map((person) => person.name.toLocaleLowerCase("en-US"))
+  )
+  const issuePersonIds = new Set<string>()
+  for (const person of issue.collaborators) {
+    if (issuePersonIds.has(person.id)) continue
+    issuePersonIds.add(person.id)
+    const normalizedName = person.name.toLocaleLowerCase("en-US")
+    if (canonicalNames.has(normalizedName)) continue
+    if (person.role.includes("Assignee")) owners.push(person)
+    else authors.push(person)
+  }
+  const expandedCategories: Array<RlyCollaboratorCategory> = []
+  if (authors.length > 0) expandedCategories.push("authors")
+  if (owners.length > 0) expandedCategories.push("owners")
+  for (const category of collaborators.expandedCategories) expandedCategories.push(category)
+  return {
+    ...collaborators,
+    authors,
+    emptyLabel: "No collaborator was synchronized or assigned to this object.",
+    expandedCategories: [...new Set(expandedCategories)],
+    owners
   }
 }
 
@@ -352,6 +392,27 @@ const partialMessagesFor = (inspection: WorkspaceEntityInspection): ReadonlyArra
   ...(inspection.activity.truncated ? ["The activity list is partial; older events are not shown."] : [])
 ]
 
+interface AgentContextInput {
+  readonly displayKey: string
+  readonly issue: WorkspaceIssuePresentation | null
+  readonly releaseCount: number
+  readonly serviceName: string
+  readonly title: string
+}
+
+const agentContextFor = ({
+  displayKey,
+  issue,
+  releaseCount,
+  serviceName,
+  title
+}: AgentContextInput): string =>
+  issue === null
+    ? `${displayKey} · ${title} · ${serviceName}`
+    : `${displayKey} · ${title} · ${serviceName} issue · ${String(releaseCount)} release${
+      releaseCount === 1 ? "" : "s"
+    } · ${String(issue.commentCount)} synchronized comment${issue.commentCount === 1 ? "" : "s"}`
+
 /** Turn one provider-neutral canonical read into explicit application-owned Rly inputs. */
 export const presentWorkspaceEntity = (
   workspaceId: WorkspaceId,
@@ -361,13 +422,22 @@ export const presentWorkspaceEntity = (
   const service = serviceFor(projection.entityType)
   const serviceName = serviceNames[service]
   const verdict = statusFor(projection.details)
+  const issue = projection.details._tag === "issue"
+    ? presentWorkspaceIssue(projection.details, inspection.source.sourceUrl)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {
     activity: activityFor(inspection),
     activityEmptyLabel: "No attributable activity has been recorded for this object.",
-    agentContext: `${projection.displayKey} · ${projection.title} · ${serviceName}`,
-    collaborators: collaboratorsFor(inspection.entity.owners),
+    agentContext: agentContextFor({
+      displayKey: projection.displayKey,
+      issue,
+      releaseCount,
+      serviceName,
+      title: projection.title
+    }),
+    collaborators: collaboratorsWithIssue(collaboratorsFor(inspection.entity.owners), issue),
     contentSummary: `${kindNames[projection.entityType]} ${projection.displayKey} is tracked in ${serviceName}. ${
       releaseCount === 0
         ? "It is not linked to a release yet."
@@ -393,6 +463,7 @@ export const presentWorkspaceEntity = (
     freshnessDateTime: DateTime.formatIso(freshnessTimestampValue),
     freshnessTime: readableTimestamp(freshnessTimestampValue),
     kindLabel: kindNames[projection.entityType],
+    issue,
     partialMessages: partialMessagesFor(inspection),
     primaryAction: primaryActionFor(inspection, workspaceId, serviceName),
     relationships: relationshipsFor(inspection, workspaceId, service),
