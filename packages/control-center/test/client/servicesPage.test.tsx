@@ -2373,7 +2373,9 @@ describe("ServicesPage connection tests", () => {
     await act(async () => syncNow?.click())
     expect(synchronize).toHaveBeenCalledWith(codeCommitConnection.pluginConnectionId, expect.any(AbortSignal))
     expect(syncNow?.disabled).toBe(true)
-    expect(host.textContent).toContain("Never synchronized")
+    // While the attempt is in flight the panel surfaces the in-progress state
+    // rather than the stale prior result.
+    expect(host.textContent).toContain("Synchronizing…")
     await act(async () => completeSynchronization?.())
     expect(host.textContent).toContain("Synchronized")
     expect(host.textContent).toContain("3 pages")
