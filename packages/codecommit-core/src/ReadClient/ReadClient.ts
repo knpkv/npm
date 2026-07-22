@@ -144,6 +144,11 @@ const mapProviderError = (operation: string) => (error: AwsClientError): CodeCom
     : error
 }
 
+// Effect Schema error messages embed the rejected value. That is a useful
+// field-level diagnostic for metadata operations, but get-blob carries raw
+// repository file bytes, so its message must never reach the logs.
+const operationLogsRejectedValue = (operation: string): boolean => operation !== "get-blob"
+
 const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
   operation: string,
   schema: S,
@@ -151,7 +156,11 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
     Effect.tapError((error) =>
-      Effect.logError(`CodeCommit provider response failed schema decode (${operation}): ${error.message}`)
+      Effect.logError(
+        operationLogsRejectedValue(operation)
+          ? `CodeCommit provider response failed schema decode (${operation}): ${error.message}`
+          : `CodeCommit provider response failed schema decode (${operation})`
+      )
     ),
     Effect.mapError(() => malformed(operation))
   )

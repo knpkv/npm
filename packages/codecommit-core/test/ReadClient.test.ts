@@ -3,6 +3,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -190,6 +191,31 @@ describe("CodeCommitReadClient", () => {
         if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitMalformedResponseError)
       })
     ))
+
+  it.effect("never writes raw blob bytes into logs when a blob response fails schema decode", () =>
+    Effect.gen(function*() {
+      // Blob content is raw repository file data; a schema-decode failure must not
+      // leak the rejected value into logs, unlike diagnostic metadata operations.
+      const secret = "AKIA-super-secret-blob-payload"
+      const messages = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const logger = Logger.make<unknown, void>((entry) => {
+        Effect.runSync(Ref.update(messages, (items) => [...items, entry.message]))
+      })
+      const result = yield* runWithProvider(
+        baseProvider({ getBlob: () => Effect.succeed({ content: secret }) }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReadClient
+          return yield* client.getBlob({ account, repositoryName: "payments-api", blobId: "blob-secret" }).pipe(
+            Effect.result
+          )
+        })
+      ).pipe(Effect.withLogger(logger))
+
+      assert.isTrue(Result.isFailure(result))
+      const logged = (yield* Ref.get(messages)).map((message) => String(message)).join("\n")
+      assert.notInclude(logged, secret)
+      assert.include(logged, "get-blob")
+    }))
 
   it.effect("interrupts an in-flight blob provider read", () =>
     Effect.gen(function*() {
