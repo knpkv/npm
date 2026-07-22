@@ -953,6 +953,179 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(projection.details.stages?.map(({ name }) => name), ["Build", "Approval"])
     })))
 
+  it.effect("matches declaration versions and preserves declared action order", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(
+        scope,
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-version-mismatch",
+          hasMore: true,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "versioned-pipeline-v8",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "pipeline-v8",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "versioned-payments",
+            sourceUrl: null,
+            title: "Versioned payments pipeline",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 8,
+              stages: [{ name: "FutureOnly", actions: [] }, {
+                name: "Production",
+                actions: [{ name: "Zeta", runOrder: 1 }, { name: "Alpha", runOrder: 2 }]
+              }]
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-execution-v7",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "execution-v7",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "versioned-execution-v7",
+            sourceUrl: null,
+            title: "Version 7 execution",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 7,
+              executionId: "versioned-execution-v7",
+              triggerRevision: "v7-head",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      const mismatched = (yield* items()).items.find(({ projection }) =>
+        projection.details._tag === "pipeline-execution" &&
+        projection.details.executionId === "versioned-execution-v7"
+      )?.projection
+      if (mismatched?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected version 7 execution")
+      }
+      assert.deepStrictEqual(mismatched.details.stages, [])
+
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-version-match",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "versioned-execution-v8",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "execution-v8",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "versioned-execution-v8",
+            sourceUrl: null,
+            title: "Version 8 execution",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 8,
+              executionId: "versioned-execution-v8",
+              triggerRevision: "v8-head",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-zeta",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "zeta-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#zeta",
+            sourceUrl: null,
+            title: "Production Zeta",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "zeta-1",
+              stageName: "Production",
+              actionName: "Zeta",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-alpha",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "alpha-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#alpha",
+            sourceUrl: null,
+            title: "Production Alpha",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "alpha-1",
+              stageName: "Production",
+              actionName: "Alpha",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-ad-hoc-zeta",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "ad-hoc-zeta-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#ad-hoc-zeta",
+            sourceUrl: null,
+            title: "Ad hoc Zeta",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "ad-hoc-zeta-1",
+              stageName: "AdHoc",
+              actionName: "Zeta",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-ad-hoc-alpha",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "ad-hoc-alpha-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#ad-hoc-alpha",
+            sourceUrl: null,
+            title: "Ad hoc Alpha",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "ad-hoc-alpha-1",
+              stageName: "AdHoc",
+              actionName: "Alpha",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      const matching = (yield* items()).items.find(({ projection }) =>
+        projection.details._tag === "pipeline-execution" &&
+        projection.details.executionId === "versioned-execution-v8"
+      )?.projection
+      if (matching?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected version 8 execution")
+      }
+      assert.deepStrictEqual(matching.details.stages?.map(({ name }) => name), [
+        "FutureOnly",
+        "Production",
+        "AdHoc"
+      ])
+      assert.deepStrictEqual(
+        matching.details.actions?.map(({ actionName, stageName }) => `${stageName}:${actionName}`),
+        ["Production:Zeta", "Production:Alpha", "AdHoc:Alpha", "AdHoc:Zeta"]
+      )
+    })))
+
   it.effect("backfills stale pipeline schema without changing the current issue schema", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -1432,7 +1605,9 @@ describe("normalized plugin page materialization", () => {
             key: "LEGACY-42",
             summary: "Historical compact issue",
             status: { name: "Open" },
-            priority: { name: "High" }
+            priority: { name: "High" },
+            stages: "GA",
+            actionCount: "provider-owned"
           })
         )
         assert.strictEqual(legacy.entityProjectionCount, 1)

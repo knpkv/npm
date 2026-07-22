@@ -38,13 +38,17 @@ const PipelineActionTypeAttributes = Schema.Struct({
   provider: OptionalText,
   version: OptionalText
 })
+const PipelineDeclarationActionAttributes = Schema.Struct({
+  name: OptionalText,
+  runOrder: Schema.optionalKey(Schema.NullOr(Schema.Int))
+})
 const PipelineDeclarationStageAttributes = Schema.Struct({
   name: OptionalText,
-  actions: Schema.optionalKey(Schema.Array(Schema.Struct({ name: OptionalText })))
+  actions: Schema.optionalKey(Schema.Array(PipelineDeclarationActionAttributes))
 })
 
-/** Pipeline fields accepted by the generic normalized-entity envelope. */
-export const PipelineEntityAttributeFields = {
+/** Pipeline fields decoded only inside the CodePipeline projection boundary. */
+const PipelineEntityAttributeFields = {
   pipelineName: OptionalText,
   pipelineVersion: Schema.optionalKey(Schema.NullOr(Schema.Int)),
   executionId: OptionalText,
@@ -75,6 +79,9 @@ export const PipelineEntityAttributeFields = {
   errorMessage: OptionalText,
   stages: Schema.optionalKey(Schema.Array(PipelineDeclarationStageAttributes))
 }
+
+/** Provider-owned field names that unrelated entity decoders may safely ignore. */
+export const PipelineEntityAttributeNames: ReadonlySet<string> = new Set(Object.keys(PipelineEntityAttributeFields))
 
 const PipelineEntityAttributes = Schema.Struct({
   status: Schema.optionalKey(Schema.NullOr(NamedText)),
@@ -176,9 +183,9 @@ const aggregateStatus = (
 /** Correlate bounded pipeline, stage, and action siblings into one safe execution projection. */
 export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.project")(function*(
   event: EntityUpsert,
-  attributes: PipelineEntityAttributes,
   siblingEvents: ReadonlyArray<NormalizedPluginEventV1>
 ): Effect.fn.Return<DeliveryEntityDetails, PipelineExecutionProjectionError> {
+  const attributes = yield* decodeAttributes(event)
   const executionId = bounded(attributes.executionId, event.vendorImmutableId, 512)
   const pipelineName = bounded(attributes.pipelineName, "unknown", 200)
   const stageEvents = new Map<string, PipelineSiblingEvent>()
@@ -196,6 +203,13 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
     if (bounded(siblingAttributes.pipelineName, "unknown", 200) !== pipelineName) continue
     const candidate = { attributes: siblingAttributes, event: sibling }
     if (sibling.entityType === "aws.codepipeline.pipeline") {
+      if (
+        attributes.pipelineVersion !== null &&
+        attributes.pipelineVersion !== undefined &&
+        siblingAttributes.pipelineVersion !== null &&
+        siblingAttributes.pipelineVersion !== undefined &&
+        siblingAttributes.pipelineVersion !== attributes.pipelineVersion
+      ) continue
       declaration = laterSibling(declaration, candidate)
       continue
     }
@@ -213,9 +227,22 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
 
   const declaredStages = (declaration?.attributes.stages ?? []).flatMap((stage) => {
     const name = optionalBounded(stage.name, 200)
-    return name === null ? [] : [{ actionCount: stage.actions?.length ?? 0, name }]
+    const actionNames = (stage.actions ?? []).flatMap((action, index) => {
+      const actionName = optionalBounded(action.name, 200)
+      return actionName === null ? [] : [{ index, name: actionName, runOrder: action.runOrder ?? index + 1 }]
+    }).sort((left, right) => left.runOrder - right.runOrder || left.index - right.index).map(({ name }) => name)
+    return name === null ? [] : [{ actionCount: stage.actions?.length ?? 0, actionNames, name }]
   }).slice(0, 100)
   const stageOrder = new Map(declaredStages.map(({ name }, index) => [name, index]))
+  const actionOrder = new Map<string, number>()
+  for (const stage of declaredStages) {
+    for (let index = 0; index < stage.actionNames.length; index++) {
+      const actionName = stage.actionNames[index]
+      if (actionName === undefined) continue
+      const key = `${stage.name}\u0000${actionName}`
+      if (!actionOrder.has(key)) actionOrder.set(key, index)
+    }
+  }
   const actions = yield* Effect.forEach(
     [...actionEvents.entries()],
     ([actionExecutionId, sibling]) =>
@@ -255,12 +282,19 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
       }),
     { concurrency: 1 }
   )
-  actions.sort((left, right) =>
-    (stageOrder.get(left.stageName) ?? 100) - (stageOrder.get(right.stageName) ?? 100) ||
-    left.stageName.localeCompare(right.stageName) ||
-    left.actionName.localeCompare(right.actionName) ||
-    left.actionExecutionId.localeCompare(right.actionExecutionId)
-  )
+  actions.sort((left, right) => {
+    const stageComparison = (stageOrder.get(left.stageName) ?? 100) - (stageOrder.get(right.stageName) ?? 100) ||
+      left.stageName.localeCompare(right.stageName)
+    if (stageComparison !== 0) return stageComparison
+    const leftOrder = actionOrder.get(`${left.stageName}\u0000${left.actionName}`)
+    const rightOrder = actionOrder.get(`${right.stageName}\u0000${right.actionName}`)
+    if (leftOrder !== undefined || rightOrder !== undefined) {
+      const declaredComparison = (leftOrder ?? Number.MAX_SAFE_INTEGER) - (rightOrder ?? Number.MAX_SAFE_INTEGER)
+      if (declaredComparison !== 0) return declaredComparison
+    }
+    return left.actionName.localeCompare(right.actionName) ||
+      left.actionExecutionId.localeCompare(right.actionExecutionId)
+  })
 
   const allStageNames = [
     ...declaredStages.map(({ name }) => name),

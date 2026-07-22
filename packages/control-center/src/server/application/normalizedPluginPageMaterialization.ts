@@ -42,7 +42,7 @@ import type { EntityRecord } from "../persistence/repositories/models.js"
 import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
-  PipelineEntityAttributeFields,
+  PipelineEntityAttributeNames,
   pipelineStatus,
   projectPipelineExecution
 } from "./pipelineExecutionProjection.js"
@@ -93,7 +93,6 @@ const EntityAttributes = Schema.Struct({
   currentVersion: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   linkedIssueKeys: Schema.optionalKey(Schema.Array(Schema.String)),
   linkedReleaseVersions: Schema.optionalKey(Schema.Array(Schema.String)),
-  ...PipelineEntityAttributeFields,
   environmentId: OptionalText,
   revision: OptionalText,
   durationMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -183,7 +182,11 @@ const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.de
 ) {
   const normalized = Schema.decodeUnknownResult(NormalizedIssueAttributes)(event.attributes)
   if (Result.isSuccess(normalized)) return normalized.success
-  if (Object.keys(event.attributes).some((key) => !LegacyIssueAttributeKeys.has(key))) {
+  if (
+    Object.keys(event.attributes).some((key) =>
+      !LegacyIssueAttributeKeys.has(key) && !PipelineEntityAttributeNames.has(key)
+    )
+  ) {
     return yield* malformed("normalized-issue-attributes-invalid", event.eventId)
   }
 
@@ -336,7 +339,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     case "pipeline-execution": {
-      const details = yield* projectPipelineExecution(event, attributes, siblingEvents).pipe(
+      const details = yield* projectPipelineExecution(event, siblingEvents).pipe(
         Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
       )
       if (details._tag !== "pipeline-execution") {
