@@ -309,6 +309,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-runtime.complete-sync-attempt", pluginRuntime.completeSyncAttempt(...args)),
       getCache: (...args: Parameters<PluginRuntimeRepositoryService["getCache"]>) =>
         publicOperation("plugin-runtime.get-cache", pluginRuntime.getCache(...args)),
+      getCodePipelineCache: (...args: Parameters<PluginRuntimeRepositoryService["getCodePipelineCache"]>) =>
+        publicOperation("plugin-runtime.get-codepipeline-cache", pluginRuntime.getCodePipelineCache(...args)),
       getLastSuccessfulHealth: (...args: Parameters<PluginRuntimeRepositoryService["getLastSuccessfulHealth"]>) =>
         publicOperation(
           "plugin-runtime.get-last-successful-health",

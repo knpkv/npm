@@ -518,6 +518,16 @@
     },
     {
       "type": "index",
+      "name": "plugin_cache_pipeline_execution_idx",
+      "sql": "CREATE INDEX plugin_cache_pipeline_execution_idx\n    ON plugin_cache_entries(\n      workspace_id, plugin_connection_id, stream_key, state,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.attributes.pipelineName') END,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.attributes.executionId') END,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.entityType') END\n    )"
+    },
+    {
+      "type": "index",
+      "name": "plugin_cache_pipeline_version_idx",
+      "sql": "CREATE INDEX plugin_cache_pipeline_version_idx\n    ON plugin_cache_entries(\n      workspace_id, plugin_connection_id, stream_key, state,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.attributes.pipelineName') END,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.entityType') END,\n      CASE WHEN json_valid(payload_json)\n        THEN json_extract(payload_json, '$.attributes.pipelineVersion') END,\n      cached_at DESC\n    )"
+    },
+    {
+      "type": "index",
       "name": "plugin_cache_state_idx",
       "sql": "CREATE INDEX plugin_cache_state_idx\n    ON plugin_cache_entries(workspace_id, plugin_connection_id, stream_key, state)"
     },

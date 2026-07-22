@@ -182,6 +182,16 @@ export const PluginCacheRecord = Schema.Struct({
 )
 export type PluginCacheRecord = typeof PluginCacheRecord.Type
 
+/** Indexed CodePipeline cache coordinates used by canonical execution correlation. */
+export interface CodePipelineCacheSelector {
+  readonly executionId: string | null
+  readonly pipelineName: string
+  readonly pipelineVersion: number | null
+}
+
+/** Maximum distinct execution/declaration correlation scopes accepted in one plugin page. */
+export const MaximumCodePipelineCorrelationExecutions = 32
+
 export const PluginEvidenceRecord = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,

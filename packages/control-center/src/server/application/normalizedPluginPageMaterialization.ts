@@ -43,6 +43,7 @@ import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeM
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
   affectedPipelineExecutionEvents,
+  codePipelineCacheSelectors,
   PipelineEntityAttributeNames,
   pipelineStatus,
   projectPipelineExecution
@@ -540,12 +541,14 @@ const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV
 const currentPipelineEvents = Effect.fn("NormalizedPluginPageMaterialization.currentPipelineEvents")(function*(
   persistence: PersistenceService,
   scope: NormalizedPluginPageMaterializationScope,
-  eventId: string
+  eventId: string,
+  selectors: Parameters<PersistenceService["pluginRuntime"]["getCodePipelineCache"]>[3]
 ) {
-  const records = yield* persistence.pluginRuntime.getCache(
+  const records = yield* persistence.pluginRuntime.getCodePipelineCache(
     scope.workspaceId,
     scope.pluginConnectionId,
-    scope.streamKey
+    scope.streamKey,
+    selectors
   )
   const groups = yield* Effect.forEach(
     records,
@@ -1286,9 +1289,25 @@ export const materializeNormalizedPluginPage = Effect.fn(
         event.entityType === "aws.codepipeline.stage" ||
         event.entityType === "aws.codepipeline.action")
     )
-    const pipelineEvents = acceptedPipelineEvent === undefined
-      ? events
-      : yield* currentPipelineEvents(persistence, scope, acceptedPipelineEvent.eventId)
+    const pipelineSelectors = acceptedPipelineEvent === undefined
+      ? []
+      : yield* codePipelineCacheSelectors(events).pipe(
+        Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
+      )
+    const cachedPipelineEvents = acceptedPipelineEvent === undefined || pipelineSelectors.length === 0
+      ? []
+      : yield* currentPipelineEvents(persistence, scope, acceptedPipelineEvent.eventId, pipelineSelectors)
+    const pipelineEventById = new Map<string, NormalizedPluginEventV1>()
+    for (const event of [...events, ...cachedPipelineEvents]) {
+      if (
+        event._tag === "UpsertEntity" &&
+        (event.entityType === "aws.codepipeline.pipeline" ||
+          event.entityType === "aws.codepipeline.execution" ||
+          event.entityType === "aws.codepipeline.stage" ||
+          event.entityType === "aws.codepipeline.action")
+      ) pipelineEventById.set(event.eventId, event)
+    }
+    const pipelineEvents = [...pipelineEventById.values()]
     const affectedExecutions = acceptedPipelineEvent === undefined
       ? []
       : yield* affectedPipelineExecutionEvents(pipelineEvents, accepted).pipe(

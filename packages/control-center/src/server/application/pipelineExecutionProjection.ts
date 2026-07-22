@@ -5,6 +5,10 @@ import * as Schema from "effect/Schema"
 import { DeliveryEntityDetails } from "../../domain/deliveryGraph.js"
 import type { NormalizedPluginEventV1 } from "../../domain/plugins/events.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import {
+  type CodePipelineCacheSelector,
+  MaximumCodePipelineCorrelationExecutions
+} from "../persistence/repositories/pluginRuntimeModels.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 
@@ -185,6 +189,44 @@ const executionKey = (attributes: PipelineEntityAttributes): string | null => {
   const executionId = optionalBounded(attributes.executionId, 512)
   return pipelineName === null || executionId === null ? null : `${pipelineName}\u0000${executionId}`
 }
+
+/** Derive bounded indexed-cache coordinates from the newly accepted pipeline page. */
+export const codePipelineCacheSelectors = Effect.fn(
+  "PipelineExecutionProjection.cacheSelectors"
+)(function*(
+  events: ReadonlyArray<NormalizedPluginEventV1>
+): Effect.fn.Return<ReadonlyArray<CodePipelineCacheSelector>, PipelineExecutionProjectionError> {
+  const selectors = new Map<string, CodePipelineCacheSelector>()
+  for (const event of events) {
+    if (
+      event._tag !== "UpsertEntity" ||
+      (event.entityType !== "aws.codepipeline.pipeline" &&
+        event.entityType !== "aws.codepipeline.execution" &&
+        event.entityType !== "aws.codepipeline.stage" &&
+        event.entityType !== "aws.codepipeline.action")
+    ) continue
+    const attributes = yield* decodeAttributes(event)
+    const pipelineName = optionalBounded(attributes.pipelineName, 200)
+    if (pipelineName === null) continue
+    const executionId = event.entityType === "aws.codepipeline.pipeline"
+      ? null
+      : optionalBounded(attributes.executionId, 512)
+    if (event.entityType !== "aws.codepipeline.pipeline" && executionId === null) continue
+    const selector = {
+      executionId,
+      pipelineName,
+      pipelineVersion: attributes.pipelineVersion ?? null
+    }
+    const key = executionId === null
+      ? `${pipelineName}\u0000declaration\u0000${String(selector.pipelineVersion ?? "")}`
+      : `${pipelineName}\u0000execution\u0000${executionId}`
+    if (!selectors.has(key) && selectors.size >= MaximumCodePipelineCorrelationExecutions) {
+      return yield* malformed("normalized-pipeline-correlation-scope-exceeded", event.eventId)
+    }
+    selectors.set(key, selector)
+  }
+  return [...selectors.values()]
+})
 
 interface PipelineDeclarationKey {
   readonly pipelineName: string
