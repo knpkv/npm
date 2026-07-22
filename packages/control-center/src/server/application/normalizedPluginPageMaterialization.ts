@@ -264,8 +264,7 @@ const decodedConfluencePageAttributes = Effect.fn(
           createdAt: yield* decodedPageTimestamp(attachment.createdAt, event.eventId)
         }
       }))
-  const contentState: "lazy" | "loaded" = attributes.contentState ??
-    (attributes.content === null ? "lazy" : "loaded")
+  const contentState: "lazy" | "loaded" = attributes.contentState ?? "loaded"
   return {
     sourceSpaceId: attributes.spaceId,
     parentSourceId: attributes.parentId,
@@ -413,17 +412,21 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             512
           ),
           status: namedText(attributes.status)?.toLowerCase() === "superseded" ? "superseded" : "current",
-          linkedIssueKeys: attributes.linkedIssueKeys
-            ?.map((key) => key.trim())
-            .filter((key, index, keys) => key.length > 0 && key.length <= 100 && keys.indexOf(key) === index)
-            .slice(0, 100),
-          linkedReleaseVersions: attributes.linkedReleaseVersions
-            ?.map((version) => version.trim())
-            .filter(
-              (version, index, versions) =>
-                version.length > 0 && version.length <= 100 && versions.indexOf(version) === index
-            )
-            .slice(0, 100),
+          ...(attributes.linkedIssueKeys === undefined ? {} : {
+            linkedIssueKeys: attributes.linkedIssueKeys
+              .map((key) => key.trim())
+              .filter((key, index, keys) => key.length > 0 && key.length <= 100 && keys.indexOf(key) === index)
+              .slice(0, 100)
+          }),
+          ...(attributes.linkedReleaseVersions === undefined ? {} : {
+            linkedReleaseVersions: attributes.linkedReleaseVersions
+              .map((version) => version.trim())
+              .filter(
+                (version, index, versions) =>
+                  version.length > 0 && version.length <= 100 && versions.indexOf(version) === index
+              )
+              .slice(0, 100)
+          }),
           ...(normalizedPage ?? {})
         }
       }

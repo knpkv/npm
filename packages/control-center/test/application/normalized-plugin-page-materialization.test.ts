@@ -4495,7 +4495,7 @@ describe("normalized plugin page materialization", () => {
         attachmentInventory: { complete: true, pagesFetched: 1 },
         watcherInventory: { complete: false, pagesFetched: 2 }
       })
-      const normalizedPage = (eventId: string, pageAttributes: Schema.JsonObject) =>
+      const normalizedPage = (eventId: string, pageAttributes: Schema.JsonObject, revision = "12") =>
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage: eventId,
           hasMore: false,
@@ -4503,7 +4503,7 @@ describe("normalized plugin page materialization", () => {
             _tag: "UpsertEntity",
             eventId,
             observedAt: "2026-07-19T09:02:00.000Z",
-            revision: "12",
+            revision,
             entityType: "confluence-page",
             vendorImmutableId: "991",
             sourceUrl: "https://wiki.example.test/pages/991",
@@ -4520,12 +4520,21 @@ describe("normalized plugin page materialization", () => {
         committedAt: T2,
         successfulHealth: { _tag: "healthy", checkedAt: T2 }
       }
-      yield* materializeNormalizedPluginPage(scope, normalizedPage("confluence-page-991-lazy", attributes))
+      yield* materializeNormalizedPluginPage(
+        scope,
+        normalizedPage("confluence-page-991-lazy", {
+          ...attributes,
+          linkedIssueKeys: ["PAY-42"],
+          linkedReleaseVersions: ["2026.29"]
+        })
+      )
 
       const lazy = (yield* items()).items[0]?.projection
       if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
       assert.strictEqual(lazy.projectionSchemaVersion, 2)
       assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.deepStrictEqual(lazy.details.linkedIssueKeys, ["PAY-42"])
+      assert.deepStrictEqual(lazy.details.linkedReleaseVersions, ["2026.29"])
       assert.deepStrictEqual(lazy.details.contributors?.[0], {
         sourcePersonId: "account-ada",
         displayName: "Ada Kline",
@@ -4544,11 +4553,7 @@ describe("normalized plugin page materialization", () => {
         createdAt: attributes.createdAt,
         updatedAt: attributes.updatedAt,
         currentVersion: attributes.currentVersion,
-        content: {
-          representation: "safe-markdown",
-          markdown: "## Production recovery\n\nVerify the rollback."
-        },
-        contentState: "loaded",
+        content: null,
         versions: attributes.versions,
         versionHistory: attributes.versionHistory,
         contributors: attributes.contributors
@@ -4563,9 +4568,36 @@ describe("normalized plugin page materialization", () => {
       if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
       assert.strictEqual(loaded.projectionRevision, 2)
       assert.strictEqual(loaded.details.contentState, "loaded")
-      assert.strictEqual(loaded.details.content?.markdown, "## Production recovery\n\nVerify the rollback.")
+      assert.isNull(loaded.details.content)
       assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
       assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })
+      assert.deepStrictEqual(loaded.details.linkedIssueKeys, ["PAY-42"])
+      assert.deepStrictEqual(loaded.details.linkedReleaseVersions, ["2026.29"])
+
+      const nextRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...loadedAttributes,
+        currentVersion: 13,
+        updatedAt: "2026-07-19T09:03:00.000Z",
+        versions: [{
+          number: 13,
+          createdAt: "2026-07-19T09:03:00.000Z",
+          message: "Remove superseded delivery links",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...loadedAttributes.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T4 },
+        normalizedPage("confluence-page-991-v13", {
+          ...nextRevisionAttributes,
+          linkedIssueKeys: [],
+          linkedReleaseVersions: []
+        }, "13")
+      )
+      const cleared = (yield* items()).items[0]?.projection
+      if (cleared?.details._tag !== "page") return yield* Effect.die("expected a next-revision page")
+      assert.deepStrictEqual(cleared.details.linkedIssueKeys, [])
+      assert.deepStrictEqual(cleared.details.linkedReleaseVersions, [])
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>
