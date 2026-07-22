@@ -93,8 +93,18 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     decodeEvidenceRow,
     decodeNodeRow,
     decodeProjectionRow,
+    decodeProjectionSummaryRow,
     decodeRelationshipRow
   } = yield* makeDeliveryGraphDecoders
+
+  const summaryExtensionJson = sql`CASE WHEN entity.entity_type = 'page'
+    THEN json_set(
+      projection.extension_json,
+      '$.content', json('null'),
+      '$.contentState', 'lazy'
+    )
+    ELSE projection.extension_json
+  END`
 
   const executePlan = Effect.fn("DeliveryGraphRepository.executePlan")(function*<RowSchema extends Schema.Top>(
     plan: RenderedSql,
@@ -107,8 +117,10 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
   const loadProjection = Effect.fn("DeliveryGraphRepository.loadProjection")(function*(
     workspaceId: WorkspaceId,
     entityId: EntityId,
-    revision: LedgerRevision | null
+    revision: LedgerRevision | null,
+    content: "exact" | "summary"
   ) {
+    const extensionJson = content === "exact" ? sql`projection.extension_json` : summaryExtensionJson
     const rows = yield* sql`SELECT
         projection.workspace_id AS workspaceId,
         projection.entity_id AS entityId,
@@ -123,7 +135,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         END AS entityType,
         projection.display_key AS displayKey,
         projection.title,
-        projection.extension_json AS extensionJson,
+        ${extensionJson} AS extensionJson,
         projection.extension_digest AS extensionDigest,
         projection.recorded_at AS recordedAt
       FROM entity_projection_revisions projection
@@ -154,7 +166,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: revision === null ? entityId : `${entityId}:${revision}`
       })
     }
-    return yield* decodeProjectionRow(row).pipe(captureMalformedDeliveryGraphRow(row))
+    const decode = content === "exact" ? decodeProjectionRow : decodeProjectionSummaryRow
+    return yield* decode(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const loadNode = Effect.fn("DeliveryGraphRepository.loadNode")(function*(
@@ -435,7 +448,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
     const entityProjections = yield* Effect.forEach(
       projectionPolicy(nodes),
-      (entityId) => loadProjection(workspaceId, entityId, null)
+      (entityId) => loadProjection(workspaceId, entityId, null, "summary")
     )
     const claimIds = Array.from(
       new Set(relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds))
@@ -467,7 +480,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       case "entityProjection":
         return DeliveryGraphReadResult.make({
           _tag: "entityProjection",
-          value: yield* loadProjection(workspaceId, query.entityId, query.revision)
+          value: yield* loadProjection(workspaceId, query.entityId, query.revision, "exact")
         })
       case "node":
         return DeliveryGraphReadResult.make({
@@ -504,7 +517,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         return DeliveryGraphReadResult.make({ _tag: "relationshipHistory", value })
       }
       case "entitySlice": {
-        const projection = yield* loadProjection(workspaceId, query.entityId, null)
+        const projection = yield* loadProjection(workspaceId, query.entityId, null, "exact")
         if (projection.projection.entityState === "deleted") {
           return yield* new RecordNotFoundError({
             workspaceId,
@@ -820,7 +833,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             ${entityType} AS entityType,
             projection.display_key AS displayKey,
             projection.title,
-            projection.extension_json AS extensionJson,
+            ${summaryExtensionJson} AS extensionJson,
             projection.extension_digest AS extensionDigest,
             projection.recorded_at AS recordedAt,
             COALESCE((
@@ -916,7 +929,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               ownerIdentities.slice(0, 20),
               (owner) => decodeWorkspaceOwner(workspaceId, owner).pipe(captureMalformedDeliveryGraphRow(owner))
             )
-            const { projection, recordedAt } = yield* decodeProjectionRow(row).pipe(
+            const { projection, recordedAt } = yield* decodeProjectionSummaryRow(row).pipe(
               captureMalformedDeliveryGraphRow(row)
             )
             return {

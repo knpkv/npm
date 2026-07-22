@@ -12,7 +12,7 @@ import type {
   WorkspaceEntityInspection,
   WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
-import type { DeliveryEntityProjection, DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
+import type { DeliveryRelationship, LedgerRevision } from "../../domain/deliveryGraph.js"
 import { evaluateFreshnessAt } from "../../domain/freshness.js"
 import type { EntityId, EnvironmentId, RelationshipId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import {
@@ -26,21 +26,6 @@ import { presentTimelineEvent } from "./timelineReads.js"
 
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
   Effect.die(`Delivery graph repository returned an unexpected result for ${operation}`)
-
-const withoutPageBody = (projection: DeliveryEntityProjection): DeliveryEntityProjection => {
-  if (projection.details._tag !== "page") return projection
-  return {
-    ...projection,
-    details: { ...projection.details, content: null, contentState: "lazy" }
-  }
-}
-
-const withoutIndexedPageBody = (
-  entry: WorkspaceEntityProjectionIndex["items"][number]
-): WorkspaceEntityProjectionIndex["items"][number] => ({
-  ...entry,
-  projection: withoutPageBody(entry.projection)
-})
 
 const candidateExplanation = (relationship: DeliveryRelationship): string => {
   if (relationship.lifecycle._tag === "missing") return relationship.lifecycle.reason
@@ -125,13 +110,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       limit: 500
     }))
     if (result._tag !== "releaseSlice") return yield* unexpectedResult("release slice")
-    return {
-      ...result.value,
-      entityProjections: result.value.entityProjections.map((entry) => ({
-        ...entry,
-        projection: withoutPageBody(entry.projection)
-      }))
-    } satisfies ReleaseDeliveryGraphInspection
+    return result.value satisfies ReleaseDeliveryGraphInspection
   })
 
   const readRelationship = Effect.fn("DeliveryGraphInspection.relationship")(function*(input: {
@@ -196,10 +175,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       graph: {
         truncated: result.value.truncated,
         nodes: result.value.nodes,
-        relatedEntityProjections: result.value.relatedEntityProjections.map((entry) => ({
-          ...entry,
-          projection: withoutPageBody(entry.projection)
-        })),
+        relatedEntityProjections: result.value.relatedEntityProjections,
         relationships: result.value.relationships,
         evidenceClaims: result.value.evidenceClaims,
         evidenceItems: result.value.evidenceItems
@@ -226,10 +202,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       if (result._tag !== "workspaceEntityProjections") {
         return yield* unexpectedResult("workspace entity projections")
       }
-      return {
-        ...result.value,
-        items: result.value.items.map(withoutIndexedPageBody)
-      } satisfies WorkspaceEntityProjectionIndex
+      return result.value satisfies WorkspaceEntityProjectionIndex
     }),
     releaseSlice,
     repairCandidates: Effect.fn("DeliveryGraphInspection.repairCandidates")(function*(input) {

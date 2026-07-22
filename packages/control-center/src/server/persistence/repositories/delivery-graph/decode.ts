@@ -28,16 +28,20 @@ import {
 export const makeDeliveryGraphDecoders = Effect.gen(function*() {
   const { verifyDigest } = yield* makeDeliveryGraphIntegrity
 
-  const decodeProjectionRow = Effect.fn("DeliveryGraphRepository.decodeProjectionRow")(function*(
-    row: typeof ProjectionRow.Type
+  const decodeProjection = Effect.fn("DeliveryGraphRepository.decodeProjection")(function*(
+    row: typeof ProjectionRow.Type,
+    verifyExtensionDigest: boolean
   ) {
-    yield* verifyDigest({
-      workspaceId: row.workspaceId,
-      recordKind: "entity-projection",
-      recordKey: `${row.entityId}:${row.projectionRevision}`,
-      json: row.extensionJson,
-      expected: row.extensionDigest
-    })
+    // SQL-derived page summaries intentionally differ from the stored payload; exact page reads still verify it.
+    if (verifyExtensionDigest || row.entityType !== "page") {
+      yield* verifyDigest({
+        workspaceId: row.workspaceId,
+        recordKind: "entity-projection",
+        recordKey: `${row.entityId}:${row.projectionRevision}`,
+        json: row.extensionJson,
+        expected: row.extensionDigest
+      })
+    }
     const details = yield* Schema.decodeUnknownEffect(projectionJson)(row.extensionJson).pipe(
       Effect.mapError(() =>
         graphRecordError(
@@ -81,6 +85,18 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
       )
     )
     return { projection, recordedAt }
+  })
+
+  const decodeProjectionRow = Effect.fn("DeliveryGraphRepository.decodeProjectionRow")(function*(
+    row: typeof ProjectionRow.Type
+  ) {
+    return yield* decodeProjection(row, true)
+  })
+
+  const decodeProjectionSummaryRow = Effect.fn(
+    "DeliveryGraphRepository.decodeProjectionSummaryRow"
+  )(function*(row: typeof ProjectionRow.Type) {
+    return yield* decodeProjection(row, false)
   })
 
   const decodeNodeRow = Effect.fn("DeliveryGraphRepository.decodeNodeRow")(function*(
@@ -351,6 +367,7 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
     decodeEvidenceRow,
     decodeNodeRow,
     decodeProjectionRow,
+    decodeProjectionSummaryRow,
     decodeRelationshipRow
   }
 })

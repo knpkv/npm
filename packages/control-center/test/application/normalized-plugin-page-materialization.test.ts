@@ -765,6 +765,21 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
   return result.value
 })
 
+const exactFirstProjection = Effect.fn(
+  "NormalizedPluginPageMaterializationTest.exactFirstProjection"
+)(function*() {
+  const persistence = yield* Persistence
+  const entityId = (yield* items()).items[0]?.projection.entityId
+  if (entityId === undefined) return yield* Effect.die("expected one entity projection")
+  const result = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+    _tag: "entityProjection",
+    entityId,
+    revision: null
+  })
+  if (result._tag !== "entityProjection") return yield* Effect.die("expected an exact entity projection")
+  return result.value.projection
+})
+
 describe("normalized plugin page materialization", () => {
   it("maps terminal and active CodePipeline statuses", () => {
     const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
@@ -4557,7 +4572,7 @@ describe("normalized plugin page materialization", () => {
         })
       )
 
-      const lazy = (yield* items()).items[0]?.projection
+      const lazy = yield* exactFirstProjection()
       if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
       assert.strictEqual(lazy.projectionSchemaVersion, 2)
       assert.strictEqual(lazy.details.contentState, "lazy")
@@ -4592,7 +4607,7 @@ describe("normalized plugin page materialization", () => {
       )
       assert.strictEqual(receipt.entityProjectionCount, 1)
 
-      const loaded = (yield* items()).items[0]?.projection
+      const loaded = yield* exactFirstProjection()
       if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
       assert.strictEqual(loaded.projectionRevision, 2)
       assert.strictEqual(loaded.details.contentState, "loaded")
@@ -4618,7 +4633,7 @@ describe("normalized plugin page materialization", () => {
         { ...scope, expectedRevision: 2, committedAt: T4 },
         normalizedPage("confluence-page-991-v13", nextRevisionAttributes, "13")
       )
-      const absent = (yield* items()).items[0]?.projection
+      const absent = yield* exactFirstProjection()
       if (absent?.details._tag !== "page") return yield* Effect.die("expected a next-revision page")
       assert.isUndefined(absent.details.linkedIssueKeys)
       assert.isUndefined(absent.details.linkedReleaseVersions)
@@ -4643,7 +4658,7 @@ describe("normalized plugin page materialization", () => {
           linkedReleaseVersions: []
         }, "14")
       )
-      const explicitlyCleared = (yield* items()).items[0]?.projection
+      const explicitlyCleared = yield* exactFirstProjection()
       if (explicitlyCleared?.details._tag !== "page") return yield* Effect.die("expected an explicitly cleared page")
       assert.deepStrictEqual(explicitlyCleared.details.linkedIssueKeys, [])
       assert.deepStrictEqual(explicitlyCleared.details.linkedReleaseVersions, [])
@@ -4735,7 +4750,7 @@ describe("normalized plugin page materialization", () => {
         normalizedPage("lazy-sync", lazyAttributes)
       )
 
-      const projection = (yield* items()).items[0]?.projection
+      const projection = yield* exactFirstProjection()
       if (projection?.details._tag !== "page") return yield* Effect.die("expected a merged page")
       assert.strictEqual(projection.details.contentState, "loaded")
       assert.strictEqual(projection.details.content?.markdown, "## Recovery\n\nKeep this body.")
@@ -4776,7 +4791,7 @@ describe("normalized plugin page materialization", () => {
         { ...scope, expectedRevision: 2, committedAt: T3 },
         normalizedPage("partial-loaded-read", loadedNullAttributes)
       )
-      const afterNullRead = (yield* items()).items[0]?.projection
+      const afterNullRead = yield* exactFirstProjection()
       if (afterNullRead?.details._tag !== "page") return yield* Effect.die("expected a page after a null read")
       assert.strictEqual(afterNullRead.details.content?.markdown, "## Recovery\n\nKeep this body.")
       assert.deepStrictEqual(
@@ -4800,7 +4815,7 @@ describe("normalized plugin page materialization", () => {
         normalizedPage("metadata-only-sync", metadataOnlyAttributes)
       )
       assert.strictEqual(metadataReceipt.entityProjectionCount, 1)
-      const afterMetadata = (yield* items()).items[0]?.projection
+      const afterMetadata = yield* exactFirstProjection()
       if (afterMetadata?.details._tag !== "page") return yield* Effect.die("expected a metadata-enriched page")
       assert.include(
         afterMetadata.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
@@ -4816,7 +4831,7 @@ describe("normalized plugin page materialization", () => {
         { ...scope, expectedRevision: 4, committedAt: T3 },
         normalizedPage("incomplete-watcher-omission", incompleteOmissionAttributes)
       )
-      const afterIncompleteOmission = (yield* items()).items[0]?.projection
+      const afterIncompleteOmission = yield* exactFirstProjection()
       if (afterIncompleteOmission?.details._tag !== "page") {
         return yield* Effect.die("expected a page after an incomplete watcher read")
       }
@@ -4833,7 +4848,7 @@ describe("normalized plugin page materialization", () => {
         { ...scope, expectedRevision: 5, committedAt: T3 },
         normalizedPage("complete-watcher-omission", completeOmissionAttributes)
       )
-      const afterCompleteOmission = (yield* items()).items[0]?.projection
+      const afterCompleteOmission = yield* exactFirstProjection()
       if (afterCompleteOmission?.details._tag !== "page") {
         return yield* Effect.die("expected a page after a complete watcher read")
       }
@@ -4866,7 +4881,7 @@ describe("normalized plugin page materialization", () => {
         { ...scope, expectedRevision: 7, committedAt: T4 },
         normalizedPage("next-revision-empty", nextRevisionAttributes, "13")
       )
-      const nextRevision = (yield* items()).items[0]?.projection
+      const nextRevision = yield* exactFirstProjection()
       if (nextRevision?.details._tag !== "page") return yield* Effect.die("expected the next page revision")
       assert.strictEqual(nextRevision.details.contentState, "loaded")
       assert.isNull(nextRevision.details.content)

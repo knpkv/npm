@@ -1096,6 +1096,97 @@ describe("DeliveryGraphRepository", () => {
       })
     ))
 
+  it.effect("redacts page bodies in repository summaries while retaining exact entity content", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* database.sql`UPDATE entities
+          SET plugin_connection_id = ${OTHER_PLUGIN_ID}, provider_id = 'confluence', entity_type = 'page'
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}`
+
+        const sentinel = "repository-page-body-sentinel"
+        yield* repository.write(WORKSPACE_A, {
+          entityProjections: [{
+            projection: {
+              workspaceId: WORKSPACE_A,
+              entityId: ISSUE_ID,
+              projectionRevision: 2,
+              sourceEntityRevision: 1,
+              supersedesProjectionRevision: 1,
+              projectionSchemaVersion: 1,
+              entityState: "present",
+              entityType: "page",
+              displayKey: "DOC-42",
+              title: "Release runbook",
+              details: {
+                _tag: "page",
+                spaceKey: "PAY",
+                revision: "2",
+                status: "current",
+                content: { representation: "safe-markdown", markdown: sentinel },
+                contentState: "loaded"
+              }
+            },
+            recordedAt: UPDATED_AT
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        })
+
+        const workspace = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        })
+        assert.strictEqual(workspace._tag, "workspaceEntityProjections")
+        if (workspace._tag === "workspaceEntityProjections") {
+          const page = workspace.value.items.find(({ projection }) => projection.entityId === ISSUE_ID)?.projection
+          assert.strictEqual(page?.details._tag, "page")
+          if (page?.details._tag === "page") {
+            assert.isNull(page.details.content)
+            assert.strictEqual(page.details.contentState, "lazy")
+          }
+        }
+
+        const release = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSlice",
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          limit: 100
+        })
+        assert.strictEqual(release._tag, "releaseSlice")
+        if (release._tag === "releaseSlice") {
+          const page = release.value.entityProjections.find(({ projection }) => projection.entityId === ISSUE_ID)
+            ?.projection
+          assert.strictEqual(page?.details._tag, "page")
+          if (page?.details._tag === "page") {
+            assert.isNull(page.details.content)
+            assert.strictEqual(page.details.contentState, "lazy")
+          }
+        }
+
+        const exact = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        })
+        assert.strictEqual(exact._tag, "entitySlice")
+        if (exact._tag === "entitySlice" && exact.value.entity.projection.details._tag === "page") {
+          assert.strictEqual(exact.value.entity.projection.details.content?.markdown, sentinel)
+          assert.strictEqual(exact.value.entity.projection.details.contentState, "loaded")
+        }
+      })
+    ))
+
   it.effect("indexes current present workspace projections including unlinked entities and excluding deleted heads", () =>
     withRepository(
       Effect.gen(function*() {
