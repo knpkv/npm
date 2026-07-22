@@ -2815,6 +2815,22 @@ describe("normalized plugin page materialization", () => {
             headRevision: "production-head",
             status: "OPEN"
           }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-legacy-approved-1",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "pull-request-legacy-approved-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "21",
+          sourceUrl: "https://console.aws.example/pull-requests/21",
+          title: "Legacy approved pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/legacy-approved",
+            targetBranch: "main",
+            headRevision: "legacy-approved-head",
+            status: "approved"
+          }
         }]
       })
       const scope: NormalizedPluginPageMaterializationScope = {
@@ -2828,7 +2844,7 @@ describe("normalized plugin page materialization", () => {
       }
 
       const receipt = yield* materializeNormalizedPluginPage(scope, page)
-      assert.strictEqual(receipt.entityProjectionCount, 4)
+      assert.strictEqual(receipt.entityProjectionCount, 5)
 
       const readStatus = (status: "active" | "done" | "failed") =>
         persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -2849,7 +2865,7 @@ describe("normalized plugin page materialization", () => {
         failed._tag !== "workspaceEntityProjections"
       ) return yield* Effect.die("expected workspace entity projections")
 
-      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["17"])
+      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey).sort(), ["17", "21"])
       assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
       assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
       const openDetails = active.value.items.find(({ projection }) => projection.displayKey === "20")?.projection
@@ -2863,6 +2879,12 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected review-requested pull-request details")
       }
       assert.strictEqual(requestedDetails.reviewState, "requested")
+      const approvedDetails = done.value.items.find(({ projection }) => projection.displayKey === "21")
+        ?.projection.details
+      if (approvedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected legacy approved pull-request details")
+      }
+      assert.strictEqual(approvedDetails.reviewState, "approved")
       const details = done.value.items[0]?.projection.details
       if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
       assert.lengthOf(details.description ?? "", 50_000)
@@ -2942,7 +2964,12 @@ describe("normalized plugin page materialization", () => {
         evidenceClaims: [],
         relationships: []
       })
-      const page = (eventId: string, checkpointAfterPage: string, sourceUrl: string | null) =>
+      const page = (
+        eventId: string,
+        checkpointAfterPage: string,
+        sourceUrl: string | null,
+        revision = "pull-request-20-revision-1"
+      ) =>
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage,
           hasMore: false,
@@ -2950,7 +2977,7 @@ describe("normalized plugin page materialization", () => {
             _tag: "UpsertEntity",
             eventId,
             observedAt: "2026-07-19T09:01:30.000Z",
-            revision: "pull-request-20-revision-1",
+            revision,
             entityType: "pull-request",
             vendorImmutableId: "20",
             sourceUrl,
@@ -3014,7 +3041,7 @@ describe("normalized plugin page materialization", () => {
           "https://console.aws.example/pull-requests/20"
         )
       )
-      assert.strictEqual(current.entityProjectionCount, 0)
+      assert.strictEqual(current.entityProjectionCount, 1)
       const metadataRefreshed = yield* persistence.entities.get(WORKSPACE_ID, entityId)
       assert.strictEqual(
         metadataRefreshed.sourceRevision.sourceUrl?.href,
@@ -3027,7 +3054,23 @@ describe("normalized plugin page materialization", () => {
         revision: null
       })
       if (unchanged._tag !== "entityProjection") return yield* Effect.die("expected current projection")
-      assert.strictEqual(unchanged.value.projection.projectionRevision, 2)
+      assert.strictEqual(unchanged.value.projection.projectionRevision, 3)
+      const visibleAfterRefresh = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "workspaceEntityProjections",
+        owner: null,
+        query: null,
+        service: "codecommit",
+        status: null,
+        type: "pull-request",
+        limit: 100
+      })
+      if (visibleAfterRefresh._tag !== "workspaceEntityProjections") {
+        return yield* Effect.die("expected current workspace pull requests")
+      }
+      assert.deepStrictEqual(
+        visibleAfterRefresh.value.items.map(({ projection }) => projection.displayKey),
+        ["20"]
+      )
 
       const exactReplay = yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 2, committedAt: T3 },
@@ -3040,6 +3083,17 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(exactReplay.entityProjectionCount, 0)
       const afterExactReplay = yield* persistence.entities.get(WORKSPACE_ID, entityId)
       assert.strictEqual(afterExactReplay.revision, metadataRefreshed.revision)
+
+      const changedRevision = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3 },
+        page(
+          "pull-request-20-changed-revision",
+          "changed-revision",
+          "https://console.aws.example/pull-requests/20",
+          "pull-request-20-revision-2"
+        )
+      )
+      assert.strictEqual(changedRevision.entityProjectionCount, 1)
     })))
 
   it.effect("decodes provider-specific timestamps only for pull requests", () =>

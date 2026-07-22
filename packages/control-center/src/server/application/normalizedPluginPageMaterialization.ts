@@ -227,7 +227,6 @@ const reviewState = (
 ): "approved" | "changes-requested" | "merged" | "not-requested" | "requested" => {
   switch (value?.toLowerCase()) {
     case "requested":
-    case "open":
       return "requested"
     case "changes-requested":
     case "changes requested":
@@ -318,7 +317,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState),
+          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status)),
           lifecycle: pullRequestLifecycle(namedText(attributes.status)),
           description: optionalBounded(attributes.description, 50_000),
           authorReference: optionalBounded(attributes.authorArn, 512),
@@ -603,15 +602,9 @@ const materializeUpsertEntity = Effect.fn(
     existing !== null &&
     existing.sourceRevision.revision === event.revision &&
     currentProjection?.projection.entityState === "present" &&
-    currentProjection.projection.projectionSchemaVersion === schemaVersion
+    currentProjection.projection.projectionSchemaVersion === schemaVersion &&
+    !sourceMetadataChanged
   ) {
-    if (sourceMetadataChanged && refreshedSource !== null) {
-      yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
-        sourceRevision: refreshedSource,
-        expectedRevision: existing.revision,
-        updatedAt: scope.committedAt
-      })
-    }
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
 
