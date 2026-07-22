@@ -2737,6 +2737,96 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(afterReplay, beforeReplay)
     })))
 
+  it.effect("normalizes provider PR metadata and filters lifecycle separately from review judgment", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pull-request-states-complete",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "pull-request-closed-1",
+          observedAt: "2026-07-19T09:01:30.000Z",
+          revision: "pull-request-closed-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "closed-17",
+          sourceUrl: "https://console.aws.example/pull-requests/closed-17",
+          title: "Closed pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/closed",
+            targetBranch: "main",
+            headRevision: "closed-head",
+            description: "x".repeat(50_001),
+            authorArn: "   ",
+            baseRevision: "b".repeat(513),
+            mergeBase: "   ",
+            status: "CLOSED"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-changes-requested-1",
+          observedAt: "2026-07-19T09:01:40.000Z",
+          revision: "pull-request-changes-requested-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "open-18",
+          sourceUrl: "https://console.aws.example/pull-requests/open-18",
+          title: "Open pull request needing changes",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/open",
+            targetBranch: "main",
+            headRevision: "open-head",
+            status: "OPEN",
+            reviewState: "changes-requested"
+          }
+        }]
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: Schema.decodeSync(PluginStreamKey)("pull-request-states"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+
+      const receipt = yield* materializeNormalizedPluginPage(scope, page)
+      assert.strictEqual(receipt.entityProjectionCount, 2)
+
+      const readStatus = (status: "active" | "done" | "failed") =>
+        persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: "codecommit",
+          status,
+          type: "pull-request",
+          limit: 100
+        })
+      const done = yield* readStatus("done")
+      const active = yield* readStatus("active")
+      const failed = yield* readStatus("failed")
+      if (
+        done._tag !== "workspaceEntityProjections" ||
+        active._tag !== "workspaceEntityProjections" ||
+        failed._tag !== "workspaceEntityProjections"
+      ) return yield* Effect.die("expected workspace entity projections")
+
+      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["closed-17"])
+      assert.isEmpty(active.value.items)
+      assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["open-18"])
+      const details = done.value.items[0]?.projection.details
+      if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
+      assert.lengthOf(details.description ?? "", 50_000)
+      assert.lengthOf(details.baseRevision ?? "", 512)
+      assert.isNull(details.authorReference)
+      assert.isNull(details.mergeBaseRevision)
+    })))
+
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>
     withMaterializer(Effect.gen(function*() {
       const database = yield* Database

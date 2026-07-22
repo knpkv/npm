@@ -327,6 +327,9 @@ describe("canonical workspace entity", () => {
         agentReviewLabel: "Agent review not run",
         author: { name: "Alice", role: "Pull request author" },
         baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+        createdAt: {
+          dateTime: "2026-07-12T08:00:00.000Z"
+        },
         headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
         reviewLabel: "Human review requested"
       }
@@ -341,6 +344,25 @@ describe("canonical workspace entity", () => {
     expect(presentation.collaborators.approvers).toEqual([
       expect.objectContaining({ name: "Mina Ortiz", role: "Release Approver" })
     ])
+  })
+
+  it("renders malformed persisted pull-request timestamps as unavailable", () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(pullRequestInspection)
+    const details = encoded.entity.projection.details
+    if (details._tag !== "pull-request") throw new Error("Expected a pull-request projection fixture")
+
+    const malformed = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      entity: {
+        ...encoded.entity,
+        projection: {
+          ...encoded.entity.projection,
+          details: { ...details, createdAt: "not-a-date" }
+        }
+      }
+    })
+
+    expect(presentWorkspaceEntity(WORKSET_WORKSPACE_ID, malformed).pullRequest?.createdAt).toBeNull()
   })
 
   it("keeps distinct Jira accounts with the same display name in the working circle", () => {

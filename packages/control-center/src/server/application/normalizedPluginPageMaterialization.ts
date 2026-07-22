@@ -156,6 +156,11 @@ const bounded = (value: string | null | undefined, fallback: string, maximum: nu
   return (normalized === undefined || normalized.length === 0 ? fallback : normalized).slice(0, maximum)
 }
 
+const optionalBounded = (value: string | null | undefined, maximum: number): string | null => {
+  const normalized = value?.trim()
+  return normalized === undefined || normalized.length === 0 ? null : normalized.slice(0, maximum)
+}
+
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : (value?.name ?? null)
 
@@ -301,10 +306,10 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           headRevision: bounded(attributes.headRevision, event.revision, 512),
           reviewState: reviewState(attributes.reviewState),
           lifecycle: pullRequestLifecycle(namedText(attributes.status)),
-          description: attributes.description ?? null,
-          authorReference: attributes.authorArn ?? null,
-          baseRevision: attributes.baseRevision ?? null,
-          mergeBaseRevision: attributes.mergeBase ?? null,
+          description: optionalBounded(attributes.description, 50_000),
+          authorReference: optionalBounded(attributes.authorArn, 512),
+          baseRevision: optionalBounded(attributes.baseRevision, 512),
+          mergeBaseRevision: optionalBounded(attributes.mergeBase, 512),
           createdAt: attributes.creationDate === null || attributes.creationDate === undefined
             ? null
             : DateTime.formatIso(attributes.creationDate),

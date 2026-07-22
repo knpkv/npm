@@ -698,6 +698,14 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           WHEN 'issue' THEN ${rawStatusText}
           ELSE replace(${rawStatusText}, '-', ' ')
         END`
+        const pullRequestReviewText = sql`replace(lower(COALESCE(
+          json_extract(projection.extension_json, '$.reviewState'),
+          ''
+        )), '-', ' ')`
+        const pullRequestLifecycleText = sql`lower(COALESCE(
+          json_extract(projection.extension_json, '$.lifecycle'),
+          ''
+        ))`
         const statusGroup = sql`CASE ${entityType}
           WHEN 'issue' THEN CASE
             WHEN ${statusText} IN ('blocked', 'rejected') THEN 'failed'
@@ -705,8 +713,9 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             ELSE 'active'
           END
           WHEN 'pull-request' THEN CASE
-            WHEN ${statusText} = 'changes requested' THEN 'failed'
-            WHEN ${statusText} IN ('approved', 'merged') THEN 'done'
+            WHEN ${pullRequestReviewText} = 'changes requested' THEN 'failed'
+            WHEN ${pullRequestReviewText} IN ('approved', 'merged') THEN 'done'
+            WHEN ${pullRequestLifecycleText} IN ('closed', 'merged') THEN 'done'
             ELSE 'active'
           END
           WHEN 'page' THEN CASE

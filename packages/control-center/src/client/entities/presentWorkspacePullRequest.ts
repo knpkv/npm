@@ -1,5 +1,6 @@
 import type { RlyPerson } from "@knpkv/rly/patterns"
 import * as DateTime from "effect/DateTime"
+import * as Option from "effect/Option"
 
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import type { DeliveryEntityDetails } from "../../domain/deliveryGraph.js"
@@ -59,11 +60,13 @@ const authorFor = (reference: string | null | undefined): RlyPerson | null =>
 
 const timestampFor = (value: PullRequestDetails["createdAt"]): WorkspacePullRequestTimestamp | null => {
   if (value === null || value === undefined) return null
-  const timestamp = DateTime.makeUnsafe(value)
-  return {
-    dateTime: DateTime.formatIso(timestamp),
-    label: timestampFormatter.format(DateTime.toDateUtc(timestamp))
-  }
+  return Option.match(DateTime.make(value), {
+    onNone: () => null,
+    onSome: (timestamp) => ({
+      dateTime: DateTime.formatIso(timestamp),
+      label: timestampFormatter.format(DateTime.toDateUtc(timestamp))
+    })
+  })
 }
 
 const reviewLabel = (reviewState: PullRequestDetails["reviewState"]): string => {
