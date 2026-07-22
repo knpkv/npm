@@ -171,12 +171,75 @@ const inspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspectio
   }
 })
 
+const encodedInspection = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+const pullRequestInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityType: "pull-request",
+      displayKey: "184",
+      title: "Checkout and capture",
+      details: {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feature/capture",
+        targetBranch: "main",
+        headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
+        baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+        mergeBaseRevision: "6a2621c69c57b428e2a83f415c23ad37a875c87d",
+        reviewState: "requested",
+        lifecycle: "open",
+        description: "Protect capture retries and preserve the original payment result.",
+        authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+        createdAt: "2026-07-12T08:00:00.000Z",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      }
+    },
+    owners: [
+      {
+        avatarFallback: "AK",
+        displayName: "Ada Kline",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
+        roles: ["reviewer"]
+      },
+      {
+        avatarFallback: "MO",
+        displayName: "Mina Ortiz",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000072",
+        roles: ["release-approver"]
+      }
+    ]
+  },
+  source: {
+    ...sourceRevision,
+    providerId: "codecommit",
+    vendorImmutableId: "184",
+    revision: "revision-9",
+    sourceUrl:
+      "https://eu-central-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/184"
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  activity: { truncated: false, events: [] }
+})
+
 const state = {
   _tag: "stale",
   entityId: inspection.entity.projection.entityId,
   inspection,
   reason: "source-stale",
   refreshKey: "snapshot-a",
+  sessionKey: "session-a",
+  workspaceId: WORKSET_WORKSPACE_ID
+} satisfies WorkspaceEntityState
+
+const pullRequestState = {
+  _tag: "ready",
+  entityId: pullRequestInspection.entity.projection.entityId,
+  inspection: pullRequestInspection,
+  refreshKey: "snapshot-pr",
   sessionKey: "session-a",
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
@@ -250,6 +313,33 @@ describe("canonical workspace entity", () => {
     expect(presentation.partialMessages).toEqual([
       "The relationship graph is partial; additional delivery links exist.",
       "The activity list is partial; older events are not shown."
+    ])
+  })
+
+  it("presents one exact pull-request head without treating agent advice as approval", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, pullRequestInspection)
+
+    expect(presentation).toMatchObject({
+      displayKey: "184",
+      service: "codecommit",
+      verdict: "Open",
+      pullRequest: {
+        agentReviewLabel: "Agent review not run",
+        author: { name: "Alice", role: "Pull request author" },
+        baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+        headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
+        reviewLabel: "Human review requested"
+      }
+    })
+    expect(presentation.facts).toContainEqual({
+      label: "Head revision",
+      value: presentation.pullRequest?.headRevision
+    })
+    expect(presentation.collaborators.reviewers).toEqual([
+      expect.objectContaining({ name: "Ada Kline", role: "Reviewer" })
+    ])
+    expect(presentation.collaborators.approvers).toEqual([
+      expect.objectContaining({ name: "Mina Ortiz", role: "Release Approver" })
     ])
   })
 
@@ -411,6 +501,30 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector<HTMLAnchorElement>('a[href="https://jira.example.test/browse/OPS-429"]')).not.toBeNull()
     expect(host.querySelector("textarea")).toBeNull()
     expect(host.textContent).not.toContain("Edit issue")
+  })
+
+  it("renders the CodeCommit revision, human review, delivery evidence, and agent entry point", async () => {
+    const onAskAgent = vi.fn()
+    const host = await renderView(onAskAgent, pullRequestState)
+
+    expect(host.textContent).toContain("feature/capture")
+    expect(host.textContent).toContain("a5d8c9e4f013bdf17c2e6765579e2770f63e7b19")
+    expect(host.textContent).toContain("91c3627b4ce7447e38c906529a4af4be6bc6812d")
+    expect(host.textContent).toContain("Protect capture retries")
+    expect(host.textContent).toContain("Alice")
+    expect(host.textContent).toContain("Ada Kline")
+    expect(host.textContent).toContain("Mina Ortiz")
+    expect(host.textContent).toContain("Human review requested")
+    expect(host.textContent).toContain("Agent review not run")
+    expect(host.textContent).toContain("Open files and diff in CodeCommit")
+    expect(host.querySelector("[data-workspace-pull-request-detail]")).not.toBeNull()
+
+    const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Ask Relay to review"
+    )
+    if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+    await act(async () => reviewButton.click())
+    expect(onAskAgent).toHaveBeenCalledOnce()
   })
 
   it("distinguishes a shortened comment body from an omitted-comments collection", async () => {

@@ -34,7 +34,7 @@ import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plu
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
-import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
@@ -62,6 +62,7 @@ interface RelationshipEndpointResolution {
 }
 
 const OptionalText = Schema.optionalKey(Schema.NullOr(Schema.String))
+const OptionalTimestamp = Schema.optionalKey(Schema.NullOr(UtcTimestamp))
 const NamedText = Schema.Union([
   Schema.String,
   Schema.Struct({ name: Schema.optionalKey(Schema.NullOr(Schema.String)) })
@@ -75,6 +76,12 @@ const EntityAttributes = Schema.Struct({
   sourceBranch: OptionalText,
   targetBranch: OptionalText,
   headRevision: OptionalText,
+  baseRevision: OptionalText,
+  mergeBase: OptionalText,
+  description: OptionalText,
+  authorArn: OptionalText,
+  creationDate: OptionalTimestamp,
+  lastActivityDate: OptionalTimestamp,
   reviewState: OptionalText,
   spaceKey: OptionalText,
   spaceId: OptionalText,
@@ -211,10 +218,22 @@ const reviewState = (
     case "approved":
       return "approved"
     case "merged":
-    case "closed":
       return "merged"
     default:
       return "not-requested"
+  }
+}
+
+const pullRequestLifecycle = (value: string | null | undefined): "closed" | "merged" | "open" | null => {
+  switch (value?.toLowerCase()) {
+    case "open":
+      return "open"
+    case "closed":
+      return "closed"
+    case "merged":
+      return "merged"
+    default:
+      return null
   }
 }
 
@@ -280,7 +299,18 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status))
+          reviewState: reviewState(attributes.reviewState),
+          lifecycle: pullRequestLifecycle(namedText(attributes.status)),
+          description: attributes.description ?? null,
+          authorReference: attributes.authorArn ?? null,
+          baseRevision: attributes.baseRevision ?? null,
+          mergeBaseRevision: attributes.mergeBase ?? null,
+          createdAt: attributes.creationDate === null || attributes.creationDate === undefined
+            ? null
+            : DateTime.formatIso(attributes.creationDate),
+          updatedAt: attributes.lastActivityDate === null || attributes.lastActivityDate === undefined
+            ? null
+            : DateTime.formatIso(attributes.lastActivityDate)
         }
       }
     case "page":

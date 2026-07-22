@@ -22,6 +22,8 @@ import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 import { presentWorkspaceIssue, type WorkspaceIssuePresentation } from "./presentWorkspaceIssue.js"
+import { presentWorkspacePullRequest } from "./presentWorkspacePullRequest.js"
+import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
 
 export interface WorkspaceEntityFact {
   readonly label: string
@@ -73,6 +75,7 @@ export interface WorkspaceEntityPresentation {
   readonly freshnessTime: string
   readonly kindLabel: string
   readonly issue: WorkspaceIssuePresentation | null
+  readonly pullRequest: WorkspacePullRequestPresentation | null
   readonly partialMessages: ReadonlyArray<string>
   readonly primaryAction: WorkspaceEntityActionPresentation
   readonly relationships: ReadonlyArray<RlyRelationship>
@@ -134,6 +137,9 @@ const factsFor = (details: DeliveryEntityDetails): ReadonlyArray<WorkspaceEntity
     case "pull-request":
       return [
         { label: "Repository", value: details.repository },
+        ...(details.lifecycle === null || details.lifecycle === undefined
+          ? []
+          : [{ label: "State", value: titleCase(details.lifecycle) }]),
         { label: "Branches", value: `${details.sourceBranch} → ${details.targetBranch}` },
         { label: "Head revision", value: details.headRevision }
       ]
@@ -425,6 +431,9 @@ export const presentWorkspaceEntity = (
   const issue = projection.details._tag === "issue"
     ? presentWorkspaceIssue(projection.details, inspection.source.sourceUrl)
     : null
+  const pullRequest = projection.details._tag === "pull-request"
+    ? presentWorkspacePullRequest(projection.details, inspection.source.sourceUrl, inspection)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {
@@ -464,6 +473,7 @@ export const presentWorkspaceEntity = (
     freshnessTime: readableTimestamp(freshnessTimestampValue),
     kindLabel: kindNames[projection.entityType],
     issue,
+    pullRequest,
     partialMessages: partialMessagesFor(inspection),
     primaryAction: primaryActionFor(inspection, workspaceId, serviceName),
     relationships: relationshipsFor(inspection, workspaceId, service),

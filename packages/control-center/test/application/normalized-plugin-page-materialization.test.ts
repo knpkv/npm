@@ -123,6 +123,13 @@ const materializedPage = Schema.decodeSync(PluginSyncPageV1)({
       sourceBranch: "feat/guard-refunds",
       targetBranch: "main",
       headRevision: "abc123",
+      baseRevision: "base456",
+      mergeBase: "merge789",
+      description: "Guard every refund write.",
+      authorArn: "arn:aws:sts::123456789012:assumed-role/Developer/ada",
+      creationDate: "2026-07-18T08:00:00.000Z",
+      lastActivityDate: "2026-07-19T09:01:30.000Z",
+      status: "OPEN",
       reviewState: "requested"
     }
   }, {
@@ -2639,6 +2646,24 @@ describe("normalized plugin page materialization", () => {
         currentItems.items.map(({ projection }) => [projection.entityType, projection.displayKey]),
         [["pull-request", "17"], ["issue", "PAY-42"]]
       )
+      const pullRequest = currentItems.items.find(({ projection }) => projection.entityType === "pull-request")
+        ?.projection.details
+      if (pullRequest?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
+      assert.deepStrictEqual(pullRequest, {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feat/guard-refunds",
+        targetBranch: "main",
+        headRevision: "abc123",
+        reviewState: "requested",
+        lifecycle: "open",
+        description: "Guard every refund write.",
+        authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/ada",
+        baseRevision: "base456",
+        mergeBaseRevision: "merge789",
+        createdAt: "2026-07-18T08:00:00.000Z",
+        updatedAt: "2026-07-19T09:01:30.000Z"
+      })
       assert.strictEqual(
         (yield* persistence.people.findPersonBySourceIdentity(WORKSPACE_ID, {
           pluginConnectionId: PLUGIN_ID,

@@ -86,8 +86,21 @@ export const statusFor = (details: DeliveryEntityDetails): string => {
   switch (details._tag) {
     case "issue":
       return details.status
-    case "pull-request":
-      return titleCase(details.reviewState)
+    case "pull-request": {
+      if (details.lifecycle !== null && details.lifecycle !== undefined) return titleCase(details.lifecycle)
+      switch (details.reviewState) {
+        case "not-requested":
+          return "Review not requested"
+        case "requested":
+          return "Review requested"
+        case "changes-requested":
+          return "Changes requested"
+        case "approved":
+          return "Approved"
+        case "merged":
+          return "Merged"
+      }
+    }
     case "page":
     case "pipeline-execution":
     case "deployment":

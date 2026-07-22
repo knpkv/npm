@@ -29,6 +29,7 @@ import { presentWorkspaceEntity, type WorkspaceEntityPresentation } from "./pres
 import { WorkspaceEntityLink } from "./WorkspaceEntityLink.js"
 import styles from "./WorkspaceEntityRoute.module.css"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
+import { WorkspacePullRequestDetails } from "./WorkspacePullRequestDetails.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
 const originLabel = (href: string, workspaceId: WorkspaceIdType): string => {
@@ -242,10 +243,12 @@ const staleMessage = (state: Extract<WorkspaceEntityState, { readonly _tag: "sta
 }
 
 const EntityContent = ({
+  onAskAgent,
   presentation,
   retry,
   stale
 }: {
+  readonly onAskAgent: () => void
   readonly presentation: WorkspaceEntityPresentation
   readonly retry: () => void
   readonly stale: Extract<WorkspaceEntityState, { readonly _tag: "stale" }> | null
@@ -264,6 +267,14 @@ const EntityContent = ({
       <StatePanel description={message} key={message} title="Partial canonical view" tone="caution" />
     ))}
     {presentation.issue === null ? null : <WorkspaceIssueDetails issue={presentation.issue} />}
+    {presentation.pullRequest === null ? null : (
+      <WorkspacePullRequestDetails
+        approvers={presentation.collaborators.approvers}
+        onAskAgent={onAskAgent}
+        pullRequest={presentation.pullRequest}
+        reviewers={presentation.collaborators.reviewers}
+      />
+    )}
     <DeliveryPath presentation={presentation} />
   </div>
 )
@@ -350,7 +361,12 @@ export const WorkspaceEntityView = ({
         }
         className={styles.shell}
         content={
-          <EntityContent presentation={presentation} retry={retry} stale={state._tag === "stale" ? state : null} />
+          <EntityContent
+            onAskAgent={onAskAgent}
+            presentation={presentation}
+            retry={retry}
+            stale={state._tag === "stale" ? state : null}
+          />
         }
         data-service={presentation.service}
         data-workspace-entity-id={state.inspection.entity.projection.entityId}

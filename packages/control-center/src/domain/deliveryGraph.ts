@@ -82,7 +82,14 @@ const PullRequestDetails = Schema.TaggedStruct("pull-request", {
   sourceBranch: boundedText(500, "SourceBranch"),
   targetBranch: boundedText(500, "TargetBranch"),
   headRevision: boundedText(512, "HeadRevision"),
-  reviewState: Schema.Literals(["not-requested", "requested", "changes-requested", "approved", "merged"])
+  reviewState: Schema.Literals(["not-requested", "requested", "changes-requested", "approved", "merged"]),
+  lifecycle: Schema.optionalKey(Schema.NullOr(Schema.Literals(["open", "closed", "merged"]))),
+  description: Schema.optionalKey(Schema.NullOr(Schema.String.check(Schema.isMaxLength(50_000)))),
+  authorReference: Schema.optionalKey(Schema.NullOr(boundedText(512, "PullRequestAuthorReference"))),
+  baseRevision: Schema.optionalKey(Schema.NullOr(boundedText(512, "BaseRevision"))),
+  mergeBaseRevision: Schema.optionalKey(Schema.NullOr(boundedText(512, "MergeBaseRevision"))),
+  createdAt: Schema.optionalKey(Schema.NullOr(boundedText(64, "PullRequestCreatedAt"))),
+  updatedAt: Schema.optionalKey(Schema.NullOr(boundedText(64, "PullRequestUpdatedAt")))
 })
 
 const PageDetails = Schema.TaggedStruct("page", {
