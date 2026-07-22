@@ -654,6 +654,27 @@ const mergedPageContributors = (
   return [...contributors.values()]
 }
 
+const mergePartialPageAttachments = (
+  current: PageDetails["attachments"],
+  incoming: PageDetails["attachments"]
+): PageDetails["attachments"] => {
+  if (current === undefined) return incoming
+  if (incoming === undefined) return current
+  const incomingIds = new Set(incoming.map(({ id }) => id))
+  return [...incoming, ...current.filter(({ id }) => !incomingIds.has(id))].slice(0, 50)
+}
+
+const mergePartialPageVersions = (
+  current: PageDetails["versions"],
+  incoming: PageDetails["versions"]
+): PageDetails["versions"] => {
+  if (current === undefined) return incoming
+  if (incoming === undefined) return current
+  const versions = new Map(current.map((version) => [version.number, version]))
+  for (const version of incoming) versions.set(version.number, version)
+  return [...versions.values()].sort((left, right) => right.number - left.number).slice(0, 500)
+}
+
 const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
   const contributors = mergedPageContributors(
     current.contributors,
@@ -662,11 +683,11 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
   )
   const preserveLoadedContent = current.contentState === "loaded" &&
     (incoming.contentState === "lazy" || incoming.content === null)
-  const attachments = incoming.attachmentInventory?.complete === false && current.attachments !== undefined
-    ? current.attachments
+  const attachments = incoming.attachmentInventory?.complete === false
+    ? mergePartialPageAttachments(current.attachments, incoming.attachments)
     : incoming.attachments
-  const versions = incoming.versionHistory?.complete === false && current.versions !== undefined
-    ? current.versions
+  const versions = incoming.versionHistory?.complete === false
+    ? mergePartialPageVersions(current.versions, incoming.versions)
     : incoming.versions
   const merged: PageDetails = {
     ...current,

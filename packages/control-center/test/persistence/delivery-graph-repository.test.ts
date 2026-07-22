@@ -1073,7 +1073,7 @@ describe("DeliveryGraphRepository", () => {
           assert.strictEqual(owner?.personId, OWNER_PERSON_ID)
           assert.deepStrictEqual(owner?.roles, ["author", "issue-assignee", "issue-owner", "operator"])
           const sourceIdentities = owner?.sourceIdentities ?? []
-          assert.lengthOf(sourceIdentities, 16)
+          assert.lengthOf(sourceIdentities, 1)
           assert.deepStrictEqual(sourceIdentities[0], {
             pluginConnectionId: OTHER_PLUGIN_ID,
             providerId: "confluence",
@@ -1092,6 +1092,31 @@ describe("DeliveryGraphRepository", () => {
         assert.isTrue(Result.isFailure(crossedWorkspace))
         if (Result.isFailure(crossedWorkspace)) {
           assert.instanceOf(crossedWorkspace.failure, RecordNotFoundError)
+        }
+      })
+    ))
+
+  it.effect("does not expose Confluence owner identities for a Jira entity", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* database.sql`INSERT INTO person_identities (
+            workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+          ) VALUES (
+            ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${OTHER_PLUGIN_ID}, 'confluence', 'account-avery', ${CREATED_AT}
+          )`
+
+        const result = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        })
+        assert.strictEqual(result._tag, "entitySlice")
+        if (result._tag === "entitySlice") {
+          assert.isUndefined(result.value.entity.owners[0]?.sourceIdentities)
         }
       })
     ))
@@ -1215,6 +1240,25 @@ describe("DeliveryGraphRepository", () => {
         assert.isTrue(Result.isFailure(corruptedRelease))
         if (Result.isFailure(corruptedRelease)) {
           assert.instanceOf(corruptedRelease.failure, PersistedRecordError)
+        }
+
+        yield* database.sql`UPDATE entity_projection_revisions
+          SET extension_json = 'not-json'
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND entity_id = ${ISSUE_ID}
+            AND projection_revision = 2`
+        const malformedWorkspace = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(malformedWorkspace))
+        if (Result.isFailure(malformedWorkspace)) {
+          assert.instanceOf(malformedWorkspace.failure, PersistedRecordError)
         }
       })
     ))

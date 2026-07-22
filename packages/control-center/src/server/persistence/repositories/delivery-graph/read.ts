@@ -98,6 +98,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
   } = yield* makeDeliveryGraphDecoders
 
   const summaryExtensionJson = sql`CASE WHEN entity.entity_type = 'page'
+      AND json_valid(projection.extension_json)
     THEN json_set(
       projection.extension_json,
       '$.content', json('null'),
@@ -404,14 +405,14 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           WHERE identity.workspace_id = ${workspaceId}
             AND identity.person_id = ${owner.personId}
             AND identity.provider_id = 'confluence'
-          ORDER BY CASE WHEN identity.plugin_connection_id = (
+            AND identity.plugin_connection_id = (
             SELECT entity.plugin_connection_id
             FROM entities AS entity
             WHERE entity.workspace_id = ${workspaceId}
               AND entity.entity_id = ${entityId}
-          ) THEN 0 ELSE 1 END,
-            identity.plugin_connection_id,
-            identity.vendor_person_id
+              AND entity.provider_id = 'confluence'
+          )
+          ORDER BY identity.vendor_person_id
           LIMIT 16`
         const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows)
         return sourceIdentities.length === 0 ? decoded : { ...decoded, sourceIdentities }
