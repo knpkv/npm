@@ -270,10 +270,10 @@ const collaboratorsWithPage = (
     owners: [...collaborators.owners],
     reviewers: [...collaborators.reviewers]
   }
-  const knownNames = new Set(Object.values(next).flat().map(({ name }) => name.toLocaleLowerCase("en-US")))
+  const knownIds = new Set(Object.values(next).flat().map(({ id }) => id))
   for (const person of page.contributors) {
-    if (knownNames.has(person.name.toLocaleLowerCase("en-US"))) continue
-    knownNames.add(person.name.toLocaleLowerCase("en-US"))
+    if (knownIds.has(person.id)) continue
+    knownIds.add(person.id)
     if (person.role.includes("Owner")) next.owners.push(person)
     else if (person.role.includes("Watcher")) next.reviewers.push(person)
     else next.authors.push(person)

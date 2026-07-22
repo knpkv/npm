@@ -89,7 +89,7 @@ const inspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspectio
             roles: ["assignee", "commenter"]
           },
           {
-            sourcePersonId: "account-ada",
+            sourcePersonId: "01890f6f-6d6a-7cc0-98d2-000000000071",
             displayName: "Ada Kline",
             avatarUrl: null,
             active: true,
@@ -397,6 +397,22 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
             external: false,
             resolved: true,
             roles: ["watcher"]
+          },
+          {
+            sourcePersonId: "account-alex-one",
+            displayName: "Alex Lee",
+            active: true,
+            external: false,
+            resolved: true,
+            roles: ["contributor"]
+          },
+          {
+            sourcePersonId: "account-alex-two",
+            displayName: "Alex Lee",
+            active: true,
+            external: true,
+            resolved: true,
+            roles: ["watcher"]
           }
         ],
         versions: [
@@ -405,7 +421,7 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
             createdAt: "2026-07-14T10:00:00.000Z",
             message: "Add rollback verification",
             minorEdit: false,
-            authorSourcePersonId: "account-ada"
+            authorSourcePersonId: "01890f6f-6d6a-7cc0-98d2-000000000071"
           },
           {
             number: 11,
@@ -430,7 +446,14 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
         watcherInventory: { complete: false, pagesFetched: 2 }
       }
     },
-    owners: []
+    owners: [
+      {
+        avatarFallback: "AK",
+        displayName: "Ada Kline",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
+        roles: ["page-owner"]
+      }
+    ]
   },
   source: {
     ...sourceRevision,
@@ -1027,6 +1050,18 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector('a[href*="attachment"], a[href*="pixel.png"]')).toBeNull()
     expect(host.querySelector("textarea, input")).toBeNull()
     expect(host.textContent).not.toContain("Publish")
+  })
+
+  it("keeps same-name Confluence accounts distinct while collapsing an exact collaborator identity", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, confluenceInspection)
+    const collaborators = [
+      ...presentation.collaborators.authors,
+      ...presentation.collaborators.owners,
+      ...presentation.collaborators.reviewers
+    ]
+
+    expect(collaborators.filter(({ name }) => name === "Alex Lee")).toHaveLength(2)
+    expect(collaborators.filter(({ id }) => id === "01890f6f-6d6a-7cc0-98d2-000000000071")).toHaveLength(1)
   })
 
   it("states the lazy Confluence content boundary without inventing a document body", async () => {

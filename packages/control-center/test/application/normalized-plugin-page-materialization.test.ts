@@ -4588,16 +4588,130 @@ describe("normalized plugin page materialization", () => {
       })
       yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 2, committedAt: T4 },
-        normalizedPage("confluence-page-991-v13", {
-          ...nextRevisionAttributes,
+        normalizedPage("confluence-page-991-v13", nextRevisionAttributes, "13")
+      )
+      const absent = (yield* items()).items[0]?.projection
+      if (absent?.details._tag !== "page") return yield* Effect.die("expected a next-revision page")
+      assert.isUndefined(absent.details.linkedIssueKeys)
+      assert.isUndefined(absent.details.linkedReleaseVersions)
+
+      const revisionFourteenAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...nextRevisionAttributes,
+        currentVersion: 14,
+        updatedAt: "2026-07-19T09:04:00.000Z",
+        versions: [{
+          number: 14,
+          createdAt: "2026-07-19T09:04:00.000Z",
+          message: "Confirm explicit empty delivery links",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...nextRevisionAttributes.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T4 },
+        normalizedPage("confluence-page-991-v14", {
+          ...revisionFourteenAttributes,
           linkedIssueKeys: [],
           linkedReleaseVersions: []
-        }, "13")
+        }, "14")
       )
-      const cleared = (yield* items()).items[0]?.projection
-      if (cleared?.details._tag !== "page") return yield* Effect.die("expected a next-revision page")
-      assert.deepStrictEqual(cleared.details.linkedIssueKeys, [])
-      assert.deepStrictEqual(cleared.details.linkedReleaseVersions, [])
+      const explicitlyCleared = (yield* items()).items[0]?.projection
+      if (explicitlyCleared?.details._tag !== "page") return yield* Effect.die("expected an explicitly cleared page")
+      assert.deepStrictEqual(explicitlyCleared.details.linkedIssueKeys, [])
+      assert.deepStrictEqual(explicitlyCleared.details.linkedReleaseVersions, [])
+    })))
+
+  it.effect("retains loaded content and watcher identities across a same-revision lazy sync", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+      const contributor = (
+        accountId: string,
+        displayName: string,
+        roles: ReadonlyArray<"author" | "contributor" | "owner" | "watcher">
+      ) => ({ accountId, displayName, active: true, external: false, resolved: true, roles })
+      const owner = contributor("account-ada", "Ada Kline", ["owner", "author"])
+      const watcher = contributor("account-mina", "Mina Ortiz", ["watcher"])
+      const schemaVersion: 1 = 1
+      const status: "current" = "current"
+      const common = {
+        schemaVersion,
+        status,
+        spaceId: "space-payments",
+        parentId: null,
+        createdAt: "2026-07-19T09:00:00.000Z",
+        updatedAt: "2026-07-19T09:02:00.000Z",
+        currentVersion: 12,
+        versions: [{
+          number: 12,
+          createdAt: "2026-07-19T09:02:00.000Z",
+          message: null,
+          minorEdit: false,
+          authorId: "account-ada"
+        }],
+        versionHistory: { complete: true, pagesFetched: 1 }
+      }
+      const loadedAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: { representation: "safe-markdown", markdown: "## Recovery\n\nKeep this body." },
+        contributors: [owner]
+      })
+      const lazyAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: null,
+        contentState: "lazy",
+        contributors: [owner, watcher],
+        attachments: [{
+          id: "attachment-1",
+          title: "recovery.pdf",
+          createdAt: "2026-07-19T09:01:00.000Z",
+          mediaType: "application/pdf",
+          fileSize: 4096,
+          version: 1
+        }],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      const normalizedPage = (eventId: string, attributes: Schema.JsonObject) =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: eventId,
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "12",
+            entityType: "confluence-page",
+            vendorImmutableId: "loaded-before-sync",
+            sourceUrl: "https://wiki.example.test/pages/loaded-before-sync",
+            title: "Loaded before sync",
+            attributes
+          }]
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        streamKey: Schema.decodeSync(PluginStreamKey)("confluence-loaded-before-sync"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(scope, normalizedPage("loaded-page", loadedAttributes))
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3 },
+        normalizedPage("lazy-sync", lazyAttributes)
+      )
+
+      const projection = (yield* items()).items[0]?.projection
+      if (projection?.details._tag !== "page") return yield* Effect.die("expected a merged page")
+      assert.strictEqual(projection.details.contentState, "loaded")
+      assert.strictEqual(projection.details.content?.markdown, "## Recovery\n\nKeep this body.")
+      assert.strictEqual(projection.details.attachments?.[0]?.title, "recovery.pdf")
+      assert.sameMembers(
+        projection.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        ["account-ada", "account-mina"]
+      )
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>

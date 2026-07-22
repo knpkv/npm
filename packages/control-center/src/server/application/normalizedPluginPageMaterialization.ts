@@ -56,6 +56,7 @@ import {
 import { materializeRelationshipInference } from "./relationshipInferenceMaterialization.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
+type PageDetails = Extract<DeliveryEntityDetails, { readonly _tag: "page" }>
 type EntityTombstone = Extract<NormalizedPluginEventV1, { readonly _tag: "TombstoneEntity" }>
 type EvidenceAppend = Extract<NormalizedPluginEventV1, { readonly _tag: "AppendEvidence" }>
 type PersonUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertPerson" }>
@@ -625,6 +626,36 @@ const sameSourceUrl = (
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
   kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
 
+const mergedPageContributors = (
+  current: PageDetails["contributors"],
+  incoming: PageDetails["contributors"]
+): PageDetails["contributors"] => {
+  if (incoming === undefined) return current
+  if (current === undefined) return incoming
+  const contributors = new Map(current.map((contributor) => [contributor.sourcePersonId, contributor]))
+  for (const contributor of incoming) {
+    const previous = contributors.get(contributor.sourcePersonId)
+    contributors.set(
+      contributor.sourcePersonId,
+      previous === undefined
+        ? contributor
+        : { ...previous, ...contributor, roles: [...new Set([...previous.roles, ...contributor.roles])] }
+    )
+  }
+  return [...contributors.values()]
+}
+
+const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
+  const contributors = mergedPageContributors(current.contributors, incoming.contributors)
+  const preserveLoadedContent = current.contentState === "loaded" && incoming.contentState === "lazy"
+  const merged: PageDetails = {
+    ...current,
+    ...incoming,
+    ...(contributors === undefined ? {} : { contributors })
+  }
+  return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
+}
+
 const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV1)
 
 const pipelineEventsFromCacheRecords = Effect.fn(
@@ -702,14 +733,18 @@ const materializeUpsertEntity = Effect.fn(
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
   const currentDetails = currentProjection?.projection.details
-  const pageEnrichment = presentation.details._tag === "page" &&
-    presentation.details.contentState === "loaded" &&
+  const sameRevisionPage = existing?.sourceRevision.revision === event.revision &&
+    presentation.details._tag === "page" &&
     currentDetails?._tag === "page" &&
-    currentDetails.contentState !== "loaded"
+    currentProjection?.projection.entityState === "present"
+  const pageEnrichment = sameRevisionPage && (
+    currentDetails.contentState !== presentation.details.contentState ||
+    (currentDetails.content === null && presentation.details.content !== null)
+  )
   const effectiveForceProjection = forceProjection || pageEnrichment
   const effectivePresentation =
-    pageEnrichment && currentDetails?._tag === "page" && presentation.details._tag === "page"
-      ? { ...presentation, details: { ...currentDetails, ...presentation.details } }
+    sameRevisionPage && currentDetails?._tag === "page" && presentation.details._tag === "page"
+      ? { ...presentation, details: mergeSameRevisionPageDetails(currentDetails, presentation.details) }
       : presentation
   const schemaVersion = projectionSchemaVersion(kind)
   const refreshedSource = existing === null
