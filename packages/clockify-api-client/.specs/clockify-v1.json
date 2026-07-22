@@ -35,6 +35,7 @@
       "description": "This endpoint group is deprecated and should not be used."
     },
     { "name": "Time entry", "x-displayName": "Time entry" },
+    { "name": "Balance Assignment", "x-displayName": "Balance Assignment" },
     { "name": "Balance", "x-displayName": "Balance" },
     { "name": "Policy", "x-displayName": "Policy" },
     { "name": "Time Off", "x-displayName": "Time Off" },
@@ -50,6 +51,11 @@
       "name": "Entity Changes: Use cases",
       "description": "This section provides a step-by-step guide that shows you how to use the Entity Changes API to keep your system up to date with time entry data, including custom field values, without re-downloading everything each time.\n\n> ### 💡 Note\n> Currently, this guide covers only one use case (custom field changes), but we plan to add more in the future.  \n\n# Use Case: Keep Custom Field Values in Sync - Entity Changes Based on Detailed Report\n\nThis use case describes how to retrieve a full set of data (via the Detailed Report), then use incremental updates of custom fields or [other supported types](#tag/Entity-Changes:-Use-cases/Use-Case:-Keep-Custom-Field-Values-in-Sync-Entity-Changes-Based-on-Detailed-Report/Supported-types) to stay in sync, including new, updated or deleted records.  \n\n## Step 1: Get Initial Data Using the Detailed Report\n\nStart by fetching time entries for a specified date range using the Detailed Report API. This is your baseline data (base dataset). \n\nBelow is an example that fetches data from `May 1 to May 20, 2025`.\n\nExample: Get data from May 1 to May 20, 2025.\n\n  * **Use the `curl` command below:**\n```\ncurl --location 'https://{API_BASE_URL}/report/workspaces/{WORKSPACE_ID}/reports/detailed' \\\n--header 'Accept: application/json' \\\n--data '{\n    \"dateRangeStart\": \"2025-05-01T00:00:00.000Z\",\n    \"dateRangeEnd\": \"2025-05-20T23:59:59.999Z\"\n}'\n```\n\n  * **Sample response:**\n```json\n    {\n      \"timeentries\": [\n        {\n          \"_id\": \"1\",\n          \"description\": \"Time entry 1\",\n          \"timeInterval\": {\n            \"start\": \"2025-05-18T01:00:00Z\",\n            \"end\": \"2025-05-18T09:00:00.000Z\"\n          },\n          \"customFields\": [\n            {\n              \"customFieldId\": \"6808e9a6b77db953ea0d3f73\",\n              \"value\": \"custom field value 1\"\n            }\n          ]\n        },\n        {\n          \"_id\": \"2\",\n          \"description\": \"Time entry 2\",\n          \"timeInterval\": {\n            \"start\": \"2025-05-19T01:00:00Z\",\n            \"end\": \"2025-05-19T09:00:00.000Z\"\n          },\n          \"customFields\": [\n            {\n              \"customFieldId\": \"6808e9a6b77db953ea0d3f73\",\n              \"value\": \"Custom field value 2\"\n            }\n          ]\n        }\n      ]\n    }\n```\n\nThe response contains a list of time entries with all current custom field values. \nSave this in your database. You’ll use it to apply future changes\n\n> ### 💡 Note\n> After this, you don’t need to fetch the full report again. Simply use the following steps to apply the changes.  \n\n## Step 2: Retrieve Created Custom Field Values\n\nFetch any new custom field values added after the date range you fetched in Step 1.\n\nExample: Get newly created values after May 20, 2025.\n\n> ### 💡 Note\n> For the API specification see [Created entities - Custom field values ](#tag/Entity-changes-(Experimental)/operation/getCreatedEntityInfo)\n\n\n* **Use the `curl` command below:**\n\n```bash\ncurl -X GET \"https://{API_BASE_URL}/v1/workspaces/{WORKSPACE_ID}/entities/created?type=TIME_ENTRY_CUSTOM_FIELD_VALUE&start=2025-05-21T00:00:00Z&end=2025-05-22T00:00:00Z&limit=30&page=1\"\n```\n* **Sample response:**\n```json\n  [\n    {\n      \"auditMetadata\": {\n        \"updatedAt\": \"2025-05-21T04:00:00Z\",\n        \"createdAt\": \"2025-05-21T03:00:00Z\"\n      },\n      \"documentType\": \"TIME_ENTRY_CUSTOM_FIELD_VALUE\",\n      \"id\": \"...\",\n      \"customFieldId\": \"6808e9a6b77db953ea0d3f85\",\n      \"timeEntryId\": \"3\",\n      \"value\": \"Custom field value 3\"\n        \"sourceType\": \"TIMEENTRY\"\n    }\n  ]\n```\n\nThe response shows only newly created custom field values. \n\nEach record has a timeEntryId, so you know which entry to update.\n\nAdd these new values to your stored data.\n\n> ### 💡 Note\n> Run this daily, weekly, or as often as your app needs updates.\n\n\n## Step 3: Retrieve Updated Custom Field Values\n**Next**, fetch custom field values that were updated after your original data.\n\nExample: Get updates after May 20, 2025.\n\n> ### 💡 Note\n> For API specification see [Updated entities - Custom field values ](#tag/Entity-changes-(Experimental)/operation/getUpdatedEntityInfo)     \n\n  * **Use the `curl` command below:**\n\n\n```bash\ncurl -X GET \"https://{API_BASE_URL}/v1/workspaces/{WORKSPACE_ID}/entities/updated?type=TIME_ENTRY_CUSTOM_FIELD_VALUE&start=2025-05-21T00:00:00Z&end=2025-05-22T00:00:00Z&limit=30&page=1\"\n```\n* **Sample response:**\n```json\n  [\n    {\n      \"auditMetadata\": {\n        \"updatedAt\": \"2025-05-21T04:51:20Z\",\n        \"createdAt\": \"2025-05-19T04:51:10Z\"\n      },\n      \"documentType\": \"TIME_ENTRY_CUSTOM_FIELD_VALUE\",\n      \"id\": \"...\",\n      \"customFieldId\": \"6808e9a6b77db953ea0d3f73\",\n      \"timeEntryId\": \"2\",\n      \"value\": \"Custom field value 2 - Updated\"\n        \"sourceType\": \"TIMEENTRY\"\n    }\n  ]\n```\nThe response shows only updated values within the specified date range. \n\nUpdates are linked to their timeEntryId.\n\nUpdate the matching records in your database.\n\n> ### 💡 Note\n>  If a record was both created and updated in the same date range, it will only appear in the /created response, not /updated.\n\n## Step 4: Retrieve or Identify Deleted Custom Field Values\nFinally, handle deletions. Use this step to retrieve any custom field values that were deleted after your initial date range and remove them from your own database. \n\nExample: Get deletions after May 20, 2025.\n\n> ### 💡 Note\n> For more information about this API, see [Deleted entities - Custom field values ](#tag/Entity-changes-(Experimental)/operation/getDeletedEntityInfo)\n\n* **Use the `curl` command below:**\n```\ncurl -X GET \"https://{API_BASE_URL}/v1/workspaces/{WORKSPACE_ID}/entities/deleted?type=TIME_ENTRY_CUSTOM_FIELD_VALUE&start=2025-05-21T00:00:00Z&end=2025-05-22T00:00:00Z&limit=30&page=1\"\n```\n\n* **Sample response:**\n```json\n  [\n    {\n      \"id\": \"...\",\n      \"deletionBinId\": \"....\",\n      \"deletedAt\": \"2025-05-21T23:15:54.790Z\",\n      \"documentType\": \"TIME_ENTRY_CUSTOM_FIELD_VALUE\",\n      \"document\": {\n        \"customFieldId\": \"6808e9a6b77db953ea0d3f73\",\n        \"timeEntryId\": \"1\",\n        \"value\": \"custom field value 1\",\n        \"sourceType\": \"TIMEENTRY\"\n      }\n    }\n  ]\n```\n\nThe response contains references to the deleted values (e.g. timeEntryId and field ID). \n\nRemove or archive these records in your system.\n\n> ### 💡 Note \n> If a value was created and deleted in the same date range, it will not show up in the deleted results.\n\n## Supported types\n\n  This guide focuses on tracking custom field values `(type=TIME_ENTRY_CUSTOM_FIELD_VALUE)`.\n\n  The same approach can be applied to other data types. Simply change the type parameter in your requests and you can use the same steps for all supported types:\n\n  * `TIME_ENTRY`\n  * `TIME_ENTRY_RATE`\n  * `TIME_ENTRY_CUSTOM_FIELD_VALUE`\n\n  We may support more types in the future as the system evolves.\n",
       "x-displayName": "Entity Changes: Use cases"
+    },
+    {
+      "name": "Approval (Deprecated)",
+      "x-displayName": "Approval (Deprecated)",
+      "description": "This endpoint group contains deprecated endpoints from the [Approval](#tag/Approval) endpoint group."
     },
     {
       "name": "Scheduling (Deprecated)",
@@ -242,15 +248,15 @@
         "operationId": "getApprovalRequests",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           },
           {
@@ -305,6 +311,17 @@
               "example": 50,
               "default": 50
             }
+          },
+          {
+            "in": "query",
+            "name": "types",
+            "required": false,
+            "schema": {
+              "uniqueItems": true,
+              "type": "array",
+              "items": { "type": "string", "enum": ["TIMESHEET", "EXPENSE", "TIMESHEET_AND_EXPENSE"] },
+              "default": ["TIMESHEET", "TIMESHEET_AND_EXPENSE", "EXPENSE"]
+            }
           }
         ],
         "responses": {
@@ -322,18 +339,19 @@
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       },
       "post": {
+        "deprecated": true,
         "operationId": "createApprrovalRequest",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           }
         ],
@@ -348,7 +366,7 @@
           }
         },
         "summary": "Submit approval request",
-        "tags": ["Approval"],
+        "tags": ["Approval (Deprecated)"],
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
     },
@@ -358,15 +376,15 @@
         "operationId": "resubmitApprovalRequest",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           }
         ],
@@ -388,30 +406,31 @@
     "/v1/workspaces/{workspaceId}/approval-requests/users/{userId}": {
       "servers": [{ "url": "https://api.clockify.me/api" }],
       "post": {
-        "operationId": "createApprovalForOther",
+        "deprecated": true,
+        "operationId": "createApprovalForOtherDeprecated",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           },
           {
-            "description": "Represents a user identifier across the system.",
-            "example": "5a0ab5acb07987125438b60f",
+            "description": "Represents user identifier across the system.",
+            "example": "ff9ef6ffff9ef6ffff9ef6ff",
             "in": "path",
             "name": "userId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a user identifier across the system.",
-              "example": "5a0ab5acb07987125438b60f"
+              "description": "Represents user identifier across the system.",
+              "example": "ff9ef6ffff9ef6ffff9ef6ff"
             }
           }
         ],
@@ -425,8 +444,8 @@
             "description": "Created"
           }
         },
-        "summary": "Submit an approval request for a user",
-        "tags": ["Approval"],
+        "summary": "Submit approval request for user",
+        "tags": ["Approval (Deprecated)"],
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
     },
@@ -436,27 +455,27 @@
         "operationId": "resubmitApprovalRequestForOther",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           },
           {
-            "description": "Represents a user identifier across the system.",
-            "example": "5a0ab5acb07987125438b60f",
+            "description": "Represents user identifier across the system.",
+            "example": "ff9ef6ffff9ef6ffff9ef6ff",
             "in": "path",
             "name": "userId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a user identifier across the system.",
-              "example": "5a0ab5acb07987125438b60f"
+              "description": "Represents user identifier across the system.",
+              "example": "ff9ef6ffff9ef6ffff9ef6ff"
             }
           }
         ],
@@ -475,21 +494,76 @@
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
     },
+    "/v1/workspaces/{workspaceId}/approval-requests/users/{userId}/{type}": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "post": {
+        "operationId": "createApprovalForOtherWithType",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
+            }
+          },
+          {
+            "description": "Represents user identifier across the system.",
+            "example": "ff9ef6ffff9ef6ffff9ef6ff",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents user identifier across the system.",
+              "example": "ff9ef6ffff9ef6ffff9ef6ff"
+            }
+          },
+          {
+            "description": "Represents approval request type.",
+            "example": "timesheet",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": { "type": "string", "enum": ["TIMESHEET", "EXPENSE", "TIMESHEET_AND_EXPENSE"] }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateApprovalRequestNoType" } }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRequestDtoV1" } } },
+            "description": "Created"
+          }
+        },
+        "summary": "Submit approval request for user with type",
+        "tags": ["Approval"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
     "/v1/workspaces/{workspaceId}/approval-requests/{approvalRequestId}": {
       "servers": [{ "url": "https://api.clockify.me/api" }],
       "patch": {
         "operationId": "updateApprovalStatus",
         "parameters": [
           {
-            "description": "Represents a workspace identifier across the system.",
-            "example": "64a687e29ae1f428e7ebe303",
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
             "in": "path",
             "name": "workspaceId",
             "required": true,
             "schema": {
               "type": "string",
-              "description": "Represents a workspace identifier across the system.",
-              "example": "64a687e29ae1f428e7ebe303"
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
             }
           },
           {
@@ -516,6 +590,49 @@
           }
         },
         "summary": "Update an approval request",
+        "tags": ["Approval"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/approval-requests/{type}": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "post": {
+        "operationId": "createApprrovalRequest_1",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "dd087fe2dd087fe2dd087fe2",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "dd087fe2dd087fe2dd087fe2"
+            }
+          },
+          {
+            "description": "Represents approval request type.",
+            "example": "timesheet",
+            "in": "path",
+            "name": "type",
+            "required": true,
+            "schema": { "type": "string", "enum": ["TIMESHEET", "EXPENSE"] }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateApprovalRequestNoType" } }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ApprovalRequestDtoV1" } } },
+            "description": "Created"
+          }
+        },
+        "summary": "Submit approval request with type",
         "tags": ["Approval"],
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
@@ -5564,6 +5681,7 @@
     "/v1/workspaces/{workspaceId}/time-entries": {
       "servers": [{ "url": "https://api.clockify.me/api" }],
       "post": {
+        "description": "Important: if workspace has time entry custom fields configured that are marked as required you must provide them in the `customFields` array.",
         "operationId": "createTimeEntry",
         "parameters": [
           {
@@ -5590,6 +5708,45 @@
           }
         },
         "summary": "Add a new time entry",
+        "tags": ["Time entry"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/time-entries/batch": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "post": {
+        "operationId": "getMultipleTimeEntries",
+        "parameters": [
+          {
+            "description": "Represents a workspace identifier across the system.",
+            "example": "64a687e29ae1f428e7ebe303",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents a workspace identifier across the system.",
+              "example": "64a687e29ae1f428e7ebe303"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/GetTimeEntriesByIdsRequest" } }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/TimeEntryWithRatesDtoV1" } }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Get multiple time entries on a workspace",
         "tags": ["Time entry"],
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
@@ -5782,6 +5939,222 @@
         },
         "summary": "Update time entry on a workspace",
         "tags": ["Time entry"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/time-off/balance/assignment": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "post": {
+        "operationId": "createBalanceAssignment",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "60f91b3ffdaf031696ec61a8",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "60f91b3ffdaf031696ec61a8"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/CreateBalanceAssignmentV1Request" } }
+          },
+          "required": true
+        },
+        "responses": { "201": { "description": "Created" } },
+        "summary": "Creates a new balance assignment for a user in policy",
+        "tags": ["Balance Assignment"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/time-off/balance/assignment/user/{userId}/policy/{policyId}": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "get": {
+        "operationId": "getBalanceAssignmentsForUserAndPolicy",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "60f91b3ffdaf031696ec61a8",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "60f91b3ffdaf031696ec61a8"
+            }
+          },
+          {
+            "description": "Represents user identifier across the system.",
+            "example": "60f924bafdaf031696ec6218",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents user identifier across the system.",
+              "example": "60f924bafdaf031696ec6218"
+            }
+          },
+          {
+            "description": "Represents policy identifier across the system.",
+            "example": "63034cd0cb0fb876a57e93ad",
+            "in": "path",
+            "name": "policyId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents policy identifier across the system.",
+              "example": "63034cd0cb0fb876a57e93ad"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "*/*": {
+                "schema": { "type": "array", "items": { "$ref": "#/components/schemas/BalanceAssignmentV1Dto" } }
+              }
+            },
+            "description": "OK"
+          }
+        },
+        "summary": "Get all balance assignments of a user in policy",
+        "tags": ["Balance Assignment"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      }
+    },
+    "/v1/workspaces/{workspaceId}/time-off/balance/assignment/{balanceAssignmentId}/user/{userId}/policy/{policyId}": {
+      "servers": [{ "url": "https://api.clockify.me/api" }],
+      "delete": {
+        "operationId": "deleteBalanceAssignment",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "60f91b3ffdaf031696ec61a8",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "60f91b3ffdaf031696ec61a8"
+            }
+          },
+          {
+            "description": "Represents user identifier across the system.",
+            "example": "60f924bafdaf031696ec6218",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents user identifier across the system.",
+              "example": "60f924bafdaf031696ec6218"
+            }
+          },
+          {
+            "description": "Represents policy identifier across the system.",
+            "example": "63034cd0cb0fb876a57e93ad",
+            "in": "path",
+            "name": "policyId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents policy identifier across the system.",
+              "example": "63034cd0cb0fb876a57e93ad"
+            }
+          },
+          {
+            "description": "Represents balance assignment identifier across the system.",
+            "example": "63034cd0cb0fb876a57e01d7",
+            "in": "path",
+            "name": "balanceAssignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents balance assignment identifier across the system.",
+              "example": "63034cd0cb0fb876a57e01d7"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/DeleteBalanceAssignmentV1Request" } }
+          },
+          "required": true
+        },
+        "responses": { "200": { "description": "OK" } },
+        "summary": "Deletes a specific balance assignment",
+        "tags": ["Balance Assignment"],
+        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+      },
+      "put": {
+        "operationId": "updateBalanceAssignment",
+        "parameters": [
+          {
+            "description": "Represents workspace identifier across the system.",
+            "example": "60f91b3ffdaf031696ec61a8",
+            "in": "path",
+            "name": "workspaceId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents workspace identifier across the system.",
+              "example": "60f91b3ffdaf031696ec61a8"
+            }
+          },
+          {
+            "description": "Represents user identifier across the system.",
+            "example": "60f924bafdaf031696ec6218",
+            "in": "path",
+            "name": "userId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents user identifier across the system.",
+              "example": "60f924bafdaf031696ec6218"
+            }
+          },
+          {
+            "description": "Represents policy identifier across the system.",
+            "example": "63034cd0cb0fb876a57e93ad",
+            "in": "path",
+            "name": "policyId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents policy identifier across the system.",
+              "example": "63034cd0cb0fb876a57e93ad"
+            }
+          },
+          {
+            "description": "Represents balance assignment identifier across the system.",
+            "example": "63034cd0cb0fb876a57e93ad",
+            "in": "path",
+            "name": "balanceAssignmentId",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Represents balance assignment identifier across the system.",
+              "example": "63034cd0cb0fb876a57e93ad"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/UpdateBalanceAssignmentV1Request" } }
+          },
+          "required": true
+        },
+        "responses": { "204": { "description": "No Content" } },
+        "summary": "Updates a specific balance assignment",
+        "tags": ["Balance Assignment"],
         "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
       }
     },
@@ -8784,6 +9157,7 @@
             "enum": ["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"]
           },
           "active": { "type": "boolean" },
+          "eligibleForPendingMembership": { "type": "boolean" },
           "limitedAccount": { "type": "boolean" },
           "notRegistered": { "type": "boolean" }
         }
@@ -8905,6 +9279,7 @@
           },
           "owner": { "$ref": "#/components/schemas/ApprovalRequestOwnerDtoV1" },
           "status": { "$ref": "#/components/schemas/ApprovalRequestStatusDtoV1" },
+          "type": { "type": "string", "description": "Represents approval request type." },
           "workspaceId": {
             "type": "string",
             "description": "Represents workspace identifier across the system.",
@@ -9069,7 +9444,7 @@
             "description": "Indicates whether assignment is published or not.",
             "default": false
           },
-          "recurring": { "$ref": "#/components/schemas/RecurringAssignmentDto" },
+          "recurring": { "$ref": "#/components/schemas/RecurringAssignmentDtoV1" },
           "startTime": {
             "type": "string",
             "description": "Represents start time in hh:mm:ss format.",
@@ -9285,12 +9660,6 @@
             "description": "Represents automatic accrual period.",
             "example": "MONTH",
             "enum": ["MONTH", "YEAR"]
-          },
-          "timeUnit": {
-            "type": "string",
-            "description": "Represents automatic accrual time unit.",
-            "example": "DAYS",
-            "enum": ["DAYS", "HOURS"]
           }
         },
         "description": "Provide automatic accrual settings."
@@ -9358,6 +9727,18 @@
         },
         "description": "Provides automatic time entry creation settings."
       },
+      "BalanceAssignmentV1Dto": {
+        "type": "object",
+        "properties": {
+          "accrued": { "type": "number", "format": "double" },
+          "balance": { "type": "number", "format": "double" },
+          "dateRange": { "$ref": "#/components/schemas/DateRange" },
+          "id": { "type": "string" },
+          "policyId": { "type": "string" },
+          "userId": { "type": "string" },
+          "workspaceId": { "type": "string" }
+        }
+      },
       "BalanceDtoV1": {
         "type": "object",
         "properties": {
@@ -9383,6 +9764,12 @@
             "description": "Indicates whether the negative balance limit is allowed.",
             "example": true,
             "default": false
+          },
+          "negativeBalanceUsed": {
+            "type": "number",
+            "description": "Represents the amount of balance used outside of existing balance and validity period",
+            "format": "double",
+            "example": 20
           },
           "policyArchived": {
             "type": "boolean",
@@ -9824,6 +10211,62 @@
             "type": "string",
             "description": "Specifies an approval period start date in yyyy-MM-ddThh:mm:ssZ format.",
             "example": "2020-01-01T00:00:00.000Z"
+          },
+          "type": { "pattern": "TIMESHEET|EXPENSE", "type": "string" }
+        }
+      },
+      "CreateApprovalRequestNoType": {
+        "required": ["periodStart"],
+        "type": "object",
+        "properties": {
+          "period": {
+            "type": "string",
+            "description": "Specifies the approval period. It has to match the workspace approval period setting.",
+            "example": "MONTHLY",
+            "enum": ["WEEKLY", "SEMI_MONTHLY", "MONTHLY"]
+          },
+          "periodStart": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Specifies an approval period start date in yyyy-MM-ddThh:mm:ssZ format.",
+            "example": "2020-01-01T00:00:00.000Z"
+          }
+        }
+      },
+      "CreateBalanceAssignmentV1Request": {
+        "required": ["balance", "policyId", "userIds"],
+        "type": "object",
+        "properties": {
+          "balance": {
+            "maximum": 10000,
+            "type": "number",
+            "description": "Represents the amount of balance to be created",
+            "format": "double",
+            "example": 12
+          },
+          "dateRange": { "$ref": "#/components/schemas/DateRangeV1Request" },
+          "note": {
+            "type": "string",
+            "description": "Represents note attached to updating balance.",
+            "example": "Bonus days added."
+          },
+          "policyId": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Represents the identifier of the policy where the balance assignment will be created",
+            "example": "63034cd0cb0fb876a57e93ad"
+          },
+          "userIds": {
+            "minItems": 1,
+            "uniqueItems": true,
+            "type": "array",
+            "description": "Represents list of users' identifiers whose balance is to be updated.",
+            "example": ["5b715448b079875110792222", "5b715448b079875110791111"],
+            "items": {
+              "type": "string",
+              "description": "Represents list of users' identifiers whose balance is to be updated.",
+              "example": "[\"5b715448b079875110792222\",\"5b715448b079875110791111\"]"
+            }
           }
         }
       },
@@ -9867,7 +10310,7 @@
             "minLength": 1,
             "type": "string",
             "description": "Represents custom attribute name.",
-            "example": "race"
+            "example": "Location"
           },
           "namespace": {
             "minLength": 1,
@@ -9879,7 +10322,7 @@
             "minLength": 1,
             "type": "string",
             "description": "Represents custom attribute value.",
-            "example": "Asian"
+            "example": "Belgrade"
           }
         },
         "description": "Represents a list of create custom field request objects."
@@ -10220,24 +10663,45 @@
         }
       },
       "CreateRecurringAssignmentRequestV1": {
-        "required": ["weeks"],
         "type": "object",
         "properties": {
-          "repeat": {
-            "type": "boolean",
-            "description": "Indicates whether assignment is recurring or not.",
-            "default": false
+          "frequency": { "$ref": "#/components/schemas/RecurringFrequency" },
+          "interval": {
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer",
+            "description": "Represents interval for recurring (1 - every week/month, 2 - biweekly).",
+            "format": "int32"
           },
-          "weeks": {
+          "monthlyRecurringType": { "$ref": "#/components/schemas/MonthlyRecurringType" },
+          "occurrences": {
             "maximum": 99,
             "minimum": 1,
             "type": "integer",
-            "description": "Indicates number of weeks for assignment.",
+            "description": "Indicates number of occurrences for assignment.",
             "format": "int32",
             "example": 5
+          },
+          "recurringEndType": { "$ref": "#/components/schemas/RecurringEndType" },
+          "repeat": {
+            "type": "boolean",
+            "description": "Indicates whether the assignment is recurring. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `recurringEndType`, `until`, and `occurrences`.",
+            "deprecated": true,
+            "default": false
+          },
+          "until": {
+            "type": "string",
+            "description": "Date by which recurring assignments will be created",
+            "format": "date-time"
+          },
+          "weeks": {
+            "type": "integer",
+            "description": "Represents number of weeks for this assignment. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `recurringEndType`, `until`, and `occurrences`.",
+            "format": "int32",
+            "example": 5,
+            "deprecated": true
           }
-        },
-        "description": "Represents a recurring assignment object. This parameter is optional."
+        }
       },
       "CreateTimeEntryRequest": {
         "type": "object",
@@ -10258,7 +10722,7 @@
             "maxItems": 50,
             "minItems": 0,
             "type": "array",
-            "description": "Represents a list of value objects for user’s custom fields.",
+            "description": "Represents a list of values for time entry custom fields defined in the workspace settings.",
             "items": { "$ref": "#/components/schemas/UpdateCustomFieldRequest" }
           },
           "description": {
@@ -10692,6 +11156,13 @@
         },
         "description": "Provide startDate and endDate for the holiday."
       },
+      "DateRange": {
+        "type": "object",
+        "properties": {
+          "end": { "type": "string", "format": "date-time" },
+          "start": { "type": "string", "format": "date-time" }
+        }
+      },
       "DateRangeDto": {
         "type": "object",
         "properties": {
@@ -10699,6 +11170,18 @@
           "start": { "type": "string", "format": "date-time" }
         },
         "description": "Represents date range object."
+      },
+      "DateRangeV1Request": {
+        "type": "object",
+        "properties": {
+          "end": { "type": "string", "description": "Provide end date in YYYY-MM-DD format.", "example": "2021-12-25" },
+          "start": {
+            "type": "string",
+            "description": "Provide start date in YYYY-MM-DD format.",
+            "example": "2021-12-23"
+          }
+        },
+        "description": "Represents the date range when the new balance will be usable. If null, this will default to the current day until the same day next year."
       },
       "DefaultEntitiesDto": {
         "type": "object",
@@ -10711,6 +11194,18 @@
           "taskId": { "type": "string", "description": "Default task for automatically created time entries" }
         },
         "description": "Provides information about default project and task for automatically created time entries."
+      },
+      "DeleteBalanceAssignmentV1Request": {
+        "required": ["note"],
+        "type": "object",
+        "properties": {
+          "note": {
+            "minLength": 1,
+            "type": "string",
+            "description": "Represents a note explaining balance deletion",
+            "example": "All balance used."
+          }
+        }
       },
       "EntityCreationPermission": {
         "type": "object",
@@ -11353,11 +11848,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11442,11 +11940,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11529,11 +12030,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11616,11 +12120,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11703,11 +12210,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11790,11 +12300,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11877,11 +12390,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -11964,11 +12480,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12051,11 +12570,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12138,11 +12660,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12225,11 +12750,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12312,11 +12840,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12399,11 +12930,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12486,11 +13020,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12573,11 +13110,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12660,11 +13200,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12747,11 +13290,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12834,11 +13380,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -12921,11 +13470,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13008,11 +13560,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13095,11 +13650,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13182,11 +13740,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13269,11 +13830,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13356,11 +13920,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13443,11 +14010,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13530,11 +14100,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13617,11 +14190,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13704,11 +14280,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13791,11 +14370,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13878,11 +14460,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -13965,11 +14550,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14052,11 +14640,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14139,11 +14730,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14226,11 +14820,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14313,11 +14910,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14400,11 +15000,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14487,11 +15090,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14574,11 +15180,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14661,11 +15270,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14748,11 +15360,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14835,11 +15450,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -14922,11 +15540,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15009,11 +15630,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15096,11 +15720,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15183,11 +15810,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15270,11 +15900,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15357,11 +15990,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15444,11 +16080,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15531,11 +16170,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15618,11 +16260,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15705,11 +16350,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15792,11 +16440,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15879,11 +16530,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -15966,11 +16620,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16053,11 +16710,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16140,11 +16800,104 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS"
+            ]
+          },
+          "SCHEDULING_BILLABLE_AND_COST_AMOUNT": {
+            "type": "string",
+            "enum": [
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16227,11 +16980,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16314,11 +17070,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16401,11 +17160,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16488,11 +17250,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16575,11 +17340,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16662,11 +17430,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16749,11 +17520,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16836,11 +17610,194 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS"
+            ]
+          },
+          "TASK_COST_RATES": {
+            "type": "string",
+            "enum": [
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS"
+            ]
+          },
+          "TASK_HOURLY_RATES": {
+            "type": "string",
+            "enum": [
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -16923,11 +17880,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17010,11 +17970,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17097,11 +18060,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17184,11 +18150,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17271,11 +18240,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17358,11 +18330,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17445,11 +18420,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17532,11 +18510,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17619,11 +18600,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17706,11 +18690,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17793,11 +18780,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17880,11 +18870,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -17967,11 +18960,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18054,11 +19050,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18141,11 +19140,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18228,11 +19230,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18315,11 +19320,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18402,11 +19410,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18489,11 +19500,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -18588,11 +19602,14 @@
                 "REQUIRED_FIELDS",
                 "SCHEDULED_REPORTS",
                 "SCHEDULING",
+                "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
                 "SCREENSHOTS",
                 "SSO",
                 "SUMMARY_ESTIMATE",
                 "TARGETS_AND_REMINDERS",
                 "TASK_RATES",
+                "TASK_COST_RATES",
+                "TASK_HOURLY_RATES",
                 "TIME_OFF",
                 "UNLIMITED_REPORTS",
                 "USER_CUSTOM_FIELDS",
@@ -18638,6 +19655,29 @@
           "paidPlan": { "type": "boolean" },
           "regionalAllowed": { "type": "boolean" },
           "weight": { "type": "integer", "format": "int32" }
+        }
+      },
+      "GetTimeEntriesByIdsRequest": {
+        "required": ["timeEntryIds"],
+        "type": "object",
+        "properties": {
+          "hydrated": {
+            "type": "boolean",
+            "description": "Flag to set whether to include additional information of time entries or not.",
+            "example": false,
+            "default": false
+          },
+          "timeEntryIds": {
+            "minItems": 1,
+            "type": "array",
+            "description": "Represents time entry identifiers across the system.",
+            "example": ["64c777ddd3fcab07cfbb210c"],
+            "items": {
+              "type": "string",
+              "description": "Represents time entry identifiers across the system.",
+              "example": "[\"64c777ddd3fcab07cfbb210c\"]"
+            }
+          }
         }
       },
       "GetTimeOffRequestsV1Request": {
@@ -20169,6 +21209,16 @@
         },
         "description": "Represents a list of milestone objects."
       },
+      "MonthlyRecurringType": {
+        "type": "object",
+        "description": "Represents monthly recurring type",
+        "example": "FIXED_DAY",
+        "oneOf": [{ "type": "string", "enum": ["FIXED_DAY", "WEEK_POSITION"] }],
+        "properties": {
+          "FIXED_DAY": { "type": "string", "enum": ["FIXED_DAY", "WEEK_POSITION"] },
+          "WEEK_POSITION": { "type": "string", "enum": ["FIXED_DAY", "WEEK_POSITION"] }
+        }
+      },
       "NegativeBalanceDto": {
         "type": "object",
         "properties": {
@@ -20305,11 +21355,33 @@
           },
           "automaticAccrual": { "$ref": "#/components/schemas/AutomaticAccrualDto" },
           "automaticTimeEntryCreation": { "$ref": "#/components/schemas/AutomaticTimeEntryCreationDto" },
+          "color": {
+            "type": "string",
+            "description": "Represents the color assigned to the policy.",
+            "example": "#8BC34A"
+          },
           "everyoneIncludingNew": {
             "type": "boolean",
             "description": "Indicates whether the policy is applied to future new users.",
             "example": false,
             "default": false
+          },
+          "icon": {
+            "type": "string",
+            "description": "Represents the icon assigned to the policy.",
+            "example": "UMBRELLA",
+            "enum": [
+              "UMBRELLA",
+              "SNOWFLAKE",
+              "FAMILY",
+              "PLANE",
+              "STETHOSCOPE",
+              "HEALTH_METRICS",
+              "CHILDCARE",
+              "LUGGAGE",
+              "MONETIZATION",
+              "CALENDAR"
+            ]
           },
           "id": {
             "type": "string",
@@ -20724,12 +21796,30 @@
           }
         }
       },
-      "RecurringAssignmentDto": {
+      "RecurringAssignmentDtoV1": {
+        "required": ["frequency"],
         "type": "object",
         "properties": {
+          "frequency": { "$ref": "#/components/schemas/RecurringFrequency" },
+          "interval": {
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer",
+            "description": "Represents interval for recurring (1 - every week/month, 2 - biweekly).",
+            "format": "int32"
+          },
+          "monthlyRecurringType": { "$ref": "#/components/schemas/MonthlyRecurringType" },
+          "occurrences": {
+            "maximum": 99,
+            "minimum": 1,
+            "type": "integer",
+            "description": "Number of occurrences",
+            "format": "int32"
+          },
           "repeat": {
             "type": "boolean",
-            "description": "Indicates whether assignment is recurring or not.",
+            "description": "Indicates whether the assignment is recurring. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `until`, and `occurrences`.",
+            "deprecated": true,
             "default": false
           },
           "seriesId": {
@@ -20737,32 +21827,81 @@
             "description": "Represents series identifier.",
             "example": "64c777ddd3fcab07cfbb210c"
           },
+          "until": {
+            "type": "string",
+            "description": "Date by which recurring assignments will be created",
+            "format": "date-time"
+          },
           "weeks": {
             "type": "integer",
-            "description": "Represents number of weeks for thhis assignment.",
+            "description": "Represents number of weeks for this assignment. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `until`, and `occurrences`.",
             "format": "int32",
-            "example": 5
+            "example": 5,
+            "deprecated": true
           }
         },
         "description": "Represents recurring assignment object."
       },
       "RecurringAssignmentRequestV1": {
-        "required": ["weeks"],
         "type": "object",
         "properties": {
-          "repeat": {
-            "type": "boolean",
-            "description": "Indicates whether assignment is recurring or not.",
-            "default": false
+          "frequency": { "$ref": "#/components/schemas/RecurringFrequency" },
+          "interval": {
+            "maximum": 2,
+            "minimum": 1,
+            "type": "integer",
+            "description": "Represents interval for recurring (1 - every week/month, 2 - biweekly).",
+            "format": "int32"
           },
-          "weeks": {
+          "monthlyRecurringType": { "$ref": "#/components/schemas/MonthlyRecurringType" },
+          "occurrences": {
             "maximum": 99,
             "minimum": 1,
             "type": "integer",
-            "description": "Indicates number of weeks for assignment.",
+            "description": "Indicates number of occurrences for assignment.",
             "format": "int32",
             "example": 5
+          },
+          "recurringEndType": { "$ref": "#/components/schemas/RecurringEndType" },
+          "repeat": {
+            "type": "boolean",
+            "description": "Indicates whether the assignment is recurring. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `recurringEndType`, `until`, and `occurrences`.",
+            "deprecated": true,
+            "default": false
+          },
+          "until": {
+            "type": "string",
+            "description": "Date by which recurring assignments will be created",
+            "format": "date-time"
+          },
+          "weeks": {
+            "type": "integer",
+            "description": "Represents number of weeks for this assignment. This field is deprecated in favor of a more flexible recurrence model. To define recurrence, use the following fields instead: `frequency`, `interval`, `monthlyRecurringType`, `recurringEndType`, `until`, and `occurrences`.",
+            "format": "int32",
+            "example": 5,
+            "deprecated": true
           }
+        }
+      },
+      "RecurringEndType": {
+        "type": "object",
+        "description": "Represents recurring end type",
+        "example": "UNTIL_DATE",
+        "oneOf": [{ "type": "string", "enum": ["UNTIL_DATE", "AFTER_OCCURRENCES"] }],
+        "properties": {
+          "AFTER_OCCURRENCES": { "type": "string", "enum": ["UNTIL_DATE", "AFTER_OCCURRENCES"] },
+          "UNTIL_DATE": { "type": "string", "enum": ["UNTIL_DATE", "AFTER_OCCURRENCES"] }
+        }
+      },
+      "RecurringFrequency": {
+        "type": "object",
+        "description": "Represents recurring frequency type",
+        "example": "WEEKLY",
+        "oneOf": [{ "type": "string", "enum": ["NONE", "WEEKLY", "MONTHLY"] }],
+        "properties": {
+          "MONTHLY": { "type": "string", "enum": ["NONE", "WEEKLY", "MONTHLY"] },
+          "NONE": { "type": "string", "enum": ["NONE", "WEEKLY", "MONTHLY"] },
+          "WEEKLY": { "type": "string", "enum": ["NONE", "WEEKLY", "MONTHLY"] }
         }
       },
       "RoleDetailsDtoV1": {
@@ -21986,14 +23125,41 @@
           }
         }
       },
+      "UpdateBalanceAssignmentV1Request": {
+        "required": ["balanceChange"],
+        "type": "object",
+        "properties": {
+          "balanceChange": {
+            "maximum": 10000,
+            "minimum": -10000,
+            "type": "number",
+            "description": "Represents the change in balance of the balance assignment",
+            "format": "double",
+            "example": 12
+          },
+          "dateRange": { "$ref": "#/components/schemas/DateRangeV1Request" },
+          "note": {
+            "type": "string",
+            "description": "Represents note attached to updating balance.",
+            "example": "Bonus days added."
+          }
+        }
+      },
       "UpdateBalanceRequestV1": {
         "required": ["userIds", "value"],
         "type": "object",
         "properties": {
+          "dateRange": { "$ref": "#/components/schemas/DateRangeV1Request" },
           "note": {
             "type": "string",
             "description": "Represents a new balance note value.",
             "example": "Bonus days added."
+          },
+          "sync": {
+            "type": "boolean",
+            "description": "Indicates whether the call should be executed synchronously. By default, call is done asynchronously",
+            "example": true,
+            "default": false
           },
           "userIds": {
             "minItems": 1,
@@ -22011,7 +23177,7 @@
             "maximum": 10000,
             "minimum": -10000,
             "type": "number",
-            "description": "Represents a new balance value.",
+            "description": "Represents the change in balance value.",
             "format": "double",
             "example": 22
           }
@@ -22351,9 +23517,7 @@
           "archived",
           "everyoneIncludingNew",
           "hasExpiration",
-          "name",
-          "userGroups",
-          "users"
+          "name"
         ],
         "type": "object",
         "properties": {
@@ -23304,7 +24468,6 @@
               "KIOSK_PIN_CODE",
               "KIOSK",
               "KIOSK_SESSION",
-              "KIOSK_PHOTO_CAPTURE",
               "MARKETPLACE_ADDON",
               "INVOICE_PAYMENT",
               "DELETION_DOCUMENT",
@@ -23319,6 +24482,7 @@
               "LOG_BIN",
               "BALANCE_ASSIGNMENT",
               "CUSTOM_COLOR",
+              "KIOSK_PHOTO_CAPTURE",
               "CUSTOM_COLORS_INDEX",
               "SAMPLE_DATA",
               "WEBHOOK_EVENT_STATUS"
@@ -26287,11 +27451,14 @@
               "REQUIRED_FIELDS",
               "SCHEDULED_REPORTS",
               "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
               "SCREENSHOTS",
               "SSO",
               "SUMMARY_ESTIMATE",
               "TARGETS_AND_REMINDERS",
               "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
               "TIME_OFF",
               "UNLIMITED_REPORTS",
               "USER_CUSTOM_FIELDS",
@@ -28836,6 +30003,7 @@
         "Scheduling",
         "Tag",
         "Time entry",
+        "Balance Assignment",
         "Balance",
         "Policy",
         "Time Off",
@@ -28846,7 +30014,7 @@
     { "name": "Clockify Audit Log API", "tags": ["Audit Log Report"] },
     {
       "name": "Deprecated API",
-      "tags": ["Template (Deprecated)", "Scheduling (Deprecated)", "Workspace (Deprecated)"]
+      "tags": ["Template (Deprecated)", "Approval (Deprecated)", "Scheduling (Deprecated)", "Workspace (Deprecated)"]
     },
     { "name": "Experimental API", "tags": ["Entity changes (Experimental)"] },
     { "name": "Guide", "tags": ["Entity Changes: Use cases"] }
