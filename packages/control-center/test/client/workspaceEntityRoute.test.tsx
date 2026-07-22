@@ -3,7 +3,7 @@
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { MemoryRouter, useLocation } from "react-router"
+import { MemoryRouter, useLocation, useNavigate } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -14,6 +14,7 @@ import {
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
+import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -547,6 +548,53 @@ describe("canonical workspace entity", () => {
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
     expect(onAskAgent).toHaveBeenCalledOnce()
+  })
+
+  it("opens the release-owned agent from a pull request reached through a release", async () => {
+    const releaseOrigin = {
+      hash: "#work",
+      pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview`,
+      search: "?filter=attention",
+      state: null
+    }
+    const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+    const RoutedPullRequest = (): ReactElement => {
+      const location = useLocation()
+      const navigate = useNavigate()
+      const agentPath = workspaceEntityAgentPath(releaseOrigin, WORKSET_WORKSPACE_ID, location)
+      return (
+        <WorkspaceEntityView
+          onAskAgent={() => navigate(agentPath)}
+          originHref={`${releaseOrigin.pathname}${releaseOrigin.search}${releaseOrigin.hash}`}
+          originLabel="Back to release"
+          originState={null}
+          retry={() => undefined}
+          state={pullRequestState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      )
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <MemoryRouter initialEntries={[entityHref]}>
+          <LocationProbe />
+          <RoutedPullRequest />
+        </MemoryRouter>
+      )
+    )
+    const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Ask Relay to review"
+    )
+    if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+
+    await act(async () => reviewButton.click())
+
+    expect(host.querySelector("[data-location]")?.textContent).toBe(
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+    )
   })
 
   it("distinguishes a shortened comment body from an omitted-comments collection", async () => {

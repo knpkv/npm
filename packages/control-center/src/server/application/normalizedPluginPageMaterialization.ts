@@ -62,7 +62,7 @@ interface RelationshipEndpointResolution {
 }
 
 const OptionalText = Schema.optionalKey(Schema.NullOr(Schema.String))
-const OptionalTimestamp = Schema.optionalKey(Schema.NullOr(UtcTimestamp))
+const OptionalUnknown = Schema.optionalKey(Schema.NullOr(Schema.Unknown))
 const NamedText = Schema.Union([
   Schema.String,
   Schema.Struct({ name: Schema.optionalKey(Schema.NullOr(Schema.String)) })
@@ -80,8 +80,8 @@ const EntityAttributes = Schema.Struct({
   mergeBase: OptionalText,
   description: OptionalText,
   authorArn: OptionalText,
-  creationDate: OptionalTimestamp,
-  lastActivityDate: OptionalTimestamp,
+  creationDate: OptionalUnknown,
+  lastActivityDate: OptionalUnknown,
   reviewState: OptionalText,
   spaceKey: OptionalText,
   spaceId: OptionalText,
@@ -163,6 +163,18 @@ const optionalBounded = (value: string | null | undefined, maximum: number): str
 
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : (value?.name ?? null)
+
+const decodedPullRequestTimestamp = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodePullRequestTimestamp"
+)(function*(
+  value: unknown,
+  eventId: string
+): Effect.fn.Return<UtcTimestamp | null, NormalizedPluginPageMaterializationError> {
+  if (value === null || value === undefined) return null
+  return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
+    Effect.mapError(() => malformed("normalized-pull-request-timestamp-invalid", eventId))
+  )
+})
 
 const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.decodeIssueAttributes")(function*(
   event: EntityUpsert
@@ -295,7 +307,9 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "pull-request":
+    case "pull-request": {
+      const creationDate = yield* decodedPullRequestTimestamp(attributes.creationDate, event.eventId)
+      const lastActivityDate = yield* decodedPullRequestTimestamp(attributes.lastActivityDate, event.eventId)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -310,14 +324,11 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           authorReference: optionalBounded(attributes.authorArn, 512),
           baseRevision: optionalBounded(attributes.baseRevision, 512),
           mergeBaseRevision: optionalBounded(attributes.mergeBase, 512),
-          createdAt: attributes.creationDate === null || attributes.creationDate === undefined
-            ? null
-            : DateTime.formatIso(attributes.creationDate),
-          updatedAt: attributes.lastActivityDate === null || attributes.lastActivityDate === undefined
-            ? null
-            : DateTime.formatIso(attributes.lastActivityDate)
+          createdAt: creationDate === null ? null : DateTime.formatIso(creationDate),
+          updatedAt: lastActivityDate === null ? null : DateTime.formatIso(lastActivityDate)
         }
       }
+    }
     case "page":
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
@@ -539,6 +550,8 @@ const sameSourceUrl = (
   right: EntityUpsert["sourceUrl"]
 ): boolean => left?.href === right?.href
 
+const projectionSchemaVersion = (kind: DeliveryEntityKind): number => kind === "pull-request" ? 2 : 1
+
 const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(function*(
   persistence: PersistenceService,
   workspaceId: WorkspaceId,
@@ -568,10 +581,12 @@ const materializeUpsertEntity = Effect.fn(
   const currentProjection = existing === null
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
+  const schemaVersion = projectionSchemaVersion(kind)
   if (
     existing !== null &&
     existing.sourceRevision.revision === event.revision &&
-    currentProjection?.projection.entityState === "present"
+    currentProjection?.projection.entityState === "present" &&
+    currentProjection.projection.projectionSchemaVersion === schemaVersion
   ) {
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
@@ -605,7 +620,7 @@ const materializeUpsertEntity = Effect.fn(
         projectionRevision,
         sourceEntityRevision: LedgerRevision.make(persisted.revision),
         supersedesProjectionRevision: currentProjection?.projection.projectionRevision ?? null,
-        projectionSchemaVersion: 1,
+        projectionSchemaVersion: schemaVersion,
         entityState: "present",
         entityType: kind,
         displayKey: presentation.displayKey,

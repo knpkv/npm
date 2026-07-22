@@ -8,6 +8,8 @@ import {
   isSafeWorkspaceEntityOrigin,
   makeWorkspaceEntityRouteState,
   resolveWorkspaceEntityOrigin,
+  workspaceEntityAgentPath,
+  workspaceEntityOriginAgentPath,
   workspaceEntityOriginHref,
   workspaceEntityParentPath,
   workspaceEntityPath,
@@ -99,6 +101,40 @@ describe("workspace entity routes", () => {
     )
     expect(workspaceEntityStateForHref(`/w/${workspaceId}/releases/${releaseId}`, entityLocation)).toBeUndefined()
     expect(workspaceEntityStateForHref("https://jira.example.test/browse/OPS-428", entityLocation)).toBeUndefined()
+  })
+
+  it("routes release-origin entities to the release-owned agent thread", () => {
+    const releaseOrigin = entityOriginFromLocation({
+      hash: "#release-work",
+      pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
+      search: `?object=${entityId}`
+    })
+    const itemsOrigin = entityOriginFromLocation({
+      hash: "#results",
+      pathname: `/w/${workspaceId}/items`,
+      search: "?q=payments"
+    })
+
+    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId)).toBe(
+      `/w/${workspaceId}/releases/${releaseId}/agent`
+    )
+    expect(workspaceEntityOriginAgentPath(itemsOrigin, workspaceId)).toBeNull()
+    expect(workspaceEntityAgentPath(releaseOrigin, workspaceId, {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "?tab=review"
+    })).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(itemsOrigin, workspaceId, {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "?tab=review"
+    })).toBe(
+      `/agent?from=${
+        encodeURIComponent(
+          `${workspaceEntityPath(workspaceId, entityId)}?tab=review#relationships`
+        )
+      }`
+    )
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {

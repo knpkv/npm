@@ -16,11 +16,11 @@ import { Link, useLocation, useNavigate, useOutletContext, useParams } from "rea
 
 import type { EntityId as EntityIdType, WorkspaceId as WorkspaceIdType } from "../../domain/identifiers.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
-import { contextualAgentPath } from "../contextualAgentPath.js"
 import {
   decodeEntityRouteId,
   resolveWorkspaceEntityOrigin,
   type WorkspaceEntityOrigin,
+  workspaceEntityAgentPath,
   workspaceEntityOriginHref,
   workspaceEntityParentPath
 } from "../items/workspaceEntityRoutes.js"
@@ -415,11 +415,10 @@ const ConnectedWorkspaceEntity = ({
   )
   const resolvedOrigin = resolveWorkspaceEntityOrigin(location.state, workspaceId, entityId)
   const resolvedOriginHref = workspaceEntityOriginHref(resolvedOrigin.origin)
+  const agentPath = workspaceEntityAgentPath(resolvedOrigin.origin, workspaceId, location)
   return (
     <WorkspaceEntityView
-      onAskAgent={() =>
-        navigate(contextualAgentPath(location.pathname, location.search, location.hash), { state: location.state })
-      }
+      onAskAgent={() => navigate(agentPath, { state: location.state })}
       originHref={resolvedOriginHref}
       originLabel={originLabel(resolvedOriginHref, workspaceId)}
       originState={resolvedOrigin.origin.state}

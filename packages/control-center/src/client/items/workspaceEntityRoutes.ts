@@ -9,6 +9,8 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
+import { contextualAgentPath } from "../contextualAgentPath.js"
+import { releaseAgentPath } from "../releases/releasePaths.js"
 import { type ReleaseRouteState, ReleaseRouteStateSchema, retainReleaseRouteState } from "../releases/releaseRoutes.js"
 import { workspaceEntityParentPath } from "../workspaceEntityPaths.js"
 
@@ -201,3 +203,21 @@ export const workspaceEntityOriginHref = ({
   pathname,
   search
 }: WorkspaceEntityOrigin): string => `${pathname}${search}${hash}`
+
+/** Resolve a release-owned agent thread only when the stored origin is an exact release route. */
+export const workspaceEntityOriginAgentPath = (
+  origin: WorkspaceEntityOrigin,
+  workspaceId: WorkspaceIdType
+): string | null => {
+  const target = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
+  return target === null ? null : releaseAgentPath(target.workspaceId, target.releaseId)
+}
+
+/** Keep entity actions in a release-owned thread, falling back to the current-page context. */
+export const workspaceEntityAgentPath = (
+  origin: WorkspaceEntityOrigin,
+  workspaceId: WorkspaceIdType,
+  current: Pick<LocationParts, "hash" | "pathname" | "search">
+): string =>
+  workspaceEntityOriginAgentPath(origin, workspaceId) ??
+    contextualAgentPath(current.pathname, current.search, current.hash)
