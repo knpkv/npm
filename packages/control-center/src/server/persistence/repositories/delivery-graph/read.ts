@@ -383,14 +383,21 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           rolesCsv: [...owner.roles].sort().join(",")
         })
         const identityRows = yield* sql<Record<string, unknown>>`SELECT
-            plugin_connection_id AS pluginConnectionId,
-            provider_id AS providerId,
-            vendor_person_id AS vendorPersonId
-          FROM person_identities
-          WHERE workspace_id = ${workspaceId}
-            AND person_id = ${owner.personId}
-            AND provider_id = 'confluence'
-          ORDER BY provider_id, plugin_connection_id, vendor_person_id
+            identity.plugin_connection_id AS pluginConnectionId,
+            identity.provider_id AS providerId,
+            identity.vendor_person_id AS vendorPersonId
+          FROM person_identities AS identity
+          WHERE identity.workspace_id = ${workspaceId}
+            AND identity.person_id = ${owner.personId}
+            AND identity.provider_id = 'confluence'
+          ORDER BY CASE WHEN identity.plugin_connection_id = (
+            SELECT entity.plugin_connection_id
+            FROM entities AS entity
+            WHERE entity.workspace_id = ${workspaceId}
+              AND entity.entity_id = ${entityId}
+          ) THEN 0 ELSE 1 END,
+            identity.plugin_connection_id,
+            identity.vendor_person_id
           LIMIT 16`
         const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows)
         return sourceIdentities.length === 0 ? decoded : { ...decoded, sourceIdentities }

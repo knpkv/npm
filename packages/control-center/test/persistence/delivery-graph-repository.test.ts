@@ -33,6 +33,13 @@ const WORKSPACE_A = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-1000
 const WORKSPACE_B = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-100000000002")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000003")
 const OTHER_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-10000000000e")
+const NOISE_CONFLUENCE_PLUGIN_IDS = Array.from(
+  { length: 16 },
+  (_, index) =>
+    Schema.decodeSync(PluginConnectionId)(
+      `01890f6f-6d6a-7cc0-98d2-${String(index + 1).padStart(12, "0")}`
+    )
+)
 const ISSUE_ID = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-100000000004")
 const PIPELINE_ID = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-100000000005")
 const ISSUE_NODE_ID = Schema.decodeSync(GraphNodeId)("01890f6f-6d6a-7cc0-98d2-100000000006")
@@ -984,6 +991,9 @@ describe("DeliveryGraphRepository", () => {
         const repository = yield* DeliveryGraphRepository
         const database = yield* Database
         yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* database.sql`UPDATE entities
+          SET plugin_connection_id = ${OTHER_PLUGIN_ID}, provider_id = 'confluence'
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}`
         yield* Effect.forEach(
           Array.from({ length: 16 }, (_, index) => `jira-account-${String(index).padStart(2, "0")}`),
           (vendorPersonId) =>
@@ -999,6 +1009,26 @@ describe("DeliveryGraphRepository", () => {
           ) VALUES (
             ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${OTHER_PLUGIN_ID}, 'confluence', 'account-avery', ${CREATED_AT}
           )`
+        yield* Effect.forEach(
+          NOISE_CONFLUENCE_PLUGIN_IDS,
+          (pluginConnectionId, index) =>
+            Effect.gen(function*() {
+              yield* database.sql`INSERT INTO plugin_connections (
+                  workspace_id, plugin_connection_id, provider_id, display_name,
+                  revision, is_enabled, created_at, updated_at
+                ) VALUES (
+                  ${WORKSPACE_A}, ${pluginConnectionId}, 'confluence',
+                  ${`Noise Confluence ${String(index)}`}, 1, 1, ${CREATED_AT}, ${CREATED_AT}
+                )`
+              yield* database.sql`INSERT INTO person_identities (
+                  workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+                ) VALUES (
+                  ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${pluginConnectionId}, 'confluence',
+                  ${`noise-account-${String(index).padStart(2, "0")}`}, ${CREATED_AT}
+                )`
+            }),
+          { discard: true }
+        )
 
         const firstRelationship = initialBatch.relationships[0]
         if (firstRelationship === undefined) return yield* Effect.die("Expected relationship fixture")
@@ -1035,17 +1065,21 @@ describe("DeliveryGraphRepository", () => {
         if (bounded._tag === "entitySlice") {
           assert.strictEqual(bounded.value.entity.projection.entityId, ISSUE_ID)
           assert.deepStrictEqual(bounded.value.entity.releaseIds, [RELEASE_ID, OTHER_RELEASE_ID].sort())
-          assert.deepStrictEqual(bounded.value.entity.owners, [{
-            avatarFallback: "AB",
-            displayName: "Avery Bell",
-            personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"],
-            sourceIdentities: [{
-              pluginConnectionId: OTHER_PLUGIN_ID,
-              providerId: "confluence",
-              vendorPersonId: VendorImmutableId.make("account-avery")
-            }]
-          }])
+          assert.lengthOf(bounded.value.entity.owners, 1)
+          const owner = bounded.value.entity.owners[0]
+          assert.isDefined(owner)
+          assert.strictEqual(owner?.avatarFallback, "AB")
+          assert.strictEqual(owner?.displayName, "Avery Bell")
+          assert.strictEqual(owner?.personId, OWNER_PERSON_ID)
+          assert.deepStrictEqual(owner?.roles, ["author", "issue-assignee", "issue-owner", "operator"])
+          const sourceIdentities = owner?.sourceIdentities ?? []
+          assert.lengthOf(sourceIdentities, 16)
+          assert.deepStrictEqual(sourceIdentities[0], {
+            pluginConnectionId: OTHER_PLUGIN_ID,
+            providerId: "confluence",
+            vendorPersonId: VendorImmutableId.make("account-avery")
+          })
+          assert.isTrue(sourceIdentities.every(({ providerId }) => providerId === "confluence"))
           assert.lengthOf(bounded.value.relationships, 1)
           assert.isTrue(bounded.value.truncated)
         }
