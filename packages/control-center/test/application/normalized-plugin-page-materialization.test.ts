@@ -2799,6 +2799,22 @@ describe("normalized plugin page materialization", () => {
             headRevision: "verification-head",
             reviewState: "requested"
           }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-codecommit-open-1",
+          observedAt: "2026-07-19T09:01:55.000Z",
+          revision: "pull-request-codecommit-open-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "20",
+          sourceUrl: "https://console.aws.example/pull-requests/20",
+          title: "Production-shaped CodeCommit pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/production-shape",
+            targetBranch: "main",
+            headRevision: "production-head",
+            status: "OPEN"
+          }
         }]
       })
       const scope: NormalizedPluginPageMaterializationScope = {
@@ -2812,7 +2828,7 @@ describe("normalized plugin page materialization", () => {
       }
 
       const receipt = yield* materializeNormalizedPluginPage(scope, page)
-      assert.strictEqual(receipt.entityProjectionCount, 3)
+      assert.strictEqual(receipt.entityProjectionCount, 4)
 
       const readStatus = (status: "active" | "done" | "failed") =>
         persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -2834,7 +2850,7 @@ describe("normalized plugin page materialization", () => {
       ) return yield* Effect.die("expected workspace entity projections")
 
       assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["17"])
-      assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19"])
+      assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
       assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
       const details = done.value.items[0]?.projection.details
       if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
@@ -2860,7 +2876,7 @@ describe("normalized plugin page materialization", () => {
         reviewSearch._tag !== "workspaceEntityProjections"
       ) return yield* Effect.die("expected searchable workspace entity projections")
       assert.deepStrictEqual(lifecycleSearch.value.items.map(({ projection }) => projection.displayKey), ["17"])
-      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19"])
+      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
     })))
 
   it.effect("backfills the current pull-request projection when its schema version is stale", () =>

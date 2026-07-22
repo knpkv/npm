@@ -318,7 +318,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState),
+          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status)),
           lifecycle: pullRequestLifecycle(namedText(attributes.status)),
           description: optionalBounded(attributes.description, 50_000),
           authorReference: optionalBounded(attributes.authorArn, 512),

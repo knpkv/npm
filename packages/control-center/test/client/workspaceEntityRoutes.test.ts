@@ -123,12 +123,17 @@ describe("workspace entity routes", () => {
       hash: "#relationships",
       pathname: workspaceEntityPath(workspaceId, entityId),
       search: "?tab=review"
-    })).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    }, null)).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
     expect(workspaceEntityAgentPath(itemsOrigin, workspaceId, {
       hash: "#relationships",
       pathname: workspaceEntityPath(workspaceId, entityId),
       search: "?tab=review"
-    })).toBe(
+    }, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(itemsOrigin, workspaceId, {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "?tab=review"
+    }, null)).toBe(
       `/agent?from=${
         encodeURIComponent(
           `${workspaceEntityPath(workspaceId, entityId)}?tab=review#relationships`

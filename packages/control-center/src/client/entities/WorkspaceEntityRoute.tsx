@@ -415,7 +415,11 @@ const ConnectedWorkspaceEntity = ({
   )
   const resolvedOrigin = resolveWorkspaceEntityOrigin(location.state, workspaceId, entityId)
   const resolvedOriginHref = workspaceEntityOriginHref(resolvedOrigin.origin)
-  const agentPath = workspaceEntityAgentPath(resolvedOrigin.origin, workspaceId, location)
+  const canonicalReleaseId =
+    controller.state._tag === "ready" || controller.state._tag === "stale"
+      ? controller.state.inspection.entity.canonicalReleaseId
+      : null
+  const agentPath = workspaceEntityAgentPath(resolvedOrigin.origin, workspaceId, location, canonicalReleaseId)
   return (
     <WorkspaceEntityView
       onAskAgent={() => navigate(agentPath, { state: location.state })}

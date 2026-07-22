@@ -550,23 +550,41 @@ describe("canonical workspace entity", () => {
     expect(onAskAgent).toHaveBeenCalledOnce()
   })
 
-  it("opens the release-owned agent from a pull request reached through a release", async () => {
-    const releaseOrigin = {
-      hash: "#work",
-      pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview`,
-      search: "?filter=attention",
-      state: null
-    }
+  it.each([
+    [
+      "a release",
+      {
+        hash: "#work",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview`,
+        search: "?filter=attention",
+        state: null
+      }
+    ],
+    [
+      "a direct Items route",
+      {
+        hash: "#review",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+        search: "?q=payments",
+        state: null
+      }
+    ]
+  ])("opens the release-owned agent from a pull request reached through %s", async (_label, origin) => {
     const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
     const RoutedPullRequest = (): ReactElement => {
       const location = useLocation()
       const navigate = useNavigate()
-      const agentPath = workspaceEntityAgentPath(releaseOrigin, WORKSET_WORKSPACE_ID, location)
+      const agentPath = workspaceEntityAgentPath(
+        origin,
+        WORKSET_WORKSPACE_ID,
+        location,
+        pullRequestInspection.entity.canonicalReleaseId
+      )
       return (
         <WorkspaceEntityView
           onAskAgent={() => navigate(agentPath)}
-          originHref={`${releaseOrigin.pathname}${releaseOrigin.search}${releaseOrigin.hash}`}
-          originLabel="Back to release"
+          originHref={`${origin.pathname}${origin.search}${origin.hash}`}
+          originLabel="Back to context"
           originState={null}
           retry={() => undefined}
           state={pullRequestState}
