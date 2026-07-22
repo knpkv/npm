@@ -30,7 +30,7 @@ import {
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { NormalizedIssueAttributes } from "../../domain/normalizedIssue.js"
-import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plugins/events.js"
+import { NormalizedPluginEventV1, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
@@ -526,7 +526,42 @@ const sameSourceUrl = (
   right: EntityUpsert["sourceUrl"]
 ): boolean => left?.href === right?.href
 
-const projectionSchemaVersion = (kind: DeliveryEntityKind): number => kind === "pull-request" ? 2 : 1
+const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
+  kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+
+const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV1)
+
+const currentPipelineEvents = Effect.fn("NormalizedPluginPageMaterialization.currentPipelineEvents")(function*(
+  persistence: PersistenceService,
+  scope: NormalizedPluginPageMaterializationScope,
+  eventId: string
+) {
+  const records = yield* persistence.pluginRuntime.getCache(
+    scope.workspaceId,
+    scope.pluginConnectionId,
+    scope.streamKey
+  )
+  const groups = yield* Effect.forEach(
+    records,
+    (record) =>
+      Effect.gen(function*() {
+        if (record.state !== "present" || record.payloadJson === null) return []
+        const cached = yield* Schema.decodeUnknownEffect(CachedNormalizedPluginEvent)(record.payloadJson).pipe(
+          Effect.mapError(() => malformed("normalized-pipeline-cache-event-invalid", eventId))
+        )
+        if (
+          cached._tag !== "UpsertEntity" ||
+          (cached.entityType !== "aws.codepipeline.pipeline" &&
+            cached.entityType !== "aws.codepipeline.execution" &&
+            cached.entityType !== "aws.codepipeline.stage" &&
+            cached.entityType !== "aws.codepipeline.action")
+        ) return []
+        return [cached]
+      }),
+    { concurrency: 1 }
+  )
+  return groups.flat()
+})
 
 const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(function*(
   persistence: PersistenceService,
@@ -1234,6 +1269,12 @@ export const materializeNormalizedPluginPage = Effect.fn(
     )
     const accepted = new Set(committed.acceptedEventIds)
     const events = page.events.filter(({ eventId }) => accepted.has(eventId))
+    const acceptedPipelineExecution = events.find((event) =>
+      event._tag === "UpsertEntity" && event.entityType === "aws.codepipeline.execution"
+    )
+    const pipelineEvents = acceptedPipelineExecution === undefined
+      ? events
+      : yield* currentPipelineEvents(persistence, scope, acceptedPipelineExecution.eventId)
     let entityProjectionCount = 0
     let evidenceClaimCount = 0
     let evidenceItemCount = 0
@@ -1252,7 +1293,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
           continue
         }
-        const receipt = yield* materializeUpsertEntity(persistence, cryptoService, scope, event, events)
+        const receipt = yield* materializeUpsertEntity(
+          persistence,
+          cryptoService,
+          scope,
+          event,
+          event.entityType === "aws.codepipeline.execution" ? pipelineEvents : events
+        )
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount
         skippedEntityCount += receipt.skippedEntityCount

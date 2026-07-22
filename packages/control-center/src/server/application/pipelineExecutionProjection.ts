@@ -282,6 +282,8 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
       actionsTruncated: stage?.actionsTruncated ?? attributes.actionsTruncated ?? false
     }
   })
+  const sourceRevision = attributes.sourceRevisions?.find(({ revisionId }) => optionalBounded(revisionId, 512) !== null)
+    ?.revisionId
   const sourceRevisions = (attributes.sourceRevisions ?? []).flatMap((source) => {
     const actionName = optionalBounded(source.actionName, 200)
     return actionName === null ? [] : [{
@@ -292,7 +294,6 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
   }).filter((source, index, sources) =>
     sources.findIndex(({ actionName }) => actionName === source.actionName) === index
   ).slice(0, 100)
-  const sourceRevision = sourceRevisions.find(({ revisionId }) => revisionId !== null)?.revisionId
   const sourceArtifacts = yield* Effect.forEach(
     (attributes.artifactRevisions ?? []).slice(0, 100),
     (artifact, index) =>
