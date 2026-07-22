@@ -87,18 +87,17 @@ export const statusFor = (details: DeliveryEntityDetails): string => {
     case "issue":
       return details.status
     case "pull-request": {
-      if (details.lifecycle !== null && details.lifecycle !== undefined) return titleCase(details.lifecycle)
       switch (details.reviewState) {
-        case "not-requested":
-          return "Review not requested"
-        case "requested":
-          return "Review requested"
         case "changes-requested":
           return "Changes requested"
         case "approved":
           return "Approved"
         case "merged":
           return "Merged"
+        case "not-requested":
+        case "requested":
+          if (details.lifecycle !== null && details.lifecycle !== undefined) return titleCase(details.lifecycle)
+          return details.reviewState === "requested" ? "Review requested" : "Review not requested"
       }
     }
     case "page":

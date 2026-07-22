@@ -88,6 +88,63 @@ describe("workspace items", () => {
     expect(selectWorkspaceItem(unlinked === undefined ? [] : [unlinked], "deleted-entity")).toBeNull()
   })
 
+  it("prioritizes decisive PR review judgment and otherwise falls back to lifecycle", () => {
+    const source = releaseWorksetFixture.entityProjections[0]
+    if (source === undefined) throw new Error("Expected a source projection")
+    const pullRequest = (
+      suffix: string,
+      lifecycle: "closed" | "open",
+      reviewState: "changes-requested" | "requested"
+    ) =>
+      Schema.decodeUnknownSync(DeliveryEntityProjection)({
+        ...Schema.encodeSync(DeliveryEntityProjection)(source.projection),
+        entityId: `01890f6f-6d6a-7cc0-98d3-0000000000${suffix}`,
+        entityType: "pull-request",
+        displayKey: suffix,
+        title: `Pull request ${suffix}`,
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: `feat/${suffix}`,
+          targetBranch: "main",
+          headRevision: `head-${suffix}`,
+          lifecycle,
+          reviewState
+        }
+      })
+    const entries = [
+      pullRequest("81", "open", "changes-requested"),
+      pullRequest("82", "closed", "requested")
+    ].map((projection) => ({
+      ...source,
+      canonicalReleaseId: null,
+      owners: [],
+      ownersTruncated: false,
+      projection,
+      releaseIds: [],
+      releaseMembershipsTruncated: false
+    }))
+    const presented = presentWorkspaceEntityIndex(WORKSET_WORKSPACE_ID, {
+      items: entries,
+      matchedCount: entries.length,
+      ownerOptions: [],
+      ownerOptionsTruncated: false,
+      totalCount: entries.length,
+      truncated: false
+    })
+
+    expect(presented.find(({ key }) => key === "81")).toMatchObject({
+      status: "Changes requested",
+      statusGroup: "failed",
+      tone: "critical"
+    })
+    expect(presented.find(({ key }) => key === "82")).toMatchObject({
+      status: "Closed",
+      statusGroup: "done",
+      tone: "positive"
+    })
+  })
+
   it("presents every canonical owner and filters by exact person identity", () => {
     const source = releaseWorksetFixture.entityProjections[0]
     if (source === undefined) throw new Error("Expected a source projection")

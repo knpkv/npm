@@ -2751,9 +2751,9 @@ describe("normalized plugin page materialization", () => {
           observedAt: "2026-07-19T09:01:30.000Z",
           revision: "pull-request-closed-revision-1",
           entityType: "pull-request",
-          vendorImmutableId: "closed-17",
+          vendorImmutableId: "17",
           sourceUrl: "https://console.aws.example/pull-requests/closed-17",
-          title: "Closed pull request",
+          title: "Payment cleanup",
           attributes: {
             repository: "payments-api",
             sourceBranch: "feat/closed",
@@ -2771,7 +2771,7 @@ describe("normalized plugin page materialization", () => {
           observedAt: "2026-07-19T09:01:40.000Z",
           revision: "pull-request-changes-requested-revision-1",
           entityType: "pull-request",
-          vendorImmutableId: "open-18",
+          vendorImmutableId: "18",
           sourceUrl: "https://console.aws.example/pull-requests/open-18",
           title: "Open pull request needing changes",
           attributes: {
@@ -2781,6 +2781,22 @@ describe("normalized plugin page materialization", () => {
             headRevision: "open-head",
             status: "OPEN",
             reviewState: "changes-requested"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-review-requested-1",
+          observedAt: "2026-07-19T09:01:50.000Z",
+          revision: "pull-request-review-requested-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "19",
+          sourceUrl: "https://console.aws.example/pull-requests/19",
+          title: "Payment verification",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/verification",
+            targetBranch: "main",
+            headRevision: "verification-head",
+            reviewState: "requested"
           }
         }]
       })
@@ -2795,7 +2811,7 @@ describe("normalized plugin page materialization", () => {
       }
 
       const receipt = yield* materializeNormalizedPluginPage(scope, page)
-      assert.strictEqual(receipt.entityProjectionCount, 2)
+      assert.strictEqual(receipt.entityProjectionCount, 3)
 
       const readStatus = (status: "active" | "done" | "failed") =>
         persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -2816,15 +2832,34 @@ describe("normalized plugin page materialization", () => {
         failed._tag !== "workspaceEntityProjections"
       ) return yield* Effect.die("expected workspace entity projections")
 
-      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["closed-17"])
-      assert.isEmpty(active.value.items)
-      assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["open-18"])
+      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["17"])
+      assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19"])
+      assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
       const details = done.value.items[0]?.projection.details
       if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
       assert.lengthOf(details.description ?? "", 50_000)
       assert.lengthOf(details.baseRevision ?? "", 512)
       assert.isNull(details.authorReference)
       assert.isNull(details.mergeBaseRevision)
+
+      const readSearch = (query: string) =>
+        persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query,
+          service: "codecommit",
+          status: null,
+          type: "pull-request",
+          limit: 100
+        })
+      const lifecycleSearch = yield* readSearch("closed")
+      const reviewSearch = yield* readSearch("review requested")
+      if (
+        lifecycleSearch._tag !== "workspaceEntityProjections" ||
+        reviewSearch._tag !== "workspaceEntityProjections"
+      ) return yield* Effect.die("expected searchable workspace entity projections")
+      assert.deepStrictEqual(lifecycleSearch.value.items.map(({ projection }) => projection.displayKey), ["17"])
+      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19"])
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>
