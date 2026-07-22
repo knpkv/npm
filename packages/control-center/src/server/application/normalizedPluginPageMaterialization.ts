@@ -42,6 +42,7 @@ import type { EntityRecord } from "../persistence/repositories/models.js"
 import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
+  affectedPipelineExecutionEvents,
   PipelineEntityAttributeNames,
   pipelineStatus,
   projectPipelineExecution
@@ -117,6 +118,7 @@ const LegacyIssueAttributeKeys: ReadonlySet<string> = new Set([
   "schemaVersion",
   "summary"
 ])
+const CanonicalIssueAttributeKeys: ReadonlySet<string> = new Set(Object.keys(NormalizedIssueAttributes.fields))
 const ReleaseAttributes = Schema.Struct({
   serviceName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   version: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
@@ -184,7 +186,8 @@ const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.de
   if (Result.isSuccess(normalized)) return normalized.success
   if (
     Object.keys(event.attributes).some((key) =>
-      !LegacyIssueAttributeKeys.has(key) && !PipelineEntityAttributeNames.has(key)
+      !LegacyIssueAttributeKeys.has(key) &&
+      (!PipelineEntityAttributeNames.has(key) || CanonicalIssueAttributeKeys.has(key))
     )
   ) {
     return yield* malformed("normalized-issue-attributes-invalid", event.eventId)
@@ -1272,12 +1275,25 @@ export const materializeNormalizedPluginPage = Effect.fn(
     )
     const accepted = new Set(committed.acceptedEventIds)
     const events = page.events.filter(({ eventId }) => accepted.has(eventId))
-    const acceptedPipelineExecution = events.find((event) =>
-      event._tag === "UpsertEntity" && event.entityType === "aws.codepipeline.execution"
+    const acceptedPipelineEvent = events.find((event) =>
+      event._tag === "UpsertEntity" &&
+      (event.entityType === "aws.codepipeline.pipeline" ||
+        event.entityType === "aws.codepipeline.execution" ||
+        event.entityType === "aws.codepipeline.stage" ||
+        event.entityType === "aws.codepipeline.action")
     )
-    const pipelineEvents = acceptedPipelineExecution === undefined
+    const pipelineEvents = acceptedPipelineEvent === undefined
       ? events
-      : yield* currentPipelineEvents(persistence, scope, acceptedPipelineExecution.eventId)
+      : yield* currentPipelineEvents(persistence, scope, acceptedPipelineEvent.eventId)
+    const affectedExecutions = acceptedPipelineEvent === undefined
+      ? []
+      : yield* affectedPipelineExecutionEvents(pipelineEvents, accepted).pipe(
+        Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
+      )
+    const entityEvents = [
+      ...events,
+      ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
+    ]
     let entityProjectionCount = 0
     let evidenceClaimCount = 0
     let evidenceItemCount = 0
@@ -1290,7 +1306,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       if (event._tag !== "UpsertPerson") continue
       personCount += yield* materializePerson(persistence, cryptoService, scope, event)
     }
-    for (const event of events) {
+    for (const event of entityEvents) {
       if (event._tag === "UpsertEntity") {
         if (event.entityType === "release") {
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount

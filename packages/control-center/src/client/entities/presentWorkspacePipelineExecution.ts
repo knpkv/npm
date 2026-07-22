@@ -151,7 +151,11 @@ const currentlyRelatedEntityIds = (inspection: WorkspaceEntityInspection): Reado
     )
   )
   return new Set(inspection.graph.relationships.flatMap((relationship) => {
-    if (relationship.lifecycle._tag === "rejected" || relationship.lifecycle._tag === "superseded") return []
+    if (
+      relationship.lifecycle._tag === "missing" ||
+      relationship.lifecycle._tag === "rejected" ||
+      relationship.lifecycle._tag === "superseded"
+    ) return []
     if (subjectNodeIds.has(relationship.sourceNodeId)) {
       const entityId = entityIdByNode.get(relationship.targetNodeId)
       return entityId === undefined ? [] : [entityId]

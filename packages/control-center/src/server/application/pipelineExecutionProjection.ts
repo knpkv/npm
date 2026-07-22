@@ -180,6 +180,40 @@ const aggregateStatus = (
   return "queued"
 }
 
+const executionKey = (attributes: PipelineEntityAttributes): string | null => {
+  const pipelineName = optionalBounded(attributes.pipelineName, 200)
+  const executionId = optionalBounded(attributes.executionId, 512)
+  return pipelineName === null || executionId === null ? null : `${pipelineName}\u0000${executionId}`
+}
+
+/** Select cached execution envelopes affected by newly accepted stage or action events. */
+export const affectedPipelineExecutionEvents = Effect.fn(
+  "PipelineExecutionProjection.affectedExecutions"
+)(function*(
+  cachedEvents: ReadonlyArray<NormalizedPluginEventV1>,
+  acceptedEventIds: ReadonlySet<string>
+): Effect.fn.Return<ReadonlyArray<EntityUpsert>, PipelineExecutionProjectionError> {
+  const affectedKeys = new Set<string>()
+  for (const event of cachedEvents) {
+    if (
+      event._tag !== "UpsertEntity" ||
+      !acceptedEventIds.has(event.eventId) ||
+      (event.entityType !== "aws.codepipeline.stage" && event.entityType !== "aws.codepipeline.action")
+    ) continue
+    const key = executionKey(yield* decodeAttributes(event))
+    if (key !== null) affectedKeys.add(key)
+  }
+  if (affectedKeys.size === 0) return []
+
+  const executions: Array<EntityUpsert> = []
+  for (const event of cachedEvents) {
+    if (event._tag !== "UpsertEntity" || event.entityType !== "aws.codepipeline.execution") continue
+    const key = executionKey(yield* decodeAttributes(event))
+    if (key !== null && affectedKeys.has(key)) executions.push(event)
+  }
+  return executions
+})
+
 /** Correlate bounded pipeline, stage, and action siblings into one safe execution projection. */
 export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.project")(function*(
   event: EntityUpsert,

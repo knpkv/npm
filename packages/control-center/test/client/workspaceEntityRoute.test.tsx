@@ -12,6 +12,7 @@ import {
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
+import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
@@ -525,6 +526,70 @@ describe("canonical workspace entity", () => {
       name: "Compile",
       provider: "AWS · CodeBuild · 1"
     })
+  })
+
+  it("counts only accepted pipeline relationships as delivery evidence", () => {
+    const root = encodedWorkset.entityProjections.find(
+      ({ projection }) => projection.details._tag === "pipeline-execution"
+    )
+    if (root?.projection.details._tag !== "pipeline-execution") {
+      throw new Error("Expected a pipeline projection fixture")
+    }
+    const graphInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encodedInspection,
+      entity: {
+        ...encodedInspection.entity,
+        canonicalReleaseId: encodedWorkset.releaseId,
+        projection: root.projection,
+        recordedAt: root.recordedAt,
+        releaseIds: [encodedWorkset.releaseId]
+      },
+      source: {
+        ...sourceRevision,
+        providerId: "codepipeline",
+        vendorImmutableId: root.projection.details.executionId,
+        revision: root.projection.details.triggerRevision,
+        sourceUrl: null
+      },
+      graph: {
+        ...encodedInspection.graph,
+        evidenceClaims: encodedWorkset.evidenceClaims,
+        evidenceItems: encodedWorkset.evidenceItems,
+        nodes: encodedWorkset.nodes,
+        relatedEntityProjections: encodedWorkset.entityProjections.filter(
+          ({ projection }) => projection.entityId !== root.projection.entityId
+        ),
+        relationships: encodedWorkset.relationships,
+        truncated: false
+      }
+    })
+    const missingInspection: Inspection = {
+      ...graphInspection,
+      graph: {
+        ...graphInspection.graph,
+        relationships: graphInspection.graph.relationships.map((relationship) =>
+          relationship.kind === "delivered-by" && relationship.targetNodeKind === "pipeline-execution"
+            ? {
+                ...relationship,
+                lifecycle: {
+                  _tag: "missing",
+                  effectiveAt: relationship.lifecycle.effectiveAt,
+                  reason: "Delivery evidence is not currently linked."
+                }
+              }
+            : relationship
+        )
+      }
+    }
+
+    if (graphInspection.entity.projection.details._tag !== "pipeline-execution") {
+      throw new Error("Expected a decoded pipeline projection fixture")
+    }
+    const accepted = presentWorkspacePipelineExecution(graphInspection.entity.projection.details, graphInspection)
+    const missing = presentWorkspacePipelineExecution(graphInspection.entity.projection.details, missingInspection)
+
+    expect(accepted).toMatchObject({ pullRequestCountLabel: "2", runbookCountLabel: "0" })
+    expect(missing).toMatchObject({ pullRequestCountLabel: "0", runbookCountLabel: "0" })
   })
 
   it("counts only currently accepted issue and pipeline relationships as PR evidence", () => {

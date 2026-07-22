@@ -951,6 +951,53 @@ describe("normalized plugin page materialization", () => {
         "Release gate"
       ])
       assert.deepStrictEqual(projection.details.stages?.map(({ name }) => name), ["Build", "Approval"])
+
+      const actionOnly = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-action-only",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-approval-action-complete",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "Succeeded:2026-07-19T09:06:00.000Z",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "cache-execution#approval",
+            sourceUrl: null,
+            title: "payments · Approval",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              actionExecutionId: "approval-1",
+              stageName: "Approval",
+              actionName: "Release gate",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "unrelated-provider-action",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "unrelated-v1",
+            entityType: "vendor.action",
+            vendorImmutableId: "unrelated-action",
+            sourceUrl: null,
+            title: "Unrelated provider action",
+            attributes: { actionCount: "provider-owned" }
+          }]
+        })
+      )
+      assert.strictEqual(actionOnly.acceptedEventCount, 2)
+      assert.strictEqual(actionOnly.entityProjectionCount, 1)
+      assert.strictEqual(actionOnly.skippedEntityCount, 2)
+      const refreshed = (yield* items()).items[0]?.projection
+      if (refreshed?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected action-refreshed pipeline execution")
+      }
+      assert.strictEqual(
+        refreshed.details.actions?.find(({ actionName }) => actionName === "Release gate")?.status,
+        "succeeded"
+      )
     })))
 
   it.effect("matches declaration versions and preserves declared action order", () =>
@@ -1597,6 +1644,21 @@ describe("normalized plugin page materialization", () => {
           return yield* Effect.die("expected malformed rich issue failure")
         }
         assert.strictEqual(failure.diagnosticCode, "normalized-issue-attributes-invalid")
+
+        const overlappingFailure = yield* materializeNormalizedPluginPage(
+          scope,
+          page("malformed-overlapping-issue-field", {
+            key: "PAY-43",
+            status: { name: "Open" },
+            priority: { name: "High" },
+            estimatePoints: null,
+            updatedAt: ""
+          })
+        ).pipe(Effect.flip)
+        if (overlappingFailure._tag !== "NormalizedPluginPageMaterializationError") {
+          return yield* Effect.die("expected malformed overlapping issue failure")
+        }
+        assert.strictEqual(overlappingFailure.diagnosticCode, "normalized-issue-attributes-invalid")
 
         const legacy = yield* materializeNormalizedPluginPage(
           scope,
