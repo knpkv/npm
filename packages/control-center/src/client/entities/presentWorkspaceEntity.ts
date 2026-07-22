@@ -22,6 +22,10 @@ import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 import { presentWorkspaceIssue, type WorkspaceIssuePresentation } from "./presentWorkspaceIssue.js"
+import {
+  presentWorkspacePipelineExecution,
+  type WorkspacePipelineExecutionPresentation
+} from "./presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "./presentWorkspacePullRequest.js"
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
 
@@ -75,6 +79,7 @@ export interface WorkspaceEntityPresentation {
   readonly freshnessTime: string
   readonly kindLabel: string
   readonly issue: WorkspaceIssuePresentation | null
+  readonly pipelineExecution: WorkspacePipelineExecutionPresentation | null
   readonly pullRequest: WorkspacePullRequestPresentation | null
   readonly partialMessages: ReadonlyArray<string>
   readonly primaryAction: WorkspaceEntityActionPresentation
@@ -434,6 +439,9 @@ export const presentWorkspaceEntity = (
   const pullRequest = projection.details._tag === "pull-request"
     ? presentWorkspacePullRequest(projection.details, inspection.source.sourceUrl, inspection)
     : null
+  const pipelineExecution = projection.details._tag === "pipeline-execution"
+    ? presentWorkspacePipelineExecution(projection.details, inspection)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {
@@ -473,6 +481,7 @@ export const presentWorkspaceEntity = (
     freshnessTime: readableTimestamp(freshnessTimestampValue),
     kindLabel: kindNames[projection.entityType],
     issue,
+    pipelineExecution,
     pullRequest,
     partialMessages: partialMessagesFor(inspection),
     primaryAction: primaryActionFor(inspection, workspaceId, serviceName),

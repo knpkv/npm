@@ -24,6 +24,7 @@ import {
   materializeNormalizedPluginPage,
   type NormalizedPluginPageMaterializationScope
 } from "../../src/server/application/normalizedPluginPageMaterialization.js"
+import { pipelineStatus } from "../../src/server/application/pipelineExecutionProjection.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -50,6 +51,7 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:06:00.000Z")
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
@@ -482,7 +484,130 @@ const codePipelineRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
       pipelineName: "payments",
       executionId: "9001",
       status: "InProgress",
-      triggerRevision: "abc123"
+      sourceRevisions: [{ revisionId: "abc123" }]
+    }
+  }]
+})
+
+const richCodePipelinePage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "codepipeline-rich-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "payments-pipeline-declaration",
+    observedAt: "2026-07-19T09:02:00.000Z",
+    revision: "pipeline-v7",
+    entityType: "aws.codepipeline.pipeline",
+    vendorImmutableId: "payments",
+    sourceUrl: null,
+    title: "Payments pipeline",
+    attributes: {
+      pipelineName: "payments",
+      stages: [
+        { name: "Source", actions: [{ name: "Checkout" }] },
+        { name: "Build", actions: [{ name: "Compile" }] },
+        { name: "Approval", actions: [{ name: "Release gate" }] },
+        { name: "Production", actions: [{ name: "Deploy" }] }
+      ]
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "payments-execution-9002",
+    observedAt: "2026-07-19T09:05:00.000Z",
+    revision: "7:InProgress:2026-07-19T09:05:00.000Z",
+    entityType: "aws.codepipeline.execution",
+    vendorImmutableId: "9002",
+    sourceUrl: "https://console.aws.example/codepipeline/payments/9002",
+    title: "Payments deploy 9002",
+    attributes: {
+      pipelineName: "payments",
+      pipelineVersion: 7,
+      executionId: "9002",
+      status: "InProgress",
+      statusSummary: "Waiting for the production release gate",
+      startedAt: "2026-07-19T09:00:00.000Z",
+      updatedAt: "2026-07-19T09:05:00.000Z",
+      sourceRevisions: [{ actionName: "Checkout", revisionId: "abc123", revisionSummary: "main" }],
+      triggerType: "StartPipelineExecution",
+      triggerDetail: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+      executionMode: "SUPERSEDED",
+      executionType: "STANDARD",
+      artifactRevisions: [{
+        name: "Source",
+        revisionId: "abc123",
+        revisionSummary: "main",
+        createdAt: "2026-07-19T08:59:00.000Z"
+      }],
+      actionCount: 2,
+      actionsTruncated: true,
+      actionPagesRead: 3
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-stage-Build",
+    observedAt: "2026-07-19T09:04:00.000Z",
+    revision: "Succeeded:2026-07-19T09:04:00.000Z",
+    entityType: "aws.codepipeline.stage",
+    vendorImmutableId: "9002#Build",
+    sourceUrl: null,
+    title: "payments · Build",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      stageName: "Build",
+      status: "Succeeded",
+      actionCount: 1,
+      actionsTruncated: true
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-action-compile",
+    observedAt: "2026-07-19T09:04:00.000Z",
+    revision: "Succeeded:2026-07-19T09:04:00.000Z",
+    entityType: "aws.codepipeline.action",
+    vendorImmutableId: "9002#compile-1",
+    sourceUrl: null,
+    title: "payments · Build · Compile",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      actionExecutionId: "compile-1",
+      stageName: "Build",
+      actionName: "Compile",
+      status: "Succeeded",
+      startedAt: "2026-07-19T09:01:00.000Z",
+      updatedAt: "2026-07-19T09:04:00.000Z",
+      updatedBy: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+      actionType: { category: "Build", owner: "AWS", provider: "CodeBuild", version: "1" },
+      actionRegion: "eu-west-1",
+      inputArtifacts: [{ name: "Source", bucket: "must-not-persist", key: "secret/source.zip" }],
+      outputArtifacts: [{ name: "BuildOutput", bucket: "must-not-persist", key: "secret/build.zip" }],
+      externalExecutionSummary: "Build completed",
+      logStreamArn: "arn:aws:logs:must-not-persist"
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-action-gate",
+    observedAt: "2026-07-19T09:05:00.000Z",
+    revision: "InProgress:2026-07-19T09:05:00.000Z",
+    entityType: "aws.codepipeline.action",
+    vendorImmutableId: "9002#gate-1",
+    sourceUrl: null,
+    title: "payments · Approval · Release gate",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      actionExecutionId: "gate-1",
+      stageName: "Approval",
+      actionName: "Release gate",
+      status: "InProgress",
+      startedAt: "2026-07-19T09:05:00.000Z",
+      updatedAt: "2026-07-19T09:05:00.000Z",
+      updatedBy: "release-approver@example.test",
+      actionType: { category: "Approval", owner: "AWS", provider: "Manual", version: "1" },
+      actionRegion: "eu-west-1",
+      inputArtifacts: [{ name: "BuildOutput" }],
+      outputArtifacts: []
     }
   }]
 })
@@ -623,6 +748,1118 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it("maps terminal and active CodePipeline statuses", () => {
+    const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
+      ["Cancelled", "stopped"],
+      ["InProgress", "running"]
+    ]
+    for (const [status, expected] of cases) assert.strictEqual(pipelineStatus(status), expected)
+  })
+
+  it.effect("materializes one bounded, credential-free CodePipeline execution document", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const receipt = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T4,
+        successfulHealth: { _tag: "healthy", checkedAt: T4 }
+      }, richCodePipelinePage)
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+      assert.strictEqual(receipt.skippedEntityCount, 4)
+
+      const index = yield* items()
+      const projection = index.items[0]?.projection
+      if (projection?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected rich pipeline execution")
+      }
+      const details = projection.details
+      assert.strictEqual(details.pipelineVersion, 7)
+      assert.strictEqual(details.statusSummary, "Waiting for the production release gate")
+      assert.strictEqual(details.triggerType, "StartPipelineExecution")
+      assert.strictEqual(details.triggerDetail, "arn:aws:sts::123456789012:assumed-role/Release/operator")
+      assert.strictEqual(details.actionCount, 2)
+      assert.isTrue(details.actionsTruncated)
+      assert.strictEqual(details.actionPagesRead, 3)
+      assert.deepStrictEqual(details.stages?.map(({ name, status }) => [name, status]), [
+        ["Source", "queued"],
+        ["Build", "succeeded"],
+        ["Approval", "running"],
+        ["Production", "queued"]
+      ])
+      assert.deepStrictEqual(details.actions?.map(({ actionName, updatedBy }) => [actionName, updatedBy]), [
+        ["Compile", "arn:aws:sts::123456789012:assumed-role/Release/operator"],
+        ["Release gate", "release-approver@example.test"]
+      ])
+      assert.deepStrictEqual(details.actions?.[0]?.artifacts, [
+        { name: "Source", direction: "input", access: "proxy-required" },
+        { name: "BuildOutput", direction: "output", access: "proxy-required" }
+      ])
+      const serialized = JSON.stringify(
+        yield* Schema.encodeEffect(WorkspaceEntityInspection)(
+          yield* (yield* makeDeliveryGraphInspection).workspaceEntity({
+            workspaceId: WORKSPACE_ID,
+            entityId: projection.entityId
+          })
+        )
+      )
+      assert.notInclude(serialized, "must-not-persist")
+      assert.notInclude(serialized, "secret/source.zip")
+      assert.notInclude(serialized, "arn:aws:logs")
+    })))
+
+  it.effect("uses a revision-only legacy pipeline source as the trigger fallback", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, codePipelineRelationshipPage)
+
+      const projection = (yield* items()).items[0]?.projection
+      if (projection?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected legacy pipeline execution")
+      }
+      assert.strictEqual(projection.details.triggerRevision, "abc123")
+      assert.deepStrictEqual(projection.details.sourceRevisions, [])
+    })))
+
+  it.effect("falls through blank trigger revisions while preserving explicit ones", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          streamKey: firstPartyStream("codepipeline"),
+          expectedRevision: 0,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-trigger-revision-fallbacks",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "pipeline-blank-trigger",
+            observedAt: "2026-07-19T09:02:20.000Z",
+            revision: "blank-trigger-event-revision",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "blank-trigger",
+            sourceUrl: null,
+            title: "Blank trigger execution",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "blank-trigger",
+              status: "Succeeded",
+              triggerRevision: "   ",
+              sourceRevisions: [{ revisionId: "abc123" }]
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "pipeline-explicit-trigger",
+            observedAt: "2026-07-19T09:02:20.000Z",
+            revision: "explicit-trigger-event-revision",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "explicit-trigger",
+            sourceUrl: null,
+            title: "Explicit trigger execution",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "explicit-trigger",
+              status: "Succeeded",
+              triggerRevision: "explicit456",
+              sourceRevisions: [{ revisionId: "abc123" }]
+            }
+          }]
+        })
+      )
+
+      const projections = (yield* items()).items.map(({ projection }) => projection)
+      const triggerRevisionFor = (executionId: string) => {
+        const projection = projections.find(
+          ({ details }) => details._tag === "pipeline-execution" && details.executionId === executionId
+        )
+        return projection?.details._tag === "pipeline-execution" ? projection.details.triggerRevision : null
+      }
+      assert.strictEqual(triggerRevisionFor("blank-trigger"), "abc123")
+      assert.strictEqual(triggerRevisionFor("explicit-trigger"), "explicit456")
+    })))
+
+  it.effect("rebuilds an advanced execution with current cached action siblings", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const buildAction = Schema.encodeSync(NormalizedPluginEventV1)(
+        Schema.decodeSync(NormalizedPluginEventV1)({
+          _tag: "UpsertEntity",
+          eventId: "cache-build-action",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "Succeeded:2026-07-19T09:02:00.000Z",
+          entityType: "aws.codepipeline.action",
+          vendorImmutableId: "cache-execution#build",
+          sourceUrl: null,
+          title: "payments · Build",
+          attributes: {
+            pipelineName: "payments",
+            executionId: "cache-execution",
+            actionExecutionId: "build-1",
+            stageName: "Build",
+            actionName: "Compile",
+            status: "Succeeded"
+          }
+        })
+      )
+      const first = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pipeline-cache-first",
+        hasMore: true,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "cache-pipeline-declaration",
+          observedAt: "2026-07-19T09:01:00.000Z",
+          revision: "pipeline-v1",
+          entityType: "aws.codepipeline.pipeline",
+          vendorImmutableId: "payments",
+          sourceUrl: null,
+          title: "Payments pipeline",
+          attributes: {
+            pipelineName: "payments",
+            stages: [{ name: "Build", actions: [{ name: "Compile" }] }, {
+              name: "Approval",
+              actions: [{ name: "Release gate" }]
+            }]
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "cache-execution-v1",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "execution-v1",
+          entityType: "aws.codepipeline.execution",
+          vendorImmutableId: "cache-execution",
+          sourceUrl: null,
+          title: "Payments execution",
+          attributes: {
+            pipelineName: "payments",
+            executionId: "cache-execution",
+            status: "InProgress",
+            triggerRevision: "abc123"
+          }
+        }, buildAction]
+      })
+      const second = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pipeline-cache-second",
+        hasMore: false,
+        events: [
+          {
+            _tag: "UpsertEntity",
+            eventId: "cache-execution-v2",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "execution-v2",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "cache-execution",
+            sourceUrl: null,
+            title: "Payments execution",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              status: "InProgress",
+              triggerRevision: "abc123"
+            }
+          },
+          buildAction,
+          {
+            _tag: "UpsertEntity",
+            eventId: "cache-approval-action",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "InProgress:2026-07-19T09:03:00.000Z",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "cache-execution#approval",
+            sourceUrl: null,
+            title: "payments · Approval",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              actionExecutionId: "approval-1",
+              stageName: "Approval",
+              actionName: "Release gate",
+              status: "InProgress"
+            }
+          }
+        ]
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(scope, first)
+      const advanced = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        second
+      )
+      assert.strictEqual(advanced.acceptedEventCount, 2)
+
+      const projection = (yield* items()).items[0]?.projection
+      if (projection?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected advanced pipeline execution")
+      }
+      assert.deepStrictEqual(projection.details.actions?.map(({ actionName }) => actionName), [
+        "Compile",
+        "Release gate"
+      ])
+      assert.deepStrictEqual(projection.details.stages?.map(({ name }) => name), ["Build", "Approval"])
+
+      const actionOnly = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-action-only",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-approval-action-complete",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "Succeeded:2026-07-19T09:06:00.000Z",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "cache-execution#approval",
+            sourceUrl: null,
+            title: "payments · Approval",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              actionExecutionId: "approval-1",
+              stageName: "Approval",
+              actionName: "Release gate",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "unrelated-provider-action",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "unrelated-v1",
+            entityType: "vendor.action",
+            vendorImmutableId: "unrelated-action",
+            sourceUrl: null,
+            title: "Unrelated provider action",
+            attributes: { actionCount: "provider-owned" }
+          }]
+        })
+      )
+      assert.strictEqual(actionOnly.acceptedEventCount, 2)
+      assert.strictEqual(actionOnly.entityProjectionCount, 1)
+      assert.strictEqual(actionOnly.skippedEntityCount, 2)
+      const refreshed = (yield* items()).items[0]?.projection
+      if (refreshed?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected action-refreshed pipeline execution")
+      }
+      assert.strictEqual(
+        refreshed.details.actions?.find(({ actionName }) => actionName === "Release gate")?.status,
+        "succeeded"
+      )
+
+      const duplicateAction = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-duplicate-action",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-approval-action-complete",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "Succeeded:2026-07-19T09:06:00.000Z",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "cache-execution#approval",
+            sourceUrl: null,
+            title: "payments · Approval",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              actionExecutionId: "approval-1",
+              stageName: "Approval",
+              actionName: "Release gate",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      assert.strictEqual(duplicateAction.acceptedEventCount, 0)
+      assert.strictEqual(duplicateAction.entityProjectionCount, 0)
+
+      const declarationOnly = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-declaration-only",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-payments-declaration",
+            observedAt: "2026-07-19T09:07:00.000Z",
+            revision: "pipeline-v1",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "payments-pipeline",
+            sourceUrl: null,
+            title: "Payments pipeline",
+            attributes: {
+              pipelineName: "payments",
+              stages: [{
+                name: "Build",
+                actions: [{ name: "Compile", runOrder: 1 }]
+              }, {
+                name: "Approval",
+                actions: [{ name: "Release gate", runOrder: 1 }]
+              }, {
+                name: "Deploy",
+                actions: []
+              }]
+            }
+          }]
+        })
+      )
+      assert.strictEqual(declarationOnly.entityProjectionCount, 1)
+      assert.strictEqual(declarationOnly.skippedEntityCount, 1)
+      const declared = (yield* items()).items[0]?.projection
+      if (declared?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected declaration-refreshed pipeline execution")
+      }
+      assert.deepStrictEqual(declared.details.stages?.map(({ name }) => name), ["Build", "Approval", "Deploy"])
+
+      const unrelatedDeclaration = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 5, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-unrelated-declaration",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-inventory-declaration",
+            observedAt: "2026-07-19T09:08:00.000Z",
+            revision: "pipeline-v2",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "inventory-pipeline",
+            sourceUrl: null,
+            title: "Inventory pipeline",
+            attributes: {
+              pipelineName: "inventory",
+              pipelineVersion: 2,
+              stages: [{ name: "Inventory", actions: [] }]
+            }
+          }]
+        })
+      )
+      assert.strictEqual(unrelatedDeclaration.entityProjectionCount, 0)
+      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
+
+      const deletedActionPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pipeline-cache-action-deleted",
+        hasMore: false,
+        events: [{
+          _tag: "TombstoneEntity",
+          eventId: "cache-approval-action-deleted",
+          observedAt: "2026-07-19T09:09:00.000Z",
+          revision: "approval-deleted-v1",
+          entityType: "aws.codepipeline.action",
+          vendorImmutableId: "cache-execution#approval",
+          reason: "Action execution no longer returned"
+        }]
+      })
+      const actionTombstone = deletedActionPage.events[0]
+      if (actionTombstone?._tag !== "TombstoneEntity") return yield* Effect.die("expected action tombstone")
+      const beforeDelete = yield* persistence.pluginRuntime.getCodePipelineCacheBeforeTombstones(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        firstPartyStream("codepipeline"),
+        [actionTombstone]
+      )
+      assert.strictEqual(beforeDelete.length, 1)
+      const deletedAction = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 6, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        deletedActionPage
+      )
+      assert.strictEqual(deletedAction.acceptedEventCount, 1)
+      assert.strictEqual(deletedAction.entityProjectionCount, 1)
+      const afterDelete = (yield* items()).items[0]?.projection
+      if (afterDelete?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected tombstone-refreshed pipeline execution")
+      }
+      assert.deepStrictEqual(afterDelete.details.actions?.map(({ actionName }) => actionName), ["Compile"])
+
+      const unknownDelete = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 7, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-unknown-action-deleted",
+          hasMore: false,
+          events: [{
+            _tag: "TombstoneEntity",
+            eventId: "cache-unknown-action-deleted",
+            observedAt: "2026-07-19T09:10:00.000Z",
+            revision: "unknown-deleted-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "unknown-execution#unknown-action",
+            reason: "Unknown action cleanup"
+          }]
+        })
+      )
+      assert.strictEqual(unknownDelete.entityProjectionCount, 0)
+    })))
+
+  it.effect("bounds correlated pipeline actions while preserving total counts", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const execution = (
+        executionId: string,
+        actionCount: number
+      ): ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> => {
+        const events: Array<typeof NormalizedPluginEventV1.Encoded> = [{
+          _tag: "UpsertEntity",
+          eventId: `${executionId}-execution`,
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "execution-v1",
+          entityType: "aws.codepipeline.execution",
+          vendorImmutableId: executionId,
+          sourceUrl: null,
+          title: `${executionId} execution`,
+          attributes: {
+            pipelineName: "bounded-actions",
+            executionId,
+            status: "Succeeded",
+            triggerRevision: "abc123"
+          }
+        }]
+        for (let index = 0; index < actionCount; index++) {
+          events.push({
+            _tag: "UpsertEntity",
+            eventId: `${executionId}-action-${String(index + 1)}`,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: `Succeeded:${String(index + 1)}`,
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: `${executionId}#action-${String(index + 1)}`,
+            sourceUrl: null,
+            title: `${executionId} · Action ${String(index + 1)}`,
+            attributes: {
+              pipelineName: "bounded-actions",
+              executionId,
+              actionExecutionId: `${executionId}-action-${String(index + 1)}`,
+              stageName: "Build",
+              actionName: `Action ${String(index + 1).padStart(3, "0")}`,
+              status: "Succeeded"
+            }
+          })
+        }
+        return events
+      }
+      const receipt = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          streamKey: firstPartyStream("codepipeline"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-bounded-actions",
+          hasMore: false,
+          events: [...execution("bounded-201", 201), ...execution("bounded-200", 200)]
+        })
+      )
+      assert.strictEqual(receipt.entityProjectionCount, 2)
+      const projections = (yield* items()).items.map(({ projection }) => projection)
+      const bounded201 = projections.find(
+        ({ details }) => details._tag === "pipeline-execution" && details.executionId === "bounded-201"
+      )
+      const bounded200 = projections.find(
+        ({ details }) => details._tag === "pipeline-execution" && details.executionId === "bounded-200"
+      )
+      if (bounded201?.details._tag !== "pipeline-execution" || bounded200?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected both bounded pipeline projections")
+      }
+      assert.strictEqual(bounded201.details.actions?.length, 200)
+      assert.strictEqual(bounded201.details.actionCount, 201)
+      assert.strictEqual(bounded201.details.actionsTruncated, true)
+      assert.deepStrictEqual(bounded201.details.stages, [{
+        name: "Build",
+        status: "succeeded",
+        actionCount: 201,
+        actionsTruncated: true
+      }])
+      assert.strictEqual(bounded200.details.actions?.length, 200)
+      assert.strictEqual(bounded200.details.actionCount, 200)
+      assert.strictEqual(bounded200.details.actionsTruncated, false)
+      assert.deepStrictEqual(bounded200.details.stages, [{
+        name: "Build",
+        status: "succeeded",
+        actionCount: 200,
+        actionsTruncated: false
+      }])
+    })))
+
+  it.effect("reads only indexed cache records for the affected pipeline execution", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const pipelineEvent = (
+        executionId: string,
+        suffix: string,
+        status: string
+      ): typeof NormalizedPluginEventV1.Encoded => ({
+        _tag: "UpsertEntity",
+        eventId: `${executionId}-action-${suffix}`,
+        observedAt: "2026-07-19T09:02:00.000Z",
+        revision: `${status}:${suffix}`,
+        entityType: "aws.codepipeline.action",
+        vendorImmutableId: `${executionId}#action`,
+        sourceUrl: null,
+        title: `${executionId} action`,
+        attributes: {
+          pipelineName: executionId,
+          executionId,
+          actionExecutionId: `${executionId}-action`,
+          stageName: "Build",
+          actionName: "Compile",
+          status
+        }
+      })
+      const executionEvent = (executionId: string): typeof NormalizedPluginEventV1.Encoded => ({
+        _tag: "UpsertEntity",
+        eventId: `${executionId}-execution`,
+        observedAt: "2026-07-19T09:02:00.000Z",
+        revision: "execution-v1",
+        entityType: "aws.codepipeline.execution",
+        vendorImmutableId: executionId,
+        sourceUrl: null,
+        title: `${executionId} execution`,
+        attributes: {
+          pipelineName: executionId,
+          executionId,
+          status: "InProgress",
+          triggerRevision: "abc123"
+        }
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(
+        scope,
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-indexed-cache-first",
+          hasMore: false,
+          events: [
+            executionEvent("target"),
+            pipelineEvent("target", "initial", "InProgress"),
+            ...Array.from({ length: 20 }, (_, index) => {
+              const executionId = `unrelated-${String(index + 1)}`
+              return [executionEvent(executionId), pipelineEvent(executionId, "initial", "Succeeded")]
+            }).flat()
+          ]
+        })
+      )
+      const collisionPage = (offset: number) =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: `pipeline-indexed-cache-collisions-${String(offset)}`,
+          hasMore: false,
+          events: Array.from({ length: 300 }, (_, index) => {
+            const sequence = offset + index
+            return {
+              _tag: "UpsertEntity",
+              eventId: `collision-${String(sequence)}`,
+              observedAt: "2026-07-19T09:02:30.000Z",
+              revision: `collision-v${String(sequence)}`,
+              entityType: "vendor.action",
+              vendorImmutableId: `collision-${String(sequence)}`,
+              sourceUrl: null,
+              title: `Colliding action ${String(sequence)}`,
+              attributes: {
+                pipelineName: "target",
+                executionId: "target"
+              }
+            }
+          })
+        })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1 },
+        collisionPage(1)
+      )
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2 },
+        collisionPage(301)
+      )
+      const database = yield* Database
+      yield* database.sql`UPDATE plugin_cache_entries SET payload_json = '{}'
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND plugin_connection_id = ${CODEPIPELINE_PLUGIN_ID}
+          AND stream_key = ${scope.streamKey}
+          AND CASE WHEN json_valid(payload_json)
+            THEN json_extract(payload_json, '$.attributes.executionId') END LIKE 'unrelated-%'
+          AND CASE WHEN json_valid(payload_json)
+            THEN json_extract(payload_json, '$.entityType') END = 'aws.codepipeline.action'`
+
+      const receipt = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-indexed-cache-target-update",
+          hasMore: false,
+          events: [pipelineEvent("target", "failed", "Failed")]
+        })
+      )
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+      const target = (yield* items()).items.map(({ projection }) => projection).find(
+        ({ details }) => details._tag === "pipeline-execution" && details.executionId === "target"
+      )
+      if (target?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected targeted pipeline projection")
+      }
+      assert.strictEqual(target.details.actions?.[0]?.status, "failed")
+    })))
+
+  it.effect("rejects plugin pages with unbounded pipeline correlation scopes", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const failure = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          streamKey: firstPartyStream("codepipeline"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-correlation-scope-overflow",
+          hasMore: false,
+          events: Array.from({ length: 33 }, (_, index) => ({
+            _tag: "UpsertEntity",
+            eventId: `overflow-execution-${String(index + 1)}`,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "execution-v1",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: `overflow-${String(index + 1)}`,
+            sourceUrl: null,
+            title: `Overflow execution ${String(index + 1)}`,
+            attributes: {
+              pipelineName: "overflow",
+              executionId: `overflow-${String(index + 1)}`,
+              status: "Succeeded",
+              triggerRevision: "abc123"
+            }
+          }))
+        })
+      ).pipe(Effect.flip)
+      if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+        return yield* Effect.die("expected bounded pipeline correlation failure")
+      }
+      assert.strictEqual(failure.diagnosticCode, "normalized-pipeline-correlation-scope-exceeded")
+    })))
+
+  it.effect("matches declaration versions and preserves declared action order", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(
+        scope,
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-version-mismatch",
+          hasMore: true,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "versioned-pipeline-v8",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "pipeline-v8",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "versioned-payments",
+            sourceUrl: null,
+            title: "Versioned payments pipeline",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 8,
+              stages: [{ name: "FutureOnly", actions: [] }, { name: "EmptyOnly", actions: [] }, {
+                name: "Production",
+                actions: [{ name: "Zeta", runOrder: 1 }, { name: "Alpha", runOrder: 2 }]
+              }]
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-execution-v7",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "execution-v7",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "versioned-execution-v7",
+            sourceUrl: null,
+            title: "Version 7 execution",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 7,
+              executionId: "versioned-execution-v7",
+              triggerRevision: "v7-head",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      const mismatched = (yield* items()).items.find(({ projection }) =>
+        projection.details._tag === "pipeline-execution" &&
+        projection.details.executionId === "versioned-execution-v7"
+      )?.projection
+      if (mismatched?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected version 7 execution")
+      }
+      assert.deepStrictEqual(mismatched.details.stages, [])
+
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-version-match",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "versioned-execution-v8",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "execution-v8",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "versioned-execution-v8",
+            sourceUrl: null,
+            title: "Version 8 execution",
+            attributes: {
+              pipelineName: "versioned-payments",
+              pipelineVersion: 8,
+              executionId: "versioned-execution-v8",
+              triggerRevision: "v8-head",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-future-observed",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "future-observed-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#future-observed",
+            sourceUrl: null,
+            title: "Future observed action",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "future-observed-1",
+              stageName: "FutureOnly",
+              actionName: "Observed",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-zeta",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "zeta-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#zeta",
+            sourceUrl: null,
+            title: "Production Zeta",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "zeta-1",
+              stageName: "Production",
+              actionName: "Zeta",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-alpha",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "alpha-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#alpha",
+            sourceUrl: null,
+            title: "Production Alpha",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "alpha-1",
+              stageName: "Production",
+              actionName: "Alpha",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-ad-hoc-zeta",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "ad-hoc-zeta-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#ad-hoc-zeta",
+            sourceUrl: null,
+            title: "Ad hoc Zeta",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "ad-hoc-zeta-1",
+              stageName: "AdHoc",
+              actionName: "Zeta",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-ad-hoc-alpha",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "ad-hoc-alpha-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#ad-hoc-alpha",
+            sourceUrl: null,
+            title: "Ad hoc Alpha",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "ad-hoc-alpha-1",
+              stageName: "AdHoc",
+              actionName: "Alpha",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      const matching = (yield* items()).items.find(({ projection }) =>
+        projection.details._tag === "pipeline-execution" &&
+        projection.details.executionId === "versioned-execution-v8"
+      )?.projection
+      if (matching?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected version 8 execution")
+      }
+      assert.deepStrictEqual(matching.details.stages?.map(({ name }) => name), [
+        "FutureOnly",
+        "EmptyOnly",
+        "Production",
+        "AdHoc"
+      ])
+      assert.deepStrictEqual(
+        matching.details.stages?.slice(0, 2).map(({ actionCount, name }) => [name, actionCount]),
+        [["FutureOnly", 1], ["EmptyOnly", 0]]
+      )
+      assert.deepStrictEqual(
+        matching.details.actions?.map(({ actionName, stageName }) => `${stageName}:${actionName}`),
+        ["FutureOnly:Observed", "Production:Zeta", "Production:Alpha", "AdHoc:Alpha", "AdHoc:Zeta"]
+      )
+    })))
+
+  it.effect("backfills stale pipeline schema without changing the current issue schema", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000256")
+      const sourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "codepipeline",
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        vendorImmutableId: "pipeline-backfill",
+        revision: "pipeline-same-revision",
+        sourceUrl: null,
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId,
+        entityType: "pipeline-execution",
+        sourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "pipeline-execution",
+            displayKey: "payments/pipeline-backfill",
+            title: "Payments execution",
+            details: {
+              _tag: "pipeline-execution",
+              pipelineName: "payments",
+              executionId: "pipeline-backfill",
+              status: "running",
+              triggerRevision: "abc123"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pipeline-schema-backfill",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "pipeline-schema-backfill-execution",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "pipeline-same-revision",
+          entityType: "aws.codepipeline.execution",
+          vendorImmutableId: "pipeline-backfill",
+          sourceUrl: null,
+          title: "Payments execution",
+          attributes: {
+            pipelineName: "payments",
+            executionId: "pipeline-backfill",
+            status: "InProgress",
+            triggerRevision: "abc123"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pipeline-schema-backfill-action",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "Succeeded:2026-07-19T09:02:00.000Z",
+          entityType: "aws.codepipeline.action",
+          vendorImmutableId: "pipeline-backfill#build",
+          sourceUrl: null,
+          title: "payments · Build",
+          attributes: {
+            pipelineName: "payments",
+            executionId: "pipeline-backfill",
+            actionExecutionId: "build-1",
+            stageName: "Build",
+            actionName: "Compile",
+            status: "Succeeded"
+          }
+        }]
+      })
+      const receipt = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: Schema.decodeSync(PluginStreamKey)("pipeline-schema-backfill"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }, page)
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+      const projection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId,
+        revision: null
+      })
+      if (projection._tag !== "entityProjection") return yield* Effect.die("expected backfilled pipeline")
+      assert.strictEqual(projection.value.projection.projectionRevision, 2)
+      assert.strictEqual(projection.value.projection.projectionSchemaVersion, 2)
+      if (projection.value.projection.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected pipeline backfill details")
+      }
+      assert.deepStrictEqual(
+        projection.value.projection.details.actions?.map(({ actionName }) => actionName),
+        ["Compile"]
+      )
+
+      const issueEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000257")
+      const issueSourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "jira",
+        pluginConnectionId: PLUGIN_ID,
+        vendorImmutableId: "PAY-257",
+        revision: "issue-same-revision",
+        sourceUrl: null,
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId: issueEntityId,
+        entityType: "issue",
+        sourceRevision: issueSourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId: issueEntityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "issue",
+            displayKey: "PAY-257",
+            title: "Unchanged issue",
+            details: { _tag: "issue", key: "PAY-257", status: "Open", priority: null, estimatePoints: null }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const unchangedIssue = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          streamKey: Schema.decodeSync(PluginStreamKey)("issue-schema-current"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "issue-schema-current",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "issue-schema-current",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "issue-same-revision",
+            entityType: "jira.issue",
+            vendorImmutableId: "PAY-257",
+            sourceUrl: null,
+            title: "Unchanged issue",
+            attributes: { key: "PAY-257", status: "Open", priority: null, estimatePoints: null }
+          }]
+        })
+      )
+      assert.strictEqual(unchangedIssue.entityProjectionCount, 0)
+      const currentIssue = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: issueEntityId,
+        revision: null
+      })
+      if (currentIssue._tag !== "entityProjection") return yield* Effect.die("expected current issue projection")
+      assert.strictEqual(currentIssue.value.projection.projectionRevision, 1)
+    })))
+
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
     withMaterializer(
       Effect.gen(function*() {
@@ -905,6 +2142,21 @@ describe("normalized plugin page materialization", () => {
         }
         assert.strictEqual(failure.diagnosticCode, "normalized-issue-attributes-invalid")
 
+        const overlappingFailure = yield* materializeNormalizedPluginPage(
+          scope,
+          page("malformed-overlapping-issue-field", {
+            key: "PAY-43",
+            status: { name: "Open" },
+            priority: { name: "High" },
+            estimatePoints: null,
+            updatedAt: ""
+          })
+        ).pipe(Effect.flip)
+        if (overlappingFailure._tag !== "NormalizedPluginPageMaterializationError") {
+          return yield* Effect.die("expected malformed overlapping issue failure")
+        }
+        assert.strictEqual(overlappingFailure.diagnosticCode, "normalized-issue-attributes-invalid")
+
         const legacy = yield* materializeNormalizedPluginPage(
           scope,
           page("compact-legacy-issue", {
@@ -912,7 +2164,9 @@ describe("normalized plugin page materialization", () => {
             key: "LEGACY-42",
             summary: "Historical compact issue",
             status: { name: "Open" },
-            priority: { name: "High" }
+            priority: { name: "High" },
+            stages: "GA",
+            actionCount: "provider-owned"
           })
         )
         assert.strictEqual(legacy.entityProjectionCount, 1)

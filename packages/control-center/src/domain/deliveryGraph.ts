@@ -104,11 +104,103 @@ const PageDetails = Schema.TaggedStruct("page", {
   )
 })
 
+const PipelineExecutionStatus = Schema.Literals(["queued", "running", "succeeded", "failed", "stopped"])
+
+const PipelineSourceRevision = Schema.Struct({
+  actionName: boundedText(200, "PipelineSourceActionName"),
+  revisionId: Schema.NullOr(boundedText(512, "PipelineSourceRevisionId")),
+  revisionSummary: Schema.NullOr(boundedText(500, "PipelineSourceRevisionSummary"))
+})
+
+const PipelineStage = Schema.Struct({
+  name: boundedText(200, "PipelineStageName"),
+  status: PipelineExecutionStatus,
+  actionCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  actionsTruncated: Schema.Boolean
+})
+
+const PipelineActionArtifact = Schema.Struct({
+  name: boundedText(200, "PipelineActionArtifactName"),
+  direction: Schema.Literals(["input", "output"]),
+  access: Schema.Literal("proxy-required")
+})
+
+const PipelineAction = Schema.Struct({
+  actionExecutionId: boundedText(512, "PipelineActionExecutionId"),
+  stageName: boundedText(200, "PipelineActionStageName"),
+  actionName: boundedText(200, "PipelineActionName"),
+  status: PipelineExecutionStatus,
+  startedAt: Schema.NullOr(UtcTimestamp),
+  updatedAt: Schema.NullOr(UtcTimestamp),
+  updatedBy: Schema.NullOr(boundedText(512, "PipelineActionActor")),
+  category: Schema.NullOr(boundedText(100, "PipelineActionCategory")),
+  provider: Schema.NullOr(boundedText(100, "PipelineActionProvider")),
+  owner: Schema.NullOr(boundedText(100, "PipelineActionOwner")),
+  version: Schema.NullOr(boundedText(100, "PipelineActionVersion")),
+  region: Schema.NullOr(boundedText(100, "PipelineActionRegion")),
+  externalExecutionSummary: Schema.NullOr(boundedText(500, "PipelineExternalExecutionSummary")),
+  errorCode: Schema.NullOr(boundedText(200, "PipelineActionErrorCode")),
+  errorMessage: Schema.NullOr(boundedText(500, "PipelineActionErrorMessage")),
+  artifacts: Schema.Array(PipelineActionArtifact).check(Schema.isMaxLength(100))
+})
+
+const PipelineSourceArtifact = Schema.Struct({
+  name: boundedText(200, "PipelineSourceArtifactName"),
+  revisionId: Schema.NullOr(boundedText(512, "PipelineSourceArtifactRevisionId")),
+  revisionSummary: Schema.NullOr(boundedText(500, "PipelineSourceArtifactRevisionSummary")),
+  createdAt: Schema.NullOr(UtcTimestamp),
+  access: Schema.Literal("proxy-required")
+})
+
 const PipelineDetails = Schema.TaggedStruct("pipeline-execution", {
   pipelineName: boundedText(200, "PipelineName"),
   executionId: boundedText(512, "PipelineExecutionId"),
-  status: Schema.Literals(["queued", "running", "succeeded", "failed", "stopped"]),
-  triggerRevision: boundedText(512, "PipelineTriggerRevision")
+  status: PipelineExecutionStatus,
+  triggerRevision: boundedText(512, "PipelineTriggerRevision"),
+  pipelineVersion: Schema.optionalKey(Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0)))),
+  statusSummary: Schema.optionalKey(Schema.NullOr(boundedText(500, "PipelineStatusSummary"))),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  updatedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  triggerType: Schema.optionalKey(Schema.NullOr(boundedText(100, "PipelineTriggerType"))),
+  triggerDetail: Schema.optionalKey(Schema.NullOr(boundedText(500, "PipelineTriggerDetail"))),
+  executionMode: Schema.optionalKey(Schema.NullOr(boundedText(100, "PipelineExecutionMode"))),
+  executionType: Schema.optionalKey(Schema.NullOr(boundedText(100, "PipelineExecutionType"))),
+  rollbackTargetExecutionId: Schema.optionalKey(
+    Schema.NullOr(boundedText(512, "PipelineRollbackTargetExecutionId"))
+  ),
+  sourceRevisions: Schema.optionalKey(
+    Schema.Array(PipelineSourceRevision).check(
+      Schema.makeFilter(
+        (revisions) => new Set(revisions.map((revision) => revision.actionName)).size === revisions.length,
+        { expected: "unique pipeline source action names" }
+      ),
+      Schema.isMaxLength(100)
+    )
+  ),
+  stages: Schema.optionalKey(
+    Schema.Array(PipelineStage).check(
+      Schema.makeFilter(
+        (stages) => new Set(stages.map((stage) => stage.name)).size === stages.length,
+        { expected: "unique pipeline stage names" }
+      ),
+      Schema.isMaxLength(100)
+    )
+  ),
+  actions: Schema.optionalKey(
+    Schema.Array(PipelineAction).check(
+      Schema.makeFilter(
+        (actions) => new Set(actions.map((action) => action.actionExecutionId)).size === actions.length,
+        { expected: "unique pipeline action execution identifiers" }
+      ),
+      Schema.isMaxLength(200)
+    )
+  ),
+  actionCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  actionsTruncated: Schema.optionalKey(Schema.Boolean),
+  actionPagesRead: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 5 }))),
+  sourceArtifacts: Schema.optionalKey(
+    Schema.Array(PipelineSourceArtifact).check(Schema.isMaxLength(100))
+  )
 })
 
 const DeploymentDetails = Schema.TaggedStruct("deployment", {

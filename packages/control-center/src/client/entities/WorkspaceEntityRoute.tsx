@@ -29,6 +29,7 @@ import { presentWorkspaceEntity, type WorkspaceEntityPresentation } from "./pres
 import { WorkspaceEntityLink } from "./WorkspaceEntityLink.js"
 import styles from "./WorkspaceEntityRoute.module.css"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
+import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionDetails.js"
 import { WorkspacePullRequestDetails } from "./WorkspacePullRequestDetails.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
@@ -267,6 +268,9 @@ const EntityContent = ({
       <StatePanel description={message} key={message} title="Partial canonical view" tone="caution" />
     ))}
     {presentation.issue === null ? null : <WorkspaceIssueDetails issue={presentation.issue} />}
+    {presentation.pipelineExecution === null ? null : (
+      <WorkspacePipelineExecutionDetails pipeline={presentation.pipelineExecution} />
+    )}
     {presentation.pullRequest === null ? null : (
       <WorkspacePullRequestDetails
         approvers={presentation.collaborators.approvers}

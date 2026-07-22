@@ -31,9 +31,10 @@ import {
 } from "../errors.js"
 import { mapPersistenceOperation, readChanges } from "./internal.js"
 import { ContentBlobDigest } from "./models.js"
-import type { PluginStreamKey } from "./pluginRuntimeModels.js"
+import type { CodePipelineCacheSelector, PluginStreamKey } from "./pluginRuntimeModels.js"
 import {
   DescriptorCandidate,
+  MaximumCodePipelineCorrelationExecutions,
   PluginCacheRecord,
   PluginEvidenceRecord,
   PluginRuntimeRecord,
@@ -1113,26 +1114,11 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return parsed.success
   })
 
-  const getCache = Effect.fn("PluginRuntimeRepository.getCache")(function*(
+  const decodeCacheRows = Effect.fn("PluginRuntimeRepository.decodeCacheRows")(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
-    streamKey: PluginStreamKey
+    rows: ReadonlyArray<Record<string, unknown>>
   ) {
-    const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
-      cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
-      cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
-      cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
-      cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
-      (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
-        WHERE evidence.workspace_id = cache.workspace_id
-          AND evidence.plugin_connection_id = cache.plugin_connection_id
-          AND evidence.stream_key = cache.stream_key
-          AND evidence.page_id = cache.last_page_id
-          AND evidence.record_key = cache.record_key
-        ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
-      FROM plugin_cache_entries AS cache WHERE cache.workspace_id = ${workspaceId}
-        AND cache.plugin_connection_id = ${pluginConnectionId} AND cache.stream_key = ${streamKey}
-      ORDER BY cache.record_key`
     const records: Array<typeof PluginCacheRecord.Type> = []
     for (const row of rows) {
       const decoded = Schema.decodeUnknownResult(PluginCacheRecord)(row)
@@ -1194,6 +1180,180 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
       records.push(decoded.success)
     }
     return records
+  })
+
+  const getCache = Effect.fn("PluginRuntimeRepository.getCache")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey
+  ) {
+    const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+      cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
+      cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
+      cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
+      cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
+      (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
+        WHERE evidence.workspace_id = cache.workspace_id
+          AND evidence.plugin_connection_id = cache.plugin_connection_id
+          AND evidence.stream_key = cache.stream_key
+          AND evidence.page_id = cache.last_page_id
+          AND evidence.record_key = cache.record_key
+        ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
+      FROM plugin_cache_entries AS cache WHERE cache.workspace_id = ${workspaceId}
+        AND cache.plugin_connection_id = ${pluginConnectionId} AND cache.stream_key = ${streamKey}
+      ORDER BY cache.record_key`
+    return yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)
+  })
+
+  const getCodePipelineCacheBeforeTombstones = Effect.fn(
+    "PluginRuntimeRepository.getCodePipelineCacheBeforeTombstones"
+  )(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    tombstones: ReadonlyArray<Extract<typeof NormalizedPluginEventV1.Type, { readonly _tag: "TombstoneEntity" }>>
+  ) {
+    const records = new Map<string, typeof PluginCacheRecord.Type>()
+    for (const tombstone of tombstones) {
+      const recordKey = yield* normalizedRecordKey(tombstone)
+      const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+        cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
+        cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
+        cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
+        cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
+        (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
+          WHERE evidence.workspace_id = cache.workspace_id
+            AND evidence.plugin_connection_id = cache.plugin_connection_id
+            AND evidence.stream_key = cache.stream_key
+            AND evidence.page_id = cache.last_page_id
+            AND evidence.record_key = cache.record_key
+          ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
+        FROM plugin_cache_entries AS cache
+        WHERE cache.workspace_id = ${workspaceId}
+          AND cache.plugin_connection_id = ${pluginConnectionId}
+          AND cache.stream_key = ${streamKey}
+          AND cache.record_key = ${recordKey}
+          AND cache.state = 'present'
+        LIMIT 1`
+      for (const record of yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)) {
+        records.set(record.recordKey, record)
+      }
+    }
+    return [...records.values()]
+  })
+
+  const getCodePipelineCache = Effect.fn("PluginRuntimeRepository.getCodePipelineCache")(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    selectors: ReadonlyArray<CodePipelineCacheSelector>
+  ) {
+    const maximumExecutions = MaximumCodePipelineCorrelationExecutions
+    const executionSelectors = new Map<string, CodePipelineCacheSelector>()
+    const declarations = new Map<string, CodePipelineCacheSelector>()
+    for (const selector of selectors) {
+      if (selector.executionId === null) {
+        const key = `${selector.pipelineName}\u0000${String(selector.pipelineVersion ?? "")}`
+        if (declarations.size < maximumExecutions) declarations.set(key, selector)
+      } else if (executionSelectors.size < maximumExecutions) {
+        const key = `${selector.pipelineName}\u0000${selector.executionId}`
+        executionSelectors.set(key, selector)
+      }
+    }
+
+    for (const selector of declarations.values()) {
+      if (executionSelectors.size >= maximumExecutions) break
+      const executionRows = selector.pipelineVersion === null
+        ? yield* sql<{ readonly executionId: unknown }>`SELECT
+          CASE WHEN json_valid(payload_json)
+            THEN json_extract(payload_json, '$.attributes.executionId') END AS executionId
+          FROM plugin_cache_entries
+          WHERE workspace_id = ${workspaceId}
+            AND plugin_connection_id = ${pluginConnectionId}
+            AND stream_key = ${streamKey}
+            AND state = 'present'
+            AND CASE WHEN json_valid(payload_json)
+              THEN json_extract(payload_json, '$.attributes.pipelineName') END = ${selector.pipelineName}
+            AND CASE WHEN json_valid(payload_json)
+              THEN json_extract(payload_json, '$.entityType') END = 'aws.codepipeline.execution'
+          ORDER BY cached_at DESC, record_key
+          LIMIT ${maximumExecutions}`
+        : yield* sql<{ readonly executionId: unknown }>`SELECT
+          CASE WHEN json_valid(payload_json)
+            THEN json_extract(payload_json, '$.attributes.executionId') END AS executionId
+          FROM plugin_cache_entries
+          WHERE workspace_id = ${workspaceId}
+            AND plugin_connection_id = ${pluginConnectionId}
+            AND stream_key = ${streamKey}
+            AND state = 'present'
+            AND CASE WHEN json_valid(payload_json)
+              THEN json_extract(payload_json, '$.attributes.pipelineName') END = ${selector.pipelineName}
+            AND CASE WHEN json_valid(payload_json)
+              THEN json_extract(payload_json, '$.entityType') END = 'aws.codepipeline.execution'
+            AND (
+              CASE WHEN json_valid(payload_json)
+                THEN json_extract(payload_json, '$.attributes.pipelineVersion') END = ${selector.pipelineVersion}
+              OR CASE WHEN json_valid(payload_json)
+                THEN json_extract(payload_json, '$.attributes.pipelineVersion') END IS NULL
+            )
+          ORDER BY cached_at DESC, record_key
+          LIMIT ${maximumExecutions}`
+      for (const row of executionRows) {
+        if (executionSelectors.size >= maximumExecutions || typeof row.executionId !== "string") break
+        const executionId = row.executionId.trim()
+        if (executionId.length === 0 || executionId.length > 512) continue
+        const executionSelector = { ...selector, executionId }
+        executionSelectors.set(`${selector.pipelineName}\u0000${executionId}`, executionSelector)
+      }
+    }
+
+    const records = new Map<string, typeof PluginCacheRecord.Type>()
+    for (const selector of executionSelectors.values()) {
+      const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+        cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
+        cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
+        cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
+        cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
+        (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
+          WHERE evidence.workspace_id = cache.workspace_id
+            AND evidence.plugin_connection_id = cache.plugin_connection_id
+            AND evidence.stream_key = cache.stream_key
+            AND evidence.page_id = cache.last_page_id
+            AND evidence.record_key = cache.record_key
+          ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
+        FROM plugin_cache_entries AS cache
+        WHERE cache.workspace_id = ${workspaceId}
+          AND cache.plugin_connection_id = ${pluginConnectionId}
+          AND cache.stream_key = ${streamKey}
+          AND cache.state = 'present'
+          AND CASE WHEN json_valid(cache.payload_json)
+            THEN json_extract(cache.payload_json, '$.attributes.pipelineName') END = ${selector.pipelineName}
+          AND CASE WHEN json_valid(cache.payload_json)
+            THEN json_extract(cache.payload_json, '$.entityType') END IN (
+              'aws.codepipeline.pipeline',
+              'aws.codepipeline.execution',
+              'aws.codepipeline.stage',
+              'aws.codepipeline.action'
+            )
+          AND (
+            CASE WHEN json_valid(cache.payload_json)
+              THEN json_extract(cache.payload_json, '$.entityType') END = 'aws.codepipeline.pipeline'
+            OR CASE WHEN json_valid(cache.payload_json)
+              THEN json_extract(cache.payload_json, '$.attributes.executionId') END = ${selector.executionId}
+          )
+        ORDER BY CASE WHEN json_valid(cache.payload_json) THEN
+          CASE json_extract(cache.payload_json, '$.entityType')
+            WHEN 'aws.codepipeline.execution' THEN 0
+            WHEN 'aws.codepipeline.pipeline' THEN 1
+            WHEN 'aws.codepipeline.stage' THEN 2
+            ELSE 3
+          END ELSE 4 END, cache.cached_at DESC, cache.record_key
+        LIMIT 503`
+      for (const record of yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)) {
+        records.set(record.recordKey, record)
+      }
+    }
+    return [...records.values()]
   })
 
   const listEvidence = Effect.fn("PluginRuntimeRepository.listEvidence")(function*(
@@ -1277,6 +1437,8 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     commitPage,
     completeSyncAttempt,
     getCache,
+    getCodePipelineCacheBeforeTombstones,
+    getCodePipelineCache,
     getLastSuccessfulHealth,
     getRuntime,
     getSyncAttemptState,
