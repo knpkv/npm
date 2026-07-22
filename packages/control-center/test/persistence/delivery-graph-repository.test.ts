@@ -14,6 +14,7 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   PersistedRecordError,
@@ -981,7 +982,23 @@ describe("DeliveryGraphRepository", () => {
       Effect.gen(function*() {
         yield* insertFoundation
         const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
         yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* Effect.forEach(
+          Array.from({ length: 16 }, (_, index) => `jira-account-${String(index).padStart(2, "0")}`),
+          (vendorPersonId) =>
+            database.sql`INSERT INTO person_identities (
+              workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+            ) VALUES (
+              ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${PLUGIN_ID}, 'jira', ${vendorPersonId}, ${CREATED_AT}
+            )`,
+          { discard: true }
+        )
+        yield* database.sql`INSERT INTO person_identities (
+            workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+          ) VALUES (
+            ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${OTHER_PLUGIN_ID}, 'confluence', 'account-avery', ${CREATED_AT}
+          )`
 
         const firstRelationship = initialBatch.relationships[0]
         if (firstRelationship === undefined) return yield* Effect.die("Expected relationship fixture")
@@ -1022,7 +1039,12 @@ describe("DeliveryGraphRepository", () => {
             avatarFallback: "AB",
             displayName: "Avery Bell",
             personId: OWNER_PERSON_ID,
-            roles: ["author", "issue-assignee", "issue-owner", "operator"]
+            roles: ["author", "issue-assignee", "issue-owner", "operator"],
+            sourceIdentities: [{
+              pluginConnectionId: OTHER_PLUGIN_ID,
+              providerId: "confluence",
+              vendorPersonId: VendorImmutableId.make("account-avery")
+            }]
           }])
           assert.lengthOf(bounded.value.relationships, 1)
           assert.isTrue(bounded.value.truncated)

@@ -389,6 +389,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           FROM person_identities
           WHERE workspace_id = ${workspaceId}
             AND person_id = ${owner.personId}
+            AND provider_id = 'confluence'
           ORDER BY provider_id, plugin_connection_id, vendor_person_id
           LIMIT 16`
         const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows)

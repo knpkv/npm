@@ -642,9 +642,26 @@ const confluenceRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
     sourceUrl: "https://acme.atlassian.net/wiki/spaces/PAY/pages/991",
     title: "Payments 2026.29 runbook",
     attributes: {
-      spaceKey: "PAY",
-      currentVersion: 8,
+      schemaVersion: 1,
       status: "current",
+      spaceId: "PAY",
+      parentId: null,
+      createdAt: "2026-07-19T09:00:00.000Z",
+      updatedAt: "2026-07-19T09:02:40.000Z",
+      currentVersion: 8,
+      content: {
+        representation: "safe-markdown",
+        markdown: "## Release recovery\n\nKeep this exact page body out of graph cards."
+      },
+      versions: [{
+        number: 8,
+        createdAt: "2026-07-19T09:02:40.000Z",
+        message: "Document release recovery",
+        minorEdit: false,
+        authorId: null
+      }],
+      versionHistory: { complete: true, pagesFetched: 1 },
+      contributors: [],
       linkedIssueKeys: ["PAY-42"],
       linkedReleaseVersions: ["2026.29"]
     }
@@ -2222,6 +2239,17 @@ describe("normalized plugin page materialization", () => {
         limit: 100
       })
       if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      const inspectionService = yield* makeDeliveryGraphInspection
+      const boundedSlice = yield* inspectionService.releaseSlice({
+        workspaceId: WORKSPACE_ID,
+        releaseId: release.id,
+        environmentId: null
+      })
+      const indexedPage = boundedSlice.entityProjections.find(({ projection }) => projection.details._tag === "page")
+        ?.projection
+      if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
+      assert.strictEqual(indexedPage.details.contentState, "lazy")
+      assert.isNull(indexedPage.details.content)
       const current = slice.value.relationships.filter(
         ({ lifecycle }) => lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
       )
