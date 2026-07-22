@@ -42,6 +42,11 @@ import type { EntityRecord } from "../persistence/repositories/models.js"
 import type { PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
+  PipelineEntityAttributeFields,
+  pipelineStatus,
+  projectPipelineExecution
+} from "./pipelineExecutionProjection.js"
+import {
   type PluginSynchronizationAuthority,
   verifyPluginSynchronizationAuthority
 } from "./pluginSynchronizationAuthority.js"
@@ -88,10 +93,7 @@ const EntityAttributes = Schema.Struct({
   currentVersion: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   linkedIssueKeys: Schema.optionalKey(Schema.Array(Schema.String)),
   linkedReleaseVersions: Schema.optionalKey(Schema.Array(Schema.String)),
-  pipelineName: OptionalText,
-  executionId: OptionalText,
-  triggerRevision: OptionalText,
-  sourceRevisions: Schema.optionalKey(Schema.Array(Schema.Struct({ revisionId: OptionalText }))),
+  ...PipelineEntityAttributeFields,
   environmentId: OptionalText,
   revision: OptionalText,
   durationMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -253,30 +255,6 @@ const pullRequestLifecycle = (value: string | null | undefined): "closed" | "mer
   }
 }
 
-const pipelineStatus = (
-  value: string | null | undefined
-): "failed" | "queued" | "running" | "stopped" | "succeeded" => {
-  switch (value?.toLowerCase()) {
-    case "inprogress":
-    case "in-progress":
-    case "running":
-      return "running"
-    case "succeeded":
-    case "success":
-      return "succeeded"
-    case "failed":
-    case "failure":
-      return "failed"
-    case "stopped":
-    case "stopping":
-    case "superseded":
-    case "abandoned":
-      return "stopped"
-    default:
-      return "queued"
-  }
-}
-
 const isoDurationMinutes = (value: string | null | undefined): number => {
   if (value === null || value === undefined) return 0
   const match = /^PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/u.exec(value)
@@ -289,7 +267,8 @@ const isoDurationMinutes = (value: string | null | undefined): number => {
 
 const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entityPresentation")(function*(
   event: EntityUpsert,
-  kind: typeof DeliveryEntityKind.Type
+  kind: typeof DeliveryEntityKind.Type,
+  siblingEvents: ReadonlyArray<NormalizedPluginEventV1>
 ): Effect.fn.Return<
   { readonly details: DeliveryEntityDetails; readonly displayKey: string },
   NormalizedPluginPageMaterializationError
@@ -357,18 +336,15 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     case "pipeline-execution": {
-      const executionId = bounded(attributes.executionId, event.vendorImmutableId, 512)
-      const pipelineName = bounded(attributes.pipelineName, "unknown", 200)
-      const sourceRevision = attributes.sourceRevisions?.find(({ revisionId }) => revisionId !== null)?.revisionId
+      const details = yield* projectPipelineExecution(event, attributes, siblingEvents).pipe(
+        Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
+      )
+      if (details._tag !== "pipeline-execution") {
+        return yield* malformed("normalized-pipeline-details-kind-invalid", event.eventId)
+      }
       return {
-        displayKey: bounded(`${pipelineName}/${executionId}`, executionId, 200),
-        details: {
-          _tag: "pipeline-execution",
-          pipelineName,
-          executionId,
-          status: pipelineStatus(namedText(attributes.status)),
-          triggerRevision: bounded(attributes.triggerRevision ?? sourceRevision, event.revision, 512)
-        }
+        displayKey: bounded(`${details.pipelineName}/${details.executionId}`, details.executionId, 200),
+        details
       }
     }
     case "deployment": {
@@ -570,11 +546,12 @@ const materializeUpsertEntity = Effect.fn(
   persistence: PersistenceService,
   cryptoService: Crypto.Crypto,
   scope: NormalizedPluginPageMaterializationScope,
-  event: EntityUpsert
+  event: EntityUpsert,
+  siblingEvents: ReadonlyArray<NormalizedPluginEventV1>
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
-  const presentation = yield* entityPresentation(event, kind)
+  const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
   const entityId = existing?.entityId ??
     (yield* entityIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId))
@@ -1275,7 +1252,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
           continue
         }
-        const receipt = yield* materializeUpsertEntity(persistence, cryptoService, scope, event)
+        const receipt = yield* materializeUpsertEntity(persistence, cryptoService, scope, event, events)
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount
         skippedEntityCount += receipt.skippedEntityCount

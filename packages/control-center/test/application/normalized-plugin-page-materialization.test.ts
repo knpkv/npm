@@ -50,6 +50,7 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:06:00.000Z")
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
@@ -487,6 +488,129 @@ const codePipelineRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   }]
 })
 
+const richCodePipelinePage = Schema.decodeSync(PluginSyncPageV1)({
+  checkpointAfterPage: "codepipeline-rich-complete",
+  hasMore: false,
+  events: [{
+    _tag: "UpsertEntity",
+    eventId: "payments-pipeline-declaration",
+    observedAt: "2026-07-19T09:02:00.000Z",
+    revision: "pipeline-v7",
+    entityType: "aws.codepipeline.pipeline",
+    vendorImmutableId: "payments",
+    sourceUrl: null,
+    title: "Payments pipeline",
+    attributes: {
+      pipelineName: "payments",
+      stages: [
+        { name: "Source", actions: [{ name: "Checkout" }] },
+        { name: "Build", actions: [{ name: "Compile" }] },
+        { name: "Approval", actions: [{ name: "Release gate" }] },
+        { name: "Production", actions: [{ name: "Deploy" }] }
+      ]
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "payments-execution-9002",
+    observedAt: "2026-07-19T09:05:00.000Z",
+    revision: "7:InProgress:2026-07-19T09:05:00.000Z",
+    entityType: "aws.codepipeline.execution",
+    vendorImmutableId: "9002",
+    sourceUrl: "https://console.aws.example/codepipeline/payments/9002",
+    title: "Payments deploy 9002",
+    attributes: {
+      pipelineName: "payments",
+      pipelineVersion: 7,
+      executionId: "9002",
+      status: "InProgress",
+      statusSummary: "Waiting for the production release gate",
+      startedAt: "2026-07-19T09:00:00.000Z",
+      updatedAt: "2026-07-19T09:05:00.000Z",
+      sourceRevisions: [{ actionName: "Checkout", revisionId: "abc123", revisionSummary: "main" }],
+      triggerType: "StartPipelineExecution",
+      triggerDetail: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+      executionMode: "SUPERSEDED",
+      executionType: "STANDARD",
+      artifactRevisions: [{
+        name: "Source",
+        revisionId: "abc123",
+        revisionSummary: "main",
+        createdAt: "2026-07-19T08:59:00.000Z"
+      }],
+      actionCount: 2,
+      actionsTruncated: true,
+      actionPagesRead: 3
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-stage-Build",
+    observedAt: "2026-07-19T09:04:00.000Z",
+    revision: "Succeeded:2026-07-19T09:04:00.000Z",
+    entityType: "aws.codepipeline.stage",
+    vendorImmutableId: "9002#Build",
+    sourceUrl: null,
+    title: "payments · Build",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      stageName: "Build",
+      status: "Succeeded",
+      actionCount: 1,
+      actionsTruncated: true
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-action-compile",
+    observedAt: "2026-07-19T09:04:00.000Z",
+    revision: "Succeeded:2026-07-19T09:04:00.000Z",
+    entityType: "aws.codepipeline.action",
+    vendorImmutableId: "9002#compile-1",
+    sourceUrl: null,
+    title: "payments · Build · Compile",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      actionExecutionId: "compile-1",
+      stageName: "Build",
+      actionName: "Compile",
+      status: "Succeeded",
+      startedAt: "2026-07-19T09:01:00.000Z",
+      updatedAt: "2026-07-19T09:04:00.000Z",
+      updatedBy: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+      actionType: { category: "Build", owner: "AWS", provider: "CodeBuild", version: "1" },
+      actionRegion: "eu-west-1",
+      inputArtifacts: [{ name: "Source", bucket: "must-not-persist", key: "secret/source.zip" }],
+      outputArtifacts: [{ name: "BuildOutput", bucket: "must-not-persist", key: "secret/build.zip" }],
+      externalExecutionSummary: "Build completed",
+      logStreamArn: "arn:aws:logs:must-not-persist"
+    }
+  }, {
+    _tag: "UpsertEntity",
+    eventId: "9002-action-gate",
+    observedAt: "2026-07-19T09:05:00.000Z",
+    revision: "InProgress:2026-07-19T09:05:00.000Z",
+    entityType: "aws.codepipeline.action",
+    vendorImmutableId: "9002#gate-1",
+    sourceUrl: null,
+    title: "payments · Approval · Release gate",
+    attributes: {
+      pipelineName: "payments",
+      executionId: "9002",
+      actionExecutionId: "gate-1",
+      stageName: "Approval",
+      actionName: "Release gate",
+      status: "InProgress",
+      startedAt: "2026-07-19T09:05:00.000Z",
+      updatedAt: "2026-07-19T09:05:00.000Z",
+      updatedBy: "release-approver@example.test",
+      actionType: { category: "Approval", owner: "AWS", provider: "Manual", version: "1" },
+      actionRegion: "eu-west-1",
+      inputArtifacts: [{ name: "BuildOutput" }],
+      outputArtifacts: []
+    }
+  }]
+})
+
 const clockifyRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "clockify-complete",
   hasMore: false,
@@ -623,6 +747,62 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it.effect("materializes one bounded, credential-free CodePipeline execution document", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const receipt = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+        providerId: "codepipeline",
+        streamKey: firstPartyStream("codepipeline"),
+        expectedRevision: 0,
+        committedAt: T4,
+        successfulHealth: { _tag: "healthy", checkedAt: T4 }
+      }, richCodePipelinePage)
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+      assert.strictEqual(receipt.skippedEntityCount, 4)
+
+      const index = yield* items()
+      const projection = index.items[0]?.projection
+      if (projection?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected rich pipeline execution")
+      }
+      const details = projection.details
+      assert.strictEqual(details.pipelineVersion, 7)
+      assert.strictEqual(details.statusSummary, "Waiting for the production release gate")
+      assert.strictEqual(details.triggerType, "StartPipelineExecution")
+      assert.strictEqual(details.triggerDetail, "arn:aws:sts::123456789012:assumed-role/Release/operator")
+      assert.strictEqual(details.actionCount, 2)
+      assert.isTrue(details.actionsTruncated)
+      assert.strictEqual(details.actionPagesRead, 3)
+      assert.deepStrictEqual(details.stages?.map(({ name, status }) => [name, status]), [
+        ["Source", "queued"],
+        ["Build", "succeeded"],
+        ["Approval", "running"],
+        ["Production", "queued"]
+      ])
+      assert.deepStrictEqual(details.actions?.map(({ actionName, updatedBy }) => [actionName, updatedBy]), [
+        ["Compile", "arn:aws:sts::123456789012:assumed-role/Release/operator"],
+        ["Release gate", "release-approver@example.test"]
+      ])
+      assert.deepStrictEqual(details.actions?.[0]?.artifacts, [
+        { name: "Source", direction: "input", access: "proxy-required" },
+        { name: "BuildOutput", direction: "output", access: "proxy-required" }
+      ])
+      const serialized = JSON.stringify(
+        yield* Schema.encodeEffect(WorkspaceEntityInspection)(
+          yield* (yield* makeDeliveryGraphInspection).workspaceEntity({
+            workspaceId: WORKSPACE_ID,
+            entityId: projection.entityId
+          })
+        )
+      )
+      assert.notInclude(serialized, "must-not-persist")
+      assert.notInclude(serialized, "secret/source.zip")
+      assert.notInclude(serialized, "arn:aws:logs")
+    })))
+
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
     withMaterializer(
       Effect.gen(function*() {

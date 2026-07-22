@@ -227,6 +227,130 @@ const pullRequestInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEnti
   activity: { truncated: false, events: [] }
 })
 
+const pipelineInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityType: "pipeline-execution",
+      displayKey: "payments/9002",
+      title: "Payments deploy 9002",
+      details: {
+        _tag: "pipeline-execution",
+        pipelineName: "payments",
+        pipelineVersion: 7,
+        executionId: "9002",
+        status: "running",
+        statusSummary: "Waiting for the production release gate",
+        triggerRevision: "abc123",
+        startedAt: "2026-07-14T09:00:00.000Z",
+        updatedAt: "2026-07-14T09:05:42.000Z",
+        triggerType: "StartPipelineExecution",
+        triggerDetail: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+        executionMode: "SUPERSEDED",
+        executionType: "STANDARD",
+        sourceRevisions: [{ actionName: "Checkout", revisionId: "abc123", revisionSummary: "main" }],
+        stages: [
+          { name: "Source", status: "succeeded", actionCount: 1, actionsTruncated: false },
+          { name: "Build", status: "succeeded", actionCount: 1, actionsTruncated: false },
+          { name: "Approval", status: "running", actionCount: 1, actionsTruncated: false },
+          { name: "Production", status: "queued", actionCount: 1, actionsTruncated: false }
+        ],
+        actions: [
+          {
+            actionExecutionId: "build-1",
+            stageName: "Build",
+            actionName: "Compile",
+            status: "succeeded",
+            startedAt: "2026-07-14T09:01:00.000Z",
+            updatedAt: "2026-07-14T09:04:00.000Z",
+            updatedBy: "arn:aws:sts::123456789012:assumed-role/Release/operator",
+            category: "Build",
+            provider: "CodeBuild",
+            owner: "AWS",
+            version: "1",
+            region: "eu-west-1",
+            externalExecutionSummary: "Build completed",
+            errorCode: null,
+            errorMessage: null,
+            artifacts: [
+              { name: "Source", direction: "input", access: "proxy-required" },
+              { name: "BuildOutput", direction: "output", access: "proxy-required" }
+            ]
+          },
+          {
+            actionExecutionId: "approval-1",
+            stageName: "Approval",
+            actionName: "Release gate",
+            status: "running",
+            startedAt: "2026-07-14T09:05:00.000Z",
+            updatedAt: "2026-07-14T09:05:42.000Z",
+            updatedBy: "release-approver@example.test",
+            category: "Approval",
+            provider: "Manual",
+            owner: "AWS",
+            version: "1",
+            region: "eu-west-1",
+            externalExecutionSummary: null,
+            errorCode: null,
+            errorMessage: null,
+            artifacts: [{ name: "BuildOutput", direction: "input", access: "proxy-required" }]
+          },
+          {
+            actionExecutionId: "deploy-1",
+            stageName: "Production",
+            actionName: "Deploy",
+            status: "queued",
+            startedAt: null,
+            updatedAt: null,
+            updatedBy: null,
+            category: "Deploy",
+            provider: "CodeDeploy",
+            owner: "AWS",
+            version: "1",
+            region: "eu-west-1",
+            externalExecutionSummary: null,
+            errorCode: null,
+            errorMessage: null,
+            artifacts: []
+          }
+        ],
+        actionCount: 4,
+        actionsTruncated: true,
+        actionPagesRead: 3,
+        sourceArtifacts: [
+          {
+            name: "Source",
+            revisionId: "abc123",
+            revisionSummary: "main",
+            createdAt: "2026-07-14T08:59:00.000Z",
+            access: "proxy-required"
+          }
+        ]
+      }
+    },
+    owners: [
+      {
+        avatarFallback: "MO",
+        displayName: "Mina Ortiz",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000072",
+        roles: ["operator"]
+      }
+    ]
+  },
+  source: {
+    ...sourceRevision,
+    providerId: "codepipeline",
+    vendorImmutableId: "9002",
+    revision: "7:InProgress",
+    sourceUrl: "https://console.aws.example/codepipeline/payments/9002"
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  activity: { truncated: false, events: [] }
+})
+
 const state = {
   _tag: "stale",
   entityId: inspection.entity.projection.entityId,
@@ -242,6 +366,15 @@ const pullRequestState = {
   entityId: pullRequestInspection.entity.projection.entityId,
   inspection: pullRequestInspection,
   refreshKey: "snapshot-pr",
+  sessionKey: "session-a",
+  workspaceId: WORKSET_WORKSPACE_ID
+} satisfies WorkspaceEntityState
+
+const pipelineState = {
+  _tag: "ready",
+  entityId: pipelineInspection.entity.projection.entityId,
+  inspection: pipelineInspection,
+  refreshKey: "snapshot-pipeline",
   sessionKey: "session-a",
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
@@ -358,6 +491,40 @@ describe("canonical workspace entity", () => {
     if (complete.pullRequest === null) throw new Error("Expected a complete pull-request presentation")
     expect(complete.pullRequest.issueCountLabel).toBe(String(complete.pullRequest.issueCount))
     expect(complete.pullRequest.pipelineCountLabel).toBe(String(complete.pullRequest.pipelineCount))
+  })
+
+  it("presents one exact pipeline run as a bounded operator flight recorder", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, pipelineInspection)
+
+    expect(presentation).toMatchObject({
+      displayKey: "payments/9002",
+      service: "codepipeline",
+      verdict: "Running",
+      pipelineExecution: {
+        actionCountLabel: "4+",
+        duration: "5m 42s",
+        executionId: "9002",
+        executionMode: "SUPERSEDED · STANDARD",
+        operators: ["Operator"],
+        approvers: ["release-approver@example.test"],
+        pipelineVersion: "v7",
+        statusSummary: "Waiting for the production release gate",
+        targetEnvironment: "Production · eu-west-1",
+        triggerRevision: "abc123"
+      }
+    })
+    expect(presentation.pipelineExecution?.stages.map(({ name }) => name)).toEqual([
+      "Source",
+      "Build",
+      "Approval",
+      "Production"
+    ])
+    expect(presentation.pipelineExecution?.actions[0]).toMatchObject({
+      actor: "Operator",
+      duration: "3m",
+      name: "Compile",
+      provider: "AWS · CodeBuild · 1"
+    })
   })
 
   it("counts only currently accepted issue and pipeline relationships as PR evidence", () => {
@@ -652,6 +819,27 @@ describe("canonical workspace entity", () => {
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
     expect(onAskAgent).toHaveBeenCalledOnce()
+  })
+
+  it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {
+    const host = await renderView(() => undefined, pipelineState)
+
+    expect(host.querySelector("[data-workspace-pipeline-execution-detail]")).not.toBeNull()
+    expect(host.textContent).toContain("Payments deploy 9002")
+    expect(host.textContent).toContain("Waiting for the production release gate")
+    expect(host.textContent).toContain("Start Pipeline Execution")
+    expect(host.textContent).toContain("Production · eu-west-1")
+    expect(host.textContent).toContain("5m 42s")
+    expect(host.textContent).toContain("Operator")
+    expect(host.textContent).toContain("release-approver@example.test")
+    expect(host.textContent).toContain("Execution path")
+    expect(host.textContent).toContain("Release gate")
+    expect(host.textContent).toContain("This is a bounded view")
+    expect(host.textContent).toContain("BuildOutput")
+    expect(host.textContent).toContain("Proxy required")
+    expect(host.textContent).toContain("Pull requests")
+    expect(host.textContent).toContain("Runbooks")
+    expect(host.querySelectorAll("a[href*='bucket'], a[href*='artifact'], a[href*='logs']")).toHaveLength(0)
   })
 
   it("renders a bounded release-membership count as a lower bound", async () => {

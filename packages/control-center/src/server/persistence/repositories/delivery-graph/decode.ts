@@ -48,7 +48,7 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
         )
       )
     )
-    const projection = yield* Schema.decodeUnknownEffect(DeliveryEntityProjection)({
+    const projection = yield* Schema.decodeUnknownEffect(Schema.toType(DeliveryEntityProjection))({
       workspaceId: row.workspaceId,
       entityId: row.entityId,
       projectionRevision: row.projectionRevision,

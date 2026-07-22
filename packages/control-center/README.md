@@ -182,6 +182,8 @@ Each execution provider page contains at most one execution, allowing its pipeli
 
 Normalized events carry the pipeline ARN, region, provider update/sample time, immutable execution/action identities, status, operator provenance, source revisions, and bounded stage/action summaries. Artifact metadata contains only names and S3 bucket/key coordinates marked `proxy-required`; resolved action configuration, provider artifact URLs, revision URLs, and external execution URLs are never exposed. Start, stop, manual approval, retry, log-content, and artifact-content operations remain unnegotiated until their governed authorization, receipt, proxy, and reconciliation paths are implemented.
 
+The canonical CodePipeline entity page is a read-first execution flight recorder. It correlates the already bounded pipeline, stage, and action events from one accepted provider page, preserves configured stage order, and shows execution identity, trigger and revision, derived deployment target, duration, operator and approval identities, action outcomes, and current release/PR/runbook evidence. The canonical projection deliberately removes S3 bucket/key coordinates and log ARNs: browser-visible artifacts retain only their name, direction, and `proxy-required` access state. Truncated stage or action reads remain explicitly labeled and are never presented as complete.
+
 ### Jira issue reader
 
 `makeJiraReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Jira adapter around the shared Schema-validated `JiraApiClient`. Its negotiated surface is deliberately limited to `entity.read` for `jira.issue`; provider mutations and workspace-wide JQL synchronization are not implied by this adapter.

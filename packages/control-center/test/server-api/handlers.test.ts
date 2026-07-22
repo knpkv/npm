@@ -179,7 +179,7 @@ const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
     ownersTruncated: false,
     releaseIds: [],
     releaseMembershipsTruncated: false,
-    projection: sharedProjection,
+    projection: Schema.encodeSync(DeliveryEntityProjection)(sharedProjection),
     recordedAt: "2026-07-14T10:02:00.000Z"
   },
   source: {
