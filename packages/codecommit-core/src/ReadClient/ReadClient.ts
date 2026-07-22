@@ -39,6 +39,15 @@ import {
 
 const PROVIDER_PAGE_LIMIT = 100
 
+/**
+ * Concurrency for hydrating a listed page's pull requests via GetPullRequest.
+ *
+ * CodeCommit's GetPullRequest throttle ceiling is low; a wide fan-out bursts it
+ * and surfaces ThrottlingException even for small repositories. Kept low so a
+ * single sync stays under the limit, trading a little latency for reliability.
+ */
+const PULL_REQUEST_HYDRATION_CONCURRENCY = 2
+
 const RawCallerIdentity = Schema.Struct({
   Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
@@ -62,9 +71,13 @@ const RawPullRequestResponse = Schema.Struct({
   pullRequest: Schema.Struct({
     pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
     revisionId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
-    title: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    // Provider-supplied free text: CodeCommit does not guarantee a trimmed
+    // title (observed trailing "\n"), so normalize on decode instead of rejecting.
+    title: Schema.String.check(Schema.isNonEmpty()),
     description: Schema.optional(Schema.String),
-    authorArn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+    // CodeCommit omits authorArn for deleted/system identities (observed "Missing
+    // key"); the sibling AwsClient read paths already model it as optional.
+    authorArn: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))),
     pullRequestStatus: Schema.Literals(["OPEN", "CLOSED"]),
     pullRequestTargets: Schema.Array(RawPullRequestTarget).check(Schema.isLengthBetween(1, 1)),
     creationDate: Schema.Date,
@@ -137,6 +150,9 @@ const decodeProvider = <S extends Schema.Codec<unknown, unknown, never, never>>(
   value: unknown
 ): Effect.Effect<S["Type"], CodeCommitMalformedResponseError> =>
   Schema.decodeUnknownEffect(Schema.toType(schema))(value).pipe(
+    Effect.tapError((error) =>
+      Effect.logError(`CodeCommit provider response failed schema decode (${operation}): ${error.message}`)
+    ),
     Effect.mapError(() => malformed(operation))
   )
 
@@ -149,9 +165,9 @@ const decodePullRequest = Effect.fn("CodeCommitReadClient.decodePullRequest")(fu
     pullRequestId: pullRequest.pullRequestId,
     revisionId: pullRequest.revisionId,
     repositoryName: target.repositoryName,
-    title: pullRequest.title,
+    title: pullRequest.title.trim(),
     description: pullRequest.description,
-    authorArn: pullRequest.authorArn,
+    authorArn: pullRequest.authorArn ?? null,
     status: target.mergeMetadata?.isMerged === true ? "MERGED" : pullRequest.pullRequestStatus,
     sourceReference: target.sourceReference,
     destinationReference: target.destinationReference,
@@ -284,7 +300,7 @@ export class CodeCommitReadClient extends Context.Service<CodeCommitReadClient, 
         const pullRequests = yield* Effect.forEach(
           page.pullRequestIds,
           (pullRequestId) => getPullRequest({ account: request.account, pullRequestId }),
-          { concurrency: 5 }
+          { concurrency: PULL_REQUEST_HYDRATION_CONCURRENCY }
         )
         return new CodeCommitPullRequestPage({
           pullRequests,

@@ -240,6 +240,39 @@ describe("CodeCommitReadClient", () => {
       })
     ))
 
+  it.effect("normalizes untrimmed provider pull request titles instead of rejecting them", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: ({ pullRequestId }) =>
+          Effect.succeed({
+            pullRequest: {
+              ...pullRequestResponse(pullRequestId).pullRequest,
+              title: "chore(RPS-6255): patch dependency vulnerabilities\n"
+            }
+          })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const revision = yield* client.getPullRequest({ account, pullRequestId: "17" })
+        assert.strictEqual(revision.title, "chore(RPS-6255): patch dependency vulnerabilities")
+      })
+    ))
+
+  it.effect("decodes a pull request whose author identity the provider omitted", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: ({ pullRequestId }) => {
+          const { authorArn: _omitted, ...pullRequest } = pullRequestResponse(pullRequestId).pullRequest
+          return Effect.succeed({ pullRequest })
+        }
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const revision = yield* client.getPullRequest({ account, pullRequestId: "17" })
+        assert.strictEqual(revision.authorArn, null)
+      })
+    ))
+
   it.effect("paginates every changed file and preserves paths, blobs, modes, and renames", () =>
     Effect.gen(function*() {
       const requestedTokens = yield* Ref.make<ReadonlyArray<string | null>>([])
