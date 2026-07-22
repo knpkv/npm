@@ -218,8 +218,8 @@ export const workspaceEntityAgentPath = (
   origin: WorkspaceEntityOrigin,
   workspaceId: WorkspaceIdType,
   current: Pick<LocationParts, "hash" | "pathname" | "search">,
-  canonicalReleaseId: ReleaseIdType | null
+  routableReleaseId: ReleaseIdType | null
 ): string =>
   workspaceEntityOriginAgentPath(origin, workspaceId) ??
-    (canonicalReleaseId === null ? null : releaseAgentPath(workspaceId, canonicalReleaseId)) ??
+    (routableReleaseId === null ? null : releaseAgentPath(workspaceId, routableReleaseId)) ??
     contextualAgentPath(current.pathname, current.search, current.hash)

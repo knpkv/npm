@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 import { describe, expect, it } from "vitest"
 
 import type { ReleaseDeliveryGraphInspection } from "../../src/api/deliveryGraph.js"
-import { presentReleaseWorkset } from "../../src/client/releases/presentReleaseWorkset.js"
+import { presentReleaseWorkset, selectReleaseWorksetObject } from "../../src/client/releases/presentReleaseWorkset.js"
 import { EntityId, GraphNodeId, RelationshipId } from "../../src/domain/identifiers.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
@@ -93,6 +93,39 @@ describe("release workset presenter", () => {
       { state: "Approved", tone: "positive" }
     ])
     expect(workset.truncated).toBe(false)
+  })
+
+  it("presents a closed pull request as completed in groups and selected-object detail", () => {
+    const pullRequest = releaseWorksetFixture.entityProjections.find(
+      ({ projection }) => projection.details._tag === "pull-request"
+    )
+    if (pullRequest?.projection.details._tag !== "pull-request") {
+      throw new Error("Expected a pull-request projection")
+    }
+    const inspection: ReleaseDeliveryGraphInspection = {
+      ...releaseWorksetFixture,
+      entityProjections: releaseWorksetFixture.entityProjections.map((entry) =>
+        entry.projection.entityId === pullRequest.projection.entityId
+          ? {
+            ...entry,
+            projection: {
+              ...entry.projection,
+              details: {
+                ...pullRequest.projection.details,
+                lifecycle: "closed",
+                reviewState: "not-requested"
+              }
+            }
+          }
+          : entry
+      )
+    }
+
+    const workset = presentReleaseWorkset(inspection, WORKSET_WORKSPACE_ID, stages)
+    const selected = selectReleaseWorksetObject(inspection, pullRequest.projection.entityId)
+
+    expect(workset.pullRequestGroups[0]).toEqual(expect.objectContaining({ state: "Closed", tone: "positive" }))
+    expect(selected).toEqual(expect.objectContaining({ status: "Closed", tone: "positive" }))
   })
 
   it("keeps a missing resolved PR-to-Jira edge out of linked work while retaining its gap", () => {

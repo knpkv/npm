@@ -130,6 +130,24 @@ const reviewStateLabel = (
   }
 }
 
+const pullRequestStateLabel = (
+  details: Extract<DeliveryEntityDetails, { readonly _tag: "pull-request" }>
+): string => {
+  switch (details.reviewState) {
+    case "approved":
+    case "changes-requested":
+    case "merged":
+      return reviewStateLabel(details.reviewState)
+    case "not-requested":
+    case "requested":
+      return details.lifecycle === "merged"
+        ? "Merged"
+        : details.lifecycle === "closed"
+        ? "Closed"
+        : reviewStateLabel(details.reviewState)
+  }
+}
+
 const pipelineStateLabel = (
   state: Extract<DeliveryEntityDetails, { readonly _tag: "pipeline-execution" }>["status"]
 ): string => `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
@@ -158,7 +176,7 @@ const selectedObjectStatus = (details: DeliveryEntityDetails): string => {
     case "issue":
       return details.status
     case "pull-request":
-      return reviewStateLabel(details.reviewState)
+      return pullRequestStateLabel(details)
     case "page":
     case "deployment":
       return titleCase(details.status)
@@ -563,7 +581,7 @@ export const presentReleaseWorkset = (
           return issue?.details._tag === "issue" ? [issue.details.key] : []
         }))
       )
-      const state = reviewStateLabel(pullRequest.details.reviewState)
+      const state = pullRequestStateLabel(pullRequest.details)
       return {
         id: pullRequest.entityId,
         title: pullRequest.title,

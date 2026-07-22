@@ -84,29 +84,65 @@ const reviewLabel = (reviewState: PullRequestDetails["reviewState"]): string => 
   }
 }
 
+const connectedEntityIds = (inspection: WorkspaceEntityInspection): ReadonlySet<string> => {
+  const entityIdByNode = new Map(
+    inspection.graph.nodes.flatMap(({ nodeId, resolution }): ReadonlyArray<readonly [string, string]> =>
+      resolution._tag === "resolved" && resolution.target._tag === "entity"
+        ? [[nodeId, resolution.target.entityId]]
+        : []
+    )
+  )
+  const subjectNodeIds = new Set(
+    inspection.graph.nodes.flatMap(({ nodeId, resolution }) =>
+      resolution._tag === "resolved" &&
+        resolution.target._tag === "entity" &&
+        resolution.target.entityId === inspection.entity.projection.entityId
+        ? [nodeId]
+        : []
+    )
+  )
+  return new Set(inspection.graph.relationships.flatMap((relationship) => {
+    if (
+      relationship.lifecycle._tag === "missing" ||
+      relationship.lifecycle._tag === "rejected" ||
+      relationship.lifecycle._tag === "superseded"
+    ) return []
+    const relatedNodeId = subjectNodeIds.has(relationship.sourceNodeId)
+      ? relationship.targetNodeId
+      : subjectNodeIds.has(relationship.targetNodeId)
+      ? relationship.sourceNodeId
+      : null
+    const relatedEntityId = relatedNodeId === null ? null : entityIdByNode.get(relatedNodeId)
+    return relatedEntityId === undefined || relatedEntityId === null ? [] : [relatedEntityId]
+  }))
+}
+
 /** Present one immutable pull-request revision without conflating agent and human review. */
 export const presentWorkspacePullRequest = (
   details: PullRequestDetails,
   sourceUrl: SourceRevision["sourceUrl"],
   inspection: WorkspaceEntityInspection
-): WorkspacePullRequestPresentation => ({
-  agentReviewLabel: "Agent review not run",
-  author: authorFor(details.authorReference),
-  baseRevision: details.baseRevision ?? null,
-  createdAt: timestampFor(details.createdAt),
-  description: details.description?.trim() || null,
-  filesHref: sourceUrl?.href ?? null,
-  headRevision: details.headRevision,
-  issueCount: inspection.graph.relatedEntityProjections.filter(
-    ({ projection }) => projection.entityType === "issue"
-  ).length,
-  mergeBaseRevision: details.mergeBaseRevision ?? null,
-  pipelineCount: inspection.graph.relatedEntityProjections.filter(
-    ({ projection }) => projection.entityType === "pipeline-execution"
-  ).length,
-  releaseCount: inspection.entity.releaseIds.length,
-  reviewLabel: reviewLabel(details.reviewState),
-  sourceBranch: details.sourceBranch,
-  targetBranch: details.targetBranch,
-  updatedAt: timestampFor(details.updatedAt)
-})
+): WorkspacePullRequestPresentation => {
+  const connected = connectedEntityIds(inspection)
+  const relatedCount = (entityType: "issue" | "pipeline-execution"): number =>
+    inspection.graph.relatedEntityProjections.filter(
+      ({ projection }) => projection.entityType === entityType && connected.has(projection.entityId)
+    ).length
+  return {
+    agentReviewLabel: "Agent review not run",
+    author: authorFor(details.authorReference),
+    baseRevision: details.baseRevision ?? null,
+    createdAt: timestampFor(details.createdAt),
+    description: details.description?.trim() || null,
+    filesHref: sourceUrl?.href ?? null,
+    headRevision: details.headRevision,
+    issueCount: relatedCount("issue"),
+    mergeBaseRevision: details.mergeBaseRevision ?? null,
+    pipelineCount: relatedCount("pipeline-execution"),
+    releaseCount: inspection.entity.releaseIds.length,
+    reviewLabel: reviewLabel(details.reviewState),
+    sourceBranch: details.sourceBranch,
+    targetBranch: details.targetBranch,
+    updatedAt: timestampFor(details.updatedAt)
+  }
+}

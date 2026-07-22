@@ -12,6 +12,7 @@ import {
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
+import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
@@ -347,6 +348,65 @@ describe("canonical workspace entity", () => {
     ])
   })
 
+  it("counts only currently accepted issue and pipeline relationships as PR evidence", () => {
+    const root = encodedWorkset.entityProjections.find(({ projection }) => projection.details._tag === "pull-request")
+    if (root?.projection.details._tag !== "pull-request") {
+      throw new Error("Expected a pull-request projection fixture")
+    }
+    const graphInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encodedInspection,
+      entity: {
+        ...encodedInspection.entity,
+        canonicalReleaseId: encodedWorkset.releaseId,
+        projection: root.projection,
+        recordedAt: root.recordedAt,
+        releaseIds: [encodedWorkset.releaseId]
+      },
+      graph: {
+        ...encodedInspection.graph,
+        evidenceClaims: encodedWorkset.evidenceClaims,
+        evidenceItems: encodedWorkset.evidenceItems,
+        nodes: encodedWorkset.nodes,
+        relatedEntityProjections: encodedWorkset.entityProjections.filter(
+          ({ projection }) => projection.entityId !== root.projection.entityId
+        ),
+        relationships: encodedWorkset.relationships
+      }
+    })
+    const implementation = graphInspection.graph.relationships.find(
+      (relationship) => relationship.kind === "implements" && relationship.sourceNodeKind === "pull-request"
+    )
+    if (implementation === undefined || implementation.lifecycle._tag !== "verified") {
+      throw new Error("Expected a verified PR implementation relationship")
+    }
+    const rejectedInspection: Inspection = {
+      ...graphInspection,
+      graph: {
+        ...graphInspection.graph,
+        relationships: graphInspection.graph.relationships.map((relationship) =>
+          relationship.relationshipId === implementation.relationshipId
+            ? {
+                ...relationship,
+                lifecycle: {
+                  _tag: "rejected",
+                  effectiveAt: implementation.lifecycle.effectiveAt,
+                  reason: "Rejected during graph review."
+                }
+              }
+            : relationship
+        )
+      }
+    }
+    const details = graphInspection.entity.projection.details
+    if (details._tag !== "pull-request") throw new Error("Expected pull-request details")
+
+    const accepted = presentWorkspacePullRequest(details, graphInspection.source.sourceUrl, graphInspection)
+    const rejected = presentWorkspacePullRequest(details, rejectedInspection.source.sourceUrl, rejectedInspection)
+
+    expect(accepted).toMatchObject({ issueCount: 3, pipelineCount: 1 })
+    expect(rejected).toMatchObject({ issueCount: 2, pipelineCount: 1 })
+  })
+
   it("renders malformed persisted pull-request timestamps as unavailable", () => {
     const encoded = Schema.encodeSync(WorkspaceEntityInspection)(pullRequestInspection)
     const details = encoded.entity.projection.details
@@ -558,28 +618,40 @@ describe("canonical workspace entity", () => {
         pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview`,
         search: "?filter=attention",
         state: null
-      }
+      },
+      null,
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
     [
-      "a direct Items route",
+      "a direct Items route with a portfolio release",
       {
         hash: "#review",
         pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
         search: "?q=payments",
         state: null
-      }
+      },
+      pullRequestInspection.entity.canonicalReleaseId,
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+    ],
+    [
+      "a direct Items route with an out-of-portfolio release",
+      {
+        hash: "#review",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+        search: "?q=payments",
+        state: null
+      },
+      null,
+      `/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      )}`
     ]
-  ])("opens the release-owned agent from a pull request reached through %s", async (_label, origin) => {
+  ])("routes the agent safely from a pull request reached through %s", async (_label, origin, releaseId, expected) => {
     const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
     const RoutedPullRequest = (): ReactElement => {
       const location = useLocation()
       const navigate = useNavigate()
-      const agentPath = workspaceEntityAgentPath(
-        origin,
-        WORKSET_WORKSPACE_ID,
-        location,
-        pullRequestInspection.entity.canonicalReleaseId
-      )
+      const agentPath = workspaceEntityAgentPath(origin, WORKSET_WORKSPACE_ID, location, releaseId)
       return (
         <WorkspaceEntityView
           onAskAgent={() => navigate(agentPath)}
@@ -610,9 +682,7 @@ describe("canonical workspace entity", () => {
 
     await act(async () => reviewButton.click())
 
-    expect(host.querySelector("[data-location]")?.textContent).toBe(
-      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
-    )
+    expect(host.querySelector("[data-location]")?.textContent).toBe(expected)
   })
 
   it("distinguishes a shortened comment body from an omitted-comments collection", async () => {

@@ -419,7 +419,13 @@ const ConnectedWorkspaceEntity = ({
     controller.state._tag === "ready" || controller.state._tag === "stale"
       ? controller.state.inspection.entity.canonicalReleaseId
       : null
-  const agentPath = workspaceEntityAgentPath(resolvedOrigin.origin, workspaceId, location, canonicalReleaseId)
+  const routableReleaseId =
+    canonicalReleaseId !== null &&
+    context.controller.state._tag === "ready" &&
+    context.controller.state.portfolio.releases.some(({ id }) => id === canonicalReleaseId)
+      ? canonicalReleaseId
+      : null
+  const agentPath = workspaceEntityAgentPath(resolvedOrigin.origin, workspaceId, location, routableReleaseId)
   return (
     <WorkspaceEntityView
       onAskAgent={() => navigate(agentPath, { state: location.state })}
