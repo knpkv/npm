@@ -144,6 +144,8 @@ export const pipelineStatus = (
     case "stopping":
     case "superseded":
     case "abandoned":
+    case "cancelled":
+    case "canceled":
       return "stopped"
     default:
       return "queued"
@@ -256,12 +258,11 @@ export const affectedPipelineExecutionEvents = Effect.fn(
   "PipelineExecutionProjection.affectedExecutions"
 )(function*(
   cachedEvents: ReadonlyArray<NormalizedPluginEventV1>,
-  acceptedEventIds: ReadonlySet<string>
+  changedEvents: ReadonlyArray<EntityUpsert>
 ): Effect.fn.Return<ReadonlyArray<EntityUpsert>, PipelineExecutionProjectionError> {
   const affectedKeys = new Set<string>()
   const acceptedDeclarations: Array<PipelineDeclarationKey> = []
-  for (const event of cachedEvents) {
-    if (event._tag !== "UpsertEntity" || !acceptedEventIds.has(event.eventId)) continue
+  for (const event of changedEvents) {
     if (event.entityType === "aws.codepipeline.pipeline") {
       const key = declarationKey(yield* decodeAttributes(event))
       if (key !== null) acceptedDeclarations.push(key)
@@ -415,13 +416,21 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
   const stages = allStageNames.map((name) => {
     const stage = stageEvents.get(name)?.attributes
     const stageActions = actions.filter((action) => action.stageName === name)
+    const visibleStageActionCount = visibleActions.filter((action) => action.stageName === name).length
+    const stageActionCount = Math.max(
+      stage?.actionCount ?? 0,
+      declaredStageByName.get(name)?.actionCount ?? 0,
+      stageActions.length
+    )
     return {
       name,
       status: stage === undefined
         ? aggregateStatus(stageActions.map(({ status }) => status))
         : pipelineStatus(namedText(stage.status)),
-      actionCount: Math.max(stage?.actionCount ?? declaredStageByName.get(name)?.actionCount ?? stageActions.length, 0),
-      actionsTruncated: stage?.actionsTruncated ?? attributes.actionsTruncated ?? false
+      actionCount: stageActionCount,
+      actionsTruncated: (stage?.actionsTruncated ?? false) ||
+        (attributes.actionsTruncated ?? false) ||
+        stageActionCount > visibleStageActionCount
     }
   })
   const sourceRevision = attributes.sourceRevisions?.find(({ revisionId }) => optionalBounded(revisionId, 512) !== null)
@@ -455,7 +464,11 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
     pipelineName,
     executionId,
     status: pipelineStatus(namedText(attributes.status)),
-    triggerRevision: bounded(attributes.triggerRevision ?? sourceRevision, event.revision, 512),
+    triggerRevision: bounded(
+      optionalBounded(attributes.triggerRevision, 512) ?? optionalBounded(sourceRevision, 512),
+      event.revision,
+      512
+    ),
     pipelineVersion: attributes.pipelineVersion ?? null,
     statusSummary: optionalBounded(attributes.statusSummary, 500),
     startedAt: yield* normalizedTimestamp(attributes.startedAt, event.eventId),

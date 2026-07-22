@@ -1205,6 +1205,43 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     return yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)
   })
 
+  const getCodePipelineCacheBeforeTombstones = Effect.fn(
+    "PluginRuntimeRepository.getCodePipelineCacheBeforeTombstones"
+  )(function*(
+    workspaceId: WorkspaceId,
+    pluginConnectionId: PluginConnectionId,
+    streamKey: PluginStreamKey,
+    tombstones: ReadonlyArray<Extract<typeof NormalizedPluginEventV1.Type, { readonly _tag: "TombstoneEntity" }>>
+  ) {
+    const records = new Map<string, typeof PluginCacheRecord.Type>()
+    for (const tombstone of tombstones) {
+      const recordKey = yield* normalizedRecordKey(tombstone)
+      const rows = yield* sql<Record<string, unknown>>`SELECT cache.workspace_id AS workspaceId,
+        cache.plugin_connection_id AS pluginConnectionId, cache.stream_key AS streamKey,
+        cache.record_key AS recordKey, cache.state, cache.payload_json AS payloadJson,
+        cache.payload_digest AS payloadDigest, cache.source_revision AS sourceRevision,
+        cache.last_page_id AS lastPageId, cache.cached_at AS cachedAt, cache.tombstoned_at AS tombstonedAt,
+        (SELECT evidence.payload_json FROM plugin_sync_evidence AS evidence
+          WHERE evidence.workspace_id = cache.workspace_id
+            AND evidence.plugin_connection_id = cache.plugin_connection_id
+            AND evidence.stream_key = cache.stream_key
+            AND evidence.page_id = cache.last_page_id
+            AND evidence.record_key = cache.record_key
+          ORDER BY evidence.ordinal DESC LIMIT 1) AS latestEventJson
+        FROM plugin_cache_entries AS cache
+        WHERE cache.workspace_id = ${workspaceId}
+          AND cache.plugin_connection_id = ${pluginConnectionId}
+          AND cache.stream_key = ${streamKey}
+          AND cache.record_key = ${recordKey}
+          AND cache.state = 'present'
+        LIMIT 1`
+      for (const record of yield* decodeCacheRows(workspaceId, pluginConnectionId, rows)) {
+        records.set(record.recordKey, record)
+      }
+    }
+    return [...records.values()]
+  })
+
   const getCodePipelineCache = Effect.fn("PluginRuntimeRepository.getCodePipelineCache")(function*(
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
@@ -1400,6 +1437,7 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     commitPage,
     completeSyncAttempt,
     getCache,
+    getCodePipelineCacheBeforeTombstones,
     getCodePipelineCache,
     getLastSuccessfulHealth,
     getRuntime,

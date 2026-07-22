@@ -24,6 +24,7 @@ import {
   materializeNormalizedPluginPage,
   type NormalizedPluginPageMaterializationScope
 } from "../../src/server/application/normalizedPluginPageMaterialization.js"
+import { pipelineStatus } from "../../src/server/application/pipelineExecutionProjection.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -747,6 +748,14 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
 })
 
 describe("normalized plugin page materialization", () => {
+  it("maps terminal and active CodePipeline statuses", () => {
+    const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
+      ["Cancelled", "stopped"],
+      ["InProgress", "running"]
+    ]
+    for (const [status, expected] of cases) assert.strictEqual(pipelineStatus(status), expected)
+  })
+
   it.effect("materializes one bounded, credential-free CodePipeline execution document", () =>
     withMaterializer(Effect.gen(function*() {
       yield* setup
@@ -825,8 +834,73 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(projection.details.sourceRevisions, [])
     })))
 
+  it.effect("falls through blank trigger revisions while preserving explicit ones", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          streamKey: firstPartyStream("codepipeline"),
+          expectedRevision: 0,
+          committedAt: T3,
+          successfulHealth: { _tag: "healthy", checkedAt: T3 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-trigger-revision-fallbacks",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "pipeline-blank-trigger",
+            observedAt: "2026-07-19T09:02:20.000Z",
+            revision: "blank-trigger-event-revision",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "blank-trigger",
+            sourceUrl: null,
+            title: "Blank trigger execution",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "blank-trigger",
+              status: "Succeeded",
+              triggerRevision: "   ",
+              sourceRevisions: [{ revisionId: "abc123" }]
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "pipeline-explicit-trigger",
+            observedAt: "2026-07-19T09:02:20.000Z",
+            revision: "explicit-trigger-event-revision",
+            entityType: "aws.codepipeline.execution",
+            vendorImmutableId: "explicit-trigger",
+            sourceUrl: null,
+            title: "Explicit trigger execution",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "explicit-trigger",
+              status: "Succeeded",
+              triggerRevision: "explicit456",
+              sourceRevisions: [{ revisionId: "abc123" }]
+            }
+          }]
+        })
+      )
+
+      const projections = (yield* items()).items.map(({ projection }) => projection)
+      const triggerRevisionFor = (executionId: string) => {
+        const projection = projections.find(
+          ({ details }) => details._tag === "pipeline-execution" && details.executionId === executionId
+        )
+        return projection?.details._tag === "pipeline-execution" ? projection.details.triggerRevision : null
+      }
+      assert.strictEqual(triggerRevisionFor("blank-trigger"), "abc123")
+      assert.strictEqual(triggerRevisionFor("explicit-trigger"), "explicit456")
+    })))
+
   it.effect("rebuilds an advanced execution with current cached action siblings", () =>
     withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
       yield* setup
       yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
       const buildAction = Schema.encodeSync(NormalizedPluginEventV1)(
@@ -1089,6 +1163,58 @@ describe("normalized plugin page materialization", () => {
       )
       assert.strictEqual(unrelatedDeclaration.entityProjectionCount, 0)
       assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
+
+      const deletedActionPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pipeline-cache-action-deleted",
+        hasMore: false,
+        events: [{
+          _tag: "TombstoneEntity",
+          eventId: "cache-approval-action-deleted",
+          observedAt: "2026-07-19T09:09:00.000Z",
+          revision: "approval-deleted-v1",
+          entityType: "aws.codepipeline.action",
+          vendorImmutableId: "cache-execution#approval",
+          reason: "Action execution no longer returned"
+        }]
+      })
+      const actionTombstone = deletedActionPage.events[0]
+      if (actionTombstone?._tag !== "TombstoneEntity") return yield* Effect.die("expected action tombstone")
+      const beforeDelete = yield* persistence.pluginRuntime.getCodePipelineCacheBeforeTombstones(
+        WORKSPACE_ID,
+        CODEPIPELINE_PLUGIN_ID,
+        firstPartyStream("codepipeline"),
+        [actionTombstone]
+      )
+      assert.strictEqual(beforeDelete.length, 1)
+      const deletedAction = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 6, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        deletedActionPage
+      )
+      assert.strictEqual(deletedAction.acceptedEventCount, 1)
+      assert.strictEqual(deletedAction.entityProjectionCount, 1)
+      const afterDelete = (yield* items()).items[0]?.projection
+      if (afterDelete?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected tombstone-refreshed pipeline execution")
+      }
+      assert.deepStrictEqual(afterDelete.details.actions?.map(({ actionName }) => actionName), ["Compile"])
+
+      const unknownDelete = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 7, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-unknown-action-deleted",
+          hasMore: false,
+          events: [{
+            _tag: "TombstoneEntity",
+            eventId: "cache-unknown-action-deleted",
+            observedAt: "2026-07-19T09:10:00.000Z",
+            revision: "unknown-deleted-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "unknown-execution#unknown-action",
+            reason: "Unknown action cleanup"
+          }]
+        })
+      )
+      assert.strictEqual(unknownDelete.entityProjectionCount, 0)
     })))
 
   it.effect("bounds correlated pipeline actions while preserving total counts", () =>
@@ -1167,9 +1293,21 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(bounded201.details.actions?.length, 200)
       assert.strictEqual(bounded201.details.actionCount, 201)
       assert.strictEqual(bounded201.details.actionsTruncated, true)
+      assert.deepStrictEqual(bounded201.details.stages, [{
+        name: "Build",
+        status: "succeeded",
+        actionCount: 201,
+        actionsTruncated: true
+      }])
       assert.strictEqual(bounded200.details.actions?.length, 200)
       assert.strictEqual(bounded200.details.actionCount, 200)
       assert.strictEqual(bounded200.details.actionsTruncated, false)
+      assert.deepStrictEqual(bounded200.details.stages, [{
+        name: "Build",
+        status: "succeeded",
+        actionCount: 200,
+        actionsTruncated: false
+      }])
     })))
 
   it.effect("reads only indexed cache records for the affected pipeline execution", () =>
@@ -1367,7 +1505,7 @@ describe("normalized plugin page materialization", () => {
             attributes: {
               pipelineName: "versioned-payments",
               pipelineVersion: 8,
-              stages: [{ name: "FutureOnly", actions: [] }, {
+              stages: [{ name: "FutureOnly", actions: [] }, { name: "EmptyOnly", actions: [] }, {
                 name: "Production",
                 actions: [{ name: "Zeta", runOrder: 1 }, { name: "Alpha", runOrder: 2 }]
               }]
@@ -1419,6 +1557,23 @@ describe("normalized plugin page materialization", () => {
               pipelineVersion: 8,
               executionId: "versioned-execution-v8",
               triggerRevision: "v8-head",
+              status: "Succeeded"
+            }
+          }, {
+            _tag: "UpsertEntity",
+            eventId: "versioned-future-observed",
+            observedAt: "2026-07-19T09:03:00.000Z",
+            revision: "future-observed-v1",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "versioned-execution-v8#future-observed",
+            sourceUrl: null,
+            title: "Future observed action",
+            attributes: {
+              pipelineName: "versioned-payments",
+              executionId: "versioned-execution-v8",
+              actionExecutionId: "future-observed-1",
+              stageName: "FutureOnly",
+              actionName: "Observed",
               status: "Succeeded"
             }
           }, {
@@ -1501,12 +1656,17 @@ describe("normalized plugin page materialization", () => {
       }
       assert.deepStrictEqual(matching.details.stages?.map(({ name }) => name), [
         "FutureOnly",
+        "EmptyOnly",
         "Production",
         "AdHoc"
       ])
       assert.deepStrictEqual(
+        matching.details.stages?.slice(0, 2).map(({ actionCount, name }) => [name, actionCount]),
+        [["FutureOnly", 1], ["EmptyOnly", 0]]
+      )
+      assert.deepStrictEqual(
         matching.details.actions?.map(({ actionName, stageName }) => `${stageName}:${actionName}`),
-        ["Production:Zeta", "Production:Alpha", "AdHoc:Alpha", "AdHoc:Zeta"]
+        ["FutureOnly:Observed", "Production:Zeta", "Production:Alpha", "AdHoc:Alpha", "AdHoc:Zeta"]
       )
     })))
 
