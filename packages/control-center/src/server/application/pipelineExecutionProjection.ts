@@ -358,6 +358,9 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
     return left.actionName.localeCompare(right.actionName) ||
       left.actionExecutionId.localeCompare(right.actionExecutionId)
   })
+  const visibleActions = actions.slice(0, 200)
+  const actionCount = Math.max(attributes.actionCount ?? 0, actions.length)
+  const actionsTruncated = (attributes.actionsTruncated ?? false) || actionCount > visibleActions.length
 
   const allStageNames = [
     ...declaredStages.map(({ name }) => name),
@@ -422,9 +425,9 @@ export const projectPipelineExecution = Effect.fn("PipelineExecutionProjection.p
     rollbackTargetExecutionId: optionalBounded(attributes.rollbackTargetExecutionId, 512),
     sourceRevisions,
     stages,
-    actions,
-    actionCount: Math.max(attributes.actionCount ?? actions.length, 0),
-    actionsTruncated: attributes.actionsTruncated ?? false,
+    actions: visibleActions,
+    actionCount,
+    actionsTruncated,
     actionPagesRead: Math.max(attributes.actionPagesRead ?? 0, 0),
     sourceArtifacts
   }).pipe(

@@ -1091,6 +1091,87 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
     })))
 
+  it.effect("bounds correlated pipeline actions while preserving total counts", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      const execution = (
+        executionId: string,
+        actionCount: number
+      ): ReadonlyArray<typeof NormalizedPluginEventV1.Encoded> => {
+        const events: Array<typeof NormalizedPluginEventV1.Encoded> = [{
+          _tag: "UpsertEntity",
+          eventId: `${executionId}-execution`,
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "execution-v1",
+          entityType: "aws.codepipeline.execution",
+          vendorImmutableId: executionId,
+          sourceUrl: null,
+          title: `${executionId} execution`,
+          attributes: {
+            pipelineName: "bounded-actions",
+            executionId,
+            status: "Succeeded",
+            triggerRevision: "abc123"
+          }
+        }]
+        for (let index = 0; index < actionCount; index++) {
+          events.push({
+            _tag: "UpsertEntity",
+            eventId: `${executionId}-action-${String(index + 1)}`,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: `Succeeded:${String(index + 1)}`,
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: `${executionId}#action-${String(index + 1)}`,
+            sourceUrl: null,
+            title: `${executionId} · Action ${String(index + 1)}`,
+            attributes: {
+              pipelineName: "bounded-actions",
+              executionId,
+              actionExecutionId: `${executionId}-action-${String(index + 1)}`,
+              stageName: "Build",
+              actionName: `Action ${String(index + 1).padStart(3, "0")}`,
+              status: "Succeeded"
+            }
+          })
+        }
+        return events
+      }
+      const receipt = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CODEPIPELINE_PLUGIN_ID,
+          providerId: "codepipeline",
+          streamKey: firstPartyStream("codepipeline"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-bounded-actions",
+          hasMore: false,
+          events: [...execution("bounded-201", 201), ...execution("bounded-200", 200)]
+        })
+      )
+      assert.strictEqual(receipt.entityProjectionCount, 2)
+      const projections = (yield* items()).items.map(({ projection }) => projection)
+      const bounded201 = projections.find(
+        ({ details }) => details._tag === "pipeline-execution" && details.executionId === "bounded-201"
+      )
+      const bounded200 = projections.find(
+        ({ details }) => details._tag === "pipeline-execution" && details.executionId === "bounded-200"
+      )
+      if (bounded201?.details._tag !== "pipeline-execution" || bounded200?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected both bounded pipeline projections")
+      }
+      assert.strictEqual(bounded201.details.actions?.length, 200)
+      assert.strictEqual(bounded201.details.actionCount, 201)
+      assert.strictEqual(bounded201.details.actionsTruncated, true)
+      assert.strictEqual(bounded200.details.actions?.length, 200)
+      assert.strictEqual(bounded200.details.actionCount, 200)
+      assert.strictEqual(bounded200.details.actionsTruncated, false)
+    })))
+
   it.effect("matches declaration versions and preserves declared action order", () =>
     withMaterializer(Effect.gen(function*() {
       yield* setup
