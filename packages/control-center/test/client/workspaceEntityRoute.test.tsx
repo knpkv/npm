@@ -459,7 +459,14 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
         avatarFallback: "AK",
         displayName: "Ada Kline",
         personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
-        roles: ["page-owner"]
+        roles: ["page-owner"],
+        sourceIdentities: [
+          {
+            pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000081",
+            providerId: "confluence",
+            vendorPersonId: "account-ada"
+          }
+        ]
       }
     ]
   },
@@ -1069,6 +1076,7 @@ describe("canonical workspace entity", () => {
     ]
 
     expect(collaborators.filter(({ name }) => name === "Alex Lee")).toHaveLength(2)
+    expect(collaborators.filter(({ name }) => name === "Ada Kline")).toHaveLength(1)
     expect(collaborators.filter(({ id }) => id === "01890f6f-6d6a-7cc0-98d2-000000000071")).toHaveLength(1)
     expect(presentation.confluencePage?.contributors.filter(({ id }) => id === "account-mina")).toHaveLength(1)
     expect(presentation.confluencePage?.contributors.find(({ id }) => id === "account-mina")?.name).toBe("Mina Ortiz")

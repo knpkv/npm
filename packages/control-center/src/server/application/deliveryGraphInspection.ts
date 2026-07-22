@@ -27,6 +27,19 @@ import { presentTimelineEvent } from "./timelineReads.js"
 const unexpectedResult = (operation: string): Effect.Effect<never> =>
   Effect.die(`Delivery graph repository returned an unexpected result for ${operation}`)
 
+const withoutIndexedPageBody = (
+  entry: WorkspaceEntityProjectionIndex["items"][number]
+): WorkspaceEntityProjectionIndex["items"][number] => {
+  if (entry.projection.details._tag !== "page") return entry
+  return {
+    ...entry,
+    projection: {
+      ...entry.projection,
+      details: { ...entry.projection.details, content: null, contentState: "lazy" }
+    }
+  }
+}
+
 const candidateExplanation = (relationship: DeliveryRelationship): string => {
   if (relationship.lifecycle._tag === "missing") return relationship.lifecycle.reason
   if (relationship.confidence._tag === "inferred") return relationship.confidence.rationale
@@ -202,7 +215,10 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       if (result._tag !== "workspaceEntityProjections") {
         return yield* unexpectedResult("workspace entity projections")
       }
-      return result.value satisfies WorkspaceEntityProjectionIndex
+      return {
+        ...result.value,
+        items: result.value.items.map(withoutIndexedPageBody)
+      } satisfies WorkspaceEntityProjectionIndex
     }),
     releaseSlice,
     repairCandidates: Effect.fn("DeliveryGraphInspection.repairCandidates")(function*(input) {

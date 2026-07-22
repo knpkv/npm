@@ -628,11 +628,12 @@ const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
 
 const mergedPageContributors = (
   current: PageDetails["contributors"],
-  incoming: PageDetails["contributors"]
+  incoming: PageDetails["contributors"],
+  incomingWatchersComplete: boolean
 ): PageDetails["contributors"] => {
   if (current === undefined && incoming === undefined) return undefined
   const contributors = new Map<string, NonNullable<PageDetails["contributors"]>[number]>()
-  for (const contributor of [...(current ?? []), ...(incoming ?? [])]) {
+  const merge = (contributor: NonNullable<PageDetails["contributors"]>[number]): void => {
     const previous = contributors.get(contributor.sourcePersonId)
     const roles = previous === undefined
       ? contributor.roles
@@ -643,11 +644,22 @@ const mergedPageContributors = (
       { ...identity, roles }
     )
   }
+  for (const contributor of current ?? []) {
+    const roles = incomingWatchersComplete
+      ? contributor.roles.filter((role) => role !== "watcher")
+      : contributor.roles
+    if (roles.length > 0) merge({ ...contributor, roles })
+  }
+  for (const contributor of incoming ?? []) merge(contributor)
   return [...contributors.values()]
 }
 
 const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
-  const contributors = mergedPageContributors(current.contributors, incoming.contributors)
+  const contributors = mergedPageContributors(
+    current.contributors,
+    incoming.contributors,
+    incoming.watcherInventory?.complete === true
+  )
   const preserveLoadedContent = current.contentState === "loaded" &&
     (incoming.contentState === "lazy" || incoming.content === null)
   const merged: PageDetails = {

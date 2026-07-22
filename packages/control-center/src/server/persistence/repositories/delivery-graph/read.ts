@@ -7,7 +7,7 @@ import {
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { derivePersonInitials, PersonAvatar, Role } from "../../../../domain/actors.js"
+import { derivePersonInitials, PersonAvatar, PersonSourceIdentity, Role } from "../../../../domain/actors.js"
 import { type DeliveryNode, type DeliveryRelationship, LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
@@ -375,11 +375,24 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     }
     const candidates = [...identities.values()]
     const owners = yield* Effect.forEach(candidates.slice(0, 20), (owner) =>
-      decodeWorkspaceOwner(workspaceId, {
-        avatarJson: owner.avatarJson,
-        displayName: owner.displayName,
-        personId: owner.personId,
-        rolesCsv: [...owner.roles].sort().join(",")
+      Effect.gen(function*() {
+        const decoded = yield* decodeWorkspaceOwner(workspaceId, {
+          avatarJson: owner.avatarJson,
+          displayName: owner.displayName,
+          personId: owner.personId,
+          rolesCsv: [...owner.roles].sort().join(",")
+        })
+        const identityRows = yield* sql<Record<string, unknown>>`SELECT
+            plugin_connection_id AS pluginConnectionId,
+            provider_id AS providerId,
+            vendor_person_id AS vendorPersonId
+          FROM person_identities
+          WHERE workspace_id = ${workspaceId}
+            AND person_id = ${owner.personId}
+          ORDER BY provider_id, plugin_connection_id, vendor_person_id
+          LIMIT 16`
+        const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows)
+        return sourceIdentities.length === 0 ? decoded : { ...decoded, sourceIdentities }
       }))
     return { owners, ownersTruncated: candidates.length > 20 }
   })

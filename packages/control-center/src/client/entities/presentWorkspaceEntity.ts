@@ -260,7 +260,8 @@ const collaboratorsWithIssue = (
 
 const collaboratorsWithPage = (
   collaborators: WorkspaceEntityCollaboratorsPresentation,
-  page: WorkspaceConfluencePagePresentation | null
+  page: WorkspaceConfluencePagePresentation | null,
+  owners: ReadonlyArray<WorkspaceEntityOwner>
 ): WorkspaceEntityCollaboratorsPresentation => {
   if (page === null) return collaborators
   const next = {
@@ -271,8 +272,15 @@ const collaboratorsWithPage = (
     reviewers: [...collaborators.reviewers]
   }
   const knownIds = new Set(Object.values(next).flat().map(({ id }) => id))
+  const knownConfluenceSourceIds = new Set<string>(
+    owners.flatMap((owner) =>
+      (owner.sourceIdentities ?? [])
+        .filter(({ providerId }) => providerId === "confluence")
+        .map(({ vendorPersonId }) => vendorPersonId)
+    )
+  )
   for (const person of page.contributors) {
-    if (knownIds.has(person.id)) continue
+    if (knownIds.has(person.id) || knownConfluenceSourceIds.has(person.id)) continue
     knownIds.add(person.id)
     if (person.role.includes("Owner")) next.owners.push(person)
     else if (person.role.includes("Watcher")) next.reviewers.push(person)
@@ -500,7 +508,8 @@ export const presentWorkspaceEntity = (
     }),
     collaborators: collaboratorsWithPage(
       collaboratorsWithIssue(collaboratorsFor(inspection.entity.owners), issue),
-      confluencePage
+      confluencePage,
+      inspection.entity.owners
     ),
     confluencePage,
     contentSummary: `${kindNames[projection.entityType]} ${projection.displayKey} is tracked in ${serviceName}. ${

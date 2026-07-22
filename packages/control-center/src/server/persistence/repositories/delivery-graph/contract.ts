@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema"
 
-import { Role } from "../../../../domain/actors.js"
+import { PersonSourceIdentity, Role } from "../../../../domain/actors.js"
 import {
   DeliveryEntityKind,
   DeliveryEntityProjection,
@@ -31,7 +31,8 @@ const WorkspaceEntityOwner = Schema.Struct({
   avatarFallback: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4)),
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   personId: PersonId,
-  roles: Schema.Array(Role).check(Schema.isMinLength(1), Schema.isMaxLength(16))
+  roles: Schema.Array(Role).check(Schema.isMinLength(1), Schema.isMaxLength(16)),
+  sourceIdentities: Schema.optionalKey(Schema.Array(PersonSourceIdentity).check(Schema.isMaxLength(16)))
 })
 
 export const EntityProjectionWrite = Schema.Struct({

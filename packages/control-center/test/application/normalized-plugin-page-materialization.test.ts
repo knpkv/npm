@@ -4716,6 +4716,25 @@ describe("normalized plugin page materialization", () => {
         projection.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
         ["account-ada", "account-mina"]
       )
+      const inspectionService = yield* makeDeliveryGraphInspection
+      const indexed = yield* inspectionService.workspaceEntityProjections({
+        workspaceId: WORKSPACE_ID,
+        owner: null,
+        query: null,
+        service: null,
+        status: null,
+        type: null
+      })
+      const indexedDetails = indexed.items[0]?.projection.details
+      if (indexedDetails?._tag !== "page") return yield* Effect.die("expected an indexed page")
+      assert.strictEqual(indexedDetails.contentState, "lazy")
+      assert.isNull(indexedDetails.content)
+      const exact = yield* inspectionService.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: projection.entityId
+      })
+      if (exact.entity.projection.details._tag !== "page") return yield* Effect.die("expected an exact page")
+      assert.strictEqual(exact.entity.projection.details.content?.markdown, "## Recovery\n\nKeep this body.")
 
       const loadedNullAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
         ...common,
@@ -4760,9 +4779,44 @@ describe("normalized plugin page materialization", () => {
         "account-tariq"
       )
 
-      const replay = yield* materializeNormalizedPluginPage(
+      const incompleteOmissionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...metadataOnlyAttributes,
+        contributors: [unresolvedOwner, watcher],
+        watcherInventory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 4, committedAt: T3 },
-        normalizedPage("identical-metadata-sync", metadataOnlyAttributes)
+        normalizedPage("incomplete-watcher-omission", incompleteOmissionAttributes)
+      )
+      const afterIncompleteOmission = (yield* items()).items[0]?.projection
+      if (afterIncompleteOmission?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after an incomplete watcher read")
+      }
+      assert.include(
+        afterIncompleteOmission.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const completeOmissionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...incompleteOmissionAttributes,
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 5, committedAt: T3 },
+        normalizedPage("complete-watcher-omission", completeOmissionAttributes)
+      )
+      const afterCompleteOmission = (yield* items()).items[0]?.projection
+      if (afterCompleteOmission?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after a complete watcher read")
+      }
+      assert.notInclude(
+        afterCompleteOmission.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const replay = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 6, committedAt: T3 },
+        normalizedPage("identical-metadata-sync", completeOmissionAttributes)
       )
       assert.strictEqual(replay.entityProjectionCount, 0)
 
@@ -4781,7 +4835,7 @@ describe("normalized plugin page materialization", () => {
         }, ...common.versions]
       })
       yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 5, committedAt: T4 },
+        { ...scope, expectedRevision: 7, committedAt: T4 },
         normalizedPage("next-revision-empty", nextRevisionAttributes, "13")
       )
       const nextRevision = (yield* items()).items[0]?.projection
