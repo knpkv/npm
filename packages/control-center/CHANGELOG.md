@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.2.0
+
+### Minor Changes
+
+- [#254](https://github.com/knpkv/npm/pull/254) [`7e99738`](https://github.com/knpkv/npm/commit/7e99738a71036b2f313f8b0260df00ceb8d10efb) Thanks [@konopkov](https://github.com/konopkov)! - Add a canonical CodeCommit pull-request page with immutable head/base revision details, synchronized author and lifecycle metadata, human review state, delivery evidence counts, a files entry point, and a release-aware agent review action.
+
+### Patch Changes
+
+- Updated dependencies [[`521c44e`](https://github.com/knpkv/npm/commit/521c44e9b9d6f4adc3e5ba44f1d9f117698d4442), [`6d510c9`](https://github.com/knpkv/npm/commit/6d510c9d3dab3e459db7fa1d25cd12f0e122699e)]:
+  - @knpkv/clockify-api-client@1.0.2
+  - @knpkv/jira-api-client@1.0.1
+
 ## 0.1.1
 
 ### Patch Changes

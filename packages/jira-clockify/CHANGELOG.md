@@ -1,5 +1,16 @@
 # @knpkv/jira-clockify
 
+## 1.1.3
+
+### Patch Changes
+
+- [#252](https://github.com/knpkv/npm/pull/252) [`6d510c9`](https://github.com/knpkv/npm/commit/6d510c9d3dab3e459db7fa1d25cd12f0e122699e) Thanks [@konopkov](https://github.com/konopkov)! - Update the generated Schema-backed Jira API client.
+
+- Updated dependencies [[`521c44e`](https://github.com/knpkv/npm/commit/521c44e9b9d6f4adc3e5ba44f1d9f117698d4442), [`6d510c9`](https://github.com/knpkv/npm/commit/6d510c9d3dab3e459db7fa1d25cd12f0e122699e)]:
+  - @knpkv/clockify-api-client@1.0.2
+  - @knpkv/jira-api-client@1.0.1
+  - @knpkv/jira-cli@1.2.2
+
 ## 1.1.2
 
 ### Patch Changes
