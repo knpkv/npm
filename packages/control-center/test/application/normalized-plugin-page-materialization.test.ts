@@ -7,6 +7,7 @@ import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import { DeliveryRelationship, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   AgentId,
+  EntityId,
   EnvironmentId,
   PluginConnectionId,
   RoleAssignmentId,
@@ -123,6 +124,13 @@ const materializedPage = Schema.decodeSync(PluginSyncPageV1)({
       sourceBranch: "feat/guard-refunds",
       targetBranch: "main",
       headRevision: "abc123",
+      baseRevision: "base456",
+      mergeBase: "merge789",
+      description: "Guard every refund write.",
+      authorArn: "arn:aws:sts::123456789012:assumed-role/Developer/ada",
+      creationDate: "2026-07-18T08:00:00.000Z",
+      lastActivityDate: "2026-07-19T09:01:30.000Z",
+      status: "OPEN",
       reviewState: "requested"
     }
   }, {
@@ -2639,6 +2647,24 @@ describe("normalized plugin page materialization", () => {
         currentItems.items.map(({ projection }) => [projection.entityType, projection.displayKey]),
         [["pull-request", "17"], ["issue", "PAY-42"]]
       )
+      const pullRequest = currentItems.items.find(({ projection }) => projection.entityType === "pull-request")
+        ?.projection.details
+      if (pullRequest?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
+      assert.deepStrictEqual(pullRequest, {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feat/guard-refunds",
+        targetBranch: "main",
+        headRevision: "abc123",
+        reviewState: "requested",
+        lifecycle: "open",
+        description: "Guard every refund write.",
+        authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/ada",
+        baseRevision: "base456",
+        mergeBaseRevision: "merge789",
+        createdAt: "2026-07-18T08:00:00.000Z",
+        updatedAt: "2026-07-19T09:01:30.000Z"
+      })
       assert.strictEqual(
         (yield* persistence.people.findPersonBySourceIdentity(WORKSPACE_ID, {
           pluginConnectionId: PLUGIN_ID,
@@ -2710,6 +2736,467 @@ describe("normalized plugin page materialization", () => {
         (SELECT COUNT(*) FROM evidence_claims) AS claims,
         (SELECT COUNT(*) FROM relationship_revisions) AS relationships`
       assert.deepStrictEqual(afterReplay, beforeReplay)
+    })))
+
+  it.effect("normalizes provider PR metadata and filters lifecycle separately from review judgment", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "pull-request-states-complete",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "pull-request-closed-1",
+          observedAt: "2026-07-19T09:01:30.000Z",
+          revision: "pull-request-closed-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "17",
+          sourceUrl: "https://console.aws.example/pull-requests/closed-17",
+          title: "Payment cleanup",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/closed",
+            targetBranch: "main",
+            headRevision: "closed-head",
+            description: "x".repeat(50_001),
+            authorArn: "   ",
+            baseRevision: "b".repeat(513),
+            mergeBase: "   ",
+            status: "CLOSED"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-changes-requested-1",
+          observedAt: "2026-07-19T09:01:40.000Z",
+          revision: "pull-request-changes-requested-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "18",
+          sourceUrl: "https://console.aws.example/pull-requests/open-18",
+          title: "Open pull request needing changes",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/open",
+            targetBranch: "main",
+            headRevision: "open-head",
+            status: "OPEN",
+            reviewState: "changes-requested"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-review-requested-1",
+          observedAt: "2026-07-19T09:01:50.000Z",
+          revision: "pull-request-review-requested-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "19",
+          sourceUrl: "https://console.aws.example/pull-requests/19",
+          title: "Payment verification",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/verification",
+            targetBranch: "main",
+            headRevision: "verification-head",
+            reviewState: "requested"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-codecommit-open-1",
+          observedAt: "2026-07-19T09:01:55.000Z",
+          revision: "pull-request-codecommit-open-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "20",
+          sourceUrl: "https://console.aws.example/pull-requests/20",
+          title: "Production-shaped CodeCommit pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/production-shape",
+            targetBranch: "main",
+            headRevision: "production-head",
+            status: "OPEN"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-legacy-approved-1",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "pull-request-legacy-approved-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "21",
+          sourceUrl: "https://console.aws.example/pull-requests/21",
+          title: "Legacy approved pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/legacy-approved",
+            targetBranch: "main",
+            headRevision: "legacy-approved-head",
+            status: "approved"
+          }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-codecommit-merged-1",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "pull-request-codecommit-merged-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "22",
+          sourceUrl: "https://console.aws.example/pull-requests/22",
+          title: "CodeCommit merged pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/merged",
+            targetBranch: "main",
+            headRevision: "merged-head",
+            status: "MERGED"
+          }
+        }]
+      })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: Schema.decodeSync(PluginStreamKey)("pull-request-states"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+
+      const receipt = yield* materializeNormalizedPluginPage(scope, page)
+      assert.strictEqual(receipt.entityProjectionCount, 6)
+
+      const readStatus = (status: "active" | "done" | "failed") =>
+        persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: "codecommit",
+          status,
+          type: "pull-request",
+          limit: 100
+        })
+      const done = yield* readStatus("done")
+      const active = yield* readStatus("active")
+      const failed = yield* readStatus("failed")
+      if (
+        done._tag !== "workspaceEntityProjections" ||
+        active._tag !== "workspaceEntityProjections" ||
+        failed._tag !== "workspaceEntityProjections"
+      ) return yield* Effect.die("expected workspace entity projections")
+
+      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey).sort(), ["17", "21", "22"])
+      assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
+      assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
+      const openDetails = active.value.items.find(({ projection }) => projection.displayKey === "20")?.projection
+        .details
+      if (openDetails?._tag !== "pull-request") return yield* Effect.die("expected open pull-request details")
+      assert.strictEqual(openDetails.lifecycle, "open")
+      assert.strictEqual(openDetails.reviewState, "not-requested")
+      const requestedDetails = active.value.items.find(({ projection }) => projection.displayKey === "19")
+        ?.projection.details
+      if (requestedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected review-requested pull-request details")
+      }
+      assert.strictEqual(requestedDetails.reviewState, "requested")
+      const approvedDetails = done.value.items.find(({ projection }) => projection.displayKey === "21")
+        ?.projection.details
+      if (approvedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected legacy approved pull-request details")
+      }
+      assert.strictEqual(approvedDetails.reviewState, "approved")
+      const mergedDetails = done.value.items.find(({ projection }) => projection.displayKey === "22")
+        ?.projection.details
+      if (mergedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected CodeCommit merged pull-request details")
+      }
+      assert.strictEqual(mergedDetails.lifecycle, "merged")
+      assert.strictEqual(mergedDetails.reviewState, "not-requested")
+      const details = done.value.items[0]?.projection.details
+      if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
+      assert.lengthOf(details.description ?? "", 50_000)
+      assert.lengthOf(details.baseRevision ?? "", 512)
+      assert.isNull(details.authorReference)
+      assert.isNull(details.mergeBaseRevision)
+
+      const readSearch = (query: string) =>
+        persistence.deliveryGraph.read(WORKSPACE_ID, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query,
+          service: "codecommit",
+          status: null,
+          type: "pull-request",
+          limit: 100
+        })
+      const lifecycleSearch = yield* readSearch("closed")
+      const reviewSearch = yield* readSearch("review requested")
+      if (
+        lifecycleSearch._tag !== "workspaceEntityProjections" ||
+        reviewSearch._tag !== "workspaceEntityProjections"
+      ) return yield* Effect.die("expected searchable workspace entity projections")
+      assert.deepStrictEqual(lifecycleSearch.value.items.map(({ projection }) => projection.displayKey), ["17"])
+      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19"])
+    })))
+
+  it.effect("backfills the current pull-request projection when its schema version is stale", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000254")
+      const sourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "codecommit",
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        vendorImmutableId: "20",
+        revision: "pull-request-20-revision-1",
+        sourceUrl: null,
+        firstObservedAt: "2026-07-19T09:01:00.000Z",
+        lastObservedAt: "2026-07-19T09:01:00.000Z",
+        synchronizedAt: "2026-07-19T09:01:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId,
+        entityType: "pull-request",
+        sourceRevision,
+        createdAt: T1
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "pull-request",
+            displayKey: "20",
+            title: "Protect payment retries",
+            details: {
+              _tag: "pull-request",
+              repository: "payments-api",
+              sourceBranch: "feat/retries",
+              targetBranch: "main",
+              headRevision: "head-20",
+              reviewState: "requested"
+            }
+          },
+          recordedAt: "2026-07-19T09:01:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const page = (
+        eventId: string,
+        checkpointAfterPage: string,
+        sourceUrl: string | null,
+        revision = "pull-request-20-revision-1"
+      ) =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage,
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId,
+            observedAt: "2026-07-19T09:01:30.000Z",
+            revision,
+            entityType: "pull-request",
+            vendorImmutableId: "20",
+            sourceUrl,
+            title: "Protect payment retries",
+            attributes: {
+              repository: "payments-api",
+              sourceBranch: "feat/retries",
+              targetBranch: "main",
+              headRevision: "head-20",
+              baseRevision: "base-20",
+              mergeBase: "merge-base-20",
+              description: "Keep retry writes idempotent.",
+              authorArn: "arn:aws:iam::123456789012:user/ada",
+              creationDate: "2026-07-18T08:00:00.000Z",
+              lastActivityDate: "2026-07-19T09:01:30.000Z",
+              status: "OPEN",
+              reviewState: "requested"
+            }
+          }]
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: Schema.decodeSync(PluginStreamKey)("pull-request-schema-backfill"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+
+      const backfill = yield* materializeNormalizedPluginPage(
+        scope,
+        page("pull-request-20-backfill", "backfilled", null)
+      )
+      assert.strictEqual(backfill.entityProjectionCount, 1)
+      const projection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId,
+        revision: null
+      })
+      if (projection._tag !== "entityProjection") return yield* Effect.die("expected backfilled projection")
+      assert.strictEqual(projection.value.projection.projectionRevision, 2)
+      assert.strictEqual(projection.value.projection.projectionSchemaVersion, 2)
+      const details = projection.value.projection.details
+      if (details._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
+      assert.strictEqual(details.baseRevision, "base-20")
+      assert.strictEqual(details.description, "Keep retry writes idempotent.")
+      const refreshedEntity = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.isNull(refreshedEntity.sourceRevision.sourceUrl)
+      assert.strictEqual(
+        DateTime.formatIso(refreshedEntity.sourceRevision.lastObservedAt),
+        "2026-07-19T09:01:30.000Z"
+      )
+      assert.strictEqual(DateTime.formatIso(refreshedEntity.sourceRevision.synchronizedAt), DateTime.formatIso(T2))
+
+      const current = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3 },
+        page(
+          "pull-request-20-current",
+          "already-current",
+          "https://console.aws.example/pull-requests/20"
+        )
+      )
+      assert.strictEqual(current.entityProjectionCount, 1)
+      const metadataRefreshed = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.strictEqual(
+        metadataRefreshed.sourceRevision.sourceUrl?.href,
+        "https://console.aws.example/pull-requests/20"
+      )
+      assert.strictEqual(DateTime.formatIso(metadataRefreshed.sourceRevision.synchronizedAt), DateTime.formatIso(T3))
+      const unchanged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId,
+        revision: null
+      })
+      if (unchanged._tag !== "entityProjection") return yield* Effect.die("expected current projection")
+      assert.strictEqual(unchanged.value.projection.projectionRevision, 3)
+      const visibleAfterRefresh = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "workspaceEntityProjections",
+        owner: null,
+        query: null,
+        service: "codecommit",
+        status: null,
+        type: "pull-request",
+        limit: 100
+      })
+      if (visibleAfterRefresh._tag !== "workspaceEntityProjections") {
+        return yield* Effect.die("expected current workspace pull requests")
+      }
+      assert.deepStrictEqual(
+        visibleAfterRefresh.value.items.map(({ projection }) => projection.displayKey),
+        ["20"]
+      )
+
+      const exactReplay = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3 },
+        page(
+          "pull-request-20-exact-replay",
+          "exact-replay",
+          "https://console.aws.example/pull-requests/20"
+        )
+      )
+      assert.strictEqual(exactReplay.entityProjectionCount, 0)
+      const afterExactReplay = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.strictEqual(afterExactReplay.revision, metadataRefreshed.revision)
+
+      const changedRevision = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3 },
+        page(
+          "pull-request-20-changed-revision",
+          "changed-revision",
+          "https://console.aws.example/pull-requests/20",
+          "pull-request-20-revision-2"
+        )
+      )
+      assert.strictEqual(changedRevision.entityProjectionCount, 1)
+
+      const clearedSourceUrl = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T3 },
+        page("pull-request-20-cleared-url", "cleared-url", null, "pull-request-20-revision-3")
+      )
+      assert.strictEqual(clearedSourceUrl.entityProjectionCount, 1)
+      const afterClearedSourceUrl = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.isNull(afterClearedSourceUrl.sourceRevision.sourceUrl)
+    })))
+
+  it.effect("decodes provider-specific timestamps only for pull requests", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+      yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "confluence-provider-fields-complete",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "confluence-page-provider-fields",
+          observedAt: "2026-07-19T09:01:30.000Z",
+          revision: "page-revision-1",
+          entityType: "confluence-page",
+          vendorImmutableId: "page-provider-fields",
+          sourceUrl: "https://confluence.example/pages/provider-fields",
+          title: "Provider field isolation",
+          attributes: {
+            spaceKey: "OPS",
+            currentVersion: 1,
+            creationDate: "July 2026",
+            lastActivityDate: { providerSpecific: true }
+          }
+        }]
+      })
+      const receipt = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        streamKey: Schema.decodeSync(PluginStreamKey)("confluence-provider-fields"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }, page)
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+
+      const invalidPullRequest = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "invalid-pull-request-timestamp",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "pull-request-invalid-timestamp",
+          observedAt: "2026-07-19T09:01:30.000Z",
+          revision: "pull-request-invalid-timestamp-1",
+          entityType: "pull-request",
+          vendorImmutableId: "21",
+          sourceUrl: null,
+          title: "Invalid timestamp",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/timestamp",
+            targetBranch: "main",
+            headRevision: "head-21",
+            creationDate: { invalid: true }
+          }
+        }]
+      })
+      const failure = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CODECOMMIT_PLUGIN_ID,
+        providerId: "codecommit",
+        streamKey: Schema.decodeSync(PluginStreamKey)("invalid-pull-request-timestamp"),
+        expectedRevision: 0,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      }, invalidPullRequest).pipe(Effect.flip)
+      if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+        return yield* Effect.die("expected pull-request timestamp failure")
+      }
+      assert.strictEqual(failure.diagnosticCode, "normalized-pull-request-timestamp-invalid")
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>

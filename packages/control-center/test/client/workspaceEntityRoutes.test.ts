@@ -8,6 +8,8 @@ import {
   isSafeWorkspaceEntityOrigin,
   makeWorkspaceEntityRouteState,
   resolveWorkspaceEntityOrigin,
+  workspaceEntityAgentPath,
+  workspaceEntityOriginAgentPath,
   workspaceEntityOriginHref,
   workspaceEntityParentPath,
   workspaceEntityPath,
@@ -21,6 +23,13 @@ const otherWorkspaceId = Schema.decodeUnknownSync(WorkspaceId)("01890f6f-6d6a-7c
 const entityId = Schema.decodeUnknownSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000001")
 const relatedEntityId = Schema.decodeUnknownSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000002")
 const releaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d4-000000000001")
+const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d4-000000000002")
+
+const releaseContext = (releaseIds: ReadonlyArray<typeof releaseId>, canonicalReleaseId = releaseIds[0] ?? null) => ({
+  canonicalReleaseId,
+  releaseIds,
+  releaseMembershipsTruncated: false
+})
 
 describe("workspace entity routes", () => {
   it("builds and decodes the canonical entity path", () => {
@@ -99,6 +108,134 @@ describe("workspace entity routes", () => {
     )
     expect(workspaceEntityStateForHref(`/w/${workspaceId}/releases/${releaseId}`, entityLocation)).toBeUndefined()
     expect(workspaceEntityStateForHref("https://jira.example.test/browse/OPS-428", entityLocation)).toBeUndefined()
+  })
+
+  it("routes release-origin entities to the release-owned agent thread", () => {
+    const releaseOrigin = entityOriginFromLocation({
+      hash: "#release-work",
+      pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
+      search: `?object=${entityId}`
+    })
+    const itemsOrigin = entityOriginFromLocation({
+      hash: "#results",
+      pathname: `/w/${workspaceId}/items`,
+      search: "?q=payments"
+    })
+    const routableReleaseIds = new Set([releaseId])
+    const noRoutableReleases = new Set<typeof releaseId>()
+
+    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId, routableReleaseIds)).toBe(
+      `/w/${workspaceId}/releases/${releaseId}/agent`
+    )
+    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId, noRoutableReleases)).toBeNull()
+    expect(workspaceEntityOriginAgentPath(itemsOrigin, workspaceId, routableReleaseIds)).toBeNull()
+    expect(workspaceEntityAgentPath(
+      releaseOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseContext([releaseId]),
+      routableReleaseIds
+    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(
+      releaseOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseContext([]),
+      noRoutableReleases
+    )).toBe(
+      `/agent?from=${
+        encodeURIComponent(
+          `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
+        )
+      }`
+    )
+    expect(workspaceEntityAgentPath(
+      itemsOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseContext([releaseId]),
+      routableReleaseIds
+    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(
+      itemsOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseContext([releaseId]),
+      noRoutableReleases
+    )).toBe(
+      `/agent?from=${
+        encodeURIComponent(
+          `${workspaceEntityParentPath(workspaceId)}?q=payments&object=${encodeURIComponent(entityId)}#item-details`
+        )
+      }`
+    )
+  })
+
+  it("preserves Items context instead of choosing an ambiguous release thread", () => {
+    const current = {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "?tab=review"
+    }
+    const expected = `/agent?from=${
+      encodeURIComponent(
+        `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
+      )
+    }`
+    const filteredExpected = `/agent?from=${
+      encodeURIComponent(
+        `${workspaceEntityParentPath(workspaceId)}?q=payments&service=codecommit&object=${
+          encodeURIComponent(
+            entityId
+          )
+        }#item-details`
+      )
+    }`
+    const staleReleaseOrigin = entityOriginFromLocation({
+      hash: "#release-work",
+      pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
+      search: `?object=${entityId}`
+    })
+    const itemsOrigin = entityOriginFromLocation({
+      hash: "#results",
+      pathname: `/w/${workspaceId}/items`,
+      search: "?q=payments&service=codecommit"
+    })
+
+    expect(
+      workspaceEntityAgentPath(
+        staleReleaseOrigin,
+        workspaceId,
+        current,
+        releaseContext([otherReleaseId]),
+        new Set([releaseId, otherReleaseId])
+      )
+    ).toBe(expected)
+    expect(
+      workspaceEntityAgentPath(
+        itemsOrigin,
+        workspaceId,
+        current,
+        releaseContext([releaseId, otherReleaseId], releaseId),
+        new Set([releaseId, otherReleaseId])
+      )
+    ).toBe(filteredExpected)
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {

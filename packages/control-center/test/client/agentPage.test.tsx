@@ -101,6 +101,7 @@ describe("AgentPage context", () => {
     const itemsMarkup = renderAgentPage(itemsPath)
     expect(itemsMarkup).toContain("Workspace items")
     expect(itemsMarkup).toContain(`href="${itemsPath.replaceAll("&", "&amp;")}"`)
+    expect(itemsMarkup).not.toContain("Context unavailable")
 
     const workPath = `/w/${workspaceId}/work?release=01890f6f-6d6a-7cc0-98d2-000000000011`
     const workMarkup = renderAgentPage(workPath)

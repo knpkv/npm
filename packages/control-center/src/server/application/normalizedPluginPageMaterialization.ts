@@ -34,7 +34,7 @@ import type { NormalizedPluginEventV1, PluginSyncPageV1 } from "../../domain/plu
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
-import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
@@ -62,6 +62,7 @@ interface RelationshipEndpointResolution {
 }
 
 const OptionalText = Schema.optionalKey(Schema.NullOr(Schema.String))
+const OptionalUnknown = Schema.optionalKey(Schema.NullOr(Schema.Unknown))
 const NamedText = Schema.Union([
   Schema.String,
   Schema.Struct({ name: Schema.optionalKey(Schema.NullOr(Schema.String)) })
@@ -75,6 +76,12 @@ const EntityAttributes = Schema.Struct({
   sourceBranch: OptionalText,
   targetBranch: OptionalText,
   headRevision: OptionalText,
+  baseRevision: OptionalText,
+  mergeBase: OptionalText,
+  description: OptionalText,
+  authorArn: OptionalText,
+  creationDate: OptionalUnknown,
+  lastActivityDate: OptionalUnknown,
   reviewState: OptionalText,
   spaceKey: OptionalText,
   spaceId: OptionalText,
@@ -149,8 +156,25 @@ const bounded = (value: string | null | undefined, fallback: string, maximum: nu
   return (normalized === undefined || normalized.length === 0 ? fallback : normalized).slice(0, maximum)
 }
 
+const optionalBounded = (value: string | null | undefined, maximum: number): string | null => {
+  const normalized = value?.trim()
+  return normalized === undefined || normalized.length === 0 ? null : normalized.slice(0, maximum)
+}
+
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : (value?.name ?? null)
+
+const decodedPullRequestTimestamp = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodePullRequestTimestamp"
+)(function*(
+  value: unknown,
+  eventId: string
+): Effect.fn.Return<UtcTimestamp | null, NormalizedPluginPageMaterializationError> {
+  if (value === null || value === undefined) return null
+  return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
+    Effect.mapError(() => malformed("normalized-pull-request-timestamp-invalid", eventId))
+  )
+})
 
 const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.decodeIssueAttributes")(function*(
   event: EntityUpsert
@@ -203,7 +227,6 @@ const reviewState = (
 ): "approved" | "changes-requested" | "merged" | "not-requested" | "requested" => {
   switch (value?.toLowerCase()) {
     case "requested":
-    case "open":
       return "requested"
     case "changes-requested":
     case "changes requested":
@@ -211,10 +234,22 @@ const reviewState = (
     case "approved":
       return "approved"
     case "merged":
-    case "closed":
       return "merged"
     default:
       return "not-requested"
+  }
+}
+
+const pullRequestLifecycle = (value: string | null | undefined): "closed" | "merged" | "open" | null => {
+  switch (value?.toLowerCase()) {
+    case "open":
+      return "open"
+    case "closed":
+      return "closed"
+    case "merged":
+      return "merged"
+    default:
+      return null
   }
 }
 
@@ -271,7 +306,10 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "pull-request":
+    case "pull-request": {
+      const creationDate = yield* decodedPullRequestTimestamp(attributes.creationDate, event.eventId)
+      const lastActivityDate = yield* decodedPullRequestTimestamp(attributes.lastActivityDate, event.eventId)
+      const status = namedText(attributes.status)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -280,9 +318,17 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status))
+          reviewState: reviewState(attributes.reviewState ?? (pullRequestLifecycle(status) === null ? status : null)),
+          lifecycle: pullRequestLifecycle(status),
+          description: optionalBounded(attributes.description, 50_000),
+          authorReference: optionalBounded(attributes.authorArn, 512),
+          baseRevision: optionalBounded(attributes.baseRevision, 512),
+          mergeBaseRevision: optionalBounded(attributes.mergeBase, 512),
+          createdAt: creationDate === null ? null : DateTime.formatIso(creationDate),
+          updatedAt: lastActivityDate === null ? null : DateTime.formatIso(lastActivityDate)
         }
       }
+    }
     case "page":
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
@@ -504,6 +550,8 @@ const sameSourceUrl = (
   right: EntityUpsert["sourceUrl"]
 ): boolean => left?.href === right?.href
 
+const projectionSchemaVersion = (kind: DeliveryEntityKind): number => kind === "pull-request" ? 2 : 1
+
 const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(function*(
   persistence: PersistenceService,
   workspaceId: WorkspaceId,
@@ -533,10 +581,30 @@ const materializeUpsertEntity = Effect.fn(
   const currentProjection = existing === null
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
+  const schemaVersion = projectionSchemaVersion(kind)
+  const refreshedSource = existing === null
+    ? null
+    : {
+      ...sourceRevision(
+        scope,
+        event,
+        existing.sourceRevision.firstObservedAt,
+        event.sourceUrl
+      ),
+      lastObservedAt: laterTimestamp(existing.sourceRevision.lastObservedAt, event.observedAt),
+      synchronizedAt: laterTimestamp(existing.sourceRevision.synchronizedAt, scope.committedAt)
+    }
+  const sourceMetadataChanged = existing !== null && refreshedSource !== null && (
+    !sameSourceUrl(existing.sourceRevision.sourceUrl, refreshedSource.sourceUrl) ||
+    !DateTime.Equivalence(existing.sourceRevision.lastObservedAt, refreshedSource.lastObservedAt) ||
+    !DateTime.Equivalence(existing.sourceRevision.synchronizedAt, refreshedSource.synchronizedAt)
+  )
   if (
     existing !== null &&
     existing.sourceRevision.revision === event.revision &&
-    currentProjection?.projection.entityState === "present"
+    currentProjection?.projection.entityState === "present" &&
+    currentProjection.projection.projectionSchemaVersion === schemaVersion &&
+    !sourceMetadataChanged
   ) {
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
@@ -548,10 +616,8 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
-    : existing.sourceRevision.revision === event.revision
-    ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
-      sourceRevision: sourceRevision(
+      sourceRevision: refreshedSource ?? sourceRevision(
         scope,
         event,
         existing.sourceRevision.firstObservedAt,
@@ -570,7 +636,7 @@ const materializeUpsertEntity = Effect.fn(
         projectionRevision,
         sourceEntityRevision: LedgerRevision.make(persisted.revision),
         supersedesProjectionRevision: currentProjection?.projection.projectionRevision ?? null,
-        projectionSchemaVersion: 1,
+        projectionSchemaVersion: schemaVersion,
         entityState: "present",
         entityType: kind,
         displayKey: presentation.displayKey,

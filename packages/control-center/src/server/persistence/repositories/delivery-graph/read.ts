@@ -698,6 +698,25 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           WHEN 'issue' THEN ${rawStatusText}
           ELSE replace(${rawStatusText}, '-', ' ')
         END`
+        const pullRequestReviewText = sql`replace(lower(COALESCE(
+          json_extract(projection.extension_json, '$.reviewState'),
+          ''
+        )), '-', ' ')`
+        const pullRequestLifecycleText = sql`lower(COALESCE(
+          json_extract(projection.extension_json, '$.lifecycle'),
+          ''
+        ))`
+        const pullRequestSearchStatusText = sql`trim(
+          CASE ${pullRequestReviewText}
+            WHEN 'not requested' THEN 'review not requested'
+            WHEN 'requested' THEN 'review requested'
+            ELSE ${pullRequestReviewText}
+          END || ' ' || ${pullRequestLifecycleText}
+        )`
+        const searchStatusText = sql`CASE ${entityType}
+          WHEN 'pull-request' THEN ${pullRequestSearchStatusText}
+          ELSE ${statusText}
+        END`
         const statusGroup = sql`CASE ${entityType}
           WHEN 'issue' THEN CASE
             WHEN ${statusText} IN ('blocked', 'rejected') THEN 'failed'
@@ -705,8 +724,9 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             ELSE 'active'
           END
           WHEN 'pull-request' THEN CASE
-            WHEN ${statusText} = 'changes requested' THEN 'failed'
-            WHEN ${statusText} IN ('approved', 'merged') THEN 'done'
+            WHEN ${pullRequestReviewText} = 'changes requested' THEN 'failed'
+            WHEN ${pullRequestReviewText} IN ('approved', 'merged') THEN 'done'
+            WHEN ${pullRequestLifecycleText} IN ('closed', 'merged') THEN 'done'
             ELSE 'active'
           END
           WHEN 'page' THEN CASE
@@ -741,7 +761,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               AND newer.projection_revision > projection.projection_revision
           )`
         const matchesFilters = sql`(${query.query} IS NULL OR instr(
-            lower(projection.display_key || ' ' || projection.title || ' ' || ${statusText}),
+            lower(projection.display_key || ' ' || projection.title || ' ' || ${searchStatusText}),
             lower(${query.query})
           ) > 0)
           AND (${query.service} IS NULL OR ${service} = ${query.service})

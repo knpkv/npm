@@ -9,6 +9,8 @@ import {
   WorkspaceId,
   type WorkspaceId as WorkspaceIdType
 } from "../../domain/identifiers.js"
+import { contextualAgentPath } from "../contextualAgentPath.js"
+import { releaseAgentPath } from "../releases/releasePaths.js"
 import { type ReleaseRouteState, ReleaseRouteStateSchema, retainReleaseRouteState } from "../releases/releaseRoutes.js"
 import { workspaceEntityParentPath } from "../workspaceEntityPaths.js"
 
@@ -42,6 +44,13 @@ export interface ResolvedWorkspaceEntityOrigin {
 export interface WorkspaceEntityTarget {
   readonly entityId: EntityIdType
   readonly workspaceId: WorkspaceIdType
+}
+
+/** Release membership evidence used to select an unambiguous entity-owned agent thread. */
+export interface WorkspaceEntityReleaseContext {
+  readonly canonicalReleaseId: ReleaseIdType | null
+  readonly releaseIds: ReadonlyArray<ReleaseIdType>
+  readonly releaseMembershipsTruncated: boolean
 }
 
 interface LocationParts {
@@ -201,3 +210,55 @@ export const workspaceEntityOriginHref = ({
   pathname,
   search
 }: WorkspaceEntityOrigin): string => `${pathname}${search}${hash}`
+
+/** Resolve a release-owned agent thread only when the stored origin is an exact release route. */
+export const workspaceEntityOriginAgentPath = (
+  origin: WorkspaceEntityOrigin,
+  workspaceId: WorkspaceIdType,
+  routableReleaseIds: ReadonlySet<ReleaseIdType>
+): string | null => {
+  const target = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
+  return target === null || !routableReleaseIds.has(target.releaseId)
+    ? null
+    : releaseAgentPath(target.workspaceId, target.releaseId)
+}
+
+/** Keep entity actions in a release-owned thread, falling back to the current-page context. */
+export const workspaceEntityAgentPath = (
+  origin: WorkspaceEntityOrigin,
+  workspaceId: WorkspaceIdType,
+  current: Pick<LocationParts, "hash" | "pathname" | "search">,
+  releaseContext: WorkspaceEntityReleaseContext,
+  routableReleaseIds: ReadonlySet<ReleaseIdType>
+): string => {
+  const originRelease = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
+  const canonicalReleaseId = releaseContext.canonicalReleaseId
+  const releasePath = originRelease === null
+    ? releaseContext.releaseMembershipsTruncated ||
+        releaseContext.releaseIds.length !== 1 ||
+        releaseContext.releaseIds[0] !== canonicalReleaseId ||
+        canonicalReleaseId === null ||
+        !routableReleaseIds.has(canonicalReleaseId)
+      ? null
+      : releaseAgentPath(workspaceId, canonicalReleaseId)
+    : !releaseContext.releaseMembershipsTruncated &&
+        releaseContext.releaseIds.includes(originRelease.releaseId) &&
+        routableReleaseIds.has(originRelease.releaseId)
+    ? releaseAgentPath(workspaceId, originRelease.releaseId)
+    : null
+  if (releasePath !== null) return releasePath
+
+  const entity = workspaceEntityTargetFromHref(current.pathname)
+  if (entity === null || entity.workspaceId !== workspaceId) {
+    return contextualAgentPath(current.pathname, current.search, current.hash)
+  }
+  const itemSearch = new URLSearchParams(
+    origin.pathname === workspaceEntityParentPath(workspaceId) ? origin.search : ""
+  )
+  itemSearch.set("object", entity.entityId)
+  return contextualAgentPath(
+    workspaceEntityParentPath(workspaceId),
+    `?${itemSearch.toString()}`,
+    "#item-details"
+  )
+}

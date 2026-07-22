@@ -3,7 +3,7 @@
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { MemoryRouter, useLocation } from "react-router"
+import { MemoryRouter, useLocation, useNavigate } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -12,8 +12,10 @@ import {
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
+import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
+import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
 import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -171,12 +173,75 @@ const inspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspectio
   }
 })
 
+const encodedInspection = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+const pullRequestInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityType: "pull-request",
+      displayKey: "184",
+      title: "Checkout and capture",
+      details: {
+        _tag: "pull-request",
+        repository: "payments-api",
+        sourceBranch: "feature/capture",
+        targetBranch: "main",
+        headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
+        baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+        mergeBaseRevision: "6a2621c69c57b428e2a83f415c23ad37a875c87d",
+        reviewState: "requested",
+        lifecycle: "open",
+        description: "Protect capture retries and preserve the original payment result.",
+        authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+        createdAt: "2026-07-12T08:00:00.000Z",
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      }
+    },
+    owners: [
+      {
+        avatarFallback: "AK",
+        displayName: "Ada Kline",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
+        roles: ["reviewer"]
+      },
+      {
+        avatarFallback: "MO",
+        displayName: "Mina Ortiz",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000072",
+        roles: ["release-approver"]
+      }
+    ]
+  },
+  source: {
+    ...sourceRevision,
+    providerId: "codecommit",
+    vendorImmutableId: "184",
+    revision: "revision-9",
+    sourceUrl:
+      "https://eu-central-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/184"
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  activity: { truncated: false, events: [] }
+})
+
 const state = {
   _tag: "stale",
   entityId: inspection.entity.projection.entityId,
   inspection,
   reason: "source-stale",
   refreshKey: "snapshot-a",
+  sessionKey: "session-a",
+  workspaceId: WORKSET_WORKSPACE_ID
+} satisfies WorkspaceEntityState
+
+const pullRequestState = {
+  _tag: "ready",
+  entityId: pullRequestInspection.entity.projection.entityId,
+  inspection: pullRequestInspection,
+  refreshKey: "snapshot-pr",
   sessionKey: "session-a",
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
@@ -251,6 +316,150 @@ describe("canonical workspace entity", () => {
       "The relationship graph is partial; additional delivery links exist.",
       "The activity list is partial; older events are not shown."
     ])
+  })
+
+  it("presents one exact pull-request head without treating agent advice as approval", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, pullRequestInspection)
+
+    expect(presentation).toMatchObject({
+      displayKey: "184",
+      service: "codecommit",
+      verdict: "Open",
+      pullRequest: {
+        agentReviewLabel: "Agent review not run",
+        author: { name: "Alice", role: "Pull request author" },
+        baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+        createdAt: {
+          dateTime: "2026-07-12T08:00:00.000Z"
+        },
+        headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
+        releaseCountLabel: "1",
+        reviewLabel: "Human review requested"
+      }
+    })
+    expect(presentation.facts).toContainEqual({
+      label: "Head revision",
+      value: presentation.pullRequest?.headRevision
+    })
+    expect(presentation.collaborators.reviewers).toEqual([
+      expect.objectContaining({ name: "Ada Kline", role: "Reviewer" })
+    ])
+    expect(presentation.collaborators.approvers).toEqual([
+      expect.objectContaining({ name: "Mina Ortiz", role: "Release Approver" })
+    ])
+    if (presentation.pullRequest === null) throw new Error("Expected a pull-request presentation")
+    expect(presentation.pullRequest.issueCountLabel).toBe(`${String(presentation.pullRequest.issueCount)}+`)
+    expect(presentation.pullRequest.pipelineCountLabel).toBe(`${String(presentation.pullRequest.pipelineCount)}+`)
+
+    const complete = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...pullRequestInspection,
+      graph: { ...pullRequestInspection.graph, truncated: false }
+    })
+    if (complete.pullRequest === null) throw new Error("Expected a complete pull-request presentation")
+    expect(complete.pullRequest.issueCountLabel).toBe(String(complete.pullRequest.issueCount))
+    expect(complete.pullRequest.pipelineCountLabel).toBe(String(complete.pullRequest.pipelineCount))
+  })
+
+  it("counts only currently accepted issue and pipeline relationships as PR evidence", () => {
+    const root = encodedWorkset.entityProjections.find(({ projection }) => projection.details._tag === "pull-request")
+    if (root?.projection.details._tag !== "pull-request") {
+      throw new Error("Expected a pull-request projection fixture")
+    }
+    const graphInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encodedInspection,
+      entity: {
+        ...encodedInspection.entity,
+        canonicalReleaseId: encodedWorkset.releaseId,
+        projection: root.projection,
+        recordedAt: root.recordedAt,
+        releaseIds: [encodedWorkset.releaseId]
+      },
+      graph: {
+        ...encodedInspection.graph,
+        evidenceClaims: encodedWorkset.evidenceClaims,
+        evidenceItems: encodedWorkset.evidenceItems,
+        nodes: encodedWorkset.nodes,
+        relatedEntityProjections: encodedWorkset.entityProjections.filter(
+          ({ projection }) => projection.entityId !== root.projection.entityId
+        ),
+        relationships: encodedWorkset.relationships
+      }
+    })
+    const implementation = graphInspection.graph.relationships.find(
+      (relationship) => relationship.kind === "implements" && relationship.sourceNodeKind === "pull-request"
+    )
+    if (implementation === undefined || implementation.lifecycle._tag !== "verified") {
+      throw new Error("Expected a verified PR implementation relationship")
+    }
+    const relatedIssueId = graphInspection.graph.nodes.find(
+      ({ nodeId }) => nodeId === implementation.targetNodeId
+    )?.resolution
+    if (
+      relatedIssueId?._tag !== "resolved" ||
+      relatedIssueId.target._tag !== "entity" ||
+      relatedIssueId.target.entityKind !== "issue"
+    ) {
+      throw new Error("Expected the implementation target to resolve to an issue")
+    }
+    const relatedIssueEntityId = relatedIssueId.target.entityId
+    const rejectedInspection: Inspection = {
+      ...graphInspection,
+      graph: {
+        ...graphInspection.graph,
+        relationships: graphInspection.graph.relationships.map((relationship) =>
+          relationship.relationshipId === implementation.relationshipId
+            ? {
+                ...relationship,
+                lifecycle: {
+                  _tag: "rejected",
+                  effectiveAt: implementation.lifecycle.effectiveAt,
+                  reason: "Rejected during graph review."
+                }
+              }
+            : relationship
+        )
+      }
+    }
+    const details = graphInspection.entity.projection.details
+    if (details._tag !== "pull-request") throw new Error("Expected pull-request details")
+    const deletedInspection: Inspection = {
+      ...graphInspection,
+      graph: {
+        ...graphInspection.graph,
+        relatedEntityProjections: graphInspection.graph.relatedEntityProjections.map((entry) =>
+          entry.projection.entityId === relatedIssueEntityId
+            ? { ...entry, projection: { ...entry.projection, entityState: "deleted" } }
+            : entry
+        )
+      }
+    }
+
+    const accepted = presentWorkspacePullRequest(details, graphInspection.source.sourceUrl, graphInspection)
+    const rejected = presentWorkspacePullRequest(details, rejectedInspection.source.sourceUrl, rejectedInspection)
+    const deleted = presentWorkspacePullRequest(details, deletedInspection.source.sourceUrl, deletedInspection)
+
+    expect(accepted).toMatchObject({ issueCount: 3, pipelineCount: 1 })
+    expect(rejected).toMatchObject({ issueCount: 2, pipelineCount: 1 })
+    expect(deleted).toMatchObject({ issueCount: 2, pipelineCount: 1 })
+  })
+
+  it("renders malformed persisted pull-request timestamps as unavailable", () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(pullRequestInspection)
+    const details = encoded.entity.projection.details
+    if (details._tag !== "pull-request") throw new Error("Expected a pull-request projection fixture")
+
+    const malformed = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      entity: {
+        ...encoded.entity,
+        projection: {
+          ...encoded.entity.projection,
+          details: { ...details, createdAt: "not-a-date" }
+        }
+      }
+    })
+
+    expect(presentWorkspaceEntity(WORKSET_WORKSPACE_ID, malformed).pullRequest?.createdAt).toBeNull()
   })
 
   it("keeps distinct Jira accounts with the same display name in the working circle", () => {
@@ -412,6 +621,166 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector("textarea")).toBeNull()
     expect(host.textContent).not.toContain("Edit issue")
   })
+
+  it("renders the CodeCommit revision, human review, delivery evidence, and agent entry point", async () => {
+    const onAskAgent = vi.fn()
+    const host = await renderView(onAskAgent, pullRequestState)
+
+    expect(host.textContent).toContain("feature/capture")
+    expect(host.textContent).toContain("a5d8c9e4f013bdf17c2e6765579e2770f63e7b19")
+    expect(host.textContent).toContain("91c3627b4ce7447e38c906529a4af4be6bc6812d")
+    expect(host.textContent).toContain("Protect capture retries")
+    expect(host.textContent).toContain("Alice")
+    expect(host.textContent).toContain("Ada Kline")
+    expect(host.textContent).toContain("Mina Ortiz")
+    expect(host.textContent).toContain("Human review requested")
+    expect(host.textContent).toContain("Agent review not run")
+    expect(host.textContent).toContain("Open files and diff in CodeCommit")
+    expect(host.querySelector("[data-workspace-pull-request-detail]")).not.toBeNull()
+    const deliveryCounts = new Map(
+      [...host.querySelectorAll("dt")].map((term) => [
+        term.textContent,
+        term.parentElement?.querySelector("dd")?.textContent
+      ])
+    )
+    expect(deliveryCounts.get("Jira items")).toMatch(/\+$/u)
+    expect(deliveryCounts.get("Pipeline runs")).toMatch(/\+$/u)
+
+    const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Ask Relay to review"
+    )
+    if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+    await act(async () => reviewButton.click())
+    expect(onAskAgent).toHaveBeenCalledOnce()
+  })
+
+  it("renders a bounded release-membership count as a lower bound", async () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(pullRequestInspection)
+    const releaseIds = Array.from(
+      { length: 500 },
+      (_, index) => `01890f6f-6d6a-7cc0-98d4-${String(index + 11).padStart(12, "0")}`
+    )
+    const truncatedInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      entity: {
+        ...encoded.entity,
+        canonicalReleaseId: releaseIds[0],
+        releaseIds,
+        releaseMembershipsTruncated: true
+      }
+    })
+    const truncatedState = {
+      ...pullRequestState,
+      inspection: truncatedInspection
+    } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, truncatedState)
+    const releaseCount = [...host.querySelectorAll("dt")]
+      .find((term) => term.textContent === "Releases")
+      ?.parentElement?.querySelector("dd")
+
+    expect(releaseCount?.textContent).toBe("500+")
+  })
+
+  it.each([
+    [
+      "a release",
+      {
+        hash: "#work",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/preview`,
+        search: "?filter=attention",
+        state: null
+      },
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
+      new Set([releaseWorksetFixture.releaseId]),
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+    ],
+    [
+      "a direct Items route with a portfolio release",
+      {
+        hash: "#review",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+        search: "?q=payments",
+        state: null
+      },
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
+      new Set([releaseWorksetFixture.releaseId]),
+      `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
+    ],
+    [
+      "a direct Items route with an out-of-portfolio release",
+      {
+        hash: "#review",
+        pathname: `/w/${WORKSET_WORKSPACE_ID}/items`,
+        search: "?q=payments",
+        state: null
+      },
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
+      new Set<typeof releaseWorksetFixture.releaseId>(),
+      `/agent?from=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items?q=payments&object=${encodeURIComponent(
+          pullRequestInspection.entity.projection.entityId
+        )}#item-details`
+      )}`
+    ]
+  ])(
+    "routes the agent safely from a pull request reached through %s",
+    async (_label, origin, releaseContext, routableReleaseIds, expected) => {
+      const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      const RoutedPullRequest = (): ReactElement => {
+        const location = useLocation()
+        const navigate = useNavigate()
+        const agentPath = workspaceEntityAgentPath(
+          origin,
+          WORKSET_WORKSPACE_ID,
+          location,
+          releaseContext,
+          routableReleaseIds
+        )
+        return (
+          <WorkspaceEntityView
+            onAskAgent={() => navigate(agentPath)}
+            originHref={`${origin.pathname}${origin.search}${origin.hash}`}
+            originLabel="Back to context"
+            originState={null}
+            retry={() => undefined}
+            state={pullRequestState}
+            workspaceId={WORKSET_WORKSPACE_ID}
+          />
+        )
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+      await act(async () =>
+        mountedRoot?.render(
+          <MemoryRouter initialEntries={[entityHref]}>
+            <LocationProbe />
+            <RoutedPullRequest />
+          </MemoryRouter>
+        )
+      )
+      const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Ask Relay to review"
+      )
+      if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+
+      await act(async () => reviewButton.click())
+
+      expect(host.querySelector("[data-location]")?.textContent).toBe(expected)
+    }
+  )
 
   it("distinguishes a shortened comment body from an omitted-comments collection", async () => {
     const details = inspection.entity.projection.details
