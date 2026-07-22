@@ -16,6 +16,7 @@ import {
 import {
   isPluginFailureRetryable,
   PLUGIN_OPERATION_MAX_ATTEMPTS,
+  PLUGIN_RATE_LIMIT_MAX_DELAY_MILLIS,
   PLUGIN_RETRY_BASE_DELAY_MILLIS,
   PLUGIN_RETRY_MAX_DELAY_MILLIS,
   retryPluginOperation,
@@ -115,10 +116,35 @@ describe("plugin retry policy", () => {
       assert.strictEqual(yield* Ref.get(attempts), 2)
     }))
 
+  it.effect("honors a bounded Retry-After beyond the transient jitter cap", () =>
+    Effect.gen(function*() {
+      // CodeCommit surfaces a ~30s rate-limit window, which exceeds the transient
+      // jitter cap but is within the explicit Retry-After ceiling and must retry.
+      assert.isAbove(30_000, PLUGIN_RETRY_MAX_DELAY_MILLIS)
+      assert.isAtMost(30_000, PLUGIN_RATE_LIMIT_MAX_DELAY_MILLIS)
+      const attempts = yield* Ref.make(0)
+      const retryAt = DateTime.makeUnsafe("1970-01-01T00:00:30.000Z")
+      const operation = Ref.updateAndGet(attempts, (count) => count + 1).pipe(
+        Effect.flatMap((attempt) =>
+          attempt === 1
+            ? Effect.fail(new PluginRateLimitFailure({ operation: "sync", retryAt }))
+            : Effect.succeed("accepted")
+        )
+      )
+      const fiber = yield* Effect.forkChild(retryPluginOperation({ operation, safety: "safe-read" }))
+
+      yield* TestClock.adjust("29999 millis")
+      assert.strictEqual(yield* Ref.get(attempts), 1)
+      yield* TestClock.adjust("1 millis")
+
+      assert.strictEqual(yield* Fiber.join(fiber), "accepted")
+      assert.strictEqual(yield* Ref.get(attempts), 2)
+    }))
+
   it.effect("fails instead of retaining a fiber for a far-future Retry-After", () =>
     Effect.gen(function*() {
       const attempts = yield* Ref.make(0)
-      const retryAt = DateTime.makeUnsafe("1970-01-01T00:00:20.001Z")
+      const retryAt = DateTime.makeUnsafe("1970-01-01T00:01:00.001Z")
       const outcome = yield* retryPluginOperation({
         operation: Ref.update(attempts, (count) => count + 1).pipe(
           Effect.andThen(Effect.fail(new PluginRateLimitFailure({ operation: "sync", retryAt })))
