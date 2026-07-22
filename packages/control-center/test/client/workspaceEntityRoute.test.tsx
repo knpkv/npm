@@ -643,7 +643,7 @@ describe("canonical workspace entity", () => {
         search: "?filter=attention",
         state: null
       },
-      null,
+      { canonicalReleaseId: null, releaseIds: [], releaseMembershipsTruncated: false },
       new Set([releaseWorksetFixture.releaseId]),
       `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
@@ -655,7 +655,11 @@ describe("canonical workspace entity", () => {
         search: "?q=payments",
         state: null
       },
-      pullRequestInspection.entity.canonicalReleaseId,
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
       new Set([releaseWorksetFixture.releaseId]),
       `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
@@ -667,7 +671,11 @@ describe("canonical workspace entity", () => {
         search: "?q=payments",
         state: null
       },
-      pullRequestInspection.entity.canonicalReleaseId,
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
       new Set<typeof releaseWorksetFixture.releaseId>(),
       `/agent?from=${encodeURIComponent(
         `/w/${WORKSET_WORKSPACE_ID}/items?object=${encodeURIComponent(
@@ -677,7 +685,7 @@ describe("canonical workspace entity", () => {
     ]
   ])(
     "routes the agent safely from a pull request reached through %s",
-    async (_label, origin, releaseId, routableReleaseIds, expected) => {
+    async (_label, origin, releaseContext, routableReleaseIds, expected) => {
       const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
       const RoutedPullRequest = (): ReactElement => {
         const location = useLocation()
@@ -686,7 +694,7 @@ describe("canonical workspace entity", () => {
           origin,
           WORKSET_WORKSPACE_ID,
           location,
-          releaseId,
+          releaseContext,
           routableReleaseIds
         )
         return (

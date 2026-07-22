@@ -23,6 +23,13 @@ const otherWorkspaceId = Schema.decodeUnknownSync(WorkspaceId)("01890f6f-6d6a-7c
 const entityId = Schema.decodeUnknownSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000001")
 const relatedEntityId = Schema.decodeUnknownSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000002")
 const releaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d4-000000000001")
+const otherReleaseId = Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d4-000000000002")
+
+const releaseContext = (releaseIds: ReadonlyArray<typeof releaseId>, canonicalReleaseId = releaseIds[0] ?? null) => ({
+  canonicalReleaseId,
+  releaseIds,
+  releaseMembershipsTruncated: false
+})
 
 describe("workspace entity routes", () => {
   it("builds and decodes the canonical entity path", () => {
@@ -130,7 +137,7 @@ describe("workspace entity routes", () => {
         pathname: workspaceEntityPath(workspaceId, entityId),
         search: "?tab=review"
       },
-      null,
+      releaseContext([]),
       routableReleaseIds
     )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
     expect(workspaceEntityAgentPath(
@@ -141,7 +148,7 @@ describe("workspace entity routes", () => {
         pathname: workspaceEntityPath(workspaceId, entityId),
         search: "?tab=review"
       },
-      null,
+      releaseContext([]),
       noRoutableReleases
     )).toBe(
       `/agent?from=${
@@ -158,7 +165,7 @@ describe("workspace entity routes", () => {
         pathname: workspaceEntityPath(workspaceId, entityId),
         search: "?tab=review"
       },
-      releaseId,
+      releaseContext([releaseId]),
       routableReleaseIds
     )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
     expect(workspaceEntityAgentPath(
@@ -169,7 +176,7 @@ describe("workspace entity routes", () => {
         pathname: workspaceEntityPath(workspaceId, entityId),
         search: "?tab=review"
       },
-      releaseId,
+      releaseContext([releaseId]),
       noRoutableReleases
     )).toBe(
       `/agent?from=${
@@ -178,6 +185,48 @@ describe("workspace entity routes", () => {
         )
       }`
     )
+  })
+
+  it("preserves Items context instead of choosing an ambiguous release thread", () => {
+    const current = {
+      hash: "#relationships",
+      pathname: workspaceEntityPath(workspaceId, entityId),
+      search: "?tab=review"
+    }
+    const expected = `/agent?from=${
+      encodeURIComponent(
+        `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
+      )
+    }`
+    const staleReleaseOrigin = entityOriginFromLocation({
+      hash: "#release-work",
+      pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
+      search: `?object=${entityId}`
+    })
+    const itemsOrigin = entityOriginFromLocation({
+      hash: "#results",
+      pathname: `/w/${workspaceId}/items`,
+      search: "?q=payments"
+    })
+
+    expect(
+      workspaceEntityAgentPath(
+        staleReleaseOrigin,
+        workspaceId,
+        current,
+        releaseContext([otherReleaseId]),
+        new Set([otherReleaseId])
+      )
+    ).toBe(expected)
+    expect(
+      workspaceEntityAgentPath(
+        itemsOrigin,
+        workspaceId,
+        current,
+        releaseContext([releaseId, otherReleaseId], releaseId),
+        new Set([releaseId, otherReleaseId])
+      )
+    ).toBe(expected)
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {

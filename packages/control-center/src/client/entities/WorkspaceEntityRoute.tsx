@@ -415,10 +415,10 @@ const ConnectedWorkspaceEntity = ({
   )
   const resolvedOrigin = resolveWorkspaceEntityOrigin(location.state, workspaceId, entityId)
   const resolvedOriginHref = workspaceEntityOriginHref(resolvedOrigin.origin)
-  const canonicalReleaseId =
+  const releaseContext =
     controller.state._tag === "ready" || controller.state._tag === "stale"
-      ? controller.state.inspection.entity.canonicalReleaseId
-      : null
+      ? controller.state.inspection.entity
+      : { canonicalReleaseId: null, releaseIds: [], releaseMembershipsTruncated: false }
   const routableReleaseIds = new Set(
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.releases.map(({ id }) => id) : []
   )
@@ -426,7 +426,7 @@ const ConnectedWorkspaceEntity = ({
     resolvedOrigin.origin,
     workspaceId,
     location,
-    canonicalReleaseId,
+    releaseContext,
     routableReleaseIds
   )
   return (

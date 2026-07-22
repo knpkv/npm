@@ -46,6 +46,13 @@ export interface WorkspaceEntityTarget {
   readonly workspaceId: WorkspaceIdType
 }
 
+/** Release membership evidence used to select an unambiguous entity-owned agent thread. */
+export interface WorkspaceEntityReleaseContext {
+  readonly canonicalReleaseId: ReleaseIdType | null
+  readonly releaseIds: ReadonlyArray<ReleaseIdType>
+  readonly releaseMembershipsTruncated: boolean
+}
+
 interface LocationParts {
   readonly hash: string
   readonly pathname: string
@@ -221,13 +228,22 @@ export const workspaceEntityAgentPath = (
   origin: WorkspaceEntityOrigin,
   workspaceId: WorkspaceIdType,
   current: Pick<LocationParts, "hash" | "pathname" | "search">,
-  canonicalReleaseId: ReleaseIdType | null,
+  releaseContext: WorkspaceEntityReleaseContext,
   routableReleaseIds: ReadonlySet<ReleaseIdType>
 ): string => {
-  const releasePath = workspaceEntityOriginAgentPath(origin, workspaceId, routableReleaseIds) ??
-    (canonicalReleaseId === null || !routableReleaseIds.has(canonicalReleaseId)
+  const originRelease = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
+  const canonicalReleaseId = releaseContext.canonicalReleaseId
+  const releasePath = originRelease === null
+    ? releaseContext.releaseMembershipsTruncated ||
+        releaseContext.releaseIds.length !== 1 ||
+        releaseContext.releaseIds[0] !== canonicalReleaseId ||
+        canonicalReleaseId === null ||
+        !routableReleaseIds.has(canonicalReleaseId)
       ? null
-      : releaseAgentPath(workspaceId, canonicalReleaseId))
+      : releaseAgentPath(workspaceId, canonicalReleaseId)
+    : routableReleaseIds.has(originRelease.releaseId)
+    ? releaseAgentPath(workspaceId, originRelease.releaseId)
+    : null
   if (releasePath !== null) return releasePath
 
   const entity = workspaceEntityTargetFromHref(current.pathname)
