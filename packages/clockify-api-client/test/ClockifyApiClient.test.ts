@@ -80,6 +80,72 @@ describe("ClockifyApiClient", () => {
     )
   })
 
+  it.effect("decodes a created time entry whose optional id references are null", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      // Clockify returns kioskId/projectId/taskId as explicit null (not absent) when unset.
+      const entry = yield* client.createTimeEntry("workspace-1", {
+        description: "[RPS-6169] review transaction mapper",
+        start: "2026-07-20T09:00:00Z"
+      })
+      expect(entry.id).toBe("entry-1")
+      expect(entry.kioskId).toBeNull()
+      expect(entry.projectId).toBeNull()
+      expect(entry.taskId).toBeNull()
+      expect(entry.tagIds).toBeNull()
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 201,
+        body: {
+          id: "entry-1",
+          description: "[RPS-6169] review transaction mapper",
+          billable: true,
+          userId: "user-1",
+          workspaceId: "workspace-1",
+          kioskId: null,
+          projectId: null,
+          taskId: null,
+          tagIds: null,
+          timeInterval: {
+            start: "2026-07-20T09:00:00Z",
+            end: null,
+            duration: null
+          }
+        }
+      }, requests))
+    )
+  })
+
+  it.effect("decodes a time-entries list whose entries have null tagIds", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      // `jcf sync reconcile` fetches time entries; Clockify returns tagIds as
+      // null (not an empty array) for entries with no tags.
+      const entries = yield* client.getTimeEntries("workspace-1", "user-1")
+      expect(entries).toHaveLength(1)
+      expect(entries[0]?.tagIds).toBeNull()
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 200,
+        body: [{
+          id: "entry-1",
+          description: "[RPS-6169] review transaction mapper",
+          billable: true,
+          userId: "user-1",
+          workspaceId: "workspace-1",
+          tagIds: null,
+          timeInterval: {
+            start: "2026-07-20T09:00:00Z",
+            end: "2026-07-20T11:00:00Z",
+            duration: "PT2H"
+          }
+        }]
+      }, requests))
+    )
+  })
+
   it.effect("leaves multipart content type unset so the transport can add its boundary", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const httpClient = HttpClient.make((request) =>

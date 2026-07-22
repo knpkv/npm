@@ -206,9 +206,11 @@ export const start = Command.make(
         yield* Console.log("Defaults saved to ~/.jcf/config.json")
       }
 
-      yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(
-        Effect.catch((e) => Console.log(`Error: ${e.message}`))
+      const started = yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(
+        Effect.as(true),
+        Effect.catch((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(false)))
       )
+      if (!started) return
 
       const startedSuffix = startedAt
         ? ` (started ${formatElapsed(Math.floor((nowMs - startedAt.getTime()) / 1000))} ago)`
