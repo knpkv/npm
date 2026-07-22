@@ -126,7 +126,10 @@ export const presentWorkspacePullRequest = (
   const connected = connectedEntityIds(inspection)
   const relatedCount = (entityType: "issue" | "pipeline-execution"): number =>
     inspection.graph.relatedEntityProjections.filter(
-      ({ projection }) => projection.entityType === entityType && connected.has(projection.entityId)
+      ({ projection }) =>
+        projection.entityState === "present" &&
+        projection.entityType === entityType &&
+        connected.has(projection.entityId)
     ).length
   return {
     agentReviewLabel: "Agent review not run",

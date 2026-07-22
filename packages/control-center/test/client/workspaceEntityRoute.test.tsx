@@ -379,6 +379,17 @@ describe("canonical workspace entity", () => {
     if (implementation === undefined || implementation.lifecycle._tag !== "verified") {
       throw new Error("Expected a verified PR implementation relationship")
     }
+    const relatedIssueId = graphInspection.graph.nodes.find(
+      ({ nodeId }) => nodeId === implementation.targetNodeId
+    )?.resolution
+    if (
+      relatedIssueId?._tag !== "resolved" ||
+      relatedIssueId.target._tag !== "entity" ||
+      relatedIssueId.target.entityKind !== "issue"
+    ) {
+      throw new Error("Expected the implementation target to resolve to an issue")
+    }
+    const relatedIssueEntityId = relatedIssueId.target.entityId
     const rejectedInspection: Inspection = {
       ...graphInspection,
       graph: {
@@ -399,12 +410,25 @@ describe("canonical workspace entity", () => {
     }
     const details = graphInspection.entity.projection.details
     if (details._tag !== "pull-request") throw new Error("Expected pull-request details")
+    const deletedInspection: Inspection = {
+      ...graphInspection,
+      graph: {
+        ...graphInspection.graph,
+        relatedEntityProjections: graphInspection.graph.relatedEntityProjections.map((entry) =>
+          entry.projection.entityId === relatedIssueEntityId
+            ? { ...entry, projection: { ...entry.projection, entityState: "deleted" } }
+            : entry
+        )
+      }
+    }
 
     const accepted = presentWorkspacePullRequest(details, graphInspection.source.sourceUrl, graphInspection)
     const rejected = presentWorkspacePullRequest(details, rejectedInspection.source.sourceUrl, rejectedInspection)
+    const deleted = presentWorkspacePullRequest(details, deletedInspection.source.sourceUrl, deletedInspection)
 
     expect(accepted).toMatchObject({ issueCount: 3, pipelineCount: 1 })
     expect(rejected).toMatchObject({ issueCount: 2, pipelineCount: 1 })
+    expect(deleted).toMatchObject({ issueCount: 2, pipelineCount: 1 })
   })
 
   it("renders malformed persisted pull-request timestamps as unavailable", () => {
@@ -620,6 +644,7 @@ describe("canonical workspace entity", () => {
         state: null
       },
       null,
+      new Set([releaseWorksetFixture.releaseId]),
       `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
     [
@@ -631,6 +656,7 @@ describe("canonical workspace entity", () => {
         state: null
       },
       pullRequestInspection.entity.canonicalReleaseId,
+      new Set([releaseWorksetFixture.releaseId]),
       `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
     [
@@ -641,49 +667,59 @@ describe("canonical workspace entity", () => {
         search: "?q=payments",
         state: null
       },
-      null,
+      pullRequestInspection.entity.canonicalReleaseId,
+      new Set<typeof releaseWorksetFixture.releaseId>(),
       `/agent?from=${encodeURIComponent(
         `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
       )}`
     ]
-  ])("routes the agent safely from a pull request reached through %s", async (_label, origin, releaseId, expected) => {
-    const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
-    const RoutedPullRequest = (): ReactElement => {
-      const location = useLocation()
-      const navigate = useNavigate()
-      const agentPath = workspaceEntityAgentPath(origin, WORKSET_WORKSPACE_ID, location, releaseId)
-      return (
-        <WorkspaceEntityView
-          onAskAgent={() => navigate(agentPath)}
-          originHref={`${origin.pathname}${origin.search}${origin.hash}`}
-          originLabel="Back to context"
-          originState={null}
-          retry={() => undefined}
-          state={pullRequestState}
-          workspaceId={WORKSET_WORKSPACE_ID}
-        />
+  ])(
+    "routes the agent safely from a pull request reached through %s",
+    async (_label, origin, releaseId, routableReleaseIds, expected) => {
+      const entityHref = `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+      const RoutedPullRequest = (): ReactElement => {
+        const location = useLocation()
+        const navigate = useNavigate()
+        const agentPath = workspaceEntityAgentPath(
+          origin,
+          WORKSET_WORKSPACE_ID,
+          location,
+          releaseId,
+          routableReleaseIds
+        )
+        return (
+          <WorkspaceEntityView
+            onAskAgent={() => navigate(agentPath)}
+            originHref={`${origin.pathname}${origin.search}${origin.hash}`}
+            originLabel="Back to context"
+            originState={null}
+            retry={() => undefined}
+            state={pullRequestState}
+            workspaceId={WORKSET_WORKSPACE_ID}
+          />
+        )
+      }
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+      await act(async () =>
+        mountedRoot?.render(
+          <MemoryRouter initialEntries={[entityHref]}>
+            <LocationProbe />
+            <RoutedPullRequest />
+          </MemoryRouter>
+        )
       )
+      const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+        (button) => button.textContent === "Ask Relay to review"
+      )
+      if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+
+      await act(async () => reviewButton.click())
+
+      expect(host.querySelector("[data-location]")?.textContent).toBe(expected)
     }
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
-    await act(async () =>
-      mountedRoot?.render(
-        <MemoryRouter initialEntries={[entityHref]}>
-          <LocationProbe />
-          <RoutedPullRequest />
-        </MemoryRouter>
-      )
-    )
-    const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Ask Relay to review"
-    )
-    if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
-
-    await act(async () => reviewButton.click())
-
-    expect(host.querySelector("[data-location]")?.textContent).toBe(expected)
-  })
+  )
 
   it("distinguishes a shortened comment body from an omitted-comments collection", async () => {
     const details = inspection.entity.projection.details

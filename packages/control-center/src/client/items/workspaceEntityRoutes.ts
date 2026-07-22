@@ -207,10 +207,13 @@ export const workspaceEntityOriginHref = ({
 /** Resolve a release-owned agent thread only when the stored origin is an exact release route. */
 export const workspaceEntityOriginAgentPath = (
   origin: WorkspaceEntityOrigin,
-  workspaceId: WorkspaceIdType
+  workspaceId: WorkspaceIdType,
+  routableReleaseIds: ReadonlySet<ReleaseIdType>
 ): string | null => {
   const target = releaseOriginTarget(origin.pathname.split("/"), workspaceId)
-  return target === null ? null : releaseAgentPath(target.workspaceId, target.releaseId)
+  return target === null || !routableReleaseIds.has(target.releaseId)
+    ? null
+    : releaseAgentPath(target.workspaceId, target.releaseId)
 }
 
 /** Keep entity actions in a release-owned thread, falling back to the current-page context. */
@@ -218,8 +221,11 @@ export const workspaceEntityAgentPath = (
   origin: WorkspaceEntityOrigin,
   workspaceId: WorkspaceIdType,
   current: Pick<LocationParts, "hash" | "pathname" | "search">,
-  routableReleaseId: ReleaseIdType | null
+  canonicalReleaseId: ReleaseIdType | null,
+  routableReleaseIds: ReadonlySet<ReleaseIdType>
 ): string =>
-  workspaceEntityOriginAgentPath(origin, workspaceId) ??
-    (routableReleaseId === null ? null : releaseAgentPath(workspaceId, routableReleaseId)) ??
+  workspaceEntityOriginAgentPath(origin, workspaceId, routableReleaseIds) ??
+    (canonicalReleaseId === null || !routableReleaseIds.has(canonicalReleaseId)
+      ? null
+      : releaseAgentPath(workspaceId, canonicalReleaseId)) ??
     contextualAgentPath(current.pathname, current.search, current.hash)

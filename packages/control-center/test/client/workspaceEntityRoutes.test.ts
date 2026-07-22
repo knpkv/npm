@@ -114,26 +114,58 @@ describe("workspace entity routes", () => {
       pathname: `/w/${workspaceId}/items`,
       search: "?q=payments"
     })
+    const routableReleaseIds = new Set([releaseId])
+    const noRoutableReleases = new Set<typeof releaseId>()
 
-    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId)).toBe(
+    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId, routableReleaseIds)).toBe(
       `/w/${workspaceId}/releases/${releaseId}/agent`
     )
-    expect(workspaceEntityOriginAgentPath(itemsOrigin, workspaceId)).toBeNull()
-    expect(workspaceEntityAgentPath(releaseOrigin, workspaceId, {
-      hash: "#relationships",
-      pathname: workspaceEntityPath(workspaceId, entityId),
-      search: "?tab=review"
-    }, null)).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
-    expect(workspaceEntityAgentPath(itemsOrigin, workspaceId, {
-      hash: "#relationships",
-      pathname: workspaceEntityPath(workspaceId, entityId),
-      search: "?tab=review"
-    }, releaseId)).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
-    expect(workspaceEntityAgentPath(itemsOrigin, workspaceId, {
-      hash: "#relationships",
-      pathname: workspaceEntityPath(workspaceId, entityId),
-      search: "?tab=review"
-    }, null)).toBe(
+    expect(workspaceEntityOriginAgentPath(releaseOrigin, workspaceId, noRoutableReleases)).toBeNull()
+    expect(workspaceEntityOriginAgentPath(itemsOrigin, workspaceId, routableReleaseIds)).toBeNull()
+    expect(workspaceEntityAgentPath(
+      releaseOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      null,
+      routableReleaseIds
+    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(
+      releaseOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      null,
+      noRoutableReleases
+    )).toContain("/agent?from=")
+    expect(workspaceEntityAgentPath(
+      itemsOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseId,
+      routableReleaseIds
+    )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
+    expect(workspaceEntityAgentPath(
+      itemsOrigin,
+      workspaceId,
+      {
+        hash: "#relationships",
+        pathname: workspaceEntityPath(workspaceId, entityId),
+        search: "?tab=review"
+      },
+      releaseId,
+      noRoutableReleases
+    )).toBe(
       `/agent?from=${
         encodeURIComponent(
           `${workspaceEntityPath(workspaceId, entityId)}?tab=review#relationships`
