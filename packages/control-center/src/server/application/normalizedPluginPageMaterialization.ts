@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema"
 
 import { derivePersonInitials, Person } from "../../domain/actors.js"
 import {
-  type DeliveryEntityDetails,
+  DeliveryEntityDetails,
   type DeliveryEntityKind,
   type DeliveryNode,
   type DeliveryRelationship,
@@ -630,16 +630,17 @@ const mergedPageContributors = (
   current: PageDetails["contributors"],
   incoming: PageDetails["contributors"]
 ): PageDetails["contributors"] => {
-  if (incoming === undefined) return current
-  if (current === undefined) return incoming
-  const contributors = new Map(current.map((contributor) => [contributor.sourcePersonId, contributor]))
-  for (const contributor of incoming) {
+  if (current === undefined && incoming === undefined) return undefined
+  const contributors = new Map<string, NonNullable<PageDetails["contributors"]>[number]>()
+  for (const contributor of [...(current ?? []), ...(incoming ?? [])]) {
     const previous = contributors.get(contributor.sourcePersonId)
+    const roles = previous === undefined
+      ? contributor.roles
+      : [...new Set([...previous.roles, ...contributor.roles])]
+    const identity = previous?.resolved === true && !contributor.resolved ? previous : contributor
     contributors.set(
       contributor.sourcePersonId,
-      previous === undefined
-        ? contributor
-        : { ...previous, ...contributor, roles: [...new Set([...previous.roles, ...contributor.roles])] }
+      { ...identity, roles }
     )
   }
   return [...contributors.values()]
@@ -647,7 +648,8 @@ const mergedPageContributors = (
 
 const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
   const contributors = mergedPageContributors(current.contributors, incoming.contributors)
-  const preserveLoadedContent = current.contentState === "loaded" && incoming.contentState === "lazy"
+  const preserveLoadedContent = current.contentState === "loaded" &&
+    (incoming.contentState === "lazy" || incoming.content === null)
   const merged: PageDetails = {
     ...current,
     ...incoming,
@@ -655,6 +657,10 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
   }
   return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
 }
+
+const equivalentPageDetails = (left: PageDetails, right: PageDetails): boolean =>
+  JSON.stringify(Schema.encodeSync(DeliveryEntityDetails)(left)) ===
+    JSON.stringify(Schema.encodeSync(DeliveryEntityDetails)(right))
 
 const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV1)
 
@@ -737,15 +743,15 @@ const materializeUpsertEntity = Effect.fn(
     presentation.details._tag === "page" &&
     currentDetails?._tag === "page" &&
     currentProjection?.projection.entityState === "present"
-  const pageEnrichment = sameRevisionPage && (
-    currentDetails.contentState !== presentation.details.contentState ||
-    (currentDetails.content === null && presentation.details.content !== null)
-  )
-  const effectiveForceProjection = forceProjection || pageEnrichment
   const effectivePresentation =
     sameRevisionPage && currentDetails?._tag === "page" && presentation.details._tag === "page"
       ? { ...presentation, details: mergeSameRevisionPageDetails(currentDetails, presentation.details) }
       : presentation
+  const pageEnrichment = sameRevisionPage &&
+    currentDetails?._tag === "page" &&
+    effectivePresentation.details._tag === "page" &&
+    !equivalentPageDetails(currentDetails, effectivePresentation.details)
+  const effectiveForceProjection = forceProjection || pageEnrichment
   const schemaVersion = projectionSchemaVersion(kind)
   const refreshedSource = existing === null
     ? null

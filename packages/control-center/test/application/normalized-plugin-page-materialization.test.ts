@@ -4621,17 +4621,20 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(explicitlyCleared.details.linkedReleaseVersions, [])
     })))
 
-  it.effect("retains loaded content and watcher identities across a same-revision lazy sync", () =>
+  it.effect("merges same-revision Confluence reads without losing richer canonical state", () =>
     withMaterializer(Effect.gen(function*() {
       yield* setup
       yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
       const contributor = (
         accountId: string,
         displayName: string,
-        roles: ReadonlyArray<"author" | "contributor" | "owner" | "watcher">
-      ) => ({ accountId, displayName, active: true, external: false, resolved: true, roles })
+        roles: ReadonlyArray<"author" | "contributor" | "owner" | "watcher">,
+        resolved = true
+      ) => ({ accountId, displayName, active: resolved, external: false, resolved, roles })
       const owner = contributor("account-ada", "Ada Kline", ["owner", "author"])
       const watcher = contributor("account-mina", "Mina Ortiz", ["watcher"])
+      const unresolvedOwner = contributor("account-ada", "Confluence user", ["contributor"], false)
+      const observer = contributor("account-tariq", "Tariq Bell", ["watcher"])
       const schemaVersion: 1 = 1
       const status: "current" = "current"
       const common = {
@@ -4656,23 +4659,24 @@ describe("normalized plugin page materialization", () => {
         content: { representation: "safe-markdown", markdown: "## Recovery\n\nKeep this body." },
         contributors: [owner]
       })
+      const attachment = {
+        id: "attachment-1",
+        title: "recovery.pdf",
+        createdAt: "2026-07-19T09:01:00.000Z",
+        mediaType: "application/pdf",
+        fileSize: 4096,
+        version: 1
+      }
       const lazyAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
         ...common,
         content: null,
         contentState: "lazy",
         contributors: [owner, watcher],
-        attachments: [{
-          id: "attachment-1",
-          title: "recovery.pdf",
-          createdAt: "2026-07-19T09:01:00.000Z",
-          mediaType: "application/pdf",
-          fileSize: 4096,
-          version: 1
-        }],
+        attachments: [attachment],
         attachmentInventory: { complete: true, pagesFetched: 1 },
         watcherInventory: { complete: true, pagesFetched: 1 }
       })
-      const normalizedPage = (eventId: string, attributes: Schema.JsonObject) =>
+      const normalizedPage = (eventId: string, attributes: Schema.JsonObject, revision = "12") =>
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage: eventId,
           hasMore: false,
@@ -4680,7 +4684,7 @@ describe("normalized plugin page materialization", () => {
             _tag: "UpsertEntity",
             eventId,
             observedAt: "2026-07-19T09:02:00.000Z",
-            revision: "12",
+            revision,
             entityType: "confluence-page",
             vendorImmutableId: "loaded-before-sync",
             sourceUrl: "https://wiki.example.test/pages/loaded-before-sync",
@@ -4712,6 +4716,78 @@ describe("normalized plugin page materialization", () => {
         projection.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
         ["account-ada", "account-mina"]
       )
+
+      const loadedNullAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: null,
+        contributors: [unresolvedOwner, watcher],
+        attachments: [attachment],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3 },
+        normalizedPage("partial-loaded-read", loadedNullAttributes)
+      )
+      const afterNullRead = (yield* items()).items[0]?.projection
+      if (afterNullRead?.details._tag !== "page") return yield* Effect.die("expected a page after a null read")
+      assert.strictEqual(afterNullRead.details.content?.markdown, "## Recovery\n\nKeep this body.")
+      assert.deepStrictEqual(
+        afterNullRead.details.contributors?.find(({ sourcePersonId }) => sourcePersonId === "account-ada"),
+        {
+          sourcePersonId: "account-ada",
+          displayName: "Ada Kline",
+          active: true,
+          external: false,
+          resolved: true,
+          roles: ["owner", "author", "contributor"]
+        }
+      )
+
+      const metadataOnlyAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...loadedNullAttributes,
+        contributors: [unresolvedOwner, watcher, observer]
+      })
+      const metadataReceipt = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3 },
+        normalizedPage("metadata-only-sync", metadataOnlyAttributes)
+      )
+      assert.strictEqual(metadataReceipt.entityProjectionCount, 1)
+      const afterMetadata = (yield* items()).items[0]?.projection
+      if (afterMetadata?.details._tag !== "page") return yield* Effect.die("expected a metadata-enriched page")
+      assert.include(
+        afterMetadata.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const replay = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T3 },
+        normalizedPage("identical-metadata-sync", metadataOnlyAttributes)
+      )
+      assert.strictEqual(replay.entityProjectionCount, 0)
+
+      const nextRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        currentVersion: 13,
+        updatedAt: "2026-07-19T09:06:00.000Z",
+        content: null,
+        contributors: [owner],
+        versions: [{
+          number: 13,
+          createdAt: "2026-07-19T09:06:00.000Z",
+          message: "Clear obsolete body",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...common.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 5, committedAt: T4 },
+        normalizedPage("next-revision-empty", nextRevisionAttributes, "13")
+      )
+      const nextRevision = (yield* items()).items[0]?.projection
+      if (nextRevision?.details._tag !== "page") return yield* Effect.die("expected the next page revision")
+      assert.strictEqual(nextRevision.details.contentState, "loaded")
+      assert.isNull(nextRevision.details.content)
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>

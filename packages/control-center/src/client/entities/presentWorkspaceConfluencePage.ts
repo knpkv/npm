@@ -75,12 +75,27 @@ const fileSizeLabel = (bytes: number | null): string => {
 const roleLabel = (roles: ReadonlyArray<"author" | "contributor" | "owner" | "watcher">): string =>
   roles.map((role) => `${role.charAt(0).toLocaleUpperCase("en-US")}${role.slice(1)}`).join(" · ")
 
+const uniqueContributors = (
+  contributors: NonNullable<PageDetails["contributors"]>
+): NonNullable<PageDetails["contributors"]> => {
+  const byId = new Map<string, NonNullable<PageDetails["contributors"]>[number]>()
+  for (const contributor of contributors) {
+    const previous = byId.get(contributor.sourcePersonId)
+    const roles = previous === undefined
+      ? contributor.roles
+      : [...new Set([...previous.roles, ...contributor.roles])]
+    const identity = previous?.resolved === true && !contributor.resolved ? previous : contributor
+    byId.set(contributor.sourcePersonId, { ...identity, roles })
+  }
+  return [...byId.values()]
+}
+
 /** Present one normalized page as a quiet read-only document with explicit provider boundaries. */
 export const presentWorkspaceConfluencePage = (
   details: PageDetails,
   inspection: WorkspaceEntityInspection
 ): WorkspaceConfluencePagePresentation => {
-  const contributors = details.contributors ?? []
+  const contributors = uniqueContributors(details.contributors ?? [])
   const contributorNameById = new Map(contributors.map(({ displayName, sourcePersonId }) => [
     sourcePersonId,
     displayName

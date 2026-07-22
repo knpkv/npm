@@ -399,6 +399,14 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
             roles: ["watcher"]
           },
           {
+            sourcePersonId: "account-mina",
+            displayName: "Confluence user",
+            active: false,
+            external: false,
+            resolved: false,
+            roles: ["contributor"]
+          },
+          {
             sourcePersonId: "account-alex-one",
             displayName: "Alex Lee",
             active: true,
@@ -1062,6 +1070,11 @@ describe("canonical workspace entity", () => {
 
     expect(collaborators.filter(({ name }) => name === "Alex Lee")).toHaveLength(2)
     expect(collaborators.filter(({ id }) => id === "01890f6f-6d6a-7cc0-98d2-000000000071")).toHaveLength(1)
+    expect(presentation.confluencePage?.contributors.filter(({ id }) => id === "account-mina")).toHaveLength(1)
+    expect(presentation.confluencePage?.contributors.find(({ id }) => id === "account-mina")?.name).toBe("Mina Ortiz")
+    expect(presentation.confluencePage?.contributors.find(({ id }) => id === "account-mina")?.role).toContain(
+      "Watcher · Contributor"
+    )
   })
 
   it("states the lazy Confluence content boundary without inventing a document body", async () => {
