@@ -309,6 +309,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
     case "pull-request": {
       const creationDate = yield* decodedPullRequestTimestamp(attributes.creationDate, event.eventId)
       const lastActivityDate = yield* decodedPullRequestTimestamp(attributes.lastActivityDate, event.eventId)
+      const status = namedText(attributes.status)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -317,8 +318,8 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status)),
-          lifecycle: pullRequestLifecycle(namedText(attributes.status)),
+          reviewState: reviewState(attributes.reviewState ?? (pullRequestLifecycle(status) === null ? status : null)),
+          lifecycle: pullRequestLifecycle(status),
           description: optionalBounded(attributes.description, 50_000),
           authorReference: optionalBounded(attributes.authorArn, 512),
           baseRevision: optionalBounded(attributes.baseRevision, 512),
@@ -588,7 +589,7 @@ const materializeUpsertEntity = Effect.fn(
         scope,
         event,
         existing.sourceRevision.firstObservedAt,
-        event.sourceUrl ?? existing.sourceRevision.sourceUrl
+        event.sourceUrl
       ),
       lastObservedAt: laterTimestamp(existing.sourceRevision.lastObservedAt, event.observedAt),
       synchronizedAt: laterTimestamp(existing.sourceRevision.synchronizedAt, scope.committedAt)

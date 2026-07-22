@@ -2831,6 +2831,22 @@ describe("normalized plugin page materialization", () => {
             headRevision: "legacy-approved-head",
             status: "approved"
           }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "pull-request-codecommit-merged-1",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "pull-request-codecommit-merged-revision-1",
+          entityType: "pull-request",
+          vendorImmutableId: "22",
+          sourceUrl: "https://console.aws.example/pull-requests/22",
+          title: "CodeCommit merged pull request",
+          attributes: {
+            repository: "payments-api",
+            sourceBranch: "feat/merged",
+            targetBranch: "main",
+            headRevision: "merged-head",
+            status: "MERGED"
+          }
         }]
       })
       const scope: NormalizedPluginPageMaterializationScope = {
@@ -2844,7 +2860,7 @@ describe("normalized plugin page materialization", () => {
       }
 
       const receipt = yield* materializeNormalizedPluginPage(scope, page)
-      assert.strictEqual(receipt.entityProjectionCount, 5)
+      assert.strictEqual(receipt.entityProjectionCount, 6)
 
       const readStatus = (status: "active" | "done" | "failed") =>
         persistence.deliveryGraph.read(WORKSPACE_ID, {
@@ -2865,7 +2881,7 @@ describe("normalized plugin page materialization", () => {
         failed._tag !== "workspaceEntityProjections"
       ) return yield* Effect.die("expected workspace entity projections")
 
-      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey).sort(), ["17", "21"])
+      assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey).sort(), ["17", "21", "22"])
       assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
       assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
       const openDetails = active.value.items.find(({ projection }) => projection.displayKey === "20")?.projection
@@ -2885,6 +2901,13 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected legacy approved pull-request details")
       }
       assert.strictEqual(approvedDetails.reviewState, "approved")
+      const mergedDetails = done.value.items.find(({ projection }) => projection.displayKey === "22")
+        ?.projection.details
+      if (mergedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected CodeCommit merged pull-request details")
+      }
+      assert.strictEqual(mergedDetails.lifecycle, "merged")
+      assert.strictEqual(mergedDetails.reviewState, "not-requested")
       const details = done.value.items[0]?.projection.details
       if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
       assert.lengthOf(details.description ?? "", 50_000)
@@ -3094,6 +3117,14 @@ describe("normalized plugin page materialization", () => {
         )
       )
       assert.strictEqual(changedRevision.entityProjectionCount, 1)
+
+      const clearedSourceUrl = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T3 },
+        page("pull-request-20-cleared-url", "cleared-url", null, "pull-request-20-revision-3")
+      )
+      assert.strictEqual(clearedSourceUrl.entityProjectionCount, 1)
+      const afterClearedSourceUrl = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.isNull(afterClearedSourceUrl.sourceRevision.sourceUrl)
     })))
 
   it.effect("decodes provider-specific timestamps only for pull requests", () =>
