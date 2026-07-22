@@ -1,4 +1,5 @@
 import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
+import * as DateTime from "effect/DateTime"
 import type { ReactElement } from "react"
 
 import type { PluginSynchronizationState } from "../../api/plugins.js"
@@ -28,14 +29,26 @@ const resultPresentation = (
   }
 }
 
-const StateDetails = ({ synchronization }: { readonly synchronization: PluginSynchronizationState }): ReactElement => {
-  const presentation = resultPresentation(synchronization.result)
+const StateDetails = ({
+  isSyncing,
+  synchronization
+}: {
+  readonly isSyncing: boolean
+  readonly synchronization: PluginSynchronizationState
+}): ReactElement => {
+  // While an attempt is in flight, surface the in-progress state instead of the
+  // stale prior result. Progress is indeterminate: pages committed only persist
+  // once the attempt completes, so the prior count reads as trailing context.
+  const presentation: ReturnType<typeof resultPresentation> = isSyncing
+    ? { label: "Synchronizing…", tone: "progress" }
+    : resultPresentation(synchronization.result)
   return (
     <div className={styles.syncState}>
       <StateLabel label={presentation.label} size="compact" tone={presentation.tone} />
       <Text tone="secondary" variant="meta">
-        Last attempt: {synchronization.lastAttemptAt === null ? "never" : String(synchronization.lastAttemptAt)} · Last
-        success: {synchronization.lastSuccessAt === null ? "never" : String(synchronization.lastSuccessAt)}
+        Last attempt:{" "}
+        {synchronization.lastAttemptAt === null ? "never" : DateTime.formatIso(synchronization.lastAttemptAt)} · Last
+        success: {synchronization.lastSuccessAt === null ? "never" : DateTime.formatIso(synchronization.lastSuccessAt)}
         {` · ${synchronization.pagesCommitted} ${synchronization.pagesCommitted === 1 ? "page" : "pages"}`}
       </Text>
     </div>
@@ -55,11 +68,18 @@ export const ConnectionSynchronization = ({
   readonly state: ConnectionSynchronizationViewState | undefined
 }): ReactElement | null => {
   if (state === undefined) return null
+  const isSyncing = state._tag === "syncing"
   const synchronization =
     state._tag === "ready" ? state.synchronization : state._tag === "syncing" ? state.previous : null
   return (
     <div className={styles.synchronization}>
-      {synchronization === null ? null : <StateDetails synchronization={synchronization} />}
+      {synchronization === null ? (
+        isSyncing ? (
+          <StateLabel label="Synchronizing…" size="compact" tone="progress" />
+        ) : null
+      ) : (
+        <StateDetails isSyncing={isSyncing} synchronization={synchronization} />
+      )}
       {state._tag === "loading" ? (
         <Text tone="secondary" variant="meta">
           Loading synchronization state…
