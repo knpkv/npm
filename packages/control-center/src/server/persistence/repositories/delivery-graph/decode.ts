@@ -21,6 +21,7 @@ import {
   type NodeRow,
   projectionJson,
   type ProjectionRow,
+  type ProjectionSummaryRow,
   relationshipJson,
   type RelationshipRow
 } from "./rows.js"
@@ -30,18 +31,15 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
 
   const decodeProjection = Effect.fn("DeliveryGraphRepository.decodeProjection")(function*(
     row: typeof ProjectionRow.Type,
-    verifyExtensionDigest: boolean
+    digestJson: string
   ) {
-    // SQL-derived page summaries intentionally differ from the stored payload; exact page reads still verify it.
-    if (verifyExtensionDigest || row.entityType !== "page") {
-      yield* verifyDigest({
-        workspaceId: row.workspaceId,
-        recordKind: "entity-projection",
-        recordKey: `${row.entityId}:${row.projectionRevision}`,
-        json: row.extensionJson,
-        expected: row.extensionDigest
-      })
-    }
+    yield* verifyDigest({
+      workspaceId: row.workspaceId,
+      recordKind: "entity-projection",
+      recordKey: `${row.entityId}:${row.projectionRevision}`,
+      json: digestJson,
+      expected: row.extensionDigest
+    })
     const details = yield* Schema.decodeUnknownEffect(projectionJson)(row.extensionJson).pipe(
       Effect.mapError(() =>
         graphRecordError(
@@ -90,13 +88,13 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
   const decodeProjectionRow = Effect.fn("DeliveryGraphRepository.decodeProjectionRow")(function*(
     row: typeof ProjectionRow.Type
   ) {
-    return yield* decodeProjection(row, true)
+    return yield* decodeProjection(row, row.extensionJson)
   })
 
   const decodeProjectionSummaryRow = Effect.fn(
     "DeliveryGraphRepository.decodeProjectionSummaryRow"
-  )(function*(row: typeof ProjectionRow.Type) {
-    return yield* decodeProjection(row, false)
+  )(function*(row: typeof ProjectionSummaryRow.Type) {
+    return yield* decodeProjection(row, row.originalExtensionJson)
   })
 
   const decodeNodeRow = Effect.fn("DeliveryGraphRepository.decodeNodeRow")(function*(

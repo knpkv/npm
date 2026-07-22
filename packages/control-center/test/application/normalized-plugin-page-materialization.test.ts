@@ -4694,6 +4694,12 @@ describe("normalized plugin page materialization", () => {
           message: null,
           minorEdit: false,
           authorId: "account-ada"
+        }, {
+          number: 11,
+          createdAt: "2026-07-18T09:02:00.000Z",
+          message: "Previous complete revision",
+          minorEdit: false,
+          authorId: "account-ada"
         }],
         versionHistory: { complete: true, pagesFetched: 1 }
       }
@@ -4759,6 +4765,49 @@ describe("normalized plugin page materialization", () => {
         projection.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
         ["account-ada", "account-mina"]
       )
+
+      const partialInventoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...lazyAttributes,
+        attachments: [],
+        attachmentInventory: { complete: false, pagesFetched: 1 },
+        versions: common.versions.slice(0, 1),
+        versionHistory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3 },
+        normalizedPage("partial-inventories", partialInventoryAttributes)
+      )
+      const afterPartialInventories = yield* exactFirstProjection()
+      if (afterPartialInventories?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after partial inventories")
+      }
+      assert.deepStrictEqual(
+        afterPartialInventories.details.attachments?.map(({ id }) => id),
+        ["attachment-1"]
+      )
+      assert.deepStrictEqual(
+        afterPartialInventories.details.versions?.map(({ number }) => number),
+        [12, 11]
+      )
+
+      const completeEmptyInventoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...partialInventoryAttributes,
+        attachments: [],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        versions: [],
+        versionHistory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3 },
+        normalizedPage("complete-empty-inventories", completeEmptyInventoryAttributes)
+      )
+      const afterCompleteEmptyInventories = yield* exactFirstProjection()
+      if (afterCompleteEmptyInventories?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after complete empty inventories")
+      }
+      assert.deepStrictEqual(afterCompleteEmptyInventories.details.attachments, [])
+      assert.deepStrictEqual(afterCompleteEmptyInventories.details.versions, [])
+
       const inspectionService = yield* makeDeliveryGraphInspection
       const indexed = yield* inspectionService.workspaceEntityProjections({
         workspaceId: WORKSPACE_ID,
@@ -4788,7 +4837,7 @@ describe("normalized plugin page materialization", () => {
         watcherInventory: { complete: true, pagesFetched: 1 }
       })
       yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 2, committedAt: T3 },
+        { ...scope, expectedRevision: 4, committedAt: T3 },
         normalizedPage("partial-loaded-read", loadedNullAttributes)
       )
       const afterNullRead = yield* exactFirstProjection()
@@ -4811,7 +4860,7 @@ describe("normalized plugin page materialization", () => {
         contributors: [unresolvedOwner, watcher, observer]
       })
       const metadataReceipt = yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 3, committedAt: T3 },
+        { ...scope, expectedRevision: 5, committedAt: T3 },
         normalizedPage("metadata-only-sync", metadataOnlyAttributes)
       )
       assert.strictEqual(metadataReceipt.entityProjectionCount, 1)
@@ -4828,7 +4877,7 @@ describe("normalized plugin page materialization", () => {
         watcherInventory: { complete: false, pagesFetched: 1 }
       })
       yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 4, committedAt: T3 },
+        { ...scope, expectedRevision: 6, committedAt: T3 },
         normalizedPage("incomplete-watcher-omission", incompleteOmissionAttributes)
       )
       const afterIncompleteOmission = yield* exactFirstProjection()
@@ -4845,7 +4894,7 @@ describe("normalized plugin page materialization", () => {
         watcherInventory: { complete: true, pagesFetched: 1 }
       })
       yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 5, committedAt: T3 },
+        { ...scope, expectedRevision: 7, committedAt: T3 },
         normalizedPage("complete-watcher-omission", completeOmissionAttributes)
       )
       const afterCompleteOmission = yield* exactFirstProjection()
@@ -4858,7 +4907,7 @@ describe("normalized plugin page materialization", () => {
       )
 
       const replay = yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 6, committedAt: T3 },
+        { ...scope, expectedRevision: 8, committedAt: T3 },
         normalizedPage("identical-metadata-sync", completeOmissionAttributes)
       )
       assert.strictEqual(replay.entityProjectionCount, 0)
@@ -4878,7 +4927,7 @@ describe("normalized plugin page materialization", () => {
         }, ...common.versions]
       })
       yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 7, committedAt: T4 },
+        { ...scope, expectedRevision: 9, committedAt: T4 },
         normalizedPage("next-revision-empty", nextRevisionAttributes, "13")
       )
       const nextRevision = yield* exactFirstProjection()

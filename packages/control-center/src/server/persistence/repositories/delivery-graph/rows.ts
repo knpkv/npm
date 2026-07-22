@@ -46,8 +46,13 @@ export const ProjectionRow = Schema.Struct({
   recordedAt: Schema.String
 })
 
-export const WorkspaceProjectionRow = Schema.Struct({
+export const ProjectionSummaryRow = Schema.Struct({
   ...ProjectionRow.fields,
+  originalExtensionJson: Schema.String
+})
+
+export const WorkspaceProjectionRow = Schema.Struct({
+  ...ProjectionSummaryRow.fields,
   ownerIdentitiesJson: Schema.String,
   releaseIdsJson: Schema.String
 })

@@ -1184,6 +1184,38 @@ describe("DeliveryGraphRepository", () => {
           assert.strictEqual(exact.value.entity.projection.details.content?.markdown, sentinel)
           assert.strictEqual(exact.value.entity.projection.details.contentState, "loaded")
         }
+
+        yield* database.sql`DROP TRIGGER entity_projection_revisions_no_update`
+        yield* database.sql`UPDATE entity_projection_revisions
+          SET extension_json = json_set(extension_json, '$.status', 'draft')
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND entity_id = ${ISSUE_ID}
+            AND projection_revision = 2`
+
+        const corruptedWorkspace = yield* repository.read(WORKSPACE_A, {
+          _tag: "workspaceEntityProjections",
+          owner: null,
+          query: null,
+          service: null,
+          status: null,
+          type: null,
+          limit: 500
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(corruptedWorkspace))
+        if (Result.isFailure(corruptedWorkspace)) {
+          assert.instanceOf(corruptedWorkspace.failure, PersistedRecordError)
+        }
+
+        const corruptedRelease = yield* repository.read(WORKSPACE_A, {
+          _tag: "releaseSlice",
+          releaseId: RELEASE_ID,
+          environmentId: null,
+          limit: 100
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(corruptedRelease))
+        if (Result.isFailure(corruptedRelease)) {
+          assert.instanceOf(corruptedRelease.failure, PersistedRecordError)
+        }
       })
     ))
 

@@ -23,7 +23,7 @@ import {
   EvidenceRow,
   graphRecordError,
   NodeRow,
-  ProjectionRow,
+  ProjectionSummaryRow,
   RelationshipRow,
   WorkspaceProjectionRow
 } from "./rows.js"
@@ -136,6 +136,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         projection.display_key AS displayKey,
         projection.title,
         ${extensionJson} AS extensionJson,
+        projection.extension_json AS originalExtensionJson,
         projection.extension_digest AS extensionDigest,
         projection.recorded_at AS recordedAt
       FROM entity_projection_revisions projection
@@ -147,7 +148,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         AND (${revision} IS NULL OR projection.projection_revision = ${revision})
       ORDER BY projection.projection_revision DESC
       LIMIT 1`
-    const decoded = yield* decodeRows(ProjectionRow, rows).pipe(
+    const decoded = yield* decodeRows(ProjectionSummaryRow, rows).pipe(
       Effect.mapError(() =>
         graphRecordError(
           workspaceId,
@@ -834,6 +835,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             projection.display_key AS displayKey,
             projection.title,
             ${summaryExtensionJson} AS extensionJson,
+            projection.extension_json AS originalExtensionJson,
             projection.extension_digest AS extensionDigest,
             projection.recorded_at AS recordedAt,
             COALESCE((

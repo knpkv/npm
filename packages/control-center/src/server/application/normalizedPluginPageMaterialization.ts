@@ -662,10 +662,18 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
   )
   const preserveLoadedContent = current.contentState === "loaded" &&
     (incoming.contentState === "lazy" || incoming.content === null)
+  const attachments = incoming.attachmentInventory?.complete === false && current.attachments !== undefined
+    ? current.attachments
+    : incoming.attachments
+  const versions = incoming.versionHistory?.complete === false && current.versions !== undefined
+    ? current.versions
+    : incoming.versions
   const merged: PageDetails = {
     ...current,
     ...incoming,
-    ...(contributors === undefined ? {} : { contributors })
+    ...(contributors === undefined ? {} : { contributors }),
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(versions === undefined ? {} : { versions })
   }
   return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
 }
