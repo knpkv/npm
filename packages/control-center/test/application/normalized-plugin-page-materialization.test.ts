@@ -2942,7 +2942,7 @@ describe("normalized plugin page materialization", () => {
         evidenceClaims: [],
         relationships: []
       })
-      const page = (eventId: string, checkpointAfterPage: string) =>
+      const page = (eventId: string, checkpointAfterPage: string, sourceUrl: string | null) =>
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage,
           hasMore: false,
@@ -2953,7 +2953,7 @@ describe("normalized plugin page materialization", () => {
             revision: "pull-request-20-revision-1",
             entityType: "pull-request",
             vendorImmutableId: "20",
-            sourceUrl: "https://console.aws.example/pull-requests/20",
+            sourceUrl,
             title: "Protect payment retries",
             attributes: {
               repository: "payments-api",
@@ -2981,7 +2981,10 @@ describe("normalized plugin page materialization", () => {
         successfulHealth: { _tag: "healthy", checkedAt: T2 }
       }
 
-      const backfill = yield* materializeNormalizedPluginPage(scope, page("pull-request-20-backfill", "backfilled"))
+      const backfill = yield* materializeNormalizedPluginPage(
+        scope,
+        page("pull-request-20-backfill", "backfilled", null)
+      )
       assert.strictEqual(backfill.entityProjectionCount, 1)
       const projection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "entityProjection",
@@ -2996,10 +2999,7 @@ describe("normalized plugin page materialization", () => {
       assert.strictEqual(details.baseRevision, "base-20")
       assert.strictEqual(details.description, "Keep retry writes idempotent.")
       const refreshedEntity = yield* persistence.entities.get(WORKSPACE_ID, entityId)
-      assert.strictEqual(
-        refreshedEntity.sourceRevision.sourceUrl?.href,
-        "https://console.aws.example/pull-requests/20"
-      )
+      assert.isNull(refreshedEntity.sourceRevision.sourceUrl)
       assert.strictEqual(
         DateTime.formatIso(refreshedEntity.sourceRevision.lastObservedAt),
         "2026-07-19T09:01:30.000Z"
@@ -3008,9 +3008,19 @@ describe("normalized plugin page materialization", () => {
 
       const current = yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 1, committedAt: T3 },
-        page("pull-request-20-current", "already-current")
+        page(
+          "pull-request-20-current",
+          "already-current",
+          "https://console.aws.example/pull-requests/20"
+        )
       )
       assert.strictEqual(current.entityProjectionCount, 0)
+      const metadataRefreshed = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.strictEqual(
+        metadataRefreshed.sourceRevision.sourceUrl?.href,
+        "https://console.aws.example/pull-requests/20"
+      )
+      assert.strictEqual(DateTime.formatIso(metadataRefreshed.sourceRevision.synchronizedAt), DateTime.formatIso(T3))
       const unchanged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "entityProjection",
         entityId,
@@ -3018,6 +3028,18 @@ describe("normalized plugin page materialization", () => {
       })
       if (unchanged._tag !== "entityProjection") return yield* Effect.die("expected current projection")
       assert.strictEqual(unchanged.value.projection.projectionRevision, 2)
+
+      const exactReplay = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3 },
+        page(
+          "pull-request-20-exact-replay",
+          "exact-replay",
+          "https://console.aws.example/pull-requests/20"
+        )
+      )
+      assert.strictEqual(exactReplay.entityProjectionCount, 0)
+      const afterExactReplay = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.strictEqual(afterExactReplay.revision, metadataRefreshed.revision)
     })))
 
   it.effect("decodes provider-specific timestamps only for pull requests", () =>

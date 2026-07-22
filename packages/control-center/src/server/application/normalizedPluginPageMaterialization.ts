@@ -582,12 +582,36 @@ const materializeUpsertEntity = Effect.fn(
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
   const schemaVersion = projectionSchemaVersion(kind)
+  const refreshedSource = existing === null
+    ? null
+    : {
+      ...sourceRevision(
+        scope,
+        event,
+        existing.sourceRevision.firstObservedAt,
+        event.sourceUrl ?? existing.sourceRevision.sourceUrl
+      ),
+      lastObservedAt: laterTimestamp(existing.sourceRevision.lastObservedAt, event.observedAt),
+      synchronizedAt: laterTimestamp(existing.sourceRevision.synchronizedAt, scope.committedAt)
+    }
+  const sourceMetadataChanged = existing !== null && refreshedSource !== null && (
+    !sameSourceUrl(existing.sourceRevision.sourceUrl, refreshedSource.sourceUrl) ||
+    !DateTime.Equivalence(existing.sourceRevision.lastObservedAt, refreshedSource.lastObservedAt) ||
+    !DateTime.Equivalence(existing.sourceRevision.synchronizedAt, refreshedSource.synchronizedAt)
+  )
   if (
     existing !== null &&
     existing.sourceRevision.revision === event.revision &&
     currentProjection?.projection.entityState === "present" &&
     currentProjection.projection.projectionSchemaVersion === schemaVersion
   ) {
+    if (sourceMetadataChanged && refreshedSource !== null) {
+      yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
+        sourceRevision: refreshedSource,
+        expectedRevision: existing.revision,
+        updatedAt: scope.committedAt
+      })
+    }
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
 
@@ -599,7 +623,7 @@ const materializeUpsertEntity = Effect.fn(
       createdAt: scope.committedAt
     })
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
-      sourceRevision: sourceRevision(
+      sourceRevision: refreshedSource ?? sourceRevision(
         scope,
         event,
         existing.sourceRevision.firstObservedAt,
