@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jira-clockify",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "TUI for Jira-Clockify time tracking, attachable to neovim",
   "license": "MIT",
   "author": "knpkv",
