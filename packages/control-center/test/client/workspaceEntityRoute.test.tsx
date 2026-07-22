@@ -670,7 +670,9 @@ describe("canonical workspace entity", () => {
       pullRequestInspection.entity.canonicalReleaseId,
       new Set<typeof releaseWorksetFixture.releaseId>(),
       `/agent?from=${encodeURIComponent(
-        `/w/${WORKSET_WORKSPACE_ID}/items/${pullRequestInspection.entity.projection.entityId}`
+        `/w/${WORKSET_WORKSPACE_ID}/items?object=${encodeURIComponent(
+          pullRequestInspection.entity.projection.entityId
+        )}#item-details`
       )}`
     ]
   ])(

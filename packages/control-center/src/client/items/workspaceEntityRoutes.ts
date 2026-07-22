@@ -223,9 +223,19 @@ export const workspaceEntityAgentPath = (
   current: Pick<LocationParts, "hash" | "pathname" | "search">,
   canonicalReleaseId: ReleaseIdType | null,
   routableReleaseIds: ReadonlySet<ReleaseIdType>
-): string =>
-  workspaceEntityOriginAgentPath(origin, workspaceId, routableReleaseIds) ??
+): string => {
+  const releasePath = workspaceEntityOriginAgentPath(origin, workspaceId, routableReleaseIds) ??
     (canonicalReleaseId === null || !routableReleaseIds.has(canonicalReleaseId)
       ? null
-      : releaseAgentPath(workspaceId, canonicalReleaseId)) ??
-    contextualAgentPath(current.pathname, current.search, current.hash)
+      : releaseAgentPath(workspaceId, canonicalReleaseId))
+  if (releasePath !== null) return releasePath
+
+  const entity = workspaceEntityTargetFromHref(current.pathname)
+  return entity === null || entity.workspaceId !== workspaceId
+    ? contextualAgentPath(current.pathname, current.search, current.hash)
+    : contextualAgentPath(
+      workspaceEntityParentPath(workspaceId),
+      `?object=${encodeURIComponent(entity.entityId)}`,
+      "#item-details"
+    )
+}

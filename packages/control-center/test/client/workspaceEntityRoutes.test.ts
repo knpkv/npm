@@ -143,7 +143,13 @@ describe("workspace entity routes", () => {
       },
       null,
       noRoutableReleases
-    )).toContain("/agent?from=")
+    )).toBe(
+      `/agent?from=${
+        encodeURIComponent(
+          `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
+        )
+      }`
+    )
     expect(workspaceEntityAgentPath(
       itemsOrigin,
       workspaceId,
@@ -168,7 +174,7 @@ describe("workspace entity routes", () => {
     )).toBe(
       `/agent?from=${
         encodeURIComponent(
-          `${workspaceEntityPath(workspaceId, entityId)}?tab=review#relationships`
+          `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
         )
       }`
     )
