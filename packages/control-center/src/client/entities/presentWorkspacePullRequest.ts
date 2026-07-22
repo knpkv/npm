@@ -25,6 +25,7 @@ export interface WorkspacePullRequestPresentation {
   readonly mergeBaseRevision: string | null
   readonly pipelineCount: number
   readonly releaseCount: number
+  readonly releaseCountLabel: string
   readonly reviewLabel: string
   readonly sourceBranch: string
   readonly targetBranch: string
@@ -131,6 +132,7 @@ export const presentWorkspacePullRequest = (
         projection.entityType === entityType &&
         connected.has(projection.entityId)
     ).length
+  const releaseCount = inspection.entity.releaseIds.length
   return {
     agentReviewLabel: "Agent review not run",
     author: authorFor(details.authorReference),
@@ -142,7 +144,8 @@ export const presentWorkspacePullRequest = (
     issueCount: relatedCount("issue"),
     mergeBaseRevision: details.mergeBaseRevision ?? null,
     pipelineCount: relatedCount("pipeline-execution"),
-    releaseCount: inspection.entity.releaseIds.length,
+    releaseCount,
+    releaseCountLabel: `${String(releaseCount)}${inspection.entity.releaseMembershipsTruncated ? "+" : ""}`,
     reviewLabel: reviewLabel(details.reviewState),
     sourceBranch: details.sourceBranch,
     targetBranch: details.targetBranch,

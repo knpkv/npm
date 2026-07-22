@@ -166,7 +166,7 @@ export const WorkspacePullRequestDetails = ({
         </div>
         <div>
           <dt>Releases</dt>
-          <dd>{pullRequest.releaseCount}</dd>
+          <dd>{pullRequest.releaseCountLabel}</dd>
         </div>
       </dl>
       <Text tone="secondary">The delivery relationships below explain every linked item and its evidence.</Text>

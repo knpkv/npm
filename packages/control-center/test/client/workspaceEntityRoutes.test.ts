@@ -137,7 +137,7 @@ describe("workspace entity routes", () => {
         pathname: workspaceEntityPath(workspaceId, entityId),
         search: "?tab=review"
       },
-      releaseContext([]),
+      releaseContext([releaseId]),
       routableReleaseIds
     )).toBe(`/w/${workspaceId}/releases/${releaseId}/agent`)
     expect(workspaceEntityAgentPath(
@@ -181,7 +181,7 @@ describe("workspace entity routes", () => {
     )).toBe(
       `/agent?from=${
         encodeURIComponent(
-          `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
+          `${workspaceEntityParentPath(workspaceId)}?q=payments&object=${encodeURIComponent(entityId)}#item-details`
         )
       }`
     )
@@ -198,6 +198,15 @@ describe("workspace entity routes", () => {
         `${workspaceEntityParentPath(workspaceId)}?object=${encodeURIComponent(entityId)}#item-details`
       )
     }`
+    const filteredExpected = `/agent?from=${
+      encodeURIComponent(
+        `${workspaceEntityParentPath(workspaceId)}?q=payments&service=codecommit&object=${
+          encodeURIComponent(
+            entityId
+          )
+        }#item-details`
+      )
+    }`
     const staleReleaseOrigin = entityOriginFromLocation({
       hash: "#release-work",
       pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
@@ -206,7 +215,7 @@ describe("workspace entity routes", () => {
     const itemsOrigin = entityOriginFromLocation({
       hash: "#results",
       pathname: `/w/${workspaceId}/items`,
-      search: "?q=payments"
+      search: "?q=payments&service=codecommit"
     })
 
     expect(
@@ -215,7 +224,7 @@ describe("workspace entity routes", () => {
         workspaceId,
         current,
         releaseContext([otherReleaseId]),
-        new Set([otherReleaseId])
+        new Set([releaseId, otherReleaseId])
       )
     ).toBe(expected)
     expect(
@@ -226,7 +235,7 @@ describe("workspace entity routes", () => {
         releaseContext([releaseId, otherReleaseId], releaseId),
         new Set([releaseId, otherReleaseId])
       )
-    ).toBe(expected)
+    ).toBe(filteredExpected)
   })
 
   it("falls back to Items for malformed, cross-workspace, cross-target, or unsupported origins", () => {

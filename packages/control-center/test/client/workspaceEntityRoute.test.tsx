@@ -333,6 +333,7 @@ describe("canonical workspace entity", () => {
           dateTime: "2026-07-12T08:00:00.000Z"
         },
         headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19",
+        releaseCountLabel: "1",
         reviewLabel: "Human review requested"
       }
     })
@@ -634,6 +635,33 @@ describe("canonical workspace entity", () => {
     expect(onAskAgent).toHaveBeenCalledOnce()
   })
 
+  it("renders a bounded release-membership count as a lower bound", async () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(pullRequestInspection)
+    const releaseIds = Array.from(
+      { length: 500 },
+      (_, index) => `01890f6f-6d6a-7cc0-98d4-${String(index + 11).padStart(12, "0")}`
+    )
+    const truncatedInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      entity: {
+        ...encoded.entity,
+        canonicalReleaseId: releaseIds[0],
+        releaseIds,
+        releaseMembershipsTruncated: true
+      }
+    })
+    const truncatedState = {
+      ...pullRequestState,
+      inspection: truncatedInspection
+    } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, truncatedState)
+    const releaseCount = [...host.querySelectorAll("dt")]
+      .find((term) => term.textContent === "Releases")
+      ?.parentElement?.querySelector("dd")
+
+    expect(releaseCount?.textContent).toBe("500+")
+  })
+
   it.each([
     [
       "a release",
@@ -643,7 +671,11 @@ describe("canonical workspace entity", () => {
         search: "?filter=attention",
         state: null
       },
-      { canonicalReleaseId: null, releaseIds: [], releaseMembershipsTruncated: false },
+      {
+        canonicalReleaseId: pullRequestInspection.entity.canonicalReleaseId,
+        releaseIds: pullRequestInspection.entity.releaseIds,
+        releaseMembershipsTruncated: pullRequestInspection.entity.releaseMembershipsTruncated
+      },
       new Set([releaseWorksetFixture.releaseId]),
       `/w/${WORKSET_WORKSPACE_ID}/releases/${encodedWorkset.releaseId}/agent`
     ],
@@ -678,7 +710,7 @@ describe("canonical workspace entity", () => {
       },
       new Set<typeof releaseWorksetFixture.releaseId>(),
       `/agent?from=${encodeURIComponent(
-        `/w/${WORKSET_WORKSPACE_ID}/items?object=${encodeURIComponent(
+        `/w/${WORKSET_WORKSPACE_ID}/items?q=payments&object=${encodeURIComponent(
           pullRequestInspection.entity.projection.entityId
         )}#item-details`
       )}`

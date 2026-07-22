@@ -241,17 +241,24 @@ export const workspaceEntityAgentPath = (
         !routableReleaseIds.has(canonicalReleaseId)
       ? null
       : releaseAgentPath(workspaceId, canonicalReleaseId)
-    : routableReleaseIds.has(originRelease.releaseId)
+    : !releaseContext.releaseMembershipsTruncated &&
+        releaseContext.releaseIds.includes(originRelease.releaseId) &&
+        routableReleaseIds.has(originRelease.releaseId)
     ? releaseAgentPath(workspaceId, originRelease.releaseId)
     : null
   if (releasePath !== null) return releasePath
 
   const entity = workspaceEntityTargetFromHref(current.pathname)
-  return entity === null || entity.workspaceId !== workspaceId
-    ? contextualAgentPath(current.pathname, current.search, current.hash)
-    : contextualAgentPath(
-      workspaceEntityParentPath(workspaceId),
-      `?object=${encodeURIComponent(entity.entityId)}`,
-      "#item-details"
-    )
+  if (entity === null || entity.workspaceId !== workspaceId) {
+    return contextualAgentPath(current.pathname, current.search, current.hash)
+  }
+  const itemSearch = new URLSearchParams(
+    origin.pathname === workspaceEntityParentPath(workspaceId) ? origin.search : ""
+  )
+  itemSearch.set("object", entity.entityId)
+  return contextualAgentPath(
+    workspaceEntityParentPath(workspaceId),
+    `?${itemSearch.toString()}`,
+    "#item-details"
+  )
 }
