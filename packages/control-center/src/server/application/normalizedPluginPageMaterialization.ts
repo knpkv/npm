@@ -40,6 +40,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
   affectedPipelineExecutionEvents,
@@ -223,6 +224,73 @@ const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.de
   }).pipe(Effect.mapError(() => malformed("normalized-issue-attributes-invalid", event.eventId)))
 })
 
+const decodedPageTimestamp = Effect.fn("NormalizedPluginPageMaterialization.decodePageTimestamp")(function*(
+  value: string,
+  eventId: string
+) {
+  return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
+    Effect.mapError(() => malformed("normalized-page-timestamp-invalid", eventId))
+  )
+})
+
+const decodedConfluencePageAttributes = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodeConfluencePageAttributes"
+)(function*(event: EntityUpsert) {
+  if (event.entityType !== "confluence-page") return null
+  const decoded = Schema.decodeUnknownResult(ConfluencePageAttributesV1)(event.attributes)
+  if (Result.isFailure(decoded)) {
+    if (Object.hasOwn(event.attributes, "schemaVersion")) {
+      return yield* malformed("normalized-confluence-page-attributes-invalid", event.eventId)
+    }
+    return null
+  }
+  const attributes = decoded.success
+  const versions = yield* Effect.forEach(attributes.versions, (version) =>
+    Effect.gen(function*() {
+      return {
+        number: version.number,
+        createdAt: yield* decodedPageTimestamp(version.createdAt, event.eventId),
+        message: version.message,
+        minorEdit: version.minorEdit,
+        authorSourcePersonId: version.authorId
+      }
+    }))
+  const attachments = attributes.attachments === undefined
+    ? undefined
+    : yield* Effect.forEach(attributes.attachments, (attachment) =>
+      Effect.gen(function*() {
+        return {
+          ...attachment,
+          createdAt: yield* decodedPageTimestamp(attachment.createdAt, event.eventId)
+        }
+      }))
+  const contentState: "lazy" | "loaded" = attributes.contentState ??
+    (attributes.content === null ? "lazy" : "loaded")
+  return {
+    sourceSpaceId: attributes.spaceId,
+    parentSourceId: attributes.parentId,
+    createdAt: yield* decodedPageTimestamp(attributes.createdAt, event.eventId),
+    updatedAt: yield* decodedPageTimestamp(attributes.updatedAt, event.eventId),
+    content: attributes.content,
+    contentState,
+    versions,
+    versionHistory: attributes.versionHistory,
+    contributors: attributes.contributors.map((contributor) => ({
+      sourcePersonId: contributor.accountId,
+      displayName: contributor.displayName,
+      active: contributor.active,
+      external: contributor.external,
+      resolved: contributor.resolved,
+      roles: contributor.roles
+    })),
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(attributes.attachmentInventory === undefined ? {} : {
+      attachmentInventory: attributes.attachmentInventory
+    }),
+    ...(attributes.watcherInventory === undefined ? {} : { watcherInventory: attributes.watcherInventory })
+  }
+})
+
 const canonicalKind = (entityType: string): typeof DeliveryEntityKind.Type | null => {
   switch (entityType) {
     case "issue":
@@ -330,7 +398,8 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "page":
+    case "page": {
+      const normalizedPage = yield* decodedConfluencePageAttributes(event)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -354,9 +423,11 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
               (version, index, versions) =>
                 version.length > 0 && version.length <= 100 && versions.indexOf(version) === index
             )
-            .slice(0, 100)
+            .slice(0, 100),
+          ...(normalizedPage ?? {})
         }
       }
+    }
     case "pipeline-execution": {
       const details = yield* projectPipelineExecution(event, siblingEvents).pipe(
         Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
@@ -549,7 +620,7 @@ const sameSourceUrl = (
 ): boolean => left?.href === right?.href
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
 
 const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV1)
 
@@ -627,6 +698,16 @@ const materializeUpsertEntity = Effect.fn(
   const currentProjection = existing === null
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
+  const currentDetails = currentProjection?.projection.details
+  const pageEnrichment = presentation.details._tag === "page" &&
+    presentation.details.contentState === "loaded" &&
+    currentDetails?._tag === "page" &&
+    currentDetails.contentState !== "loaded"
+  const effectiveForceProjection = forceProjection || pageEnrichment
+  const effectivePresentation =
+    pageEnrichment && currentDetails?._tag === "page" && presentation.details._tag === "page"
+      ? { ...presentation, details: { ...currentDetails, ...presentation.details } }
+      : presentation
   const schemaVersion = projectionSchemaVersion(kind)
   const refreshedSource = existing === null
     ? null
@@ -651,7 +732,7 @@ const materializeUpsertEntity = Effect.fn(
     currentProjection?.projection.entityState === "present" &&
     currentProjection.projection.projectionSchemaVersion === schemaVersion &&
     !sourceMetadataChanged &&
-    !forceProjection
+    !effectiveForceProjection
   ) {
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
@@ -663,7 +744,7 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
-    : forceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
+    : effectiveForceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
     ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
       sourceRevision: refreshedSource ?? sourceRevision(
@@ -688,9 +769,9 @@ const materializeUpsertEntity = Effect.fn(
         projectionSchemaVersion: schemaVersion,
         entityState: "present",
         entityType: kind,
-        displayKey: presentation.displayKey,
+        displayKey: effectivePresentation.displayKey,
         title: event.title,
-        details: presentation.details
+        details: effectivePresentation.details
       },
       recordedAt: scope.committedAt
     }],

@@ -16,6 +16,7 @@ import {
   WorkspaceId
 } from "./identifiers.js"
 import { NormalizedIssueAttributes } from "./normalizedIssue.js"
+import { NormalizedPageAttributes } from "./normalizedPage.js"
 import { UtcTimestamp } from "./utcTimestamp.js"
 
 const boundedText = (maximum: number, identifier: string) =>
@@ -93,6 +94,7 @@ const PullRequestDetails = Schema.TaggedStruct("pull-request", {
 })
 
 const PageDetails = Schema.TaggedStruct("page", {
+  ...NormalizedPageAttributes.fields,
   spaceKey: boundedText(100, "SpaceKey"),
   revision: boundedText(512, "PageRevision"),
   status: Schema.Literals(["draft", "current", "superseded"]),

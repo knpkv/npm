@@ -21,6 +21,10 @@ import type { EntityId, GraphNodeId, ReleaseId, WorkspaceId } from "../../domain
 import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
+import {
+  presentWorkspaceConfluencePage,
+  type WorkspaceConfluencePagePresentation
+} from "./presentWorkspaceConfluencePage.js"
 import { presentWorkspaceIssue, type WorkspaceIssuePresentation } from "./presentWorkspaceIssue.js"
 import {
   presentWorkspacePipelineExecution,
@@ -70,6 +74,7 @@ export interface WorkspaceEntityPresentation {
   readonly activityEmptyLabel: string
   readonly agentContext: string
   readonly collaborators: WorkspaceEntityCollaboratorsPresentation
+  readonly confluencePage: WorkspaceConfluencePagePresentation | null
   readonly contentSummary: string
   readonly displayKey: string
   readonly evidence: WorkspaceEntityEvidencePresentation
@@ -250,6 +255,42 @@ const collaboratorsWithIssue = (
     emptyLabel: "No collaborator was synchronized or assigned to this object.",
     expandedCategories: [...new Set(expandedCategories)],
     owners
+  }
+}
+
+const collaboratorsWithPage = (
+  collaborators: WorkspaceEntityCollaboratorsPresentation,
+  page: WorkspaceConfluencePagePresentation | null
+): WorkspaceEntityCollaboratorsPresentation => {
+  if (page === null) return collaborators
+  const next = {
+    approvers: [...collaborators.approvers],
+    authors: [...collaborators.authors],
+    operators: [...collaborators.operators],
+    owners: [...collaborators.owners],
+    reviewers: [...collaborators.reviewers]
+  }
+  const knownNames = new Set(Object.values(next).flat().map(({ name }) => name.toLocaleLowerCase("en-US")))
+  for (const person of page.contributors) {
+    if (knownNames.has(person.name.toLocaleLowerCase("en-US"))) continue
+    knownNames.add(person.name.toLocaleLowerCase("en-US"))
+    if (person.role.includes("Owner")) next.owners.push(person)
+    else if (person.role.includes("Watcher")) next.reviewers.push(person)
+    else next.authors.push(person)
+  }
+  const categoryOrder: ReadonlyArray<RlyCollaboratorCategory> = [
+    "authors",
+    "owners",
+    "reviewers",
+    "operators",
+    "approvers"
+  ]
+  return {
+    ...next,
+    emptyLabel: "No collaborator was synchronized or assigned to this document.",
+    expandedCategories: categoryOrder.filter(
+      (category) => next[category].length > 0
+    )
   }
 }
 
@@ -442,6 +483,9 @@ export const presentWorkspaceEntity = (
   const pipelineExecution = projection.details._tag === "pipeline-execution"
     ? presentWorkspacePipelineExecution(projection.details, inspection)
     : null
+  const confluencePage = projection.details._tag === "page"
+    ? presentWorkspaceConfluencePage(projection.details, inspection)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {
@@ -454,7 +498,11 @@ export const presentWorkspaceEntity = (
       serviceName,
       title: projection.title
     }),
-    collaborators: collaboratorsWithIssue(collaboratorsFor(inspection.entity.owners), issue),
+    collaborators: collaboratorsWithPage(
+      collaboratorsWithIssue(collaboratorsFor(inspection.entity.owners), issue),
+      confluencePage
+    ),
+    confluencePage,
     contentSummary: `${kindNames[projection.entityType]} ${projection.displayKey} is tracked in ${serviceName}. ${
       releaseCount === 0
         ? "It is not linked to a release yet."

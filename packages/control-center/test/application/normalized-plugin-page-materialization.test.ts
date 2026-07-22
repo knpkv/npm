@@ -29,6 +29,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
@@ -4451,6 +4452,120 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected pull-request timestamp failure")
       }
       assert.strictEqual(failure.diagnosticCode, "normalized-pull-request-timestamp-invalid")
+    })))
+
+  it.effect("materializes rich Confluence state and enriches lazy content at the same source revision", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+      const attributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        schemaVersion: 1,
+        status: "current",
+        spaceId: "space-payments",
+        parentId: "parent-88",
+        createdAt: "2026-07-19T09:00:00.000Z",
+        updatedAt: "2026-07-19T09:02:00.000Z",
+        currentVersion: 12,
+        content: null,
+        contentState: "lazy",
+        versions: [{
+          number: 12,
+          createdAt: "2026-07-19T09:02:00.000Z",
+          message: "Add rollback verification",
+          minorEdit: false,
+          authorId: "account-ada"
+        }],
+        versionHistory: { complete: false, pagesFetched: 2 },
+        contributors: [{
+          accountId: "account-ada",
+          displayName: "Ada Kline",
+          active: true,
+          external: false,
+          resolved: true,
+          roles: ["owner", "author"]
+        }],
+        attachments: [{
+          id: "attachment-1",
+          title: "rollback-evidence.pdf",
+          createdAt: "2026-07-19T09:01:00.000Z",
+          mediaType: "application/pdf",
+          fileSize: 4096,
+          version: 3
+        }],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: false, pagesFetched: 2 }
+      })
+      const normalizedPage = (eventId: string, pageAttributes: Schema.JsonObject) =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: eventId,
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "12",
+            entityType: "confluence-page",
+            vendorImmutableId: "991",
+            sourceUrl: "https://wiki.example.test/pages/991",
+            title: "Payments release runbook",
+            attributes: pageAttributes
+          }]
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        streamKey: Schema.decodeSync(PluginStreamKey)("confluence-rich-page"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(scope, normalizedPage("confluence-page-991-lazy", attributes))
+
+      const lazy = (yield* items()).items[0]?.projection
+      if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
+      assert.strictEqual(lazy.projectionSchemaVersion, 2)
+      assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.deepStrictEqual(lazy.details.contributors?.[0], {
+        sourcePersonId: "account-ada",
+        displayName: "Ada Kline",
+        active: true,
+        external: false,
+        resolved: true,
+        roles: ["owner", "author"]
+      })
+      assert.strictEqual(lazy.details.attachments?.[0]?.title, "rollback-evidence.pdf")
+
+      const loadedAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        schemaVersion: attributes.schemaVersion,
+        status: attributes.status,
+        spaceId: attributes.spaceId,
+        parentId: attributes.parentId,
+        createdAt: attributes.createdAt,
+        updatedAt: attributes.updatedAt,
+        currentVersion: attributes.currentVersion,
+        content: {
+          representation: "safe-markdown",
+          markdown: "## Production recovery\n\nVerify the rollback."
+        },
+        contentState: "loaded",
+        versions: attributes.versions,
+        versionHistory: attributes.versionHistory,
+        contributors: attributes.contributors
+      })
+      const receipt = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3 },
+        normalizedPage("confluence-page-991-loaded", loadedAttributes)
+      )
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+
+      const loaded = (yield* items()).items[0]?.projection
+      if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
+      assert.strictEqual(loaded.projectionRevision, 2)
+      assert.strictEqual(loaded.details.contentState, "loaded")
+      assert.strictEqual(loaded.details.content?.markdown, "## Production recovery\n\nVerify the rollback.")
+      assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
+      assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>
