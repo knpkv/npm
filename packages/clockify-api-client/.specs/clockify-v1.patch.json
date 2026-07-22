@@ -158,5 +158,74 @@
     "op": "add",
     "path": "/components/schemas/CreateTimeEntryRequest/required",
     "value": ["description", "start"]
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoImplV1/properties/kioskId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoImplV1/properties/projectId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoImplV1/properties/taskId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoV1/properties/kioskId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoV1/properties/projectId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryDtoV1/properties/taskId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/kioskId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/projectId/nullable",
+    "value": true
+  },
+  {
+    "op": "add",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/taskId/nullable",
+    "value": true
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeEntryDtoImplV1/properties/tagIds",
+    "value": {
+      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "description": "Represents a list of tag identifiers across the system."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeEntryDtoV1/properties/tagIds",
+    "value": {
+      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "description": "Represents a list of tag identifiers across the system."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/tagIds",
+    "value": {
+      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "description": "Represents a list of tag identifiers across the system."
+    }
   }
 ]
