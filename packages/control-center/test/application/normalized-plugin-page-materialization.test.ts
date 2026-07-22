@@ -953,7 +953,7 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(projection.details.stages?.map(({ name }) => name), ["Build", "Approval"])
 
       const actionOnly = yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 2, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        { ...scope, expectedRevision: 2, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage: "pipeline-cache-action-only",
           hasMore: false,
@@ -998,6 +998,97 @@ describe("normalized plugin page materialization", () => {
         refreshed.details.actions?.find(({ actionName }) => actionName === "Release gate")?.status,
         "succeeded"
       )
+
+      const duplicateAction = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-duplicate-action",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-approval-action-complete",
+            observedAt: "2026-07-19T09:06:00.000Z",
+            revision: "Succeeded:2026-07-19T09:06:00.000Z",
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "cache-execution#approval",
+            sourceUrl: null,
+            title: "payments · Approval",
+            attributes: {
+              pipelineName: "payments",
+              executionId: "cache-execution",
+              actionExecutionId: "approval-1",
+              stageName: "Approval",
+              actionName: "Release gate",
+              status: "Succeeded"
+            }
+          }]
+        })
+      )
+      assert.strictEqual(duplicateAction.acceptedEventCount, 0)
+      assert.strictEqual(duplicateAction.entityProjectionCount, 0)
+
+      const declarationOnly = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-declaration-only",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-payments-declaration",
+            observedAt: "2026-07-19T09:07:00.000Z",
+            revision: "pipeline-v1",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "payments-pipeline",
+            sourceUrl: null,
+            title: "Payments pipeline",
+            attributes: {
+              pipelineName: "payments",
+              stages: [{
+                name: "Build",
+                actions: [{ name: "Compile", runOrder: 1 }]
+              }, {
+                name: "Approval",
+                actions: [{ name: "Release gate", runOrder: 1 }]
+              }, {
+                name: "Deploy",
+                actions: []
+              }]
+            }
+          }]
+        })
+      )
+      assert.strictEqual(declarationOnly.entityProjectionCount, 1)
+      assert.strictEqual(declarationOnly.skippedEntityCount, 1)
+      const declared = (yield* items()).items[0]?.projection
+      if (declared?.details._tag !== "pipeline-execution") {
+        return yield* Effect.die("expected declaration-refreshed pipeline execution")
+      }
+      assert.deepStrictEqual(declared.details.stages?.map(({ name }) => name), ["Build", "Approval", "Deploy"])
+
+      const unrelatedDeclaration = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 5, committedAt: T4, successfulHealth: { _tag: "healthy", checkedAt: T4 } },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "pipeline-cache-unrelated-declaration",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "cache-inventory-declaration",
+            observedAt: "2026-07-19T09:08:00.000Z",
+            revision: "pipeline-v2",
+            entityType: "aws.codepipeline.pipeline",
+            vendorImmutableId: "inventory-pipeline",
+            sourceUrl: null,
+            title: "Inventory pipeline",
+            attributes: {
+              pipelineName: "inventory",
+              pipelineVersion: 2,
+              stages: [{ name: "Inventory", actions: [] }]
+            }
+          }]
+        })
+      )
+      assert.strictEqual(unrelatedDeclaration.entityProjectionCount, 0)
+      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
     })))
 
   it.effect("matches declaration versions and preserves declared action order", () =>

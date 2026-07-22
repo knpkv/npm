@@ -588,7 +588,8 @@ const materializeUpsertEntity = Effect.fn(
   cryptoService: Crypto.Crypto,
   scope: NormalizedPluginPageMaterializationScope,
   event: EntityUpsert,
-  siblingEvents: ReadonlyArray<NormalizedPluginEventV1>
+  siblingEvents: ReadonlyArray<NormalizedPluginEventV1>,
+  forceProjection: boolean
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
@@ -622,7 +623,8 @@ const materializeUpsertEntity = Effect.fn(
     existing.sourceRevision.revision === event.revision &&
     currentProjection?.projection.entityState === "present" &&
     currentProjection.projection.projectionSchemaVersion === schemaVersion &&
-    !sourceMetadataChanged
+    !sourceMetadataChanged &&
+    !forceProjection
   ) {
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
@@ -634,6 +636,8 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
+    : forceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
+    ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
       sourceRevision: refreshedSource ?? sourceRevision(
         scope,
@@ -1294,6 +1298,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       ...events,
       ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
     ]
+    const forcedPipelineExecutionEventIds = new Set(affectedExecutions.map(({ eventId }) => eventId))
     let entityProjectionCount = 0
     let evidenceClaimCount = 0
     let evidenceItemCount = 0
@@ -1317,7 +1322,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
           cryptoService,
           scope,
           event,
-          event.entityType === "aws.codepipeline.execution" ? pipelineEvents : events
+          event.entityType === "aws.codepipeline.execution" ? pipelineEvents : events,
+          event.entityType === "aws.codepipeline.execution" && forcedPipelineExecutionEventIds.has(event.eventId)
         )
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount

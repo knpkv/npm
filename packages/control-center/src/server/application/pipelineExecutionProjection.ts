@@ -186,7 +186,30 @@ const executionKey = (attributes: PipelineEntityAttributes): string | null => {
   return pipelineName === null || executionId === null ? null : `${pipelineName}\u0000${executionId}`
 }
 
-/** Select cached execution envelopes affected by newly accepted stage or action events. */
+interface PipelineDeclarationKey {
+  readonly pipelineName: string
+  readonly pipelineVersion: number | null
+}
+
+const declarationKey = (attributes: PipelineEntityAttributes): PipelineDeclarationKey | null => {
+  const pipelineName = optionalBounded(attributes.pipelineName, 200)
+  return pipelineName === null
+    ? null
+    : { pipelineName, pipelineVersion: attributes.pipelineVersion ?? null }
+}
+
+const declarationMatchesExecution = (
+  declaration: PipelineDeclarationKey,
+  execution: PipelineEntityAttributes
+): boolean => {
+  const pipelineName = optionalBounded(execution.pipelineName, 200)
+  if (pipelineName !== declaration.pipelineName) return false
+  const executionVersion = execution.pipelineVersion ?? null
+  return declaration.pipelineVersion === null || executionVersion === null ||
+    declaration.pipelineVersion === executionVersion
+}
+
+/** Select cached execution envelopes affected by newly accepted declarations, stages, or actions. */
 export const affectedPipelineExecutionEvents = Effect.fn(
   "PipelineExecutionProjection.affectedExecutions"
 )(function*(
@@ -194,22 +217,28 @@ export const affectedPipelineExecutionEvents = Effect.fn(
   acceptedEventIds: ReadonlySet<string>
 ): Effect.fn.Return<ReadonlyArray<EntityUpsert>, PipelineExecutionProjectionError> {
   const affectedKeys = new Set<string>()
+  const acceptedDeclarations: Array<PipelineDeclarationKey> = []
   for (const event of cachedEvents) {
-    if (
-      event._tag !== "UpsertEntity" ||
-      !acceptedEventIds.has(event.eventId) ||
-      (event.entityType !== "aws.codepipeline.stage" && event.entityType !== "aws.codepipeline.action")
-    ) continue
-    const key = executionKey(yield* decodeAttributes(event))
-    if (key !== null) affectedKeys.add(key)
+    if (event._tag !== "UpsertEntity" || !acceptedEventIds.has(event.eventId)) continue
+    if (event.entityType === "aws.codepipeline.pipeline") {
+      const key = declarationKey(yield* decodeAttributes(event))
+      if (key !== null) acceptedDeclarations.push(key)
+    } else if (event.entityType === "aws.codepipeline.stage" || event.entityType === "aws.codepipeline.action") {
+      const key = executionKey(yield* decodeAttributes(event))
+      if (key !== null) affectedKeys.add(key)
+    }
   }
-  if (affectedKeys.size === 0) return []
+  if (affectedKeys.size === 0 && acceptedDeclarations.length === 0) return []
 
   const executions: Array<EntityUpsert> = []
   for (const event of cachedEvents) {
     if (event._tag !== "UpsertEntity" || event.entityType !== "aws.codepipeline.execution") continue
-    const key = executionKey(yield* decodeAttributes(event))
-    if (key !== null && affectedKeys.has(key)) executions.push(event)
+    const attributes = yield* decodeAttributes(event)
+    const key = executionKey(attributes)
+    if (
+      (key !== null && affectedKeys.has(key)) ||
+      acceptedDeclarations.some((declaration) => declarationMatchesExecution(declaration, attributes))
+    ) executions.push(event)
   }
   return executions
 })
