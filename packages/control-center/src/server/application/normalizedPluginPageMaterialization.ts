@@ -318,7 +318,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
           sourceBranch: bounded(attributes.sourceBranch, "unknown", 500),
           targetBranch: bounded(attributes.targetBranch, "unknown", 500),
           headRevision: bounded(attributes.headRevision, event.revision, 512),
-          reviewState: reviewState(attributes.reviewState ?? namedText(attributes.status)),
+          reviewState: reviewState(attributes.reviewState),
           lifecycle: pullRequestLifecycle(namedText(attributes.status)),
           description: optionalBounded(attributes.description, 50_000),
           authorReference: optionalBounded(attributes.authorArn, 512),
@@ -598,8 +598,6 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
-    : existing.sourceRevision.revision === event.revision
-    ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
       sourceRevision: sourceRevision(
         scope,

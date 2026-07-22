@@ -347,6 +347,17 @@ describe("canonical workspace entity", () => {
     expect(presentation.collaborators.approvers).toEqual([
       expect.objectContaining({ name: "Mina Ortiz", role: "Release Approver" })
     ])
+    if (presentation.pullRequest === null) throw new Error("Expected a pull-request presentation")
+    expect(presentation.pullRequest.issueCountLabel).toBe(`${String(presentation.pullRequest.issueCount)}+`)
+    expect(presentation.pullRequest.pipelineCountLabel).toBe(`${String(presentation.pullRequest.pipelineCount)}+`)
+
+    const complete = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...pullRequestInspection,
+      graph: { ...pullRequestInspection.graph, truncated: false }
+    })
+    if (complete.pullRequest === null) throw new Error("Expected a complete pull-request presentation")
+    expect(complete.pullRequest.issueCountLabel).toBe(String(complete.pullRequest.issueCount))
+    expect(complete.pullRequest.pipelineCountLabel).toBe(String(complete.pullRequest.pipelineCount))
   })
 
   it("counts only currently accepted issue and pipeline relationships as PR evidence", () => {
@@ -626,6 +637,14 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Agent review not run")
     expect(host.textContent).toContain("Open files and diff in CodeCommit")
     expect(host.querySelector("[data-workspace-pull-request-detail]")).not.toBeNull()
+    const deliveryCounts = new Map(
+      [...host.querySelectorAll("dt")].map((term) => [
+        term.textContent,
+        term.parentElement?.querySelector("dd")?.textContent
+      ])
+    )
+    expect(deliveryCounts.get("Jira items")).toMatch(/\+$/u)
+    expect(deliveryCounts.get("Pipeline runs")).toMatch(/\+$/u)
 
     const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       (button) => button.textContent === "Ask Relay to review"

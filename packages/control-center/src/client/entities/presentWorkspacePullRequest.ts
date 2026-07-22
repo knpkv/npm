@@ -22,8 +22,10 @@ export interface WorkspacePullRequestPresentation {
   readonly filesHref: string | null
   readonly headRevision: string
   readonly issueCount: number
+  readonly issueCountLabel: string
   readonly mergeBaseRevision: string | null
   readonly pipelineCount: number
+  readonly pipelineCountLabel: string
   readonly releaseCount: number
   readonly releaseCountLabel: string
   readonly reviewLabel: string
@@ -133,6 +135,9 @@ export const presentWorkspacePullRequest = (
         connected.has(projection.entityId)
     ).length
   const releaseCount = inspection.entity.releaseIds.length
+  const issueCount = relatedCount("issue")
+  const pipelineCount = relatedCount("pipeline-execution")
+  const evidenceCountLabel = (count: number): string => `${String(count)}${inspection.graph.truncated ? "+" : ""}`
   return {
     agentReviewLabel: "Agent review not run",
     author: authorFor(details.authorReference),
@@ -141,9 +146,11 @@ export const presentWorkspacePullRequest = (
     description: details.description?.trim() || null,
     filesHref: sourceUrl?.href ?? null,
     headRevision: details.headRevision,
-    issueCount: relatedCount("issue"),
+    issueCount,
+    issueCountLabel: evidenceCountLabel(issueCount),
     mergeBaseRevision: details.mergeBaseRevision ?? null,
-    pipelineCount: relatedCount("pipeline-execution"),
+    pipelineCount,
+    pipelineCountLabel: evidenceCountLabel(pipelineCount),
     releaseCount,
     releaseCountLabel: `${String(releaseCount)}${inspection.entity.releaseMembershipsTruncated ? "+" : ""}`,
     reviewLabel: reviewLabel(details.reviewState),

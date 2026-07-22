@@ -2852,6 +2852,17 @@ describe("normalized plugin page materialization", () => {
       assert.deepStrictEqual(done.value.items.map(({ projection }) => projection.displayKey), ["17"])
       assert.deepStrictEqual(active.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
       assert.deepStrictEqual(failed.value.items.map(({ projection }) => projection.displayKey), ["18"])
+      const openDetails = active.value.items.find(({ projection }) => projection.displayKey === "20")?.projection
+        .details
+      if (openDetails?._tag !== "pull-request") return yield* Effect.die("expected open pull-request details")
+      assert.strictEqual(openDetails.lifecycle, "open")
+      assert.strictEqual(openDetails.reviewState, "not-requested")
+      const requestedDetails = active.value.items.find(({ projection }) => projection.displayKey === "19")
+        ?.projection.details
+      if (requestedDetails?._tag !== "pull-request") {
+        return yield* Effect.die("expected review-requested pull-request details")
+      }
+      assert.strictEqual(requestedDetails.reviewState, "requested")
       const details = done.value.items[0]?.projection.details
       if (details?._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
       assert.lengthOf(details.description ?? "", 50_000)
@@ -2876,7 +2887,7 @@ describe("normalized plugin page materialization", () => {
         reviewSearch._tag !== "workspaceEntityProjections"
       ) return yield* Effect.die("expected searchable workspace entity projections")
       assert.deepStrictEqual(lifecycleSearch.value.items.map(({ projection }) => projection.displayKey), ["17"])
-      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19", "20"])
+      assert.deepStrictEqual(reviewSearch.value.items.map(({ projection }) => projection.displayKey), ["19"])
     })))
 
   it.effect("backfills the current pull-request projection when its schema version is stale", () =>
@@ -2890,7 +2901,7 @@ describe("normalized plugin page materialization", () => {
         pluginConnectionId: CODECOMMIT_PLUGIN_ID,
         vendorImmutableId: "20",
         revision: "pull-request-20-revision-1",
-        sourceUrl: "https://console.aws.example/pull-requests/20",
+        sourceUrl: null,
         firstObservedAt: "2026-07-19T09:01:00.000Z",
         lastObservedAt: "2026-07-19T09:01:00.000Z",
         synchronizedAt: "2026-07-19T09:01:00.000Z",
@@ -2984,6 +2995,16 @@ describe("normalized plugin page materialization", () => {
       if (details._tag !== "pull-request") return yield* Effect.die("expected pull-request details")
       assert.strictEqual(details.baseRevision, "base-20")
       assert.strictEqual(details.description, "Keep retry writes idempotent.")
+      const refreshedEntity = yield* persistence.entities.get(WORKSPACE_ID, entityId)
+      assert.strictEqual(
+        refreshedEntity.sourceRevision.sourceUrl?.href,
+        "https://console.aws.example/pull-requests/20"
+      )
+      assert.strictEqual(
+        DateTime.formatIso(refreshedEntity.sourceRevision.lastObservedAt),
+        "2026-07-19T09:01:30.000Z"
+      )
+      assert.strictEqual(DateTime.formatIso(refreshedEntity.sourceRevision.synchronizedAt), DateTime.formatIso(T2))
 
       const current = yield* materializeNormalizedPluginPage(
         { ...scope, expectedRevision: 1, committedAt: T3 },

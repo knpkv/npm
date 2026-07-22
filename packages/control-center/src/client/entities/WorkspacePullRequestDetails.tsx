@@ -158,11 +158,11 @@ export const WorkspacePullRequestDetails = ({
       <dl className={styles.deliveryCounts}>
         <div>
           <dt>Jira items</dt>
-          <dd>{pullRequest.issueCount}</dd>
+          <dd>{pullRequest.issueCountLabel}</dd>
         </div>
         <div>
           <dt>Pipeline runs</dt>
-          <dd>{pullRequest.pipelineCount}</dd>
+          <dd>{pullRequest.pipelineCountLabel}</dd>
         </div>
         <div>
           <dt>Releases</dt>
