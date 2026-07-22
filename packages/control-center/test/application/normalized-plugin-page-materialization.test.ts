@@ -1238,6 +1238,36 @@ describe("normalized plugin page materialization", () => {
           ]
         })
       )
+      const collisionPage = (offset: number) =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: `pipeline-indexed-cache-collisions-${String(offset)}`,
+          hasMore: false,
+          events: Array.from({ length: 300 }, (_, index) => {
+            const sequence = offset + index
+            return {
+              _tag: "UpsertEntity",
+              eventId: `collision-${String(sequence)}`,
+              observedAt: "2026-07-19T09:02:30.000Z",
+              revision: `collision-v${String(sequence)}`,
+              entityType: "vendor.action",
+              vendorImmutableId: `collision-${String(sequence)}`,
+              sourceUrl: null,
+              title: `Colliding action ${String(sequence)}`,
+              attributes: {
+                pipelineName: "target",
+                executionId: "target"
+              }
+            }
+          })
+        })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1 },
+        collisionPage(1)
+      )
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2 },
+        collisionPage(301)
+      )
       const database = yield* Database
       yield* database.sql`UPDATE plugin_cache_entries SET payload_json = '{}'
         WHERE workspace_id = ${WORKSPACE_ID}
@@ -1249,7 +1279,7 @@ describe("normalized plugin page materialization", () => {
             THEN json_extract(payload_json, '$.entityType') END = 'aws.codepipeline.action'`
 
       const receipt = yield* materializeNormalizedPluginPage(
-        { ...scope, expectedRevision: 1, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
+        { ...scope, expectedRevision: 3, committedAt: T3, successfulHealth: { _tag: "healthy", checkedAt: T3 } },
         Schema.decodeSync(PluginSyncPageV1)({
           checkpointAfterPage: "pipeline-indexed-cache-target-update",
           hasMore: false,

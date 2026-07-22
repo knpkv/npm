@@ -1291,6 +1291,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
           AND cache.state = 'present'
           AND CASE WHEN json_valid(cache.payload_json)
             THEN json_extract(cache.payload_json, '$.attributes.pipelineName') END = ${selector.pipelineName}
+          AND CASE WHEN json_valid(cache.payload_json)
+            THEN json_extract(cache.payload_json, '$.entityType') END IN (
+              'aws.codepipeline.pipeline',
+              'aws.codepipeline.execution',
+              'aws.codepipeline.stage',
+              'aws.codepipeline.action'
+            )
           AND (
             CASE WHEN json_valid(cache.payload_json)
               THEN json_extract(cache.payload_json, '$.entityType') END = 'aws.codepipeline.pipeline'
