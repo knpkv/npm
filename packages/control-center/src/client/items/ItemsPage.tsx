@@ -12,7 +12,10 @@ import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
 import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
-import { rememberWorkspaceScrollPosition } from "../workspaceScrollRestoration.js"
+import {
+  rememberWorkspaceScrollPosition,
+  shouldRememberWorkspaceScrollPosition
+} from "../workspaceScrollRestoration.js"
 import {
   type WorkspaceItemPresentation,
   type WorkspaceItemStatus,
@@ -425,7 +428,11 @@ export const ItemsPage = ({
               <ServiceMark service={item.service} size="compact" />
               <Link
                 className={styles.itemLink}
-                onClick={() => rememberWorkspaceScrollPosition(location)}
+                onClick={(event) => {
+                  if (shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
+                    rememberWorkspaceScrollPosition(location)
+                  }
+                }}
                 state={makeWorkspaceEntityRouteState(
                   location.state,
                   context.workspaceId,
