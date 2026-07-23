@@ -28,6 +28,7 @@ import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceRelease
 import { presentWorkspaceEntity, type WorkspaceEntityPresentation } from "./presentWorkspaceEntity.js"
 import { WorkspaceEntityLink } from "./WorkspaceEntityLink.js"
 import styles from "./WorkspaceEntityRoute.module.css"
+import { WorkspaceConfluencePageDetails } from "./WorkspaceConfluencePageDetails.js"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
 import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionDetails.js"
 import { WorkspacePullRequestDetails } from "./WorkspacePullRequestDetails.js"
@@ -268,6 +269,9 @@ const EntityContent = ({
       <StatePanel description={message} key={message} title="Partial canonical view" tone="caution" />
     ))}
     {presentation.issue === null ? null : <WorkspaceIssueDetails issue={presentation.issue} />}
+    {presentation.confluencePage === null ? null : (
+      <WorkspaceConfluencePageDetails page={presentation.confluencePage} />
+    )}
     {presentation.pipelineExecution === null ? null : (
       <WorkspacePipelineExecutionDetails pipeline={presentation.pipelineExecution} />
     )}

@@ -7,7 +7,7 @@ import {
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
-import { derivePersonInitials, PersonAvatar, Role } from "../../../../domain/actors.js"
+import { derivePersonInitials, PersonAvatar, PersonSourceIdentity, Role } from "../../../../domain/actors.js"
 import { type DeliveryNode, type DeliveryRelationship, LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
@@ -23,7 +23,7 @@ import {
   EvidenceRow,
   graphRecordError,
   NodeRow,
-  ProjectionRow,
+  ProjectionSummaryRow,
   RelationshipRow,
   WorkspaceProjectionRow
 } from "./rows.js"
@@ -93,8 +93,19 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     decodeEvidenceRow,
     decodeNodeRow,
     decodeProjectionRow,
+    decodeProjectionSummaryRow,
     decodeRelationshipRow
   } = yield* makeDeliveryGraphDecoders
+
+  const summaryExtensionJson = sql`CASE WHEN entity.entity_type = 'page'
+      AND json_valid(projection.extension_json)
+    THEN json_set(
+      projection.extension_json,
+      '$.content', json('null'),
+      '$.contentState', 'lazy'
+    )
+    ELSE projection.extension_json
+  END`
 
   const executePlan = Effect.fn("DeliveryGraphRepository.executePlan")(function*<RowSchema extends Schema.Top>(
     plan: RenderedSql,
@@ -107,8 +118,10 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
   const loadProjection = Effect.fn("DeliveryGraphRepository.loadProjection")(function*(
     workspaceId: WorkspaceId,
     entityId: EntityId,
-    revision: LedgerRevision | null
+    revision: LedgerRevision | null,
+    content: "exact" | "summary"
   ) {
+    const extensionJson = content === "exact" ? sql`projection.extension_json` : summaryExtensionJson
     const rows = yield* sql`SELECT
         projection.workspace_id AS workspaceId,
         projection.entity_id AS entityId,
@@ -123,7 +136,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         END AS entityType,
         projection.display_key AS displayKey,
         projection.title,
-        projection.extension_json AS extensionJson,
+        ${extensionJson} AS extensionJson,
+        projection.extension_json AS originalExtensionJson,
         projection.extension_digest AS extensionDigest,
         projection.recorded_at AS recordedAt
       FROM entity_projection_revisions projection
@@ -135,7 +149,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         AND (${revision} IS NULL OR projection.projection_revision = ${revision})
       ORDER BY projection.projection_revision DESC
       LIMIT 1`
-    const decoded = yield* decodeRows(ProjectionRow, rows).pipe(
+    const decoded = yield* decodeRows(ProjectionSummaryRow, rows).pipe(
       Effect.mapError(() =>
         graphRecordError(
           workspaceId,
@@ -154,7 +168,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         recordKey: revision === null ? entityId : `${entityId}:${revision}`
       })
     }
-    return yield* decodeProjectionRow(row).pipe(captureMalformedDeliveryGraphRow(row))
+    const decode = content === "exact" ? decodeProjectionRow : decodeProjectionSummaryRow
+    return yield* decode(row).pipe(captureMalformedDeliveryGraphRow(row))
   })
 
   const loadNode = Effect.fn("DeliveryGraphRepository.loadNode")(function*(
@@ -375,11 +390,35 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     }
     const candidates = [...identities.values()]
     const owners = yield* Effect.forEach(candidates.slice(0, 20), (owner) =>
-      decodeWorkspaceOwner(workspaceId, {
-        avatarJson: owner.avatarJson,
-        displayName: owner.displayName,
-        personId: owner.personId,
-        rolesCsv: [...owner.roles].sort().join(",")
+      Effect.gen(function*() {
+        const decoded = yield* decodeWorkspaceOwner(workspaceId, {
+          avatarJson: owner.avatarJson,
+          displayName: owner.displayName,
+          personId: owner.personId,
+          rolesCsv: [...owner.roles].sort().join(",")
+        })
+        const identityRows = yield* sql<Record<string, unknown>>`SELECT
+            identity.plugin_connection_id AS pluginConnectionId,
+            identity.provider_id AS providerId,
+            identity.vendor_person_id AS vendorPersonId
+          FROM person_identities AS identity
+          WHERE identity.workspace_id = ${workspaceId}
+            AND identity.person_id = ${owner.personId}
+            AND identity.provider_id = 'confluence'
+            AND identity.plugin_connection_id = (
+            SELECT entity.plugin_connection_id
+            FROM entities AS entity
+            WHERE entity.workspace_id = ${workspaceId}
+              AND entity.entity_id = ${entityId}
+              AND entity.provider_id = 'confluence'
+          )
+          ORDER BY identity.vendor_person_id
+          LIMIT 16`
+        const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows).pipe(
+          Effect.mapError(() => graphRecordError(workspaceId, "person", owner.personId, "person-schema-invalid")),
+          captureMalformedDeliveryGraphRow(identityRows)
+        )
+        return sourceIdentities.length === 0 ? decoded : { ...decoded, sourceIdentities }
       }))
     return { owners, ownersTruncated: candidates.length > 20 }
   })
@@ -414,7 +453,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     const nodes = yield* Effect.forEach(nodeIds, (nodeId) => loadNode(workspaceId, nodeId))
     const entityProjections = yield* Effect.forEach(
       projectionPolicy(nodes),
-      (entityId) => loadProjection(workspaceId, entityId, null)
+      (entityId) => loadProjection(workspaceId, entityId, null, "summary")
     )
     const claimIds = Array.from(
       new Set(relationships.flatMap(({ evidenceClaimIds }) => evidenceClaimIds))
@@ -446,7 +485,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
       case "entityProjection":
         return DeliveryGraphReadResult.make({
           _tag: "entityProjection",
-          value: yield* loadProjection(workspaceId, query.entityId, query.revision)
+          value: yield* loadProjection(workspaceId, query.entityId, query.revision, "exact")
         })
       case "node":
         return DeliveryGraphReadResult.make({
@@ -483,7 +522,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         return DeliveryGraphReadResult.make({ _tag: "relationshipHistory", value })
       }
       case "entitySlice": {
-        const projection = yield* loadProjection(workspaceId, query.entityId, null)
+        const projection = yield* loadProjection(workspaceId, query.entityId, null, "exact")
         if (projection.projection.entityState === "deleted") {
           return yield* new RecordNotFoundError({
             workspaceId,
@@ -799,7 +838,8 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             ${entityType} AS entityType,
             projection.display_key AS displayKey,
             projection.title,
-            projection.extension_json AS extensionJson,
+            ${summaryExtensionJson} AS extensionJson,
+            projection.extension_json AS originalExtensionJson,
             projection.extension_digest AS extensionDigest,
             projection.recorded_at AS recordedAt,
             COALESCE((
@@ -895,7 +935,7 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
               ownerIdentities.slice(0, 20),
               (owner) => decodeWorkspaceOwner(workspaceId, owner).pipe(captureMalformedDeliveryGraphRow(owner))
             )
-            const { projection, recordedAt } = yield* decodeProjectionRow(row).pipe(
+            const { projection, recordedAt } = yield* decodeProjectionSummaryRow(row).pipe(
               captureMalformedDeliveryGraphRow(row)
             )
             return {

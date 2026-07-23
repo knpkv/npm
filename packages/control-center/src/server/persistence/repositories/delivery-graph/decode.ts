@@ -21,6 +21,7 @@ import {
   type NodeRow,
   projectionJson,
   type ProjectionRow,
+  type ProjectionSummaryRow,
   relationshipJson,
   type RelationshipRow
 } from "./rows.js"
@@ -28,14 +29,15 @@ import {
 export const makeDeliveryGraphDecoders = Effect.gen(function*() {
   const { verifyDigest } = yield* makeDeliveryGraphIntegrity
 
-  const decodeProjectionRow = Effect.fn("DeliveryGraphRepository.decodeProjectionRow")(function*(
-    row: typeof ProjectionRow.Type
+  const decodeProjection = Effect.fn("DeliveryGraphRepository.decodeProjection")(function*(
+    row: typeof ProjectionRow.Type,
+    digestJson: string
   ) {
     yield* verifyDigest({
       workspaceId: row.workspaceId,
       recordKind: "entity-projection",
       recordKey: `${row.entityId}:${row.projectionRevision}`,
-      json: row.extensionJson,
+      json: digestJson,
       expected: row.extensionDigest
     })
     const details = yield* Schema.decodeUnknownEffect(projectionJson)(row.extensionJson).pipe(
@@ -81,6 +83,18 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
       )
     )
     return { projection, recordedAt }
+  })
+
+  const decodeProjectionRow = Effect.fn("DeliveryGraphRepository.decodeProjectionRow")(function*(
+    row: typeof ProjectionRow.Type
+  ) {
+    return yield* decodeProjection(row, row.extensionJson)
+  })
+
+  const decodeProjectionSummaryRow = Effect.fn(
+    "DeliveryGraphRepository.decodeProjectionSummaryRow"
+  )(function*(row: typeof ProjectionSummaryRow.Type) {
+    return yield* decodeProjection(row, row.originalExtensionJson)
   })
 
   const decodeNodeRow = Effect.fn("DeliveryGraphRepository.decodeNodeRow")(function*(
@@ -351,6 +365,7 @@ export const makeDeliveryGraphDecoders = Effect.gen(function*() {
     decodeEvidenceRow,
     decodeNodeRow,
     decodeProjectionRow,
+    decodeProjectionSummaryRow,
     decodeRelationshipRow
   }
 })

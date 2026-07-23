@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema"
 
 import { derivePersonInitials, Person } from "../../domain/actors.js"
 import {
-  type DeliveryEntityDetails,
+  DeliveryEntityDetails,
   type DeliveryEntityKind,
   type DeliveryNode,
   type DeliveryRelationship,
@@ -40,6 +40,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
   affectedPipelineExecutionEvents,
@@ -55,6 +56,7 @@ import {
 import { materializeRelationshipInference } from "./relationshipInferenceMaterialization.js"
 
 type EntityUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
+type PageDetails = Extract<DeliveryEntityDetails, { readonly _tag: "page" }>
 type EntityTombstone = Extract<NormalizedPluginEventV1, { readonly _tag: "TombstoneEntity" }>
 type EvidenceAppend = Extract<NormalizedPluginEventV1, { readonly _tag: "AppendEvidence" }>
 type PersonUpsert = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertPerson" }>
@@ -223,6 +225,72 @@ const decodedIssueAttributes = Effect.fn("NormalizedPluginPageMaterialization.de
   }).pipe(Effect.mapError(() => malformed("normalized-issue-attributes-invalid", event.eventId)))
 })
 
+const decodedPageTimestamp = Effect.fn("NormalizedPluginPageMaterialization.decodePageTimestamp")(function*(
+  value: string,
+  eventId: string
+) {
+  return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
+    Effect.mapError(() => malformed("normalized-page-timestamp-invalid", eventId))
+  )
+})
+
+const decodedConfluencePageAttributes = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodeConfluencePageAttributes"
+)(function*(event: EntityUpsert) {
+  if (event.entityType !== "confluence-page") return null
+  const decoded = Schema.decodeUnknownResult(ConfluencePageAttributesV1)(event.attributes)
+  if (Result.isFailure(decoded)) {
+    if (Object.hasOwn(event.attributes, "schemaVersion")) {
+      return yield* malformed("normalized-confluence-page-attributes-invalid", event.eventId)
+    }
+    return null
+  }
+  const attributes = decoded.success
+  const versions = yield* Effect.forEach(attributes.versions, (version) =>
+    Effect.gen(function*() {
+      return {
+        number: version.number,
+        createdAt: yield* decodedPageTimestamp(version.createdAt, event.eventId),
+        message: version.message,
+        minorEdit: version.minorEdit,
+        authorSourcePersonId: version.authorId
+      }
+    }))
+  const attachments = attributes.attachments === undefined
+    ? undefined
+    : yield* Effect.forEach(attributes.attachments, (attachment) =>
+      Effect.gen(function*() {
+        return {
+          ...attachment,
+          createdAt: yield* decodedPageTimestamp(attachment.createdAt, event.eventId)
+        }
+      }))
+  const contentState: "lazy" | "loaded" = attributes.contentState ?? "loaded"
+  return {
+    sourceSpaceId: attributes.spaceId,
+    parentSourceId: attributes.parentId,
+    createdAt: yield* decodedPageTimestamp(attributes.createdAt, event.eventId),
+    updatedAt: yield* decodedPageTimestamp(attributes.updatedAt, event.eventId),
+    content: attributes.content,
+    contentState,
+    versions,
+    versionHistory: attributes.versionHistory,
+    contributors: attributes.contributors.map((contributor) => ({
+      sourcePersonId: contributor.accountId,
+      displayName: contributor.displayName,
+      active: contributor.active,
+      external: contributor.external,
+      resolved: contributor.resolved,
+      roles: contributor.roles
+    })),
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(attributes.attachmentInventory === undefined ? {} : {
+      attachmentInventory: attributes.attachmentInventory
+    }),
+    ...(attributes.watcherInventory === undefined ? {} : { watcherInventory: attributes.watcherInventory })
+  }
+})
+
 const canonicalKind = (entityType: string): typeof DeliveryEntityKind.Type | null => {
   switch (entityType) {
     case "issue":
@@ -330,7 +398,8 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "page":
+    case "page": {
+      const normalizedPage = yield* decodedConfluencePageAttributes(event)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -344,19 +413,25 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             512
           ),
           status: namedText(attributes.status)?.toLowerCase() === "superseded" ? "superseded" : "current",
-          linkedIssueKeys: attributes.linkedIssueKeys
-            ?.map((key) => key.trim())
-            .filter((key, index, keys) => key.length > 0 && key.length <= 100 && keys.indexOf(key) === index)
-            .slice(0, 100),
-          linkedReleaseVersions: attributes.linkedReleaseVersions
-            ?.map((version) => version.trim())
-            .filter(
-              (version, index, versions) =>
-                version.length > 0 && version.length <= 100 && versions.indexOf(version) === index
-            )
-            .slice(0, 100)
+          ...(attributes.linkedIssueKeys === undefined ? {} : {
+            linkedIssueKeys: attributes.linkedIssueKeys
+              .map((key) => key.trim())
+              .filter((key, index, keys) => key.length > 0 && key.length <= 100 && keys.indexOf(key) === index)
+              .slice(0, 100)
+          }),
+          ...(attributes.linkedReleaseVersions === undefined ? {} : {
+            linkedReleaseVersions: attributes.linkedReleaseVersions
+              .map((version) => version.trim())
+              .filter(
+                (version, index, versions) =>
+                  version.length > 0 && version.length <= 100 && versions.indexOf(version) === index
+              )
+              .slice(0, 100)
+          }),
+          ...(normalizedPage ?? {})
         }
       }
+    }
     case "pipeline-execution": {
       const details = yield* projectPipelineExecution(event, siblingEvents).pipe(
         Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
@@ -549,7 +624,167 @@ const sameSourceUrl = (
 ): boolean => left?.href === right?.href
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+
+const mergedPageContributors = (
+  current: PageDetails["contributors"],
+  incoming: PageDetails["contributors"],
+  incomingWatchersComplete: boolean
+): {
+  readonly contributors: PageDetails["contributors"]
+  readonly watcherCoverageTruncated: boolean
+} => {
+  if (current === undefined && incoming === undefined) {
+    return { contributors: undefined, watcherCoverageTruncated: false }
+  }
+  const contributors = new Map<string, NonNullable<PageDetails["contributors"]>[number]>()
+  const merge = (contributor: NonNullable<PageDetails["contributors"]>[number]): void => {
+    const previous = contributors.get(contributor.sourcePersonId)
+    const roles = previous === undefined
+      ? contributor.roles
+      : [...new Set([...previous.roles, ...contributor.roles])]
+    const identity = previous?.resolved === true && !contributor.resolved ? previous : contributor
+    contributors.set(
+      contributor.sourcePersonId,
+      { ...identity, roles }
+    )
+  }
+  for (const contributor of current ?? []) {
+    const roles = incomingWatchersComplete
+      ? contributor.roles.filter((role) => role !== "watcher")
+      : contributor.roles
+    if (roles.length > 0) merge({ ...contributor, roles })
+  }
+  for (const contributor of incoming ?? []) merge(contributor)
+  const prioritized = [...contributors.values()].sort((left, right) => {
+    const leftWatcherOnly = left.roles.every((role) => role === "watcher")
+    const rightWatcherOnly = right.roles.every((role) => role === "watcher")
+    return Number(leftWatcherOnly) - Number(rightWatcherOnly)
+  })
+  const dropped = prioritized.slice(502)
+  return {
+    contributors: prioritized.slice(0, 502),
+    watcherCoverageTruncated: dropped.some(({ roles }) => roles.every((role) => role === "watcher"))
+  }
+}
+
+const mergePartialPageAttachments = (
+  current: PageDetails["attachments"],
+  incoming: PageDetails["attachments"]
+): PageDetails["attachments"] => {
+  if (current === undefined) return incoming
+  if (incoming === undefined) return current
+  const incomingIds = new Set(incoming.map(({ id }) => id))
+  return [...incoming, ...current.filter(({ id }) => !incomingIds.has(id))].slice(0, 50)
+}
+
+const mergePartialPageVersions = (
+  current: PageDetails["versions"],
+  incoming: PageDetails["versions"]
+): PageDetails["versions"] => {
+  if (current === undefined) return incoming
+  if (incoming === undefined) return current
+  const versions = new Map(current.map((version) => [version.number, version]))
+  for (const version of incoming) versions.set(version.number, version)
+  return [...versions.values()].sort((left, right) => right.number - left.number).slice(0, 500)
+}
+
+const pageRevisionNumber = (revision: PageDetails["revision"]): number | null => {
+  const versionNumber = Number(revision)
+  return Number.isSafeInteger(versionNumber) && versionNumber > 0 ? versionNumber : null
+}
+
+const accuratePageVersionHistory = (details: PageDetails): PageDetails => {
+  if (details.versionHistory?.complete !== true) return details
+  const currentVersionNumber = pageRevisionNumber(details.revision)
+  if (
+    currentVersionNumber === null ||
+    details.versions?.some(({ number }) => number === currentVersionNumber) === true
+  ) return details
+  return { ...details, versionHistory: { ...details.versionHistory, complete: false } }
+}
+
+const mergeCompletePageVersions = (
+  current: PageDetails["versions"],
+  incoming: PageDetails["versions"],
+  versionHistory: PageDetails["versionHistory"],
+  currentRevision: PageDetails["revision"]
+): {
+  readonly versions: PageDetails["versions"]
+  readonly versionHistory: PageDetails["versionHistory"]
+} => {
+  if (current === undefined || incoming === undefined) return { versions: incoming, versionHistory }
+  const currentVersionNumber = pageRevisionNumber(currentRevision)
+  if (currentVersionNumber === null || incoming.some(({ number }) => number === currentVersionNumber)) {
+    return { versions: incoming, versionHistory }
+  }
+  const currentVersion = current.find(({ number }) => number === currentVersionNumber)
+  if (currentVersion === undefined) {
+    return {
+      versions: incoming,
+      versionHistory: versionHistory === undefined ? undefined : { ...versionHistory, complete: false }
+    }
+  }
+  const overflowed = incoming.length >= 500
+  const versions = overflowed
+    ? [
+      currentVersion,
+      ...[...incoming]
+        .sort((left, right) => right.number - left.number)
+        .slice(0, 499)
+    ].sort((left, right) => right.number - left.number)
+    : mergePartialPageVersions([currentVersion], incoming)
+  return {
+    versions,
+    versionHistory: overflowed && versionHistory !== undefined
+      ? { ...versionHistory, complete: false }
+      : versionHistory
+  }
+}
+
+const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
+  const contributorMerge = mergedPageContributors(
+    current.contributors,
+    incoming.contributors,
+    incoming.watcherInventory?.complete === true
+  )
+  const preserveLoadedContent = current.contentState === "loaded" &&
+    (incoming.contentState === "lazy" || incoming.content === null)
+  const attachments = incoming.attachmentInventory?.complete === false
+    ? mergePartialPageAttachments(current.attachments, incoming.attachments)
+    : incoming.attachments
+  const versionMerge = incoming.versionHistory?.complete === false
+    ? {
+      versions: mergePartialPageVersions(current.versions, incoming.versions),
+      versionHistory: incoming.versionHistory
+    }
+    : mergeCompletePageVersions(
+      current.versions,
+      incoming.versions,
+      incoming.versionHistory,
+      incoming.revision
+    )
+  const watcherInventory = contributorMerge.watcherCoverageTruncated
+    ? {
+      complete: false,
+      pagesFetched: incoming.watcherInventory?.pagesFetched ?? current.watcherInventory?.pagesFetched ?? 0
+    }
+    : incoming.watcherInventory
+  const merged: PageDetails = {
+    ...current,
+    ...incoming,
+    ...(contributorMerge.contributors === undefined ? {} : { contributors: contributorMerge.contributors }),
+    ...(attachments === undefined ? {} : { attachments }),
+    ...(versionMerge.versions === undefined ? {} : { versions: versionMerge.versions }),
+    ...(versionMerge.versionHistory === undefined ? {} : { versionHistory: versionMerge.versionHistory }),
+    ...(watcherInventory === undefined ? {} : { watcherInventory })
+  }
+  return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
+}
+
+const equivalentPageDetails = (left: PageDetails, right: PageDetails): boolean =>
+  JSON.stringify(Schema.encodeSync(DeliveryEntityDetails)(left)) ===
+    JSON.stringify(Schema.encodeSync(DeliveryEntityDetails)(right))
 
 const CachedNormalizedPluginEvent = Schema.fromJsonString(NormalizedPluginEventV1)
 
@@ -627,6 +862,22 @@ const materializeUpsertEntity = Effect.fn(
   const currentProjection = existing === null
     ? null
     : yield* readProjection(persistence, scope.workspaceId, entityId)
+  const currentDetails = currentProjection?.projection.details
+  const sameRevisionPage = existing?.sourceRevision.revision === event.revision &&
+    presentation.details._tag === "page" &&
+    currentDetails?._tag === "page" &&
+    currentProjection?.projection.entityState === "present"
+  const effectivePresentation =
+    sameRevisionPage && currentDetails?._tag === "page" && presentation.details._tag === "page"
+      ? { ...presentation, details: mergeSameRevisionPageDetails(currentDetails, presentation.details) }
+      : presentation.details._tag === "page"
+      ? { ...presentation, details: accuratePageVersionHistory(presentation.details) }
+      : presentation
+  const pageEnrichment = sameRevisionPage &&
+    currentDetails?._tag === "page" &&
+    effectivePresentation.details._tag === "page" &&
+    !equivalentPageDetails(currentDetails, effectivePresentation.details)
+  const effectiveForceProjection = forceProjection || pageEnrichment
   const schemaVersion = projectionSchemaVersion(kind)
   const refreshedSource = existing === null
     ? null
@@ -651,7 +902,7 @@ const materializeUpsertEntity = Effect.fn(
     currentProjection?.projection.entityState === "present" &&
     currentProjection.projection.projectionSchemaVersion === schemaVersion &&
     !sourceMetadataChanged &&
-    !forceProjection
+    !effectiveForceProjection
   ) {
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
@@ -663,7 +914,7 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
-    : forceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
+    : effectiveForceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
     ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
       sourceRevision: refreshedSource ?? sourceRevision(
@@ -688,9 +939,9 @@ const materializeUpsertEntity = Effect.fn(
         projectionSchemaVersion: schemaVersion,
         entityState: "present",
         entityType: kind,
-        displayKey: presentation.displayKey,
+        displayKey: effectivePresentation.displayKey,
         title: event.title,
-        details: presentation.details
+        details: effectivePresentation.details
       },
       recordedAt: scope.committedAt
     }],

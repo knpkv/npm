@@ -29,6 +29,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
@@ -641,9 +642,26 @@ const confluenceRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
     sourceUrl: "https://acme.atlassian.net/wiki/spaces/PAY/pages/991",
     title: "Payments 2026.29 runbook",
     attributes: {
-      spaceKey: "PAY",
-      currentVersion: 8,
+      schemaVersion: 1,
       status: "current",
+      spaceId: "PAY",
+      parentId: null,
+      createdAt: "2026-07-19T09:00:00.000Z",
+      updatedAt: "2026-07-19T09:02:40.000Z",
+      currentVersion: 8,
+      content: {
+        representation: "safe-markdown",
+        markdown: "## Release recovery\n\nKeep this exact page body out of graph cards."
+      },
+      versions: [{
+        number: 8,
+        createdAt: "2026-07-19T09:02:40.000Z",
+        message: "Document release recovery",
+        minorEdit: false,
+        authorId: null
+      }],
+      versionHistory: { complete: true, pagesFetched: 1 },
+      contributors: [],
       linkedIssueKeys: ["PAY-42"],
       linkedReleaseVersions: ["2026.29"]
     }
@@ -745,6 +763,21 @@ const items = Effect.fn("NormalizedPluginPageMaterializationTest.items")(functio
   })
   if (result._tag !== "workspaceEntityProjections") return yield* Effect.die("expected Items projection")
   return result.value
+})
+
+const exactFirstProjection = Effect.fn(
+  "NormalizedPluginPageMaterializationTest.exactFirstProjection"
+)(function*() {
+  const persistence = yield* Persistence
+  const entityId = (yield* items()).items[0]?.projection.entityId
+  if (entityId === undefined) return yield* Effect.die("expected one entity projection")
+  const result = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+    _tag: "entityProjection",
+    entityId,
+    revision: null
+  })
+  if (result._tag !== "entityProjection") return yield* Effect.die("expected an exact entity projection")
+  return result.value.projection
 })
 
 describe("normalized plugin page materialization", () => {
@@ -2221,6 +2254,17 @@ describe("normalized plugin page materialization", () => {
         limit: 100
       })
       if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+      const inspectionService = yield* makeDeliveryGraphInspection
+      const boundedSlice = yield* inspectionService.releaseSlice({
+        workspaceId: WORKSPACE_ID,
+        releaseId: release.id,
+        environmentId: null
+      })
+      const indexedPage = boundedSlice.entityProjections.find(({ projection }) => projection.details._tag === "page")
+        ?.projection
+      if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
+      assert.strictEqual(indexedPage.details.contentState, "lazy")
+      assert.isNull(indexedPage.details.content)
       const current = slice.value.relationships.filter(
         ({ lifecycle }) => lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
       )
@@ -4451,6 +4495,603 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected pull-request timestamp failure")
       }
       assert.strictEqual(failure.diagnosticCode, "normalized-pull-request-timestamp-invalid")
+    })))
+
+  it.effect("materializes rich Confluence state and enriches lazy content at the same source revision", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+      const attributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        schemaVersion: 1,
+        status: "current",
+        spaceId: "space-payments",
+        parentId: "parent-88",
+        createdAt: "2026-07-19T09:00:00.000Z",
+        updatedAt: "2026-07-19T09:02:00.000Z",
+        currentVersion: 12,
+        content: null,
+        contentState: "lazy",
+        versions: [{
+          number: 12,
+          createdAt: "2026-07-19T09:02:00.000Z",
+          message: "Add rollback verification",
+          minorEdit: false,
+          authorId: "account-ada"
+        }],
+        versionHistory: { complete: false, pagesFetched: 2 },
+        contributors: [{
+          accountId: "account-ada",
+          displayName: "Ada Kline",
+          active: true,
+          external: false,
+          resolved: true,
+          roles: ["owner", "author"]
+        }],
+        attachments: [{
+          id: "attachment-1",
+          title: "rollback-evidence.pdf",
+          createdAt: "2026-07-19T09:01:00.000Z",
+          mediaType: "application/pdf",
+          fileSize: 4096,
+          version: 3
+        }],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: false, pagesFetched: 2 }
+      })
+      const normalizedPage = (eventId: string, pageAttributes: Schema.JsonObject, revision = "12") =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: eventId,
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision,
+            entityType: "confluence-page",
+            vendorImmutableId: "991",
+            sourceUrl: "https://wiki.example.test/pages/991",
+            title: "Payments release runbook",
+            attributes: pageAttributes
+          }]
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        streamKey: Schema.decodeSync(PluginStreamKey)("confluence-rich-page"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(
+        scope,
+        normalizedPage("confluence-page-991-lazy", {
+          ...attributes,
+          linkedIssueKeys: ["PAY-42"],
+          linkedReleaseVersions: ["2026.29"]
+        })
+      )
+
+      const lazy = yield* exactFirstProjection()
+      if (lazy?.details._tag !== "page") return yield* Effect.die("expected a canonical page")
+      assert.strictEqual(lazy.projectionSchemaVersion, 2)
+      assert.strictEqual(lazy.details.contentState, "lazy")
+      assert.deepStrictEqual(lazy.details.linkedIssueKeys, ["PAY-42"])
+      assert.deepStrictEqual(lazy.details.linkedReleaseVersions, ["2026.29"])
+      assert.deepStrictEqual(lazy.details.contributors?.[0], {
+        sourcePersonId: "account-ada",
+        displayName: "Ada Kline",
+        active: true,
+        external: false,
+        resolved: true,
+        roles: ["owner", "author"]
+      })
+      assert.strictEqual(lazy.details.attachments?.[0]?.title, "rollback-evidence.pdf")
+
+      const loadedAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        schemaVersion: attributes.schemaVersion,
+        status: attributes.status,
+        spaceId: attributes.spaceId,
+        parentId: attributes.parentId,
+        createdAt: attributes.createdAt,
+        updatedAt: attributes.updatedAt,
+        currentVersion: attributes.currentVersion,
+        content: null,
+        versions: attributes.versions,
+        versionHistory: attributes.versionHistory,
+        contributors: attributes.contributors
+      })
+      const receipt = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3 },
+        normalizedPage("confluence-page-991-loaded", loadedAttributes)
+      )
+      assert.strictEqual(receipt.entityProjectionCount, 1)
+
+      const loaded = yield* exactFirstProjection()
+      if (loaded?.details._tag !== "page") return yield* Effect.die("expected an enriched canonical page")
+      assert.strictEqual(loaded.projectionRevision, 2)
+      assert.strictEqual(loaded.details.contentState, "loaded")
+      assert.isNull(loaded.details.content)
+      assert.strictEqual(loaded.details.attachments?.[0]?.title, "rollback-evidence.pdf")
+      assert.deepStrictEqual(loaded.details.watcherInventory, { complete: false, pagesFetched: 2 })
+      assert.deepStrictEqual(loaded.details.linkedIssueKeys, ["PAY-42"])
+      assert.deepStrictEqual(loaded.details.linkedReleaseVersions, ["2026.29"])
+
+      const nextRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...loadedAttributes,
+        currentVersion: 13,
+        updatedAt: "2026-07-19T09:03:00.000Z",
+        versions: [{
+          number: 13,
+          createdAt: "2026-07-19T09:03:00.000Z",
+          message: "Remove superseded delivery links",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...loadedAttributes.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T4 },
+        normalizedPage("confluence-page-991-v13", nextRevisionAttributes, "13")
+      )
+      const absent = yield* exactFirstProjection()
+      if (absent?.details._tag !== "page") return yield* Effect.die("expected a next-revision page")
+      assert.isUndefined(absent.details.linkedIssueKeys)
+      assert.isUndefined(absent.details.linkedReleaseVersions)
+
+      const revisionFourteenAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...nextRevisionAttributes,
+        currentVersion: 14,
+        updatedAt: "2026-07-19T09:04:00.000Z",
+        versions: [{
+          number: 14,
+          createdAt: "2026-07-19T09:04:00.000Z",
+          message: "Confirm explicit empty delivery links",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...nextRevisionAttributes.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T4 },
+        normalizedPage("confluence-page-991-v14", {
+          ...revisionFourteenAttributes,
+          linkedIssueKeys: [],
+          linkedReleaseVersions: []
+        }, "14")
+      )
+      const explicitlyCleared = yield* exactFirstProjection()
+      if (explicitlyCleared?.details._tag !== "page") return yield* Effect.die("expected an explicitly cleared page")
+      assert.deepStrictEqual(explicitlyCleared.details.linkedIssueKeys, [])
+      assert.deepStrictEqual(explicitlyCleared.details.linkedReleaseVersions, [])
+    })))
+
+  it.effect("merges same-revision Confluence reads without losing richer canonical state", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CONFLUENCE_PLUGIN_ID, "confluence")
+      const contributor = (
+        accountId: string,
+        displayName: string,
+        roles: ReadonlyArray<"author" | "contributor" | "owner" | "watcher">,
+        resolved = true
+      ) => ({ accountId, displayName, active: resolved, external: false, resolved, roles })
+      const owner = contributor("account-ada", "Ada Kline", ["owner", "author"])
+      const watcher = contributor("account-mina", "Mina Ortiz", ["watcher"])
+      const unresolvedOwner = contributor("account-ada", "Confluence user", ["contributor"], false)
+      const observer = contributor("account-tariq", "Tariq Bell", ["watcher"])
+      const schemaVersion: 1 = 1
+      const status: "current" = "current"
+      const common = {
+        schemaVersion,
+        status,
+        spaceId: "space-payments",
+        parentId: null,
+        createdAt: "2026-07-19T09:00:00.000Z",
+        updatedAt: "2026-07-19T09:02:00.000Z",
+        currentVersion: 12,
+        versions: [{
+          number: 12,
+          createdAt: "2026-07-19T09:02:00.000Z",
+          message: null,
+          minorEdit: false,
+          authorId: "account-ada"
+        }, {
+          number: 11,
+          createdAt: "2026-07-18T09:02:00.000Z",
+          message: "Previous complete revision",
+          minorEdit: false,
+          authorId: "account-ada"
+        }],
+        versionHistory: { complete: true, pagesFetched: 1 }
+      }
+      const loadedAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: { representation: "safe-markdown", markdown: "## Recovery\n\nKeep this body." },
+        contributors: [owner]
+      })
+      const attachment = {
+        id: "attachment-1",
+        title: "recovery.pdf",
+        createdAt: "2026-07-19T09:01:00.000Z",
+        mediaType: "application/pdf",
+        fileSize: 4096,
+        version: 1
+      }
+      const lazyAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: null,
+        contentState: "lazy",
+        contributors: [owner, watcher],
+        attachments: [attachment],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      const normalizedPage = (eventId: string, attributes: Schema.JsonObject, revision = "12") =>
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: eventId,
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId,
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision,
+            entityType: "confluence-page",
+            vendorImmutableId: "loaded-before-sync",
+            sourceUrl: "https://wiki.example.test/pages/loaded-before-sync",
+            title: "Loaded before sync",
+            attributes
+          }]
+        })
+      const scope: NormalizedPluginPageMaterializationScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONFLUENCE_PLUGIN_ID,
+        providerId: "confluence",
+        streamKey: Schema.decodeSync(PluginStreamKey)("confluence-loaded-before-sync"),
+        expectedRevision: 0,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      }
+      yield* materializeNormalizedPluginPage(scope, normalizedPage("loaded-page", loadedAttributes))
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 1, committedAt: T3 },
+        normalizedPage("lazy-sync", lazyAttributes)
+      )
+
+      const projection = yield* exactFirstProjection()
+      if (projection?.details._tag !== "page") return yield* Effect.die("expected a merged page")
+      assert.strictEqual(projection.details.contentState, "loaded")
+      assert.strictEqual(projection.details.content?.markdown, "## Recovery\n\nKeep this body.")
+      assert.strictEqual(projection.details.attachments?.[0]?.title, "recovery.pdf")
+      assert.sameMembers(
+        projection.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        ["account-ada", "account-mina"]
+      )
+
+      const partialInventoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...lazyAttributes,
+        attachments: [{
+          ...attachment,
+          id: "attachment-2",
+          title: "new-partial-evidence.pdf"
+        }],
+        attachmentInventory: { complete: false, pagesFetched: 1 },
+        versions: [{
+          number: 10,
+          createdAt: "2026-07-17T09:02:00.000Z",
+          message: "Newly observed partial history",
+          minorEdit: false,
+          authorId: "account-ada"
+        }],
+        versionHistory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 2, committedAt: T3 },
+        normalizedPage("partial-inventories", partialInventoryAttributes)
+      )
+      const afterPartialInventories = yield* exactFirstProjection()
+      if (afterPartialInventories?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after partial inventories")
+      }
+      assert.deepStrictEqual(
+        afterPartialInventories.details.attachments?.map(({ id }) => id),
+        ["attachment-2", "attachment-1"]
+      )
+      assert.deepStrictEqual(
+        afterPartialInventories.details.versions?.map(({ number }) => number),
+        [12, 11, 10]
+      )
+
+      const emptyPartialInventoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...partialInventoryAttributes,
+        attachments: [],
+        versions: []
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 3, committedAt: T3 },
+        normalizedPage("empty-partial-inventories", emptyPartialInventoryAttributes)
+      )
+      const afterEmptyPartialInventories = yield* exactFirstProjection()
+      if (afterEmptyPartialInventories?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after empty partial inventories")
+      }
+      assert.deepStrictEqual(
+        afterEmptyPartialInventories.details.attachments?.map(({ id }) => id),
+        ["attachment-2", "attachment-1"]
+      )
+      assert.deepStrictEqual(
+        afterEmptyPartialInventories.details.versions?.map(({ number }) => number),
+        [12, 11, 10]
+      )
+
+      const completeHistoryMissingCurrentAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...partialInventoryAttributes,
+        attachments: [],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        versions: common.versions.filter(({ number }) => number === 11),
+        versionHistory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 4, committedAt: T3 },
+        normalizedPage("complete-history-missing-current", completeHistoryMissingCurrentAttributes)
+      )
+      const afterCompleteHistoryMissingCurrent = yield* exactFirstProjection()
+      if (afterCompleteHistoryMissingCurrent?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after a complete history missing the current version")
+      }
+      assert.deepStrictEqual(afterCompleteHistoryMissingCurrent.details.attachments, [])
+      assert.deepStrictEqual(
+        afterCompleteHistoryMissingCurrent.details.versions?.map(({ number }) => number),
+        [12, 11]
+      )
+
+      const completeCurrentVersionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...completeHistoryMissingCurrentAttributes,
+        versions: common.versions.filter(({ number }) => number === 12)
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 5, committedAt: T3 },
+        normalizedPage("complete-current-version", completeCurrentVersionAttributes)
+      )
+      const afterCompleteCurrentVersion = yield* exactFirstProjection()
+      if (afterCompleteCurrentVersion?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after a complete current-version history")
+      }
+      assert.deepStrictEqual(
+        afterCompleteCurrentVersion.details.versions?.map(({ number }) => number),
+        [12]
+      )
+
+      const inspectionService = yield* makeDeliveryGraphInspection
+      const indexed = yield* inspectionService.workspaceEntityProjections({
+        workspaceId: WORKSPACE_ID,
+        owner: null,
+        query: null,
+        service: null,
+        status: null,
+        type: null
+      })
+      const indexedDetails = indexed.items[0]?.projection.details
+      if (indexedDetails?._tag !== "page") return yield* Effect.die("expected an indexed page")
+      assert.strictEqual(indexedDetails.contentState, "lazy")
+      assert.isNull(indexedDetails.content)
+      const exact = yield* inspectionService.workspaceEntity({
+        workspaceId: WORKSPACE_ID,
+        entityId: projection.entityId
+      })
+      if (exact.entity.projection.details._tag !== "page") return yield* Effect.die("expected an exact page")
+      assert.strictEqual(exact.entity.projection.details.content?.markdown, "## Recovery\n\nKeep this body.")
+
+      const loadedNullAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        content: null,
+        contributors: [unresolvedOwner, watcher],
+        attachments: [attachment],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 6, committedAt: T3 },
+        normalizedPage("partial-loaded-read", loadedNullAttributes)
+      )
+      const afterNullRead = yield* exactFirstProjection()
+      if (afterNullRead?.details._tag !== "page") return yield* Effect.die("expected a page after a null read")
+      assert.strictEqual(afterNullRead.details.content?.markdown, "## Recovery\n\nKeep this body.")
+      assert.deepStrictEqual(
+        afterNullRead.details.contributors?.find(({ sourcePersonId }) => sourcePersonId === "account-ada"),
+        {
+          sourcePersonId: "account-ada",
+          displayName: "Ada Kline",
+          active: true,
+          external: false,
+          resolved: true,
+          roles: ["owner", "author", "contributor"]
+        }
+      )
+
+      const metadataOnlyAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...loadedNullAttributes,
+        contributors: [unresolvedOwner, watcher, observer]
+      })
+      const metadataReceipt = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 7, committedAt: T3 },
+        normalizedPage("metadata-only-sync", metadataOnlyAttributes)
+      )
+      assert.strictEqual(metadataReceipt.entityProjectionCount, 1)
+      const afterMetadata = yield* exactFirstProjection()
+      if (afterMetadata?.details._tag !== "page") return yield* Effect.die("expected a metadata-enriched page")
+      assert.include(
+        afterMetadata.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const incompleteOmissionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...metadataOnlyAttributes,
+        contributors: [unresolvedOwner, watcher],
+        watcherInventory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 8, committedAt: T3 },
+        normalizedPage("incomplete-watcher-omission", incompleteOmissionAttributes)
+      )
+      const afterIncompleteOmission = yield* exactFirstProjection()
+      if (afterIncompleteOmission?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after an incomplete watcher read")
+      }
+      assert.include(
+        afterIncompleteOmission.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const completeOmissionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...incompleteOmissionAttributes,
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 9, committedAt: T3 },
+        normalizedPage("complete-watcher-omission", completeOmissionAttributes)
+      )
+      const afterCompleteOmission = yield* exactFirstProjection()
+      if (afterCompleteOmission?.details._tag !== "page") {
+        return yield* Effect.die("expected a page after a complete watcher read")
+      }
+      assert.notInclude(
+        afterCompleteOmission.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-tariq"
+      )
+
+      const replay = yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 10, committedAt: T3 },
+        normalizedPage("identical-metadata-sync", completeOmissionAttributes)
+      )
+      assert.strictEqual(replay.entityProjectionCount, 0)
+
+      const nextRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...common,
+        currentVersion: 13,
+        updatedAt: "2026-07-19T09:06:00.000Z",
+        content: null,
+        contributors: [owner],
+        versions: [{
+          number: 13,
+          createdAt: "2026-07-19T09:06:00.000Z",
+          message: "Clear obsolete body",
+          minorEdit: false,
+          authorId: "account-ada"
+        }, ...common.versions]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 11, committedAt: T4 },
+        normalizedPage("next-revision-empty", nextRevisionAttributes, "13")
+      )
+      const nextRevision = yield* exactFirstProjection()
+      if (nextRevision?.details._tag !== "page") return yield* Effect.die("expected the next page revision")
+      assert.strictEqual(nextRevision.details.contentState, "loaded")
+      assert.isNull(nextRevision.details.content)
+      assert.isTrue(nextRevision.details.versionHistory?.complete)
+
+      const historyVersion = (number: number) => ({
+        number,
+        createdAt: "2026-07-19T09:06:00.000Z",
+        message: null,
+        minorEdit: false,
+        authorId: "account-ada"
+      })
+      const maximumRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...nextRevisionAttributes,
+        currentVersion: 501,
+        updatedAt: "2026-07-19T09:07:00.000Z",
+        versions: [historyVersion(501)]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 12, committedAt: T4 },
+        normalizedPage("maximum-revision", maximumRevisionAttributes, "501")
+      )
+      const boundedCompleteHistoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...maximumRevisionAttributes,
+        versions: Array.from({ length: 499 }, (_, index) => historyVersion(index + 1)),
+        versionHistory: { complete: true, pagesFetched: 5 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 13, committedAt: T4 },
+        normalizedPage("bounded-complete-history", boundedCompleteHistoryAttributes, "501")
+      )
+      const boundedCompleteHistory = yield* exactFirstProjection()
+      if (boundedCompleteHistory?.details._tag !== "page") {
+        return yield* Effect.die("expected a bounded complete page history")
+      }
+      assert.lengthOf(boundedCompleteHistory.details.versions ?? [], 500)
+      assert.include(boundedCompleteHistory.details.versions?.map(({ number }) => number) ?? [], 501)
+      assert.isTrue(boundedCompleteHistory.details.versionHistory?.complete)
+
+      const overflowingHistoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...boundedCompleteHistoryAttributes,
+        versions: Array.from({ length: 500 }, (_, index) => historyVersion(index + 1))
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 14, committedAt: T4 },
+        normalizedPage("overflowing-complete-history", overflowingHistoryAttributes, "501")
+      )
+      const overflowingHistory = yield* exactFirstProjection()
+      if (overflowingHistory?.details._tag !== "page") {
+        return yield* Effect.die("expected an overflowed page history")
+      }
+      assert.lengthOf(overflowingHistory.details.versions ?? [], 500)
+      assert.include(overflowingHistory.details.versions?.map(({ number }) => number) ?? [], 501)
+      assert.isFalse(overflowingHistory.details.versionHistory?.complete)
+
+      const boundedContributors = [
+        owner,
+        ...Array.from(
+          { length: 501 },
+          (_, index) =>
+            contributor(`account-owner-${String(index).padStart(3, "0")}`, `Owner ${String(index)}`, ["owner"])
+        )
+      ]
+      const boundedContributorAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...overflowingHistoryAttributes,
+        contributors: boundedContributors,
+        watcherInventory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 15, committedAt: T4 },
+        normalizedPage("bounded-contributors", boundedContributorAttributes, "501")
+      )
+      const overflowContributor = contributor("account-overflow-watcher", "Overflow Watcher", ["watcher"])
+      const overflowingContributorAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...overflowingHistoryAttributes,
+        contributors: [overflowContributor],
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 16, committedAt: T4 },
+        normalizedPage("overflowing-contributors", overflowingContributorAttributes, "501")
+      )
+      const afterContributorOverflow = yield* exactFirstProjection()
+      if (afterContributorOverflow?.details._tag !== "page") {
+        return yield* Effect.die("expected bounded contributors after same-revision enrichment")
+      }
+      assert.lengthOf(afterContributorOverflow.details.contributors ?? [], 502)
+      assert.notInclude(
+        afterContributorOverflow.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-overflow-watcher"
+      )
+      assert.isFalse(afterContributorOverflow.details.watcherInventory?.complete)
+
+      const currentlessNewRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...maximumRevisionAttributes,
+        currentVersion: 502,
+        updatedAt: "2026-07-19T09:08:00.000Z",
+        versions: [historyVersion(501)],
+        versionHistory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 17, committedAt: T4 },
+        normalizedPage("currentless-new-revision", currentlessNewRevisionAttributes, "502")
+      )
+      const currentlessNewRevision = yield* exactFirstProjection()
+      if (currentlessNewRevision?.details._tag !== "page") {
+        return yield* Effect.die("expected a current-less new page revision")
+      }
+      assert.isFalse(currentlessNewRevision.details.versionHistory?.complete)
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>

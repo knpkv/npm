@@ -1,7 +1,7 @@
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
-import { Role } from "../domain/actors.js"
+import { PersonSourceIdentity, Role } from "../domain/actors.js"
 import {
   DeliveryEntityKind,
   DeliveryEntityProjection,
@@ -101,7 +101,8 @@ export const WorkspaceEntityOwner = Schema.Struct({
   avatarFallback: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4)),
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   personId: PersonId,
-  roles: boundedArray(Role, MAXIMUM_WORKSPACE_OWNER_ROLES).check(Schema.isMinLength(1))
+  roles: boundedArray(Role, MAXIMUM_WORKSPACE_OWNER_ROLES).check(Schema.isMinLength(1)),
+  sourceIdentities: Schema.optionalKey(boundedArray(PersonSourceIdentity, MAXIMUM_WORKSPACE_OWNER_ROLES))
 }).annotate({ identifier: "WorkspaceEntityOwner" })
 
 /** Decoded entity owner identity. */

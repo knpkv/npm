@@ -89,7 +89,7 @@ const inspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspectio
             roles: ["assignee", "commenter"]
           },
           {
-            sourcePersonId: "account-ada",
+            sourcePersonId: "01890f6f-6d6a-7cc0-98d2-000000000071",
             displayName: "Ada Kline",
             avatarUrl: null,
             active: true,
@@ -352,6 +352,136 @@ const pipelineInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
   activity: { truncated: false, events: [] }
 })
 
+const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityType: "page",
+      displayKey: "991",
+      title: "Payments release runbook",
+      details: {
+        _tag: "page",
+        spaceKey: "PAY",
+        revision: "12",
+        status: "current",
+        sourceSpaceId: "space-payments",
+        parentSourceId: "parent-88",
+        createdAt: "2026-07-10T08:00:00.000Z",
+        updatedAt: "2026-07-14T10:00:00.000Z",
+        contentState: "loaded",
+        content: {
+          representation: "safe-markdown",
+          markdown: [
+            "## Production recovery",
+            "",
+            "Follow the [safe checklist](https://wiki.example.test/checklist).",
+            "[Unsafe](javascript:alert(1)) ![tracker](https://evil.example.test/pixel.png)",
+            '<script>window.evil = true</script><iframe src="https://evil.example.test"></iframe>'
+          ].join("\n")
+        },
+        contributors: [
+          {
+            sourcePersonId: "account-ada",
+            displayName: "Ada Kline",
+            active: true,
+            external: false,
+            resolved: true,
+            roles: ["owner", "author"]
+          },
+          {
+            sourcePersonId: "account-mina",
+            displayName: "Mina Ortiz",
+            active: true,
+            external: false,
+            resolved: true,
+            roles: ["watcher"]
+          },
+          {
+            sourcePersonId: "account-mina",
+            displayName: "Confluence user",
+            active: false,
+            external: false,
+            resolved: false,
+            roles: ["contributor"]
+          },
+          {
+            sourcePersonId: "account-alex-one",
+            displayName: "Alex Lee",
+            active: true,
+            external: false,
+            resolved: true,
+            roles: ["contributor"]
+          },
+          {
+            sourcePersonId: "account-alex-two",
+            displayName: "Alex Lee",
+            active: true,
+            external: true,
+            resolved: true,
+            roles: ["watcher"]
+          }
+        ],
+        versions: [
+          {
+            number: 12,
+            createdAt: "2026-07-14T10:00:00.000Z",
+            message: "Add rollback verification",
+            minorEdit: false,
+            authorSourcePersonId: "01890f6f-6d6a-7cc0-98d2-000000000071"
+          },
+          {
+            number: 11,
+            createdAt: "2026-07-13T10:00:00.000Z",
+            message: null,
+            minorEdit: true,
+            authorSourcePersonId: null
+          }
+        ],
+        versionHistory: { complete: false, pagesFetched: 2 },
+        attachments: [
+          {
+            id: "attachment-1",
+            title: "rollback-evidence.pdf",
+            createdAt: "2026-07-14T09:00:00.000Z",
+            mediaType: "application/pdf",
+            fileSize: 4096,
+            version: 3
+          }
+        ],
+        attachmentInventory: { complete: true, pagesFetched: 1 },
+        watcherInventory: { complete: false, pagesFetched: 2 }
+      }
+    },
+    owners: [
+      {
+        avatarFallback: "AK",
+        displayName: "Ada Kline",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
+        roles: ["page-owner"],
+        sourceIdentities: [
+          {
+            pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000081",
+            providerId: "confluence",
+            vendorPersonId: "account-ada"
+          }
+        ]
+      }
+    ]
+  },
+  source: {
+    ...sourceRevision,
+    providerId: "confluence",
+    vendorImmutableId: "991",
+    revision: "12",
+    sourceUrl: "https://wiki.example.test/pages/991"
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  activity: { truncated: false, events: [] }
+})
+
 const state = {
   _tag: "stale",
   entityId: inspection.entity.projection.entityId,
@@ -376,6 +506,15 @@ const pipelineState = {
   entityId: pipelineInspection.entity.projection.entityId,
   inspection: pipelineInspection,
   refreshKey: "snapshot-pipeline",
+  sessionKey: "session-a",
+  workspaceId: WORKSET_WORKSPACE_ID
+} satisfies WorkspaceEntityState
+
+const confluenceState = {
+  _tag: "ready",
+  entityId: confluenceInspection.entity.projection.entityId,
+  inspection: confluenceInspection,
+  refreshKey: "snapshot-confluence",
   sessionKey: "session-a",
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
@@ -905,6 +1044,64 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Pull requests")
     expect(host.textContent).toContain("Runbooks")
     expect(host.querySelectorAll("a[href*='bucket'], a[href*='artifact'], a[href*='logs']")).toHaveLength(0)
+  })
+
+  it("renders a human-first Confluence document without executing content or exposing attachment media", async () => {
+    const host = await renderView(() => undefined, confluenceState)
+
+    expect(host.querySelector("[data-workspace-confluence-page-detail]")).not.toBeNull()
+    expect(host.textContent).toContain("Payments release runbook")
+    expect(host.textContent).toContain("Production recovery")
+    expect(host.textContent).toContain("Revision12")
+    expect(host.textContent).toContain("Ada Kline")
+    expect(host.textContent).toContain("Owner · Author")
+    expect(host.textContent).toContain("Mina Ortiz")
+    expect(host.textContent).toContain("Watcher")
+    expect(host.textContent).toContain("Add rollback verification")
+    expect(host.textContent).toContain("rollback-evidence.pdf")
+    expect(host.textContent).toContain("authenticated proxy required")
+    expect(host.querySelector<HTMLAnchorElement>('a[href="https://wiki.example.test/checklist"]')).not.toBeNull()
+    expect(host.querySelector('a[href^="javascript:"], img, script, iframe')).toBeNull()
+    expect(host.querySelector('a[href*="attachment"], a[href*="pixel.png"]')).toBeNull()
+    expect(host.querySelector("textarea, input")).toBeNull()
+    expect(host.textContent).not.toContain("Publish")
+  })
+
+  it("keeps same-name Confluence accounts distinct while collapsing an exact collaborator identity", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, confluenceInspection)
+    const collaborators = [
+      ...presentation.collaborators.authors,
+      ...presentation.collaborators.owners,
+      ...presentation.collaborators.reviewers
+    ]
+
+    expect(collaborators.filter(({ name }) => name === "Alex Lee")).toHaveLength(2)
+    expect(collaborators.filter(({ name }) => name === "Ada Kline")).toHaveLength(1)
+    expect(collaborators.filter(({ id }) => id === "01890f6f-6d6a-7cc0-98d2-000000000071")).toHaveLength(1)
+    expect(presentation.confluencePage?.contributors.filter(({ id }) => id === "account-mina")).toHaveLength(1)
+    expect(presentation.confluencePage?.contributors.find(({ id }) => id === "account-mina")?.name).toBe("Mina Ortiz")
+    expect(presentation.confluencePage?.contributors.find(({ id }) => id === "account-mina")?.role).toContain(
+      "Watcher · Contributor"
+    )
+  })
+
+  it("states the lazy Confluence content boundary without inventing a document body", async () => {
+    const encoded = Schema.encodeSync(WorkspaceEntityInspection)(confluenceInspection)
+    const lazyInspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+      ...encoded,
+      entity: {
+        ...encoded.entity,
+        projection: {
+          ...encoded.entity.projection,
+          details: { ...encoded.entity.projection.details, content: null, contentState: "lazy" }
+        }
+      }
+    })
+    const host = await renderView(() => undefined, { ...confluenceState, inspection: lazyInspection })
+
+    expect(host.textContent).toContain("Content has not been loaded")
+    expect(host.textContent).toContain("Open the authenticated Confluence source")
+    expect(host.querySelector("[data-workspace-rich-text]")).toBeNull()
   })
 
   it("renders a bounded release-membership count as a lower bound", async () => {
