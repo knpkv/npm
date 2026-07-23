@@ -170,6 +170,11 @@ const ClockifyWorkspaceUserIdentity = Schema.Struct({ id: ClockifyIdentifier })
 const ClockifyWorkspaceUser = Schema.Struct({
   id: ClockifyIdentifier,
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  memberships: Schema.optionalKey(Schema.Array(Schema.Struct({
+    membershipStatus: Schema.optionalKey(Schema.String),
+    membershipType: Schema.optionalKey(Schema.String),
+    targetId: Schema.optionalKey(ClockifyIdentifier)
+  }))),
   status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
 })
 const ClockifyWorkspaceDirectory = Schema.Array(Schema.Unknown)
@@ -342,6 +347,30 @@ const decodeScopedWorkspaceUsers = Effect.fn("ClockifyReadPlugin.decodeScopedWor
   )
 })
 
+const readScopedWorkspaceUsers = Effect.fn("ClockifyReadPlugin.readScopedWorkspaceUsers")(function*(
+  provider: ClockifyReadProvider,
+  configuration: ClockifyReadPluginConfiguration,
+  configuredUserIds: ReadonlyArray<string>
+) {
+  const users = new Map<string, (typeof ClockifyWorkspaceUsers.Type)[number]>()
+  for (let page = 1; page <= 1_000; page++) {
+    const raw = yield* withTimeout(
+      "clockify-workspace-users",
+      configuration.operationTimeoutMillis,
+      provider.getWorkspaceUsers(configuration.workspaceId, { page, pageSize: 500 })
+    )
+    const directory = yield* decodeProvider(
+      "clockify-sync",
+      "clockify-workspace-users-shape-invalid",
+      ClockifyWorkspaceDirectory,
+      raw
+    )
+    for (const user of yield* decodeScopedWorkspaceUsers(directory, configuredUserIds)) users.set(user.id, user)
+    if (users.size === configuredUserIds.length || directory.length < 500) return [...users.values()]
+  }
+  return yield* malformed("clockify-sync", "clockify-workspace-users-page-limit-exceeded")
+})
+
 const streamSyncPages = (options: {
   readonly provider: ClockifyReadProvider
   readonly configuration: ClockifyReadPluginConfiguration
@@ -399,7 +428,7 @@ const streamSyncPages = (options: {
           const anchor = entityEvents.find((event) => event.attributes.userId === userId)
           return user === undefined || anchor === undefined
             ? Effect.succeed(null)
-            : normalizeClockifyPerson({ user })
+            : normalizeClockifyPerson({ user, workspaceId: options.configuration.workspaceId })
         },
         { concurrency: options.configuration.maximumConcurrency }
       ).pipe(Effect.map((events) => events.filter((event) => event !== null)))
@@ -510,11 +539,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
             return Stream.unwrap(
               Effect.all([
                 startPageFromCheckpoint(request.checkpoint, syncScopeDigest),
-                withTimeout(
-                  "clockify-workspace-users",
-                  decoded.operationTimeoutMillis,
-                  provider.getWorkspaceUsers(decoded.workspaceId)
-                ).pipe(Effect.flatMap((users) => decodeScopedWorkspaceUsers(users, userIds)))
+                readScopedWorkspaceUsers(provider, decoded, userIds)
               ], { concurrency: 2 }).pipe(
                 Effect.map(([startPage, workspaceUsers]) =>
                   streamSyncPages({

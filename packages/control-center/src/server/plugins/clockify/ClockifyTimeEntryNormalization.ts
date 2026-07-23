@@ -18,6 +18,11 @@ const ClockifyPersonObservedAt = DateTime.makeUnsafe(0)
 const ClockifyPersonResponse = Schema.Struct({
   id: ClockifyIdentifier,
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  memberships: Schema.optionalKey(Schema.Array(Schema.Struct({
+    membershipStatus: Schema.optionalKey(Schema.String),
+    membershipType: Schema.optionalKey(Schema.String),
+    targetId: Schema.optionalKey(ClockifyIdentifier)
+  }))),
   status: Schema.optionalKey(
     Schema.Literals(["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"])
   )
@@ -85,6 +90,7 @@ export const digestClockifySyncScope = (scope: {
 /** Normalize one workspace user, using its own digest as the stable event identity. @internal */
 export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization.normalizePerson")(function*(input: {
   readonly user: unknown
+  readonly workspaceId: string
 }): Effect.fn.Return<
   ClockifyPersonEvent,
   PluginConfigurationFailure | PluginMalformedResponseFailure,
@@ -93,7 +99,12 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
   const user = yield* Schema.decodeUnknownEffect(ClockifyPersonResponse)(input.user).pipe(
     Effect.mapError(() => malformed("clockify-person-shape-invalid"))
   )
-  const active = user.status !== "DELETED" && user.status !== "LIMITED_DELETED"
+  const workspaceMembership = user.memberships?.find(
+    ({ membershipType, targetId }) => membershipType === "WORKSPACE" && targetId === input.workspaceId
+  )
+  const active = workspaceMembership?.membershipStatus === undefined
+    ? user.status !== "DELETED" && user.status !== "LIMITED_DELETED"
+    : workspaceMembership.membershipStatus === "ACTIVE"
   const revision = yield* digestJson({
     active,
     id: user.id,

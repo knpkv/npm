@@ -273,6 +273,27 @@ describe("ClockifyReadPlugin", () => {
       assert.isFalse(person.active)
     }))
 
+  it.effect("derives Clockify person activity from workspace membership", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getWorkspaceUsers: () =>
+            Effect.succeed([{
+              id: "user-1",
+              name: "Former Member",
+              status: "ACTIVE",
+              memberships: [{ membershipType: "WORKSPACE", targetId: "workspace-1", membershipStatus: "INACTIVE" }]
+            }])
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", maximumPages: 1 }
+      )
+      const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected workspace member")
+      assert.isFalse(person.active)
+    }))
+
   it.effect("scopes large Clockify directories before decoding configured users", () =>
     Effect.gen(function*() {
       for (const directorySize of [10_000, 10_001]) {
@@ -332,9 +353,12 @@ describe("ClockifyReadPlugin", () => {
   it.effect("changes Clockify person identity only when the profile changes", () =>
     Effect.gen(function*() {
       const user = { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
-      const first = yield* normalizeClockifyPerson({ user })
-      const second = yield* normalizeClockifyPerson({ user })
-      const renamed = yield* normalizeClockifyPerson({ user: { ...user, name: "Ada Byron" } })
+      const first = yield* normalizeClockifyPerson({ user, workspaceId: "workspace-1" })
+      const second = yield* normalizeClockifyPerson({ user, workspaceId: "workspace-1" })
+      const renamed = yield* normalizeClockifyPerson({
+        user: { ...user, name: "Ada Byron" },
+        workspaceId: "workspace-1"
+      })
       assert.strictEqual(first.eventId, second.eventId)
       assert.strictEqual(first.revision, second.revision)
       assert.deepStrictEqual(

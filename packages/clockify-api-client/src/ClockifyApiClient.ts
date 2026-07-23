@@ -49,6 +49,11 @@ export interface ClockifyApiClientShape {
   readonly getWorkspaceUsers?: (
     workspaceId: string
   ) => Effect.Effect<ReadonlyArray<WorkspaceUser>, ClockifyClientError>
+  readonly getWorkspaceUsersPage?: (
+    workspaceId: string,
+    page: number,
+    pageSize: number
+  ) => Effect.Effect<ReadonlyArray<WorkspaceUser>, ClockifyClientError>
   readonly getWorkspaces: () => Effect.Effect<ReadonlyArray<Workspace>, ClockifyClientError>
   readonly getProjects: (workspaceId: string) => Effect.Effect<ReadonlyArray<Project>, ClockifyClientError>
   readonly getProjectByName: (workspaceId: string, name: string) => Effect.Effect<Project | null, ClockifyClientError>
@@ -133,18 +138,26 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
         const getTags = (workspaceId: string) =>
           api.getTags(workspaceId, { params: { archived: false, "page-size": 200 } })
 
+        const getWorkspaceUsersPage = Effect.fn("ClockifyApiClient.getWorkspaceUsersPage")(function*(
+          workspaceId: string,
+          page: number,
+          pageSize: number
+        ) {
+          return yield* api.getUsersOfWorkspace(workspaceId, {
+            params: {
+              "account-statuses": "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED",
+              "include-roles": "false",
+              memberships: "ALL",
+              page,
+              "page-size": pageSize,
+              status: "ALL"
+            }
+          })
+        })
         const getWorkspaceUsers = Effect.fn("ClockifyApiClient.getWorkspaceUsers")(function*(workspaceId: string) {
           const users: Array<WorkspaceUser> = []
           for (let page = 1;; page++) {
-            const batch = yield* api.getUsersOfWorkspace(workspaceId, {
-              params: {
-                "account-statuses": "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED",
-                "include-roles": "false",
-                page,
-                "page-size": 500,
-                status: "ALL"
-              }
-            })
+            const batch = yield* getWorkspaceUsersPage(workspaceId, page, 500)
             for (const user of batch) users.push(user)
             if (batch.length < 500) break
           }
@@ -154,6 +167,7 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
         return ClockifyApiClient.of({
           getUser: () => api.getLoggedUser(undefined),
           getWorkspaceUsers,
+          getWorkspaceUsersPage,
           getWorkspaces: () => api.getWorkspacesOfUser(undefined),
           getProjects,
           getProjectByName: (workspaceId, name) =>

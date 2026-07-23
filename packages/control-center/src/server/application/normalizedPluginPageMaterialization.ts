@@ -955,7 +955,7 @@ const reconcileTimeEntryContributor = Effect.fn(
     )
     roleAssignments.set(updated.assignment.assignmentId, updated)
   }
-  if (Result.isFailure(person)) return
+  if (Result.isFailure(person) || !person.success.person.isActive) return
   const assignmentId = RoleAssignmentId.make(
     yield* stableUuid(
       cryptoService,
@@ -1796,7 +1796,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
         if (
           accepted.has(event.eventId) ||
           event._tag !== "UpsertEntity" ||
-          canonicalKind(event.entityType) !== "time-entry"
+          canonicalKind(event.entityType) !== "time-entry" ||
+          acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
         ) return false
         const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
         return Result.isSuccess(attributes) &&
@@ -1809,7 +1810,6 @@ export const materializeNormalizedPluginPage = Effect.fn(
       const event of [
         ...acceptedEvents,
         ...backfillEntityEvents,
-        ...roleBackfillEntityEvents,
         ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
       ]
     ) entityEventById.set(event.eventId, event)
@@ -1824,19 +1824,36 @@ export const materializeNormalizedPluginPage = Effect.fn(
     let relationshipCount = 0
     let skippedEntityCount = 0
 
-    for (const event of acceptedEvents) {
+    for (const event of page.events) {
       if (event._tag !== "UpsertPerson") continue
       personCount += yield* materializePerson(persistence, cryptoService, scope, event)
     }
     const roleAssignments = new Map<RoleAssignmentId, RoleAssignmentRecord>()
     if (
-      entityEvents.some(
+      roleBackfillEntityEvents.length > 0 || entityEvents.some(
         (event) => event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
       )
     ) {
       for (const record of yield* persistence.people.listRoleAssignments(scope.workspaceId)) {
         roleAssignments.set(record.assignment.assignmentId, record)
       }
+    }
+    for (const event of roleBackfillEntityEvents) {
+      if (event._tag !== "UpsertEntity") continue
+      const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
+      const userId = Result.isSuccess(attributes) ? attributes.success.userId : null
+      if (userId === null || userId === undefined) continue
+      const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+      if (existing === null) continue
+      yield* reconcileTimeEntryContributor(
+        persistence,
+        cryptoService,
+        scope,
+        existing.entityId,
+        userId,
+        event.eventId,
+        roleAssignments
+      )
     }
     for (const event of entityEvents) {
       if (event._tag === "UpsertEntity") {
