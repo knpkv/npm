@@ -365,7 +365,7 @@ describe("manual plugin synchronization", () => {
       )
     })))
 
-  it.effect("preserves synchronization for a compatible historical Jira runtime", () =>
+  it.effect("rejects synchronization for a historical Jira runtime without sync capability", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "jira")
@@ -390,17 +390,19 @@ describe("manual plugin synchronization", () => {
       const synchronized = yield* synchronization.synchronize({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: fixture.pluginConnectionId
-      })
+      }).pipe(Effect.result)
 
-      assert.strictEqual(synchronized.result, "synchronized")
-      assert.strictEqual(synchronized.pagesCommitted, 1)
+      assert.isTrue(Result.isFailure(synchronized))
+      if (Result.isFailure(synchronized)) {
+        assert.instanceOf(synchronized.failure, ApplicationInvalidRequest)
+      }
       assert.lengthOf(
         yield* persistence.pluginRuntime.listSyncAttempts(
           WORKSPACE_ID,
           fixture.pluginConnectionId,
           streamKey
         ),
-        1
+        0
       )
     })))
 

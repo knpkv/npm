@@ -485,13 +485,13 @@ describe("application adapters", () => {
           isEnabled: false
         })
         assert.strictEqual(disabled.health?._tag, "disabled")
-        assert.isTrue(disabled.supportsSynchronization)
+        assert.isFalse(disabled.supportsSynchronization)
         assert.deepStrictEqual(yield* Fiber.join(wakeFiber), Option.some(WORKSPACE_ID))
         const listedDisabled = (yield* administration.list(WORKSPACE_ID)).find(
           ({ pluginConnectionId }) => pluginConnectionId === PLUGIN_ID
         )
         assert.strictEqual(listedDisabled?.health?._tag, "disabled")
-        assert.isTrue(listedDisabled?.supportsSynchronization)
+        assert.isFalse(listedDisabled?.supportsSynchronization)
         assert.strictEqual(
           (yield* administration.health({ workspaceId: WORKSPACE_ID, pluginConnectionId: PLUGIN_ID })).health._tag,
           "disabled"

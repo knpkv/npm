@@ -296,9 +296,6 @@ const JiraDescriptionDocument = Schema.Struct({
   version: Schema.Literal(1),
   content: Schema.Array(Schema.Json)
 })
-const EditDescriptionRequestPayload = Schema.Struct({
-  description: JiraDescriptionDocument
-})
 const AddCommentRequestPayload = Schema.Struct({
   body: JiraDescriptionDocument
 })
@@ -315,10 +312,6 @@ const JiraActionComment = Schema.Struct({
 })
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraActionPayload = Schema.Union([
-  Schema.TaggedStruct("edit-description", {
-    issueKey: JiraIssueKey,
-    description: JiraDescriptionDocument
-  }),
   Schema.TaggedStruct("add-comment", {
     issueKey: JiraIssueKey,
     body: JiraDescriptionDocument
@@ -398,7 +391,6 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
   if (
     request.target.entityType !== "jira.issue" ||
     (
-      request.actionKind !== "edit-description" &&
       request.actionKind !== "add-comment" &&
       request.actionKind !== "transition"
     )
@@ -410,21 +402,7 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
     })
   }
   const issue = yield* loadActionIssue(provider, configuration, request)
-  const payload = request.actionKind === "edit-description"
-    ? JiraActionPayload.make({
-      _tag: "edit-description",
-      issueKey: issue.key,
-      description: (yield* Schema.decodeUnknownEffect(
-        Schema.toType(EditDescriptionRequestPayload)
-      )(request.payload).pipe(
-        Effect.mapError(() =>
-          new PluginConfigurationFailure({
-            diagnosticCode: "jira-action-payload-invalid"
-          })
-        )
-      )).description
-    })
-    : request.actionKind === "add-comment"
+  const payload = request.actionKind === "add-comment"
     ? JiraActionPayload.make({
       _tag: "add-comment",
       issueKey: issue.key,
@@ -490,16 +468,12 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
     capabilityVersion: 1,
     request: { ...request, payload },
     payloadDigest,
-    summary: payload._tag === "edit-description"
-      ? `Edit Jira issue ${issue.key} description`
-      : payload._tag === "add-comment"
+    summary: payload._tag === "add-comment"
       ? `Comment on Jira issue ${issue.key}`
       : `Move Jira issue ${issue.key} to ${payload.toStatusName}`,
     impact: {
       level: "medium",
-      summary: payload._tag === "edit-description"
-        ? "Replaces the Jira issue description at the inspected revision"
-        : payload._tag === "add-comment"
+      summary: payload._tag === "add-comment"
         ? "Adds a durable comment to the Jira issue"
         : `Transitions the Jira issue to ${payload.toStatusName}`
     },
@@ -528,7 +502,6 @@ const decodeAuthorizedJiraAction = Effect.fn("JiraReadPlugin.decodeAuthorizedAct
   if (
     proposalRequest.target.entityType !== "jira.issue" ||
     (
-      proposalRequest.actionKind !== "edit-description" &&
       proposalRequest.actionKind !== "add-comment" &&
       proposalRequest.actionKind !== "transition"
     )
@@ -653,10 +626,7 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
   const action = yield* decodeAuthorizedJiraAction(request)
   const inspected = yield* loadActionIssue(provider, configuration, action.request).pipe(Effect.result)
   if (Result.isFailure(inspected)) {
-    if (inspected.failure._tag === "PluginConflictFailure") {
-      return confirmedJiraActionFailure(action, request, yield* DateTime.now)
-    }
-    return yield* inspected.failure
+    return confirmedJiraActionFailure(action, request, yield* DateTime.now)
   }
   if (action.payload._tag === "transition") {
     const transitionAction = action.payload
@@ -675,22 +645,13 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
     }
   }
   const reconciliationKey = reconciliationKeyForAction(action, request.payloadDigest)
-  const operation = action.payload._tag === "edit-description"
-    ? "jira-edit-issue"
-    : action.payload._tag === "add-comment"
+  const operation = action.payload._tag === "add-comment"
     ? "jira-add-comment"
     : "jira-transition-issue"
   const mutation = yield* withTimeout(
     operation,
     configuration.operationTimeoutMillis,
-    action.payload._tag === "edit-description"
-      ? provider.updateIssueDescription(action.issueId, action.payload.description).pipe(
-        Effect.as({
-          providerOperationId: `jr:edit-description:${action.issueId}:${request.payloadDigest}`,
-          safeSummary: `Jira issue ${action.payload.issueKey} description updated`
-        })
-      )
-      : action.payload._tag === "add-comment"
+    action.payload._tag === "add-comment"
       ? provider.addIssueComment(action.issueId, action.payload.body, request.idempotencyKey).pipe(
         Effect.map((commentId) => ({
           providerOperationId: `jira-comment:${commentId}`,
@@ -778,6 +739,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
     const comments = yield* collectPages({
       operation: "jira-reconcile-comments",
       configuration,
+      preservePrefix: true,
       load: (page) =>
         provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
           Effect.map((response) => ({ values: response.comments, total: response.total }))
@@ -837,32 +799,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
       }
     }
   }
-  if (current.fields.description === undefined) return { _tag: "pending", checkedAt }
-  const currentDigest = yield* digestGovernedActionPayload({
-    _tag: "edit-description",
-    issueKey: action.payload.issueKey,
-    description: current.fields.description
-  }).pipe(
-    Effect.provideService(Crypto.Crypto, cryptoService),
-    Effect.mapError(() =>
-      new PluginMalformedResponseFailure({
-        operation: "reconcile",
-        diagnosticCode: "jira-action-payload-digest-failed"
-      })
-    )
-  )
-  if (currentDigest !== request.payloadDigest) return { _tag: "pending", checkedAt }
-  return {
-    _tag: "succeeded",
-    receipt: {
-      status: "succeeded",
-      providerOperationId: PluginProviderOperationId.make(
-        `jr:reconciled:edit-description:${action.issueId}:${request.payloadDigest}`
-      ),
-      safeSummary: `Jira issue ${action.payload.issueKey} description updated`,
-      observedAt: checkedAt
-    }
-  }
+  return { _tag: "pending", checkedAt }
 })
 
 const withTimeout = <Value>(
@@ -885,6 +822,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   readonly configuration: JiraReadPluginConfiguration
   readonly load: (request: JiraPageRequest) => Effect.Effect<ProviderPage<Value>, PluginFailure>
   readonly maximumValues: number
+  readonly preservePrefix?: boolean
 }): Effect.fn.Return<JiraFetchedCollection<Value>, PluginFailure> {
   const values: Array<Value> = []
   let total = 0
@@ -909,7 +847,13 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
-    if (page === 1 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
+    if (
+      page === 1 &&
+      totalKnown &&
+      !skippedPrefix &&
+      options.preservePrefix !== true &&
+      options.configuration.maximumPages > 1
+    ) {
       const sequentialCapacity = options.configuration.maximumPages * options.configuration.pageSize
       if (total > sequentialCapacity) {
         const tailCapacity = Math.min(
