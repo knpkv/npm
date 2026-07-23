@@ -89,26 +89,41 @@ const jiraAssociationsFor = (
     }
   }
 
-  return inspection.graph.relationships.flatMap((relationship) => {
+  const associations = new Map<EntityId, {
+    readonly evidenceClaimIds: Set<string>
+    readonly issue: WorkspaceEntityInspection["entity"]["projection"]
+    state: "inferred" | "linked"
+  }>()
+  for (const relationship of inspection.graph.relationships) {
     if (
       relationship.kind !== "tracks-time-for" ||
       !subjectNodeIds.has(relationship.sourceNodeId) ||
       !acceptedRelationship(relationship)
-    ) return []
+    ) continue
     const issueId = issueIdByNode.get(relationship.targetNodeId)
     const issue = issueId === undefined ? undefined : issues.get(issueId)
-    if (issueId === undefined || issue === undefined) return []
+    if (issueId === undefined || issue === undefined) continue
     const inferred = relationship.lifecycle._tag === "inferred" || relationship.confidence._tag === "inferred"
-    return [{
-      evidenceLabel: `${String(relationship.evidenceClaimIds.length)} evidence claim${
-        relationship.evidenceClaimIds.length === 1 ? "" : "s"
-      }`,
-      href: workspaceEntityPath(workspaceId, issueId),
-      key: issue.displayKey,
-      state: inferred ? "inferred" : "linked",
-      title: issue.title
-    }]
-  })
+    const current = associations.get(issueId)
+    if (current === undefined) {
+      associations.set(issueId, {
+        evidenceClaimIds: new Set(relationship.evidenceClaimIds),
+        issue,
+        state: inferred ? "inferred" : "linked"
+      })
+      continue
+    }
+    for (const evidenceClaimId of relationship.evidenceClaimIds) current.evidenceClaimIds.add(evidenceClaimId)
+    if (!inferred) current.state = "linked"
+  }
+
+  return [...associations.entries()].map(([issueId, { evidenceClaimIds, issue, state }]) => ({
+    evidenceLabel: `${String(evidenceClaimIds.size)} evidence claim${evidenceClaimIds.size === 1 ? "" : "s"}`,
+    href: workspaceEntityPath(workspaceId, issueId),
+    key: issue.displayKey,
+    state,
+    title: issue.title
+  }))
 }
 
 /** Present one immutable Clockify entry as a deterministic, read-only time ledger. */

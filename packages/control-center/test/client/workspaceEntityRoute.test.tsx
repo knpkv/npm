@@ -11,13 +11,14 @@ import {
   WorkspaceEntityInspection,
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
+import { RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
-import { releaseWorksetFixture, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
+import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -830,6 +831,31 @@ describe("canonical workspace entity", () => {
     expect(presentation.clockifyTimeEntry?.jiraAssociations).toEqual([
       expect.objectContaining({ key: "OPS-429", state: "inferred" })
     ])
+
+    const relationship = clockifyInspection.graph.relationships[0]
+    if (relationship === undefined) throw new Error("Expected a Clockify relationship fixture")
+    const duplicateAssociation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      graph: {
+        ...clockifyInspection.graph,
+        relationships: [
+          {
+            ...relationship,
+            scope: { _tag: "release", releaseId: WORKSET_RELEASE_ID }
+          },
+          {
+            ...relationship,
+            relationshipId: Schema.decodeUnknownSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000094"),
+            scope: {
+              _tag: "release",
+              releaseId: Schema.decodeUnknownSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000012")
+            }
+          }
+        ]
+      }
+    })
+    expect(duplicateAssociation.clockifyTimeEntry?.jiraAssociations).toHaveLength(1)
+    expect(duplicateAssociation.clockifyTimeEntry?.rollupLabel).toBe("1 visible entry · 135 exact minutes")
 
     const unattributed = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
       ...clockifyInspection,

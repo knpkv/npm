@@ -626,7 +626,6 @@ const clockifyRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
     sourceUrl: "https://app.clockify.me/tracker",
     title: "PAY-42 review and rollout",
     attributes: {
-      durationMinutes: 45,
       billable: true,
       approvalState: "approved",
       description: "PAY-42 review and rollout",
@@ -1880,43 +1879,53 @@ describe("normalized plugin page materialization", () => {
         evidenceClaims: [],
         relationships: []
       })
-      const timeEntryReceipt = yield* materializeNormalizedPluginPage(
-        {
-          workspaceId: WORKSPACE_ID,
-          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
-          providerId: "clockify",
-          streamKey: Schema.decodeSync(PluginStreamKey)("time-entry-schema-backfill"),
-          expectedRevision: 0,
-          committedAt: T2,
-          successfulHealth: { _tag: "healthy", checkedAt: T2 }
-        },
-        Schema.decodeSync(PluginSyncPageV1)({
-          checkpointAfterPage: "time-entry-schema-backfill",
-          hasMore: false,
-          events: [{
-            _tag: "UpsertEntity",
-            eventId: "time-entry-schema-backfill",
-            observedAt: "2026-07-19T09:02:00.000Z",
-            revision: "time-entry-same-revision",
-            entityType: "clockify.time-entry",
-            vendorImmutableId: "time-entry-backfill",
-            sourceUrl: "https://app.clockify.me/tracker",
-            title: "PAY-258 release review",
-            attributes: {
-              durationMinutes: 45,
-              billable: true,
-              approvalState: "approved",
-              projectId: "payments",
-              userId: "clockify-user-avery",
-              interval: {
-                start: "2026-07-19T08:17:00.000Z",
-                end: "2026-07-19T09:02:00.000Z"
-              }
+      const timeEntryStreamKey = Schema.decodeSync(PluginStreamKey)("time-entry-schema-backfill")
+      const timeEntryPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "time-entry-schema-backfill",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "time-entry-schema-backfill",
+          observedAt: "2026-07-19T09:02:00.000Z",
+          revision: "time-entry-same-revision",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-entry-backfill",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "PAY-258 release review",
+          attributes: {
+            billable: true,
+            approvalState: "approved",
+            projectId: "payments",
+            userId: "clockify-user-avery",
+            interval: {
+              start: "2026-07-19T08:17:00.000Z",
+              end: "2026-07-19T09:02:00.000Z"
             }
-          }]
-        })
+          }
+        }]
+      })
+      yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        timeEntryStreamKey,
+        0,
+        timeEntryPage,
+        T2,
+        { _tag: "healthy", checkedAt: T2 }
       )
+      const timeEntryScope = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        providerId: "clockify",
+        streamKey: timeEntryStreamKey,
+        expectedRevision: 1,
+        committedAt: T2,
+        successfulHealth: { _tag: "healthy", checkedAt: T2 }
+      } satisfies NormalizedPluginPageMaterializationScope
+      const timeEntryReceipt = yield* materializeNormalizedPluginPage(timeEntryScope, timeEntryPage)
       assert.strictEqual(timeEntryReceipt.entityProjectionCount, 1)
+      assert.strictEqual(timeEntryReceipt.acceptedEventCount, 0)
       const timeEntryProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "entityProjection",
         entityId: timeEntryEntityId,
@@ -1931,9 +1940,13 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected time-entry backfill details")
       }
       assert.deepInclude(timeEntryProjection.value.projection.details, {
+        durationMinutes: 45,
         projectId: "payments",
         userId: "clockify-user-avery"
       })
+      const currentTimeEntry = yield* materializeNormalizedPluginPage(timeEntryScope, timeEntryPage)
+      assert.strictEqual(currentTimeEntry.acceptedEventCount, 0)
+      assert.strictEqual(currentTimeEntry.entityProjectionCount, 0)
 
       const issueEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000257")
       const issueSourceRevision = Schema.decodeSync(SourceRevision)({
