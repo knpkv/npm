@@ -743,6 +743,43 @@ describe("CodeCommitPlugin", () => {
       if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthenticationFailure)
     }))
 
+  it.effect("surfaces execute API authentication and authorization failures", () =>
+    Effect.gen(function*() {
+      const execute = (cause: { readonly _tag: string }) =>
+        runWithClient(
+          baseReadClient(),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const proposal = yield* connection.proposeAction(requestChangesProposal)
+            return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+          }),
+          baseReviewClient({
+            execute: () =>
+              Effect.fail(
+                new Errors.AwsApiError({
+                  operation: "postPullRequestComment",
+                  profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                  region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                  cause
+                })
+              )
+          })
+        ).pipe(Effect.result)
+
+      const authentication = yield* execute({ _tag: "ExpiredTokenException" })
+      const authorization = yield* execute({ _tag: "AccessDeniedException" })
+
+      assert.isTrue(Result.isFailure(authentication))
+      if (Result.isFailure(authentication)) {
+        assert.instanceOf(authentication.failure, PluginAuthenticationFailure)
+      }
+      assert.isTrue(Result.isFailure(authorization))
+      if (Result.isFailure(authorization)) {
+        assert.instanceOf(authorization.failure, PluginAuthorizationFailure)
+      }
+    }))
+
   it.effect("records approval-by-author denial as a terminal failed receipt", () =>
     Effect.gen(function*() {
       const approveRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({

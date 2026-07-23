@@ -290,14 +290,9 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
       return false
     case "AwsApiError":
       return causeHasTag(error.cause, [
-        "AccessDeniedException",
-        "EncryptionKeyAccessDeniedException",
-        "ExpiredTokenException",
         "IdempotencyParameterMismatchException",
-        "InvalidClientTokenId",
         "MaximumNumberOfApprovalsExceededException",
-        "PullRequestCannotBeApprovedByAuthorException",
-        "UnrecognizedClientException"
+        "PullRequestCannotBeApprovedByAuthorException"
       ])
   }
 }
