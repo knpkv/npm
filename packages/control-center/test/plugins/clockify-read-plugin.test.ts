@@ -354,6 +354,7 @@ describe("ClockifyReadPlugin", () => {
         { ...configuration, userIds: "user-1,user-2", maximumPages: 1 }
       )
       const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
+      assert.isFalse(pages.flatMap(({ events }) => events).some((event) => event._tag === "UpsertEntity"))
       assert.deepStrictEqual(
         people.map(({ vendorPersonId }) => vendorPersonId),
         ["user-1", "user-2"]
