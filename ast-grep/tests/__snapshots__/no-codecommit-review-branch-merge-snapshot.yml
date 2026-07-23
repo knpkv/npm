@@ -1,0 +1,18 @@
+id: no-codecommit-review-branch-merge
+snapshots:
+  ? |
+    codecommit.mergeBranchesByFastForward({
+      repositoryName: action.target.repositoryName,
+      sourceCommitSpecifier: action.target.sourceCommit,
+      destinationCommitSpecifier: action.target.destinationCommit
+    })
+  : labels:
+    - source: |-
+        codecommit.mergeBranchesByFastForward({
+          repositoryName: action.target.repositoryName,
+          sourceCommitSpecifier: action.target.sourceCommit,
+          destinationCommitSpecifier: action.target.destinationCommit
+        })
+      style: primary
+      start: 0
+      end: 205

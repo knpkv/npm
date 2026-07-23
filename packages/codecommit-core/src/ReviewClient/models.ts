@@ -42,8 +42,7 @@ export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("comment", CommentActionFields),
   Schema.TaggedStruct("request-changes", CommentActionFields),
   Schema.TaggedStruct("approve", { target: CodeCommitReviewTarget }),
-  Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget }),
-  Schema.TaggedStruct("merge-fast-forward", { target: CodeCommitReviewTarget })
+  Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
 /** Decoded CodeCommit review mutation. */

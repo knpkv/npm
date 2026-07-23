@@ -96,7 +96,6 @@ const baseProvider = (
       comment: { commentId: "comment-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
-  mergeFastForward: () => Effect.succeed({ commitId: "head-commit-17" }),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
   getCommentsPage: () => Effect.succeed({ commentsForPullRequestData: [], nextToken: undefined }),
   ...overrides
@@ -225,31 +224,30 @@ describe("CodeCommitReviewClient", () => {
       assert.strictEqual(results.approve._tag, "pending")
     }))
 
-  it.effect("binds fast-forward execution to the authorized destination commit and branch", () =>
+  it.effect("distinguishes approve and revoke receipts on the same revision", () =>
     Effect.gen(function*() {
-      const observedTarget = yield* Ref.make<CodeCommitReviewAction["target"] | null>(null)
-      const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
-        _tag: "merge-fast-forward",
+      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "approve",
         target: commentAction.target
       })
-      const receipt = yield* runWithClients(
+      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "revoke-approval",
+        target: commentAction.target
+      })
+      const receipts = yield* runWithClients(
         baseReadClient(),
-        baseProvider({
-          mergeFastForward: (action) =>
-            Ref.set(observedTarget, action.target).pipe(
-              Effect.as({ commitId: action.target.sourceCommit })
-            )
-        }),
+        baseProvider(),
         Effect.gen(function*() {
           const client = yield* CodeCommitReviewClient
-          return yield* client.execute(mergeAction)
+          return {
+            approve: yield* client.execute(approveAction),
+            revoke: yield* client.execute(revokeAction)
+          }
         })
       )
 
-      assert.strictEqual(receipt.operationId, "merge:17:head-commit-17")
-      assert.deepInclude(yield* Ref.get(observedTarget), {
-        destinationCommit: "base-commit-17",
-        destinationReference: "refs/heads/main"
-      })
+      assert.notStrictEqual(receipts.approve.operationId, receipts.revoke.operationId)
+      assert.strictEqual(receipts.approve.operationId, "approval:approve:17:revision-17")
+      assert.strictEqual(receipts.revoke.operationId, "approval:revoke-approval:17:revision-17")
     }))
 })

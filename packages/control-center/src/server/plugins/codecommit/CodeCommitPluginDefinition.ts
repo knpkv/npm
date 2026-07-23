@@ -3,9 +3,11 @@
  *
  * Owns pull-request discovery, immutable revision reads, complete paginated
  * changed-file inventory, and governed review actions. CodeCommit exposes
- * native approval, revoke, and merge mutations; request-review and
+ * native approval and revoke mutations; request-review and
  * request-changes are represented by idempotent comments on the exact commits
- * because the provider has no corresponding review-state API.
+ * because the provider has no corresponding review-state API. Governed merge
+ * is intentionally not offered because CodeCommit has no single operation that
+ * both enforces PR approval rules and compare-and-sets the authorized base.
  *
  * @internal
  */
@@ -126,6 +128,9 @@ const descriptor = {
     requirement: "required"
   }))
 } satisfies unknown
+
+/** Current persisted descriptor snapshot used by first-party compatibility checks. @internal */
+export const codeCommitPluginDescriptor = descriptor
 
 const output = <S extends Schema.Codec<unknown, unknown, never, never>>(
   operation: string,
@@ -346,11 +351,6 @@ const CodeCommitActionPayload = Schema.Union([
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
     destinationReference: ReviewReference
-  }),
-  Schema.TaggedStruct("merge-fast-forward", {
-    sourceCommit: ReviewCommitId,
-    destinationCommit: ReviewCommitId,
-    destinationReference: ReviewReference
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
@@ -361,15 +361,13 @@ const actionKinds: readonly [
   "comment",
   "request-changes",
   "approve",
-  "revoke-approval",
-  "merge-fast-forward"
+  "revoke-approval"
 ] = [
   "request-review",
   "comment",
   "request-changes",
   "approve",
-  "revoke-approval",
-  "merge-fast-forward"
+  "revoke-approval"
 ]
 
 type CodeCommitActionKind = typeof actionKinds[number]
@@ -389,22 +387,17 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
       return `Approve CodeCommit pull request #${pullRequestId}`
     case "revoke-approval":
       return `Revoke approval on CodeCommit pull request #${pullRequestId}`
-    case "merge-fast-forward":
-      return `Fast-forward the destination branch for CodeCommit pull request #${pullRequestId}`
   }
 }
 
 const actionImpact = (
   actionKind: CodeCommitActionKind
-): { readonly level: "medium" | "high"; readonly summary: string } =>
-  actionKind === "merge-fast-forward"
-    ? { level: "high", summary: "Fast-forwards the destination branch from the exact authorized base commit" }
-    : {
-      level: "medium",
-      summary: actionKind === "approve" || actionKind === "revoke-approval"
-        ? "Changes the signed-in AWS identity's approval state"
-        : "Adds a durable review comment to the pull request"
-    }
+): { readonly level: "medium"; readonly summary: string } => ({
+  level: "medium",
+  summary: actionKind === "approve" || actionKind === "revoke-approval"
+    ? "Changes the signed-in AWS identity's approval state"
+    : "Adds a durable review comment to the pull request"
+})
 
 const decodeRequestedPayload = Effect.fn("CodeCommitPlugin.decodeRequestedPayload")(function*(
   actionKind: CodeCommitActionKind,
@@ -495,7 +488,6 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
     }
     case "approve":
     case "revoke-approval":
-    case "merge-fast-forward":
       return yield* decodeNormalizedActionPayload({
         _tag: actionKind,
         sourceCommit: pullRequest.sourceCommit,
@@ -598,7 +590,6 @@ const actionFromPayload = (
       }
     case "approve":
     case "revoke-approval":
-    case "merge-fast-forward":
       return { _tag: payload._tag, target }
   }
 }
@@ -629,7 +620,6 @@ const actionFromLocator = (
       }
     case "approve":
     case "revoke-approval":
-    case "merge-fast-forward":
       return { _tag: locator.actionKind, target }
   }
 }

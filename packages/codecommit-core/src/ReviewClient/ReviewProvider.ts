@@ -29,9 +29,6 @@ export interface CodeCommitReviewProviderService {
   readonly updateApprovalState: (
     action: Extract<CodeCommitReviewAction, { readonly _tag: "approve" | "revoke-approval" }>
   ) => Effect.Effect<unknown, AwsClientError>
-  readonly mergeFastForward: (
-    action: Extract<CodeCommitReviewAction, { readonly _tag: "merge-fast-forward" }>
-  ) => Effect.Effect<unknown, AwsClientError>
   readonly getApprovalStates: (target: CodeCommitReviewTarget) => Effect.Effect<unknown, AwsClientError>
   readonly getCommentsPage: (
     request: GetReviewCommentsProviderPageRequest
@@ -98,17 +95,6 @@ export const CodeCommitReviewProviderLive = Layer.effect(
             pullRequestId: action.target.pullRequestId,
             revisionId: action.target.revisionId,
             approvalState: action._tag === "approve" ? "APPROVE" : "REVOKE"
-          })
-        )),
-      mergeFastForward: (action) =>
-        provideRuntime(callProvider(
-          "mergeBranchesByFastForward",
-          action.target,
-          codecommit.mergeBranchesByFastForward({
-            repositoryName: action.target.repositoryName,
-            sourceCommitSpecifier: action.target.sourceCommit,
-            destinationCommitSpecifier: action.target.destinationCommit,
-            targetBranch: action.target.destinationReference.replace(/^refs\/heads\//u, "")
           })
         )),
       getApprovalStates: (target) =>

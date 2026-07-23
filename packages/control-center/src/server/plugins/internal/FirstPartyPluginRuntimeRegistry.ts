@@ -36,7 +36,7 @@ import {
   clockifyReadPluginDescriptor,
   makeClockifyReadPluginRuntime
 } from "../clockify/ClockifyReadPlugin.js"
-import { codeCommitPluginDefinition } from "../codecommit/CodeCommitPluginDefinition.js"
+import { codeCommitPluginDefinition, codeCommitPluginDescriptor } from "../codecommit/CodeCommitPluginDefinition.js"
 import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
 import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
@@ -107,7 +107,11 @@ interface LoadedRuntime {
   readonly configurationRevision: number
   readonly connectionRevision: number
   readonly descriptor: NegotiatedPluginDescriptorV1
-  readonly descriptorGeneration: "current" | "compatible-atlassian" | "legacy-atlassian"
+  readonly descriptorGeneration:
+    | "current"
+    | "compatible-atlassian"
+    | "compatible-codecommit"
+    | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
 
@@ -448,10 +452,23 @@ const historicalConfluenceDescriptors = [{
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }]
 
+const historicalCodeCommitDescriptor = {
+  ...codeCommitPluginDescriptor,
+  capabilities: codeCommitPluginDescriptor.capabilities.filter(
+    ({ capabilityId }) =>
+      capabilityId === "entity.read" ||
+      capabilityId === "sync.incremental" ||
+      capabilityId === "diff.inventory"
+  )
+}
+
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
     return [confluencePagePluginDescriptor, ...historicalConfluenceDescriptors]
+  }
+  if (providerId === "codecommit") {
+    return [codeCommitPluginDescriptor, historicalCodeCommitDescriptor]
   }
   return [expectedDescriptor(providerId)]
 }
@@ -496,6 +513,8 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
     descriptor,
     descriptorGeneration: descriptorGeneration === 0
       ? "current"
+      : connection.providerId === "codecommit"
+      ? "compatible-codecommit"
       : connection.providerId === "jira" && descriptorGeneration === 1
       ? "compatible-atlassian"
       : "legacy-atlassian",
@@ -746,7 +765,28 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
 
-const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(loaded: LoadedRuntime) {
+type CodeCommitClientsLayer = Layer.Layer<
+  ReadClient.CodeCommitReadClient | ReviewClient.CodeCommitReviewClient,
+  never,
+  HttpClient.HttpClient
+>
+
+const liveCodeCommitClients = (() => {
+  const awsConfiguration = AwsClientConfig.Default
+  const readClient = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(awsConfiguration))
+  const reviewProvider = ReviewClient.CodeCommitReviewProviderLive.pipe(
+    Layer.provide(awsConfiguration)
+  )
+  const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+    Layer.provide(Layer.merge(readClient, reviewProvider))
+  )
+  return Layer.merge(readClient, reviewClient)
+})()
+
+const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(
+  loaded: LoadedRuntime,
+  clients: CodeCommitClientsLayer
+) {
   const expectedKeys = new Set(["profile", "region", "repositoryName"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const profile = yield* textValue(loaded.configuration, "profile")
@@ -756,18 +796,13 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
   }
-  const awsConfiguration = AwsClientConfig.Default
-  const readClient = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(awsConfiguration))
-  const reviewProvider = ReviewClient.CodeCommitReviewProviderLive.pipe(
-    Layer.provide(awsConfiguration)
-  )
-  const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
-    Layer.provide(Layer.merge(readClient, reviewProvider))
-  )
-  const clients = Layer.merge(readClient, reviewClient)
   return {
     credentialGeneration: `${profile}\0${region}`,
-    layer: buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(Layer.provide(clients))
+    layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
+      codeCommitPluginDefinition,
+      configuration,
+      loaded.descriptor
+    ).pipe(Layer.provide(clients))
   }
 })
 
@@ -803,7 +838,10 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
   }
 })
 
-const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(loaded: LoadedRuntime) {
+const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
+  loaded: LoadedRuntime,
+  codeCommitClients: CodeCommitClientsLayer
+) {
   switch (loaded.runtime.providerId) {
     case "jira":
       return yield* jiraLayer(loaded)
@@ -812,13 +850,15 @@ const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(functio
     case "confluence":
       return yield* confluenceLayer(loaded)
     case "codecommit":
-      return yield* codeCommitLayer(loaded)
+      return yield* codeCommitLayer(loaded, codeCommitClients)
     case "codepipeline":
       return yield* codePipelineLayer(loaded)
   }
 })
 
-const makeRegistry = Effect.gen(function*() {
+const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*(
+  codeCommitClients: CodeCommitClientsLayer
+) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
   const cryptoService = yield* Crypto.Crypto
@@ -840,7 +880,7 @@ const makeRegistry = Effect.gen(function*() {
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded)
+          const provider = yield* providerLayer(loaded, codeCommitClients)
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
           return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
@@ -852,5 +892,14 @@ const makeRegistry = Effect.gen(function*() {
   } satisfies PluginRuntimeRegistryV1
 })
 
+/** Injectable first-party registry used to verify complete owning-package runtime wiring. @internal */
+export const makeFirstPartyPluginRuntimeRegistry = (
+  codeCommitClients: CodeCommitClientsLayer
+): Layer.Layer<
+  PluginRuntimeRegistry,
+  never,
+  Persistence | SecretStore | Crypto.Crypto | HttpClient.HttpClient | FileSystem.FileSystem | Path.Path
+> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
+
 /** Production registry for the fixed first-party provider catalog. @internal */
-export const FirstPartyPluginRuntimeRegistry = Layer.effect(PluginRuntimeRegistry, makeRegistry)
+export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)

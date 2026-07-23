@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -9,6 +10,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -29,10 +31,13 @@ import {
 } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
-import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
+import {
+  codeCommitPluginDefinition,
+  codeCommitPluginDescriptor
+} from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
-import { FirstPartyPluginRuntimeRegistry } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import { makeFirstPartyPluginRuntimeRegistry } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { pluginRuntimeKey } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
@@ -49,20 +54,27 @@ const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-00000000008
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000083")
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
-const INVALID_AUTHORIZED_ACTION = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+const AUTHORIZED_COMMENT_ACTION = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
   proposal: {
     proposalKey: "registry-executor-precedence",
     capabilityVersion: 1,
     request: {
       actionKind: "comment",
-      target: { entityType: "issue", vendorImmutableId: "RPS-1" },
-      expectedRevision: "revision-1",
-      payload: { content: "This target intentionally fails before a provider call." },
+      target: { entityType: "pull-request", vendorImmutableId: "17" },
+      expectedRevision: "revision-17",
+      payload: {
+        _tag: "comment",
+        sourceCommit: "head-commit-17",
+        destinationCommit: "base-commit-17",
+        destinationReference: "refs/heads/main",
+        content: "Registry wiring check.",
+        clientRequestToken: "1".repeat(64)
+      },
       evidenceIds: []
     },
     payloadDigest: "0".repeat(64),
     summary: "Exercise the selected provider executor",
-    impact: { level: "medium", summary: "No provider mutation is expected" },
+    impact: { level: "medium", summary: "Posts one review comment" },
     proposedAt: CREATED_AT
   },
   idempotencyKey: "registry-executor-precedence",
@@ -76,6 +88,16 @@ const historicalJiraDescriptor = {
   ...jiraReadPluginDescriptor,
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
+}
+
+const historicalCodeCommitDescriptor = {
+  ...codeCommitPluginDescriptor,
+  capabilities: codeCommitPluginDescriptor.capabilities.filter(
+    ({ capabilityId }) =>
+      capabilityId === "entity.read" ||
+      capabilityId === "sync.incremental" ||
+      capabilityId === "diff.inventory"
+  )
 }
 
 const historicalConfluenceOAuthDescriptor = {
@@ -218,6 +240,64 @@ const fakeClockifyClient = (
 describe("first-party plugin runtime", () => {
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
     Effect.gen(function*() {
+      const readCalls = yield* Ref.make(0)
+      const mutationCalls = yield* Ref.make(0)
+      const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        pullRequestId: "17",
+        revisionId: "revision-17",
+        repositoryName: "payments-api",
+        title: "Registry wiring",
+        authorArn: "arn:aws:iam::123456789012:user/alice",
+        status: "OPEN",
+        sourceReference: "refs/heads/feature/registry",
+        destinationReference: "refs/heads/main",
+        sourceCommit: "head-commit-17",
+        destinationCommit: "base-commit-17",
+        mergeBase: "base-commit-17",
+        creationDate: new Date("2026-07-18T08:00:00.000Z"),
+        lastActivityDate: new Date("2026-07-18T09:00:00.000Z")
+      })
+      const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
+        discoverAccount: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitAccountIdentity({
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/reviewer"
+            })
+          ),
+        listRepositoriesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitRepositoryPage({
+              repositoryNames: [pullRequest.repositoryName],
+              nextToken: null
+            })
+          ),
+        getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestsPage: () =>
+          Effect.succeed(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
+        streamPullRequests: () => Stream.make(pullRequest),
+        getPullRequest: () => Ref.update(readCalls, (count) => count + 1).pipe(Effect.as(pullRequest)),
+        getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
+        streamChangedFiles: () => Stream.empty
+      })
+      const reviewProvider = Layer.succeed(ReviewClient.CodeCommitReviewProvider, {
+        postComment: (action) =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({
+              comment: {
+                commentId: "registry-comment-1",
+                clientRequestToken: action.clientRequestToken
+              }
+            })
+          ),
+        updateApprovalState: () => Effect.die("unused updateApprovalState"),
+        getApprovalStates: () => Effect.die("unused getApprovalStates"),
+        getCommentsPage: () => Effect.die("unused getCommentsPage")
+      })
+      const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+        Layer.provide(Layer.merge(readClient, reviewProvider))
+      )
+      const clients = Layer.merge(readClient, reviewClient)
       const config = yield* makePersistenceTestConfig("control-center-first-party-codecommit-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const database = databaseLayer(config)
@@ -265,7 +345,10 @@ describe("first-party plugin runtime", () => {
         const registry = yield* PluginRuntimeRegistry
         const result = yield* Effect.gen(function*() {
           const executor = yield* AuthorizedPluginExecutor
-          return yield* executor.preflight(INVALID_AUTHORIZED_ACTION).pipe(Effect.result)
+          return {
+            preflight: yield* executor.preflight(AUTHORIZED_COMMENT_ACTION),
+            dispatch: yield* executor.executeAuthorizedAction(AUTHORIZED_COMMENT_ACTION)
+          }
         }).pipe(
           Effect.provide(registry.layer(pluginRuntimeKey({
             workspaceId: WORKSPACE_ID,
@@ -274,15 +357,46 @@ describe("first-party plugin runtime", () => {
           Effect.scoped
         )
 
-        assert.strictEqual(result._tag, "Failure")
-        if (result._tag === "Failure") {
-          assert.strictEqual(result.failure._tag, "PluginConfigurationFailure")
-          if (result.failure._tag === "PluginConfigurationFailure") {
-            assert.strictEqual(result.failure.diagnosticCode, "codecommit-action-kind-or-target-invalid")
-          }
-        }
+        assert.strictEqual(result.preflight._tag, "ready")
+        assert.strictEqual(result.dispatch._tag, "confirmed")
+        if (result.dispatch._tag === "confirmed") assert.strictEqual(result.dispatch.receipt.status, "succeeded")
+        assert.strictEqual(yield* Ref.get(readCalls), 1)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: UNCONFIGURED_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Historical CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          UNCONFIGURED_CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          UNCONFIGURED_CONNECTION_ID,
+          "codecommit",
+          historicalCodeCommitDescriptor,
+          0,
+          CREATED_AT
+        )
+        const historicalConnection = yield* Effect.gen(function*() {
+          return yield* PluginConnection
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: UNCONFIGURED_CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        assert.isFalse(hasPluginCapability(historicalConnection.descriptor, "action.execute", 1))
       }).pipe(
-        Effect.provide(FirstPartyPluginRuntimeRegistry),
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients)),
         Effect.provide(dependencies)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
