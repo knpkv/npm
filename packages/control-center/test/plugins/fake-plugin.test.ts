@@ -14,11 +14,13 @@ import * as TestClock from "effect/testing/TestClock"
 import {
   AuthorizedPluginActionV1,
   DiffContentRangeRequestV1,
+  type DiffContentRangeV1,
   PluginActionCancellationRequestV1,
   PluginActionReconciliationRequestV1,
   PluginSyncRequestV1
 } from "../../src/domain/plugins/index.js"
 import {
+  PluginConfigurationFailure,
   PluginConflictFailure,
   PluginMalformedResponseFailure,
   PluginUnsupportedCapabilityFailure
@@ -441,6 +443,8 @@ describe("FakePlugin", () => {
       const request = Schema.decodeUnknownSync(DiffContentRangeRequestV1)({
         entity: { entityType: "pull-request", vendorImmutableId: "42" },
         path: "src/index.ts",
+        previousPath: null,
+        status: "modified",
         side: "after",
         offset: 0,
         length: 1
@@ -458,6 +462,86 @@ describe("FakePlugin", () => {
         assert.instanceOf(outcome.failure, PluginMalformedResponseFailure)
         assert.strictEqual(outcome.failure.diagnosticCode, "plugin-diff-content-range-invalid")
       }
+    }))
+
+  it.effect("rejects negotiated v2 diff capabilities whose adapter omits the matching methods", () =>
+    Effect.gen(function*() {
+      const runtime = yield* makeFakePluginRuntime(baseScenario())
+      const services = yield* Effect.all({
+        connection: PluginConnection,
+        executor: AuthorizedPluginExecutor
+      }).pipe(Effect.provide(runtime.layer), Effect.scoped)
+      const v1Reader = {
+        readInventoryPage: () => Effect.succeed({ entries: [], nextCursor: null }),
+        readContentRange: () =>
+          Effect.succeed(
+            {
+              bytesBase64: null,
+              totalBytes: null,
+              unavailableReason: "missing"
+            } satisfies DiffContentRangeV1
+          )
+      }
+      const v1Descriptor = descriptor(["diff.inventory", "diff.content"])
+      const v2Descriptor = {
+        ...v1Descriptor,
+        capabilities: v1Descriptor.capabilities.map((capability) => ({
+          ...capability,
+          supportedVersions: [2]
+        }))
+      }
+      const definitionFor = (diff: PluginConnection["Service"]["diff"]) =>
+        definePluginV1({
+          rawDescriptor: v2Descriptor,
+          configurationSchema: Schema.Unknown,
+          capabilityCodecs: pluginCapabilityCodecsV1,
+          make: () =>
+            Effect.succeed({
+              connection: { ...services.connection, diff },
+              executor: services.executor
+            })
+        })
+      const missingInventory = yield* Layer.build(
+        buildPluginDefinitionLayer(definitionFor(Option.some(v1Reader)), null)
+      ).pipe(Effect.scoped, Effect.result)
+      const missingContent = yield* Layer.build(
+        buildPluginDefinitionLayer(
+          definitionFor(Option.some({
+            ...v1Reader,
+            readInventoryPageV2: v1Reader.readInventoryPage
+          })),
+          null
+        )
+      ).pipe(Effect.scoped, Effect.result)
+
+      assert.isTrue(Result.isFailure(missingInventory))
+      if (Result.isFailure(missingInventory)) {
+        assert.instanceOf(missingInventory.failure, PluginConfigurationFailure)
+        assert.strictEqual(
+          missingInventory.failure.diagnosticCode,
+          "plugin-negotiated-diff-inventory-v2-implementation-missing"
+        )
+      }
+      assert.isTrue(Result.isFailure(missingContent))
+      if (Result.isFailure(missingContent)) {
+        assert.instanceOf(missingContent.failure, PluginConfigurationFailure)
+        assert.strictEqual(
+          missingContent.failure.diagnosticCode,
+          "plugin-negotiated-diff-content-v2-implementation-missing"
+        )
+      }
+
+      const v1Definition = definePluginV1({
+        rawDescriptor: v1Descriptor,
+        configurationSchema: Schema.Unknown,
+        capabilityCodecs: pluginCapabilityCodecsV1,
+        make: () =>
+          Effect.succeed({
+            connection: { ...services.connection, diff: Option.some(v1Reader) },
+            executor: services.executor
+          })
+      })
+      yield* Layer.build(buildPluginDefinitionLayer(v1Definition, null)).pipe(Effect.scoped)
     }))
 
   it.effect("does not invoke an opaque definition factory for an unsupported major", () =>

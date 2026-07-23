@@ -11,6 +11,7 @@ import * as Stream from "effect/Stream"
 import { PluginHealth } from "../../domain/freshness.js"
 import {
   type DiffContentRangeRequestV1,
+  type DiffContentRangeRequestV2,
   type DiffContentRangeV1,
   type NegotiatedPluginDescriptorV1,
   type PluginCapabilityId,
@@ -25,7 +26,7 @@ import {
 import { AuthorizedPluginExecutor } from "./internal/AuthorizedPluginExecutor.js"
 import { hasPluginCapability, negotiatePluginDescriptorV1 } from "./negotiation.js"
 import type { PluginCapabilityCodecsV1 } from "./PluginCapabilityCodecs.js"
-import { PluginConnection, type PluginConnectionV1 } from "./PluginConnection.js"
+import { PluginConnection, type PluginConnectionV1, type PluginDiffReaderV1 } from "./PluginConnection.js"
 import { makePluginDefinitionV1, type PluginDefinitionV1 } from "./PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "./PluginExecutor.js"
 import { retryPluginOperation, retryPluginStream } from "./retryPolicy.js"
@@ -90,9 +91,9 @@ const validateCapabilityCodecs = Effect.fn("PluginDefinition.validateCapabilityC
         case "action.reconcile":
           return codecs.actionReconcile
         case "diff.inventory":
-          return codecs.diffInventory
+          return capability.version === 2 ? codecs.diffInventoryV2 : codecs.diffInventory
         case "diff.content":
-          return codecs.diffContent
+          return capability.version === 2 ? codecs.diffContentV2 : codecs.diffContent
       }
     })()
     if (registered === undefined || registered.version !== capability.version) {
@@ -123,7 +124,7 @@ const normalizeLegacyDiscoveryOutput = (value: unknown): unknown =>
     : value
 
 const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContentRange")(function*(
-  request: DiffContentRangeRequestV1,
+  request: DiffContentRangeRequestV1 | DiffContentRangeRequestV2,
   response: DiffContentRangeV1
 ) {
   if (response.bytesBase64 === null) return response
@@ -149,14 +150,15 @@ const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContent
 
 const requireCapability = (
   descriptor: NegotiatedPluginDescriptorV1,
-  capabilityId: PluginCapabilityId
+  capabilityId: PluginCapabilityId,
+  version = 1
 ): Effect.Effect<void, PluginUnsupportedCapabilityFailure> =>
-  hasPluginCapability(descriptor, capabilityId, 1)
+  hasPluginCapability(descriptor, capabilityId, version)
     ? Effect.void
     : Effect.fail(
       new PluginUnsupportedCapabilityFailure({
         capabilityId,
-        requestedVersion: 1,
+        requestedVersion: version,
         diagnosticCode: "plugin-capability-not-negotiated"
       })
     )
@@ -164,9 +166,10 @@ const requireCapability = (
 const withCapability = <A, E>(
   descriptor: NegotiatedPluginDescriptorV1,
   capabilityId: PluginCapabilityId,
-  effect: Effect.Effect<A, E>
+  effect: Effect.Effect<A, E>,
+  version = 1
 ): Effect.Effect<A, E | PluginUnsupportedCapabilityFailure> =>
-  requireCapability(descriptor, capabilityId).pipe(Effect.andThen(effect))
+  requireCapability(descriptor, capabilityId, version).pipe(Effect.andThen(effect))
 
 const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(function*(
   descriptor: NegotiatedPluginDescriptorV1,
@@ -181,13 +184,35 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
   const actionReconcile = codecs.actionReconcile
   const diffInventory = codecs.diffInventory
   const diffContent = codecs.diffContent
+  const diffInventoryV2 = codecs.diffInventoryV2
+  const diffContentV2 = codecs.diffContentV2
 
   const requiresDiff = hasPluginCapability(descriptor, "diff.inventory", 1) ||
-    hasPluginCapability(descriptor, "diff.content", 1)
+    hasPluginCapability(descriptor, "diff.content", 1) ||
+    hasPluginCapability(descriptor, "diff.inventory", 2) ||
+    hasPluginCapability(descriptor, "diff.content", 2)
   if (requiresDiff && Option.isNone(services.connection.diff)) {
     return yield* new PluginConfigurationFailure({
       diagnosticCode: "plugin-negotiated-diff-implementation-missing"
     })
+  }
+  if (Option.isSome(services.connection.diff)) {
+    if (
+      hasPluginCapability(descriptor, "diff.inventory", 2) &&
+      services.connection.diff.value.readInventoryPageV2 === undefined
+    ) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "plugin-negotiated-diff-inventory-v2-implementation-missing"
+      })
+    }
+    if (
+      hasPluginCapability(descriptor, "diff.content", 2) &&
+      services.connection.diff.value.readContentRangeV2 === undefined
+    ) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "plugin-negotiated-diff-content-v2-implementation-missing"
+      })
+    }
   }
 
   const connection: PluginConnectionV1 = {
@@ -238,7 +263,7 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
           )
       ),
     diff: requiresDiff
-      ? Option.map(services.connection.diff, (diff) => ({
+      ? Option.map(services.connection.diff, (diff): PluginDiffReaderV1 => ({
         readInventoryPage: (request) =>
           withCapability(
             descriptor,
@@ -272,7 +297,53 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
                   )
                 )
               )
-          )
+          ),
+        ...(diff.readInventoryPageV2 === undefined
+          ? {}
+          : {
+            readInventoryPageV2: (request) =>
+              withCapability(
+                descriptor,
+                "diff.inventory",
+                diffInventoryV2 === undefined
+                  ? Effect.fail(missingCapabilityCodec("diff.inventory"))
+                  : decodeBoundary("diff-inventory", "input", diffInventoryV2.input, request).pipe(
+                    Effect.flatMap((decoded) =>
+                      retryPluginOperation({
+                        operation: diff.readInventoryPageV2!(decoded),
+                        safety: "safe-read"
+                      })
+                    ),
+                    Effect.flatMap((page) => decodeBoundary("diff-inventory", "output", diffInventoryV2.output, page))
+                  ),
+                2
+              )
+          }),
+        ...(diff.readContentRangeV2 === undefined
+          ? {}
+          : {
+            readContentRangeV2: (request) =>
+              withCapability(
+                descriptor,
+                "diff.content",
+                diffContentV2 === undefined
+                  ? Effect.fail(missingCapabilityCodec("diff.content"))
+                  : decodeBoundary("diff-content", "input", diffContentV2.input, request).pipe(
+                    Effect.flatMap((decodedRequest) =>
+                      retryPluginOperation({
+                        operation: diff.readContentRangeV2!(decodedRequest),
+                        safety: "safe-read"
+                      }).pipe(
+                        Effect.flatMap((range) =>
+                          decodeBoundary("diff-content", "output", diffContentV2.output, range)
+                        ),
+                        Effect.flatMap((range) => validateDiffContentRange(decodedRequest, range))
+                      )
+                    )
+                  ),
+                2
+              )
+          })
       }))
       : Option.none(),
     proposeAction: (request) =>

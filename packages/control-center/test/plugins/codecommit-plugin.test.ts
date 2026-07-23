@@ -15,24 +15,33 @@ import * as TestClock from "effect/testing/TestClock"
 
 import {
   AuthorizedPluginActionV1,
-  DiffInventoryPageRequestV1,
+  DiffContentRangeRequestV1,
+  DiffContentRangeRequestV2,
+  DiffInventoryPageRequestV2,
+  NegotiatedPluginDescriptorV1,
   type PluginActionProposalV1,
   PluginActionReconciliationRequestV1,
   PluginSyncRequestV1,
   ProposePluginActionRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
   PluginConflictFailure,
-  PluginRateLimitFailure
+  PluginRateLimitFailure,
+  PluginUnsupportedCapabilityFailure
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
+import { historicalCompleteDiffCodeCommitDescriptor } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
-import { buildPluginDefinitionLayer } from "../../src/server/plugins/PluginDefinition.js"
+import {
+  buildPluginDefinitionLayer,
+  buildPluginDefinitionLayerFromNegotiatedDescriptor
+} from "../../src/server/plugins/PluginDefinition.js"
 
 const configuration = {
   profile: "production",
@@ -63,6 +72,18 @@ const makePullRequest = (
   })
 
 const pullRequest = makePullRequest(configuration.repositoryName)
+const immutableDiffIdentity = {
+  expectedRevision: Revision.make("revision-17"),
+  baseRevision: Revision.make("base-commit-17"),
+  headRevision: Revision.make("head-commit-17")
+}
+const legacyNegotiatedDescriptor = Schema.decodeUnknownSync(NegotiatedPluginDescriptorV1)({
+  descriptor: historicalCompleteDiffCodeCommitDescriptor,
+  capabilities: historicalCompleteDiffCodeCommitDescriptor.capabilities.map(({ capabilityId }) => ({
+    capabilityId,
+    version: 1
+  }))
+})
 
 const changedFiles = [
   Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
@@ -76,7 +97,6 @@ const changedFiles = [
     after: { blobId: "blob-added", path: "src/added.ts", mode: "100644" }
   })
 ]
-
 const baseReadClient = (
   overrides: Partial<ReadClient.CodeCommitReadClientService> = {}
 ): ReadClient.CodeCommitReadClientService => ({
@@ -140,6 +160,28 @@ const runWithClient = <A, E>(
   effect.pipe(
     Effect.provide(
       buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(
+        Layer.provide(Layer.mergeAll(
+          Layer.succeed(ReadClient.CodeCommitReadClient, client),
+          Layer.succeed(ReviewClient.CodeCommitReviewClient, reviewClient),
+          NodeCrypto.layer
+        ))
+      )
+    ),
+    Effect.scoped
+  )
+
+const runLegacyWithClient = <A, E>(
+  client: ReadClient.CodeCommitReadClientService,
+  effect: Effect.Effect<A, E, AuthorizedPluginExecutor | PluginConnection>,
+  reviewClient: ReviewClient.CodeCommitReviewClientService = baseReviewClient()
+) =>
+  effect.pipe(
+    Effect.provide(
+      buildPluginDefinitionLayerFromNegotiatedDescriptor(
+        codeCommitPluginDefinition,
+        configuration,
+        legacyNegotiatedDescriptor
+      ).pipe(
         Layer.provide(Layer.mergeAll(
           Layer.succeed(ReadClient.CodeCommitReadClient, client),
           Layer.succeed(ReviewClient.CodeCommitReviewClient, reviewClient),
@@ -342,8 +384,9 @@ describe("CodeCommitPlugin", () => {
 
   it.effect("normalizes complete changed-file pages with stable rename paths", () =>
     Effect.gen(function*() {
-      const request = Schema.decodeUnknownSync(DiffInventoryPageRequestV1)({
+      const request = Schema.decodeUnknownSync(DiffInventoryPageRequestV2)({
         entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
         cursor: null
       })
       const page = yield* runWithClient(
@@ -351,7 +394,7 @@ describe("CodeCommitPlugin", () => {
         Effect.gen(function*() {
           const connection = yield* PluginConnection
           if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
-          return yield* connection.diff.value.readInventoryPage(request)
+          return yield* connection.diff.value.readInventoryPageV2!(request)
         })
       )
 
@@ -363,7 +406,716 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(page.nextCursor, null)
     }))
 
-  it.effect("rejects cross-repository entity and inventory reads before normalization or diff access", () =>
+  it.effect("reads a synchronized historical revision by its stored commits after the live PR advances", () =>
+    Effect.gen(function*() {
+      const pullRequestCalls = yield* Ref.make(0)
+      const commitPairs = yield* Ref.make<Array<readonly [string, string]>>([])
+      const client = baseReadClient({
+        getPullRequest: () =>
+          Ref.update(pullRequestCalls, (count) => count + 1).pipe(
+            Effect.as(makePullRequest(configuration.repositoryName, "OPEN", "revision-18"))
+          ),
+        getChangedFilesPage: ({ afterCommitSpecifier, beforeCommitSpecifier }) =>
+          Ref.update(commitPairs, (pairs) => {
+            const pair: readonly [string, string] = [beforeCommitSpecifier, afterCommitSpecifier]
+            return [...pairs, pair]
+          }).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: changedFiles,
+                nextToken: null,
+                providerPageLimit: 100
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(DiffInventoryPageRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        cursor: null
+      })
+      const contentRequest = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: request.entity,
+        ...immutableDiffIdentity,
+        path: "src/added.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const result = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const page = yield* connection.diff.value.readInventoryPageV2!(request)
+          const content = yield* connection.diff.value.readContentRangeV2!(contentRequest)
+          return { content, page }
+        })
+      )
+
+      assert.strictEqual(result.page.entries.length, 2)
+      assert.strictEqual(result.content.unavailableReason, null)
+      assert.strictEqual(yield* Ref.get(pullRequestCalls), 2)
+      assert.deepStrictEqual(yield* Ref.get(commitPairs), [
+        ["base-commit-17", "head-commit-17"],
+        ["base-commit-17", "head-commit-17"]
+      ])
+    }))
+
+  it.effect("rejects v2 inventory and content when the pull request belongs to another repository", () =>
+    Effect.gen(function*() {
+      const pullRequestCalls = yield* Ref.make(0)
+      const changedFileCalls = yield* Ref.make(0)
+      const client = baseReadClient({
+        getPullRequest: () =>
+          Ref.update(pullRequestCalls, (count) => count + 1).pipe(
+            Effect.as(makePullRequest("other-repository"))
+          ),
+        getChangedFilesPage: () =>
+          Ref.update(changedFileCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: changedFiles,
+                nextToken: null,
+                providerPageLimit: 100
+              })
+            )
+          )
+      })
+      const inventoryRequest = Schema.decodeUnknownSync(DiffInventoryPageRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        cursor: null
+      })
+      const contentRequest = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: inventoryRequest.entity,
+        ...immutableDiffIdentity,
+        path: "src/added.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const results = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const inventory = yield* connection.diff.value.readInventoryPageV2!(inventoryRequest).pipe(Effect.result)
+          const content = yield* connection.diff.value.readContentRangeV2!(contentRequest).pipe(Effect.result)
+          return { content, inventory }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(results.inventory))
+      if (Result.isFailure(results.inventory)) {
+        assert.instanceOf(results.inventory.failure, PluginConfigurationFailure)
+        if (Predicate.isTagged(results.inventory.failure, "PluginConfigurationFailure")) {
+          assert.strictEqual(
+            results.inventory.failure.diagnosticCode,
+            "codecommit-pull-request-repository-mismatch"
+          )
+        }
+      }
+      assert.isTrue(Result.isFailure(results.content))
+      if (Result.isFailure(results.content)) {
+        assert.instanceOf(results.content.failure, PluginConfigurationFailure)
+        if (Predicate.isTagged(results.content.failure, "PluginConfigurationFailure")) {
+          assert.strictEqual(
+            results.content.failure.diagnosticCode,
+            "codecommit-pull-request-repository-mismatch"
+          )
+        }
+      }
+      assert.strictEqual(yield* Ref.get(pullRequestCalls), 2)
+      assert.strictEqual(yield* Ref.get(changedFileCalls), 0)
+    }))
+
+  it.effect("rejects a non-pull-request legacy content read before provider access", () =>
+    Effect.gen(function*() {
+      const pullRequestCalls = yield* Ref.make(0)
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV1)({
+        entity: { entityType: "issue", vendorImmutableId: "17" },
+        path: "src/file.ts",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const result = yield* runLegacyWithClient(
+        baseReadClient({
+          getPullRequest: () =>
+            Ref.update(pullRequestCalls, (count) => count + 1).pipe(
+              Effect.as(pullRequest)
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          return yield* connection.diff.value.readContentRange(request).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginUnsupportedCapabilityFailure)
+      }
+      assert.strictEqual(yield* Ref.get(pullRequestCalls), 0)
+    }))
+
+  it.effect("bridges legacy rename sides through the normalized current path", () =>
+    Effect.gen(function*() {
+      const blobCalls = yield* Ref.make<Array<string>>([])
+      const client = baseReadClient({
+        getBlob: ({ blobId }) =>
+          Ref.update(blobCalls, (calls) => [...calls, blobId]).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new TextEncoder().encode(blobId)
+              })
+            )
+          )
+      })
+      const beforeRequest = Schema.decodeUnknownSync(DiffContentRangeRequestV1)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        path: "src/old-name.ts",
+        side: "before",
+        offset: 0,
+        length: 100
+      })
+      const afterRequest = Schema.decodeUnknownSync(DiffContentRangeRequestV1)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        path: "src/new-name.ts",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const ranges = yield* runLegacyWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const before = yield* connection.diff.value.readContentRange(beforeRequest)
+          const after = yield* connection.diff.value.readContentRange(afterRequest)
+          return { after, before }
+        })
+      )
+
+      assert.strictEqual(ranges.before.bytesBase64, "YmxvYi1vbGQ=")
+      assert.strictEqual(ranges.after.bytesBase64, "YmxvYi1uZXc=")
+      assert.deepStrictEqual(yield* Ref.get(blobCalls), ["blob-old", "blob-new"])
+    }))
+
+  it.effect("bridges legacy modified and intentionally missing added/deleted sides", () =>
+    Effect.gen(function*() {
+      const files = [
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "modified",
+          before: { blobId: "blob-modified-before", path: "src/modified.ts", mode: "100644" },
+          after: { blobId: "blob-modified-after", path: "src/modified.ts", mode: "100644" }
+        }),
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "deleted",
+          before: { blobId: "blob-deleted", path: "src/deleted.ts", mode: "100644" },
+          after: null
+        }),
+        ...changedFiles
+      ]
+      const blobCalls = yield* Ref.make<Array<string>>([])
+      const client = baseReadClient({
+        getChangedFilesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitChangedFilesPage({
+              files,
+              nextToken: null,
+              providerPageLimit: 100
+            })
+          ),
+        getBlob: ({ blobId }) =>
+          Ref.update(blobCalls, (calls) => [...calls, blobId]).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new TextEncoder().encode(blobId)
+              })
+            )
+          )
+      })
+      const request = (path: string, side: "before" | "after") =>
+        Schema.decodeUnknownSync(DiffContentRangeRequestV1)({
+          entity: { entityType: "pull-request", vendorImmutableId: "17" },
+          path,
+          side,
+          offset: 0,
+          length: 100
+        })
+      const results = yield* runLegacyWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const modified = yield* connection.diff.value.readContentRange(request("src/modified.ts", "after"))
+          const renamed = yield* connection.diff.value.readContentRange(request("src/old-name.ts", "before"))
+          const addedBefore = yield* connection.diff.value.readContentRange(request("src/added.ts", "before"))
+          const deletedAfter = yield* connection.diff.value.readContentRange(request("src/deleted.ts", "after"))
+          return { addedBefore, deletedAfter, modified, renamed }
+        })
+      )
+
+      assert.strictEqual(results.modified.unavailableReason, null)
+      assert.strictEqual(results.renamed.unavailableReason, null)
+      assert.deepStrictEqual(results.addedBefore, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+      assert.deepStrictEqual(results.deletedAfter, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+      assert.deepStrictEqual(yield* Ref.get(blobCalls), ["blob-modified-after", "blob-old"])
+    }))
+
+  it.effect("lazily reads bounded text ranges without exposing the complete blob", () =>
+    Effect.gen(function*() {
+      const blobCalls = yield* Ref.make(0)
+      const bytes = new TextEncoder().encode("export const answer = 42\\n")
+      const client = baseReadClient({
+        getBlob: ({ blobId }) =>
+          Ref.update(blobCalls, (calls) => calls + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/added.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 7,
+        length: 5
+      })
+      const ranges = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const first = yield* connection.diff.value.readContentRangeV2!(request)
+          const second = yield* connection.diff.value.readContentRangeV2!(request)
+          return { first, second }
+        })
+      )
+
+      assert.strictEqual(ranges.first.unavailableReason, null)
+      assert.strictEqual(ranges.first.totalBytes, bytes.byteLength)
+      assert.strictEqual(ranges.first.bytesBase64, "Y29uc3Q=")
+      assert.deepStrictEqual(ranges.second, ranges.first)
+      assert.strictEqual(yield* Ref.get(blobCalls), 2)
+    }))
+
+  it.effect("uses exact entry anchors for rename-away and replacement-add collisions", () =>
+    Effect.gen(function*() {
+      const blobCalls = yield* Ref.make<Array<string>>([])
+      const collisionFiles = [
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "renamed",
+          before: { blobId: "blob-renamed-old", path: "src/a.ts", mode: "100644" },
+          after: { blobId: "blob-moved", path: "src/moved.ts", mode: "100644" }
+        }),
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "added",
+          before: null,
+          after: { blobId: "blob-replacement", path: "src/a.ts", mode: "100644" }
+        })
+      ]
+      const client = baseReadClient({
+        getChangedFilesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitChangedFilesPage({
+              files: collisionFiles,
+              nextToken: null,
+              providerPageLimit: 100
+            })
+          ),
+        getBlob: ({ blobId }) =>
+          Ref.update(blobCalls, (calls) => [...calls, blobId]).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new TextEncoder().encode("renamed before")
+              })
+            )
+          )
+      })
+      const replacementBefore = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/a.ts",
+        previousPath: null,
+        status: "added",
+        side: "before",
+        offset: 0,
+        length: 100
+      })
+      const renamedBefore = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/moved.ts",
+        previousPath: "src/a.ts",
+        status: "renamed",
+        side: "before",
+        offset: 0,
+        length: 100
+      })
+      const mismatched = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        ...replacementBefore,
+        previousPath: renamedBefore.previousPath,
+        status: renamedBefore.status
+      })
+      const results = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const replacement = yield* connection.diff.value.readContentRangeV2!(replacementBefore)
+          const renamed = yield* connection.diff.value.readContentRangeV2!(renamedBefore)
+          const mismatch = yield* connection.diff.value.readContentRangeV2!(mismatched).pipe(Effect.result)
+          return { mismatch, renamed, replacement }
+        })
+      )
+
+      assert.deepStrictEqual(results.replacement, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+      assert.strictEqual(results.renamed.unavailableReason, null)
+      assert.strictEqual(results.renamed.bytesBase64, "cmVuYW1lZCBiZWZvcmU=")
+      assert.isTrue(Result.isFailure(results.mismatch))
+      if (Result.isFailure(results.mismatch)) {
+        assert.isTrue(Predicate.isTagged(results.mismatch.failure, "PluginConflictFailure"))
+        if (Predicate.isTagged(results.mismatch.failure, "PluginConflictFailure")) {
+          assert.strictEqual(
+            results.mismatch.failure.diagnosticCode,
+            "codecommit-diff-entry-identity-mismatch"
+          )
+        }
+      }
+      assert.deepStrictEqual(yield* Ref.get(blobCalls), ["blob-renamed-old"])
+    }))
+
+  it.effect("distinguishes disappeared blobs from intentionally absent diff sides", () =>
+    Effect.gen(function*() {
+      const blobCalls = yield* Ref.make<Array<string>>([])
+      const files = [
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "modified",
+          before: { blobId: "blob-modified-before", path: "src/modified.ts", mode: "100644" },
+          after: { blobId: "blob-modified-after", path: "src/modified.ts", mode: "100644" }
+        }),
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "renamed",
+          before: { blobId: "blob-renamed-before", path: "src/before.ts", mode: "100644" },
+          after: { blobId: "blob-renamed-after", path: "src/after.ts", mode: "100644" }
+        }),
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "added",
+          before: null,
+          after: { blobId: "blob-added", path: "src/added.ts", mode: "100644" }
+        }),
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "deleted",
+          before: { blobId: "blob-deleted", path: "src/deleted.ts", mode: "100644" },
+          after: null
+        })
+      ]
+      const client = baseReadClient({
+        getChangedFilesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitChangedFilesPage({
+              files,
+              nextToken: null,
+              providerPageLimit: 100
+            })
+          ),
+        getBlob: ({ blobId }) =>
+          Ref.update(blobCalls, (calls) => [...calls, blobId]).pipe(
+            Effect.andThen(
+              Effect.fail(new ReadClient.CodeCommitReadNotFoundError({ operation: "get-blob" }))
+            )
+          )
+      })
+      const request = (
+        path: string,
+        previousPath: string | null,
+        status: "added" | "modified" | "deleted" | "renamed",
+        side: "before" | "after"
+      ) =>
+        Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+          entity: { entityType: "pull-request", vendorImmutableId: "17" },
+          ...immutableDiffIdentity,
+          path,
+          previousPath,
+          status,
+          side,
+          offset: 0,
+          length: 100
+        })
+      const results = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          const modified = yield* connection.diff.value
+            .readContentRangeV2!(request("src/modified.ts", null, "modified", "after"))
+            .pipe(Effect.result)
+          const renamed = yield* connection.diff.value
+            .readContentRangeV2!(request("src/after.ts", "src/before.ts", "renamed", "before"))
+            .pipe(Effect.result)
+          const addedBefore = yield* connection.diff.value
+            .readContentRangeV2!(request("src/added.ts", null, "added", "before"))
+          const deletedAfter = yield* connection.diff.value
+            .readContentRangeV2!(request("src/deleted.ts", null, "deleted", "after"))
+          return { addedBefore, deletedAfter, modified, renamed }
+        })
+      )
+
+      for (const result of [results.modified, results.renamed]) {
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, PluginConflictFailure)
+          if (Predicate.isTagged(result.failure, "PluginConflictFailure")) {
+            assert.strictEqual(
+              result.failure.diagnosticCode,
+              "codecommit-diff-blob-disappeared"
+            )
+          }
+        }
+      }
+      assert.deepStrictEqual(results.addedBefore, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+      assert.deepStrictEqual(results.deletedAfter, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+      assert.deepStrictEqual(yield* Ref.get(blobCalls), ["blob-modified-after", "blob-renamed-before"])
+    }))
+
+  it.effect("returns explicit binary and oversized content states without exposing bytes", () =>
+    Effect.gen(function*() {
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/added.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const binary = yield* runWithClient(
+        baseReadClient({
+          getBlob: ({ blobId }) =>
+            Effect.succeed(
+              new ReadClient.CodeCommitBlobContent({
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
+                bytes: new Uint8Array([1, 0, 2])
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          return yield* connection.diff.value.readContentRangeV2!(request)
+        })
+      )
+      const oversized = yield* runWithClient(
+        baseReadClient({
+          getBlob: () =>
+            Effect.fail(
+              new ReadClient.CodeCommitBlobTooLargeError({
+                operation: "get-blob",
+                maximumBytes: 1_048_576,
+                actualBytes: 2_000_000,
+                source: "provider"
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+          return yield* connection.diff.value.readContentRangeV2!(request)
+        })
+      )
+
+      assert.deepStrictEqual(binary, {
+        bytesBase64: null,
+        totalBytes: 3,
+        unavailableReason: "binary"
+      })
+      assert.deepStrictEqual(oversized, {
+        bytesBase64: null,
+        totalBytes: 2_000_000,
+        unavailableReason: "oversized"
+      })
+    }))
+
+  it.effect("preserves throttling as a typed retryable content failure", () =>
+    Effect.gen(function*() {
+      const blobCalls = yield* Ref.make(0)
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/added.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const client = baseReadClient({
+        getBlob: () =>
+          Ref.update(blobCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.fail(
+              new Errors.AwsThrottleError({
+                operation: "get-blob",
+                retryCount: 3,
+                cause: "throttled"
+              })
+            ))
+          )
+      })
+      const fiber = yield* Effect.forkChild(
+        runWithClient(
+          client,
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+            return yield* connection.diff.value.readContentRangeV2!(request).pipe(Effect.result)
+          })
+        )
+      )
+      yield* TestClock.adjust("31 seconds")
+      yield* TestClock.adjust("31 seconds")
+      const result = yield* Fiber.join(fiber)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginRateLimitFailure)
+      assert.strictEqual(yield* Ref.get(blobCalls), 3)
+    }))
+
+  it.effect("fails cyclic changed-file pagination as a provider outage instead of a missing side", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(0)
+      const token = ReadClient.CodeCommitPageToken.make("cyclic-page")
+      const client = baseReadClient({
+        getChangedFilesPage: () =>
+          Ref.update(calls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: [],
+                nextToken: token,
+                providerPageLimit: 100
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/not-returned.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const fiber = yield* Effect.forkChild(
+        runWithClient(
+          client,
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+            return yield* connection.diff.value.readContentRangeV2!(request).pipe(Effect.result)
+          })
+        )
+      )
+      yield* TestClock.adjust("1 second")
+      const result = yield* Fiber.join(fiber)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.isTrue(Predicate.isTagged(result.failure, "PluginOutageFailure"))
+        if (Predicate.isTagged(result.failure, "PluginOutageFailure")) {
+          assert.strictEqual(result.failure.operation, "diff-content-inventory-cursor-cycle")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(calls), 6)
+    }))
+
+  it.effect("fails exhausted changed-file pagination as a provider outage instead of a missing side", () =>
+    Effect.gen(function*() {
+      const calls = yield* Ref.make(0)
+      const client = baseReadClient({
+        getChangedFilesPage: () =>
+          Ref.updateAndGet(calls, (count) => count + 1).pipe(
+            Effect.map((count) =>
+              new ReadClient.CodeCommitChangedFilesPage({
+                files: [],
+                nextToken: ReadClient.CodeCommitPageToken.make(`provider-page-${count}`),
+                providerPageLimit: 100
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(DiffContentRangeRequestV2)({
+        entity: { entityType: "pull-request", vendorImmutableId: "17" },
+        ...immutableDiffIdentity,
+        path: "src/not-returned.ts",
+        previousPath: null,
+        status: "added",
+        side: "after",
+        offset: 0,
+        length: 100
+      })
+      const fiber = yield* Effect.forkChild(
+        runWithClient(
+          client,
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
+            return yield* connection.diff.value.readContentRangeV2!(request).pipe(Effect.result)
+          })
+        )
+      )
+      yield* TestClock.adjust("1 second")
+      const result = yield* Fiber.join(fiber)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.isTrue(Predicate.isTagged(result.failure, "PluginOutageFailure"))
+        if (Predicate.isTagged(result.failure, "PluginOutageFailure")) {
+          assert.strictEqual(result.failure.operation, "diff-content-inventory-page-limit")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(calls), 300)
+    }))
+
+  it.effect("rejects a cross-repository entity read before normalization or diff access", () =>
     Effect.gen(function*() {
       const differenceCalls = yield* Ref.make(0)
       const mismatchedPullRequest = makePullRequest("other-repository")
@@ -384,27 +1136,16 @@ describe("CodeCommitPlugin", () => {
         entityType: "pull-request",
         vendorImmutableId: "17"
       })
-      const inventoryRequest = Schema.decodeUnknownSync(DiffInventoryPageRequestV1)({
-        entity: entityRequest,
-        cursor: null
-      })
-      const results = yield* runWithClient(
+      const result = yield* runWithClient(
         client,
         Effect.gen(function*() {
           const connection = yield* PluginConnection
-          if (Option.isNone(connection.diff)) return yield* Effect.die("missing diff reader")
-          const entity = yield* connection.readEntity(entityRequest).pipe(Effect.result)
-          const inventory = yield* connection.diff.value.readInventoryPage(inventoryRequest).pipe(Effect.result)
-          return { entity, inventory }
+          return yield* connection.readEntity(entityRequest).pipe(Effect.result)
         })
       )
 
-      assert.isTrue(Result.isFailure(results.entity))
-      if (Result.isFailure(results.entity)) assert.instanceOf(results.entity.failure, PluginConfigurationFailure)
-      assert.isTrue(Result.isFailure(results.inventory))
-      if (Result.isFailure(results.inventory)) {
-        assert.instanceOf(results.inventory.failure, PluginConfigurationFailure)
-      }
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginConfigurationFailure)
       assert.strictEqual(yield* Ref.get(differenceCalls), 0)
     }))
 

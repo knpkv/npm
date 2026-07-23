@@ -27,6 +27,7 @@ import type {
   WorkspaceEntityInspection,
   WorkspaceEntityProjectionIndex
 } from "../../api/deliveryGraph.js"
+import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { ControlCenterLiveEvent } from "../../api/liveEvents.js"
 import type { OpaqueMediaId, SafeMediaContentType } from "../../api/media.js"
 import type {
@@ -81,6 +82,7 @@ import type {
   WorkspaceId
 } from "../../domain/identifiers.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
+import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
@@ -231,6 +233,35 @@ export class PluginAdministration extends Context.Service<
   PluginAdministration,
   PluginAdministrationService
 >()("@knpkv/control-center/server/api/PluginAdministration") {}
+
+export type CompleteDiffReadError =
+  | ApplicationConflict
+  | ApplicationRateLimited
+  | ApplicationResourceNotFound
+  | ApplicationServiceUnavailable
+
+/** Workspace-scoped application boundary for complete immutable diff reads. */
+export class CompleteDiffReads extends Context.Service<CompleteDiffReads, {
+  readonly content: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly vendorImmutableId: VendorImmutableId
+    readonly revision: Revision
+    readonly anchor: CompleteDiffInventoryEntry["anchor"]
+    readonly path: CompleteDiffInventoryEntry["path"]
+    readonly previousPath: CompleteDiffInventoryEntry["previousPath"]
+    readonly status: CompleteDiffInventoryEntry["status"]
+    readonly side: "before" | "after"
+    readonly offset: number
+    readonly length: number
+  }) => Effect.Effect<CompleteDiffContentRange, CompleteDiffReadError>
+  readonly inventory: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly vendorImmutableId: VendorImmutableId
+    readonly revision: Revision
+  }) => Effect.Effect<CompleteDiffInventory, CompleteDiffReadError>
+}>()("@knpkv/control-center/server/api/CompleteDiffReads") {}
 
 /** Injectable bird's-eye portfolio projection boundary. */
 export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {

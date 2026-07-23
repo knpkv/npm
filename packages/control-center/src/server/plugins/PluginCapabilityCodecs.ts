@@ -1,8 +1,10 @@
 import {
   AuthorizedPluginActionV1,
   DiffContentRangeRequestV1,
+  DiffContentRangeRequestV2,
   DiffContentRangeV1,
   DiffInventoryPageRequestV1,
+  DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
   PluginActionCancellationRequestV1,
   PluginActionCancellationResultV1,
@@ -20,6 +22,9 @@ import {
 
 interface CapabilityCodecV1 {
   readonly version: 1
+}
+interface CapabilityCodecV2 {
+  readonly version: 2
 }
 
 /** Adapter-registered codecs for every version-one capability boundary it offers. */
@@ -55,6 +60,14 @@ export interface PluginCapabilityCodecsV1 {
   }
   readonly diffContent?: CapabilityCodecV1 & {
     readonly input: typeof DiffContentRangeRequestV1
+    readonly output: typeof DiffContentRangeV1
+  }
+  readonly diffInventoryV2?: CapabilityCodecV2 & {
+    readonly input: typeof DiffInventoryPageRequestV2
+    readonly output: typeof DiffInventoryPageV1
+  }
+  readonly diffContentV2?: CapabilityCodecV2 & {
+    readonly input: typeof DiffContentRangeRequestV2
     readonly output: typeof DiffContentRangeV1
   }
 }
@@ -100,6 +113,16 @@ export const pluginCapabilityCodecsV1 = {
   diffContent: {
     version: 1,
     input: DiffContentRangeRequestV1,
+    output: DiffContentRangeV1
+  },
+  diffInventoryV2: {
+    version: 2,
+    input: DiffInventoryPageRequestV2,
+    output: DiffInventoryPageV1
+  },
+  diffContentV2: {
+    version: 2,
+    input: DiffContentRangeRequestV2,
     output: DiffContentRangeV1
   }
 } satisfies PluginCapabilityCodecsV1

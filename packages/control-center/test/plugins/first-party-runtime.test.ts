@@ -18,9 +18,12 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
+import { EntityId, GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
 import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
@@ -44,17 +47,25 @@ import {
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
 import {
+  historicalActionCodeCommitDescriptor,
   historicalCodeCommitDescriptor,
+  historicalCompleteDiffCodeCommitDescriptor,
   makeFirstPartyPluginRuntimeRegistry
 } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
-import { pluginRuntimeKey, PluginRuntimeMap } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
+import {
+  PluginConnectionMapLive,
+  pluginRuntimeKey,
+  PluginRuntimeMap
+} from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMap.js"
+import { liveApplicationServices } from "../../src/server/runtime/ControlCenterServer.js"
+import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
@@ -72,6 +83,8 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000081")
 const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082")
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000083")
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
+const PREVIOUS_CODECOMMIT_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000085")
+const FUTURE_CODECOMMIT_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000086")
 const GOVERNED_WORKSPACE = WorkspaceId.make(GOVERNED_WORKSPACE_ID)
 const GOVERNED_CONNECTION = PluginConnectionId.make(GOVERNED_CONNECTION_ID)
 const GOVERNED_ACTION = GovernedActionId.make(GOVERNED_ACTION_ID)
@@ -521,6 +534,99 @@ describe("first-party plugin runtime", () => {
           Effect.scoped
         )
         assert.isFalse(hasPluginCapability(historicalConnection.descriptor, "action.execute", 1))
+
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: PREVIOUS_CODECOMMIT_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Previous action-capable CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          PREVIOUS_CODECOMMIT_CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          PREVIOUS_CODECOMMIT_CONNECTION_ID,
+          "codecommit",
+          historicalCompleteDiffCodeCommitDescriptor,
+          0,
+          CREATED_AT
+        )
+        const previousConnection = yield* Effect.gen(function*() {
+          return yield* PluginConnection
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: PREVIOUS_CODECOMMIT_CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        const previousCapabilities = [
+          "action.propose",
+          "action.execute",
+          "action.reconcile",
+          "diff.inventory",
+          "diff.content"
+        ] satisfies ReadonlyArray<Parameters<typeof hasPluginCapability>[1]>
+        for (const capabilityId of previousCapabilities) {
+          assert.isTrue(hasPluginCapability(previousConnection.descriptor, capabilityId, 1))
+        }
+        assert.isFalse(hasPluginCapability(previousConnection.descriptor, "diff.content", 2))
+
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: FUTURE_CODECOMMIT_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Unknown future CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          FUTURE_CODECOMMIT_CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          FUTURE_CODECOMMIT_CONNECTION_ID,
+          "codecommit",
+          {
+            ...historicalActionCodeCommitDescriptor,
+            capabilities: [
+              ...historicalActionCodeCommitDescriptor.capabilities,
+              {
+                capabilityId: "action.cancel",
+                supportedVersions: [1],
+                requirement: "required"
+              }
+            ]
+          },
+          0,
+          CREATED_AT
+        )
+        const futureResult = yield* Effect.gen(function*() {
+          return yield* PluginConnection
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: FUTURE_CODECOMMIT_CONNECTION_ID
+          }))),
+          Effect.scoped,
+          Effect.result
+        )
+        assert.strictEqual(futureResult._tag, "Failure")
+        if (futureResult._tag === "Failure") {
+          assert.strictEqual(futureResult.failure._tag, "PluginConfigurationFailure")
+          if (futureResult.failure._tag === "PluginConfigurationFailure") {
+            assert.strictEqual(futureResult.failure.diagnosticCode, "plugin-runtime-source-mismatch")
+          }
+        }
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients)),
         Effect.provide(dependencies)
@@ -656,6 +762,29 @@ describe("first-party plugin runtime", () => {
     assert.deepStrictEqual(
       historicalCodeCommitDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
       ["entity.read", "sync.incremental", "diff.inventory"]
+    )
+    assert.deepStrictEqual(
+      historicalActionCodeCommitDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      [
+        "entity.read",
+        "sync.incremental",
+        "action.propose",
+        "action.execute",
+        "action.reconcile",
+        "diff.inventory"
+      ]
+    )
+    assert.deepStrictEqual(
+      historicalCompleteDiffCodeCommitDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      [
+        "entity.read",
+        "sync.incremental",
+        "action.propose",
+        "action.execute",
+        "action.reconcile",
+        "diff.inventory",
+        "diff.content"
+      ]
     )
   })
 
@@ -1230,6 +1359,249 @@ describe("first-party plugin runtime", () => {
         assert.lengthOf(requests, 0)
       }).pipe(
         Effect.provide(firstPartyPluginConnectionMapLayer),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("shares first-party diff runtime reuse and administration invalidation", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const config = yield* makePersistenceTestConfig("control-center-first-party-shared-diff-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer
+      const discoveredProfiles = yield* Ref.make<Array<string>>([])
+      const changedFileProfiles = yield* Ref.make<Array<string>>([])
+      const mapBuilds = yield* Ref.make(0)
+      const invalidations = yield* Ref.make(0)
+      const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        pullRequestId: "17",
+        revisionId: "revision-advanced",
+        repositoryName: "payments-api",
+        title: "Shared diff runtime",
+        description: "Reuse one runtime until administration invalidates it.",
+        authorArn: "arn:aws:iam::123456789012:user/alice",
+        status: "OPEN",
+        sourceReference: "refs/heads/feature/shared-runtime",
+        destinationReference: "refs/heads/main",
+        sourceCommit: "live-head",
+        destinationCommit: "live-base",
+        mergeBase: "live-base",
+        creationDate: new Date("2026-07-18T08:00:00.000Z"),
+        lastActivityDate: new Date("2026-07-18T09:00:00.000Z")
+      })
+      const files = [
+        Schema.decodeUnknownSync(ReadClient.CodeCommitChangedFile)({
+          status: "modified",
+          before: { blobId: "blob-before", path: "src/runtime.ts", mode: "100644" },
+          after: { blobId: "blob-after", path: "src/runtime.ts", mode: "100644" }
+        })
+      ]
+      const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
+        discoverAccount: ({ profile }) =>
+          Ref.update(discoveredProfiles, (profiles) => [...profiles, profile]).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitAccountIdentity({
+                accountId: "123456789012",
+                arn: `arn:aws:iam::123456789012:role/${profile}`
+              })
+            )
+          ),
+        listRepositoriesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitRepositoryPage({
+              repositoryNames: [pullRequest.repositoryName],
+              nextToken: null
+            })
+          ),
+        getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestsPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitPullRequestPage({
+              pullRequests: [pullRequest],
+              nextToken: null
+            })
+          ),
+        streamPullRequests: () => Stream.make(pullRequest),
+        getPullRequest: () => Effect.succeed(pullRequest),
+        getChangedFilesPage: ({ account }) =>
+          Ref.update(changedFileProfiles, (profiles) => [...profiles, account.profile]).pipe(
+            Effect.as(
+              new ReadClient.CodeCommitChangedFilesPage({
+                files,
+                nextToken: null,
+                providerPageLimit: 100
+              })
+            )
+          ),
+        streamChangedFiles: () => Stream.fromIterable(files)
+      })
+      const reviewClient = Layer.succeed(ReviewClient.CodeCommitReviewClient, {
+        preflight: () => Effect.succeed(pullRequest),
+        execute: () => Effect.die("unused execute"),
+        reconcile: () => Effect.die("unused reconcile")
+      })
+      const clients = Layer.merge(readClient, reviewClient)
+      const registry = makeFirstPartyPluginRuntimeRegistry(clients)
+      const baseConnections = PluginConnectionMapLive.pipe(
+        Layer.provide(PluginRuntimeMap.layer.pipe(Layer.provide(registry)))
+      )
+      const connections = Layer.effect(
+        PluginConnectionMap,
+        Effect.gen(function*() {
+          const connectionMap = yield* PluginConnectionMap
+          yield* Ref.update(mapBuilds, (count) => count + 1)
+          return PluginConnectionMap.of({
+            contextEffect: connectionMap.contextEffect,
+            invalidate: (scope) =>
+              Ref.update(invalidations, (count) => count + 1).pipe(
+                Effect.andThen(connectionMap.invalidate(scope))
+              )
+          })
+        })
+      ).pipe(
+        Layer.provide(baseConnections),
+        Layer.provide(runtimeAuthority)
+      )
+      const dependencies = Layer.mergeAll(
+        persistence,
+        foundation,
+        runtimeAuthority,
+        DomainEventWakeups.layer,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      ).pipe(Layer.provideMerge(database))
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Payments CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          CREATED_AT
+        )
+        const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
+        const observedAt = DateTime.formatIso(CREATED_AT)
+        const sourceRevision = Schema.decodeSync(SourceRevision)({
+          providerId: "codecommit",
+          pluginConnectionId: CONNECTION_ID,
+          vendorImmutableId: "17",
+          revision: "revision-17",
+          sourceUrl: null,
+          firstObservedAt: observedAt,
+          lastObservedAt: observedAt,
+          synchronizedAt: observedAt,
+          normalizationSchemaVersion: 2
+        })
+        yield* persistenceService.entities.create(WORKSPACE_ID, {
+          entityId,
+          entityType: "pull-request",
+          sourceRevision,
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.deliveryGraph.write(WORKSPACE_ID, {
+          entityProjections: [{
+            projection: {
+              workspaceId: WORKSPACE_ID,
+              entityId,
+              projectionRevision: 1,
+              sourceEntityRevision: 1,
+              supersedesProjectionRevision: null,
+              projectionSchemaVersion: 2,
+              entityState: "present",
+              entityType: "pull-request",
+              displayKey: "17",
+              title: "Shared diff runtime",
+              details: {
+                _tag: "pull-request",
+                repository: "payments-api",
+                sourceBranch: "feature/shared-runtime",
+                targetBranch: "main",
+                headRevision: "head-commit-17",
+                baseRevision: "base-commit-17",
+                reviewState: "requested",
+                lifecycle: "open"
+              }
+            },
+            recordedAt: observedAt
+          }],
+          nodes: [],
+          evidenceItems: [],
+          evidenceClaims: [],
+          relationships: []
+        })
+
+        const reads = yield* CompleteDiffReads
+        const administration = yield* PluginAdministration
+        const request = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CONNECTION_ID,
+          vendorImmutableId: VendorImmutableId.make("17"),
+          revision: Revision.make("revision-17")
+        }
+        const first = yield* reads.inventory(request)
+        const second = yield* reads.inventory(request)
+        assert.deepStrictEqual(second, first)
+        assert.deepStrictEqual(yield* Ref.get(discoveredProfiles), ["production"])
+        assert.deepStrictEqual(yield* Ref.get(changedFileProfiles), ["production", "production"])
+
+        const patch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: "profile", value: "rotated" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments-api" }
+          ]
+        })
+        const updated = yield* administration.patchConfiguration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CONNECTION_ID,
+          patch
+        })
+        assert.strictEqual(updated.revision, 2)
+
+        const third = yield* reads.inventory(request)
+        assert.deepStrictEqual(third, first)
+        assert.deepStrictEqual({
+          mapBuilds: yield* Ref.get(mapBuilds),
+          invalidations: yield* Ref.get(invalidations),
+          discoveredProfiles: yield* Ref.get(discoveredProfiles),
+          changedFileProfiles: yield* Ref.get(changedFileProfiles)
+        }, {
+          mapBuilds: 1,
+          invalidations: 1,
+          discoveredProfiles: ["production", "rotated"],
+          changedFileProfiles: ["production", "production", "rotated"]
+        })
+      }).pipe(
+        Effect.provide(liveApplicationServices(null, true, "http://127.0.0.1:4173", connections)),
         Effect.provide(dependencies)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))

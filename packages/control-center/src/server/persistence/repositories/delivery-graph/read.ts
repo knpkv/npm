@@ -11,6 +11,7 @@ import { derivePersonInitials, PersonAvatar, PersonSourceIdentity, Role } from "
 import { type DeliveryNode, type DeliveryRelationship, LedgerRevision } from "../../../../domain/deliveryGraph.js"
 import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
 import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
+import { Revision } from "../../../../domain/sourceRevision.js"
 import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
 import { type DeliveryGraphQuery, DeliveryGraphReadResult } from "./contract.js"
@@ -31,6 +32,10 @@ import {
 const WorkspaceProjectionCountRow = Schema.Struct({
   matchedCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   totalCount: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+const SourceProjectionRow = Schema.Struct({
+  ...ProjectionSummaryRow.fields,
+  sourceRevision: Revision
 })
 
 const WorkspaceProjectionReleaseIds = Schema.fromJsonString(Schema.Array(ReleaseId))
@@ -170,6 +175,62 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
     }
     const decode = content === "exact" ? decodeProjectionRow : decodeProjectionSummaryRow
     return yield* decode(row).pipe(captureMalformedDeliveryGraphRow(row))
+  })
+
+  const loadSourceProjection = Effect.fn("DeliveryGraphRepository.loadSourceProjection")(function*(
+    workspaceId: WorkspaceId,
+    query: Extract<DeliveryGraphQuery, { readonly _tag: "sourceEntityProjection" }>
+  ) {
+    const rows = yield* sql`SELECT
+        projection.workspace_id AS workspaceId,
+        projection.entity_id AS entityId,
+        projection.projection_revision AS projectionRevision,
+        projection.source_entity_revision AS sourceEntityRevision,
+        projection.supersedes_projection_revision AS supersedesProjectionRevision,
+        projection.projection_schema_version AS projectionSchemaVersion,
+        projection.entity_state AS entityState,
+        CASE entity.entity_type
+          WHEN 'pipeline' THEN 'pipeline-execution'
+          ELSE entity.entity_type
+        END AS entityType,
+        projection.display_key AS displayKey,
+        projection.title,
+        projection.extension_json AS extensionJson,
+        projection.extension_json AS originalExtensionJson,
+        projection.extension_digest AS extensionDigest,
+        projection.recorded_at AS recordedAt,
+        source.source_revision AS sourceRevision
+      FROM entity_projection_revisions projection
+      INNER JOIN entities entity
+        ON entity.workspace_id = projection.workspace_id
+       AND entity.entity_id = projection.entity_id
+      INNER JOIN entity_revisions source
+        ON source.workspace_id = projection.workspace_id
+       AND source.entity_id = projection.entity_id
+       AND source.revision = projection.source_entity_revision
+      WHERE projection.workspace_id = ${workspaceId}
+        AND entity.plugin_connection_id = ${query.pluginConnectionId}
+        AND entity.provider_id = ${query.providerId}
+        AND entity.vendor_immutable_id = ${query.vendorImmutableId}
+        AND source.source_revision = ${query.revision}
+      ORDER BY projection.projection_revision DESC
+      LIMIT 1`
+    const decoded = yield* decodeRows(SourceProjectionRow, rows).pipe(
+      Effect.mapError(() =>
+        graphRecordError(workspaceId, "entity-projection", query.vendorImmutableId, "entity-projection-schema-invalid")
+      ),
+      captureMalformedDeliveryGraphRow(rows)
+    )
+    const row = decoded[0]
+    if (row === undefined) {
+      return yield* new RecordNotFoundError({
+        workspaceId,
+        recordKind: "entity-source-projection",
+        recordKey: query.vendorImmutableId
+      })
+    }
+    const value = yield* decodeProjectionRow(row).pipe(captureMalformedDeliveryGraphRow(row))
+    return { ...value, sourceRevision: row.sourceRevision }
   })
 
   const loadNode = Effect.fn("DeliveryGraphRepository.loadNode")(function*(
@@ -486,6 +547,11 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
         return DeliveryGraphReadResult.make({
           _tag: "entityProjection",
           value: yield* loadProjection(workspaceId, query.entityId, query.revision, "exact")
+        })
+      case "sourceEntityProjection":
+        return DeliveryGraphReadResult.make({
+          _tag: "sourceEntityProjection",
+          value: yield* loadSourceProjection(workspaceId, query)
         })
       case "node":
         return DeliveryGraphReadResult.make({

@@ -27,8 +27,8 @@ export const HOST_PLUGIN_CAPABILITY_VERSIONS: Readonly<
   "action.execute": [1],
   "action.cancel": [1],
   "action.reconcile": [1],
-  "diff.inventory": [1],
-  "diff.content": [1]
+  "diff.inventory": [1, 2],
+  "diff.content": [1, 2]
 }
 
 const selectHighestCommonVersion = (

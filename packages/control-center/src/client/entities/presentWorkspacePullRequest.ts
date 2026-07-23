@@ -5,6 +5,7 @@ import * as Option from "effect/Option"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import type { DeliveryEntityDetails } from "../../domain/deliveryGraph.js"
 import type { SourceRevision } from "../../domain/sourceRevision.js"
+import type { WorkspacePullRequestDiffScope } from "./WorkspacePullRequestDiff.js"
 
 type PullRequestDetails = Extract<DeliveryEntityDetails, { readonly _tag: "pull-request" }>
 
@@ -19,6 +20,7 @@ export interface WorkspacePullRequestPresentation {
   readonly baseRevision: string | null
   readonly createdAt: WorkspacePullRequestTimestamp | null
   readonly description: string | null
+  readonly diffScope: WorkspacePullRequestDiffScope
   readonly filesHref: string | null
   readonly headRevision: string
   readonly issueCount: number
@@ -123,7 +125,7 @@ const connectedEntityIds = (inspection: WorkspaceEntityInspection): ReadonlySet<
 /** Present one immutable pull-request revision without conflating agent and human review. */
 export const presentWorkspacePullRequest = (
   details: PullRequestDetails,
-  sourceUrl: SourceRevision["sourceUrl"],
+  source: SourceRevision,
   inspection: WorkspaceEntityInspection
 ): WorkspacePullRequestPresentation => {
   const connected = connectedEntityIds(inspection)
@@ -144,7 +146,12 @@ export const presentWorkspacePullRequest = (
     baseRevision: details.baseRevision ?? null,
     createdAt: timestampFor(details.createdAt),
     description: details.description?.trim() || null,
-    filesHref: sourceUrl?.href ?? null,
+    diffScope: {
+      pluginConnectionId: source.pluginConnectionId,
+      vendorImmutableId: source.vendorImmutableId,
+      revision: source.revision
+    },
+    filesHref: source.sourceUrl?.href ?? null,
     headRevision: details.headRevision,
     issueCount,
     issueCountLabel: evidenceCountLabel(issueCount),

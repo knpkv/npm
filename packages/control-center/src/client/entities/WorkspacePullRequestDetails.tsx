@@ -4,6 +4,7 @@ import type { ReactElement, ReactNode } from "react"
 
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
+import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
 
 const Section = ({
@@ -45,13 +46,17 @@ const People = ({ empty, people }: { readonly empty: string; readonly people: Re
 export const WorkspacePullRequestDetails = ({
   approvers,
   onAskAgent,
+  onSessionExpired,
   pullRequest,
-  reviewers
+  reviewers,
+  sessionKey
 }: {
   readonly approvers: ReadonlyArray<RlyPerson>
   readonly onAskAgent: () => void
+  readonly onSessionExpired: (sessionKey: string) => void
   readonly pullRequest: WorkspacePullRequestPresentation
   readonly reviewers: ReadonlyArray<RlyPerson>
+  readonly sessionKey: string | null
 }): ReactElement => (
   <article className={styles.document} data-workspace-pull-request-detail>
     <div className={styles.revisionCard}>
@@ -172,12 +177,16 @@ export const WorkspacePullRequestDetails = ({
       <Text tone="secondary">The delivery relationships below explain every linked item and its evidence.</Text>
     </Section>
 
-    <Section heading="Files" meta="Diff entry point">
-      {pullRequest.filesHref === null ? (
-        <Text tone="secondary">The provider did not supply a pull-request URL for this revision.</Text>
-      ) : (
+    <Section heading="Files" meta="Complete immutable diff">
+      <WorkspacePullRequestDiff
+        heading={`Pull request ${pullRequest.headRevision.slice(0, 12)}`}
+        onSessionExpired={onSessionExpired}
+        scope={pullRequest.diffScope}
+        sessionKey={sessionKey}
+      />
+      {pullRequest.filesHref === null ? null : (
         <a className={styles.filesLink} href={pullRequest.filesHref} rel="noreferrer" target="_blank">
-          Open files and diff in CodeCommit
+          Open this revision in CodeCommit
         </a>
       )}
     </Section>

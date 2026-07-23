@@ -18,9 +18,11 @@ import {
   EvidenceId,
   GraphNodeId,
   PersonId,
+  PluginConnectionId,
   RelationshipId,
   ReleaseId
 } from "../../../../domain/identifiers.js"
+import { ProviderId, Revision, VendorImmutableId } from "../../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 
 const MAXIMUM_BATCH_RECORDS = 500
@@ -70,6 +72,12 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
   entityProjection: {
     entityId: EntityId,
     revision: Schema.NullOr(LedgerRevision)
+  },
+  sourceEntityProjection: {
+    pluginConnectionId: PluginConnectionId,
+    providerId: ProviderId,
+    vendorImmutableId: VendorImmutableId,
+    revision: Revision
   },
   node: { nodeId: GraphNodeId },
   evidence: {
@@ -121,6 +129,12 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
 export type DeliveryGraphQuery = typeof DeliveryGraphQuery.Type
 
 export const PersistedEntityProjection = Schema.Struct({
+  projection: DeliveryEntityProjection,
+  recordedAt: UtcTimestamp
+})
+
+export const PersistedSourceEntityProjection = Schema.Struct({
+  sourceRevision: Revision,
   projection: DeliveryEntityProjection,
   recordedAt: UtcTimestamp
 })
@@ -226,6 +240,7 @@ const ReleaseRelationshipSummary = Schema.Struct({
 /** Tagged read result; callers never need to understand the SQL representation. */
 export const DeliveryGraphReadResult = Schema.TaggedUnion({
   entityProjection: { value: PersistedEntityProjection },
+  sourceEntityProjection: { value: PersistedSourceEntityProjection },
   node: { value: DeliveryNode },
   evidence: { value: EvidenceBundle },
   relationship: { value: DeliveryRelationship },

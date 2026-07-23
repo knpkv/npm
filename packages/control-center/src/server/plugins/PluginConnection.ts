@@ -6,8 +6,10 @@ import type * as Stream from "effect/Stream"
 import type { PluginHealth } from "../../domain/freshness.js"
 import type {
   DiffContentRangeRequestV1,
+  DiffContentRangeRequestV2,
   DiffContentRangeV1,
   DiffInventoryPageRequestV1,
+  DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
   NegotiatedPluginDescriptorV1,
   PluginActionProposalV1,
@@ -27,6 +29,12 @@ export interface PluginDiffReaderV1 {
   ) => Effect.Effect<DiffInventoryPageV1, PluginFailure>
   readonly readContentRange: (
     request: DiffContentRangeRequestV1
+  ) => Effect.Effect<DiffContentRangeV1, PluginFailure>
+  readonly readInventoryPageV2?: (
+    request: DiffInventoryPageRequestV2
+  ) => Effect.Effect<DiffInventoryPageV1, PluginFailure>
+  readonly readContentRangeV2?: (
+    request: DiffContentRangeRequestV2
   ) => Effect.Effect<DiffContentRangeV1, PluginFailure>
 }
 

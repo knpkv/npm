@@ -247,13 +247,17 @@ const staleMessage = (state: Extract<WorkspaceEntityState, { readonly _tag: "sta
 
 const EntityContent = ({
   onAskAgent,
+  onSessionExpired,
   presentation,
   retry,
+  sessionKey,
   stale
 }: {
   readonly onAskAgent: () => void
+  readonly onSessionExpired: (sessionKey: string) => void
   readonly presentation: WorkspaceEntityPresentation
   readonly retry: () => void
+  readonly sessionKey: string | null
   readonly stale: Extract<WorkspaceEntityState, { readonly _tag: "stale" }> | null
 }): ReactElement => (
   <div className={styles.content}>
@@ -283,8 +287,10 @@ const EntityContent = ({
       <WorkspacePullRequestDetails
         approvers={presentation.collaborators.approvers}
         onAskAgent={onAskAgent}
+        onSessionExpired={onSessionExpired}
         pullRequest={presentation.pullRequest}
         reviewers={presentation.collaborators.reviewers}
+        sessionKey={sessionKey}
       />
     )}
     <DeliveryPath presentation={presentation} />
@@ -293,21 +299,27 @@ const EntityContent = ({
 
 interface WorkspaceEntityViewProps {
   readonly onAskAgent: () => void
+  readonly onSessionExpired?: (sessionKey: string) => void
   readonly originHref: string
   readonly originLabel: string
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
   readonly state: WorkspaceEntityState
+  readonly sessionKey?: string | null
   readonly workspaceId: WorkspaceIdType
 }
+
+const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 
 /** Pure state renderer for the canonical entity route. */
 export const WorkspaceEntityView = ({
   onAskAgent,
+  onSessionExpired = ignoreSessionExpiration,
   originHref,
   originLabel: backLabel,
   originState,
   retry,
+  sessionKey = null,
   state,
   workspaceId
 }: WorkspaceEntityViewProps): ReactElement => {
@@ -375,8 +387,10 @@ export const WorkspaceEntityView = ({
         content={
           <EntityContent
             onAskAgent={onAskAgent}
+            onSessionExpired={onSessionExpired}
             presentation={presentation}
             retry={retry}
+            sessionKey={sessionKey}
             stale={state._tag === "stale" ? state : null}
           />
         }
@@ -418,13 +432,8 @@ const ConnectedWorkspaceEntity = ({
   const navigate = useNavigate()
   const refreshKey =
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
-  const controller = useWorkspaceEntity(
-    workspaceId,
-    entityId,
-    refreshKey,
-    browserReadableSessionKey(browserSession.state),
-    browserSession.invalidateSession
-  )
+  const sessionKey = browserReadableSessionKey(browserSession.state)
+  const controller = useWorkspaceEntity(workspaceId, entityId, refreshKey, sessionKey, browserSession.invalidateSession)
   const resolvedOrigin = resolveWorkspaceEntityOrigin(location.state, workspaceId, entityId)
   const resolvedOriginHref = workspaceEntityOriginHref(resolvedOrigin.origin)
   const releaseContext =
@@ -444,11 +453,13 @@ const ConnectedWorkspaceEntity = ({
   return (
     <WorkspaceEntityView
       onAskAgent={() => navigate(agentPath, { state: location.state })}
+      onSessionExpired={browserSession.invalidateSession}
       originHref={resolvedOriginHref}
       originLabel={originLabel(resolvedOriginHref, workspaceId)}
       originState={resolvedOrigin.origin.state}
       retry={controller.retry}
       state={controller.state}
+      sessionKey={sessionKey}
       workspaceId={workspaceId}
     />
   )

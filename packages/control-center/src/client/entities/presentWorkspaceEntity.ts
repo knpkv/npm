@@ -491,7 +491,7 @@ export const presentWorkspaceEntity = (
     ? presentWorkspaceIssue(projection.details, inspection.source.sourceUrl)
     : null
   const pullRequest = projection.details._tag === "pull-request"
-    ? presentWorkspacePullRequest(projection.details, inspection.source.sourceUrl, inspection)
+    ? presentWorkspacePullRequest(projection.details, inspection.source, inspection)
     : null
   const pipelineExecution = projection.details._tag === "pipeline-execution"
     ? presentWorkspacePipelineExecution(projection.details, inspection)
