@@ -10,6 +10,7 @@
     "./CacheService.js": "./src/CacheService/index.ts",
     "./ConfigService.js": "./src/ConfigService/index.ts",
     "./ReadClient.js": "./src/ReadClient/index.ts",
+    "./ReviewClient.js": "./src/ReviewClient/index.ts",
     "./SandboxService.js": "./src/SandboxService/index.ts",
     "./*.js": "./src/*.ts"
   },
@@ -21,6 +22,7 @@
       ".": "./dist/index.js",
       "./ConfigService.js": "./dist/ConfigService/index.js",
       "./ReadClient.js": "./dist/ReadClient/index.js",
+      "./ReviewClient.js": "./dist/ReviewClient/index.js",
       "./*.js": "./dist/*.js"
     }
   },

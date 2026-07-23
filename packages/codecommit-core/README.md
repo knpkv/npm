@@ -46,7 +46,26 @@ const program = Effect.gen(function* () {
 
 The models preserve the exact pull request revision, base/head commits, merge base, old/new paths, blob IDs, modes, provider cursor, and requested provider page limit. `getBlob` reads one immutable blob through the same injectable provider and Schema boundary, retains at most 1 MiB, and distinguishes the provider's file limit from the read client's exact observed byte limit. Streams and blob reads inherit Effect interruption, so cancellation stops an in-flight provider call. Provider authentication/API failures, missing objects, malformed responses, and blob size limits remain typed.
 
-`classifyCodeCommitFile` derives conservative binary/generated facts from bounded bytes and stable path signals. Binary detection requires a NUL byte; generated detection recognizes an explicit `generated` path segment, `.generated.`, minified/source-map suffixes, and common lockfiles. It deliberately avoids broad directory guesses such as `dist` or `vendor`. Commit history and comment reads remain later I01 slices; callers must not infer classification merely from a successful inventory read without content.
+`classifyCodeCommitFile` derives conservative binary/generated facts from bounded bytes and stable path signals. Binary detection requires a NUL byte; generated detection recognizes an explicit `generated` path segment, `.generated.`, minified/source-map suffixes, and common lockfiles. It deliberately avoids broad directory guesses such as `dist` or `vendor`. General ReadClient commit-history and comment queries remain later I01 slices; the ReviewClient uses a bounded internal comment read only for reconciliation. Callers must not infer classification merely from a successful inventory read without content.
+
+### ReviewClient
+
+The supported `@knpkv/codecommit-core/ReviewClient.js` entry exposes immutable pull-request review actions for server integrations. Every action carries the exact repository, pull request revision, base commit, and head commit that a caller authorized. `preflight` rejects a changed or closed target before a write, `execute` returns a secret-free provider receipt, and `reconcile` inspects provider state without replaying an ambiguous mutation.
+
+```typescript
+import { ReviewClient } from "@knpkv/codecommit-core"
+import { Effect } from "effect"
+
+declare const action: ReviewClient.CodeCommitReviewAction
+
+const program = Effect.gen(function* () {
+  const client = yield* ReviewClient.CodeCommitReviewClient
+  yield* client.preflight(action)
+  return yield* client.execute(action)
+})
+```
+
+`CodeCommitReviewClient.live` supplies the raw mutation provider and still requires a `CodeCommitReadClient`, `AwsClientConfig`, and `HttpClient` when layers are composed. CodeCommit natively supports approve, revoke approval, and fast-forward merge. It has no request-review or request-changes state mutation, so those actions are idempotent comments attached to the authorized base/head commits. Comment reconciliation searches by AWS client request token; approval reconciliation reads the signed-in identity’s state; merge reconciliation verifies the exact merged source commit.
 
 ### CacheService (SQLite)
 
@@ -93,6 +112,7 @@ Client-side code must use deep imports to avoid pulling in server-only deps:
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { AppStatus } from "@knpkv/codecommit-core/Domain.js"
 import { CodeCommitReadClient } from "@knpkv/codecommit-core/ReadClient.js"
+import { CodeCommitReviewClient } from "@knpkv/codecommit-core/ReviewClient.js"
 ```
 
 The `.js` suffix is required — see package.json exports field.

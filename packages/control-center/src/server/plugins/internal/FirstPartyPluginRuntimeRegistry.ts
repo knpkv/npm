@@ -2,6 +2,7 @@ import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
 import {
   AdfSchemaValidatorLayer,
@@ -755,10 +756,18 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
   }
-  const client = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(AwsClientConfig.Default))
+  const awsConfiguration = AwsClientConfig.Default
+  const readClient = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(awsConfiguration))
+  const reviewProvider = ReviewClient.CodeCommitReviewProviderLive.pipe(
+    Layer.provide(awsConfiguration)
+  )
+  const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+    Layer.provide(Layer.merge(readClient, reviewProvider))
+  )
+  const clients = Layer.merge(readClient, reviewClient)
   return {
     credentialGeneration: `${profile}\0${region}`,
-    layer: buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(Layer.provide(client))
+    layer: buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(Layer.provide(clients))
   }
 })
 

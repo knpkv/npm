@@ -1,41 +1,60 @@
 /**
  * Production CodeCommit read adapter for one configured repository.
  *
- * This first vertical slice owns pull-request discovery, immutable revision
- * reads, and complete paginated changed-file inventory. Provider writes and
- * diff content reads are intentionally not negotiated.
+ * Owns pull-request discovery, immutable revision reads, complete paginated
+ * changed-file inventory, and governed review actions. CodeCommit exposes
+ * native approval, revoke, and merge mutations; request-review and
+ * request-changes are represented by idempotent comments on the exact commits
+ * because the provider has no corresponding review-state API.
  *
  * @internal
  */
 import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import * as Clock from "effect/Clock"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
+  type AuthorizedPluginActionV1,
   type DiffInventoryPageRequestV1,
   DiffInventoryPageV1,
+  type PluginActionDispatchResultV1,
+  PluginActionPreflightV1,
+  PluginActionProposalV1,
+  PluginActionReconciliationKey,
+  type PluginActionReconciliationRequestV1,
+  type PluginActionReconciliationResultV1,
   PluginDiscoveryV1,
+  PluginProviderOperationId,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
+  type ProposePluginActionRequestV1,
   type ReadPluginEntityRequestV1,
   ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
+import { Revision } from "../../../domain/sourceRevision.js"
+import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
   PluginRateLimitFailure,
   PluginTimeoutFailure,
+  PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
 import { pluginCapabilityCodecsV1 } from "../PluginCapabilityCodecs.js"
@@ -94,7 +113,14 @@ const descriptor = {
       required: true
     }
   ],
-  capabilities: ["entity.read", "sync.incremental", "diff.inventory"].map((capabilityId) => ({
+  capabilities: [
+    "entity.read",
+    "sync.incremental",
+    "action.propose",
+    "action.execute",
+    "action.reconcile",
+    "diff.inventory"
+  ].map((capabilityId) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -163,14 +189,461 @@ const failRead = Effect.fn("CodeCommitPlugin.failRead")(function*(
   }
 })
 
+const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
+  operation: string,
+  error: ReviewClient.CodeCommitReviewError,
+  ambiguousOutcome: PluginActionReconciliationKey | null
+): Effect.fn.Return<never, PluginFailure> {
+  switch (error._tag) {
+    case "AwsCredentialError":
+      return yield* new PluginAuthenticationFailure({ operation })
+    case "AwsThrottleError": {
+      const currentTimeMillis = yield* Clock.currentTimeMillis
+      return yield* new PluginRateLimitFailure({
+        operation,
+        retryAt: DateTime.add(DateTime.makeUnsafe(currentTimeMillis), { seconds: RETRY_DELAY_SECONDS })
+      })
+    }
+    case "CodeCommitMalformedResponseError":
+      if (ambiguousOutcome !== null) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation,
+          reconciliationKey: ambiguousOutcome
+        })
+      }
+      return yield* new PluginMalformedResponseFailure({
+        operation,
+        diagnosticCode: error.diagnosticCode
+      })
+    case "CodeCommitBlobTooLargeError":
+      return yield* new PluginMalformedResponseFailure({
+        operation,
+        diagnosticCode: "codecommit-review-unexpected-blob-read"
+      })
+    case "CodeCommitReadNotFoundError":
+      return yield* new PluginConflictFailure({
+        operation,
+        diagnosticCode: "codecommit-review-target-not-found"
+      })
+    case "CodeCommitReviewConflictError":
+      return yield* new PluginConflictFailure({
+        operation,
+        diagnosticCode: `codecommit-${error.reason}`
+      })
+    case "AwsApiError": {
+      if (causeHasTag(error.cause, ["InvalidClientTokenId", "UnrecognizedClientException", "ExpiredTokenException"])) {
+        return yield* new PluginAuthenticationFailure({ operation })
+      }
+      if (causeHasTag(error.cause, ["AccessDeniedException", "EncryptionKeyAccessDeniedException"])) {
+        return yield* new PluginAuthorizationFailure({ operation })
+      }
+      if (causeHasTag(error.cause, ["ThrottlingException", "TooManyRequestsException"])) {
+        const currentTimeMillis = yield* Clock.currentTimeMillis
+        return yield* new PluginRateLimitFailure({
+          operation,
+          retryAt: DateTime.add(DateTime.makeUnsafe(currentTimeMillis), { seconds: RETRY_DELAY_SECONDS })
+        })
+      }
+      if (ambiguousOutcome !== null) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation,
+          reconciliationKey: ambiguousOutcome
+        })
+      }
+      if (causeHasTag(error.cause, ["TimeoutError"])) {
+        return yield* new PluginTimeoutFailure({ operation })
+      }
+      return yield* new PluginOutageFailure({ operation })
+    }
+  }
+})
+
+const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): boolean => {
+  switch (error._tag) {
+    case "AwsCredentialError":
+    case "AwsThrottleError":
+    case "CodeCommitReadNotFoundError":
+    case "CodeCommitReviewConflictError":
+      return true
+    case "CodeCommitBlobTooLargeError":
+    case "CodeCommitMalformedResponseError":
+      return false
+    case "AwsApiError":
+      return causeHasTag(error.cause, [
+        "AccessDeniedException",
+        "EncryptionKeyAccessDeniedException",
+        "ExpiredTokenException",
+        "IdempotencyParameterMismatchException",
+        "InvalidClientTokenId",
+        "ThrottlingException",
+        "TooManyRequestsException",
+        "UnrecognizedClientException"
+      ])
+  }
+}
+
 const unsupported = (
-  capabilityId: "action.propose" | "action.execute" | "action.cancel" | "action.reconcile" | "diff.content"
+  capabilityId: "action.cancel" | "diff.content"
 ) =>
   new PluginUnsupportedCapabilityFailure({
     capabilityId,
     requestedVersion: 1,
-    diagnosticCode: "codecommit-read-adapter-capability-not-offered"
+    diagnosticCode: "codecommit-adapter-capability-not-offered"
   })
+
+const ReviewCommentPayload = Schema.Struct({
+  content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_240))
+})
+
+const RequestReviewPayload = Schema.Struct({
+  reviewerArns: Schema.Array(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_048))
+  ).check(Schema.isNonEmpty(), Schema.isUnique(), Schema.isMaxLength(50)),
+  message: Schema.optional(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_192))
+  )
+})
+
+const EmptyPayload = Schema.Struct({})
+const ReviewCommitId = ReadClient.CodeCommitCommitId.check(Schema.isMaxLength(64))
+
+const CodeCommitActionPayload = Schema.Union([
+  Schema.TaggedStruct("request-review", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    reviewerArns: RequestReviewPayload.fields.reviewerArns,
+    content: ReviewCommentPayload.fields.content
+  }),
+  Schema.TaggedStruct("comment", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    content: ReviewCommentPayload.fields.content
+  }),
+  Schema.TaggedStruct("request-changes", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId,
+    content: ReviewCommentPayload.fields.content
+  }),
+  Schema.TaggedStruct("approve", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId
+  }),
+  Schema.TaggedStruct("revoke-approval", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId
+  }),
+  Schema.TaggedStruct("merge-fast-forward", {
+    sourceCommit: ReviewCommitId,
+    destinationCommit: ReviewCommitId
+  })
+]).pipe(Schema.toTaggedUnion("_tag"))
+
+type CodeCommitActionPayload = typeof CodeCommitActionPayload.Type
+
+const actionKinds: readonly [
+  "request-review",
+  "comment",
+  "request-changes",
+  "approve",
+  "revoke-approval",
+  "merge-fast-forward"
+] = [
+  "request-review",
+  "comment",
+  "request-changes",
+  "approve",
+  "revoke-approval",
+  "merge-fast-forward"
+]
+
+type CodeCommitActionKind = typeof actionKinds[number]
+
+const isActionKind = (value: string): value is CodeCommitActionKind =>
+  actionKinds.some((actionKind) => actionKind === value)
+
+const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string): string => {
+  switch (actionKind) {
+    case "request-review":
+      return `Request review on CodeCommit pull request #${pullRequestId}`
+    case "comment":
+      return `Comment on CodeCommit pull request #${pullRequestId}`
+    case "request-changes":
+      return `Request changes on CodeCommit pull request #${pullRequestId}`
+    case "approve":
+      return `Approve CodeCommit pull request #${pullRequestId}`
+    case "revoke-approval":
+      return `Revoke approval on CodeCommit pull request #${pullRequestId}`
+    case "merge-fast-forward":
+      return `Merge CodeCommit pull request #${pullRequestId}`
+  }
+}
+
+const actionImpact = (
+  actionKind: CodeCommitActionKind
+): { readonly level: "medium" | "high"; readonly summary: string } =>
+  actionKind === "merge-fast-forward"
+    ? { level: "high", summary: "Updates the destination branch and closes the pull request" }
+    : {
+      level: "medium",
+      summary: actionKind === "approve" || actionKind === "revoke-approval"
+        ? "Changes the signed-in AWS identity's approval state"
+        : "Adds a durable review comment to the pull request"
+    }
+
+const decodeRequestedPayload = Effect.fn("CodeCommitPlugin.decodeRequestedPayload")(function*(
+  actionKind: CodeCommitActionKind,
+  payload: ProposePluginActionRequestV1["payload"]
+) {
+  const schema = actionKind === "request-review"
+    ? RequestReviewPayload
+    : actionKind === "comment" || actionKind === "request-changes"
+    ? ReviewCommentPayload
+    : EmptyPayload
+  return yield* Schema.decodeUnknownEffect(Schema.toType(schema))(payload).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+  )
+})
+
+const reviewRequestContent = (
+  payload: typeof RequestReviewPayload.Type
+): string => {
+  const reviewers = payload.reviewerArns.map((reviewerArn) => `- ${reviewerArn}`).join("\n")
+  return `${
+    payload.message === undefined ? "Review requested." : payload.message
+  }\n\nRequested reviewers:\n${reviewers}`
+}
+
+const decodeNormalizedActionPayload = (
+  value: unknown
+): Effect.Effect<CodeCommitActionPayload, PluginConfigurationFailure> =>
+  Schema.decodeUnknownEffect(Schema.toType(CodeCommitActionPayload))(value).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+  )
+
+const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayload")(function*(
+  actionKind: CodeCommitActionKind,
+  payload: ProposePluginActionRequestV1["payload"],
+  pullRequest: ReadClient.CodeCommitPullRequestRevision
+): Effect.fn.Return<CodeCommitActionPayload, PluginConfigurationFailure> {
+  const requested = yield* decodeRequestedPayload(actionKind, payload)
+  switch (actionKind) {
+    case "request-review": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(RequestReviewPayload))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        reviewerArns: decoded.reviewerArns,
+        content: reviewRequestContent(decoded)
+      })
+    }
+    case "comment":
+    case "request-changes": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(ReviewCommentPayload))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        content: decoded.content
+      })
+    }
+    case "approve":
+    case "revoke-approval":
+    case "merge-fast-forward":
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit
+      })
+  }
+})
+
+const ReconciliationLocatorWire = Schema.Tuple([
+  Schema.Literals(actionKinds),
+  Domain.PullRequestId.check(Schema.isMaxLength(64)),
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  ReviewCommitId,
+  ReviewCommitId,
+  Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)))
+]).check(
+  Schema.makeFilter(
+    ([actionKind, _pullRequestId, _revisionId, _sourceCommit, _destinationCommit, clientRequestToken]) =>
+      actionKind === "request-review" || actionKind === "comment" || actionKind === "request-changes"
+        ? clientRequestToken !== null
+        : clientRequestToken === null,
+    { expected: "a comment token only for comment-backed review actions" }
+  )
+)
+
+interface ReconciliationLocator {
+  readonly actionKind: CodeCommitActionKind
+  readonly pullRequestId: Domain.PullRequestId
+  readonly revisionId: string
+  readonly sourceCommit: ReadClient.CodeCommitCommitId
+  readonly destinationCommit: ReadClient.CodeCommitCommitId
+  readonly clientRequestToken: string | null
+}
+
+const encodeReconciliationLocator = (
+  locator: ReconciliationLocator
+): PluginActionReconciliationKey =>
+  PluginActionReconciliationKey.make(`ccmt:v1:${
+    Encoding.encodeBase64Url(JSON.stringify([
+      locator.actionKind,
+      locator.pullRequestId,
+      locator.revisionId,
+      locator.sourceCommit,
+      locator.destinationCommit,
+      locator.clientRequestToken
+    ]))
+  }`)
+
+const decodeReconciliationLocator = (
+  key: PluginActionReconciliationKey
+): Effect.Effect<ReconciliationLocator, PluginConfigurationFailure> => {
+  const encoded = key.startsWith("ccmt:v1:") ? key.slice("ccmt:v1:".length) : ""
+  const decoded = Encoding.decodeBase64UrlString(encoded)
+  if (Result.isFailure(decoded)) {
+    return Effect.fail(
+      new PluginConfigurationFailure({
+        diagnosticCode: "codecommit-reconciliation-key-invalid"
+      })
+    )
+  }
+  return Schema.decodeUnknownEffect(Schema.fromJsonString(ReconciliationLocatorWire))(decoded.success).pipe(
+    Effect.map(([actionKind, pullRequestId, revisionId, sourceCommit, destinationCommit, clientRequestToken]) => ({
+      actionKind,
+      pullRequestId,
+      revisionId,
+      sourceCommit,
+      destinationCommit,
+      clientRequestToken
+    })),
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-reconciliation-key-invalid" }))
+  )
+}
+
+const actionFromPayload = (
+  account: ReadClient.CodeCommitReadAccount,
+  repositoryName: Domain.RepositoryName,
+  pullRequestId: Domain.PullRequestId,
+  revisionId: string,
+  payload: CodeCommitActionPayload,
+  clientRequestToken: string
+): ReviewClient.CodeCommitReviewAction => {
+  const target = {
+    account,
+    repositoryName,
+    pullRequestId,
+    revisionId,
+    sourceCommit: payload.sourceCommit,
+    destinationCommit: payload.destinationCommit
+  }
+  switch (payload._tag) {
+    case "request-review":
+    case "comment":
+    case "request-changes":
+      return {
+        _tag: payload._tag,
+        target,
+        content: payload.content,
+        clientRequestToken
+      }
+    case "approve":
+    case "revoke-approval":
+    case "merge-fast-forward":
+      return { _tag: payload._tag, target }
+  }
+}
+
+const actionFromLocator = (
+  account: ReadClient.CodeCommitReadAccount,
+  repositoryName: Domain.RepositoryName,
+  locator: ReconciliationLocator
+): ReviewClient.CodeCommitReviewAction => {
+  const target = {
+    account,
+    repositoryName,
+    pullRequestId: locator.pullRequestId,
+    revisionId: locator.revisionId,
+    sourceCommit: locator.sourceCommit,
+    destinationCommit: locator.destinationCommit
+  }
+  switch (locator.actionKind) {
+    case "request-review":
+    case "comment":
+    case "request-changes":
+      return {
+        _tag: locator.actionKind,
+        target,
+        content: "Reconcile the previously dispatched review comment",
+        clientRequestToken: locator.clientRequestToken ?? "invalid-missing-client-request-token"
+      }
+    case "approve":
+    case "revoke-approval":
+    case "merge-fast-forward":
+      return { _tag: locator.actionKind, target }
+  }
+}
+
+const locatorForAction = (
+  action: ReviewClient.CodeCommitReviewAction
+): PluginActionReconciliationKey =>
+  encodeReconciliationLocator({
+    actionKind: action._tag,
+    pullRequestId: action.target.pullRequestId,
+    revisionId: action.target.revisionId,
+    sourceCommit: action.target.sourceCommit,
+    destinationCommit: action.target.destinationCommit,
+    clientRequestToken: action._tag === "request-review" ||
+        action._tag === "comment" ||
+        action._tag === "request-changes"
+      ? action.clientRequestToken
+      : null
+  })
+
+const decodeAuthorizedAction = Effect.fn("CodeCommitPlugin.decodeAuthorizedAction")(function*(
+  account: ReadClient.CodeCommitReadAccount,
+  repositoryName: Domain.RepositoryName,
+  request: AuthorizedPluginActionV1
+) {
+  const proposal = request.proposal
+  if (
+    proposal.request.target.entityType !== "pull-request" ||
+    !isActionKind(proposal.request.actionKind)
+  ) {
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "codecommit-action-kind-or-target-invalid"
+    })
+  }
+  const payload = yield* Schema.decodeUnknownEffect(Schema.toType(CodeCommitActionPayload))(
+    proposal.request.payload
+  ).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+  )
+  if (payload._tag !== proposal.request.actionKind) {
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "codecommit-action-kind-payload-mismatch"
+    })
+  }
+  const pullRequestId = yield* Schema.decodeUnknownEffect(Domain.PullRequestId)(
+    proposal.request.target.vendorImmutableId
+  ).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-pull-request-id-invalid" }))
+  )
+  return actionFromPayload(
+    account,
+    repositoryName,
+    pullRequestId,
+    proposal.request.expectedRevision,
+    payload,
+    request.payloadDigest
+  )
+})
 
 const now = Clock.currentTimeMillis.pipe(Effect.map(DateTime.makeUnsafe))
 
@@ -288,8 +761,14 @@ const inventoryEntry = Effect.fn("CodeCommitPlugin.inventoryEntry")(function*(
 const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
   configuration: typeof CodeCommitPluginConfiguration.Type,
   descriptor: PluginConnectionV1["descriptor"]
-): Effect.fn.Return<PluginConnectionV1, never, ReadClient.CodeCommitReadClient> {
+): Effect.fn.Return<
+  { readonly connection: PluginConnectionV1; readonly executor: AuthorizedPluginExecutorV1 },
+  never,
+  Crypto.Crypto | ReadClient.CodeCommitReadClient | ReviewClient.CodeCommitReviewClient
+> {
   const readClient = yield* ReadClient.CodeCommitReadClient
+  const reviewClient = yield* ReviewClient.CodeCommitReviewClient
+  const cryptoService = yield* Crypto.Crypto
   const account = { profile: configuration.profile, region: configuration.region }
   const probeRepository = readClient.listPullRequestsPage({
     account,
@@ -435,6 +914,49 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     })
   })
 
+  const proposeAction = Effect.fn("CodeCommitPlugin.proposeAction")(function*(
+    request: ProposePluginActionRequestV1
+  ) {
+    if (request.target.entityType !== "pull-request" || !isActionKind(request.actionKind)) {
+      return yield* new PluginUnsupportedCapabilityFailure({
+        capabilityId: "action.propose",
+        requestedVersion: 1,
+        diagnosticCode: "codecommit-action-kind-or-target-unsupported"
+      })
+    }
+    const pullRequest = yield* readClient.getPullRequest({
+      account,
+      pullRequestId: request.target.vendorImmutableId
+    }).pipe(Effect.catch((error) => failRead("propose-action", error)))
+    yield* enforceConfiguredRepository(configuration.repositoryName, pullRequest)
+    if (pullRequest.status !== "OPEN" || pullRequest.revisionId !== request.expectedRevision) {
+      return yield* new PluginConflictFailure({
+        operation: "propose-action",
+        diagnosticCode: pullRequest.status !== "OPEN"
+          ? "codecommit-pull-request-closed"
+          : "codecommit-revision-changed"
+      })
+    }
+    const payload = yield* normalizeActionPayload(request.actionKind, request.payload, pullRequest)
+    const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
+    )
+    const proposedAt = yield* now
+    return yield* output("propose-action", PluginActionProposalV1, {
+      proposalKey: `ccmt:${request.actionKind}:${pullRequest.pullRequestId}:${pullRequest.revisionId}:${payloadDigest}`,
+      capabilityVersion: 1,
+      request: {
+        ...request,
+        payload
+      },
+      payloadDigest,
+      summary: actionSummary(request.actionKind, pullRequest.pullRequestId),
+      impact: actionImpact(request.actionKind),
+      proposedAt: DateTime.formatIso(proposedAt)
+    })
+  })
+
   const connection: PluginConnectionV1 = {
     descriptor,
     discover,
@@ -445,17 +967,117 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       readInventoryPage,
       readContentRange: () => Effect.fail(unsupported("diff.content"))
     }),
-    proposeAction: () => Effect.fail(unsupported("action.propose"))
+    proposeAction
   }
-  return connection
-})
 
-const executor: AuthorizedPluginExecutorV1 = {
-  preflight: () => Effect.fail(unsupported("action.execute")),
-  executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-  requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-  reconcile: () => Effect.fail(unsupported("action.reconcile"))
-}
+  const preflight = Effect.fn("CodeCommitPlugin.preflight")(function*(
+    request: AuthorizedPluginActionV1
+  ) {
+    const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
+    const result = yield* reviewClient.preflight(action).pipe(Effect.result)
+    const checkedAt = yield* now
+    if (Result.isSuccess(result)) {
+      return yield* output("preflight", PluginActionPreflightV1, {
+        _tag: "ready",
+        checkedRevision: Revision.make(result.success.revisionId),
+        checkedAt: DateTime.formatIso(checkedAt)
+      })
+    }
+    if (result.failure._tag === "CodeCommitReviewConflictError") {
+      return yield* output("preflight", PluginActionPreflightV1, {
+        _tag: "blocked",
+        reasons: [`CodeCommit action blocked: ${result.failure.reason}`],
+        checkedAt: DateTime.formatIso(checkedAt)
+      })
+    }
+    return yield* failReview("preflight", result.failure, null)
+  })
+
+  const executeAuthorizedAction = Effect.fn("CodeCommitPlugin.executeAuthorizedAction")(function*(
+    request: AuthorizedPluginActionV1
+  ) {
+    const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
+    const reconciliationKey = locatorForAction(action)
+    const result = yield* reviewClient.execute(action).pipe(Effect.result)
+    const observedAt = yield* now
+    if (Result.isFailure(result)) {
+      if (!isConfirmedReviewRejection(result.failure)) {
+        return yield* failReview("execute-authorized-action", result.failure, reconciliationKey)
+      }
+      return {
+        _tag: "confirmed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(
+            `rejected:${action._tag}:${action.target.pullRequestId}:${action.target.revisionId}`
+          ),
+          safeSummary: "CodeCommit rejected the authorized review action without applying it",
+          observedAt
+        }
+      } satisfies PluginActionDispatchResultV1
+    }
+    return {
+      _tag: "confirmed",
+      receipt: {
+        status: "succeeded",
+        providerOperationId: PluginProviderOperationId.make(result.success.operationId),
+        safeSummary: result.success.summary,
+        observedAt
+      }
+    } satisfies PluginActionDispatchResultV1
+  })
+
+  const reconcile = Effect.fn("CodeCommitPlugin.reconcile")(function*(
+    request: PluginActionReconciliationRequestV1
+  ) {
+    if (request.reconciliationKey === null) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codecommit-reconciliation-key-required"
+      })
+    }
+    const locator = yield* decodeReconciliationLocator(request.reconciliationKey)
+    const action = actionFromLocator(account, configuration.repositoryName, locator)
+    const result = yield* reviewClient.reconcile(action).pipe(
+      Effect.catch((error) => failReview("reconcile", error, null))
+    )
+    const checkedAt = yield* now
+    switch (result._tag) {
+      case "pending":
+        return { _tag: "pending", checkedAt } satisfies PluginActionReconciliationResultV1
+      case "succeeded":
+        return {
+          _tag: "succeeded",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: PluginProviderOperationId.make(result.receipt.operationId),
+            safeSummary: result.receipt.summary,
+            observedAt: checkedAt
+          }
+        } satisfies PluginActionReconciliationResultV1
+      case "failed":
+        return {
+          _tag: "failed",
+          receipt: {
+            status: "failed",
+            providerOperationId: PluginProviderOperationId.make(
+              `reconciliation:${locator.pullRequestId}:${locator.revisionId}`
+            ),
+            safeSummary: result.summary,
+            observedAt: checkedAt
+          }
+        } satisfies PluginActionReconciliationResultV1
+    }
+  })
+
+  const executor: AuthorizedPluginExecutorV1 = {
+    preflight,
+    executeAuthorizedAction,
+    requestCancellation: () => Effect.fail(unsupported("action.cancel")),
+    reconcile
+  }
+
+  return { connection, executor }
+})
 
 /** Internal requirement-preserving definition used by the runtime registry and adapter tests. @internal */
 export const codeCommitPluginDefinition = definePluginV1({
@@ -464,12 +1086,12 @@ export const codeCommitPluginDefinition = definePluginV1({
   capabilityCodecs: {
     entityRead: pluginCapabilityCodecsV1.entityRead,
     syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
+    actionPropose: pluginCapabilityCodecsV1.actionPropose,
+    actionExecute: pluginCapabilityCodecsV1.actionExecute,
+    actionReconcile: pluginCapabilityCodecsV1.actionReconcile,
     diffInventory: pluginCapabilityCodecsV1.diffInventory
   },
-  make: ({ configuration, descriptor: negotiatedDescriptor }) =>
-    makeConnection(configuration, negotiatedDescriptor).pipe(
-      Effect.map((connection) => ({ connection, executor }))
-    )
+  make: ({ configuration, descriptor: negotiatedDescriptor }) => makeConnection(configuration, negotiatedDescriptor)
 })
 
 /** Opaque production CodeCommit plugin definition for first-party registration. */

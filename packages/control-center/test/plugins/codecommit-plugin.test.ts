@@ -1,16 +1,23 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
-import { Domain, Errors, ReadClient } from "@knpkv/codecommit-core"
+import { Domain, Errors, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import {
+  AuthorizedPluginActionV1,
   DiffInventoryPageRequestV1,
+  type PluginActionProposalV1,
+  PluginActionReconciliationRequestV1,
   PluginSyncRequestV1,
+  ProposePluginActionRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
 import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
@@ -19,6 +26,7 @@ import {
   PluginAuthorizationFailure,
   PluginConfigurationFailure
 } from "../../src/server/plugins/failures.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { buildPluginDefinitionLayer } from "../../src/server/plugins/PluginDefinition.js"
 
@@ -105,18 +113,58 @@ const baseReadClient = (
   ...overrides
 })
 
+const baseReviewClient = (
+  overrides: Partial<ReviewClient.CodeCommitReviewClientService> = {}
+): ReviewClient.CodeCommitReviewClientService => ({
+  preflight: () => Effect.succeed(pullRequest),
+  execute: () =>
+    Effect.succeed(
+      new ReviewClient.CodeCommitReviewReceipt({
+        operationId: "review-operation-1",
+        summary: "Review action completed"
+      })
+    ),
+  reconcile: () => Effect.succeed({ _tag: "pending" }),
+  ...overrides
+})
+
 const runWithClient = <A, E>(
   client: ReadClient.CodeCommitReadClientService,
-  effect: Effect.Effect<A, E, PluginConnection>
+  effect: Effect.Effect<A, E, AuthorizedPluginExecutor | PluginConnection>,
+  reviewClient: ReviewClient.CodeCommitReviewClientService = baseReviewClient()
 ) =>
   effect.pipe(
     Effect.provide(
       buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(
-        Layer.provide(Layer.succeed(ReadClient.CodeCommitReadClient, client))
+        Layer.provide(Layer.mergeAll(
+          Layer.succeed(ReadClient.CodeCommitReadClient, client),
+          Layer.succeed(ReviewClient.CodeCommitReviewClient, reviewClient),
+          NodeCrypto.layer
+        ))
       )
     ),
     Effect.scoped
   )
+
+const requestChangesProposal = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "request-changes",
+  target: { entityType: "pull-request", vendorImmutableId: "17" },
+  expectedRevision: "revision-17",
+  payload: { content: "Please preserve the authorization binding." },
+  evidenceIds: ["review-finding-1"]
+})
+
+const authorizeProposal = (
+  proposal: PluginActionProposalV1
+) =>
+  Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+    proposal,
+    idempotencyKey: "governed-action-1",
+    payloadDigest: proposal.payloadDigest,
+    authorizationId: "authorization-1",
+    authorizedAt: proposal.proposedAt,
+    expiresAt: DateTime.add(proposal.proposedAt, { minutes: 5 })
+  })
 
 describe("CodeCommitPlugin", () => {
   it.effect("proves repository access and region-scopes the discovered resource identity", () =>
@@ -406,5 +454,197 @@ describe("CodeCommitPlugin", () => {
 
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthorizationFailure)
+    }))
+
+  it.effect("offers request-review comments and native approval as distinct governed actions", () =>
+    Effect.gen(function*() {
+      const requestReview = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        actionKind: "request-review",
+        target: { entityType: "pull-request", vendorImmutableId: "17" },
+        expectedRevision: "revision-17",
+        payload: {
+          reviewerArns: ["arn:aws:iam::123456789012:user/grace"],
+          message: "Please review the authorization changes."
+        },
+        evidenceIds: []
+      })
+      const approve = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        actionKind: "approve",
+        target: { entityType: "pull-request", vendorImmutableId: "17" },
+        expectedRevision: "revision-17",
+        payload: {},
+        evidenceIds: []
+      })
+      const proposals = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const requestReviewProposal = yield* connection.proposeAction(requestReview)
+          const approveProposal = yield* connection.proposeAction(approve)
+          return {
+            requestReview: requestReviewProposal,
+            approve: approveProposal,
+            approvalDispatch: yield* executor.executeAuthorizedAction(authorizeProposal(approveProposal))
+          }
+        })
+      )
+
+      assert.deepInclude(proposals.requestReview.request.payload, {
+        _tag: "request-review",
+        reviewerArns: ["arn:aws:iam::123456789012:user/grace"]
+      })
+      assert.deepInclude(proposals.approve.request.payload, { _tag: "approve" })
+      assert.strictEqual(proposals.requestReview.impact.level, "medium")
+      assert.strictEqual(proposals.approve.impact.level, "medium")
+      assert.strictEqual(proposals.approvalDispatch._tag, "confirmed")
+    }))
+
+  it.effect("proposes and executes a governed request-changes action against the exact revision", () =>
+    Effect.gen(function*() {
+      const executed = yield* Ref.make<ReviewClient.CodeCommitReviewAction | null>(null)
+      const reviewClient = baseReviewClient({
+        execute: (action) =>
+          Ref.set(executed, action).pipe(
+            Effect.as(
+              new ReviewClient.CodeCommitReviewReceipt({
+                operationId: "comment:comment-42",
+                summary: "Change request posted to the pull request"
+              })
+            )
+          )
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          const authorized = authorizeProposal(proposal)
+          const preflight = yield* executor.preflight(authorized)
+          const dispatch = yield* executor.executeAuthorizedAction(authorized)
+          return { dispatch, preflight, proposal }
+        }),
+        reviewClient
+      )
+
+      assert.deepInclude(result.proposal.request.payload, { _tag: "request-changes" })
+      assert.strictEqual(result.preflight._tag, "ready")
+      assert.strictEqual(result.dispatch._tag, "confirmed")
+      const action = yield* Ref.get(executed)
+      assert.strictEqual(action?._tag, "request-changes")
+      assert.strictEqual(action?.target.revisionId, "revision-17")
+      assert.strictEqual(action?.target.sourceCommit, "head-commit-17")
+    }))
+
+  it.effect("blocks stale actions before the executor can call the review mutation", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const reviewClient = baseReviewClient({
+        preflight: () =>
+          Effect.fail(
+            new ReviewClient.CodeCommitReviewConflictError({
+              operation: "preflight",
+              reason: "revision-changed"
+            })
+          ),
+        execute: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReviewClient.CodeCommitReviewReceipt({
+                operationId: "unexpected",
+                summary: "Unexpected mutation"
+              })
+            )
+          )
+      })
+      const preflight = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.preflight(authorizeProposal(proposal))
+        }),
+        reviewClient
+      )
+
+      assert.strictEqual(preflight._tag, "blocked")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("records a definitive provider rejection as a failed receipt", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new ReviewClient.CodeCommitReviewConflictError({
+                operation: "post-comment",
+                reason: "revision-changed"
+              })
+            )
+        })
+      )
+
+      assert.strictEqual(result._tag, "confirmed")
+      if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
+  it.effect("reconciles an ambiguous provider outcome without replaying the mutation", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const reviewClient = baseReviewClient({
+        execute: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.fail(
+              new Errors.AwsApiError({
+                operation: "postPullRequestComment",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "TimeoutError" }
+              })
+            ))
+          ),
+        reconcile: () =>
+          Effect.succeed({
+            _tag: "succeeded",
+            receipt: new ReviewClient.CodeCommitReviewReceipt({
+              operationId: "comment:comment-reconciled",
+              summary: "Change request posted to the pull request"
+            })
+          })
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          const authorized = authorizeProposal(proposal)
+          const dispatch = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          if (Result.isSuccess(dispatch)) return yield* Effect.die("expected ambiguous provider outcome")
+          if (!Predicate.isTagged(dispatch.failure, "PluginUnknownOutcomeFailure")) {
+            return yield* Effect.die("expected PluginUnknownOutcomeFailure")
+          }
+          const reconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+            reconciliationKey: dispatch.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest
+          })
+          return yield* executor.reconcile(reconciliationRequest)
+        }),
+        reviewClient
+      )
+
+      assert.strictEqual(result._tag, "succeeded")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
 })
