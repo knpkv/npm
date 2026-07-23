@@ -72,6 +72,12 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
   if (Predicate.isTagged(cause, "PullRequestApprovalRulesNotSatisfiedException")) {
     return "approval-rules-unsatisfied"
   }
+  if (Predicate.isTagged(cause, "RepositoryNotAssociatedWithPullRequestException")) return "repository-changed"
+  if (Predicate.isTagged(cause, "CommitDoesNotExistException")) return "source-commit-changed"
+  if (
+    Predicate.isTagged(cause, "CommentContentSizeLimitExceededException") ||
+    Predicate.isTagged(cause, "InvalidClientRequestTokenException")
+  ) return "revision-changed"
   if (
     Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||
     Predicate.isTagged(cause, "ManualMergeRequiredException")

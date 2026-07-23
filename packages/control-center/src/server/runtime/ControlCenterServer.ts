@@ -45,7 +45,7 @@ import {
   type StaticAssetStoreOptions
 } from "../http/security/StaticAssetStore.js"
 import { staticApplicationLayer } from "../http/StaticApplication.js"
-import { databaseLayer } from "../persistence/Database.js"
+import { type Database, databaseLayer } from "../persistence/Database.js"
 import {
   type Persistence,
   type PersistenceLayerError,
@@ -134,6 +134,7 @@ const liveApplicationServices = (
   ControlCenterCoreApplicationServices,
   never,
   | Crypto.Crypto
+  | Database
   | DomainEventWakeups
   | FileSystem.FileSystem
   | HttpClient.HttpClient
@@ -177,6 +178,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ApplicationError,
     | ApplicationRequirements
     | Crypto.Crypto
+    | Database
     | DomainEventWakeups
     | FileSystem.FileSystem
     | HttpClient.HttpClient
@@ -193,6 +195,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const databaseDrain = databaseDrainLayer.pipe(Layer.provide(database))
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence),
+    Layer.provide(database),
     Layer.provide(domainEventWakeups)
   )
   const releaseAgent = options.releaseAgent === undefined || options.releaseAgent === null

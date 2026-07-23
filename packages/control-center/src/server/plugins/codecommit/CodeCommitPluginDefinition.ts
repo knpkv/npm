@@ -280,10 +280,10 @@ const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
 
 const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): boolean => {
   switch (error._tag) {
-    case "AwsCredentialError":
     case "CodeCommitReadNotFoundError":
     case "CodeCommitReviewConflictError":
       return true
+    case "AwsCredentialError":
     case "AwsThrottleError":
     case "CodeCommitBlobTooLargeError":
     case "CodeCommitMalformedResponseError":
@@ -1060,10 +1060,17 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
         checkedAt: DateTime.formatIso(checkedAt)
       })
     }
-    if (result.failure._tag === "CodeCommitReviewConflictError") {
+    if (
+      result.failure._tag === "CodeCommitReviewConflictError" ||
+      result.failure._tag === "CodeCommitReadNotFoundError"
+    ) {
       return yield* output("preflight", PluginActionPreflightV1, {
         _tag: "blocked",
-        reasons: [`CodeCommit action blocked: ${result.failure.reason}`],
+        reasons: [
+          result.failure._tag === "CodeCommitReviewConflictError"
+            ? `CodeCommit action blocked: ${result.failure.reason}`
+            : "CodeCommit action blocked: review target not found"
+        ],
         checkedAt: DateTime.formatIso(checkedAt)
       })
     }

@@ -6,6 +6,8 @@ valid:
       repositoryName: action.target.repositoryName,
       sourceCommitId: action.target.sourceCommit
     })
+  - codecommit.mergePullRequestBySquash(input)
+  - codecommit.mergePullRequestByThreeWay(input)
 invalid:
   - |
     codecommit.mergeBranchesByFastForward({
@@ -13,3 +15,5 @@ invalid:
       sourceCommitSpecifier: action.target.sourceCommit,
       destinationCommitSpecifier: action.target.destinationCommit
     })
+  - codecommit.mergeBranchesBySquash(input)
+  - codecommit.mergeBranchesByThreeWay(input)

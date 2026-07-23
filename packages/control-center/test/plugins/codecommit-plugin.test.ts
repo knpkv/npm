@@ -642,6 +642,56 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
+  it.effect("blocks a missing pull request during preflight without calling the mutation", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const preflight = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.preflight(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          preflight: () => Effect.fail(new ReadClient.CodeCommitReadNotFoundError({ operation: "getPullRequest" })),
+          execute: () =>
+            Ref.update(mutationCalls, (count) => count + 1).pipe(
+              Effect.andThen(Effect.die("missing preflight target must block execute"))
+            )
+        })
+      )
+
+      assert.strictEqual(preflight._tag, "blocked")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("surfaces preflight credential failures as authentication failures", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.preflight(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          preflight: () =>
+            Effect.fail(
+              new Errors.AwsCredentialError({
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "CredentialsProviderError" }
+              })
+            )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthenticationFailure)
+    }))
+
   it.effect("records a definitive provider rejection as a failed receipt", () =>
     Effect.gen(function*() {
       const result = yield* runWithClient(
@@ -665,6 +715,32 @@ describe("CodeCommitPlugin", () => {
 
       assert.strictEqual(result._tag, "confirmed")
       if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
+  it.effect("surfaces execute credential failures instead of recording a terminal receipt", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsCredentialError({
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "CredentialsProviderError" }
+              })
+            )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginAuthenticationFailure)
     }))
 
   it.effect("records approval-by-author denial as a terminal failed receipt", () =>

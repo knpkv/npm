@@ -12,6 +12,7 @@ import {
 import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "@knpkv/jira-api-client"
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
@@ -62,8 +63,9 @@ import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
 import {
   PluginRuntimeAccountDigest,
   PluginRuntimeAuthority,
-  PluginRuntimeAuthorityToken
+  PluginRuntimeSourceDigest
 } from "./PluginRuntimeAuthority.js"
+import { PluginRuntimeAuthoritySource } from "./PluginRuntimeAuthoritySource.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "./PluginRuntimeRegistry.js"
 
 const CLOCKIFY_API_ORIGIN = "https://api.clockify.me/api"
@@ -569,6 +571,7 @@ const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(funct
   loaded: LoadedRuntime,
   credentialGeneration: string
 ) {
+  const authoritySource = yield* PluginRuntimeAuthoritySource
   const source = JSON.stringify([
     scope.workspaceId,
     scope.pluginConnectionId,
@@ -583,9 +586,27 @@ const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(funct
   ])
   const digest = yield* runtimeDigest(source)
   const accountDigest = PluginRuntimeAccountDigest.make(`sha256:${digest}`)
+  const current = yield* authoritySource.publish({
+    scope,
+    expected: {
+      providerId: loaded.runtime.providerId,
+      connectionRevision: loaded.connectionRevision,
+      descriptorGeneration: loaded.runtime.descriptorGeneration,
+      configuration: {
+        _tag: "present",
+        revision: loaded.configurationRevision,
+        digest: PluginRuntimeSourceDigest.make(loaded.configurationDigest)
+      },
+      descriptorDigest: PluginRuntimeSourceDigest.make(loaded.runtime.descriptorDigest)
+    },
+    accountDigest,
+    activatedAt: yield* DateTime.now
+  }).pipe(
+    Effect.mapError(() => configurationFailure("plugin-runtime-authority-publication-failed"))
+  )
   return {
     accountDigest,
-    layer: Layer.succeed(PluginRuntimeAuthority, PluginRuntimeAuthorityToken.make(`sha256:${digest}`))
+    layer: Layer.succeed(PluginRuntimeAuthority, current.runtimeAuthorityToken)
   }
 })
 
@@ -903,6 +924,7 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
   const httpClient = yield* HttpClient.HttpClient
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const authoritySource = yield* PluginRuntimeAuthoritySource
 
   const requirements = Layer.mergeAll(
     Layer.succeed(Persistence, persistence),
@@ -910,7 +932,8 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
     Layer.succeed(Crypto.Crypto, cryptoService),
     Layer.succeed(HttpClient.HttpClient, httpClient),
     Layer.succeed(FileSystem.FileSystem, fileSystem),
-    Layer.succeed(Path.Path, path)
+    Layer.succeed(Path.Path, path),
+    Layer.succeed(PluginRuntimeAuthoritySource, authoritySource)
   )
 
   return {
@@ -936,7 +959,13 @@ export const makeFirstPartyPluginRuntimeRegistry = (
 ): Layer.Layer<
   PluginRuntimeRegistry,
   never,
-  Persistence | SecretStore | Crypto.Crypto | HttpClient.HttpClient | FileSystem.FileSystem | Path.Path
+  | Persistence
+  | SecretStore
+  | Crypto.Crypto
+  | HttpClient.HttpClient
+  | FileSystem.FileSystem
+  | Path.Path
+  | PluginRuntimeAuthoritySource
 > => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
 
 /** Production registry for the fixed first-party provider catalog. @internal */

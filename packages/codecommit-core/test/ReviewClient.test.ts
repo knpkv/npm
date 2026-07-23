@@ -7,6 +7,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
+import { AwsApiError } from "../src/Errors.js"
 import {
   CodeCommitAccountIdentity,
   CodeCommitBlobContent,
@@ -164,6 +165,31 @@ describe("CodeCommitReviewClient", () => {
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("classifies deterministic comment validation failures as terminal conflicts", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          postComment: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "postCommentForPullRequest",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "CommentContentSizeLimitExceededException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(commentAction).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
     }))
 
   it.effect("re-checks an approval target immediately before the provider write", () =>

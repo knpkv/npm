@@ -6,7 +6,10 @@ severity: error
 message: "CodeCommit governed PR reviews must not bypass provider approval rules with the branch merge API"
 
 rule:
-  pattern: codecommit.mergeBranchesByFastForward($$$)
+  any:
+    - pattern: codecommit.mergeBranchesByFastForward($$$)
+    - pattern: codecommit.mergeBranchesBySquash($$$)
+    - pattern: codecommit.mergeBranchesByThreeWay($$$)
 
 files:
   - "packages/codecommit-core/src/ReviewClient/**/*.ts"
@@ -16,6 +19,6 @@ ignores:
   - "repos/**"
 
 note: |
-  `MergeBranchesByFastForward` does not enforce CodeCommit pull-request approval
+  CodeCommit branch merge operations do not enforce pull-request approval
   rules. Genuine branch-maintenance helpers outside the PR review boundary still
   require reviewer judgment.
