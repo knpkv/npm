@@ -19,11 +19,13 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
+import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as SynchronizedRef from "effect/SynchronizedRef"
 
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
@@ -83,7 +85,8 @@ interface SyncCursor {
 export const CodeCommitPluginConfiguration = Schema.Struct({
   profile: Domain.AwsProfileName,
   region: Domain.AwsRegion,
-  repositoryName: Domain.RepositoryName
+  repositoryName: Domain.RepositoryName,
+  runtimeIdentity: Schema.optional(ReadClient.CodeCommitAccountIdentity)
 })
 
 const descriptor = {
@@ -266,10 +269,10 @@ const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
 const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): boolean => {
   switch (error._tag) {
     case "AwsCredentialError":
-    case "AwsThrottleError":
     case "CodeCommitReadNotFoundError":
     case "CodeCommitReviewConflictError":
       return true
+    case "AwsThrottleError":
     case "CodeCommitBlobTooLargeError":
     case "CodeCommitMalformedResponseError":
       return false
@@ -281,8 +284,6 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
         "IdempotencyParameterMismatchException",
         "InvalidClientTokenId",
         "PullRequestCannotBeApprovedByAuthorException",
-        "ThrottlingException",
-        "TooManyRequestsException",
         "UnrecognizedClientException"
       ])
   }
@@ -796,13 +797,35 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
   descriptor: PluginConnectionV1["descriptor"]
 ): Effect.fn.Return<
   { readonly connection: PluginConnectionV1; readonly executor: AuthorizedPluginExecutorV1 },
-  never,
+  PluginFailure,
   Crypto.Crypto | ReadClient.CodeCommitReadClient | ReviewClient.CodeCommitReviewClient
 > {
   const readClient = yield* ReadClient.CodeCommitReadClient
   const reviewClient = yield* ReviewClient.CodeCommitReviewClient
   const cryptoService = yield* Crypto.Crypto
+  const dispatches = yield* SynchronizedRef.make(HashMap.empty<string, {
+    readonly payloadDigest: string
+    readonly result: Result.Result<PluginActionDispatchResultV1, PluginFailure>
+  }>())
   const account = { profile: configuration.profile, region: configuration.region }
+  const runtimeIdentity = configuration.runtimeIdentity ??
+    (yield* readClient.discoverAccount(account).pipe(
+      Effect.catch((error) => failRead("runtime-identity", error))
+    ))
+  const verifyRuntimeIdentity = Effect.fn("CodeCommitPlugin.verifyRuntimeIdentity")(function*() {
+    const currentIdentity = yield* readClient.discoverAccount(account).pipe(
+      Effect.catch((error) => failRead("runtime-identity", error))
+    )
+    if (
+      currentIdentity.accountId !== runtimeIdentity.accountId ||
+      currentIdentity.arn !== runtimeIdentity.arn
+    ) {
+      return yield* new PluginConflictFailure({
+        operation: "runtime-identity",
+        diagnosticCode: "codecommit-runtime-identity-changed"
+      })
+    }
+  })
   const probeRepository = readClient.listPullRequestsPage({
     account,
     repositoryName: configuration.repositoryName,
@@ -1006,6 +1029,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
   const preflight = Effect.fn("CodeCommitPlugin.preflight")(function*(
     request: AuthorizedPluginActionV1
   ) {
+    yield* verifyRuntimeIdentity()
     const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
     const result = yield* reviewClient.preflight(action).pipe(Effect.result)
     const checkedAt = yield* now
@@ -1026,7 +1050,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     return yield* failReview("preflight", result.failure, null)
   })
 
-  const executeAuthorizedAction = Effect.fn("CodeCommitPlugin.executeAuthorizedAction")(function*(
+  const dispatchAuthorizedAction = Effect.fn("CodeCommitPlugin.dispatchAuthorizedAction")(function*(
     request: AuthorizedPluginActionV1
   ) {
     const action = yield* decodeAuthorizedAction(account, configuration.repositoryName, request)
@@ -1060,9 +1084,46 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     } satisfies PluginActionDispatchResultV1
   })
 
+  const executeAuthorizedAction = Effect.fn("CodeCommitPlugin.executeAuthorizedAction")(function*(
+    request: AuthorizedPluginActionV1
+  ) {
+    yield* verifyRuntimeIdentity()
+    const result = yield* SynchronizedRef.modifyEffect(dispatches, (current) => {
+      const previous = HashMap.get(current, request.idempotencyKey)
+      if (Option.isSome(previous)) {
+        const replay = previous.value.payloadDigest === request.payloadDigest
+          ? previous.value.result
+          : Result.fail(
+            new PluginConflictFailure({
+              operation: "execute-authorized-action",
+              diagnosticCode: "codecommit-idempotency-payload-mismatch"
+            })
+          )
+        const transition: readonly [typeof replay, typeof current] = [replay, current]
+        return Effect.succeed(transition)
+      }
+      return dispatchAuthorizedAction(request).pipe(
+        Effect.result,
+        Effect.map((dispatched) => {
+          const cache = Result.isSuccess(dispatched) ||
+              Predicate.isTagged(dispatched.failure, "PluginUnknownOutcomeFailure")
+            ? HashMap.set(current, request.idempotencyKey, {
+              payloadDigest: request.payloadDigest,
+              result: dispatched
+            })
+            : current
+          const transition: readonly [typeof dispatched, typeof current] = [dispatched, cache]
+          return transition
+        })
+      )
+    })
+    return Result.isSuccess(result) ? result.success : yield* result.failure
+  })
+
   const reconcile = Effect.fn("CodeCommitPlugin.reconcile")(function*(
     request: PluginActionReconciliationRequestV1
   ) {
+    yield* verifyRuntimeIdentity()
     if (request.reconciliationKey === null) {
       return yield* new PluginConfigurationFailure({
         diagnosticCode: "codecommit-reconciliation-key-required"

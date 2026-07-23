@@ -24,7 +24,9 @@ import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
-  PluginConfigurationFailure
+  PluginConfigurationFailure,
+  PluginConflictFailure,
+  PluginRateLimitFailure
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -155,11 +157,12 @@ const requestChangesProposal = Schema.decodeUnknownSync(ProposePluginActionReque
 })
 
 const authorizeProposal = (
-  proposal: PluginActionProposalV1
+  proposal: PluginActionProposalV1,
+  idempotencyKey = "governed-action-1"
 ) =>
   Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
     proposal,
-    idempotencyKey: "governed-action-1",
+    idempotencyKey,
     payloadDigest: proposal.payloadDigest,
     authorizationId: "authorization-1",
     authorizedAt: proposal.proposedAt,
@@ -666,6 +669,119 @@ describe("CodeCommitPlugin", () => {
 
       assert.strictEqual(result._tag, "confirmed")
       if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
+  it.effect("replays one authorized action once and rejects an idempotency-key payload collision", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const reviewClient = baseReviewClient({
+        execute: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as(
+              new ReviewClient.CodeCommitReviewReceipt({
+                operationId: "review-operation-idempotent",
+                summary: "Review action completed once"
+              })
+            )
+          )
+      })
+      const collisionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        ...requestChangesProposal,
+        payload: { content: "A different authorized payload." }
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const firstProposal = yield* connection.proposeAction(requestChangesProposal)
+          const collisionProposal = yield* connection.proposeAction(collisionRequest)
+          const authorized = authorizeProposal(firstProposal)
+          const first = yield* executor.executeAuthorizedAction(authorized)
+          const retry = yield* executor.executeAuthorizedAction(authorized)
+          const collision = yield* executor.executeAuthorizedAction(
+            authorizeProposal(collisionProposal)
+          ).pipe(Effect.result)
+          const separate = yield* executor.executeAuthorizedAction(
+            authorizeProposal(collisionProposal, "governed-action-2")
+          )
+          return { collision, first, retry, separate }
+        }),
+        reviewClient
+      )
+
+      assert.deepStrictEqual(result.retry, result.first)
+      assert.isTrue(Result.isFailure(result.collision))
+      if (Result.isFailure(result.collision)) {
+        assert.instanceOf(result.collision.failure, PluginConflictFailure)
+      }
+      assert.strictEqual(result.separate._tag, "confirmed")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 2)
+    }))
+
+  it.effect("surfaces provider throttling as retryable instead of a terminal failed receipt", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "postPullRequestComment",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "ThrottlingException" }
+              })
+            )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginRateLimitFailure)
+    }))
+
+  it.effect("blocks governed writes when the configured AWS profile changes identity", () =>
+    Effect.gen(function*() {
+      const identityArn = yield* Ref.make("arn:aws:iam::123456789012:user/reviewer")
+      const mutationCalls = yield* Ref.make(0)
+      const client = baseReadClient({
+        discoverAccount: () =>
+          Ref.get(identityArn).pipe(
+            Effect.map((arn) =>
+              new ReadClient.CodeCommitAccountIdentity({
+                accountId: "123456789012",
+                arn
+              })
+            )
+          )
+      })
+      const reviewClient = baseReviewClient({
+        execute: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.die("identity change must block the mutation"))
+          )
+      })
+      const result = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-reviewer")
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        reviewClient
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginConflictFailure)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
   it.effect("reconciles an ambiguous provider outcome without replaying the mutation", () =>

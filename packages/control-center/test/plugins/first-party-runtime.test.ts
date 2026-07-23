@@ -38,6 +38,7 @@ import {
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { makeFirstPartyPluginRuntimeRegistry } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeKey } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
@@ -242,6 +243,7 @@ describe("first-party plugin runtime", () => {
     Effect.gen(function*() {
       const readCalls = yield* Ref.make(0)
       const mutationCalls = yield* Ref.make(0)
+      const identityArn = yield* Ref.make("arn:aws:iam::123456789012:user/reviewer")
       const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
         pullRequestId: "17",
         revisionId: "revision-17",
@@ -259,11 +261,13 @@ describe("first-party plugin runtime", () => {
       })
       const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
         discoverAccount: () =>
-          Effect.succeed(
-            new ReadClient.CodeCommitAccountIdentity({
-              accountId: "123456789012",
-              arn: "arn:aws:iam::123456789012:user/reviewer"
-            })
+          Ref.get(identityArn).pipe(
+            Effect.map((arn) =>
+              new ReadClient.CodeCommitAccountIdentity({
+                accountId: "123456789012",
+                arn
+              })
+            )
           ),
         listRepositoriesPage: () =>
           Effect.succeed(
@@ -345,7 +349,9 @@ describe("first-party plugin runtime", () => {
         const registry = yield* PluginRuntimeRegistry
         const result = yield* Effect.gen(function*() {
           const executor = yield* AuthorizedPluginExecutor
+          const authority = yield* PluginRuntimeAuthority
           return {
+            authority,
             preflight: yield* executor.preflight(AUTHORIZED_COMMENT_ACTION),
             dispatch: yield* executor.executeAuthorizedAction(AUTHORIZED_COMMENT_ACTION)
           }
@@ -362,6 +368,29 @@ describe("first-party plugin runtime", () => {
         if (result.dispatch._tag === "confirmed") assert.strictEqual(result.dispatch.receipt.status, "succeeded")
         assert.strictEqual(yield* Ref.get(readCalls), 1)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+
+        yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-reviewer")
+        const rotatedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        yield* Ref.set(identityArn, "arn:aws:iam::123456789012:user/reviewer")
+        const refreshedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        assert.notStrictEqual(rotatedAuthority, result.authority)
+        assert.strictEqual(refreshedAuthority, result.authority)
 
         yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
           pluginConnectionId: UNCONFIGURED_CONNECTION_ID,

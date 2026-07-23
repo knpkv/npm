@@ -36,7 +36,11 @@ import {
   clockifyReadPluginDescriptor,
   makeClockifyReadPluginRuntime
 } from "../clockify/ClockifyReadPlugin.js"
-import { codeCommitPluginDefinition, codeCommitPluginDescriptor } from "../codecommit/CodeCommitPluginDefinition.js"
+import {
+  CodeCommitPluginConfiguration,
+  codeCommitPluginDefinition,
+  codeCommitPluginDescriptor
+} from "../codecommit/CodeCommitPluginDefinition.js"
 import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
 import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
@@ -791,16 +795,23 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const profile = yield* textValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
-  const configuration = {
+  const configuration = yield* Schema.decodeUnknownEffect(CodeCommitPluginConfiguration)({
     profile,
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
-  }
+  }).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
+  const identity = yield* Effect.gen(function*() {
+    const readClient = yield* ReadClient.CodeCommitReadClient
+    return yield* readClient.discoverAccount(configuration)
+  }).pipe(
+    Effect.provide(clients),
+    Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
+  )
   return {
-    credentialGeneration: `${profile}\0${region}`,
+    credentialGeneration: `${profile}\0${region}\0${identity.accountId}\0${identity.arn}`,
     layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
       codeCommitPluginDefinition,
-      configuration,
+      { ...configuration, runtimeIdentity: identity },
       loaded.descriptor
     ).pipe(Layer.provide(clients))
   }
