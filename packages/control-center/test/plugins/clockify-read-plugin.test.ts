@@ -346,6 +346,20 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(first.vendorPersonId, "user-1")
     }))
 
+  it.effect("emits configured Clockify people without time entries", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({ getTimeEntries: () => Effect.succeed([]) }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1,user-2", maximumPages: 1 }
+      )
+      const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
+      assert.deepStrictEqual(
+        people.map(({ vendorPersonId }) => vendorPersonId),
+        ["user-1", "user-2"]
+      )
+    }))
+
   it.effect("changes Clockify person identity only when the profile changes", () =>
     Effect.gen(function*() {
       const user = { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
