@@ -111,10 +111,11 @@ const confirmedDispatch = Schema.decodeUnknownSync(PluginActionDispatchResultV1)
   }
 })
 
-const reconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+const reconciliationRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
   reconciliationKey: null,
   idempotencyKey: "action:PAY-42:done",
-  payloadDigest: "1".repeat(64)
+  payloadDigest: "1".repeat(64),
+  authorizedAction: authorizedRequest
 })
 
 const pendingReconciliation = Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({

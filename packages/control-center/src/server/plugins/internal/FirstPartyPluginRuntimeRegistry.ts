@@ -2,6 +2,7 @@ import { HomeDirectoryLive } from "@knpkv/atlassian-common/profile-storage"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
+import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-client"
 import {
   AdfSchemaValidatorLayer,
@@ -11,6 +12,7 @@ import {
 import { JiraApiClient, JiraApiConfig, type JiraApiConfigShape } from "@knpkv/jira-api-client"
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
@@ -35,7 +37,11 @@ import {
   clockifyReadPluginDescriptor,
   makeClockifyReadPluginRuntime
 } from "../clockify/ClockifyReadPlugin.js"
-import { codeCommitPluginDefinition } from "../codecommit/CodeCommitPluginDefinition.js"
+import {
+  CodeCommitPluginConfiguration,
+  codeCommitPluginDefinition,
+  codeCommitPluginDescriptor
+} from "../codecommit/CodeCommitPluginDefinition.js"
 import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
 import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
@@ -57,8 +63,9 @@ import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
 import {
   PluginRuntimeAccountDigest,
   PluginRuntimeAuthority,
-  PluginRuntimeAuthorityToken
+  PluginRuntimeSourceDigest
 } from "./PluginRuntimeAuthority.js"
+import { PluginRuntimeAuthoritySource } from "./PluginRuntimeAuthoritySource.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "./PluginRuntimeRegistry.js"
 
 const CLOCKIFY_API_ORIGIN = "https://api.clockify.me/api"
@@ -106,7 +113,11 @@ interface LoadedRuntime {
   readonly configurationRevision: number
   readonly connectionRevision: number
   readonly descriptor: NegotiatedPluginDescriptorV1
-  readonly descriptorGeneration: "current" | "compatible-atlassian" | "legacy-atlassian"
+  readonly descriptorGeneration:
+    | "current"
+    | "compatible-atlassian"
+    | "compatible-codecommit"
+    | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
 
@@ -447,10 +458,50 @@ const historicalConfluenceDescriptors = [{
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }]
 
+/** Frozen descriptor accepted for persisted read-only CodeCommit runtimes. @internal */
+export const historicalCodeCommitDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.codecommit",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "AWS CodeCommit",
+  configurationFields: [
+    {
+      _tag: "text",
+      key: "profile",
+      label: "AWS profile",
+      description: "Local AWS credential profile resolved by the CodeCommit owning package.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "region",
+      label: "AWS region",
+      description: "AWS region containing the configured CodeCommit repository.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "repositoryName",
+      label: "Repository",
+      description: "One CodeCommit repository normalized by this connection.",
+      required: true
+    }
+  ],
+  capabilities: ["entity.read", "sync.incremental", "diff.inventory"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
+
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
     return [confluencePagePluginDescriptor, ...historicalConfluenceDescriptors]
+  }
+  if (providerId === "codecommit") {
+    return [codeCommitPluginDescriptor, historicalCodeCommitDescriptor]
   }
   return [expectedDescriptor(providerId)]
 }
@@ -495,6 +546,8 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
     descriptor,
     descriptorGeneration: descriptorGeneration === 0
       ? "current"
+      : connection.providerId === "codecommit"
+      ? "compatible-codecommit"
       : connection.providerId === "jira" && descriptorGeneration === 1
       ? "compatible-atlassian"
       : "legacy-atlassian",
@@ -518,6 +571,7 @@ const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(funct
   loaded: LoadedRuntime,
   credentialGeneration: string
 ) {
+  const authoritySource = yield* PluginRuntimeAuthoritySource
   const source = JSON.stringify([
     scope.workspaceId,
     scope.pluginConnectionId,
@@ -532,9 +586,27 @@ const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(funct
   ])
   const digest = yield* runtimeDigest(source)
   const accountDigest = PluginRuntimeAccountDigest.make(`sha256:${digest}`)
+  const current = yield* authoritySource.publish({
+    scope,
+    expected: {
+      providerId: loaded.runtime.providerId,
+      connectionRevision: loaded.connectionRevision,
+      descriptorGeneration: loaded.runtime.descriptorGeneration,
+      configuration: {
+        _tag: "present",
+        revision: loaded.configurationRevision,
+        digest: PluginRuntimeSourceDigest.make(loaded.configurationDigest)
+      },
+      descriptorDigest: PluginRuntimeSourceDigest.make(loaded.runtime.descriptorDigest)
+    },
+    accountDigest,
+    activatedAt: yield* DateTime.now
+  }).pipe(
+    Effect.mapError(() => configurationFailure("plugin-runtime-authority-publication-failed"))
+  )
   return {
     accountDigest,
-    layer: Layer.succeed(PluginRuntimeAuthority, PluginRuntimeAuthorityToken.make(`sha256:${digest}`))
+    layer: Layer.succeed(PluginRuntimeAuthority, current.runtimeAuthorityToken)
   }
 })
 
@@ -745,20 +817,51 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
 
-const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(loaded: LoadedRuntime) {
+type CodeCommitClientsLayer = Layer.Layer<
+  ReadClient.CodeCommitReadClient | ReviewClient.CodeCommitReviewClient,
+  never,
+  HttpClient.HttpClient
+>
+
+const liveCodeCommitClients = (() => {
+  const awsConfiguration = AwsClientConfig.Default
+  const readClient = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(awsConfiguration))
+  const reviewProvider = ReviewClient.CodeCommitReviewProviderLive.pipe(
+    Layer.provide(awsConfiguration)
+  )
+  const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+    Layer.provide(Layer.merge(readClient, reviewProvider))
+  )
+  return Layer.merge(readClient, reviewClient)
+})()
+
+const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(
+  loaded: LoadedRuntime,
+  clients: CodeCommitClientsLayer
+) {
   const expectedKeys = new Set(["profile", "region", "repositoryName"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const profile = yield* textValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
-  const configuration = {
+  const configuration = yield* Schema.decodeUnknownEffect(CodeCommitPluginConfiguration)({
     profile,
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
-  }
-  const client = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(AwsClientConfig.Default))
+  }).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
+  const identity = yield* Effect.gen(function*() {
+    const readClient = yield* ReadClient.CodeCommitReadClient
+    return yield* readClient.discoverAccount(configuration)
+  }).pipe(
+    Effect.provide(clients),
+    Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
+  )
   return {
-    credentialGeneration: `${profile}\0${region}`,
-    layer: buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(Layer.provide(client))
+    credentialGeneration: `${profile}\0${region}\0${identity.accountId}\0${identity.arn}`,
+    layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
+      codeCommitPluginDefinition,
+      { ...configuration, runtimeIdentity: identity },
+      loaded.descriptor
+    ).pipe(Layer.provide(clients))
   }
 })
 
@@ -794,7 +897,10 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
   }
 })
 
-const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(loaded: LoadedRuntime) {
+const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
+  loaded: LoadedRuntime,
+  codeCommitClients: CodeCommitClientsLayer
+) {
   switch (loaded.runtime.providerId) {
     case "jira":
       return yield* jiraLayer(loaded)
@@ -803,19 +909,22 @@ const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(functio
     case "confluence":
       return yield* confluenceLayer(loaded)
     case "codecommit":
-      return yield* codeCommitLayer(loaded)
+      return yield* codeCommitLayer(loaded, codeCommitClients)
     case "codepipeline":
       return yield* codePipelineLayer(loaded)
   }
 })
 
-const makeRegistry = Effect.gen(function*() {
+const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*(
+  codeCommitClients: CodeCommitClientsLayer
+) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
   const cryptoService = yield* Crypto.Crypto
   const httpClient = yield* HttpClient.HttpClient
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  const authoritySource = yield* PluginRuntimeAuthoritySource
 
   const requirements = Layer.mergeAll(
     Layer.succeed(Persistence, persistence),
@@ -823,7 +932,8 @@ const makeRegistry = Effect.gen(function*() {
     Layer.succeed(Crypto.Crypto, cryptoService),
     Layer.succeed(HttpClient.HttpClient, httpClient),
     Layer.succeed(FileSystem.FileSystem, fileSystem),
-    Layer.succeed(Path.Path, path)
+    Layer.succeed(Path.Path, path),
+    Layer.succeed(PluginRuntimeAuthoritySource, authoritySource)
   )
 
   return {
@@ -831,9 +941,9 @@ const makeRegistry = Effect.gen(function*() {
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded)
+          const provider = yield* providerLayer(loaded, codeCommitClients)
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
-          return Layer.mergeAll(provider.layer, authority.layer, readOnlyExecutorLayer).pipe(
+          return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
           )
         }).pipe(
@@ -843,5 +953,20 @@ const makeRegistry = Effect.gen(function*() {
   } satisfies PluginRuntimeRegistryV1
 })
 
+/** Injectable first-party registry used to verify complete owning-package runtime wiring. @internal */
+export const makeFirstPartyPluginRuntimeRegistry = (
+  codeCommitClients: CodeCommitClientsLayer
+): Layer.Layer<
+  PluginRuntimeRegistry,
+  never,
+  | Persistence
+  | SecretStore
+  | Crypto.Crypto
+  | HttpClient.HttpClient
+  | FileSystem.FileSystem
+  | Path.Path
+  | PluginRuntimeAuthoritySource
+> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
+
 /** Production registry for the fixed first-party provider catalog. @internal */
-export const FirstPartyPluginRuntimeRegistry = Layer.effect(PluginRuntimeRegistry, makeRegistry)
+export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)

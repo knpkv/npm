@@ -38,6 +38,50 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
+export type GovernedActionFixtureVariant = "jira" | "codecommit"
+
+const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
+
+const codeCommitFixture = defineFixture({
+  providerId: "codecommit",
+  connectionName: "Payments CodeCommit",
+  entityType: "pull-request",
+  vendorImmutableId: "17",
+  sourceRevision: "revision-17",
+  sourceUrl: "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/17",
+  displayKey: "17",
+  title: "Registry wiring",
+  details: {
+    _tag: "pull-request",
+    repository: "payments-api",
+    sourceBranch: "feature/registry",
+    targetBranch: "main",
+    headRevision: "head-commit-17",
+    reviewState: "requested"
+  }
+})
+
+const jiraFixture = defineFixture({
+  providerId: "jira",
+  connectionName: "Payments Jira",
+  entityType: "issue",
+  vendorImmutableId: "PAY-42",
+  sourceRevision: "1",
+  sourceUrl: "https://jira.example/browse/PAY-42",
+  displayKey: "PAY-42",
+  title: "Ship guarded refunds",
+  details: {
+    _tag: "issue",
+    key: "PAY-42",
+    status: "In review",
+    priority: "High",
+    estimatePoints: 5
+  }
+})
+
+const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
+  variant === "codecommit" ? codeCommitFixture : jiraFixture
+
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
 const decodeEvidence = Schema.decodeUnknownSync(GovernedActionEvidenceReference)
@@ -53,7 +97,8 @@ const humanCause = decodeCause({
 
 export const seedGovernedActionAuthorityRoots = Effect.fn(
   "AuthorizedGovernedActionFixture.seedRoots"
-)(function*() {
+)(function*(variant: GovernedActionFixtureVariant = "jira") {
+  const fixture = fixtureVariant(variant)
   const { sql } = yield* Database
   yield* sql`INSERT INTO workspaces (
     workspace_id, display_name, revision, created_at, updated_at
@@ -62,15 +107,15 @@ export const seedGovernedActionAuthorityRoots = Effect.fn(
     workspace_id, plugin_connection_id, provider_id, display_name,
     revision, is_enabled, created_at, updated_at
   ) VALUES (
-    ${WORKSPACE_ID}, ${CONNECTION_ID}, 'jira', 'Payments Jira',
+    ${WORKSPACE_ID}, ${CONNECTION_ID}, ${fixture.providerId}, ${fixture.connectionName},
     1, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
   yield* sql`INSERT INTO entities (
     workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
     entity_type, current_revision, created_at, updated_at
   ) VALUES (
-    ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, 'jira', 'PAY-42',
-    'issue', 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
+    ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, ${fixture.providerId}, ${fixture.vendorImmutableId},
+    ${fixture.entityType}, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
   yield* sql`INSERT INTO sessions (
     workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id, agent_id,
@@ -86,7 +131,8 @@ export const seedGovernedActionAuthorityRoots = Effect.fn(
 /** Seed the current target revision and evidence required by the final dispatch authority check. */
 export const seedGovernedActionCurrentInputs = Effect.fn(
   "AuthorizedGovernedActionFixture.seedCurrentInputs"
-)(function*() {
+)(function*(variant: GovernedActionFixtureVariant = "jira") {
+  const fixture = fixtureVariant(variant)
   const workspaceId = Schema.decodeSync(WorkspaceId)(WORKSPACE_ID)
   const connectionId = Schema.decodeSync(PluginConnectionId)(CONNECTION_ID)
   const entityId = Schema.decodeSync(EntityId)(ENTITY_ID)
@@ -96,8 +142,8 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
     workspace_id, entity_id, revision, source_revision, normalization_schema_version,
     source_url, first_observed_at, last_observed_at, synchronized_at, created_at
   ) VALUES (
-    ${workspaceId}, ${entityId}, 1, '1', 1,
-    'https://jira.example/browse/PAY-42', '2026-07-15T09:45:00.000Z',
+    ${workspaceId}, ${entityId}, 1, ${fixture.sourceRevision}, 1,
+    ${fixture.sourceUrl}, '2026-07-15T09:45:00.000Z',
     '2026-07-15T09:50:00.000Z', '2026-07-15T09:55:00.000Z', '2026-07-15T09:55:00.000Z'
   )`
   const graph = yield* DeliveryGraphRepository
@@ -111,26 +157,20 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
         supersedesProjectionRevision: null,
         projectionSchemaVersion: 1,
         entityState: "present",
-        entityType: "issue",
-        displayKey: "PAY-42",
-        title: "Ship guarded refunds",
-        details: {
-          _tag: "issue",
-          key: "PAY-42",
-          status: "In review",
-          priority: "High",
-          estimatePoints: 5
-        }
+        entityType: fixture.entityType,
+        displayKey: fixture.displayKey,
+        title: fixture.title,
+        details: fixture.details
       },
       recordedAt: "2026-07-15T09:55:00.000Z"
     }],
     nodes: [{
       workspaceId,
       nodeId,
-      endpointKind: "issue",
+      endpointKind: fixture.entityType,
       resolution: {
         _tag: "resolved",
-        target: { _tag: "entity", entityId, entityKind: "issue" }
+        target: { _tag: "entity", entityId, entityKind: fixture.entityType }
       },
       createdAt: "2026-07-15T09:55:00.000Z"
     }],
@@ -154,11 +194,11 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
         provenance: {
           _tag: "provider",
           sourceRevision: {
-            providerId: "jira",
+            providerId: fixture.providerId,
             pluginConnectionId: connectionId,
-            vendorImmutableId: "PAY-42",
-            revision: "1",
-            sourceUrl: "https://jira.example/browse/PAY-42",
+            vendorImmutableId: fixture.vendorImmutableId,
+            revision: fixture.sourceRevision,
+            sourceUrl: fixture.sourceUrl,
             firstObservedAt: "2026-07-15T09:45:00.000Z",
             lastObservedAt: "2026-07-15T09:50:00.000Z",
             synchronizedAt: "2026-07-15T09:55:00.000Z",
@@ -191,8 +231,24 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
 
 export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   "AuthorizedGovernedActionFixture.makeEnvelope"
-)(function*(options?: { readonly pluginConnectionAuthorityDigest?: string | undefined }) {
-  const payload = decodePayload({ fields: { resolution: null, status: "Done" }, notify: true })
+)(function*(options?: {
+  readonly pluginConnectionAuthorityDigest?: string | undefined
+  readonly variant?: GovernedActionFixtureVariant | undefined
+}) {
+  const variant = options?.variant ?? "jira"
+  const fixture = fixtureVariant(variant)
+  const payload = decodePayload(
+    variant === "codecommit"
+      ? {
+        _tag: "comment",
+        sourceCommit: "head-commit-17",
+        destinationCommit: "base-commit-17",
+        destinationReference: "refs/heads/main",
+        content: "Registry wiring check.",
+        clientRequestToken: "1".repeat(64)
+      }
+      : { fields: { resolution: null, status: "Done" }, notify: true }
+  )
   const payloadDigest = yield* digestGovernedActionPayload(payload)
   const evidence = decodeEvidence({
     workspaceId: WORKSPACE_ID,
@@ -210,30 +266,40 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
     actionId: ACTION_ID,
-    idempotencyKey: "governed-action:PAY-42:done:1",
+    idempotencyKey: variant === "codecommit"
+      ? "governed-action:codecommit:17:comment:1"
+      : "governed-action:PAY-42:done:1",
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest ?? `sha256:${"a".repeat(64)}`,
-    pluginId: "dev.knpkv.jira",
+    pluginId: variant === "codecommit" ? "dev.knpkv.codecommit" : "dev.knpkv.jira",
     pluginContractVersion: { major: 1, minor: 0, patch: 0 },
-    pluginAdapterVersion: { major: 1, minor: 2, patch: 3 },
-    providerId: "jira",
+    pluginAdapterVersion: variant === "codecommit"
+      ? { major: 0, minor: 1, patch: 0 }
+      : { major: 1, minor: 2, patch: 3 },
+    providerId: fixture.providerId,
     capability: { capabilityId: "action.execute", version: 1 },
     targetEntityId: ENTITY_ID,
     proposal: {
-      proposalKey: "transition:PAY-42:done",
+      proposalKey: variant === "codecommit" ? "comment:codecommit:17" : "transition:PAY-42:done",
       capabilityVersion: 1,
       request: {
-        actionKind: "transition",
-        target: { entityType: "issue", vendorImmutableId: "PAY-42" },
-        expectedRevision: "1",
+        actionKind: variant === "codecommit" ? "comment" : "transition",
+        target: {
+          entityType: fixture.entityType,
+          vendorImmutableId: fixture.vendorImmutableId
+        },
+        expectedRevision: fixture.sourceRevision,
         payload,
         evidenceIds: ["provider-evidence-1"]
       },
       payloadDigest,
-      summary: "Move PAY-42 to Done",
-      impact: { level: "medium", summary: "Changes the issue workflow state" },
+      summary: variant === "codecommit" ? "Comment on CodeCommit pull request 17" : "Move PAY-42 to Done",
+      impact: {
+        level: "medium",
+        summary: variant === "codecommit" ? "Posts one review comment" : "Changes the issue workflow state"
+      },
       proposedAt: PROPOSED_AT
     },
     evidence: [Schema.encodeSync(GovernedActionEvidenceReference)(evidence)],
@@ -246,7 +312,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     },
     proposalExpiresAt: "2026-07-15T10:10:00.000Z",
     causationId: null,
-    correlationId: "action:PAY-42:done"
+    correlationId: variant === "codecommit" ? "action:codecommit:17:comment" : "action:PAY-42:done"
   })
   return (yield* makeGovernedActionEnvelope(material)).envelope
 })
@@ -257,11 +323,13 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
   readonly authorized?: boolean
   readonly pluginConnectionAuthorityDigest?: string
   readonly seedAuthorityRoots?: boolean
+  readonly variant?: GovernedActionFixtureVariant
 }) {
-  if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots()
+  if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots(options?.variant)
   const repository = yield* GovernedActionRepository
   const envelope = yield* makeAuthorizedGovernedActionEnvelope({
-    pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest
+    pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest,
+    variant: options?.variant
   })
   const proposal = decodeCommit({
     envelope: Schema.encodeSync(GovernedActionEnvelopeV1)(envelope),
@@ -272,7 +340,7 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
     cause: humanCause,
     occurredAt: PROPOSED_AT,
     causationId: null,
-    correlationId: "action:PAY-42:done",
+    correlationId: envelope.correlationId,
     companion: { _tag: "none" },
     auditEventId: PROPOSAL_AUDIT_ID
   })

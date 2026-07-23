@@ -1,0 +1,30 @@
+id: no-codecommit-review-branch-merge
+snapshots:
+  ? |
+    codecommit.mergeBranchesByFastForward({
+      repositoryName: action.target.repositoryName,
+      sourceCommitSpecifier: action.target.sourceCommit,
+      destinationCommitSpecifier: action.target.destinationCommit
+    })
+  : labels:
+      - source: |-
+          codecommit.mergeBranchesByFastForward({
+            repositoryName: action.target.repositoryName,
+            sourceCommitSpecifier: action.target.sourceCommit,
+            destinationCommitSpecifier: action.target.destinationCommit
+          })
+        style: primary
+        start: 0
+        end: 205
+  codecommit.mergeBranchesBySquash(input):
+    labels:
+      - source: codecommit.mergeBranchesBySquash(input)
+        style: primary
+        start: 0
+        end: 39
+  codecommit.mergeBranchesByThreeWay(input):
+    labels:
+      - source: codecommit.mergeBranchesByThreeWay(input)
+        style: primary
+        start: 0
+        end: 41

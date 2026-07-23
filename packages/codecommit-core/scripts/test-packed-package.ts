@@ -60,10 +60,14 @@ const program = Effect.scoped(
     yield* fileSystem.writeFileString(
       path.join(consumer, "verify.mjs"),
       `import "@knpkv/codecommit-core/ReadClient.js"
+import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import * as AwsRetry from "@distilled.cloud/aws/Retry"
 import * as Effect from "effect/Effect"
 import * as Ref from "effect/Ref"
 
+if (ReviewClient.CodeCommitReviewClient === undefined) {
+  throw new Error("CodeCommit review client public export is missing")
+}
 const lastError = await Effect.runPromise(Ref.make(undefined))
 const policy = AwsRetry.makeDefault(lastError)
 if (policy.schedule === undefined) throw new Error("Distilled AWS retry policy was not constructed")
@@ -71,7 +75,7 @@ if (policy.schedule === undefined) throw new Error("Distilled AWS retry policy w
     )
 
     yield* runCheckedCommand(spawner, "node", ["verify.mjs"], consumer)
-    yield* Console.log("codecommit-core packed consumer verified the published Distilled AWS runtime")
+    yield* Console.log("codecommit-core packed consumer verified public clients and the Distilled AWS runtime")
   }).pipe(Effect.provide(NodeServices.layer))
 )
 

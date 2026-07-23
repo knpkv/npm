@@ -1,0 +1,19 @@
+id: no-codecommit-review-branch-merge
+valid:
+  - |
+    codecommit.mergePullRequestByFastForward({
+      pullRequestId: action.target.pullRequestId,
+      repositoryName: action.target.repositoryName,
+      sourceCommitId: action.target.sourceCommit
+    })
+  - codecommit.mergePullRequestBySquash(input)
+  - codecommit.mergePullRequestByThreeWay(input)
+invalid:
+  - |
+    codecommit.mergeBranchesByFastForward({
+      repositoryName: action.target.repositoryName,
+      sourceCommitSpecifier: action.target.sourceCommit,
+      destinationCommitSpecifier: action.target.destinationCommit
+    })
+  - codecommit.mergeBranchesBySquash(input)
+  - codecommit.mergeBranchesByThreeWay(input)

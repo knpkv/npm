@@ -173,8 +173,17 @@ export const PluginActionCancellationResultV1 = Schema.Union([
 export const PluginActionReconciliationRequestV1 = Schema.Struct({
   reconciliationKey: Schema.NullOr(PluginActionReconciliationKey),
   idempotencyKey: boundedOpaque("PluginReconciliationIdempotencyKey", 512),
-  payloadDigest: PluginActionPayloadDigest
-})
+  payloadDigest: PluginActionPayloadDigest,
+  authorizedAction: Schema.optionalKey(AuthorizedPluginActionV1)
+}).check(
+  Schema.makeFilter(
+    ({ authorizedAction, idempotencyKey, payloadDigest }) =>
+      authorizedAction === undefined ||
+      (authorizedAction.idempotencyKey === idempotencyKey &&
+        authorizedAction.payloadDigest === payloadDigest),
+    { expected: "reconciliation identity to match the durable authorized action" }
+  )
+)
 
 /** Reconciled provider state. Cancelled means the mutation provably did not occur. */
 export const PluginActionReconciliationResultV1 = Schema.Union([

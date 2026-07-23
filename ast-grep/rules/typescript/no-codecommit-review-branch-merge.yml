@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-codecommit-review-branch-merge
+language: tsx
+severity: error
+message: "CodeCommit governed PR reviews must not bypass provider approval rules with the branch merge API"
+
+rule:
+  any:
+    - pattern: codecommit.mergeBranchesByFastForward($$$)
+    - pattern: codecommit.mergeBranchesBySquash($$$)
+    - pattern: codecommit.mergeBranchesByThreeWay($$$)
+
+files:
+  - "packages/codecommit-core/src/ReviewClient/**/*.ts"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  CodeCommit branch merge operations do not enforce pull-request approval
+  rules. Genuine branch-maintenance helpers outside the PR review boundary still
+  require reviewer judgment.

@@ -23,6 +23,7 @@ export * as Errors from "./Errors.js"
 export * as PermissionService from "./PermissionService/index.js"
 export * as PRService from "./PRService/index.js"
 export * as ReadClient from "./ReadClient/index.js"
+export * as ReviewClient from "./ReviewClient/index.js"
 export * as SandboxService from "./SandboxService/index.js"
 export * as StatsService from "./StatsService/index.js"
 

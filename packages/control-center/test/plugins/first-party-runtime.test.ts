@@ -1,6 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES } from "@knpkv/atlassian-common/auth"
+import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -9,6 +10,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -16,20 +18,39 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
+import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
+import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
+import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
+import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import {
   PluginConnectionDisplayName,
   RecordRevision,
   WorkspaceName
 } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
+import {
+  codeCommitPluginDefinition,
+  codeCommitPluginDescriptor
+} from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
+import {
+  historicalCodeCommitDescriptor,
+  makeFirstPartyPluginRuntimeRegistry
+} from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
+import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { pluginRuntimeKey, PluginRuntimeMap } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
+import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -37,14 +58,24 @@ import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMa
 import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
+import {
+  ACTION_ID as GOVERNED_ACTION_ID,
+  CONNECTION_ID as GOVERNED_CONNECTION_ID,
+  seedGovernedAction,
+  seedGovernedActionAuthorityRoots,
+  seedGovernedActionCurrentInputs,
+  WORKSPACE_ID as GOVERNED_WORKSPACE_ID
+} from "../governance/fixtures/authorizedGovernedAction.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000081")
 const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082")
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000083")
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
+const GOVERNED_WORKSPACE = WorkspaceId.make(GOVERNED_WORKSPACE_ID)
+const GOVERNED_CONNECTION = PluginConnectionId.make(GOVERNED_CONNECTION_ID)
+const GOVERNED_ACTION = GovernedActionId.make(GOVERNED_ACTION_ID)
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
-
 const historicalJiraDescriptor = {
   ...jiraReadPluginDescriptor,
   adapterVersion: { major: 0, minor: 1, patch: 0 },
@@ -189,6 +220,281 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
+  it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const readCalls = yield* Ref.make(0)
+      const mutationCalls = yield* Ref.make(0)
+      const identityArn = yield* Ref.make("arn:aws:iam::123456789012:user/reviewer")
+      const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        pullRequestId: "17",
+        revisionId: "revision-17",
+        repositoryName: "payments-api",
+        title: "Registry wiring",
+        authorArn: "arn:aws:iam::123456789012:user/alice",
+        status: "OPEN",
+        sourceReference: "refs/heads/feature/registry",
+        destinationReference: "refs/heads/main",
+        sourceCommit: "head-commit-17",
+        destinationCommit: "base-commit-17",
+        mergeBase: "base-commit-17",
+        creationDate: new Date("2026-07-18T08:00:00.000Z"),
+        lastActivityDate: new Date("2026-07-18T09:00:00.000Z")
+      })
+      const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
+        discoverAccount: () =>
+          Ref.get(identityArn).pipe(
+            Effect.map((arn) =>
+              new ReadClient.CodeCommitAccountIdentity({
+                accountId: "123456789012",
+                arn
+              })
+            )
+          ),
+        listRepositoriesPage: () =>
+          Effect.succeed(
+            new ReadClient.CodeCommitRepositoryPage({
+              repositoryNames: [pullRequest.repositoryName],
+              nextToken: null
+            })
+          ),
+        getBlob: () => Effect.die("unused getBlob"),
+        listPullRequestsPage: () =>
+          Effect.succeed(new ReadClient.CodeCommitPullRequestPage({ pullRequests: [pullRequest], nextToken: null })),
+        streamPullRequests: () => Stream.make(pullRequest),
+        getPullRequest: () => Ref.update(readCalls, (count) => count + 1).pipe(Effect.as(pullRequest)),
+        getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
+        streamChangedFiles: () => Stream.empty
+      })
+      const reviewProvider = Layer.succeed(ReviewClient.CodeCommitReviewProvider, {
+        postComment: (action) =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({
+              comment: {
+                commentId: "registry-comment-1",
+                clientRequestToken: action.clientRequestToken
+              }
+            })
+          ),
+        updateApprovalState: () => Effect.die("unused updateApprovalState"),
+        getApprovalStates: () => Effect.die("unused getApprovalStates"),
+        getCommentsPage: () => Effect.die("unused getCommentsPage")
+      })
+      const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+        Layer.provide(Layer.merge(readClient, reviewProvider))
+      )
+      const clients = Layer.merge(readClient, reviewClient)
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codecommit-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Payments CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          CREATED_AT
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const result = yield* Effect.gen(function*() {
+          const authority = yield* PluginRuntimeAuthority
+          return { authority }
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        const repeatedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        assert.strictEqual(repeatedAuthority, result.authority)
+
+        yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-reviewer")
+        const rotatedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        yield* Ref.set(identityArn, "arn:aws:iam::123456789012:user/reviewer")
+        const refreshedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        assert.notStrictEqual(rotatedAuthority, result.authority)
+        assert.notStrictEqual(refreshedAuthority, result.authority)
+        assert.notStrictEqual(refreshedAuthority, rotatedAuthority)
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+        ))
+        yield* seedGovernedActionAuthorityRoots("codecommit")
+        const governedConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          governedConfiguration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        const governedAuthority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: governedAuthority,
+          seedAuthorityRoots: false,
+          variant: "codecommit"
+        })
+        yield* seedGovernedActionCurrentInputs("codecommit")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const engineLayer = GovernedActionExecutionEngine.layer.pipe(
+          Layer.provide(store),
+          Layer.provide(executors)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(Effect.provide(engineLayer))
+        const governedRecord = yield* (yield* GovernedActionRepository).read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(governedRecord.head.state, "succeeded")
+        assert.strictEqual(governedRecord.head.lineage._tag, "terminal")
+        if (governedRecord.head.lineage._tag === "terminal") {
+          assert.strictEqual(governedRecord.head.lineage.receipt.status, "succeeded")
+        }
+        assert.strictEqual(yield* Ref.get(readCalls), 2)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: UNCONFIGURED_CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Historical CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          UNCONFIGURED_CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          UNCONFIGURED_CONNECTION_ID,
+          "codecommit",
+          historicalCodeCommitDescriptor,
+          0,
+          CREATED_AT
+        )
+        const historicalConnection = yield* Effect.gen(function*() {
+          return yield* PluginConnection
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: UNCONFIGURED_CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+        assert.isFalse(hasPluginCapability(historicalConnection.descriptor, "action.execute", 1))
+      }).pipe(
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(clients)),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it("keeps the historical Confluence descriptor independent of future current fields", () => {
     const futureCurrent = {
       ...confluencePagePluginDescriptor,
@@ -213,8 +519,32 @@ describe("first-party plugin runtime", () => {
     }])
   })
 
+  it("keeps the historical CodeCommit descriptor independent of future current fields", () => {
+    const futureCurrent = {
+      ...codeCommitPluginDescriptor,
+      configurationFields: [
+        ...codeCommitPluginDescriptor.configurationFields,
+        {
+          _tag: "text",
+          key: "futureField",
+          label: "Future field",
+          description: "A field added after the historical descriptor was persisted.",
+          required: false
+        }
+      ]
+    }
+
+    assert.isTrue(futureCurrent.configurationFields.some(({ key }) => key === "futureField"))
+    assert.isFalse(historicalCodeCommitDescriptor.configurationFields.some(({ key }) => key === "futureField"))
+    assert.deepStrictEqual(
+      historicalCodeCommitDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental", "diff.inventory"]
+    )
+  })
+
   it.effect("loads compatible historical descriptors while rejecting pre-scope Jira descriptors", () =>
     Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-legacy-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const database = databaseLayer(config)
@@ -222,6 +552,7 @@ describe("first-party plugin runtime", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
+        database,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )
@@ -369,6 +700,7 @@ describe("first-party plugin runtime", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
+        database,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )
@@ -537,6 +869,7 @@ describe("first-party plugin runtime", () => {
 
   it.effect("loads legacy text and current secret-backed Atlassian emails", () =>
     Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-email-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const database = databaseLayer(config)
@@ -544,6 +877,7 @@ describe("first-party plugin runtime", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
+        database,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )
@@ -656,6 +990,7 @@ describe("first-party plugin runtime", () => {
 
   it.effect("rejects non-tenant Atlassian origins before credentials or HTTP are used", () =>
     Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-atlassian-origin-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const database = databaseLayer(config)
@@ -663,6 +998,7 @@ describe("first-party plugin runtime", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
+        database,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )
@@ -759,6 +1095,7 @@ describe("first-party plugin runtime", () => {
 
   it.effect("loads persisted Clockify authority, reuses its cache, and discovers the exact identity", () =>
     Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-runtime-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const secretRoot = SecretRoot.make(`${root}/secrets`)
@@ -768,6 +1105,7 @@ describe("first-party plugin runtime", () => {
       const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
+        database,
         secrets,
         Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )

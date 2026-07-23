@@ -13,10 +13,10 @@ import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { PluginActionReconciliationRequestV1 } from "../../src/domain/plugins/index.js"
 import type {
   AuthorizedPluginActionV1,
   PluginActionCancellationRequestV1,
-  PluginActionReconciliationRequestV1,
   PluginSyncRequestV1
 } from "../../src/domain/plugins/index.js"
 import {
@@ -124,6 +124,20 @@ const runAfterRetryWindow = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Ef
  */
 export const runPluginContractSuite = (name: string, harness: PluginContractHarness): void => {
   describe(`${name} plugin contract`, () => {
+    it("preserves the frozen v1 reconciliation request wire shape", () => {
+      const legacy = Schema.decodeUnknownResult(Schema.toType(PluginActionReconciliationRequestV1))({
+        reconciliationKey: harness.reconciliationRequest.reconciliationKey,
+        idempotencyKey: harness.reconciliationRequest.idempotencyKey,
+        payloadDigest: harness.reconciliationRequest.payloadDigest
+      })
+      const current = Schema.decodeUnknownResult(Schema.toType(PluginActionReconciliationRequestV1))(
+        harness.reconciliationRequest
+      )
+
+      assert.isTrue(Result.isSuccess(legacy))
+      assert.isTrue(Result.isSuccess(current))
+    })
+
     it.effect("decodes safe provider account, workspace, resource, and endpoint discovery", () =>
       Effect.gen(function*() {
         const runtime = yield* harness.makeRuntime("healthy")
