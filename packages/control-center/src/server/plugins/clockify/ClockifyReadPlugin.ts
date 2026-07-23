@@ -166,13 +166,16 @@ const ClockifyWorkspaces = Schema.Array(
     name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
   })
 )
-const ClockifyWorkspaceUsers = Schema.Array(
-  Schema.Struct({
-    id: ClockifyIdentifier,
-    name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
-    status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
-  })
-).check(Schema.makeFilter((values) => values.length <= 10_000, { expected: "at most 10000 Clockify users" }))
+const ClockifyWorkspaceUserIdentity = Schema.Struct({ id: ClockifyIdentifier })
+const ClockifyWorkspaceUser = Schema.Struct({
+  id: ClockifyIdentifier,
+  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
+})
+const ClockifyWorkspaceDirectory = Schema.Array(Schema.Unknown)
+const ClockifyWorkspaceUsers = Schema.Array(ClockifyWorkspaceUser).check(
+  Schema.makeFilter((values) => values.length <= 10, { expected: "at most 10 configured Clockify users" })
+)
 const ClockifyTimeEntryPage = Schema.Array(Schema.Unknown).check(
   Schema.makeFilter((values) => values.length <= 50, { expected: "at most 50 Clockify time entries" })
 )
@@ -316,6 +319,29 @@ const readWorkspaceContext = Effect.fn("ClockifyReadPlugin.readWorkspaceContext"
   return { user, workspace }
 })
 
+const decodeScopedWorkspaceUsers = Effect.fn("ClockifyReadPlugin.decodeScopedWorkspaceUsers")(function*(
+  rawUsers: unknown,
+  configuredUserIds: ReadonlyArray<string>
+) {
+  const directory = yield* decodeProvider(
+    "clockify-sync",
+    "clockify-workspace-users-shape-invalid",
+    ClockifyWorkspaceDirectory,
+    rawUsers
+  )
+  const configured = new Set(configuredUserIds)
+  const scoped = directory.filter((rawUser) => {
+    const identity = Schema.decodeUnknownOption(ClockifyWorkspaceUserIdentity)(rawUser)
+    return Option.isSome(identity) && configured.has(identity.value.id)
+  })
+  return yield* decodeProvider(
+    "clockify-sync",
+    "clockify-workspace-users-shape-invalid",
+    ClockifyWorkspaceUsers,
+    scoped
+  )
+})
+
 const streamSyncPages = (options: {
   readonly provider: ClockifyReadProvider
   readonly configuration: ClockifyReadPluginConfiguration
@@ -373,7 +399,7 @@ const streamSyncPages = (options: {
           const anchor = entityEvents.find((event) => event.attributes.userId === userId)
           return user === undefined || anchor === undefined
             ? Effect.succeed(null)
-            : normalizeClockifyPerson({ anchor, user })
+            : normalizeClockifyPerson({ user })
         },
         { concurrency: options.configuration.maximumConcurrency }
       ).pipe(Effect.map((events) => events.filter((event) => event !== null)))
@@ -488,14 +514,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
                   "clockify-workspace-users",
                   decoded.operationTimeoutMillis,
                   provider.getWorkspaceUsers(decoded.workspaceId)
-                ).pipe(Effect.flatMap((users) =>
-                  decodeProvider(
-                    "clockify-sync",
-                    "clockify-workspace-users-shape-invalid",
-                    ClockifyWorkspaceUsers,
-                    users
-                  )
-                ))
+                ).pipe(Effect.flatMap((users) => decodeScopedWorkspaceUsers(users, userIds)))
               ], { concurrency: 2 }).pipe(
                 Effect.map(([startPage, workspaceUsers]) =>
                   streamSyncPages({

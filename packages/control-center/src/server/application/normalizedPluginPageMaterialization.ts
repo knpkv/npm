@@ -517,6 +517,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             : attributes.interval?.state === "running"
             ? "pending"
             : "not-required",
+          description: optionalBounded(attributes.description, 4_000),
           projectId,
           ...(userId === null ? {} : { userId }),
           ...(startedAt === null ? {} : { startedAt }),
@@ -668,7 +669,7 @@ const sameSourceUrl = (
 ): boolean => left?.href === right?.href
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" || kind === "time-entry" ? 2 : 1
+  kind === "time-entry" ? 3 : kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
 
 const requiresProjectionSchemaBackfill = Effect.fn(
   "NormalizedPluginPageMaterialization.requiresProjectionSchemaBackfill"

@@ -273,43 +273,74 @@ describe("ClockifyReadPlugin", () => {
       assert.isFalse(person.active)
     }))
 
-  it.effect("keeps Clockify person event identity independent of the entry anchor", () =>
+  it.effect("scopes large Clockify directories before decoding configured users", () =>
     Effect.gen(function*() {
-      const page = Schema.decodeSync(PluginSyncPageV1)({
-        checkpointAfterPage: "person-anchor",
-        hasMore: false,
-        events: [{
-          _tag: "UpsertEntity",
-          eventId: "entry-anchor-1",
-          observedAt: "2026-07-19T09:00:00.000Z",
-          revision: "entry-revision-1",
-          entityType: "clockify.time-entry",
-          vendorImmutableId: "entry-1",
-          sourceUrl: null,
-          title: "Entry",
-          attributes: {}
-        }]
-      })
-      const anchor = page.events[0]
-      if (anchor?._tag !== "UpsertEntity") return assert.fail("expected entry anchor")
-      const changedAnchor = Schema.decodeSync(NormalizedPluginEventV1)({
-        _tag: "UpsertEntity",
-        eventId: "entry-anchor-2",
-        observedAt: "2026-07-19T09:01:00.000Z",
-        revision: "entry-revision-2",
-        entityType: "clockify.time-entry",
-        vendorImmutableId: "entry-1",
-        sourceUrl: null,
-        title: "Entry",
-        attributes: {}
-      })
-      if (changedAnchor._tag !== "UpsertEntity") return assert.fail("expected changed entry anchor")
+      for (const directorySize of [10_000, 10_001]) {
+        const workspaceUsers = [
+          ...Array.from({ length: directorySize - 1 }, (_, index) => ({
+            id: `unconfigured-${String(index)}`,
+            name: `Unconfigured ${String(index)}`,
+            status: "ACTIVE"
+          })),
+          { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
+        ]
+        const pages = yield* withConnection(
+          baseProvider({ getWorkspaceUsers: () => Effect.succeed(workspaceUsers) }),
+          PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+          { ...configuration, userIds: "user-1", maximumPages: 1 }
+        )
+        const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+        assert.strictEqual(person?._tag, "UpsertPerson")
+        if (person?._tag !== "UpsertPerson") return assert.fail("expected configured Clockify person")
+        assert.strictEqual(person.displayName, "Ada Lovelace")
+      }
+    }))
+
+  it.effect("keeps Clockify person payloads stable across provider pages", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getTimeEntries: (_workspaceId, _userId, request) =>
+            Effect.succeed(
+              request.page === 1
+                ? [timeEntry("entry-1")]
+                : request.page === 2
+                ? [timeEntry("entry-2", "user-1", {
+                  timeInterval: {
+                    start: "2026-07-17T09:00:00.000Z",
+                    end: "2026-07-17T10:00:00.000Z",
+                    duration: "PT1H"
+                  }
+                })]
+                : []
+            )
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", pageSize: 1, maximumPages: 3, maximumConcurrency: 1 }
+      )
+      const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
+      assert.lengthOf(people, 2)
+      const first = people[0]
+      if (first === undefined) return assert.fail("expected a Clockify person on the first provider page")
+      const encodedFirst = Schema.encodeSync(NormalizedPluginEventV1)(first)
+      assert.deepStrictEqual(
+        people.map((person) => Schema.encodeSync(NormalizedPluginEventV1)(person)),
+        [encodedFirst, encodedFirst]
+      )
+    }))
+
+  it.effect("changes Clockify person identity only when the profile changes", () =>
+    Effect.gen(function*() {
       const user = { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
-      const first = yield* normalizeClockifyPerson({ anchor, user })
-      const second = yield* normalizeClockifyPerson({ anchor: changedAnchor, user })
-      const renamed = yield* normalizeClockifyPerson({ anchor, user: { ...user, name: "Ada Byron" } })
+      const first = yield* normalizeClockifyPerson({ user })
+      const second = yield* normalizeClockifyPerson({ user })
+      const renamed = yield* normalizeClockifyPerson({ user: { ...user, name: "Ada Byron" } })
       assert.strictEqual(first.eventId, second.eventId)
       assert.strictEqual(first.revision, second.revision)
+      assert.deepStrictEqual(
+        Schema.encodeSync(NormalizedPluginEventV1)(first),
+        Schema.encodeSync(NormalizedPluginEventV1)(second)
+      )
       assert.notStrictEqual(first.eventId, renamed.eventId)
       assert.notStrictEqual(first.revision, renamed.revision)
     }).pipe(Effect.provide(NodeCrypto.layer)))

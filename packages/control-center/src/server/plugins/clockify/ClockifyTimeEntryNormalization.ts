@@ -12,6 +12,9 @@ import { PluginConfigurationFailure, PluginMalformedResponseFailure } from "../f
 const ClockifyIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const ClockifyText = Schema.String.check(Schema.isMaxLength(4_000))
 const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
+// Clockify's workspace-user response has no profile revision timestamp. Keep the
+// observation deterministic so an unchanged person has one immutable payload.
+const ClockifyPersonObservedAt = DateTime.makeUnsafe(0)
 const ClockifyPersonResponse = Schema.Struct({
   id: ClockifyIdentifier,
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
@@ -81,7 +84,6 @@ export const digestClockifySyncScope = (scope: {
 
 /** Normalize one workspace user, using its own digest as the stable event identity. @internal */
 export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization.normalizePerson")(function*(input: {
-  readonly anchor: ClockifyTimeEntryEvent
   readonly user: unknown
 }): Effect.fn.Return<
   ClockifyPersonEvent,
@@ -100,7 +102,7 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
   const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
     _tag: "UpsertPerson",
     eventId: `clockify:person:${user.id.slice(0, 300)}:${revision}`,
-    observedAt: input.anchor.observedAt,
+    observedAt: ClockifyPersonObservedAt,
     revision,
     vendorPersonId: user.id,
     displayName: user.name,

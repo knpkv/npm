@@ -831,6 +831,22 @@ describe("canonical workspace entity", () => {
     expect(presentation.clockifyTimeEntry?.jiraAssociations).toEqual([
       expect.objectContaining({ key: "OPS-429", state: "inferred" })
     ])
+    expect(presentation.clockifyTimeEntry?.description).toBe("Review payment safeguards")
+
+    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
+    const timeEntryDetails = clockifyInspection.entity.projection.details
+    if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const detailedPresentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      entity: {
+        ...clockifyInspection.entity,
+        projection: {
+          ...clockifyInspection.entity.projection,
+          details: { ...timeEntryDetails, description: sourceDescription }
+        }
+      }
+    })
+    expect(detailedPresentation.clockifyTimeEntry?.description).toBe(sourceDescription)
 
     const relationship = clockifyInspection.graph.relationships[0]
     if (relationship === undefined) throw new Error("Expected a Clockify relationship fixture")
@@ -1267,6 +1283,29 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("The entry remains visible")
     expect(host.textContent).toContain("Corrections and approval remain read-only")
     expect(host.querySelector("input, textarea, select")).toBeNull()
+  })
+
+  it("renders the full Clockify source description", async () => {
+    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
+    const timeEntryDetails = clockifyInspection.entity.projection.details
+    if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const detailedState = {
+      ...clockifyState,
+      inspection: {
+        ...clockifyInspection,
+        entity: {
+          ...clockifyInspection.entity,
+          projection: {
+            ...clockifyInspection.entity.projection,
+            details: { ...timeEntryDetails, description: sourceDescription }
+          }
+        }
+      }
+    } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, detailedState)
+
+    expect(host.textContent).toContain("end-marker")
+    expect(host.textContent).toContain(sourceDescription)
   })
 
   it("renders a human-first Confluence document without executing content or exposing attachment media", async () => {

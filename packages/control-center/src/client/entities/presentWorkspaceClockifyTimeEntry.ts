@@ -155,7 +155,7 @@ export const presentWorkspaceClockifyTimeEntry = (
     associationLabel: jiraAssociations.length === 0 ? "Unattributed" : "Attributed",
     billableLabel: details.billable ? "Billable" : "Non-billable",
     contributorLabel: contributor?.displayName ?? details.userId ?? "Contributor not synchronized",
-    description: inspection.entity.projection.title,
+    description: details.description ?? inspection.entity.projection.title,
     durationLabel: durationLabel(details.durationMinutes),
     endedAt: timestampLabel(details.endedAt),
     jiraAssociations,

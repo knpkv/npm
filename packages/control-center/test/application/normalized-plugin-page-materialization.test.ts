@@ -1889,6 +1889,7 @@ describe("normalized plugin page materialization", () => {
         evidenceClaims: [],
         relationships: []
       })
+      const longTimeEntryDescription = `Full Clockify source description: ${"detail ".repeat(90)}end-marker`
       const timeEntryStreamKey = Schema.decodeSync(PluginStreamKey)("time-entry-schema-backfill")
       const timeEntryPage = Schema.decodeSync(PluginSyncPageV1)({
         checkpointAfterPage: "time-entry-schema-backfill",
@@ -1903,6 +1904,7 @@ describe("normalized plugin page materialization", () => {
           sourceUrl: "https://app.clockify.me/tracker",
           title: "PAY-258 release review",
           attributes: {
+            description: longTimeEntryDescription,
             billable: true,
             approvalState: "approved",
             projectId: "payments",
@@ -1945,12 +1947,13 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backfilled time entry")
       }
       assert.strictEqual(timeEntryProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 2)
+      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 3)
       assert.strictEqual(timeEntryProjection.value.projection.sourceEntityRevision, 1)
       if (timeEntryProjection.value.projection.details._tag !== "time-entry") {
         return yield* Effect.die("expected time-entry backfill details")
       }
       assert.deepInclude(timeEntryProjection.value.projection.details, {
+        description: longTimeEntryDescription,
         durationMinutes: 45,
         projectId: "payments",
         userId: "clockify-user-avery"
@@ -2136,7 +2139,7 @@ describe("normalized plugin page materialization", () => {
       }
       assert.strictEqual(correctedProjection.value.projection.title, "Older entry")
       assert.strictEqual(correctedProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 2)
+      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 3)
       assert.strictEqual(
         (yield* persistence.entities.get(WORKSPACE_ID, newerTimeEntryEntityId)).sourceRevision.revision,
         "time-entry-revision-1"

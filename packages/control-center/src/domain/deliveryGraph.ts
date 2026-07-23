@@ -215,6 +215,7 @@ const TimeEntryDetails = Schema.TaggedStruct("time-entry", {
   durationMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   billable: Schema.Boolean,
   approvalState: Schema.Literals(["pending", "approved", "rejected", "not-required"]),
+  description: Schema.optionalKey(Schema.NullOr(boundedText(4_000, "ClockifyTimeEntryDescription"))),
   projectId: Schema.optionalKey(Schema.NullOr(boundedText(512, "ClockifyProjectId"))),
   userId: Schema.optionalKey(boundedText(512, "ClockifyUserId")),
   startedAt: Schema.optionalKey(UtcTimestamp),
