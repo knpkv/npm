@@ -917,13 +917,6 @@ const materializeUpsertEntity = Effect.fn(
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
-  if (
-    kind === "time-entry" &&
-    existing !== null &&
-    DateTime.Order(event.observedAt, existing.sourceRevision.lastObservedAt) < 0
-  ) {
-    return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
-  }
   const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const entityId = existing?.entityId ??
     (yield* entityIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId))
@@ -1040,6 +1033,39 @@ const materializeUpsertEntity = Effect.fn(
     )
     if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
     if (Result.isSuccess(person)) {
+      const assignments = yield* persistence.people.listRoleAssignments(scope.workspaceId)
+      for (const record of assignments) {
+        const assignment = record.assignment
+        if (
+          assignment.role !== "contributor" ||
+          assignment.scope._tag !== "entity" ||
+          assignment.scope.entityId !== entityId ||
+          assignment.lifecycle._tag !== "active" ||
+          assignment.actor._tag !== "human" ||
+          assignment.actor.personId === person.success.person.personId
+        ) continue
+        const providerManagedAssignmentId = RoleAssignmentId.make(
+          yield* stableUuid(
+            cryptoService,
+            materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
+            event.eventId
+          )
+        )
+        if (assignment.assignmentId !== providerManagedAssignmentId) continue
+        yield* persistence.people.updateRoleAssignment(
+          scope.workspaceId,
+          {
+            ...assignment,
+            lifecycle: {
+              _tag: "ended",
+              assignedAt: assignment.lifecycle.assignedAt,
+              endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
+            }
+          },
+          record.revision,
+          scope.committedAt
+        )
+      }
       const assignmentId = RoleAssignmentId.make(
         yield* stableUuid(
           cryptoService,
@@ -1053,7 +1079,17 @@ const materializeUpsertEntity = Effect.fn(
       if (Result.isFailure(existingAssignment) && existingAssignment.failure._tag !== "RecordNotFoundError") {
         return yield* existingAssignment.failure
       }
-      if (Result.isFailure(existingAssignment)) {
+      if (Result.isSuccess(existingAssignment) && existingAssignment.success.assignment.lifecycle._tag !== "active") {
+        yield* persistence.people.updateRoleAssignment(
+          scope.workspaceId,
+          {
+            ...existingAssignment.success.assignment,
+            lifecycle: { _tag: "active", assignedAt: scope.committedAt }
+          },
+          existingAssignment.success.revision,
+          scope.committedAt
+        )
+      } else if (Result.isFailure(existingAssignment)) {
         const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
           actor: { _tag: "human", personId: person.success.person.personId },
           assignmentId,

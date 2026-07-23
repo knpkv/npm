@@ -133,12 +133,21 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
         const getTags = (workspaceId: string) =>
           api.getTags(workspaceId, { params: { archived: false, "page-size": 200 } })
 
+        const getWorkspaceUsers = Effect.fn("ClockifyApiClient.getWorkspaceUsers")(function*(workspaceId: string) {
+          const users: Array<WorkspaceUser> = []
+          for (let page = 1; page <= 20; page++) {
+            const batch = yield* api.getUsersOfWorkspace(workspaceId, {
+              params: { "include-roles": "false", page, "page-size": 500, status: "ALL" }
+            })
+            for (const user of batch) users.push(user)
+            if (batch.length < 500) break
+          }
+          return users
+        })
+
         return ClockifyApiClient.of({
           getUser: () => api.getLoggedUser(undefined),
-          getWorkspaceUsers: (workspaceId) =>
-            api.getUsersOfWorkspace(workspaceId, {
-              params: { "include-roles": "false", "page-size": 500, status: "ALL" }
-            }),
+          getWorkspaceUsers,
           getWorkspaces: () => api.getWorkspacesOfUser(undefined),
           getProjects,
           getProjectByName: (workspaceId, name) =>

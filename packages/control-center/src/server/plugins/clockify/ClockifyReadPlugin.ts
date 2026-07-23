@@ -172,7 +172,7 @@ const ClockifyWorkspaceUsers = Schema.Array(
     name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
     status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
   })
-).check(Schema.makeFilter((values) => values.length <= 500, { expected: "at most 500 Clockify users" }))
+).check(Schema.makeFilter((values) => values.length <= 10_000, { expected: "at most 10000 Clockify users" }))
 const ClockifyTimeEntryPage = Schema.Array(Schema.Unknown).check(
   Schema.makeFilter((values) => values.length <= 50, { expected: "at most 50 Clockify time entries" })
 )

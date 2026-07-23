@@ -15,7 +15,9 @@ const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLen
 const ClockifyPersonResponse = Schema.Struct({
   id: ClockifyIdentifier,
   name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
-  status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
+  status: Schema.optionalKey(
+    Schema.Literals(["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"])
+  )
 })
 
 const ClockifyTimeEntryResponse = Schema.Struct({
@@ -89,8 +91,9 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
   const user = yield* Schema.decodeUnknownEffect(ClockifyPersonResponse)(input.user).pipe(
     Effect.mapError(() => malformed("clockify-person-shape-invalid"))
   )
+  const active = user.status !== "DELETED" && user.status !== "LIMITED_DELETED"
   const revision = yield* digestJson({
-    active: user.status !== "INACTIVE",
+    active,
     id: user.id,
     name: user.name
   })
@@ -102,7 +105,7 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
     vendorPersonId: user.id,
     displayName: user.name,
     avatarUrl: null,
-    active: user.status !== "INACTIVE"
+    active
   }).pipe(Effect.mapError(() => malformed("clockify-normalized-person-invalid")))
   if (event._tag !== "UpsertPerson") return yield* malformed("clockify-normalized-event-kind-invalid")
   return event

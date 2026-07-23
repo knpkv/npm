@@ -2118,26 +2118,27 @@ describe("normalized plugin page materialization", () => {
           attributes: { durationMinutes: 15, billable: true }
         }]
       })
-      const olderReplay = yield* materializeNormalizedPluginPage({
+      const correctedEntry = yield* materializeNormalizedPluginPage({
         ...timeEntryScope,
         streamKey: olderTimeEntryStreamKey,
         expectedRevision: 0
       }, olderTimeEntryPage)
-      assert.strictEqual(olderReplay.acceptedEventCount, 1)
-      assert.strictEqual(olderReplay.entityProjectionCount, 0)
-      const unchangedNewerProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+      assert.strictEqual(correctedEntry.acceptedEventCount, 1)
+      assert.strictEqual(correctedEntry.entityProjectionCount, 1)
+      const correctedProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "entityProjection",
         entityId: newerTimeEntryEntityId,
         revision: null
       })
-      if (unchangedNewerProjection._tag !== "entityProjection") {
-        return yield* Effect.die("expected unchanged newer time entry")
+      if (correctedProjection._tag !== "entityProjection") {
+        return yield* Effect.die("expected corrected time entry")
       }
-      assert.strictEqual(unchangedNewerProjection.value.projection.projectionRevision, 1)
-      assert.strictEqual(unchangedNewerProjection.value.projection.projectionSchemaVersion, 1)
+      assert.strictEqual(correctedProjection.value.projection.title, "Older entry")
+      assert.strictEqual(correctedProjection.value.projection.projectionRevision, 2)
+      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 2)
       assert.strictEqual(
         (yield* persistence.entities.get(WORKSPACE_ID, newerTimeEntryEntityId)).sourceRevision.revision,
-        "time-entry-revision-2"
+        "time-entry-revision-1"
       )
 
       const issueEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000257")
@@ -2746,6 +2747,74 @@ describe("normalized plugin page materialization", () => {
       })
       if (deliveredHistory._tag !== "relationshipHistory") return yield* Effect.die("expected delivery history")
       assert.strictEqual(deliveredHistory.value[0]?.lifecycle._tag, "superseded")
+
+      const reassignmentPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "clockify-reassigned",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertPerson",
+          eventId: "clockify-person-avery-v1",
+          observedAt: "2026-07-19T09:06:00.000Z",
+          revision: "avery-v1",
+          vendorPersonId: "clockify-user-avery",
+          displayName: "Avery Chen",
+          avatarUrl: null,
+          active: true
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "clockify-time-1-reassigned",
+          observedAt: "2026-07-19T09:00:00.000Z",
+          revision: "time-1-reassigned",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-1",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "PAY-42 review and rollout",
+          attributes: {
+            billable: true,
+            approvalState: "approved",
+            description: "PAY-42 review and rollout",
+            projectId: "project-payments",
+            taskId: "task-review",
+            userId: "clockify-user-avery",
+            locked: true,
+            entryType: "REGULAR",
+            tagIds: ["release", "review"],
+            interval: {
+              start: "2026-07-19T08:17:30.000Z",
+              end: "2026-07-19T09:00:00.000Z",
+              duration: "PT42M30S",
+              state: "completed"
+            }
+          }
+        }]
+      })
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        providerId: "clockify",
+        streamKey: firstPartyStream("clockify"),
+        expectedRevision: 1,
+        committedAt: T4,
+        successfulHealth: { _tag: "healthy", checkedAt: T4 }
+      }, reassignmentPage)
+
+      const entryAssignments = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).filter(
+        ({ assignment }) =>
+          assignment.role === "contributor" &&
+          assignment.scope._tag === "entity" &&
+          assignment.scope.entityId === indexedTimeEntry.entityId
+      )
+      assert.lengthOf(entryAssignments, 2)
+      assert.lengthOf(entryAssignments.filter(({ assignment }) => assignment.lifecycle._tag === "ended"), 1)
+      const activeContributor = entryAssignments.find(({ assignment }) => assignment.lifecycle._tag === "active")
+      if (activeContributor?.assignment.actor._tag !== "human") {
+        return yield* Effect.die("expected reassigned Clockify contributor")
+      }
+      const activePerson = yield* persistence.people.getPerson(
+        WORKSPACE_ID,
+        activeContributor.assignment.actor.personId
+      )
+      assert.strictEqual(activePerson.person.displayName, "Avery Chen")
     })))
 
   it.effect("uses the evidence provider stream and health when another provider triggers inference", () =>

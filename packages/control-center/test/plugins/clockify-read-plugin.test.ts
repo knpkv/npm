@@ -256,6 +256,21 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(providerCalls.filter((page) => page === 1).length, 1)
     }))
 
+  it.effect("marks deleted Clockify workspace users inactive", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getWorkspaceUsers: () => Effect.succeed([{ id: "user-1", name: "Former User", status: "DELETED" }])
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", maximumPages: 1 }
+      )
+      const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected deleted Clockify person")
+      assert.isFalse(person.active)
+    }))
+
   it.effect("rejects duplicate vendor identities with different revisions in one page", () =>
     Effect.gen(function*() {
       const outcome = yield* withConnection(
