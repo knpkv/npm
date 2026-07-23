@@ -18,6 +18,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
@@ -83,11 +84,22 @@ const JiraProjectIssuePageResponse = Schema.Struct({
   isLast: Schema.optionalKey(Schema.Boolean),
   nextPageToken: Schema.optionalKey(Schema.NullOr(JiraProviderPageToken))
 })
+const JiraCommentMutationResult = Schema.Struct({
+  id: JiraProviderIdentifier
+})
 
 /** Schema-decoded page shape crossing the bounded project iteration boundary. @internal */
 export interface JiraProjectIssuePage {
   readonly issues: ReadonlyArray<JiraProjectIssue>
   readonly nextPageToken: string | null
+}
+
+/** Stable transition data needed by the governed action boundary. @internal */
+export interface JiraIssueTransition {
+  readonly id: string
+  readonly name: string
+  readonly toStatusId: string
+  readonly toStatusName: string
 }
 
 /** Narrow provider surface required by the production issue-read adapter. @internal */
@@ -109,6 +121,22 @@ export interface JiraReadProvider {
   readonly searchProjectIssues: (
     request: JiraProjectIssuePageRequest
   ) => Effect.Effect<JiraProjectIssuePage, PluginFailure>
+  readonly updateIssueDescription: (
+    issueId: string,
+    description: Schema.Json
+  ) => Effect.Effect<void, PluginFailure>
+  readonly addIssueComment: (
+    issueId: string,
+    body: Schema.Json,
+    idempotencyKey: string
+  ) => Effect.Effect<string, PluginFailure>
+  readonly getIssueTransitions: (
+    issueId: string
+  ) => Effect.Effect<ReadonlyArray<JiraIssueTransition>, PluginFailure>
+  readonly transitionIssue: (
+    issueId: string,
+    transitionId: string
+  ) => Effect.Effect<void, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -143,6 +171,12 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
   if (status === 401) return yield* new PluginAuthenticationFailure({ operation })
   if (status === 403) return yield* new PluginAuthorizationFailure({ operation })
   if (status === 408 || status === 504) return yield* new PluginTimeoutFailure({ operation })
+  if (status === 400 || status === 404 || status === 409 || status === 422) {
+    return yield* new PluginConflictFailure({
+      operation,
+      diagnosticCode: `jira-provider-rejected-${status}`
+    })
+  }
   if (status === 429) {
     const now = yield* DateTime.now
     const retryAt = DateTime.add(now, { seconds: retryAfterSeconds(error, now) })
@@ -196,6 +230,14 @@ const ISSUE_FIELDS = [
   "parent",
   "subtasks"
 ]
+
+const JiraTransitions = Schema.Struct({
+  transitions: Schema.optionalKey(Schema.Array(Schema.Struct({
+    id: Schema.String,
+    name: Schema.String,
+    to: Schema.Struct({ id: Schema.String, name: Schema.String })
+  })))
+})
 
 const escapeJqlString = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")
 
@@ -271,7 +313,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     providerCall(
       "jira-get-comments",
       client.getComments(issueId, {
-        params: { ...request, orderBy: "created" }
+        params: { ...request, orderBy: "created", expand: "properties" }
       })
     ),
   getChangelogs: (issueId, request) =>
@@ -295,5 +337,67 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         )
       ),
       Effect.flatMap(decodeProjectIssuePage)
+    ),
+  updateIssueDescription: (issueId, description) =>
+    providerCall(
+      "jira-edit-issue",
+      client.editIssue(issueId, {
+        params: { notifyUsers: true },
+        payload: { fields: { description } }
+      }).pipe(Effect.asVoid)
+    ),
+  addIssueComment: (issueId, body, idempotencyKey) =>
+    providerCall(
+      "jira-add-comment",
+      client.addComment(issueId, {
+        payload: {
+          body,
+          properties: [{
+            key: "dev.knpkv.control-center.idempotency",
+            value: idempotencyKey
+          }]
+        }
+      })
+    ).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraCommentMutationResult)),
+      Effect.map((comment) => comment.id),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-add-comment",
+            diagnosticCode: "jira-comment-response-invalid"
+          })
+          : error
+      )
+    ),
+  getIssueTransitions: (issueId) =>
+    providerCall(
+      "jira-get-transitions",
+      client.getTransitions(issueId, undefined)
+    ).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraTransitions)),
+      Effect.map((response) =>
+        (response.transitions ?? []).map((transition) => ({
+          id: transition.id,
+          name: transition.name,
+          toStatusId: transition.to.id,
+          toStatusName: transition.to.name
+        }))
+      ),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-get-transitions",
+            diagnosticCode: "jira-transitions-response-invalid"
+          })
+          : error
+      )
+    ),
+  transitionIssue: (issueId, transitionId) =>
+    providerCall(
+      "jira-transition-issue",
+      client.doTransition(issueId, {
+        payload: { transition: { id: transitionId } }
+      })
     )
 })
