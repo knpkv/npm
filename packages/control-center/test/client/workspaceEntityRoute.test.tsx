@@ -482,6 +482,144 @@ const confluenceInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntit
   activity: { truncated: false, events: [] }
 })
 
+const relatedClockifyIssue = encodedWorkset.entityProjections[1]
+if (relatedClockifyIssue === undefined) throw new Error("Expected a related issue fixture")
+const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityType: "time-entry",
+      displayKey: "time-entry-901",
+      title: "Review payment safeguards",
+      details: {
+        _tag: "time-entry",
+        durationMinutes: 135,
+        billable: true,
+        approvalState: "approved",
+        description: "Review payment safeguards and release evidence",
+        projectId: "project-payments",
+        taskId: "task-review",
+        userId: "clockify-user-mina",
+        locked: true,
+        entryType: "REGULAR",
+        tagIds: ["release", "review"],
+        startedAt: "2026-07-14T07:45:00.000Z",
+        endedAt: "2026-07-14T10:00:00.000Z",
+        timerState: "completed"
+      }
+    },
+    owners: [
+      {
+        avatarFallback: "MO",
+        displayName: "Mina Ortiz",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000072",
+        roles: ["author"],
+        sourceIdentities: [
+          {
+            pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000081",
+            providerId: "clockify",
+            vendorPersonId: "clockify-user-mina"
+          }
+        ]
+      },
+      {
+        avatarFallback: "AK",
+        displayName: "Ada Kline",
+        personId: "01890f6f-6d6a-7cc0-98d2-000000000071",
+        roles: ["release-approver"]
+      }
+    ]
+  },
+  source: {
+    ...sourceRevision,
+    providerId: "clockify",
+    vendorImmutableId: "time-entry-901",
+    revision: "clockify-revision-4",
+    sourceUrl: "https://app.clockify.me/tracker"
+  },
+  isSourceCurrent: true,
+  freshness: null,
+  graph: {
+    truncated: false,
+    nodes: [
+      {
+        workspaceId: WORKSET_WORKSPACE_ID,
+        nodeId: "01890f6f-6d6a-7cc0-98d2-000000000091",
+        endpointKind: "time-entry",
+        resolution: {
+          _tag: "resolved",
+          target: {
+            _tag: "entity",
+            entityId: encodedInspection.entity.projection.entityId,
+            entityKind: "time-entry"
+          }
+        },
+        createdAt: "2026-07-14T10:02:00.000Z"
+      },
+      {
+        workspaceId: WORKSET_WORKSPACE_ID,
+        nodeId: "01890f6f-6d6a-7cc0-98d2-000000000092",
+        endpointKind: "issue",
+        resolution: {
+          _tag: "resolved",
+          target: {
+            _tag: "entity",
+            entityId: relatedClockifyIssue.projection.entityId,
+            entityKind: "issue"
+          }
+        },
+        createdAt: "2026-07-14T10:02:00.000Z"
+      }
+    ],
+    relatedEntityProjections: [relatedClockifyIssue],
+    relationships: [
+      {
+        workspaceId: WORKSET_WORKSPACE_ID,
+        relationshipId: "01890f6f-6d6a-7cc0-98d2-000000000093",
+        relationshipSchemaVersion: 1,
+        revision: 1,
+        supersedesRevision: null,
+        kind: "tracks-time-for",
+        sourceNodeId: "01890f6f-6d6a-7cc0-98d2-000000000091",
+        sourceNodeKind: "time-entry",
+        targetNodeId: "01890f6f-6d6a-7cc0-98d2-000000000092",
+        targetNodeKind: "issue",
+        scope: null,
+        lifecycle: { _tag: "inferred", effectiveAt: "2026-07-14T10:02:00.000Z" },
+        confidence: { _tag: "inferred", score: 0.94, rationale: "Jira key in the Clockify description." },
+        provenance: {
+          _tag: "rule",
+          ruleId: "clockify-description-jira-key",
+          ruleVersion: 1,
+          rationale: "Jira key in the Clockify description."
+        },
+        recordedBy: { _tag: "system", component: "relationship-inference" },
+        evidenceClaimIds: [],
+        recordedAt: "2026-07-14T10:02:00.000Z"
+      }
+    ],
+    evidenceClaims: [],
+    evidenceItems: []
+  },
+  activity: {
+    truncated: false,
+    events: [
+      {
+        eventKey: "plugin-sync:time-entry-901:clockify-revision-4",
+        occurredAt: "2026-07-14T10:01:00.000Z",
+        actor: { kind: "plugin", label: "Clockify synchronization" },
+        sourceKind: "plugin-sync",
+        service: "clockify",
+        eventType: "entity-synchronized",
+        title: "Time entry synchronized",
+        href: "https://app.clockify.me/tracker"
+      }
+    ]
+  }
+})
+
 const state = {
   _tag: "stale",
   entityId: inspection.entity.projection.entityId,
@@ -515,6 +653,15 @@ const confluenceState = {
   entityId: confluenceInspection.entity.projection.entityId,
   inspection: confluenceInspection,
   refreshKey: "snapshot-confluence",
+  sessionKey: "session-a",
+  workspaceId: WORKSET_WORKSPACE_ID
+} satisfies WorkspaceEntityState
+
+const clockifyState = {
+  _tag: "ready",
+  entityId: clockifyInspection.entity.projection.entityId,
+  inspection: clockifyInspection,
+  refreshKey: "snapshot-clockify",
   sessionKey: "session-a",
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
@@ -664,6 +811,40 @@ describe("canonical workspace entity", () => {
       duration: "3m",
       name: "Compile",
       provider: "AWS · CodeBuild · 1"
+    })
+  })
+
+  it("presents one exact Clockify entry with a deterministic rollup and inferred Jira attribution", () => {
+    const presentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, clockifyInspection)
+
+    expect(presentation).toMatchObject({
+      displayKey: "time-entry-901",
+      service: "clockify",
+      verdict: "Approved",
+      clockifyTimeEntry: {
+        approvalLabel: "Approved",
+        approvers: ["Ada Kline"],
+        associationLabel: "Attributed",
+        billableLabel: "Billable",
+        contributorLabel: "Mina Ortiz",
+        durationLabel: "2h 15m",
+        projectLabel: "project-payments",
+        rollupLabel: "1 visible entry · 135 exact minutes",
+        totalMinutes: 135
+      }
+    })
+    expect(presentation.clockifyTimeEntry?.jiraAssociations).toEqual([
+      expect.objectContaining({ key: "OPS-429", state: "inferred" })
+    ])
+
+    const unattributed = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      graph: { ...clockifyInspection.graph, relationships: [] }
+    })
+    expect(unattributed.clockifyTimeEntry).toMatchObject({
+      associationLabel: "Unattributed",
+      durationLabel: "2h 15m",
+      rollupLabel: "1 visible entry · 135 exact minutes"
     })
   })
 
@@ -1044,6 +1225,28 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Pull requests")
     expect(host.textContent).toContain("Runbooks")
     expect(host.querySelectorAll("a[href*='bucket'], a[href*='artifact'], a[href*='logs']")).toHaveLength(0)
+  })
+
+  it("renders a read-only Clockify ledger and keeps an unattributed entry visible", async () => {
+    const unattributedState = {
+      ...clockifyState,
+      inspection: {
+        ...clockifyInspection,
+        graph: { ...clockifyInspection.graph, relationships: [] }
+      }
+    } satisfies WorkspaceEntityState
+    const host = await renderView(() => undefined, unattributedState)
+
+    expect(host.querySelector("[data-workspace-clockify-time-entry-detail]")).not.toBeNull()
+    expect(host.textContent).toContain("2h 15m")
+    expect(host.textContent).toContain("1 visible entry · 135 exact minutes")
+    expect(host.textContent).toContain("Review payment safeguards and release evidence")
+    expect(host.textContent).toContain("project-payments")
+    expect(host.textContent).toContain("Mina Ortiz")
+    expect(host.textContent).toContain("Unattributed")
+    expect(host.textContent).toContain("The entry remains visible")
+    expect(host.textContent).toContain("Corrections and approval remain read-only")
+    expect(host.querySelector("input, textarea, select")).toBeNull()
   })
 
   it("renders a human-first Confluence document without executing content or exposing attachment media", async () => {

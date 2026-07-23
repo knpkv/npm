@@ -625,7 +625,24 @@ const clockifyRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
     vendorImmutableId: "time-1",
     sourceUrl: "https://app.clockify.me/tracker",
     title: "PAY-42 review and rollout",
-    attributes: { durationMinutes: 45, billable: true, approvalState: "approved" }
+    attributes: {
+      durationMinutes: 45,
+      billable: true,
+      approvalState: "approved",
+      description: "PAY-42 review and rollout",
+      projectId: "project-payments",
+      taskId: "task-review",
+      userId: "clockify-user-mina",
+      locked: true,
+      entryType: "REGULAR",
+      tagIds: ["release", "review"],
+      interval: {
+        start: "2026-07-19T08:17:30.000Z",
+        end: "2026-07-19T09:02:30.000Z",
+        duration: "PT45M",
+        state: "completed"
+      }
+    }
   }]
 })
 
@@ -2265,6 +2282,34 @@ describe("normalized plugin page materialization", () => {
       if (indexedPage?.details._tag !== "page") return yield* Effect.die("expected a bounded page projection")
       assert.strictEqual(indexedPage.details.contentState, "lazy")
       assert.isNull(indexedPage.details.content)
+      const indexedTimeEntry = boundedSlice.entityProjections.find(
+        ({ projection }) => projection.details._tag === "time-entry"
+      )?.projection
+      if (indexedTimeEntry?.details._tag !== "time-entry") {
+        return yield* Effect.die("expected a bounded time-entry projection")
+      }
+      assert.deepInclude(indexedTimeEntry.details, {
+        durationMinutes: 45,
+        billable: true,
+        approvalState: "approved",
+        description: "PAY-42 review and rollout",
+        projectId: "project-payments",
+        taskId: "task-review",
+        userId: "clockify-user-mina",
+        locked: true,
+        entryType: "REGULAR",
+        tagIds: ["release", "review"],
+        timerState: "completed"
+      })
+      if (
+        indexedTimeEntry.details.startedAt === undefined ||
+        indexedTimeEntry.details.endedAt === undefined ||
+        indexedTimeEntry.details.endedAt === null
+      ) {
+        return yield* Effect.die("expected a complete Clockify interval")
+      }
+      assert.strictEqual(DateTime.formatIso(indexedTimeEntry.details.startedAt), "2026-07-19T08:17:30.000Z")
+      assert.strictEqual(DateTime.formatIso(indexedTimeEntry.details.endedAt), "2026-07-19T09:02:30.000Z")
       const current = slice.value.relationships.filter(
         ({ lifecycle }) => lifecycle._tag !== "rejected" && lifecycle._tag !== "superseded"
       )

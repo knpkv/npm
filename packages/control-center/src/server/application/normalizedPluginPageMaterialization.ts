@@ -117,9 +117,17 @@ const EntityAttributes = Schema.Struct({
   durationMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   billable: Schema.optionalKey(Schema.Boolean),
   approvalState: OptionalText,
+  userId: OptionalText,
+  projectId: OptionalText,
+  taskId: OptionalText,
+  tagIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  locked: Schema.optionalKey(Schema.Boolean),
+  entryType: OptionalText,
   interval: Schema.optionalKey(Schema.Struct({
     duration: OptionalText,
-    state: OptionalText
+    state: OptionalText,
+    start: OptionalUnknown,
+    end: OptionalUnknown
   }))
 })
 const LegacyIssueAttributes = Schema.Struct({
@@ -185,15 +193,16 @@ const optionalBounded = (value: string | null | undefined, maximum: number): str
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : (value?.name ?? null)
 
-const decodedPullRequestTimestamp = Effect.fn(
-  "NormalizedPluginPageMaterialization.decodePullRequestTimestamp"
+const decodedOptionalEntityTimestamp = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodeOptionalEntityTimestamp"
 )(function*(
   value: unknown,
-  eventId: string
+  eventId: string,
+  diagnosticCode: string
 ): Effect.fn.Return<UtcTimestamp | null, NormalizedPluginPageMaterializationError> {
   if (value === null || value === undefined) return null
   return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
-    Effect.mapError(() => malformed("normalized-pull-request-timestamp-invalid", eventId))
+    Effect.mapError(() => malformed(diagnosticCode, eventId))
   )
 })
 
@@ -376,8 +385,16 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
       }
     }
     case "pull-request": {
-      const creationDate = yield* decodedPullRequestTimestamp(attributes.creationDate, event.eventId)
-      const lastActivityDate = yield* decodedPullRequestTimestamp(attributes.lastActivityDate, event.eventId)
+      const creationDate = yield* decodedOptionalEntityTimestamp(
+        attributes.creationDate,
+        event.eventId,
+        "normalized-pull-request-timestamp-invalid"
+      )
+      const lastActivityDate = yield* decodedOptionalEntityTimestamp(
+        attributes.lastActivityDate,
+        event.eventId,
+        "normalized-pull-request-timestamp-invalid"
+      )
       const status = namedText(attributes.status)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
@@ -463,7 +480,30 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "time-entry":
+    case "time-entry": {
+      const startedAt = yield* decodedOptionalEntityTimestamp(
+        attributes.interval?.start,
+        event.eventId,
+        "normalized-time-entry-timestamp-invalid"
+      )
+      const endedAt = yield* decodedOptionalEntityTimestamp(
+        attributes.interval?.end,
+        event.eventId,
+        "normalized-time-entry-timestamp-invalid"
+      )
+      const userId = optionalBounded(attributes.userId, 512)
+      const projectId = optionalBounded(attributes.projectId, 512)
+      const taskId = optionalBounded(attributes.taskId, 512)
+      const tagIds = [
+        ...new Set(
+          (attributes.tagIds ?? []).map((tagId) => tagId.trim().slice(0, 512)).filter(Boolean)
+        )
+      ].slice(0, 100)
+      const entryType = attributes.entryType === "BREAK" ||
+          attributes.entryType === "HOLIDAY" ||
+          attributes.entryType === "TIME_OFF"
+        ? attributes.entryType
+        : "REGULAR"
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -477,9 +517,24 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             ? attributes.approvalState
             : attributes.interval?.state === "running"
             ? "pending"
-            : "not-required"
+            : "not-required",
+          ...(attributes.description === null || attributes.description === undefined
+            ? {}
+            : { description: attributes.description.slice(0, 4_000) }),
+          projectId,
+          taskId,
+          ...(userId === null ? {} : { userId }),
+          ...(attributes.locked === undefined ? {} : { locked: attributes.locked }),
+          ...(attributes.entryType === null || attributes.entryType === undefined ? {} : { entryType }),
+          ...(attributes.tagIds === undefined ? {} : { tagIds }),
+          ...(startedAt === null ? {} : { startedAt }),
+          endedAt,
+          ...(attributes.interval?.state === null || attributes.interval?.state === undefined
+            ? {}
+            : { timerState: attributes.interval.state === "running" ? "running" : "completed" })
         }
       }
+    }
   }
 })
 

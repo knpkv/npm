@@ -214,7 +214,22 @@ const DeploymentDetails = Schema.TaggedStruct("deployment", {
 const TimeEntryDetails = Schema.TaggedStruct("time-entry", {
   durationMinutes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   billable: Schema.Boolean,
-  approvalState: Schema.Literals(["pending", "approved", "rejected", "not-required"])
+  approvalState: Schema.Literals(["pending", "approved", "rejected", "not-required"]),
+  description: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4_000))),
+  projectId: Schema.optionalKey(Schema.NullOr(boundedText(512, "ClockifyProjectId"))),
+  taskId: Schema.optionalKey(Schema.NullOr(boundedText(512, "ClockifyTaskId"))),
+  userId: Schema.optionalKey(boundedText(512, "ClockifyUserId")),
+  locked: Schema.optionalKey(Schema.Boolean),
+  entryType: Schema.optionalKey(Schema.Literals(["REGULAR", "BREAK", "HOLIDAY", "TIME_OFF"])),
+  tagIds: Schema.optionalKey(
+    Schema.Array(boundedText(512, "ClockifyTagId")).check(
+      Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify tags" }),
+      Schema.isUnique()
+    )
+  ),
+  startedAt: Schema.optionalKey(UtcTimestamp),
+  endedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  timerState: Schema.optionalKey(Schema.Literals(["running", "completed"]))
 })
 
 /** Provider-neutral entity extension decoded before graph persistence. */
