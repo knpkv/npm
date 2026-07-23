@@ -217,7 +217,7 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
   addIssueComment: () => Effect.succeed("c42"),
   getIssueTransitions: () => Effect.succeed([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]),
   transitionIssue: () => Effect.void,
-  getProjectVersions: () => Effect.succeed([]),
+  getProjectVersion: () => Effect.succeed(Option.none()),
   getIssueLinkTypes: Effect.succeed([]),
   ...overrides
 })
@@ -300,15 +300,32 @@ const fixVersionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)
   evidenceIds: ["jira-release-association-review"]
 })
 
+const blocksLinkType = {
+  id: "10000",
+  name: "Blocks",
+  inward: "is blocked by",
+  outward: "blocks"
+}
+
 const linkIssueRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
   actionKind: "link-issue",
   target: { entityType: "jira.issue", vendorImmutableId: issue.id },
   expectedRevision: issue.fields.updated,
   payload: {
     linkedIssueId: "PAY-43",
-    linkTypeName: "Relates"
+    linkTypeName: "Blocks",
+    direction: "outward"
   },
   evidenceIds: ["jira-issue-link-review"]
+})
+
+const inwardLinkIssueRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  ...linkIssueRequest,
+  payload: {
+    linkedIssueId: "PAY-43",
+    linkTypeName: "Blocks",
+    direction: "inward"
+  }
 })
 
 const transitionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
@@ -567,38 +584,46 @@ describe("JiraReadPlugin", () => {
     ))
 
   it.effect("canonicalizes requested Jira fix versions without rewriting the target", () =>
-    withConnection(
-      baseProvider({
-        getProjectVersions: () =>
-          Effect.succeed([
-            { id: "2026.30", name: "July 2026" },
-            { id: "2026.31", name: "August 2026" }
-          ])
-      }),
-      Effect.gen(function*() {
-        const connection = yield* PluginConnection
-        const proposal = yield* connection.proposeAction(fixVersionRequest)
+    Effect.gen(function*() {
+      const requestedIds = yield* Ref.make<ReadonlyArray<string>>([])
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersion: (versionId) =>
+            Ref.update(requestedIds, (ids) => [...ids, versionId]).pipe(
+              Effect.as(Option.some(
+                versionId === "2026.31"
+                  ? { id: "2026.31", name: "August 2026", projectId: "10" }
+                  : { id: "2026.30", name: "July 2026", projectId: "10" }
+              ))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposal = yield* connection.proposeAction(fixVersionRequest)
 
-        assert.deepStrictEqual(proposal.request.target, fixVersionRequest.target)
-        assert.deepStrictEqual(proposal.request.payload, {
-          _tag: "set-fix-versions",
-          issueKey: "PAY-42",
-          versions: [
-            { id: "2026.31", name: "August 2026" },
-            { id: "2026.30", name: "July 2026" }
-          ]
+          assert.deepStrictEqual(proposal.request.target, fixVersionRequest.target)
+          assert.deepStrictEqual(proposal.request.payload, {
+            _tag: "set-fix-versions",
+            issueKey: "PAY-42",
+            versions: [
+              { id: "2026.31", name: "August 2026" },
+              { id: "2026.30", name: "July 2026" }
+            ]
+          })
+          assert.deepStrictEqual(yield* Ref.get(requestedIds), ["2026.31", "2026.30"])
         })
-      })
-    ))
+      )
+    }))
 
   it.effect("maps malformed selected Jira fix-version metadata to the plugin failure channel", () =>
     withConnection(
       baseProvider({
-        getProjectVersions: () =>
-          Effect.succeed([
-            { id: "2026.30", name: "July 2026" },
-            { id: "2026.31", name: "" }
-          ])
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some(
+            versionId === "2026.31"
+              ? { id: "2026.31", name: "", projectId: "10" }
+              : { id: "2026.30", name: "July 2026", projectId: "10" }
+          ))
       }),
       Effect.gen(function*() {
         const connection = yield* PluginConnection
@@ -617,7 +642,12 @@ describe("JiraReadPlugin", () => {
   it.effect("rejects an unavailable Jira fix version", () =>
     withConnection(
       baseProvider({
-        getProjectVersions: () => Effect.succeed([{ id: "2026.30", name: "July 2026" }])
+        getProjectVersion: (versionId) =>
+          Effect.succeed(
+            versionId === "2026.30"
+              ? Option.some({ id: "2026.30", name: "July 2026", projectId: "10" })
+              : Option.none()
+          )
       }),
       Effect.gen(function*() {
         const connection = yield* PluginConnection
@@ -627,7 +657,25 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
-  it.effect("proposes an explicitly directed Jira issue link from canonical provider identities", () => {
+  it.effect("rejects a requested Jira fix version from another project", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some({
+            id: versionId,
+            name: versionId,
+            projectId: versionId === "2026.31" ? "20" : "10"
+          }))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assertConflictDiagnostic(proposed, "jira-fix-version-outside-connection")
+      })
+    ))
+
+  it.effect("preserves both directions of an asymmetric Jira issue link", () => {
     const linkedIssue = {
       ...issue,
       id: "10043",
@@ -636,25 +684,74 @@ describe("JiraReadPlugin", () => {
     return withConnection(
       baseProvider({
         getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
-        getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
       }),
       Effect.gen(function*() {
         const connection = yield* PluginConnection
-        const proposal = yield* connection.proposeAction(linkIssueRequest)
+        const outward = yield* connection.proposeAction(linkIssueRequest)
+        const inward = yield* connection.proposeAction(inwardLinkIssueRequest)
 
-        assert.deepStrictEqual(proposal.request.target, linkIssueRequest.target)
-        assert.deepStrictEqual(proposal.request.payload, {
+        assert.deepStrictEqual(outward.request.target, linkIssueRequest.target)
+        assert.deepStrictEqual(outward.request.payload, {
           _tag: "link-issue",
           issueKey: "PAY-42",
+          direction: "outward",
+          relationship: "blocks",
+          inwardIssueId: "10043",
+          inwardIssueKey: "PAY-43",
+          outwardIssueId: "10042",
+          outwardIssueKey: "PAY-42",
+          linkTypeId: "10000",
+          linkTypeName: "Blocks",
+          linkTypeInward: "is blocked by",
+          linkTypeOutward: "blocks"
+        })
+        assert.deepStrictEqual(inward.request.target, inwardLinkIssueRequest.target)
+        assert.deepStrictEqual(inward.request.payload, {
+          _tag: "link-issue",
+          issueKey: "PAY-42",
+          direction: "inward",
+          relationship: "is blocked by",
           inwardIssueId: "10042",
           inwardIssueKey: "PAY-42",
           outwardIssueId: "10043",
           outwardIssueKey: "PAY-43",
           linkTypeId: "10000",
-          linkTypeName: "Relates"
+          linkTypeName: "Blocks",
+          linkTypeInward: "is blocked by",
+          linkTypeOutward: "blocks"
         })
       })
     )
+  })
+
+  it.effect("rejects a Jira issue link with a missing or invalid direction", () => {
+    const propose = (payload: Schema.Json) =>
+      withConnection(
+        baseProvider(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+            ...linkIssueRequest,
+            payload
+          })
+          return yield* connection.proposeAction(request).pipe(Effect.result)
+        })
+      )
+    return Effect.gen(function*() {
+      for (
+        const payload of [
+          { linkedIssueId: "PAY-43", linkTypeName: "Blocks" },
+          { linkedIssueId: "PAY-43", linkTypeName: "Blocks", direction: "sideways" }
+        ]
+      ) {
+        const proposed = yield* propose(payload)
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginConfigurationFailure")
+        }
+      }
+    })
   })
 
   it.effect("maps malformed selected Jira link-type metadata to the plugin failure channel", () => {
@@ -666,7 +763,7 @@ describe("JiraReadPlugin", () => {
     return withConnection(
       baseProvider({
         getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
-        getIssueLinkTypes: Effect.succeed([{ id: "", name: "Relates" }])
+        getIssueLinkTypes: Effect.succeed([{ ...blocksLinkType, id: "" }])
       }),
       Effect.gen(function*() {
         const connection = yield* PluginConnection
@@ -700,7 +797,7 @@ describe("JiraReadPlugin", () => {
     return Effect.gen(function*() {
       const missingIssue = yield* propose(baseProvider({
         getIssue: (issueId) => Effect.succeed(issueId === issue.id ? Option.some(issue) : Option.none()),
-        getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
       }))
       assertConflictDiagnostic(missingIssue, "jira-linked-issue-not-found")
 
@@ -711,7 +808,7 @@ describe("JiraReadPlugin", () => {
               ? issue
               : { ...linkedIssue, fields: { ...linkedIssue.fields, project: { id: "20" } } }
           )),
-        getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
       }))
       assertConflictDiagnostic(outsideProject, "jira-linked-issue-outside-connection")
 
@@ -727,13 +824,13 @@ describe("JiraReadPlugin", () => {
     withConnection(
       baseProvider({
         getIssue: () => Effect.succeed(Option.some(issue)),
-        getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
       }),
       Effect.gen(function*() {
         const connection = yield* PluginConnection
         const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
           ...linkIssueRequest,
-          payload: { linkedIssueId: issue.key, linkTypeName: "Relates" }
+          payload: { linkedIssueId: issue.key, linkTypeName: "Blocks", direction: "outward" }
         })
         const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
 
@@ -752,7 +849,7 @@ describe("JiraReadPlugin", () => {
               fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
             })),
           getComment: () => Ref.update(associationReads, (count) => count + 1).pipe(Effect.as(Option.none())),
-          getProjectVersions: () => Ref.update(associationReads, (count) => count + 1).pipe(Effect.as([])),
+          getProjectVersion: () => Ref.update(associationReads, (count) => count + 1).pipe(Effect.as(Option.none())),
           getIssueLinkTypes: Ref.update(associationReads, (count) => count + 1).pipe(Effect.as([]))
         }),
         Effect.gen(function*() {

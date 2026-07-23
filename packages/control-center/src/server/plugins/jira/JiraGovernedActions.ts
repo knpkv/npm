@@ -44,15 +44,23 @@ const FixVersionRequestPayload = Schema.Struct({
 })
 const LinkIssueRequestPayload = Schema.Struct({
   linkedIssueId: JiraProviderIdentity,
-  linkTypeName: JiraProviderIdentity
+  linkTypeName: JiraProviderIdentity,
+  direction: Schema.Literals(["outward", "inward"])
 })
 const JiraProjectVersionMetadata = Schema.Struct({
   id: JiraProviderIdentity,
   name: JiraProviderIdentity
 })
+const JiraSelectedProjectVersion = Schema.Struct({
+  id: JiraProviderIdentity,
+  name: JiraProviderIdentity,
+  projectId: Schema.NullOr(JiraProjectId)
+})
 const JiraIssueLinkTypeMetadata = Schema.Struct({
   id: JiraProviderIdentity,
-  name: JiraProviderIdentity
+  name: JiraProviderIdentity,
+  inward: JiraProviderIdentity,
+  outward: JiraProviderIdentity
 })
 const JiraAssociationPayload = Schema.Union([
   Schema.TaggedStruct("reply-comment", {
@@ -66,12 +74,16 @@ const JiraAssociationPayload = Schema.Union([
   }),
   Schema.TaggedStruct("link-issue", {
     issueKey: JiraIssueKey,
+    direction: Schema.Literals(["outward", "inward"]),
+    relationship: JiraProviderIdentity,
     inwardIssueId: JiraProviderIdentity,
     inwardIssueKey: JiraIssueKey,
     outwardIssueId: JiraProviderIdentity,
     outwardIssueKey: JiraIssueKey,
     linkTypeId: JiraProviderIdentity,
-    linkTypeName: JiraProviderIdentity
+    linkTypeName: JiraProviderIdentity,
+    linkTypeInward: JiraProviderIdentity,
+    linkTypeOutward: JiraProviderIdentity
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 const JiraActionIssue = Schema.Struct({
@@ -208,30 +220,40 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
     : request.actionKind === "set-fix-versions"
     ? yield* Effect.gen(function*() {
       const requested = yield* decodePayload(FixVersionRequestPayload, request.payload)
-      const available = yield* withTimeout(
-        "jira-get-project-versions",
-        configuration.operationTimeoutMillis,
-        provider.getProjectVersions(configuration.projectId)
-      )
-      const byId = new Map(available.map((version) => [version.id, version]))
       const versions: Array<typeof JiraProjectVersionMetadata.Type> = []
       for (const versionId of requested.versionIds) {
-        const version = byId.get(versionId)
-        if (version === undefined) {
+        const found = yield* withTimeout(
+          "jira-get-project-version",
+          configuration.operationTimeoutMillis,
+          provider.getProjectVersion(versionId)
+        )
+        if (Option.isNone(found)) {
           return yield* new PluginConflictFailure({
             operation: "propose-action",
             diagnosticCode: "jira-fix-version-unavailable"
           })
         }
-        const canonical = yield* Schema.decodeUnknownEffect(JiraProjectVersionMetadata)(version).pipe(
+        const canonical = yield* Schema.decodeUnknownEffect(JiraSelectedProjectVersion)(found.value).pipe(
           Effect.mapError(() =>
             new PluginMalformedResponseFailure({
-              operation: "jira-get-project-versions",
+              operation: "jira-get-project-version",
               diagnosticCode: "jira-project-version-metadata-invalid"
             })
           )
         )
-        versions.push(canonical)
+        if (canonical.id !== versionId) {
+          return yield* new PluginMalformedResponseFailure({
+            operation: "jira-get-project-version",
+            diagnosticCode: "jira-project-version-identity-mismatch"
+          })
+        }
+        if (canonical.projectId !== null && canonical.projectId !== configuration.projectId) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "jira-fix-version-outside-connection"
+          })
+        }
+        versions.push({ id: canonical.id, name: canonical.name })
       }
       return JiraAssociationPayload.make({
         _tag: "set-fix-versions",
@@ -292,15 +314,21 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
           })
         )
       )
+      const inwardIssue = requested.direction === "outward" ? linkedIssue : issue
+      const outwardIssue = requested.direction === "outward" ? issue : linkedIssue
       return JiraAssociationPayload.make({
         _tag: "link-issue",
         issueKey: issue.key,
-        inwardIssueId: issue.id,
-        inwardIssueKey: issue.key,
-        outwardIssueId: linkedIssue.id,
-        outwardIssueKey: linkedIssue.key,
+        direction: requested.direction,
+        relationship: requested.direction === "outward" ? linkType.outward : linkType.inward,
+        inwardIssueId: inwardIssue.id,
+        inwardIssueKey: inwardIssue.key,
+        outwardIssueId: outwardIssue.id,
+        outwardIssueKey: outwardIssue.key,
         linkTypeId: linkType.id,
-        linkTypeName: linkType.name
+        linkTypeName: linkType.name,
+        linkTypeInward: linkType.inward,
+        linkTypeOutward: linkType.outward
       })
     })
 
@@ -323,14 +351,16 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
       ? `Reply on Jira issue ${issue.key}`
       : payload._tag === "set-fix-versions"
       ? `Associate Jira issue ${issue.key} with ${payload.versions.length} release version(s)`
-      : `Link Jira issue ${issue.key} to ${payload.outwardIssueKey}`,
+      : `Link Jira issue ${issue.key} to ${
+        payload.direction === "outward" ? payload.inwardIssueKey : payload.outwardIssueKey
+      }`,
     impact: {
       level: "medium",
       summary: payload._tag === "reply-comment"
         ? "Proposes a normal Jira comment with an explicit reply reference"
         : payload._tag === "set-fix-versions"
         ? "Proposes replacing the Jira issue fix-version associations"
-        : `Proposes a directed ${payload.linkTypeName} Jira issue link`
+        : `Proposes the directed Jira relationship "${payload.relationship}"`
     },
     proposedAt
   }).pipe(

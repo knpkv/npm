@@ -107,12 +107,15 @@ export interface JiraIssueTransition {
 export interface JiraProjectVersion {
   readonly id: string
   readonly name: string
+  readonly projectId: string | null
 }
 
 /** Stable issue-link type data needed by the governed proposal boundary. @internal */
 export interface JiraIssueLinkType {
   readonly id: string
   readonly name: string
+  readonly inward: string
+  readonly outward: string
 }
 
 /** Narrow provider surface required by the production issue-read adapter. @internal */
@@ -154,9 +157,9 @@ export interface JiraReadProvider {
     issueId: string,
     transitionId: string
   ) => Effect.Effect<void, PluginFailure>
-  readonly getProjectVersions: (
-    projectId: string
-  ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
+  readonly getProjectVersion: (
+    versionId: string
+  ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
   readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
 }
 
@@ -259,14 +262,18 @@ const JiraTransitions = Schema.Struct({
     to: Schema.Struct({ id: Schema.String, name: Schema.String })
   })))
 })
-const JiraProjectVersions = Schema.Array(Schema.Struct({
+const JiraProjectVersionResponse = Schema.Struct({
   id: Schema.String,
-  name: Schema.String
-}))
+  name: Schema.String,
+  projectId: Schema.optionalKey(Schema.Number),
+  project: Schema.optionalKey(Schema.String)
+})
 const JiraIssueLinkTypes = Schema.Struct({
   issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
-    id: Schema.String,
-    name: Schema.String
+    id: JiraProviderIdentifier,
+    name: JiraProviderIdentifier,
+    inward: JiraProviderIdentifier,
+    outward: JiraProviderIdentifier
   })))
 })
 
@@ -445,19 +452,46 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         payload: { transition: { id: transitionId } }
       })
     ),
-  getProjectVersions: (projectId) =>
-    providerCall(
-      "jira-get-project-versions",
-      client.getProjectVersions(projectId, undefined)
-    ).pipe(
-      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersions)),
-      Effect.mapError((error) =>
-        Schema.isSchemaError(error)
-          ? new PluginMalformedResponseFailure({
-            operation: "jira-get-project-versions",
-            diagnosticCode: "jira-project-versions-response-invalid"
-          })
-          : error
+  getProjectVersion: (versionId) =>
+    client.getVersion(versionId, undefined).pipe(
+      Effect.map((response): Option.Option<unknown> => Option.some(response)),
+      Effect.catch((error) =>
+        isNotFound(error)
+          ? Effect.succeed(Option.none<unknown>())
+          : mapFailure("jira-get-project-version", error)
+      ),
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(Option.none()),
+          onSome: (response) =>
+            Schema.decodeUnknownEffect(JiraProjectVersionResponse)(response).pipe(
+              Effect.mapError(() =>
+                new PluginMalformedResponseFailure({
+                  operation: "jira-get-project-version",
+                  diagnosticCode: "jira-project-version-response-invalid"
+                })
+              ),
+              Effect.flatMap((version) =>
+                version.id === versionId
+                  ? Effect.succeed(version)
+                  : Effect.fail(
+                    new PluginMalformedResponseFailure({
+                      operation: "jira-get-project-version",
+                      diagnosticCode: "jira-project-version-identity-mismatch"
+                    })
+                  )
+              ),
+              Effect.map((version) =>
+                Option.some({
+                  id: version.id,
+                  name: version.name,
+                  projectId: version.projectId === undefined
+                    ? version.project ?? null
+                    : String(version.projectId)
+                })
+              )
+            )
+        })
       )
     ),
   getIssueLinkTypes: providerCall(

@@ -14,8 +14,8 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { makeJiraReadProvider, mapJiraReadProviderFailure } from "../../src/server/plugins/jira/JiraReadProvider.js"
 
-const jiraClientLayer = (
-  body: unknown,
+const jiraClientLayerFromResponse = (
+  responseBody: (request: HttpClientRequest.HttpClientRequest) => unknown,
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) =>
   JiraApiClient.layer.pipe(
@@ -34,7 +34,7 @@ const jiraClientLayer = (
           requests.push(request)
           return HttpClientResponse.fromWeb(
             request,
-            new Response(JSON.stringify(body), {
+            new Response(JSON.stringify(responseBody(request)), {
               status: 200,
               headers: { "content-type": "application/json" }
             })
@@ -43,6 +43,11 @@ const jiraClientLayer = (
       )
     ))
   )
+
+const jiraClientLayer = (
+  body: unknown,
+  requests: Array<HttpClientRequest.HttpClientRequest>
+) => jiraClientLayerFromResponse(() => body, requests)
 
 const rateLimitError = (retryAfter: string): HttpClientError.HttpClientError => {
   const request = HttpClientRequest.get("https://acme.atlassian.net/rest/api/3/issue/PAY-42")
@@ -85,17 +90,33 @@ describe("JiraReadProvider", () => {
     }, requests)))
   })
 
-  it.effect("decodes Jira project versions used by governed proposals", () => {
+  it.effect("loads only the requested Jira project versions by direct ID", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {
       const client = yield* JiraApiClient
       const provider = makeJiraReadProvider(client)
 
-      const versions = yield* provider.getProjectVersions("10")
+      const versions = yield* Effect.forEach(
+        ["2026.31", "2026.30"],
+        provider.getProjectVersion
+      )
 
-      assert.deepStrictEqual(versions, [{ id: "2026.30", name: "July 2026" }])
-      assert.include(requests[0]?.url ?? "", "/rest/api/3/project/10/versions")
-    }).pipe(Effect.provide(jiraClientLayer([{ id: "2026.30", name: "July 2026" }], requests)))
+      assert.deepStrictEqual(versions, [
+        Option.some({ id: "2026.31", name: "August 2026", projectId: "10" }),
+        Option.some({ id: "2026.30", name: "July 2026", projectId: "10" })
+      ])
+      assert.deepStrictEqual(
+        requests.map(({ url }) => new URL(url).pathname),
+        ["/rest/api/3/version/2026.31", "/rest/api/3/version/2026.30"]
+      )
+      assert.isFalse(requests.some(({ url }) => url.includes("/project/10/versions")))
+    }).pipe(Effect.provide(jiraClientLayerFromResponse(
+      (request) =>
+        request.url.endsWith("/2026.31")
+          ? { id: "2026.31", name: "August 2026", projectId: 10 }
+          : { id: "2026.30", name: "July 2026", projectId: 10 },
+      requests
+    )))
   })
 
   it.effect("decodes Jira issue-link types used by governed proposals", () => {
@@ -106,11 +127,21 @@ describe("JiraReadProvider", () => {
 
       const linkTypes = yield* provider.getIssueLinkTypes
 
-      assert.deepStrictEqual(linkTypes, [{ id: "10000", name: "Relates" }])
+      assert.deepStrictEqual(linkTypes, [{
+        id: "10000",
+        name: "Relates",
+        inward: "relates to",
+        outward: "relates to"
+      }])
       assert.include(requests[0]?.url ?? "", "/rest/api/3/issueLinkType")
     }).pipe(
       Effect.provide(jiraClientLayer({
-        issueLinkTypes: [{ id: "10000", name: "Relates" }]
+        issueLinkTypes: [{
+          id: "10000",
+          name: "Relates",
+          inward: "relates to",
+          outward: "relates to"
+        }]
       }, requests))
     )
   })
