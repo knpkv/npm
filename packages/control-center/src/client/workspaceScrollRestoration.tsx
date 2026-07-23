@@ -1,26 +1,13 @@
 import { type ReactElement, useEffect } from "react"
 import { type Location, ScrollRestoration, useLocation } from "react-router"
 
-const MAXIMUM_SAVED_WORKSPACE_SCROLL_POSITIONS = 32
 const MAXIMUM_DEFERRED_RESTORATION_FRAMES = 300
-const RELEASE_PREVIEW_SCROLL_SELECTOR = "[data-rly-release-preview-scroll]"
-const SCROLL_POSITION_TOLERANCE = 2
+export const RELEASE_PREVIEW_SCROLL_SELECTOR = "[data-rly-release-preview-scroll]"
+export const SCROLL_POSITION_TOLERANCE = 2
 
-interface SavedWorkspaceScrollPosition {
-  readonly preview: boolean
-  readonly top: number
-}
+export type SavedWorkspaceScrollPosition = readonly [top: number, preview: boolean, entityPath: string, active: boolean]
 
-const savedWorkspaceScrollPositions = new Map<string, SavedWorkspaceScrollPosition>()
-
-interface WorkspaceNavigationClick {
-  readonly altKey: boolean
-  readonly button: number
-  readonly ctrlKey: boolean
-  readonly defaultPrevented: boolean
-  readonly metaKey: boolean
-  readonly shiftKey: boolean
-}
+export const savedWorkspaceScrollPositions = new Map<string, SavedWorkspaceScrollPosition>()
 
 /**
  * Reuse scroll positions for the same exact workspace view even when an
@@ -32,34 +19,6 @@ export const workspaceScrollRestorationKey = ({
   search
 }: Pick<Location, "hash" | "pathname" | "search">): string => `${pathname}${search}${hash}`
 
-/** Match the same primary, unmodified, same-tab click contract as React Router. */
-export const shouldRememberWorkspaceScrollPosition = (event: WorkspaceNavigationClick, linkTarget: string): boolean =>
-  !event.defaultPrevented &&
-  event.button === 0 &&
-  !event.altKey &&
-  !event.ctrlKey &&
-  !event.metaKey &&
-  !event.shiftKey &&
-  (linkTarget === "" || linkTarget === "_self")
-
-/** Remember the current viewport before opening a canonical entity route. */
-export const rememberWorkspaceScrollPosition = (location: Pick<Location, "hash" | "pathname" | "search">): void => {
-  const key = workspaceScrollRestorationKey(location)
-  savedWorkspaceScrollPositions.delete(key)
-  const previewScroller = document.querySelector<HTMLElement>(RELEASE_PREVIEW_SCROLL_SELECTOR)
-  const savedPosition: SavedWorkspaceScrollPosition = {
-    preview: previewScroller !== null,
-    top: previewScroller?.scrollTop ?? window.scrollY
-  }
-  if (savedPosition.top <= SCROLL_POSITION_TOLERANCE) return
-  savedWorkspaceScrollPositions.set(key, savedPosition)
-  if (savedWorkspaceScrollPositions.size <= MAXIMUM_SAVED_WORKSPACE_SCROLL_POSITIONS) return
-  for (const oldestKey of savedWorkspaceScrollPositions.keys()) {
-    savedWorkspaceScrollPositions.delete(oldestKey)
-    break
-  }
-}
-
 /**
  * Retry entity round-trip restoration until lazy workspace content can hold
  * the viewport.
@@ -69,8 +28,18 @@ export const DeferredWorkspaceScrollRestoration = (): null => {
   const key = workspaceScrollRestorationKey(location)
 
   useEffect(() => {
+    for (const [originKey, saved] of savedWorkspaceScrollPositions) {
+      if (originKey === key) continue
+      if (saved[2] === location.pathname) {
+        if (!saved[3]) savedWorkspaceScrollPositions.set(originKey, [saved[0], saved[1], saved[2], true])
+        continue
+      }
+      savedWorkspaceScrollPositions.delete(originKey)
+    }
     const target = savedWorkspaceScrollPositions.get(key)
-    if (target === undefined) return
+    if (target === undefined || !target[3]) return
+    const targetTop = target[0]
+    const targetPreview = target[1]
     let frame = 0
     let requestId = 0
     let lastAppliedTarget = -1
@@ -79,10 +48,10 @@ export const DeferredWorkspaceScrollRestoration = (): null => {
     }
     const restore = (): void => {
       frame += 1
-      const previewScroller = target.preview
+      const previewScroller = targetPreview
         ? document.querySelector<HTMLElement>(RELEASE_PREVIEW_SCROLL_SELECTOR)
         : null
-      if (target.preview && previewScroller === null) {
+      if (targetPreview && previewScroller === null) {
         if (frame >= MAXIMUM_DEFERRED_RESTORATION_FRAMES) {
           consumeTarget()
           return
@@ -99,7 +68,7 @@ export const DeferredWorkspaceScrollRestoration = (): null => {
         previewScroller === null
           ? Math.max(0, document.documentElement.scrollHeight - window.innerHeight)
           : Math.max(0, previewScroller.scrollHeight - previewScroller.clientHeight)
-      const reachableTarget = Math.min(target.top, maximumScrollPosition)
+      const reachableTarget = Math.min(targetTop, maximumScrollPosition)
       if (reachableTarget > lastAppliedTarget + SCROLL_POSITION_TOLERANCE) {
         if (previewScroller === null) {
           window.scrollTo(0, reachableTarget)
@@ -109,7 +78,7 @@ export const DeferredWorkspaceScrollRestoration = (): null => {
         lastAppliedTarget = reachableTarget
       }
       const restoredPosition = previewScroller === null ? window.scrollY : previewScroller.scrollTop
-      if (Math.abs(restoredPosition - target.top) <= SCROLL_POSITION_TOLERANCE) {
+      if (Math.abs(restoredPosition - targetTop) <= SCROLL_POSITION_TOLERANCE) {
         consumeTarget()
         return
       }

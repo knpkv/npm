@@ -12,10 +12,7 @@ import { PortfolioOverviewView, type PortfolioOverviewState } from "../portfolio
 import type { WorkspaceReleaseOutletContext } from "../releases/WorkspaceReleaseLayout.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
 import { releaseWorksetSessionKey } from "../releases/ReleaseWorkset.js"
-import {
-  rememberWorkspaceScrollPosition,
-  shouldRememberWorkspaceScrollPosition
-} from "../workspaceScrollRestoration.js"
+import { rememberWorkspaceScrollPosition, shouldRememberWorkspaceScrollPosition } from "../workspaceScrollCapture.js"
 import {
   type WorkspaceItemPresentation,
   type WorkspaceItemStatus,
@@ -430,7 +427,7 @@ export const ItemsPage = ({
                 className={styles.itemLink}
                 onClick={(event) => {
                   if (shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
-                    rememberWorkspaceScrollPosition(location)
+                    rememberWorkspaceScrollPosition(location, item.href)
                   }
                 }}
                 state={makeWorkspaceEntityRouteState(

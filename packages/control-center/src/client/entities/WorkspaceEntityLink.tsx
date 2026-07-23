@@ -7,10 +7,7 @@ import {
   makeWorkspaceEntityRouteState,
   workspaceEntityTargetFromHref
 } from "../items/workspaceEntityRoutes.js"
-import {
-  rememberWorkspaceScrollPosition,
-  shouldRememberWorkspaceScrollPosition
-} from "../workspaceScrollRestoration.js"
+import { rememberWorkspaceScrollPosition, shouldRememberWorkspaceScrollPosition } from "../workspaceScrollCapture.js"
 
 interface RouterLocationParts {
   readonly hash: string
@@ -45,7 +42,7 @@ export const WorkspaceEntityLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(f
       onClick={(event) => {
         onClick?.(event)
         if (state !== undefined && shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
-          rememberWorkspaceScrollPosition(location)
+          rememberWorkspaceScrollPosition(location, href)
         }
       }}
       ref={ref}

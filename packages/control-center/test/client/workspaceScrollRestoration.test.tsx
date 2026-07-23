@@ -7,14 +7,22 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { WorkspaceEntityLink } from "../../src/client/entities/WorkspaceEntityLink.js"
 import {
-  DeferredWorkspaceScrollRestoration,
   rememberWorkspaceScrollPosition,
-  shouldRememberWorkspaceScrollPosition,
+  shouldRememberWorkspaceScrollPosition
+} from "../../src/client/workspaceScrollCapture.js"
+import {
+  DeferredWorkspaceScrollRestoration,
   workspaceScrollRestorationKey
 } from "../../src/client/workspaceScrollRestoration.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
+const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+const entityId = "01890f6f-6d6a-7cc0-98d3-000000000001"
+const releaseId = "01890f6f-6d6a-7cc0-98d4-000000000001"
+const entityPath = `/w/${workspaceId}/items/${entityId}`
+const entityRoute = { hash: "", pathname: entityPath, search: "" }
+const overviewRoute = { hash: "", pathname: `/w/${workspaceId}/overview`, search: "" }
 const route = {
   hash: "#release-work",
   pathname: "/w/workspace/releases/release",
@@ -79,6 +87,11 @@ const mountRestorer = (strict: boolean, location = route): void => {
       </MemoryRouter>
     )
   )
+}
+
+const activateEntityTarget = (): void => {
+  mountRestorer(false, entityRoute)
+  unmountCurrent()
 }
 
 const mountEntityLink = (href: string): HTMLAnchorElement => {
@@ -187,9 +200,6 @@ describe("workspace scroll restoration", () => {
   })
 
   it("arms the Rly bridge only for canonical entity targets", () => {
-    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
-    const entityId = "01890f6f-6d6a-7cc0-98d3-000000000001"
-    const releaseId = "01890f6f-6d6a-7cc0-98d4-000000000001"
     setViewport(500)
     setScrollY(500)
     const releaseLink = mountEntityLink(`/w/${workspaceId}/releases/${releaseId}`)
@@ -201,9 +211,31 @@ describe("workspace scroll restoration", () => {
 
     unmountCurrent()
     setScrollY(500)
-    const entityLink = mountEntityLink(`/w/${workspaceId}/items/${entityId}`)
+    const entityLink = mountEntityLink(entityPath)
     act(() => entityLink.click())
     unmountCurrent()
+    activateEntityTarget()
+    setScrollY(0)
+    mountRestorer(false)
+    expect(runFrame()).toBe(true)
+    expect(window.scrollY).toBe(500)
+  })
+
+  it("expires an abandoned entity round trip while preserving a direct return", () => {
+    setViewport(500)
+    setScrollY(500)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
+    mountRestorer(false, overviewRoute)
+    unmountCurrent()
+    setScrollY(0)
+    mountRestorer(false)
+    expect(runFrame()).toBe(false)
+
+    unmountCurrent()
+    setScrollY(500)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
     setScrollY(0)
     mountRestorer(false)
     expect(runFrame()).toBe(true)
@@ -213,7 +245,8 @@ describe("workspace scroll restoration", () => {
   it("survives StrictMode replay and consumes the target after the first real restoration", () => {
     setViewport(1_000)
     setScrollY(1_000)
-    rememberWorkspaceScrollPosition(route)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
     setScrollY(0)
 
     mountRestorer(true)
@@ -234,7 +267,8 @@ describe("workspace scroll restoration", () => {
   it("stops retrying an unreachable stable target without overriding later user scrolling", () => {
     setViewport(200)
     setScrollY(1_000)
-    rememberWorkspaceScrollPosition(route)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
     setScrollY(0)
 
     mountRestorer(false)
@@ -253,7 +287,8 @@ describe("workspace scroll restoration", () => {
   it("keeps an untouched target pending while lazy content takes more than twelve frames to load", () => {
     setViewport(200)
     setScrollY(1_000)
-    rememberWorkspaceScrollPosition(route)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
     setScrollY(0)
 
     mountRestorer(false)
@@ -272,7 +307,8 @@ describe("workspace scroll restoration", () => {
   it("follows a growing lazy page until the saved target becomes reachable", () => {
     setViewport(200)
     setScrollY(1_000)
-    rememberWorkspaceScrollPosition(route)
+    rememberWorkspaceScrollPosition(route, entityPath)
+    activateEntityTarget()
     setScrollY(0)
 
     mountRestorer(false)
@@ -296,8 +332,9 @@ describe("workspace scroll restoration", () => {
     Object.defineProperty(sourceScroller, "scrollHeight", { configurable: true, value: 1_600 })
     sourceScroller.scrollTop = 1_000
     document.body.append(sourceScroller)
-    rememberWorkspaceScrollPosition(previewRoute)
+    rememberWorkspaceScrollPosition(previewRoute, entityPath)
     sourceScroller.remove()
+    activateEntityTarget()
 
     mountRestorer(false, previewRoute)
     for (let attempt = 0; attempt < 20; attempt += 1) expect(runFrame()).toBe(true)

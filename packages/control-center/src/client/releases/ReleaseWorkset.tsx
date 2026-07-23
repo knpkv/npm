@@ -8,10 +8,7 @@ import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { WorkspaceEntityLink, workspaceEntityStateForHref } from "../entities/WorkspaceEntityLink.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
-import {
-  rememberWorkspaceScrollPosition,
-  shouldRememberWorkspaceScrollPosition
-} from "../workspaceScrollRestoration.js"
+import { rememberWorkspaceScrollPosition, shouldRememberWorkspaceScrollPosition } from "../workspaceScrollCapture.js"
 import {
   presentReleaseWorkset,
   releaseWorksetRelationshipEvidenceClaims,
@@ -97,11 +94,14 @@ export const SelectedReleaseWorksetObjectPanel = ({
                     ) : (
                       <Link
                         onClick={(event) => {
+                          const href = relationship.other.href
                           if (
                             linkLocation !== undefined &&
+                            href !== null &&
+                            workspaceEntityStateForHref(href, linkLocation) !== undefined &&
                             shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)
                           ) {
-                            rememberWorkspaceScrollPosition(linkLocation)
+                            rememberWorkspaceScrollPosition(linkLocation, href)
                           }
                         }}
                         state={
@@ -245,8 +245,11 @@ export const ReleaseWorkset = ({
                     className={styles.runbook}
                     key={runbook.id}
                     onClick={(event) => {
-                      if (shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
-                        rememberWorkspaceScrollPosition(location)
+                      if (
+                        workspaceEntityStateForHref(runbook.href, location) !== undefined &&
+                        shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)
+                      ) {
+                        rememberWorkspaceScrollPosition(location, runbook.href)
                       }
                     }}
                     state={workspaceEntityStateForHref(runbook.href, location)}
