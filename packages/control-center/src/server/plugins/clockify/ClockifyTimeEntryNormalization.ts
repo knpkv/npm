@@ -79,7 +79,7 @@ export const digestClockifySyncScope = (scope: {
   readonly workspaceId: string
 }) => digestJson(scope)
 
-/** Normalize one workspace user, anchored to a stable entry revision in the same page. @internal */
+/** Normalize one workspace user, using its own digest as the stable event identity. @internal */
 export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization.normalizePerson")(function*(input: {
   readonly anchor: ClockifyTimeEntryEvent
   readonly user: unknown
@@ -99,7 +99,7 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
   })
   const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
     _tag: "UpsertPerson",
-    eventId: `clockify:person:${user.id.slice(0, 300)}:${revision}:${input.anchor.revision}`,
+    eventId: `clockify:person:${user.id.slice(0, 300)}:${revision}`,
     observedAt: input.anchor.observedAt,
     revision,
     vendorPersonId: user.id,

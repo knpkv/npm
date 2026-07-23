@@ -135,7 +135,7 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
 
         const getWorkspaceUsers = Effect.fn("ClockifyApiClient.getWorkspaceUsers")(function*(workspaceId: string) {
           const users: Array<WorkspaceUser> = []
-          for (let page = 1; page <= 20; page++) {
+          for (let page = 1;; page++) {
             const batch = yield* api.getUsersOfWorkspace(workspaceId, {
               params: {
                 "account-statuses": "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED",

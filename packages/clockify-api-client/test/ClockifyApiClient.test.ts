@@ -100,7 +100,7 @@ describe("ClockifyApiClient", () => {
         HttpClient.make((request) =>
           Effect.sync(() => {
             requests.push(request)
-            const body = requests.length === 1
+            const body = requests.length <= 20
               ? firstPage
               : [{ id: "configured-user", name: "Configured User", email: "configured@example.test", status: "ACTIVE" }]
             return HttpClientResponse.fromWeb(
@@ -118,11 +118,11 @@ describe("ClockifyApiClient", () => {
       const client = yield* ClockifyApiClient
       if (client.getWorkspaceUsers === undefined) return assert.fail("expected workspace user discovery")
       const users = yield* client.getWorkspaceUsers("workspace-1")
-      expect(users).toHaveLength(501)
+      expect(users).toHaveLength(10_001)
       expect(users.at(-1)?.id).toBe("configured-user")
-      expect(requests).toHaveLength(2)
+      expect(requests).toHaveLength(21)
       expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("1")
-      expect(new Map(requests[1]?.urlParams ?? []).get("page")).toBe("2")
+      expect(new Map(requests[20]?.urlParams ?? []).get("page")).toBe("21")
       expect(new Map(requests[0]?.urlParams ?? []).get("account-statuses")).toBe(
         "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED"
       )

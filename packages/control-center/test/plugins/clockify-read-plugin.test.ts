@@ -21,6 +21,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import {
   MaximumPluginSyncPageBytes,
+  NormalizedPluginEventV1,
   PluginSyncPageV1,
   PluginSyncRequestV1,
   ReadPluginEntityRequestV1
@@ -28,6 +29,7 @@ import {
 import { makeClockifyReadPluginRuntimeFromProvider } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
+import { normalizeClockifyPerson } from "../../src/server/plugins/clockify/ClockifyTimeEntryNormalization.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import { PluginAuthenticationFailure, PluginOutageFailure } from "../../src/server/plugins/failures.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -270,6 +272,47 @@ describe("ClockifyReadPlugin", () => {
       if (person?._tag !== "UpsertPerson") return assert.fail("expected deleted Clockify person")
       assert.isFalse(person.active)
     }))
+
+  it.effect("keeps Clockify person event identity independent of the entry anchor", () =>
+    Effect.gen(function*() {
+      const page = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "person-anchor",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "entry-anchor-1",
+          observedAt: "2026-07-19T09:00:00.000Z",
+          revision: "entry-revision-1",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "entry-1",
+          sourceUrl: null,
+          title: "Entry",
+          attributes: {}
+        }]
+      })
+      const anchor = page.events[0]
+      if (anchor?._tag !== "UpsertEntity") return assert.fail("expected entry anchor")
+      const changedAnchor = Schema.decodeSync(NormalizedPluginEventV1)({
+        _tag: "UpsertEntity",
+        eventId: "entry-anchor-2",
+        observedAt: "2026-07-19T09:01:00.000Z",
+        revision: "entry-revision-2",
+        entityType: "clockify.time-entry",
+        vendorImmutableId: "entry-1",
+        sourceUrl: null,
+        title: "Entry",
+        attributes: {}
+      })
+      if (changedAnchor._tag !== "UpsertEntity") return assert.fail("expected changed entry anchor")
+      const user = { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
+      const first = yield* normalizeClockifyPerson({ anchor, user })
+      const second = yield* normalizeClockifyPerson({ anchor: changedAnchor, user })
+      const renamed = yield* normalizeClockifyPerson({ anchor, user: { ...user, name: "Ada Byron" } })
+      assert.strictEqual(first.eventId, second.eventId)
+      assert.strictEqual(first.revision, second.revision)
+      assert.notStrictEqual(first.eventId, renamed.eventId)
+      assert.notStrictEqual(first.revision, renamed.revision)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
 
   it.effect("rejects duplicate vendor identities with different revisions in one page", () =>
     Effect.gen(function*() {

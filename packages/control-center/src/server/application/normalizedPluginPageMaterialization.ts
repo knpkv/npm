@@ -903,6 +903,95 @@ const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(f
   return yield* persistence.deliveryGraph.write(workspaceId, encoded)
 })
 
+const reconcileTimeEntryContributor = Effect.fn(
+  "NormalizedPluginPageMaterialization.reconcileTimeEntryContributor"
+)(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  entityId: EntityId,
+  userId: string,
+  eventId: string,
+  roleAssignments: Map<RoleAssignmentId, RoleAssignmentRecord>
+) {
+  const identity = {
+    pluginConnectionId: scope.pluginConnectionId,
+    providerId: scope.providerId,
+    vendorPersonId: VendorImmutableId.make(userId)
+  }
+  const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, identity).pipe(Effect.result)
+  if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
+  for (const record of roleAssignments.values()) {
+    const assignment = record.assignment
+    if (
+      assignment.role !== "contributor" ||
+      assignment.scope._tag !== "entity" ||
+      assignment.scope.entityId !== entityId ||
+      assignment.lifecycle._tag !== "active" ||
+      assignment.actor._tag !== "human" ||
+      (Result.isSuccess(person) && assignment.actor.personId === person.success.person.personId)
+    ) continue
+    const providerManagedAssignmentId = RoleAssignmentId.make(
+      yield* stableUuid(
+        cryptoService,
+        materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
+        eventId
+      )
+    )
+    if (assignment.assignmentId !== providerManagedAssignmentId) continue
+    const updated = yield* persistence.people.updateRoleAssignment(
+      scope.workspaceId,
+      {
+        ...assignment,
+        lifecycle: {
+          _tag: "ended",
+          assignedAt: assignment.lifecycle.assignedAt,
+          endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
+        }
+      },
+      record.revision,
+      scope.committedAt
+    )
+    roleAssignments.set(updated.assignment.assignmentId, updated)
+  }
+  if (Result.isFailure(person)) return
+  const assignmentId = RoleAssignmentId.make(
+    yield* stableUuid(
+      cryptoService,
+      materializationKey(scope, "role-assignment", `${entityId}:contributor:${person.success.person.personId}`),
+      eventId
+    )
+  )
+  const existingAssignment = yield* persistence.people.getRoleAssignment(scope.workspaceId, assignmentId).pipe(
+    Effect.result
+  )
+  if (Result.isFailure(existingAssignment) && existingAssignment.failure._tag !== "RecordNotFoundError") {
+    return yield* existingAssignment.failure
+  }
+  if (Result.isSuccess(existingAssignment) && existingAssignment.success.assignment.lifecycle._tag !== "active") {
+    const updated = yield* persistence.people.updateRoleAssignment(
+      scope.workspaceId,
+      {
+        ...existingAssignment.success.assignment,
+        lifecycle: { _tag: "active", assignedAt: scope.committedAt }
+      },
+      existingAssignment.success.revision,
+      scope.committedAt
+    )
+    roleAssignments.set(updated.assignment.assignmentId, updated)
+  } else if (Result.isFailure(existingAssignment)) {
+    const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
+      actor: { _tag: "human", personId: person.success.person.personId },
+      assignmentId,
+      lifecycle: { _tag: "active", assignedAt: scope.committedAt },
+      role: "contributor",
+      scope: { _tag: "entity", entityId, workspaceId: scope.workspaceId }
+    }).pipe(Effect.mapError(() => malformed("normalized-time-entry-contributor-invalid", eventId)))
+    const created = yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
+    roleAssignments.set(created.assignment.assignmentId, created)
+  }
+})
+
 const materializeUpsertEntity = Effect.fn(
   "NormalizedPluginPageMaterialization.upsertEntity"
 )(function*(
@@ -966,6 +1055,17 @@ const materializeUpsertEntity = Effect.fn(
     !sourceMetadataChanged &&
     !effectiveForceProjection
   ) {
+    if (effectivePresentation.details._tag === "time-entry" && effectivePresentation.details.userId !== undefined) {
+      yield* reconcileTimeEntryContributor(
+        persistence,
+        cryptoService,
+        scope,
+        entityId,
+        effectivePresentation.details.userId,
+        event.eventId,
+        roleAssignments
+      )
+    }
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
 
@@ -1024,85 +1124,15 @@ const materializeUpsertEntity = Effect.fn(
   } satisfies typeof DeliveryGraphWriteBatch.Type
   const receipt = yield* writeGraph(persistence, scope.workspaceId, batch, event.eventId)
   if (effectivePresentation.details._tag === "time-entry" && effectivePresentation.details.userId !== undefined) {
-    const identity = {
-      pluginConnectionId: scope.pluginConnectionId,
-      providerId: scope.providerId,
-      vendorPersonId: VendorImmutableId.make(effectivePresentation.details.userId)
-    }
-    const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, identity).pipe(
-      Effect.result
+    yield* reconcileTimeEntryContributor(
+      persistence,
+      cryptoService,
+      scope,
+      entityId,
+      effectivePresentation.details.userId,
+      event.eventId,
+      roleAssignments
     )
-    if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
-    for (const record of roleAssignments.values()) {
-      const assignment = record.assignment
-      if (
-        assignment.role !== "contributor" ||
-        assignment.scope._tag !== "entity" ||
-        assignment.scope.entityId !== entityId ||
-        assignment.lifecycle._tag !== "active" ||
-        assignment.actor._tag !== "human" ||
-        (Result.isSuccess(person) && assignment.actor.personId === person.success.person.personId)
-      ) continue
-      const providerManagedAssignmentId = RoleAssignmentId.make(
-        yield* stableUuid(
-          cryptoService,
-          materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
-          event.eventId
-        )
-      )
-      if (assignment.assignmentId !== providerManagedAssignmentId) continue
-      const updated = yield* persistence.people.updateRoleAssignment(
-        scope.workspaceId,
-        {
-          ...assignment,
-          lifecycle: {
-            _tag: "ended",
-            assignedAt: assignment.lifecycle.assignedAt,
-            endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
-          }
-        },
-        record.revision,
-        scope.committedAt
-      )
-      roleAssignments.set(updated.assignment.assignmentId, updated)
-    }
-    if (Result.isSuccess(person)) {
-      const assignmentId = RoleAssignmentId.make(
-        yield* stableUuid(
-          cryptoService,
-          materializationKey(scope, "role-assignment", `${entityId}:contributor:${person.success.person.personId}`),
-          event.eventId
-        )
-      )
-      const existingAssignment = yield* persistence.people.getRoleAssignment(scope.workspaceId, assignmentId).pipe(
-        Effect.result
-      )
-      if (Result.isFailure(existingAssignment) && existingAssignment.failure._tag !== "RecordNotFoundError") {
-        return yield* existingAssignment.failure
-      }
-      if (Result.isSuccess(existingAssignment) && existingAssignment.success.assignment.lifecycle._tag !== "active") {
-        const updated = yield* persistence.people.updateRoleAssignment(
-          scope.workspaceId,
-          {
-            ...existingAssignment.success.assignment,
-            lifecycle: { _tag: "active", assignedAt: scope.committedAt }
-          },
-          existingAssignment.success.revision,
-          scope.committedAt
-        )
-        roleAssignments.set(updated.assignment.assignmentId, updated)
-      } else if (Result.isFailure(existingAssignment)) {
-        const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
-          actor: { _tag: "human", personId: person.success.person.personId },
-          assignmentId,
-          lifecycle: { _tag: "active", assignedAt: scope.committedAt },
-          role: "contributor",
-          scope: { _tag: "entity", entityId, workspaceId: scope.workspaceId }
-        }).pipe(Effect.mapError(() => malformed("normalized-time-entry-contributor-invalid", event.eventId)))
-        const created = yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
-        roleAssignments.set(created.assignment.assignmentId, created)
-      }
-    }
   }
   return { ...receipt, skippedEntityCount: 0 }
 })
@@ -1756,11 +1786,33 @@ export const materializeNormalizedPluginPage = Effect.fn(
       : yield* affectedPipelineExecutionEvents(pipelineEvents, pipelineChanges).pipe(
         Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
       )
-    const entityEvents = [
-      ...acceptedEvents,
-      ...backfillEntityEvents,
-      ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
-    ]
+    const acceptedPersonIds = new Set(
+      acceptedEvents.flatMap((event) => event._tag === "UpsertPerson" ? [event.vendorPersonId] : [])
+    )
+    const roleBackfillEntityEvents = acceptedPersonIds.size === 0
+      ? []
+      : page.events.filter((event) => {
+        if (
+          accepted.has(event.eventId) ||
+          event._tag !== "UpsertEntity" ||
+          canonicalKind(event.entityType) !== "time-entry"
+        ) return false
+        const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
+        return Result.isSuccess(attributes) &&
+          attributes.success.userId !== null &&
+          attributes.success.userId !== undefined &&
+          acceptedPersonIds.has(VendorImmutableId.make(attributes.success.userId))
+      })
+    const entityEventById = new Map<string, NormalizedPluginEventV1>()
+    for (
+      const event of [
+        ...acceptedEvents,
+        ...backfillEntityEvents,
+        ...roleBackfillEntityEvents,
+        ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
+      ]
+    ) entityEventById.set(event.eventId, event)
+    const entityEvents = [...entityEventById.values()]
     const backfillEntityEventIds = new Set(backfillEntityEvents.map(({ eventId }) => eventId))
     const forcedPipelineExecutionEventIds = new Set(affectedExecutions.map(({ eventId }) => eventId))
     let entityProjectionCount = 0

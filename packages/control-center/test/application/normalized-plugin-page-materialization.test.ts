@@ -2850,6 +2850,32 @@ describe("normalized plugin page materialization", () => {
       )
       assert.strictEqual(activePerson.person.displayName, "Avery Chen")
 
+      const missingUserPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "clockify-missing-user",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "clockify-time-1-missing-user",
+          observedAt: "2026-07-19T09:07:00.000Z",
+          revision: "time-1-missing-user",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-1",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "PAY-42 review and rollout",
+          attributes: {
+            billable: true,
+            approvalState: "approved",
+            description: "PAY-42 review and rollout",
+            userId: "clockify-user-missing",
+            interval: {
+              start: "2026-07-19T08:17:30.000Z",
+              end: "2026-07-19T09:00:00.000Z",
+              duration: "PT42M30S",
+              state: "completed"
+            }
+          }
+        }]
+      })
       yield* materializeNormalizedPluginPage(
         {
           workspaceId: WORKSPACE_ID,
@@ -2860,32 +2886,7 @@ describe("normalized plugin page materialization", () => {
           committedAt: T5,
           successfulHealth: { _tag: "healthy", checkedAt: T5 }
         },
-        Schema.decodeSync(PluginSyncPageV1)({
-          checkpointAfterPage: "clockify-missing-user",
-          hasMore: false,
-          events: [{
-            _tag: "UpsertEntity",
-            eventId: "clockify-time-1-missing-user",
-            observedAt: "2026-07-19T09:07:00.000Z",
-            revision: "time-1-missing-user",
-            entityType: "clockify.time-entry",
-            vendorImmutableId: "time-1",
-            sourceUrl: "https://app.clockify.me/tracker",
-            title: "PAY-42 review and rollout",
-            attributes: {
-              billable: true,
-              approvalState: "approved",
-              description: "PAY-42 review and rollout",
-              userId: "clockify-user-missing",
-              interval: {
-                start: "2026-07-19T08:17:30.000Z",
-                end: "2026-07-19T09:00:00.000Z",
-                duration: "PT42M30S",
-                state: "completed"
-              }
-            }
-          }]
-        })
+        missingUserPage
       )
       const assignmentsAfterMissingUser = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).filter(
         ({ assignment }) =>
@@ -2895,6 +2896,53 @@ describe("normalized plugin page materialization", () => {
       )
       assert.lengthOf(assignmentsAfterMissingUser.filter(({ assignment }) => assignment.lifecycle._tag === "active"), 0)
       assert.lengthOf(assignmentsAfterMissingUser.filter(({ assignment }) => assignment.lifecycle._tag === "ended"), 2)
+
+      yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          providerId: "clockify",
+          streamKey: firstPartyStream("clockify"),
+          expectedRevision: 3,
+          committedAt: T5,
+          successfulHealth: { _tag: "healthy", checkedAt: T5 }
+        },
+        {
+          ...missingUserPage,
+          checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("clockify-missing-user-discovered"),
+          events: [
+            Schema.decodeSync(NormalizedPluginEventV1)({
+              _tag: "UpsertPerson",
+              eventId: "clockify-person-missing-v1",
+              observedAt: "2026-07-19T09:07:00.000Z",
+              revision: "missing-v1",
+              vendorPersonId: "clockify-user-missing",
+              displayName: "Morgan Lee",
+              avatarUrl: null,
+              active: true
+            }),
+            ...missingUserPage.events
+          ]
+        }
+      )
+      const assignmentsAfterDiscovery = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).filter(
+        ({ assignment }) =>
+          assignment.role === "contributor" &&
+          assignment.scope._tag === "entity" &&
+          assignment.scope.entityId === indexedTimeEntry.entityId
+      )
+      assert.lengthOf(assignmentsAfterDiscovery.filter(({ assignment }) => assignment.lifecycle._tag === "active"), 1)
+      const discoveredContributor = assignmentsAfterDiscovery.find(
+        ({ assignment }) => assignment.lifecycle._tag === "active"
+      )
+      if (discoveredContributor?.assignment.actor._tag !== "human") {
+        return yield* Effect.die("expected discovered Clockify contributor")
+      }
+      assert.strictEqual(
+        (yield* persistence.people.getPerson(WORKSPACE_ID, discoveredContributor.assignment.actor.personId)).person
+          .displayName,
+        "Morgan Lee"
+      )
     })))
 
   it.effect("uses the evidence provider stream and health when another provider triggers inference", () =>
