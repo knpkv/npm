@@ -675,6 +675,22 @@ const mergePartialPageVersions = (
   return [...versions.values()].sort((left, right) => right.number - left.number).slice(0, 500)
 }
 
+const mergeCompletePageVersions = (
+  current: PageDetails["versions"],
+  incoming: PageDetails["versions"],
+  currentRevision: PageDetails["revision"]
+): PageDetails["versions"] => {
+  if (current === undefined || incoming === undefined) return incoming
+  const currentVersionNumber = Number(currentRevision)
+  if (
+    !Number.isSafeInteger(currentVersionNumber) ||
+    currentVersionNumber <= 0 ||
+    incoming.some(({ number }) => number === currentVersionNumber)
+  ) return incoming
+  const currentVersion = current.find(({ number }) => number === currentVersionNumber)
+  return currentVersion === undefined ? incoming : mergePartialPageVersions([currentVersion], incoming)
+}
+
 const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
   const contributors = mergedPageContributors(
     current.contributors,
@@ -688,7 +704,7 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
     : incoming.attachments
   const versions = incoming.versionHistory?.complete === false
     ? mergePartialPageVersions(current.versions, incoming.versions)
-    : incoming.versions
+    : mergeCompletePageVersions(current.versions, incoming.versions, incoming.revision)
   const merged: PageDetails = {
     ...current,
     ...incoming,
