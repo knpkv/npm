@@ -75,7 +75,6 @@ const descriptorFor = (providerId: "clockify" | "codecommit" | "codepipeline" | 
   pluginId: `dev.knpkv.${providerId}`,
   displayName: providerId
 })
-
 const cacheOnlyPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "cache-complete",
   hasMore: false,
@@ -2574,6 +2573,120 @@ describe("normalized plugin page materialization", () => {
         assert.strictEqual(legacy.entityProjectionCount, 1)
       })
     ))
+  it.effect("carries Clockify person activity across committed provider pages", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+
+      const person = (vendorPersonId: string, active: boolean, revision: string) => ({
+        _tag: "UpsertPerson",
+        eventId: `person-${vendorPersonId}-${revision}`,
+        observedAt: "2026-07-19T09:02:00.000Z",
+        revision,
+        vendorPersonId,
+        displayName: vendorPersonId,
+        avatarUrl: null,
+        active
+      })
+      const entry = (vendorImmutableId: string, userId: string) => ({
+        _tag: "UpsertEntity",
+        eventId: `entry-${vendorImmutableId}-v1`,
+        observedAt: "2026-07-19T09:02:00.000Z",
+        revision: "v1",
+        entityType: "clockify.time-entry",
+        vendorImmutableId,
+        sourceUrl: null,
+        title: vendorImmutableId,
+        attributes: {
+          userId,
+          interval: {
+            start: "2026-07-19T08:00:00.000Z",
+            end: "2026-07-19T09:00:00.000Z",
+            duration: "PT1H",
+            state: "completed"
+          }
+        }
+      })
+      const inactiveEntries = [
+        entry("inactive-entry-1", "inactive-user"),
+        entry("inactive-entry-2", "inactive-user")
+      ]
+      const activeEntries = [
+        entry("active-entry-1", "active-user"),
+        entry("active-entry-2", "active-user")
+      ]
+      const page = (checkpointAfterPage: string, hasMore: boolean, events: ReadonlyArray<unknown>) =>
+        Schema.decodeUnknownSync(PluginSyncPageV1)({ checkpointAfterPage, hasMore, events })
+      const scope = (expectedRevision: number): NormalizedPluginPageMaterializationScope => ({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        providerId: "clockify",
+        streamKey: firstPartyStream("clockify"),
+        expectedRevision,
+        committedAt: T3,
+        successfulHealth: { _tag: "healthy", checkedAt: T3 }
+      })
+
+      yield* materializeNormalizedPluginPage(
+        scope(0),
+        page("clockify-people-seed", false, [
+          person("inactive-user", true, "v1"),
+          person("active-user", true, "v1"),
+          ...inactiveEntries,
+          ...activeEntries
+        ])
+      )
+      const entityIds = new Map<string, string>()
+      for (const { projection } of (yield* items()).items) {
+        entityIds.set(projection.displayKey, projection.entityId)
+      }
+      const activeContributorCount = (entryIds: ReadonlyArray<string>) =>
+        persistence.people.listRoleAssignments(WORKSPACE_ID).pipe(
+          Effect.map((assignments) =>
+            assignments.filter(({ assignment }) => {
+              if (
+                assignment.role !== "contributor" ||
+                assignment.lifecycle._tag !== "active" ||
+                assignment.scope._tag !== "entity"
+              ) return false
+              const entityId = assignment.scope.entityId
+              return entryIds.some((entryId) => entityIds.get(entryId) === entityId)
+            }).length
+          )
+        )
+
+      assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 2)
+      assert.strictEqual(yield* activeContributorCount(["active-entry-1", "active-entry-2"]), 2)
+
+      yield* materializeNormalizedPluginPage(
+        scope(1),
+        page("clockify-inactive-page-1", true, [
+          person("inactive-user", false, "v2"),
+          inactiveEntries[0]
+        ])
+      )
+      assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 1)
+      yield* materializeNormalizedPluginPage(
+        scope(2),
+        page("clockify-inactive-page-2", false, [inactiveEntries[1]])
+      )
+      assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 0)
+
+      yield* materializeNormalizedPluginPage(
+        scope(3),
+        page("clockify-active-page-1", true, [
+          person("active-user", true, "v2"),
+          activeEntries[0]
+        ])
+      )
+      yield* materializeNormalizedPluginPage(
+        scope(4),
+        page("clockify-active-page-2", false, [activeEntries[1]])
+      )
+      assert.strictEqual(yield* activeContributorCount(["active-entry-1", "active-entry-2"]), 2)
+    })))
+
   it.effect("materializes inferred relationships across synchronized provider evidence", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence

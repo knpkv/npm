@@ -157,7 +157,6 @@ const EvidenceData = Schema.Struct({
   predicate: Schema.optionalKey(EvidencePredicate),
   value: Schema.optionalKey(EvidenceValue)
 })
-
 /** Redacted failure raised before a normalized page can become a canonical projection. */
 export class NormalizedPluginPageMaterializationError extends Schema.TaggedErrorClass<
   NormalizedPluginPageMaterializationError
@@ -1792,21 +1791,43 @@ export const materializeNormalizedPluginPage = Effect.fn(
     const acceptedPersonIds = new Set(
       acceptedEvents.flatMap((event) => event._tag === "UpsertPerson" ? [event.vendorPersonId] : [])
     )
-    const roleBackfillEntityEvents = acceptedPersonIds.size === 0
-      ? []
-      : page.events.filter((event) => {
-        if (
-          accepted.has(event.eventId) ||
-          event._tag !== "UpsertEntity" ||
-          canonicalKind(event.entityType) !== "time-entry" ||
-          acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
-        ) return false
-        const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
-        return Result.isSuccess(attributes) &&
-          attributes.success.userId !== null &&
-          attributes.success.userId !== undefined &&
-          acceptedPersonIds.has(VendorImmutableId.make(attributes.success.userId))
-      })
+    const roleBackfillCandidates = page.events.flatMap((event) => {
+      if (
+        accepted.has(event.eventId) ||
+        event._tag !== "UpsertEntity" ||
+        canonicalKind(event.entityType) !== "time-entry" ||
+        acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
+      ) return []
+      const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
+      if (
+        Result.isFailure(attributes) ||
+        attributes.success.userId === null ||
+        attributes.success.userId === undefined
+      ) return []
+      return [{ event, vendorPersonId: VendorImmutableId.make(attributes.success.userId) }]
+    })
+    const persistedInactivePersonIds = new Set(
+      yield* Effect.filter(
+        [...new Set(roleBackfillCandidates.map(({ vendorPersonId }) => vendorPersonId))].filter(
+          (vendorPersonId) => !acceptedPersonIds.has(vendorPersonId)
+        ),
+        (vendorPersonId) =>
+          Effect.gen(function*() {
+            const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, {
+              pluginConnectionId: scope.pluginConnectionId,
+              providerId: scope.providerId,
+              vendorPersonId
+            }).pipe(Effect.result)
+            if (Result.isSuccess(person)) return !person.success.person.isActive
+            if (person.failure._tag === "RecordNotFoundError") return false
+            return yield* person.failure
+          }),
+        { concurrency: 1 }
+      )
+    )
+    const roleBackfillEntityEvents = roleBackfillCandidates.filter(
+      ({ vendorPersonId }) => acceptedPersonIds.has(vendorPersonId) || persistedInactivePersonIds.has(vendorPersonId)
+    ).map(({ event }) => event)
     const entityEventById = new Map<string, NormalizedPluginEventV1>()
     for (
       const event of [
