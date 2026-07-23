@@ -192,6 +192,35 @@ describe("CodeCommitReviewClient", () => {
       if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
     }))
 
+  it.effect("classifies the maximum-approval rejection as a terminal conflict", () =>
+    Effect.gen(function*() {
+      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "approve",
+        target: commentAction.target
+      })
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          updateApprovalState: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "updatePullRequestApprovalState",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "MaximumNumberOfApprovalsExceededException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(approveAction).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+    }))
+
   it.effect("re-checks an approval target immediately before the provider write", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
@@ -417,6 +446,40 @@ describe("CodeCommitReviewClient", () => {
       )
 
       assert.strictEqual(result._tag, "succeeded")
+    }))
+
+  it.effect("does not reconcile an approval from another account with the same username", () =>
+    Effect.gen(function*() {
+      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "approve",
+        target: commentAction.target
+      })
+      const result = yield* runWithClients(
+        baseReadClient({
+          discoverAccount: () =>
+            Effect.succeed(
+              new CodeCommitAccountIdentity({
+                accountId: "111111111111",
+                arn: "arn:aws:sts::111111111111:assumed-role/Reviewer/alice"
+              })
+            )
+        }),
+        baseProvider({
+          getApprovalStates: () =>
+            Effect.succeed({
+              approvals: [{
+                userArn: "arn:aws:iam::222222222222:user/alice",
+                approvalState: "APPROVE"
+              }]
+            })
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.reconcile(approveAction)
+        })
+      )
+
+      assert.strictEqual(result._tag, "pending")
     }))
 
   it.effect("keeps an approval pending for a different normalized identity", () =>

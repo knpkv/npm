@@ -777,6 +777,76 @@ describe("CodeCommitPlugin", () => {
       if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
     }))
 
+  it.effect("records maximum-approval rejection as a terminal failed receipt", () =>
+    Effect.gen(function*() {
+      const approveRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        actionKind: "approve",
+        target: { entityType: "pull-request", vendorImmutableId: "17" },
+        expectedRevision: "revision-17",
+        payload: {},
+        evidenceIds: []
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(approveRequest)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "updatePullRequestApprovalState",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "MaximumNumberOfApprovalsExceededException" }
+              })
+            )
+        })
+      )
+
+      assert.strictEqual(result._tag, "confirmed")
+      if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
+  it.effect("keeps approval throttling reconcilable after provider intent", () =>
+    Effect.gen(function*() {
+      const approveRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        actionKind: "approve",
+        target: { entityType: "pull-request", vendorImmutableId: "17" },
+        expectedRevision: "revision-17",
+        payload: {},
+        evidenceIds: []
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(approveRequest)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "updatePullRequestApprovalState",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "ThrottlingException" }
+              })
+            )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.isTrue(Predicate.isTagged(result.failure, "PluginUnknownOutcomeFailure"))
+      }
+    }))
+
   it.effect("replays one authorized action once and rejects an idempotency-key payload collision", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)

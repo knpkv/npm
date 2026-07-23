@@ -295,6 +295,7 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
         "ExpiredTokenException",
         "IdempotencyParameterMismatchException",
         "InvalidClientTokenId",
+        "MaximumNumberOfApprovalsExceededException",
         "PullRequestCannotBeApprovedByAuthorException",
         "UnrecognizedClientException"
       ])
@@ -1156,7 +1157,11 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
   ) {
     yield* verifyRuntimeIdentity()
     const action = request.reconciliationKey === null
-      ? yield* decodeAuthorizedAction(account, configuration.repositoryName, request.authorizedAction)
+      ? request.authorizedAction === undefined
+        ? yield* new PluginConfigurationFailure({
+          diagnosticCode: "codecommit-reconciliation-authorized-action-missing"
+        })
+        : yield* decodeAuthorizedAction(account, configuration.repositoryName, request.authorizedAction)
       : actionFromLocator(
         account,
         configuration.repositoryName,

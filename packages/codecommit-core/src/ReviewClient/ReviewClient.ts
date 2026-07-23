@@ -9,7 +9,7 @@ import { Context, Effect, Layer, Predicate, Schema } from "effect"
 import { identityMatches } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../ReadClient/errors.js"
-import type { CodeCommitPullRequestRevision } from "../ReadClient/models.js"
+import type { CodeCommitAccountIdentity, CodeCommitPullRequestRevision } from "../ReadClient/models.js"
 import { CodeCommitReadClient } from "../ReadClient/ReadClient.js"
 import { CodeCommitReviewConflictError, type CodeCommitReviewError } from "./errors.js"
 import {
@@ -69,6 +69,9 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
   if (Predicate.isTagged(cause, "TipOfSourceReferenceIsDifferentException")) return "source-commit-changed"
   if (Predicate.isTagged(cause, "PullRequestAlreadyClosedException")) return "pull-request-closed"
   if (Predicate.isTagged(cause, "PullRequestCannotBeApprovedByAuthorException")) return "approval-by-author"
+  if (Predicate.isTagged(cause, "MaximumNumberOfApprovalsExceededException")) {
+    return "approval-rules-unsatisfied"
+  }
   if (Predicate.isTagged(cause, "PullRequestApprovalRulesNotSatisfiedException")) {
     return "approval-rules-unsatisfied"
   }
@@ -107,6 +110,24 @@ const targetConflict = (
   if (pullRequest.destinationCommit !== target.destinationCommit) return "destination-commit-changed"
   if (pullRequest.destinationReference !== target.destinationReference) return "destination-reference-changed"
   return null
+}
+
+const arnAccountId = (arn: string): string | null => {
+  const fields = arn.trim().split(":")
+  const accountId = fields[4]
+  return fields[0]?.toLowerCase() === "arn" && accountId !== undefined && /^[0-9]{12}$/u.test(accountId)
+    ? accountId
+    : null
+}
+
+const approvalIdentityMatches = (
+  identity: CodeCommitAccountIdentity,
+  approvalArn: string
+): boolean => {
+  const caller = identity.arn.trim().toLowerCase()
+  const approver = approvalArn.trim().toLowerCase()
+  if (caller === approver) return true
+  return arnAccountId(approvalArn) === identity.accountId && identityMatches(identity.arn, approvalArn)
 }
 
 const preflightTarget = Effect.fn("CodeCommitReviewClient.preflightTarget")(function*(
@@ -254,7 +275,7 @@ export class CodeCommitReviewClient extends Context.Service<
             )
             const states = yield* decodeProvider("reconcile-approval", RawApprovalStates, raw)
             const caller = (states.approvals ?? []).find(({ userArn }) =>
-              userArn !== undefined && identityMatches(identity.arn, userArn)
+              userArn !== undefined && approvalIdentityMatches(identity, userArn)
             )
             const reconciled = action._tag === "approve"
               ? caller?.approvalState === "APPROVE"

@@ -174,12 +174,13 @@ export const PluginActionReconciliationRequestV1 = Schema.Struct({
   reconciliationKey: Schema.NullOr(PluginActionReconciliationKey),
   idempotencyKey: boundedOpaque("PluginReconciliationIdempotencyKey", 512),
   payloadDigest: PluginActionPayloadDigest,
-  authorizedAction: AuthorizedPluginActionV1
+  authorizedAction: Schema.optionalKey(AuthorizedPluginActionV1)
 }).check(
   Schema.makeFilter(
     ({ authorizedAction, idempotencyKey, payloadDigest }) =>
-      authorizedAction.idempotencyKey === idempotencyKey &&
-      authorizedAction.payloadDigest === payloadDigest,
+      authorizedAction === undefined ||
+      (authorizedAction.idempotencyKey === idempotencyKey &&
+        authorizedAction.payloadDigest === payloadDigest),
     { expected: "reconciliation identity to match the durable authorized action" }
   )
 )
