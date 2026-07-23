@@ -103,6 +103,18 @@ export interface JiraIssueTransition {
   readonly toStatusName: string
 }
 
+/** Stable project-version data needed by the governed action boundary. @internal */
+export interface JiraProjectVersion {
+  readonly id: string
+  readonly name: string
+}
+
+/** Stable issue-link type data needed by the governed action boundary. @internal */
+export interface JiraIssueLinkType {
+  readonly id: string
+  readonly name: string
+}
+
 /** Narrow provider surface required by the production issue-read adapter. @internal */
 export interface JiraReadProvider {
   readonly getCurrentUser: Effect.Effect<JiraApi.User, PluginFailure>
@@ -137,6 +149,19 @@ export interface JiraReadProvider {
   readonly transitionIssue: (
     issueId: string,
     transitionId: string
+  ) => Effect.Effect<void, PluginFailure>
+  readonly getProjectVersions: (
+    projectId: string
+  ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
+  readonly setIssueFixVersions: (
+    issueId: string,
+    versionIds: ReadonlyArray<string>
+  ) => Effect.Effect<void, PluginFailure>
+  readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
+  readonly linkIssues: (
+    issueId: string,
+    linkedIssueId: string,
+    linkTypeName: string
   ) => Effect.Effect<void, PluginFailure>
 }
 
@@ -229,7 +254,8 @@ const ISSUE_FIELDS = [
   "duedate",
   "resolutiondate",
   "parent",
-  "subtasks"
+  "subtasks",
+  "issuelinks"
 ]
 
 const JiraTransitions = Schema.Struct({
@@ -237,6 +263,16 @@ const JiraTransitions = Schema.Struct({
     id: Schema.String,
     name: Schema.String,
     to: Schema.Struct({ id: Schema.String, name: Schema.String })
+  })))
+})
+const JiraProjectVersions = Schema.Array(Schema.Struct({
+  id: Schema.String,
+  name: Schema.String
+}))
+const JiraIssueLinkTypes = Schema.Struct({
+  issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
+    id: Schema.String,
+    name: Schema.String
   })))
 })
 
@@ -405,5 +441,58 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       client.doTransition(issueId, {
         payload: { transition: { id: transitionId } }
       })
+    ),
+  getProjectVersions: (projectId) =>
+    providerCall(
+      "jira-get-project-versions",
+      client.getProjectVersions(projectId, undefined)
+    ).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraProjectVersions)),
+      Effect.mapError((error) =>
+        Schema.isSchemaError(error)
+          ? new PluginMalformedResponseFailure({
+            operation: "jira-get-project-versions",
+            diagnosticCode: "jira-project-versions-response-invalid"
+          })
+          : error
+      )
+    ),
+  setIssueFixVersions: (issueId, versionIds) =>
+    providerCall(
+      "jira-set-fix-versions",
+      client.editIssue(issueId, {
+        params: { notifyUsers: true },
+        payload: {
+          fields: {
+            fixVersions: versionIds.map((id) => ({ id }))
+          }
+        }
+      }).pipe(Effect.asVoid)
+    ),
+  getIssueLinkTypes: providerCall(
+    "jira-get-issue-link-types",
+    client.getIssueLinkTypes(undefined)
+  ).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(JiraIssueLinkTypes)),
+    Effect.map((response) => response.issueLinkTypes ?? []),
+    Effect.mapError((error) =>
+      Schema.isSchemaError(error)
+        ? new PluginMalformedResponseFailure({
+          operation: "jira-get-issue-link-types",
+          diagnosticCode: "jira-issue-link-types-response-invalid"
+        })
+        : error
+    )
+  ),
+  linkIssues: (issueId, linkedIssueId, linkTypeName) =>
+    providerCall(
+      "jira-link-issues",
+      client.linkIssues({
+        payload: {
+          type: { name: linkTypeName },
+          inwardIssue: { id: issueId },
+          outwardIssue: { id: linkedIssueId }
+        }
+      }).pipe(Effect.asVoid)
     )
 })

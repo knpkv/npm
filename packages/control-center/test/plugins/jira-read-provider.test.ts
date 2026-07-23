@@ -5,6 +5,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
@@ -15,7 +16,8 @@ import { makeJiraReadProvider, mapJiraReadProviderFailure } from "../../src/serv
 
 const jiraClientLayer = (
   body: unknown,
-  requests: Array<HttpClientRequest.HttpClientRequest>
+  requests: Array<HttpClientRequest.HttpClientRequest>,
+  status = 200
 ) =>
   JiraApiClient.layer.pipe(
     Layer.provide(Layer.succeed(JiraApiConfig, {
@@ -34,7 +36,7 @@ const jiraClientLayer = (
           return HttpClientResponse.fromWeb(
             request,
             new Response(JSON.stringify(body), {
-              status: 200,
+              status,
               headers: { "content-type": "application/json" }
             })
           )
@@ -67,6 +69,102 @@ const mapRateLimit = Effect.fn("JiraReadProviderTest.mapRateLimit")(function*(re
 })
 
 describe("JiraReadProvider", () => {
+  it.effect("requests durable Jira comment properties for reconciliation", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      yield* provider.getComments("10042", { startAt: 0, maxResults: 25 })
+
+      const request = requests[0]
+      if (request === undefined) return yield* Effect.die("expected a Jira comments request")
+      assert.strictEqual(new Map(request.urlParams).get("expand"), "properties")
+      assert.strictEqual(new Map(request.urlParams).get("orderBy"), "created")
+    }).pipe(Effect.provide(jiraClientLayer({
+      comments: [],
+      startAt: 0,
+      maxResults: 25,
+      total: 0
+    }, requests)))
+  })
+
+  it.effect("decodes Jira project versions used by governed associations", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const versions = yield* provider.getProjectVersions("10")
+
+      assert.deepStrictEqual(versions, [{ id: "2026.30", name: "2026.30" }])
+      assert.include(requests[0]?.url ?? "", "/rest/api/3/project/10/versions")
+    }).pipe(Effect.provide(jiraClientLayer([
+      { id: "2026.30", name: "2026.30" }
+    ], requests)))
+  })
+
+  it.effect("sends exact Jira fix-version identifiers in an issue edit", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      yield* provider.setIssueFixVersions("10042", ["2026.30", "2026.31"])
+
+      const request = requests[0]
+      if (request === undefined) return yield* Effect.die("expected a Jira issue edit request")
+      const body = request.body._tag === "Uint8Array"
+        ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
+          new TextDecoder().decode(request.body.body)
+        )
+        : null
+      assert.deepStrictEqual(body, {
+        fields: {
+          fixVersions: [{ id: "2026.30" }, { id: "2026.31" }]
+        }
+      })
+    }).pipe(Effect.provide(jiraClientLayer({}, requests)))
+  })
+
+  it.effect("decodes the Jira issue-link types used by governed associations", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const linkTypes = yield* provider.getIssueLinkTypes
+
+      assert.deepStrictEqual(linkTypes, [{ id: "10000", name: "Relates" }])
+      assert.include(requests[0]?.url ?? "", "/rest/api/3/issueLinkType")
+    }).pipe(Effect.provide(jiraClientLayer({
+      issueLinkTypes: [{ id: "10000", name: "Relates" }]
+    }, requests)))
+  })
+
+  it.effect("sends a directional Jira issue-link association", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      yield* provider.linkIssues("10042", "10043", "Relates")
+
+      const request = requests[0]
+      if (request === undefined) return yield* Effect.die("expected a Jira issue-link request")
+      const body = request.body._tag === "Uint8Array"
+        ? Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(
+          new TextDecoder().decode(request.body.body)
+        )
+        : null
+      assert.deepStrictEqual(body, {
+        type: { name: "Relates" },
+        inwardIssue: { id: "10042" },
+        outwardIssue: { id: "10043" }
+      })
+    }).pipe(Effect.provide(jiraClientLayer({}, requests, 201)))
+  })
+
   it.effect("pins project JQL and formats ISO watermarks as Jira minute timestamps", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

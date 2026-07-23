@@ -170,6 +170,8 @@ slice must leave an explicit extension seam and must not advertise capabilities 
 
 #### M3.2 — Jira actions
 
+**Status: proposal-only foundation complete; provider execution remains blocked on atomic revision semantics.**
+
 - Add description edits, comments/replies, transitions, and link/version association with revision
   preconditions and explicit threaded-comment fallback.
 - **Acceptance:** conflict recovery preserves the human draft; authorization, expiry, and stale

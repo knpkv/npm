@@ -15,16 +15,13 @@ import {
   PluginDiscoveryV1,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
-  type ProposePluginActionRequestV1,
   type ReadPluginEntityRequestV1,
   type ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
 import { SourceUrl } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
-import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginConfigurationFailure,
-  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginTimeoutFailure,
@@ -35,6 +32,7 @@ import type { PluginConnectionV1 } from "../PluginConnection.js"
 import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { makeJiraGovernedActions } from "./JiraGovernedActions.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
 import {
   type JiraIssueWatermark,
@@ -903,6 +901,7 @@ const makeRuntime = (
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const cryptoService = yield* Crypto.Crypto
+        const governedActions = yield* makeJiraGovernedActions(provider, decoded, cryptoService)
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
           discover: Effect.gen(function*() {
@@ -982,7 +981,10 @@ const makeRuntime = (
           sync: (request) => syncProject(provider, decoded, request),
           readEntity: (request) => readIssue(provider, decoded, request),
           diff: Option.none(),
-          proposeAction: (request) => proposeJiraAction(provider, decoded, cryptoService, request)
+          proposeAction: (request) =>
+            request.actionKind === "add-comment"
+              ? proposeJiraAction(provider, decoded, cryptoService, request)
+              : governedActions.proposeAction(request)
         }
         const executor: AuthorizedPluginExecutorV1 = {
           preflight: () => Effect.fail(unsupported("action.execute")),
