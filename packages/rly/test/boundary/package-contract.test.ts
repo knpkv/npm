@@ -57,7 +57,7 @@ describe("package contract", () => {
       subpath: "."
     })
     expect(diffEntry).toMatchObject({
-      aggregates: [],
+      aggregates: ["diff/workbench"],
       source: "src/diff/index.ts",
       subpath: "./diff"
     })

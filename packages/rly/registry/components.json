@@ -958,7 +958,7 @@
         "storyId": "diff-difffiletree--file-states",
         "storyPath": "?path=/story/diff-difffiletree--file-states"
       },
-      "example": "import { DiffFileTree } from \"@knpkv/rly/diff\"",
+      "example": "import { DiffFileTree } from \"@knpkv/rly/diff/workbench\"",
       "exports": [
         {
           "kind": "value",
@@ -995,7 +995,7 @@
           "test/diff/DiffFileTree.test.tsx"
         ]
       },
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffFileTree",
       "props": {
         "defaults": {},
@@ -1156,7 +1156,7 @@
         "storyId": "diff-diffheader--controlled-preferences",
         "storyPath": "?path=/story/diff-diffheader--controlled-preferences"
       },
-      "example": "import { DiffHeader } from \"@knpkv/rly/diff\"",
+      "example": "import { DiffHeader } from \"@knpkv/rly/diff/workbench\"",
       "exports": [
         {
           "kind": "value",
@@ -1185,7 +1185,7 @@
           "test/diff/DiffHeader.test.tsx"
         ]
       },
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffHeader",
       "props": {
         "defaults": {},
@@ -1272,7 +1272,7 @@
         "storyId": "diff-diffworkbench--bird-eye-review",
         "storyPath": "?path=/story/diff-diffworkbench--bird-eye-review"
       },
-      "example": "import { DiffWorkbench } from \"@knpkv/rly/diff\"",
+      "example": "import { DiffWorkbench } from \"@knpkv/rly/diff/workbench\"",
       "exports": [
         {
           "kind": "value",
@@ -1301,7 +1301,7 @@
           "test/diff/DiffWorkbench.test.tsx"
         ]
       },
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffWorkbench",
       "props": {
         "defaults": {},

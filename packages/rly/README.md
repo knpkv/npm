@@ -334,6 +334,9 @@ worker graph out of ordinary primitives and patterns. `DiffWorkbench` composes
 a controlled header, complete lightweight file inventory, renderer slot, and
 semantic finding list. Exceptional files stay visible as loading, binary,
 generated, oversized, unavailable, or error rows; renames preserve both paths.
+Applications that supply their own bounded viewer can import
+`DiffWorkbench`, `DiffHeader`, and `DiffFileTree` from the lightweight
+`@knpkv/rly/diff/workbench` entry without loading the syntax renderer graph.
 
 `DiffCodeView` is the single pinned `@pierre/diffs` adapter. It accepts complete
 before/after text, split or stacked layout, wrapping, context, selection,

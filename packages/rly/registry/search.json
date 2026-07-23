@@ -260,7 +260,7 @@
         "navigate"
       ],
       "category": "diff",
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffFileTree",
       "states": [
         "added",
@@ -320,7 +320,7 @@
         "filter"
       ],
       "category": "diff",
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffHeader",
       "states": [
         "agent",
@@ -353,7 +353,7 @@
         "review"
       ],
       "category": "diff",
-      "importPath": "@knpkv/rly/diff",
+      "importPath": "@knpkv/rly/diff/workbench",
       "name": "DiffWorkbench",
       "states": [
         "all-files",
