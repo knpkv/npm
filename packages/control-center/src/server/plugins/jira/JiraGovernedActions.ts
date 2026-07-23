@@ -16,7 +16,11 @@ import {
   PluginTimeoutFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
-import type { JiraReadProvider } from "./JiraReadProvider.js"
+import {
+  decodeJiraProviderPathIdentifier,
+  JiraProviderPathIdentifier,
+  type JiraReadProvider
+} from "./JiraReadProvider.js"
 
 interface JiraGovernedActionConfiguration {
   readonly projectId: string
@@ -26,12 +30,6 @@ interface JiraGovernedActionConfiguration {
 const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraProviderIdentity = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-const JiraProviderPathIdentifier = JiraProviderIdentity.check(
-  Schema.makeFilter(
-    (value) => value !== "." && value !== ".." && /^[A-Za-z0-9._~-]+$/u.test(value),
-    { expected: "a Jira identifier safe for one URL path segment" }
-  )
-)
 const JiraDescriptionDocument = Schema.Struct({
   type: Schema.Literal("doc"),
   version: Schema.Literal(1),
@@ -116,7 +114,7 @@ const loadActionIssue = Effect.fn("JiraGovernedActions.loadActionIssue")(functio
   configuration: JiraGovernedActionConfiguration,
   request: ProposePluginActionRequestV1
 ) {
-  const targetIssueId = yield* decodePayload(JiraProviderPathIdentifier, request.target.vendorImmutableId)
+  const targetIssueId = yield* decodeJiraProviderPathIdentifier(request.target.vendorImmutableId)
   const found = yield* withTimeout(
     "jira-propose-get-issue",
     configuration.operationTimeoutMillis,

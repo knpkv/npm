@@ -742,9 +742,33 @@ module.exports = {
     },
     create(context) {
       const filename = context.filename.replaceAll("\\", "/")
-      if (!filename.endsWith("/server/plugins/jira/JiraGovernedActions.ts")) return {}
+      if (!filename.includes("/server/plugins/jira/")) return {}
 
       const requestPathFields = new Set(["linkedIssueId", "parentCommentId", "versionIds"])
+      const providerPathMethods = new Set([
+        "addIssueComment",
+        "getChangelogs",
+        "getComment",
+        "getComments",
+        "getIssue",
+        "getIssueTransitions",
+        "getProject",
+        "getProjectVersion",
+        "transitionIssue",
+        "updateIssueDescription"
+      ])
+      const containsVendorImmutableId = (node) => {
+        if (node.type === "MemberExpression" && staticPropertyName(node.property) === "vendorImmutableId") {
+          return true
+        }
+        const visitorKeys = context.sourceCode.visitorKeys[node.type] ?? []
+        return visitorKeys.some((key) => {
+          const child = node[key]
+          return Array.isArray(child)
+            ? child.some((entry) => entry !== null && containsVendorImmutableId(entry))
+            : child !== null && child !== undefined && containsVendorImmutableId(child)
+        })
+      }
       const nearestProperty = (node) => {
         let current = node.parent
         while (current !== undefined && current.type !== "Property" && current.type !== "VariableDeclarator") {
@@ -759,8 +783,21 @@ module.exports = {
       }
 
       return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            node.callee.object.type !== "Identifier" ||
+            node.callee.object.name !== "provider" ||
+            !providerPathMethods.has(staticPropertyName(node.callee.property)) ||
+            !node.arguments.some((argument) => argument.type !== "SpreadElement" && containsVendorImmutableId(argument))
+          ) {
+            return
+          }
+          context.report({ messageId: "unsafePathIdentifier", node })
+        },
         Identifier(node) {
           if (node.name !== "JiraProviderIdentity") return
+          if (!filename.endsWith("/JiraGovernedActions.ts")) return
           const property = nearestProperty(node)
           if (property === undefined) return
           const propertyName = staticPropertyName(property.key)

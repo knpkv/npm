@@ -90,6 +90,22 @@ describe("JiraReadProvider", () => {
     }, requests)))
   })
 
+  it.effect("rejects unsafe Jira path identifiers before generated-client requests", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getIssue("../issueLinkType").pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+      }
+      assert.strictEqual(requests.length, 0)
+    }).pipe(Effect.provide(jiraClientLayer({}, requests)))
+  })
+
   it.effect("loads only the requested Jira project versions by direct ID", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

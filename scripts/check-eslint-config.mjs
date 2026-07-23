@@ -159,6 +159,23 @@ await assertRuleDiagnostics({
 })
 
 await assertRuleDiagnostics({
+  code: `provider.getIssue(request.target.vendorImmutableId)`,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/jira/JiraReadPlugin.ts",
+  ruleId: "local-rules/require-jira-path-identifier-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    const targetIssueId = yield* decodeJiraProviderPathIdentifier(request.target.vendorImmutableId)
+    provider.getIssue(targetIssueId)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/plugins/jira/JiraReadPlugin.ts",
+  ruleId: "local-rules/require-jira-path-identifier-schema"
+})
+
+await assertRuleDiagnostics({
   code: `
     const ReplyCommentRequestPayload = Schema.Struct({ parentCommentId: JiraProviderPathIdentifier })
     const FixVersionRequestPayload = Schema.Struct({ versionIds: Schema.Array(JiraProviderPathIdentifier) })

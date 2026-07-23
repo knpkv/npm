@@ -461,6 +461,29 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("rejects unsafe Jira read targets before provider reads", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Ref.update(issueReads, (count) => count + 1).pipe(
+              Effect.as(Option.none())
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const outcome = yield* connection.readEntity(issueReference("../issueLinkType")).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(outcome))
+          if (Result.isFailure(outcome)) {
+            assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+          }
+          assert.strictEqual(yield* Ref.get(issueReads), 0)
+        })
+      )
+    }))
+
   it.effect("keeps every Jira executor method unsupported with zero provider mutation", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)

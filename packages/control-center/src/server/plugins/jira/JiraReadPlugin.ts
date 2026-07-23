@@ -38,6 +38,7 @@ import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import { makeJiraGovernedActions } from "./JiraGovernedActions.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
 import {
+  decodeJiraProviderPathIdentifier,
   type JiraIssueWatermark,
   type JiraPageRequest,
   type JiraProjectIssue,
@@ -303,10 +304,11 @@ const loadActionIssue = Effect.fn("JiraReadPlugin.loadActionIssue")(function*(
   configuration: JiraReadPluginConfiguration,
   request: ProposePluginActionRequestV1
 ) {
+  const targetIssueId = yield* decodeJiraProviderPathIdentifier(request.target.vendorImmutableId)
   const found = yield* withTimeout(
     "jira-propose-get-issue",
     configuration.operationTimeoutMillis,
-    provider.getIssue(request.target.vendorImmutableId)
+    provider.getIssue(targetIssueId)
   )
   if (Option.isNone(found)) {
     return yield* new PluginConflictFailure({
@@ -322,7 +324,7 @@ const loadActionIssue = Effect.fn("JiraReadPlugin.loadActionIssue")(function*(
       })
     )
   )
-  if (issue.id !== request.target.vendorImmutableId || issue.fields.project.id !== configuration.projectId) {
+  if (issue.id !== targetIssueId || issue.fields.project.id !== configuration.projectId) {
     return yield* new PluginConflictFailure({
       operation: "propose-action",
       diagnosticCode: "jira-action-target-outside-connection"
@@ -523,14 +525,15 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
   if (request.entityType !== "jira.issue") {
     return yield* unsupported("entity.read")
   }
+  const issueId = yield* decodeJiraProviderPathIdentifier(request.vendorImmutableId)
 
   const issue = yield* withTimeout(
     "jira-get-issue",
     configuration.operationTimeoutMillis,
-    provider.getIssue(request.vendorImmutableId)
+    provider.getIssue(issueId)
   )
   if (Option.isNone(issue)) return { _tag: "missing", reference: request, observedAt }
-  if (issue.value.id !== request.vendorImmutableId) {
+  if (issue.value.id !== issueId) {
     return yield* new PluginMalformedResponseFailure({
       operation: "jira-get-issue",
       diagnosticCode: "jira-issue-identity-mismatch"
@@ -551,7 +554,7 @@ const readIssue = Effect.fn("JiraReadPlugin.readIssue")(function*(
     })
   }
 
-  const { changelogs, comments } = yield* collectIssueActivity(provider, configuration, request.vendorImmutableId)
+  const { changelogs, comments } = yield* collectIssueActivity(provider, configuration, issueId)
   const event = yield* normalizeJiraIssue({
     issue: issue.value,
     comments,
