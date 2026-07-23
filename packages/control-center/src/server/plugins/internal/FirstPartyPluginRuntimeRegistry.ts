@@ -456,14 +456,41 @@ const historicalConfluenceDescriptors = [{
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }]
 
-const historicalCodeCommitDescriptor = {
-  ...codeCommitPluginDescriptor,
-  capabilities: codeCommitPluginDescriptor.capabilities.filter(
-    ({ capabilityId }) =>
-      capabilityId === "entity.read" ||
-      capabilityId === "sync.incremental" ||
-      capabilityId === "diff.inventory"
-  )
+/** Frozen descriptor accepted for persisted read-only CodeCommit runtimes. @internal */
+export const historicalCodeCommitDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.codecommit",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "AWS CodeCommit",
+  configurationFields: [
+    {
+      _tag: "text",
+      key: "profile",
+      label: "AWS profile",
+      description: "Local AWS credential profile resolved by the CodeCommit owning package.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "region",
+      label: "AWS region",
+      description: "AWS region containing the configured CodeCommit repository.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "repositoryName",
+      label: "Repository",
+      description: "One CodeCommit repository normalized by this connection.",
+      required: true
+    }
+  ],
+  capabilities: ["entity.read", "sync.incremental", "diff.inventory"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
 }
 
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {

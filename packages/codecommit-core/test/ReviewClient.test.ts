@@ -166,6 +166,33 @@ describe("CodeCommitReviewClient", () => {
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
+  it.effect("re-checks an approval target immediately before the provider write", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const stale = Schema.decodeUnknownSync(CodeCommitPullRequestRevision)({
+        ...pullRequest,
+        repositoryName: "different-repository"
+      })
+      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "approve",
+        target: commentAction.target
+      })
+      const result = yield* runWithClients(
+        baseReadClient({ getPullRequest: () => Effect.succeed(stale) }),
+        baseProvider({
+          updateApprovalState: () => Ref.update(mutationCalls, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(approveAction).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
   it.effect("returns a safe receipt for an idempotent review comment", () =>
     Effect.gen(function*() {
       const observedToken = yield* Ref.make("")
@@ -300,6 +327,36 @@ describe("CodeCommitReviewClient", () => {
 
       assert.strictEqual(results.revoke._tag, "succeeded")
       assert.strictEqual(results.approve._tag, "pending")
+    }))
+
+  it.effect("reconciles an explicit REVOKE state while keeping APPROVE pending", () =>
+    Effect.gen(function*() {
+      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "revoke-approval",
+        target: commentAction.target
+      })
+      const runForState = (approvalState: "APPROVE" | "REVOKE") =>
+        runWithClients(
+          baseReadClient(),
+          baseProvider({
+            getApprovalStates: () =>
+              Effect.succeed({
+                approvals: [{
+                  userArn: "arn:aws:iam::123456789012:user/reviewer",
+                  approvalState
+                }]
+              })
+          }),
+          Effect.gen(function*() {
+            const client = yield* CodeCommitReviewClient
+            return yield* client.reconcile(revokeAction)
+          })
+        )
+      const revoked = yield* runForState("REVOKE")
+      const approved = yield* runForState("APPROVE")
+
+      assert.strictEqual(revoked._tag, "succeeded")
+      assert.strictEqual(approved._tag, "pending")
     }))
 
   it.effect("normalizes assumed-role identities when reconciling approvals", () =>

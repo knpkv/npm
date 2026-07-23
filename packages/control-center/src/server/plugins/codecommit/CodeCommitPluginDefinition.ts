@@ -301,6 +301,14 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
   }
 }
 
+const isPostIntentReviewFailure = (error: ReviewClient.CodeCommitReviewError): boolean =>
+  "operation" in error && [
+    "post-comment",
+    "postPullRequestComment",
+    "update-approval",
+    "updatePullRequestApprovalState"
+  ].includes(error.operation)
+
 const unsupported = (
   capabilityId: "action.cancel" | "diff.content"
 ) =>
@@ -311,7 +319,7 @@ const unsupported = (
   })
 
 const ReviewCommentPayload = Schema.Struct({
-  content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_240))
+  content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_100))
 })
 
 const RequestReviewPayload = Schema.Struct({
@@ -1071,7 +1079,11 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     const observedAt = yield* now
     if (Result.isFailure(result)) {
       if (!isConfirmedReviewRejection(result.failure)) {
-        return yield* failReview("execute-authorized-action", result.failure, reconciliationKey)
+        return yield* failReview(
+          "execute-authorized-action",
+          result.failure,
+          isPostIntentReviewFailure(result.failure) ? reconciliationKey : null
+        )
       }
       return {
         _tag: "confirmed",

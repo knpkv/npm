@@ -27,7 +27,8 @@ import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
-  PluginConflictFailure
+  PluginConflictFailure,
+  PluginRateLimitFailure
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -504,6 +505,34 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(proposals.approvalDispatch._tag, "confirmed")
     }))
 
+  it.effect("reserves durable marker space before authorizing review comments", () =>
+    Effect.gen(function*() {
+      const request = (content: string) =>
+        Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+          actionKind: "comment",
+          target: { entityType: "pull-request", vendorImmutableId: "17" },
+          expectedRevision: "revision-17",
+          payload: { content },
+          evidenceIds: []
+        })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return {
+            withinLimit: yield* connection.proposeAction(request("x".repeat(10_000))),
+            exceedsMarkedLimit: yield* connection.proposeAction(request("x".repeat(10_240))).pipe(Effect.result)
+          }
+        })
+      )
+
+      assert.strictEqual(result.withinLimit.request.actionKind, "comment")
+      assert.isTrue(Result.isFailure(result.exceedsMarkedLimit))
+      if (Result.isFailure(result.exceedsMarkedLimit)) {
+        assert.instanceOf(result.exceedsMarkedLimit.failure, PluginConfigurationFailure)
+      }
+    }))
+
   it.effect("binds comment idempotency tokens to the pull-request target and keeps retries stable", () =>
     Effect.gen(function*() {
       const secondPullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
@@ -788,6 +817,39 @@ describe("CodeCommitPlugin", () => {
 
       assert.strictEqual(result._tag, "ready")
       assert.strictEqual(yield* Ref.get(attempts), 2)
+    }))
+
+  it.effect("surfaces execute-phase throttling before provider intent as retryable", () =>
+    Effect.gen(function*() {
+      const attempts = yield* Ref.make(0)
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(requestChangesProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Ref.update(attempts, (count) => count + 1).pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new Errors.AwsApiError({
+                    operation: "getPullRequest",
+                    profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                    region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                    cause: { _tag: "ThrottlingException" }
+                  })
+                )
+              )
+            )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginRateLimitFailure)
+      assert.strictEqual(yield* Ref.get(attempts), 1)
     }))
 
   it.effect("blocks governed writes when the configured AWS profile changes identity", () =>

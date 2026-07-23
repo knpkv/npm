@@ -37,7 +37,10 @@ import {
 } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
-import { makeFirstPartyPluginRuntimeRegistry } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import {
+  historicalCodeCommitDescriptor,
+  makeFirstPartyPluginRuntimeRegistry
+} from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeKey } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
@@ -89,16 +92,6 @@ const historicalJiraDescriptor = {
   ...jiraReadPluginDescriptor,
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
-}
-
-const historicalCodeCommitDescriptor = {
-  ...codeCommitPluginDescriptor,
-  capabilities: codeCommitPluginDescriptor.capabilities.filter(
-    ({ capabilityId }) =>
-      capabilityId === "entity.read" ||
-      capabilityId === "sync.incremental" ||
-      capabilityId === "diff.inventory"
-  )
 }
 
 const historicalConfluenceOAuthDescriptor = {
@@ -452,6 +445,29 @@ describe("first-party plugin runtime", () => {
       supportedVersions: [1],
       requirement: "required"
     }])
+  })
+
+  it("keeps the historical CodeCommit descriptor independent of future current fields", () => {
+    const futureCurrent = {
+      ...codeCommitPluginDescriptor,
+      configurationFields: [
+        ...codeCommitPluginDescriptor.configurationFields,
+        {
+          _tag: "text",
+          key: "futureField",
+          label: "Future field",
+          description: "A field added after the historical descriptor was persisted.",
+          required: false
+        }
+      ]
+    }
+
+    assert.isTrue(futureCurrent.configurationFields.some(({ key }) => key === "futureField"))
+    assert.isFalse(historicalCodeCommitDescriptor.configurationFields.some(({ key }) => key === "futureField"))
+    assert.deepStrictEqual(
+      historicalCodeCommitDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental", "diff.inventory"]
+    )
   })
 
   it.effect("loads compatible historical descriptors while rejecting pre-scope Jira descriptors", () =>

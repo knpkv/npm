@@ -185,6 +185,7 @@ export class CodeCommitReviewClient extends Context.Service<
           }
           case "approve":
           case "revoke-approval": {
+            yield* preflightTarget(readClient, action.target)
             yield* provider.updateApprovalState(action).pipe(
               Effect.mapError(mapProviderError("update-approval"))
             )
@@ -251,7 +252,7 @@ export class CodeCommitReviewClient extends Context.Service<
             )
             const reconciled = action._tag === "approve"
               ? caller?.approvalState === "APPROVE"
-              : caller === undefined
+              : caller === undefined || caller.approvalState === "REVOKE"
             return reconciled
               ? {
                 _tag: "succeeded",
