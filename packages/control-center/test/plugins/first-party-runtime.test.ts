@@ -81,6 +81,15 @@ const historicalJiraDescriptor = {
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }
+const historicalJiraV02Descriptor = {
+  ...jiraReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
 
 const historicalConfluenceOAuthDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -565,7 +574,12 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
-          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only" | "scoped"
+          readonly generation:
+            | "pre-oauth"
+            | "oauth-without-identity"
+            | "oauth-with-site-only"
+            | "scoped"
+            | "scoped-v0.2"
           readonly missing: "none" | "apiToken" | "email"
           readonly providerId: "jira" | "confluence"
         }> = [
@@ -573,6 +587,7 @@ describe("first-party plugin runtime", () => {
           { providerId: "jira", generation: "oauth-without-identity", missing: "none" },
           { providerId: "jira", generation: "oauth-with-site-only", missing: "none" },
           { providerId: "jira", generation: "scoped", missing: "none" },
+          { providerId: "jira", generation: "scoped-v0.2", missing: "none" },
           { providerId: "confluence", generation: "pre-oauth", missing: "none" },
           { providerId: "jira", generation: "pre-oauth", missing: "email" },
           { providerId: "confluence", generation: "pre-oauth", missing: "apiToken" }
@@ -605,10 +620,14 @@ describe("first-party plugin runtime", () => {
                 ...(testCase.generation === "pre-oauth"
                   ? []
                   : [{ _tag: "text", key: "authMode", value: "api-token" }]),
-                ...(testCase.generation === "oauth-with-site-only" || testCase.generation === "scoped"
-                  ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
-                  : []),
-                ...(testCase.generation === "scoped"
+                ...(
+                  testCase.generation === "oauth-with-site-only" ||
+                    testCase.generation === "scoped" ||
+                    testCase.generation === "scoped-v0.2"
+                    ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
+                    : []
+                ),
+                ...(testCase.generation === "scoped" || testCase.generation === "scoped-v0.2"
                   ? [{ _tag: "text", key: "projectId", value: "project-1" }]
                   : []),
                 { _tag: "integer", key: "maximumPages", value: 3 },
@@ -643,6 +662,8 @@ describe("first-party plugin runtime", () => {
               ? jiraOAuthDescriptorWithoutIdentity
               : testCase.generation === "scoped"
               ? historicalJiraDescriptor
+              : testCase.generation === "scoped-v0.2"
+              ? historicalJiraV02Descriptor
               : jiraOAuthDescriptorWithSiteOnly,
             0,
             CREATED_AT
@@ -652,7 +673,11 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.providerId === "jira" && testCase.generation !== "scoped") {
+          if (
+            testCase.providerId === "jira" &&
+            testCase.generation !== "scoped" &&
+            testCase.generation !== "scoped-v0.2"
+          ) {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure" && outcome.failure._tag === "PluginConfigurationFailure") {
               assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-migration-required")

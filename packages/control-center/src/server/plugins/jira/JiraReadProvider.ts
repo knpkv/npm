@@ -171,7 +171,7 @@ const mapFailure = Effect.fn("JiraReadProvider.mapFailure")(function*(
   if (status === 401) return yield* new PluginAuthenticationFailure({ operation })
   if (status === 403) return yield* new PluginAuthorizationFailure({ operation })
   if (status === 408 || status === 504) return yield* new PluginTimeoutFailure({ operation })
-  if (status === 400 || status === 404 || status === 409 || status === 422) {
+  if (status === 400 || status === 404 || status === 409 || status === 413 || status === 422) {
     return yield* new PluginConflictFailure({
       operation,
       diagnosticCode: `jira-provider-rejected-${status}`

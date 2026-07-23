@@ -325,7 +325,27 @@ const jiraReaderFields = [
     maximum: 120_000
   }
 ]
+const historicalJiraV02Descriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.jira.read",
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  displayName: "Jira issue reader",
+  configurationFields: [
+    jiraWebBaseUrlField,
+    jiraSiteIdField,
+    jiraProjectIdField,
+    ...jiraOAuthFields,
+    ...jiraReaderFields
+  ],
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
 const historicalJiraDescriptors = [
+  historicalJiraV02Descriptor,
   jiraDescriptorSnapshot([
     jiraWebBaseUrlField,
     jiraSiteIdField,
@@ -548,7 +568,7 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
       ? "current"
       : connection.providerId === "codecommit"
       ? "compatible-codecommit"
-      : connection.providerId === "jira" && descriptorGeneration === 1
+      : connection.providerId === "jira" && (descriptorGeneration === 1 || descriptorGeneration === 2)
       ? "compatible-atlassian"
       : "legacy-atlassian",
     runtime

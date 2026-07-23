@@ -372,7 +372,15 @@ const loadActionIssue = Effect.fn("JiraReadPlugin.loadActionIssue")(function*(
       diagnosticCode: "jira-action-target-outside-connection"
     })
   }
-  if (DateTime.formatIso(issue.fields.updated) !== request.expectedRevision) {
+  const expectedRevision = yield* Schema.decodeUnknownEffect(UtcTimestamp)(request.expectedRevision).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-propose-get-issue",
+        diagnosticCode: "jira-action-revision-invalid"
+      })
+    )
+  )
+  if (!DateTime.Equivalence(issue.fields.updated, expectedRevision)) {
     return yield* new PluginConflictFailure({
       operation: "propose-action",
       diagnosticCode: "jira-issue-revision-changed"
@@ -450,6 +458,12 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
         return yield* new PluginConflictFailure({
           operation: "propose-action",
           diagnosticCode: "jira-transition-unavailable"
+        })
+      }
+      if (transition.toStatusId === issue.fields.status.id) {
+        return yield* new PluginConflictFailure({
+          operation: "propose-action",
+          diagnosticCode: "jira-transition-already-current"
         })
       }
       return JiraActionPayload.make({
@@ -549,6 +563,22 @@ const reconciliationKeyForAction = (
     `jr:v1:${action.payload._tag}:${action.issueId}:${payloadDigest}`
   )
 
+const confirmedJiraActionFailure = (
+  action: JiraDescriptionAction,
+  request: AuthorizedPluginActionV1,
+  observedAt: DateTime.Utc
+): PluginActionDispatchResultV1 => ({
+  _tag: "confirmed",
+  receipt: {
+    status: "failed",
+    providerOperationId: PluginProviderOperationId.make(
+      `jr:rejected:${action.payload._tag}:${action.issueId}:${request.payloadDigest}`
+    ),
+    safeSummary: `Jira rejected the ${action.payload._tag} action for ${action.payload.issueKey}`,
+    observedAt
+  }
+})
+
 const preflightJiraAction = Effect.fn("JiraReadPlugin.preflight")(function*(
   provider: JiraReadProvider,
   configuration: JiraReadPluginConfiguration,
@@ -574,6 +604,33 @@ const preflightJiraAction = Effect.fn("JiraReadPlugin.preflight")(function*(
     }
     return yield* inspected.failure
   }
+  if (action.payload._tag === "transition") {
+    const transitionAction = action.payload
+    const transitions = yield* withTimeout(
+      "jira-get-transitions",
+      configuration.operationTimeoutMillis,
+      provider.getIssueTransitions(action.issueId)
+    )
+    if (
+      !transitions.some((transition) =>
+        transition.id === transitionAction.transitionId &&
+        transition.toStatusId === transitionAction.toStatusId
+      )
+    ) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
+        _tag: "blocked",
+        reasons: ["Jira transition blocked: jira-transition-unavailable"],
+        checkedAt
+      }).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "preflight",
+            diagnosticCode: "jira-action-preflight-invalid"
+          })
+        )
+      )
+    }
+  }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
     _tag: "ready",
     checkedRevision: action.expectedRevision,
@@ -594,7 +651,13 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
   request: AuthorizedPluginActionV1
 ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
   const action = yield* decodeAuthorizedJiraAction(request)
-  yield* loadActionIssue(provider, configuration, action.request)
+  const inspected = yield* loadActionIssue(provider, configuration, action.request).pipe(Effect.result)
+  if (Result.isFailure(inspected)) {
+    if (inspected.failure._tag === "PluginConflictFailure") {
+      return confirmedJiraActionFailure(action, request, yield* DateTime.now)
+    }
+    return yield* inspected.failure
+  }
   if (action.payload._tag === "transition") {
     const transitionAction = action.payload
     const transitions = yield* withTimeout(
@@ -608,10 +671,7 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
         transition.toStatusId === transitionAction.toStatusId
       )
     ) {
-      return yield* new PluginConflictFailure({
-        operation: "execute-authorized-action",
-        diagnosticCode: "jira-transition-unavailable"
-      })
+      return confirmedJiraActionFailure(action, request, yield* DateTime.now)
     }
   }
   const reconciliationKey = reconciliationKeyForAction(action, request.payloadDigest)
@@ -648,7 +708,11 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
   if (Result.isFailure(mutation)) {
     if (
       mutation.failure._tag === "PluginTimeoutFailure" ||
-      mutation.failure._tag === "PluginOutageFailure"
+      mutation.failure._tag === "PluginOutageFailure" ||
+      (
+        action.payload._tag === "add-comment" &&
+        mutation.failure._tag === "PluginMalformedResponseFailure"
+      )
     ) {
       return yield* new PluginUnknownOutcomeFailure({
         operation,
@@ -656,17 +720,7 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
       })
     }
     if (mutation.failure._tag === "PluginConflictFailure") {
-      return {
-        _tag: "confirmed",
-        receipt: {
-          status: "failed",
-          providerOperationId: PluginProviderOperationId.make(
-            `jr:rejected:${action.payload._tag}:${action.issueId}:${request.payloadDigest}`
-          ),
-          safeSummary: `Jira rejected the ${action.payload._tag} action for ${action.payload.issueKey}`,
-          observedAt
-        }
-      }
+      return confirmedJiraActionFailure(action, request, observedAt)
     }
     return yield* mutation.failure
   }
@@ -747,7 +801,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
     )
     const currentDigest = yield* digestGovernedActionPayload({
       _tag: "add-comment",
-      issueKey: current.key,
+      issueKey: action.payload.issueKey,
       body: decoded.body
     }).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
@@ -786,7 +840,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
   if (current.fields.description === undefined) return { _tag: "pending", checkedAt }
   const currentDigest = yield* digestGovernedActionPayload({
     _tag: "edit-description",
-    issueKey: current.key,
+    issueKey: action.payload.issueKey,
     description: current.fields.description
   }).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
