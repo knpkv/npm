@@ -23,6 +23,7 @@ import * as Generated from "./generated/ClockifyApi.js"
 export type ClockifyClientError = HttpClientError.HttpClientError | SchemaError
 
 export type User = Generated.GetLoggedUser200
+export type WorkspaceUser = Generated.GetUsersOfWorkspace200[number]
 export type Workspace = Generated.GetWorkspacesOfUser200[number]
 export type Project = Generated.GetProjects200[number]
 export type Tag = Generated.GetTags200[number]
@@ -45,6 +46,9 @@ export interface GetTimeEntriesParams {
 
 export interface ClockifyApiClientShape {
   readonly getUser: () => Effect.Effect<User, ClockifyClientError>
+  readonly getWorkspaceUsers?: (
+    workspaceId: string
+  ) => Effect.Effect<ReadonlyArray<WorkspaceUser>, ClockifyClientError>
   readonly getWorkspaces: () => Effect.Effect<ReadonlyArray<Workspace>, ClockifyClientError>
   readonly getProjects: (workspaceId: string) => Effect.Effect<ReadonlyArray<Project>, ClockifyClientError>
   readonly getProjectByName: (workspaceId: string, name: string) => Effect.Effect<Project | null, ClockifyClientError>
@@ -131,6 +135,10 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
 
         return ClockifyApiClient.of({
           getUser: () => api.getLoggedUser(undefined),
+          getWorkspaceUsers: (workspaceId) =>
+            api.getUsersOfWorkspace(workspaceId, {
+              params: { "include-roles": "false", "page-size": 500, status: "ALL" }
+            }),
           getWorkspaces: () => api.getWorkspacesOfUser(undefined),
           getProjects,
           getProjectByName: (workspaceId, name) =>

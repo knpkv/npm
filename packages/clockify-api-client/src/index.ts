@@ -23,7 +23,8 @@ export type {
   TimeInterval,
   UpdateTimeEntryParams,
   User,
-  Workspace
+  Workspace,
+  WorkspaceUser
 } from "./ClockifyApiClient.js"
 
 export { ClockifyApiConfig, type ClockifyApiConfigShape } from "./ClockifyApiConfig.js"

@@ -12,6 +12,11 @@ import { PluginConfigurationFailure, PluginMalformedResponseFailure } from "../f
 const ClockifyIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const ClockifyText = Schema.String.check(Schema.isMaxLength(4_000))
 const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
+const ClockifyPersonResponse = Schema.Struct({
+  id: ClockifyIdentifier,
+  name: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  status: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(100)))
+})
 
 const ClockifyTimeEntryResponse = Schema.Struct({
   billable: Schema.Boolean,
@@ -37,6 +42,7 @@ const ClockifyTimeEntryResponse = Schema.Struct({
 })
 
 type ClockifyTimeEntryEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
+type ClockifyPersonEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertPerson" }>
 
 interface NormalizeClockifyTimeEntryInput {
   readonly allowedUserIds?: ReadonlySet<string> | undefined
@@ -70,6 +76,37 @@ export const digestClockifySyncScope = (scope: {
   readonly userIds: ReadonlyArray<string>
   readonly workspaceId: string
 }) => digestJson(scope)
+
+/** Normalize one workspace user, anchored to a stable entry revision in the same page. @internal */
+export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization.normalizePerson")(function*(input: {
+  readonly anchor: ClockifyTimeEntryEvent
+  readonly user: unknown
+}): Effect.fn.Return<
+  ClockifyPersonEvent,
+  PluginConfigurationFailure | PluginMalformedResponseFailure,
+  Crypto.Crypto
+> {
+  const user = yield* Schema.decodeUnknownEffect(ClockifyPersonResponse)(input.user).pipe(
+    Effect.mapError(() => malformed("clockify-person-shape-invalid"))
+  )
+  const revision = yield* digestJson({
+    active: user.status !== "INACTIVE",
+    id: user.id,
+    name: user.name
+  })
+  const event = yield* Schema.decodeUnknownEffect(Schema.toType(NormalizedPluginEventV1))({
+    _tag: "UpsertPerson",
+    eventId: `clockify:person:${user.id.slice(0, 300)}:${revision}:${input.anchor.revision}`,
+    observedAt: input.anchor.observedAt,
+    revision,
+    vendorPersonId: user.id,
+    displayName: user.name,
+    avatarUrl: null,
+    active: user.status !== "INACTIVE"
+  }).pipe(Effect.mapError(() => malformed("clockify-normalized-person-invalid")))
+  if (event._tag !== "UpsertPerson") return yield* malformed("clockify-normalized-event-kind-invalid")
+  return event
+})
 
 /** Normalize one untrusted provider entry into a stable vendor-neutral event. @internal */
 export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization.normalize")(function*(

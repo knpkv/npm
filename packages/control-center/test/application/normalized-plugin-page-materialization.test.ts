@@ -617,6 +617,15 @@ const clockifyRelationshipPage = Schema.decodeSync(PluginSyncPageV1)({
   checkpointAfterPage: "clockify-complete",
   hasMore: false,
   events: [{
+    _tag: "UpsertPerson",
+    eventId: "clockify-person-mina-v1",
+    observedAt: "2026-07-19T09:02:30.000Z",
+    revision: "mina-v1",
+    vendorPersonId: "clockify-user-mina",
+    displayName: "Mina Ortiz",
+    avatarUrl: null,
+    active: true
+  }, {
     _tag: "UpsertEntity",
     eventId: "clockify-time-1",
     observedAt: "2026-07-19T09:02:30.000Z",
@@ -1951,6 +1960,104 @@ describe("normalized plugin page materialization", () => {
       const persistedTimeEntry = yield* persistence.entities.get(WORKSPACE_ID, timeEntryEntityId)
       assert.strictEqual(persistedTimeEntry.revision, 1)
 
+      const mixedEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000260")
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId: mixedEntityId,
+        entityType: "time-entry",
+        sourceRevision: Schema.decodeSync(SourceRevision)({
+          providerId: "clockify",
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          vendorImmutableId: "time-entry-mixed",
+          revision: "time-entry-mixed-old",
+          sourceUrl: null,
+          firstObservedAt: "2026-07-19T08:00:00.000Z",
+          lastObservedAt: "2026-07-19T08:00:00.000Z",
+          synchronizedAt: "2026-07-19T08:00:00.000Z",
+          normalizationSchemaVersion: 1
+        }),
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId: mixedEntityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-mixed",
+            title: "Old mixed entry",
+            details: { _tag: "time-entry", durationMinutes: 10, billable: true, approvalState: "approved" }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const mixedStreamKey = Schema.decodeSync(PluginStreamKey)("time-entry-mixed-replay")
+      const oldMixedEvent: typeof NormalizedPluginEventV1.Encoded = {
+        _tag: "UpsertEntity",
+        eventId: "time-entry-mixed-old",
+        observedAt: "2026-07-19T08:00:00.000Z",
+        revision: "time-entry-mixed-old",
+        entityType: "clockify.time-entry",
+        vendorImmutableId: "time-entry-mixed",
+        sourceUrl: null,
+        title: "Old mixed entry",
+        attributes: { durationMinutes: 10, billable: true }
+      }
+      const oldMixedPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "time-entry-mixed-old",
+        hasMore: true,
+        events: [oldMixedEvent]
+      })
+      yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        mixedStreamKey,
+        0,
+        oldMixedPage,
+        T2,
+        { _tag: "healthy", checkedAt: T2 }
+      )
+      const mixedReceipt = yield* materializeNormalizedPluginPage(
+        {
+          ...timeEntryScope,
+          streamKey: mixedStreamKey
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "time-entry-mixed-new",
+          hasMore: false,
+          events: [oldMixedEvent, {
+            ...oldMixedEvent,
+            eventId: "time-entry-mixed-new",
+            observedAt: "2026-07-19T09:00:00.000Z",
+            revision: "time-entry-mixed-new",
+            title: "New mixed entry",
+            attributes: { durationMinutes: 60, billable: false }
+          }]
+        })
+      )
+      assert.strictEqual(mixedReceipt.acceptedEventCount, 1)
+      assert.strictEqual(mixedReceipt.entityProjectionCount, 1)
+      const mixedProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: mixedEntityId,
+        revision: null
+      })
+      if (mixedProjection._tag !== "entityProjection") return yield* Effect.die("expected mixed time entry")
+      assert.strictEqual(mixedProjection.value.projection.title, "New mixed entry")
+      assert.strictEqual(
+        (yield* persistence.entities.get(WORKSPACE_ID, mixedEntityId)).sourceRevision.revision,
+        "time-entry-mixed-new"
+      )
+
       const newerTimeEntryEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000259")
       yield* persistence.entities.create(WORKSPACE_ID, {
         entityId: newerTimeEntryEntityId,
@@ -2011,21 +2118,12 @@ describe("normalized plugin page materialization", () => {
           attributes: { durationMinutes: 15, billable: true }
         }]
       })
-      yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
-        WORKSPACE_ID,
-        CLOCKIFY_PLUGIN_ID,
-        "clockify",
-        olderTimeEntryStreamKey,
-        0,
-        olderTimeEntryPage,
-        T2,
-        { _tag: "healthy", checkedAt: T2 }
-      )
       const olderReplay = yield* materializeNormalizedPluginPage({
         ...timeEntryScope,
-        streamKey: olderTimeEntryStreamKey
+        streamKey: olderTimeEntryStreamKey,
+        expectedRevision: 0
       }, olderTimeEntryPage)
-      assert.strictEqual(olderReplay.acceptedEventCount, 0)
+      assert.strictEqual(olderReplay.acceptedEventCount, 1)
       assert.strictEqual(olderReplay.entityProjectionCount, 0)
       const unchangedNewerProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
         _tag: "entityProjection",
@@ -2544,6 +2642,15 @@ describe("normalized plugin page materialization", () => {
         projectId: "project-payments",
         userId: "clockify-user-mina"
       })
+      const contributor = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).find(
+        ({ assignment }) =>
+          assignment.role === "contributor" &&
+          assignment.scope._tag === "entity" &&
+          assignment.scope.entityId === indexedTimeEntry.entityId
+      )?.assignment
+      if (contributor?.actor._tag !== "human") return yield* Effect.die("expected Clockify contributor")
+      const contributorPerson = yield* persistence.people.getPerson(WORKSPACE_ID, contributor.actor.personId)
+      assert.strictEqual(contributorPerson.person.displayName, "Mina Ortiz")
       if (
         indexedTimeEntry.details.startedAt === undefined ||
         indexedTimeEntry.details.endedAt === undefined ||

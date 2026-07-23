@@ -5,7 +5,7 @@ import * as Encoding from "effect/Encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import { derivePersonInitials, Person } from "../../domain/actors.js"
+import { derivePersonInitials, Person, RoleAssignment } from "../../domain/actors.js"
 import {
   DeliveryEntityDetails,
   type DeliveryEntityKind,
@@ -27,6 +27,7 @@ import {
   type PluginConnectionId,
   RelationshipId,
   ReleaseId,
+  RoleAssignmentId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { NormalizedIssueAttributes } from "../../domain/normalizedIssue.js"
@@ -915,8 +916,15 @@ const materializeUpsertEntity = Effect.fn(
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
-  const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+  if (
+    kind === "time-entry" &&
+    existing !== null &&
+    DateTime.Order(event.observedAt, existing.sourceRevision.lastObservedAt) < 0
+  ) {
+    return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
+  }
+  const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const entityId = existing?.entityId ??
     (yield* entityIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId))
   const currentProjection = existing === null
@@ -1021,6 +1029,42 @@ const materializeUpsertEntity = Effect.fn(
     relationships: []
   } satisfies typeof DeliveryGraphWriteBatch.Type
   const receipt = yield* writeGraph(persistence, scope.workspaceId, batch, event.eventId)
+  if (effectivePresentation.details._tag === "time-entry" && effectivePresentation.details.userId !== undefined) {
+    const identity = {
+      pluginConnectionId: scope.pluginConnectionId,
+      providerId: scope.providerId,
+      vendorPersonId: VendorImmutableId.make(effectivePresentation.details.userId)
+    }
+    const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, identity).pipe(
+      Effect.result
+    )
+    if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
+    if (Result.isSuccess(person)) {
+      const assignmentId = RoleAssignmentId.make(
+        yield* stableUuid(
+          cryptoService,
+          materializationKey(scope, "role-assignment", `${entityId}:contributor:${person.success.person.personId}`),
+          event.eventId
+        )
+      )
+      const existingAssignment = yield* persistence.people.getRoleAssignment(scope.workspaceId, assignmentId).pipe(
+        Effect.result
+      )
+      if (Result.isFailure(existingAssignment) && existingAssignment.failure._tag !== "RecordNotFoundError") {
+        return yield* existingAssignment.failure
+      }
+      if (Result.isFailure(existingAssignment)) {
+        const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
+          actor: { _tag: "human", personId: person.success.person.personId },
+          assignmentId,
+          lifecycle: { _tag: "active", assignedAt: scope.committedAt },
+          role: "contributor",
+          scope: { _tag: "entity", entityId, workspaceId: scope.workspaceId }
+        }).pipe(Effect.mapError(() => malformed("normalized-time-entry-contributor-invalid", event.eventId)))
+        yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
+      }
+    }
+  }
   return { ...receipt, skippedEntityCount: 0 }
 })
 
@@ -1631,10 +1675,19 @@ export const materializeNormalizedPluginPage = Effect.fn(
     )
     const accepted = new Set(committed.acceptedEventIds)
     const acceptedEvents = page.events.filter(({ eventId }) => accepted.has(eventId))
+    const acceptedClockifyTimeEntryIds = new Set(
+      acceptedEvents.flatMap((event) =>
+        event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
+          ? [event.vendorImmutableId]
+          : []
+      )
+    )
     const backfillEntityEvents = yield* Effect.filter(
       page.events,
       (event) =>
-        !accepted.has(event.eventId) && event._tag === "UpsertEntity"
+        !accepted.has(event.eventId) &&
+          event._tag === "UpsertEntity" &&
+          !acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
           ? requiresProjectionSchemaBackfill(persistence, scope, event)
           : Effect.succeed(false)
     )

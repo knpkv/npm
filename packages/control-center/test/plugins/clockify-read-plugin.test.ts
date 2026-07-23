@@ -60,6 +60,11 @@ const timeEntry = (id: string, userId = "user-1", overrides: Readonly<Record<str
 
 const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyReadProvider => ({
   getCurrentUser: Effect.succeed({ id: "user-1", name: "Ada Lovelace" }),
+  getWorkspaceUsers: () =>
+    Effect.succeed([
+      { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" },
+      { id: "user-2", name: "Grace Hopper", status: "ACTIVE" }
+    ]),
   getWorkspaces: Effect.succeed([{ id: "workspace-1", name: "Delivery" }]),
   getTimeEntry: (_workspaceId, entryId) => Effect.succeed(Option.some(timeEntry(entryId))),
   getTimeEntries: (_workspaceId, userId, request) =>
@@ -186,10 +191,19 @@ describe("ClockifyReadPlugin", () => {
       assert.isTrue(pages[0]?.hasMore)
       assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.isFalse(pages[1]?.hasMore)
-      assert.strictEqual(pages[0]?.events.length, 3)
+      assert.strictEqual(pages[0]?.events.length, 5)
       assert.lengthOf(yield* Ref.get(calls), 6)
 
-      const event = pages[0]?.events[0]
+      const person = pages[0]?.events.find(
+        (candidate) => candidate._tag === "UpsertPerson" && candidate.vendorPersonId === "user-1"
+      )
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected Clockify person event")
+      assert.strictEqual(person.displayName, "Ada Lovelace")
+
+      const event = pages[0]?.events.find(
+        (candidate) => candidate._tag === "UpsertEntity" && candidate.vendorImmutableId === "entry-1"
+      )
       assert.strictEqual(event?._tag, "UpsertEntity")
       if (event?._tag !== "UpsertEntity") return assert.fail("expected time-entry event")
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(event.attributes)
@@ -420,8 +434,8 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(yield* Ref.get(maximumActive), 2)
       yield* Deferred.succeed(release, undefined)
       const pages = yield* Fiber.join(fiber)
-      assert.strictEqual(pages[0]?.events.length, 6)
-      assert.strictEqual(yield* Ref.get(digestCalls), 7)
+      assert.strictEqual(pages[0]?.events.length, 8)
+      assert.strictEqual(yield* Ref.get(digestCalls), 9)
     }))
 
   it.effect("rejects configuration above the 100-entry provider aggregate", () =>
@@ -460,7 +474,7 @@ describe("ClockifyReadPlugin", () => {
       )
 
       assert.lengthOf(pages, 1)
-      assert.lengthOf(pages[0]?.events ?? [], 10)
+      assert.lengthOf(pages[0]?.events ?? [], 11)
       assert.isAtMost(new TextEncoder().encode(JSON.stringify(pages[0])).byteLength, MaximumPluginSyncPageBytes)
     }))
 
@@ -491,7 +505,7 @@ describe("ClockifyReadPlugin", () => {
       assert.isAbove(pages.length, 1)
       assert.strictEqual(
         pages.reduce((count, page) => count + page.events.length, 0),
-        100
+        102
       )
       for (const page of pages) {
         Schema.decodeUnknownSync(Schema.toType(PluginSyncPageV1))(page)

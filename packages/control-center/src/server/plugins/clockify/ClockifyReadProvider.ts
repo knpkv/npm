@@ -34,6 +34,7 @@ export interface ClockifyTimeEntryPageRequest {
 /** Narrow provider surface required by the production Clockify reader. @internal */
 export interface ClockifyReadProvider {
   readonly getCurrentUser: Effect.Effect<unknown, PluginFailure>
+  readonly getWorkspaceUsers: (workspaceId: string) => Effect.Effect<unknown, PluginFailure>
   readonly getWorkspaces: Effect.Effect<unknown, PluginFailure>
   readonly getTimeEntry: (
     workspaceId: string,
@@ -107,6 +108,10 @@ const providerCall = <Value, Error>(
 /** Build the production provider boundary from the shared Clockify client. @internal */
 export const makeClockifyReadProvider = (client: ClockifyApiClientShape): ClockifyReadProvider => ({
   getCurrentUser: providerCall("clockify-current-user", client.getUser()),
+  getWorkspaceUsers: (workspaceId) =>
+    client.getWorkspaceUsers === undefined
+      ? providerCall("clockify-workspace-users", client.getUser()).pipe(Effect.map((user) => [user]))
+      : providerCall("clockify-workspace-users", client.getWorkspaceUsers(workspaceId)),
   getWorkspaces: providerCall("clockify-workspaces", client.getWorkspaces()),
   getTimeEntry: (workspaceId, timeEntryId) =>
     client.getTimeEntry(workspaceId, timeEntryId).pipe(
