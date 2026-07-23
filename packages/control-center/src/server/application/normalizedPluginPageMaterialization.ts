@@ -39,7 +39,7 @@ import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
-import type { EntityRecord } from "../persistence/repositories/models.js"
+import type { EntityRecord, RoleAssignmentRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
@@ -912,7 +912,8 @@ const materializeUpsertEntity = Effect.fn(
   event: EntityUpsert,
   siblingEvents: ReadonlyArray<NormalizedPluginEventV1>,
   forceProjection: boolean,
-  preserveSourceRevision: boolean
+  preserveSourceRevision: boolean,
+  roleAssignments: Map<RoleAssignmentId, RoleAssignmentRecord>
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
@@ -1033,8 +1034,7 @@ const materializeUpsertEntity = Effect.fn(
     )
     if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
     if (Result.isSuccess(person)) {
-      const assignments = yield* persistence.people.listRoleAssignments(scope.workspaceId)
-      for (const record of assignments) {
+      for (const record of roleAssignments.values()) {
         const assignment = record.assignment
         if (
           assignment.role !== "contributor" ||
@@ -1052,7 +1052,7 @@ const materializeUpsertEntity = Effect.fn(
           )
         )
         if (assignment.assignmentId !== providerManagedAssignmentId) continue
-        yield* persistence.people.updateRoleAssignment(
+        const updated = yield* persistence.people.updateRoleAssignment(
           scope.workspaceId,
           {
             ...assignment,
@@ -1065,6 +1065,7 @@ const materializeUpsertEntity = Effect.fn(
           record.revision,
           scope.committedAt
         )
+        roleAssignments.set(updated.assignment.assignmentId, updated)
       }
       const assignmentId = RoleAssignmentId.make(
         yield* stableUuid(
@@ -1080,7 +1081,7 @@ const materializeUpsertEntity = Effect.fn(
         return yield* existingAssignment.failure
       }
       if (Result.isSuccess(existingAssignment) && existingAssignment.success.assignment.lifecycle._tag !== "active") {
-        yield* persistence.people.updateRoleAssignment(
+        const updated = yield* persistence.people.updateRoleAssignment(
           scope.workspaceId,
           {
             ...existingAssignment.success.assignment,
@@ -1089,6 +1090,7 @@ const materializeUpsertEntity = Effect.fn(
           existingAssignment.success.revision,
           scope.committedAt
         )
+        roleAssignments.set(updated.assignment.assignmentId, updated)
       } else if (Result.isFailure(existingAssignment)) {
         const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
           actor: { _tag: "human", personId: person.success.person.personId },
@@ -1097,7 +1099,8 @@ const materializeUpsertEntity = Effect.fn(
           role: "contributor",
           scope: { _tag: "entity", entityId, workspaceId: scope.workspaceId }
         }).pipe(Effect.mapError(() => malformed("normalized-time-entry-contributor-invalid", event.eventId)))
-        yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
+        const created = yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
+        roleAssignments.set(created.assignment.assignmentId, created)
       }
     }
   }
@@ -1772,6 +1775,16 @@ export const materializeNormalizedPluginPage = Effect.fn(
       if (event._tag !== "UpsertPerson") continue
       personCount += yield* materializePerson(persistence, cryptoService, scope, event)
     }
+    const roleAssignments = new Map<RoleAssignmentId, RoleAssignmentRecord>()
+    if (
+      entityEvents.some(
+        (event) => event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
+      )
+    ) {
+      for (const record of yield* persistence.people.listRoleAssignments(scope.workspaceId)) {
+        roleAssignments.set(record.assignment.assignmentId, record)
+      }
+    }
     for (const event of entityEvents) {
       if (event._tag === "UpsertEntity") {
         if (event.entityType === "release") {
@@ -1788,7 +1801,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
           event,
           event.entityType === "aws.codepipeline.execution" ? pipelineEvents : acceptedEvents,
           forcedPipelineProjection || schemaBackfill,
-          schemaBackfill
+          schemaBackfill,
+          roleAssignments
         )
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount

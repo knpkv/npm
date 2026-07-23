@@ -123,6 +123,9 @@ describe("ClockifyApiClient", () => {
       expect(requests).toHaveLength(2)
       expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("1")
       expect(new Map(requests[1]?.urlParams ?? []).get("page")).toBe("2")
+      expect(new Map(requests[0]?.urlParams ?? []).get("account-statuses")).toBe(
+        "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED"
+      )
     }).pipe(Effect.provide(layer))
   })
 

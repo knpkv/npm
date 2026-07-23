@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Option, Schema } from "effect"
+import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect"
 import type * as Crypto from "effect/Crypto"
 
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -2786,7 +2786,39 @@ describe("normalized plugin page materialization", () => {
               state: "completed"
             }
           }
+        }, {
+          _tag: "UpsertEntity",
+          eventId: "clockify-time-2-avery",
+          observedAt: "2026-07-19T09:06:00.000Z",
+          revision: "time-2-avery",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-2",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "PAY-42 follow-up",
+          attributes: {
+            billable: false,
+            approvalState: "pending",
+            description: "PAY-42 follow-up",
+            userId: "clockify-user-avery",
+            interval: {
+              start: "2026-07-19T09:05:00.000Z",
+              end: "2026-07-19T09:06:00.000Z",
+              duration: "PT1M",
+              state: "completed"
+            }
+          }
         }]
+      })
+      const roleListCalls = yield* Ref.make(0)
+      const instrumentedPersistence = Persistence.of({
+        ...persistence,
+        people: {
+          ...persistence.people,
+          listRoleAssignments: (...args) =>
+            Ref.update(roleListCalls, (count) => count + 1).pipe(
+              Effect.andThen(persistence.people.listRoleAssignments(...args))
+            )
+        }
       })
       yield* materializeNormalizedPluginPage({
         workspaceId: WORKSPACE_ID,
@@ -2796,7 +2828,8 @@ describe("normalized plugin page materialization", () => {
         expectedRevision: 1,
         committedAt: T4,
         successfulHealth: { _tag: "healthy", checkedAt: T4 }
-      }, reassignmentPage)
+      }, reassignmentPage).pipe(Effect.provideService(Persistence, instrumentedPersistence))
+      assert.strictEqual(yield* Ref.get(roleListCalls), 1)
 
       const entryAssignments = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).filter(
         ({ assignment }) =>

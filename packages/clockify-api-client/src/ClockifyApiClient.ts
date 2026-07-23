@@ -137,7 +137,13 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
           const users: Array<WorkspaceUser> = []
           for (let page = 1; page <= 20; page++) {
             const batch = yield* api.getUsersOfWorkspace(workspaceId, {
-              params: { "include-roles": "false", page, "page-size": 500, status: "ALL" }
+              params: {
+                "account-statuses": "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED",
+                "include-roles": "false",
+                page,
+                "page-size": 500,
+                status: "ALL"
+              }
             })
             for (const user of batch) users.push(user)
             if (batch.length < 500) break
