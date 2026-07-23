@@ -62,6 +62,7 @@ interface ProviderPage<Value> {
 const collectPages = Effect.fn("JiraGovernedActions.collectPages")(function*<Value>(options: {
   readonly operation: string
   readonly configuration: JiraGovernedActionConfiguration
+  readonly order: "oldest" | "newest"
   readonly load: (request: JiraPageRequest) => Effect.Effect<ProviderPage<Value>, PluginFailure>
   readonly maximumValues: number
 }): Effect.fn.Return<JiraFetchedCollection<Value>, PluginFailure> {
@@ -88,7 +89,13 @@ const collectPages = Effect.fn("JiraGovernedActions.collectPages")(function*<Val
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
-    if (page === 1 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
+    if (
+      options.order === "oldest" &&
+      page === 1 &&
+      totalKnown &&
+      !skippedPrefix &&
+      options.configuration.maximumPages > 1
+    ) {
       const sequentialCapacity = options.configuration.maximumPages * options.configuration.pageSize
       if (total > sequentialCapacity) {
         const tailCapacity = Math.min(
@@ -662,6 +669,79 @@ const preflightJiraAction = Effect.fn("JiraReadPlugin.preflight")(function*(
       )
     }
   }
+  if (action.payload._tag === "set-fix-versions") {
+    const available = yield* withTimeout(
+      "jira-get-project-versions",
+      configuration.operationTimeoutMillis,
+      provider.getProjectVersions(configuration.projectId)
+    )
+    const availableIds = new Set(available.map((version) => version.id))
+    if (!action.payload.versions.every((version) => availableIds.has(version.id))) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
+        _tag: "blocked",
+        reasons: ["Jira fix-version association blocked: jira-fix-version-unavailable"],
+        checkedAt
+      }).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "preflight",
+            diagnosticCode: "jira-action-preflight-invalid"
+          })
+        )
+      )
+    }
+  }
+  if (action.payload._tag === "link-issue") {
+    const linkAction = action.payload
+    const linked = yield* withTimeout(
+      "jira-get-linked-issue",
+      configuration.operationTimeoutMillis,
+      provider.getIssue(linkAction.linkedIssueId)
+    )
+    const linkedIssue = Option.isSome(linked)
+      ? yield* Schema.decodeUnknownEffect(JiraActionIssue)(linked.value).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "jira-get-linked-issue",
+            diagnosticCode: "jira-linked-issue-invalid"
+          })
+        )
+      )
+      : null
+    if (linkedIssue === null || linkedIssue.fields.project.id !== configuration.projectId) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
+        _tag: "blocked",
+        reasons: ["Jira issue link blocked: jira-issue-link-precondition-changed"],
+        checkedAt
+      }).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "preflight",
+            diagnosticCode: "jira-action-preflight-invalid"
+          })
+        )
+      )
+    }
+    const linkTypes = yield* withTimeout(
+      "jira-get-issue-link-types",
+      configuration.operationTimeoutMillis,
+      provider.getIssueLinkTypes
+    )
+    if (!linkTypes.some((linkType) => linkType.name === linkAction.linkTypeName)) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
+        _tag: "blocked",
+        reasons: ["Jira issue link blocked: jira-issue-link-precondition-changed"],
+        checkedAt
+      }).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "preflight",
+            diagnosticCode: "jira-action-preflight-invalid"
+          })
+        )
+      )
+    }
+  }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
     _tag: "ready",
     checkedRevision: action.expectedRevision,
@@ -877,6 +957,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
     const comments = yield* collectPages({
       operation: "jira-reconcile-comments",
       configuration,
+      order: "newest",
       load: (page) =>
         provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
           Effect.map((response) => ({ values: response.comments, total: response.total }))

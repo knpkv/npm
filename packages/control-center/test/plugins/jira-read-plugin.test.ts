@@ -851,6 +851,59 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("keeps the newest Jira reply page when reconciliation exceeds the page budget", () =>
+    Effect.gen(function*() {
+      return yield* withConnection(
+        baseProvider({
+          getComments: (_issueId, request) =>
+            Effect.succeed({
+              comments: request.order === "newest" && request.startAt === 0
+                ? [{
+                  id: "c-newest",
+                  body: replyCommentBody,
+                  properties: [{
+                    key: "dev.knpkv.control-center.idempotency",
+                    value: "jira-governed-action-1"
+                  }]
+                }, {
+                  id: "c-other",
+                  body: "Another recent comment"
+                }]
+                : [],
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: 10
+            }),
+          addIssueComment: () => Effect.fail(new PluginTimeoutFailure({ operation: "jira-add-comment" }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(replyCommentRequest)
+          const authorized = authorizeProposal(proposal)
+          const dispatched = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          if (!Result.isFailure(dispatched) || dispatched.failure._tag !== "PluginUnknownOutcomeFailure") {
+            return yield* Effect.die("expected a reconcilable Jira reply outcome")
+          }
+
+          const reconciled = yield* executor.reconcile(
+            Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+              reconciliationKey: dispatched.failure.reconciliationKey,
+              idempotencyKey: authorized.idempotencyKey,
+              payloadDigest: authorized.payloadDigest,
+              authorizedAction: authorized
+            })
+          )
+
+          assert.strictEqual(reconciled._tag, "succeeded")
+          if (reconciled._tag === "succeeded") {
+            assert.strictEqual(reconciled.receipt.providerOperationId, "jira-comment:c-newest")
+          }
+        }),
+        { ...configuration, pageSize: 2, maximumPages: 3 }
+      )
+    }))
+
   it.effect("proposes and executes an available Jira transition", () =>
     Effect.gen(function*() {
       const transitions = yield* Ref.make<ReadonlyArray<string>>([])
@@ -954,6 +1007,8 @@ describe("JiraReadPlugin", () => {
               { id: "2026.31", name: "2026.31" }
             ]
           })
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+          assert.strictEqual(preflight._tag, "ready")
           const dispatched = yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
           assert.strictEqual(dispatched._tag, "confirmed")
           assert.deepStrictEqual(yield* Ref.get(assignedVersionIds), ["2026.30", "2026.31"])
@@ -1025,6 +1080,41 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("blocks preflight when an authorized Jira fix version becomes unavailable", () =>
+    Effect.gen(function*() {
+      const available = yield* Ref.make(true)
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersions: () =>
+            Ref.get(available).pipe(
+              Effect.map((isAvailable) =>
+                isAvailable
+                  ? [
+                    { id: "2026.30", name: "2026.30" },
+                    { id: "2026.31", name: "2026.31" }
+                  ]
+                  : []
+              )
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(fixVersionRequest)
+          yield* Ref.set(available, false)
+
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "Jira fix-version association blocked: jira-fix-version-unavailable"
+            ])
+          }
+        })
+      )
+    }))
+
   it.effect("does not mutate when an authorized Jira fix version becomes unavailable", () =>
     Effect.gen(function*() {
       const available = yield* Ref.make(true)
@@ -1088,9 +1178,80 @@ describe("JiraReadPlugin", () => {
             linkedIssueKey: "PAY-43",
             linkTypeName: "Relates"
           })
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+          assert.strictEqual(preflight._tag, "ready")
           const dispatched = yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
           assert.strictEqual(dispatched._tag, "confirmed")
           assert.deepStrictEqual(yield* Ref.get(linkedPairs), [["10042", "10043", "Relates"]])
+        })
+      )
+    }))
+
+  it.effect("blocks preflight when an authorized Jira linked issue becomes unavailable", () =>
+    Effect.gen(function*() {
+      const linkedIssueAvailable = yield* Ref.make(true)
+      const linkedIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43"
+      }
+      return yield* withConnection(
+        baseProvider({
+          getIssue: (issueId) =>
+            issueId === issue.id
+              ? Effect.succeed(Option.some(issue))
+              : Ref.get(linkedIssueAvailable).pipe(
+                Effect.map((isAvailable) => isAvailable ? Option.some(linkedIssue) : Option.none())
+              ),
+          getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(linkIssueRequest)
+          yield* Ref.set(linkedIssueAvailable, false)
+
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "Jira issue link blocked: jira-issue-link-precondition-changed"
+            ])
+          }
+        })
+      )
+    }))
+
+  it.effect("blocks preflight when an authorized Jira issue-link type becomes unavailable", () =>
+    Effect.gen(function*() {
+      const linkTypeAvailable = yield* Ref.make(true)
+      const linkedIssue = {
+        ...issue,
+        id: "10043",
+        key: "PAY-43"
+      }
+      return yield* withConnection(
+        baseProvider({
+          getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
+          getIssueLinkTypes: Ref.get(linkTypeAvailable).pipe(
+            Effect.map((isAvailable) => isAvailable ? [{ id: "10000", name: "Relates" }] : [])
+          )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(linkIssueRequest)
+          yield* Ref.set(linkTypeAvailable, false)
+
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "Jira issue link blocked: jira-issue-link-precondition-changed"
+            ])
+          }
         })
       )
     }))
