@@ -38,17 +38,18 @@ export const WorkspaceEntityLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(f
   ref
 ): ReactElement {
   const location = useLocation()
+  const state = workspaceEntityStateForHref(href, location)
   return (
     <Link
       {...props}
       onClick={(event) => {
         onClick?.(event)
-        if (shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
+        if (state !== undefined && shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
           rememberWorkspaceScrollPosition(location)
         }
       }}
       ref={ref}
-      state={workspaceEntityStateForHref(href, location)}
+      state={state}
       to={href}
     />
   )

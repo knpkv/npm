@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { WorkspaceEntityLink } from "../../src/client/entities/WorkspaceEntityLink.js"
 import {
   DeferredWorkspaceScrollRestoration,
   rememberWorkspaceScrollPosition,
@@ -59,6 +60,13 @@ const runFrame = (): boolean => {
   return true
 }
 
+const unmountCurrent = (): void => {
+  if (mountedRoot !== undefined) act(() => mountedRoot?.unmount())
+  mountedHost?.remove()
+  mountedRoot = undefined
+  mountedHost = undefined
+}
+
 const mountRestorer = (strict: boolean, location = route): void => {
   const restorer = <DeferredWorkspaceScrollRestoration />
   mountedHost = document.createElement("div")
@@ -71,6 +79,22 @@ const mountRestorer = (strict: boolean, location = route): void => {
       </MemoryRouter>
     )
   )
+}
+
+const mountEntityLink = (href: string): HTMLAnchorElement => {
+  mountedHost = document.createElement("div")
+  document.body.append(mountedHost)
+  mountedRoot = createRoot(mountedHost)
+  act(() =>
+    mountedRoot?.render(
+      <MemoryRouter initialEntries={[workspaceScrollRestorationKey(route)]}>
+        <WorkspaceEntityLink href={href}>Open target</WorkspaceEntityLink>
+      </MemoryRouter>
+    )
+  )
+  const anchor = mountedHost.querySelector("a")
+  if (anchor === null) throw new Error("Expected the workspace entity link to render an anchor")
+  return anchor
 }
 
 const restoreProperty = (target: object, key: PropertyKey, descriptor: PropertyDescriptor | undefined): void => {
@@ -111,11 +135,8 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  if (mountedRoot !== undefined) act(() => mountedRoot?.unmount())
-  mountedHost?.remove()
+  unmountCurrent()
   document.querySelectorAll("[data-rly-release-preview-scroll]").forEach((element) => element.remove())
-  mountedRoot = undefined
-  mountedHost = undefined
   Object.defineProperty(window, "cancelAnimationFrame", {
     configurable: true,
     value: originalWindowMethods.cancelAnimationFrame
@@ -165,6 +186,30 @@ describe("workspace scroll restoration", () => {
     expect(shouldRememberWorkspaceScrollPosition(primaryClick, "_blank")).toBe(false)
   })
 
+  it("arms the Rly bridge only for canonical entity targets", () => {
+    const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
+    const entityId = "01890f6f-6d6a-7cc0-98d3-000000000001"
+    const releaseId = "01890f6f-6d6a-7cc0-98d4-000000000001"
+    setViewport(500)
+    setScrollY(500)
+    const releaseLink = mountEntityLink(`/w/${workspaceId}/releases/${releaseId}`)
+    act(() => releaseLink.click())
+    unmountCurrent()
+    setScrollY(0)
+    mountRestorer(false)
+    expect(runFrame()).toBe(false)
+
+    unmountCurrent()
+    setScrollY(500)
+    const entityLink = mountEntityLink(`/w/${workspaceId}/items/${entityId}`)
+    act(() => entityLink.click())
+    unmountCurrent()
+    setScrollY(0)
+    mountRestorer(false)
+    expect(runFrame()).toBe(true)
+    expect(window.scrollY).toBe(500)
+  })
+
   it("survives StrictMode replay and consumes the target after the first real restoration", () => {
     setViewport(1_000)
     setScrollY(1_000)
@@ -177,10 +222,7 @@ describe("workspace scroll restoration", () => {
     expect(window.scrollY).toBe(1_000)
     expect(scrollCalls).toEqual([1_000])
 
-    act(() => mountedRoot?.unmount())
-    mountedRoot = undefined
-    mountedHost?.remove()
-    mountedHost = undefined
+    unmountCurrent()
     setScrollY(0)
     scrollCalls = []
     mountRestorer(true)
