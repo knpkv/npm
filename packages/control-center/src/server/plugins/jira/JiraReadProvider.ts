@@ -103,13 +103,13 @@ export interface JiraIssueTransition {
   readonly toStatusName: string
 }
 
-/** Stable project-version data needed by the governed action boundary. @internal */
+/** Stable project-version data needed by the governed proposal boundary. @internal */
 export interface JiraProjectVersion {
   readonly id: string
   readonly name: string
 }
 
-/** Stable issue-link type data needed by the governed action boundary. @internal */
+/** Stable issue-link type data needed by the governed proposal boundary. @internal */
 export interface JiraIssueLinkType {
   readonly id: string
   readonly name: string
@@ -157,16 +157,7 @@ export interface JiraReadProvider {
   readonly getProjectVersions: (
     projectId: string
   ) => Effect.Effect<ReadonlyArray<JiraProjectVersion>, PluginFailure>
-  readonly setIssueFixVersions: (
-    issueId: string,
-    versionIds: ReadonlyArray<string>
-  ) => Effect.Effect<void, PluginFailure>
   readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
-  readonly linkIssues: (
-    issueId: string,
-    linkedIssueId: string,
-    linkTypeName: string
-  ) => Effect.Effect<void, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -258,8 +249,7 @@ const ISSUE_FIELDS = [
   "duedate",
   "resolutiondate",
   "parent",
-  "subtasks",
-  "issuelinks"
+  "subtasks"
 ]
 
 const JiraTransitions = Schema.Struct({
@@ -470,18 +460,6 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
           : error
       )
     ),
-  setIssueFixVersions: (issueId, versionIds) =>
-    providerCall(
-      "jira-set-fix-versions",
-      client.editIssue(issueId, {
-        params: { notifyUsers: true },
-        payload: {
-          fields: {
-            fixVersions: versionIds.map((id) => ({ id }))
-          }
-        }
-      }).pipe(Effect.asVoid)
-    ),
   getIssueLinkTypes: providerCall(
     "jira-get-issue-link-types",
     client.getIssueLinkTypes(undefined)
@@ -496,16 +474,5 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
         })
         : error
     )
-  ),
-  linkIssues: (issueId, linkedIssueId, linkTypeName) =>
-    providerCall(
-      "jira-link-issues",
-      client.linkIssues({
-        payload: {
-          type: { name: linkTypeName },
-          inwardIssue: { id: issueId },
-          outwardIssue: { id: linkedIssueId }
-        }
-      }).pipe(Effect.asVoid)
-    )
+  )
 })

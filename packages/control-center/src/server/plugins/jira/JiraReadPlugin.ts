@@ -15,13 +15,16 @@ import {
   PluginDiscoveryV1,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
+  type ProposePluginActionRequestV1,
   type ReadPluginEntityRequestV1,
   type ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
 import { SourceUrl } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
+import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginTimeoutFailure,
@@ -901,7 +904,7 @@ const makeRuntime = (
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const cryptoService = yield* Crypto.Crypto
-        const governedActions = yield* makeJiraGovernedActions(provider, decoded, cryptoService)
+        const governedActions = makeJiraGovernedActions(provider, decoded, cryptoService)
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
           discover: Effect.gen(function*() {

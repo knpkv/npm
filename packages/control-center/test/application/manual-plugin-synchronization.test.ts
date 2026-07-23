@@ -466,9 +466,7 @@ describe("manual plugin synchronization", () => {
         getIssueTransitions: () => Effect.succeed([]),
         transitionIssue: () => Effect.void,
         getProjectVersions: () => Effect.succeed([]),
-        setIssueFixVersions: () => Effect.void,
         getIssueLinkTypes: Effect.succeed([]),
-        linkIssues: () => Effect.void,
         searchProjectIssues: () =>
           Effect.succeed({
             issues: [{
