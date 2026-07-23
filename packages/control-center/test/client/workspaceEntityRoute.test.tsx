@@ -498,16 +498,10 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
         durationMinutes: 135,
         billable: true,
         approvalState: "approved",
-        description: "Review payment safeguards and release evidence",
         projectId: "project-payments",
-        taskId: "task-review",
         userId: "clockify-user-mina",
-        locked: true,
-        entryType: "REGULAR",
-        tagIds: ["release", "review"],
         startedAt: "2026-07-14T07:45:00.000Z",
-        endedAt: "2026-07-14T10:00:00.000Z",
-        timerState: "completed"
+        endedAt: "2026-07-14T10:00:00.000Z"
       }
     },
     owners: [
@@ -1240,7 +1234,7 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector("[data-workspace-clockify-time-entry-detail]")).not.toBeNull()
     expect(host.textContent).toContain("2h 15m")
     expect(host.textContent).toContain("1 visible entry · 135 exact minutes")
-    expect(host.textContent).toContain("Review payment safeguards and release evidence")
+    expect(host.textContent).toContain("Review payment safeguards")
     expect(host.textContent).toContain("project-payments")
     expect(host.textContent).toContain("Mina Ortiz")
     expect(host.textContent).toContain("Unattributed")

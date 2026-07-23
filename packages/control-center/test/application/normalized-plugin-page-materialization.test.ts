@@ -2292,14 +2292,8 @@ describe("normalized plugin page materialization", () => {
         durationMinutes: 45,
         billable: true,
         approvalState: "approved",
-        description: "PAY-42 review and rollout",
         projectId: "project-payments",
-        taskId: "task-review",
-        userId: "clockify-user-mina",
-        locked: true,
-        entryType: "REGULAR",
-        tagIds: ["release", "review"],
-        timerState: "completed"
+        userId: "clockify-user-mina"
       })
       if (
         indexedTimeEntry.details.startedAt === undefined ||

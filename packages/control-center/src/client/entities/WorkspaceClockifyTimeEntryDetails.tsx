@@ -79,19 +79,10 @@ export const WorkspaceClockifyTimeEntryDetails = ({
             <dd>{timeEntry.endedAt}</dd>
           </div>
           <div>
-            <dt>Type</dt>
-            <dd>{timeEntry.entryTypeLabel}</dd>
-          </div>
-          <div>
             <dt>State</dt>
             <dd>{timeEntry.timerLabel}</dd>
           </div>
         </dl>
-        <div className={styles.entryMeta}>
-          <span>{timeEntry.taskLabel}</span>
-          <span>{timeEntry.tagCountLabel}</span>
-          <span>{timeEntry.lockLabel}</span>
-        </div>
       </div>
     </Section>
 

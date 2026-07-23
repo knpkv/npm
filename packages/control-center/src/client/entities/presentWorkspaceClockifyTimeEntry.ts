@@ -25,14 +25,10 @@ export interface WorkspaceClockifyTimeEntryPresentation {
   readonly description: string
   readonly durationLabel: string
   readonly endedAt: string
-  readonly entryTypeLabel: string
   readonly jiraAssociations: ReadonlyArray<WorkspaceClockifyJiraAssociation>
-  readonly lockLabel: string
   readonly projectLabel: string
   readonly rollupLabel: string
   readonly startedAt: string
-  readonly tagCountLabel: string
-  readonly taskLabel: string
   readonly timerLabel: string
   readonly totalMinutes: number
 }
@@ -144,26 +140,18 @@ export const presentWorkspaceClockifyTimeEntry = (
     associationLabel: jiraAssociations.length === 0 ? "Unattributed" : "Attributed",
     billableLabel: details.billable ? "Billable" : "Non-billable",
     contributorLabel: contributor?.displayName ?? details.userId ?? "Contributor not synchronized",
-    description: details.description?.trim() || inspection.entity.projection.title,
+    description: inspection.entity.projection.title,
     durationLabel: durationLabel(details.durationMinutes),
     endedAt: timestampLabel(details.endedAt),
-    entryTypeLabel: titleCase(details.entryType ?? "regular"),
     jiraAssociations,
-    lockLabel: details.locked === undefined
-      ? "Lock state not synchronized"
-      : details.locked
-      ? "Locked"
-      : "Editable at source",
     projectLabel: details.projectId ?? "No Clockify project",
     rollupLabel: `1 visible entry · ${String(details.durationMinutes)} exact minute${
       details.durationMinutes === 1 ? "" : "s"
     }`,
     startedAt: timestampLabel(details.startedAt),
-    tagCountLabel: `${String(details.tagIds?.length ?? 0)} tag${details.tagIds?.length === 1 ? "" : "s"}`,
-    taskLabel: details.taskId ?? "No task",
-    timerLabel: details.timerState === undefined
+    timerLabel: details.startedAt === undefined || details.endedAt === undefined
       ? "Timer state not synchronized"
-      : details.timerState === "running"
+      : details.endedAt === null
       ? "Timer running"
       : "Completed",
     totalMinutes: details.durationMinutes

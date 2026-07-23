@@ -9,7 +9,6 @@
 .entry,
 .entry dl,
 .entry dl > div,
-.entryMeta,
 .attribution,
 .attribution > div,
 .attribution ul,
@@ -49,7 +48,6 @@
 .ledgerBody header > span,
 .primaryFacts dt,
 .entry dt,
-.entryMeta,
 .attribution small,
 .people dt {
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -96,7 +94,6 @@
 
 .primaryFacts dt,
 .entry dt,
-.entryMeta,
 .people dt {
   color: var(--rly-color-text-2);
 }
@@ -128,20 +125,13 @@
   color: var(--rly-color-service-clockify);
   font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
     var(--rly-type-verdict-font);
-  grid-row: span 2;
 }
 
 .entry dl,
 .people {
   gap: var(--rly-space-12) var(--rly-space-24);
-  grid-template-columns: repeat(4, minmax(var(--rly-space-0), 1fr));
+  grid-template-columns: repeat(3, minmax(var(--rly-space-0), 1fr));
   margin: var(--rly-space-0);
-}
-
-.entryMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-8) var(--rly-space-20);
 }
 
 .attribution {
@@ -228,10 +218,6 @@
 
   .total {
     min-block-size: auto;
-  }
-
-  .entry > strong {
-    grid-row: auto;
   }
 
   .primaryFacts,

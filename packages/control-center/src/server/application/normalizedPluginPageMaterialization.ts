@@ -119,10 +119,6 @@ const EntityAttributes = Schema.Struct({
   approvalState: OptionalText,
   userId: OptionalText,
   projectId: OptionalText,
-  taskId: OptionalText,
-  tagIds: Schema.optionalKey(Schema.Array(Schema.String)),
-  locked: Schema.optionalKey(Schema.Boolean),
-  entryType: OptionalText,
   interval: Schema.optionalKey(Schema.Struct({
     duration: OptionalText,
     state: OptionalText,
@@ -493,17 +489,6 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
       )
       const userId = optionalBounded(attributes.userId, 512)
       const projectId = optionalBounded(attributes.projectId, 512)
-      const taskId = optionalBounded(attributes.taskId, 512)
-      const tagIds = [
-        ...new Set(
-          (attributes.tagIds ?? []).map((tagId) => tagId.trim().slice(0, 512)).filter(Boolean)
-        )
-      ].slice(0, 100)
-      const entryType = attributes.entryType === "BREAK" ||
-          attributes.entryType === "HOLIDAY" ||
-          attributes.entryType === "TIME_OFF"
-        ? attributes.entryType
-        : "REGULAR"
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
@@ -518,20 +503,10 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             : attributes.interval?.state === "running"
             ? "pending"
             : "not-required",
-          ...(attributes.description === null || attributes.description === undefined
-            ? {}
-            : { description: attributes.description.slice(0, 4_000) }),
           projectId,
-          taskId,
           ...(userId === null ? {} : { userId }),
-          ...(attributes.locked === undefined ? {} : { locked: attributes.locked }),
-          ...(attributes.entryType === null || attributes.entryType === undefined ? {} : { entryType }),
-          ...(attributes.tagIds === undefined ? {} : { tagIds }),
           ...(startedAt === null ? {} : { startedAt }),
-          endedAt,
-          ...(attributes.interval?.state === null || attributes.interval?.state === undefined
-            ? {}
-            : { timerState: attributes.interval.state === "running" ? "running" : "completed" })
+          endedAt
         }
       }
     }
