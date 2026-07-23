@@ -247,7 +247,13 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
             diagnosticCode: "jira-project-version-identity-mismatch"
           })
         }
-        if (canonical.projectId !== null && canonical.projectId !== configuration.projectId) {
+        if (canonical.projectId === null) {
+          return yield* new PluginMalformedResponseFailure({
+            operation: "jira-get-project-version",
+            diagnosticCode: "jira-project-version-ownership-missing"
+          })
+        }
+        if (canonical.projectId !== configuration.projectId) {
           return yield* new PluginConflictFailure({
             operation: "propose-action",
             diagnosticCode: "jira-fix-version-outside-connection"

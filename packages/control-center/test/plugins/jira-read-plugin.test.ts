@@ -675,6 +675,30 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
+  it.effect("rejects a Jira fix version without confirmed project ownership", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some({
+            id: versionId,
+            name: versionId,
+            projectId: null
+          }))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-project-version-ownership-missing")
+          }
+        }
+      })
+    ))
+
   it.effect("preserves both directions of an asymmetric Jira issue link", () => {
     const linkedIssue = {
       ...issue,
