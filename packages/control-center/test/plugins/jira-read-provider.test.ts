@@ -119,6 +119,28 @@ describe("JiraReadProvider", () => {
     )))
   })
 
+  it.effect("rejects a Jira version response with an unsafe numeric project ID", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getProjectVersion("v").pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-openapi-response-invalid")
+        }
+      }
+    }).pipe(Effect.provide(jiraClientLayer({
+      id: "v",
+      name: "V",
+      projectId: Number.MAX_SAFE_INTEGER + 1
+    }, requests)))
+  })
+
   it.effect("decodes Jira issue-link types used by governed proposals", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

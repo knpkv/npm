@@ -657,6 +657,33 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
+  it.effect("rejects unsafe Jira path identifiers before provider reads", () =>
+    Effect.gen(function*() {
+      const versionReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersion: () =>
+            Ref.update(versionReads, (count) => count + 1).pipe(
+              Effect.as(Option.none())
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+            ...fixVersionRequest,
+            payload: { versionIds: ["2026.31/../issueLinkType"] }
+          })
+          const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(proposed))
+          if (Result.isFailure(proposed)) {
+            assert.strictEqual(proposed.failure._tag, "PluginConfigurationFailure")
+          }
+          assert.strictEqual(yield* Ref.get(versionReads), 0)
+        })
+      )
+    }))
+
   it.effect("rejects a requested Jira fix version from another project", () =>
     withConnection(
       baseProvider({

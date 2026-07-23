@@ -265,7 +265,7 @@ const JiraTransitions = Schema.Struct({
 const JiraProjectVersionResponse = Schema.Struct({
   id: Schema.String,
   name: Schema.String,
-  projectId: Schema.optionalKey(Schema.Number),
+  projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
   project: Schema.optionalKey(Schema.String)
 })
 const JiraIssueLinkTypes = Schema.Struct({

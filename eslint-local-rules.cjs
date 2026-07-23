@@ -727,6 +727,50 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-jira-path-identifier-schema": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require path-safe schemas for Jira identifiers used in provider URL paths",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unsafePathIdentifier: "Use JiraProviderPathIdentifier for values passed to Jira provider path parameters."
+      }
+    },
+    create(context) {
+      const filename = context.filename.replaceAll("\\", "/")
+      if (!filename.endsWith("/server/plugins/jira/JiraGovernedActions.ts")) return {}
+
+      const requestPathFields = new Set(["linkedIssueId", "parentCommentId", "versionIds"])
+      const nearestProperty = (node) => {
+        let current = node.parent
+        while (current !== undefined && current.type !== "Property" && current.type !== "VariableDeclarator") {
+          current = current.parent
+        }
+        return current?.type === "Property" ? current : undefined
+      }
+      const enclosingVariableName = (node) => {
+        let current = node.parent
+        while (current !== undefined && current.type !== "VariableDeclarator") current = current.parent
+        return current?.type === "VariableDeclarator" && current.id.type === "Identifier" ? current.id.name : undefined
+      }
+
+      return {
+        Identifier(node) {
+          if (node.name !== "JiraProviderIdentity") return
+          const property = nearestProperty(node)
+          if (property === undefined) return
+          const propertyName = staticPropertyName(property.key)
+          const isActionIssueId = propertyName === "id" && enclosingVariableName(node) === "JiraActionIssue"
+          if (!isActionIssueId && !requestPathFields.has(propertyName)) return
+          context.report({ messageId: "unsafePathIdentifier", node })
+        }
+      }
+    }
+  },
   "no-ad-hoc-workspace-entity-path": {
     meta: {
       type: "problem",

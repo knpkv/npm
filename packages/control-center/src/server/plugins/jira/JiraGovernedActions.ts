@@ -26,24 +26,30 @@ interface JiraGovernedActionConfiguration {
 const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraProviderIdentity = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const JiraProviderPathIdentifier = JiraProviderIdentity.check(
+  Schema.makeFilter(
+    (value) => value !== "." && value !== ".." && /^[A-Za-z0-9._~-]+$/u.test(value),
+    { expected: "a Jira identifier safe for one URL path segment" }
+  )
+)
 const JiraDescriptionDocument = Schema.Struct({
   type: Schema.Literal("doc"),
   version: Schema.Literal(1),
   content: Schema.Array(Schema.Json)
 })
 const ReplyCommentRequestPayload = Schema.Struct({
-  parentCommentId: JiraProviderIdentity,
+  parentCommentId: JiraProviderPathIdentifier,
   body: JiraDescriptionDocument
 })
 const FixVersionRequestPayload = Schema.Struct({
-  versionIds: Schema.Array(JiraProviderIdentity).check(
+  versionIds: Schema.Array(JiraProviderPathIdentifier).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(50),
     Schema.isUnique()
   )
 })
 const LinkIssueRequestPayload = Schema.Struct({
-  linkedIssueId: JiraProviderIdentity,
+  linkedIssueId: JiraProviderPathIdentifier,
   linkTypeName: JiraProviderIdentity,
   direction: Schema.Literals(["outward", "inward"])
 })
@@ -65,7 +71,7 @@ const JiraIssueLinkTypeMetadata = Schema.Struct({
 const JiraAssociationPayload = Schema.Union([
   Schema.TaggedStruct("reply-comment", {
     issueKey: JiraIssueKey,
-    parentCommentId: JiraProviderIdentity,
+    parentCommentId: JiraProviderPathIdentifier,
     body: JiraDescriptionDocument
   }),
   Schema.TaggedStruct("set-fix-versions", {
@@ -87,7 +93,7 @@ const JiraAssociationPayload = Schema.Union([
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 const JiraActionIssue = Schema.Struct({
-  id: JiraProviderIdentity,
+  id: JiraProviderPathIdentifier,
   key: JiraIssueKey,
   fields: Schema.Struct({
     project: Schema.Struct({ id: JiraProjectId }),
@@ -110,10 +116,11 @@ const loadActionIssue = Effect.fn("JiraGovernedActions.loadActionIssue")(functio
   configuration: JiraGovernedActionConfiguration,
   request: ProposePluginActionRequestV1
 ) {
+  const targetIssueId = yield* decodePayload(JiraProviderPathIdentifier, request.target.vendorImmutableId)
   const found = yield* withTimeout(
     "jira-propose-get-issue",
     configuration.operationTimeoutMillis,
-    provider.getIssue(request.target.vendorImmutableId)
+    provider.getIssue(targetIssueId)
   )
   if (Option.isNone(found)) {
     return yield* new PluginConflictFailure({
@@ -129,7 +136,7 @@ const loadActionIssue = Effect.fn("JiraGovernedActions.loadActionIssue")(functio
       })
     )
   )
-  if (issue.id !== request.target.vendorImmutableId || issue.fields.project.id !== configuration.projectId) {
+  if (issue.id !== targetIssueId || issue.fields.project.id !== configuration.projectId) {
     return yield* new PluginConflictFailure({
       operation: "propose-action",
       diagnosticCode: "jira-action-target-outside-connection"
