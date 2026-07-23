@@ -53,6 +53,7 @@ const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
 const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:06:00.000Z")
+const T5 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:00.000Z")
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
 const descriptor = {
@@ -2848,6 +2849,52 @@ describe("normalized plugin page materialization", () => {
         activeContributor.assignment.actor.personId
       )
       assert.strictEqual(activePerson.person.displayName, "Avery Chen")
+
+      yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          providerId: "clockify",
+          streamKey: firstPartyStream("clockify"),
+          expectedRevision: 2,
+          committedAt: T5,
+          successfulHealth: { _tag: "healthy", checkedAt: T5 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "clockify-missing-user",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "clockify-time-1-missing-user",
+            observedAt: "2026-07-19T09:07:00.000Z",
+            revision: "time-1-missing-user",
+            entityType: "clockify.time-entry",
+            vendorImmutableId: "time-1",
+            sourceUrl: "https://app.clockify.me/tracker",
+            title: "PAY-42 review and rollout",
+            attributes: {
+              billable: true,
+              approvalState: "approved",
+              description: "PAY-42 review and rollout",
+              userId: "clockify-user-missing",
+              interval: {
+                start: "2026-07-19T08:17:30.000Z",
+                end: "2026-07-19T09:00:00.000Z",
+                duration: "PT42M30S",
+                state: "completed"
+              }
+            }
+          }]
+        })
+      )
+      const assignmentsAfterMissingUser = (yield* persistence.people.listRoleAssignments(WORKSPACE_ID)).filter(
+        ({ assignment }) =>
+          assignment.role === "contributor" &&
+          assignment.scope._tag === "entity" &&
+          assignment.scope.entityId === indexedTimeEntry.entityId
+      )
+      assert.lengthOf(assignmentsAfterMissingUser.filter(({ assignment }) => assignment.lifecycle._tag === "active"), 0)
+      assert.lengthOf(assignmentsAfterMissingUser.filter(({ assignment }) => assignment.lifecycle._tag === "ended"), 2)
     })))
 
   it.effect("uses the evidence provider stream and health when another provider triggers inference", () =>

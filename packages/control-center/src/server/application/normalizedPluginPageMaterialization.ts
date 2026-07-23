@@ -1033,40 +1033,40 @@ const materializeUpsertEntity = Effect.fn(
       Effect.result
     )
     if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
+    for (const record of roleAssignments.values()) {
+      const assignment = record.assignment
+      if (
+        assignment.role !== "contributor" ||
+        assignment.scope._tag !== "entity" ||
+        assignment.scope.entityId !== entityId ||
+        assignment.lifecycle._tag !== "active" ||
+        assignment.actor._tag !== "human" ||
+        (Result.isSuccess(person) && assignment.actor.personId === person.success.person.personId)
+      ) continue
+      const providerManagedAssignmentId = RoleAssignmentId.make(
+        yield* stableUuid(
+          cryptoService,
+          materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
+          event.eventId
+        )
+      )
+      if (assignment.assignmentId !== providerManagedAssignmentId) continue
+      const updated = yield* persistence.people.updateRoleAssignment(
+        scope.workspaceId,
+        {
+          ...assignment,
+          lifecycle: {
+            _tag: "ended",
+            assignedAt: assignment.lifecycle.assignedAt,
+            endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
+          }
+        },
+        record.revision,
+        scope.committedAt
+      )
+      roleAssignments.set(updated.assignment.assignmentId, updated)
+    }
     if (Result.isSuccess(person)) {
-      for (const record of roleAssignments.values()) {
-        const assignment = record.assignment
-        if (
-          assignment.role !== "contributor" ||
-          assignment.scope._tag !== "entity" ||
-          assignment.scope.entityId !== entityId ||
-          assignment.lifecycle._tag !== "active" ||
-          assignment.actor._tag !== "human" ||
-          assignment.actor.personId === person.success.person.personId
-        ) continue
-        const providerManagedAssignmentId = RoleAssignmentId.make(
-          yield* stableUuid(
-            cryptoService,
-            materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
-            event.eventId
-          )
-        )
-        if (assignment.assignmentId !== providerManagedAssignmentId) continue
-        const updated = yield* persistence.people.updateRoleAssignment(
-          scope.workspaceId,
-          {
-            ...assignment,
-            lifecycle: {
-              _tag: "ended",
-              assignedAt: assignment.lifecycle.assignedAt,
-              endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
-            }
-          },
-          record.revision,
-          scope.committedAt
-        )
-        roleAssignments.set(updated.assignment.assignmentId, updated)
-      }
       const assignmentId = RoleAssignmentId.make(
         yield* stableUuid(
           cryptoService,
