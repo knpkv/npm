@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
 import styles from "./AppShell.module.css"
+import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
 
 const CommandSearch = lazy(async () => {
   const module = await import("./command/CommandSearch.js")
@@ -102,6 +103,7 @@ export const AppShell = (): ReactElement => {
       <main className={styles.main}>
         <Outlet />
       </main>
+      <WorkspaceScrollRestoration />
     </div>
   )
 }

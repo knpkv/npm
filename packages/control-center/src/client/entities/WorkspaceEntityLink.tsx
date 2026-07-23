@@ -7,6 +7,7 @@ import {
   makeWorkspaceEntityRouteState,
   workspaceEntityTargetFromHref
 } from "../items/workspaceEntityRoutes.js"
+import { rememberWorkspaceScrollPosition, shouldRememberWorkspaceScrollPosition } from "../workspaceScrollCapture.js"
 
 interface RouterLocationParts {
   readonly hash: string
@@ -30,9 +31,23 @@ export const workspaceEntityStateForHref = (href: string, location: RouterLocati
 
 /** React Router bridge installed only inside lazy entity-aware route chunks. */
 export const WorkspaceEntityLink = forwardRef<HTMLAnchorElement, RlyLinkProps>(function WorkspaceEntityLink(
-  { href, ...props },
+  { href, onClick, ...props },
   ref
 ): ReactElement {
   const location = useLocation()
-  return <Link {...props} ref={ref} state={workspaceEntityStateForHref(href, location)} to={href} />
+  const state = workspaceEntityStateForHref(href, location)
+  return (
+    <Link
+      {...props}
+      onClick={(event) => {
+        onClick?.(event)
+        if (state !== undefined && shouldRememberWorkspaceScrollPosition(event, event.currentTarget.target)) {
+          rememberWorkspaceScrollPosition(location, href)
+        }
+      }}
+      ref={ref}
+      state={state}
+      to={href}
+    />
+  )
 })

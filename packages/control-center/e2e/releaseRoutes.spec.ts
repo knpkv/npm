@@ -460,14 +460,64 @@ test("preserves the exact overview origin through preview and canonical entity B
   await page.getByRole("button", { name: "Preview Solar Grove" }).click()
 
   const preview = page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })
-  await preview.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`).click()
+  const itemLink = preview.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  await itemLink.scrollIntoViewIfNeeded()
+  const previewScrollPosition = await page.evaluate<number>(`(() => {
+    const element = document.querySelector("[data-rly-release-preview-scroll]");
+    return element === null ? 0 : element.scrollTop;
+  })()`)
+  expect(previewScrollPosition).toBeGreaterThan(0)
+  await itemLink.click()
   await expect(page).toHaveURL(canonicalEntityPath)
   await expect(page.locator(`[data-workspace-entity-id="${canonicalEntityId}"]`)).toBeVisible()
 
   await page.getByRole("link", { name: "Back to release" }).click()
   await expect(page).toHaveURL(previewPath)
+  await expect
+    .poll(() =>
+      page.evaluate<number>(`(() => {
+        const element = document.querySelector("[data-rly-release-preview-scroll]");
+        return element === null ? 0 : element.scrollTop;
+      })()`)
+    )
+    .toBeGreaterThanOrEqual(previewScrollPosition - 2)
   await page.getByRole("button", { name: "Close preview" }).click()
   await expect(page).toHaveURL(filteredOverviewPath)
+})
+
+test("restores the exact release scroll position after a canonical entity round trip", async ({ page }) => {
+  await page.goto(fullPath)
+  const itemLink = page.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  await itemLink.scrollIntoViewIfNeeded()
+  const releaseScrollPosition = await page.evaluate<number>("window.scrollY")
+  expect(releaseScrollPosition).toBeGreaterThan(0)
+
+  await itemLink.click()
+  await expect(page).toHaveURL(canonicalEntityPath)
+  await page.getByRole("link", { name: "Back to release" }).click()
+
+  await expect(page).toHaveURL(fullPath)
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBeGreaterThanOrEqual(releaseScrollPosition - 2)
+
+  await page.evaluate("window.scrollTo(0, 0)")
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
+
+  await expect(page).toHaveURL(fullPath)
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
+
+  const freshNavigationItemLink = page.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  await freshNavigationItemLink.scrollIntoViewIfNeeded()
+  expect(await page.evaluate<number>("window.scrollY")).toBeGreaterThan(0)
+  await page.getByRole("link", { name: "Back to overview" }).dispatchEvent("click")
+  await expect(page).toHaveURL(overviewPath)
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
+
+  await expect(page).toHaveURL(fullPath)
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
 })
 
 test("returns a directly loaded canonical entity to Items", async ({ page }) => {

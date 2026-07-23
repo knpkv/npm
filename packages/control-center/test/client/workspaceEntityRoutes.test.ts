@@ -74,7 +74,7 @@ describe("workspace entity routes", () => {
     const entityOrigin = entityOriginFromLocation({
       hash: "#release-work",
       pathname: `/w/${workspaceId}/releases/${releaseId}/preview`,
-      search: `?object=${entityId}`,
+      search: `?object=${entityId}&relationship=01890f6f-6d6a-7cc0-98d5-000000000001`,
       state: releaseState
     })
     const firstState = makeWorkspaceEntityRouteState(releaseState, workspaceId, entityId, entityOrigin)
