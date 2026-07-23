@@ -30,6 +30,7 @@ import {
 export interface JiraPageRequest {
   readonly startAt: number
   readonly maxResults: number
+  readonly order?: "oldest" | "newest"
 }
 
 /** Stable provider-independent lower bound for one incremental project query. @internal */
@@ -313,7 +314,12 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     providerCall(
       "jira-get-comments",
       client.getComments(issueId, {
-        params: { ...request, orderBy: "created", expand: "properties" }
+        params: {
+          startAt: request.startAt,
+          maxResults: request.maxResults,
+          orderBy: request.order === "newest" ? "-created" : "created",
+          expand: "properties"
+        }
       })
     ),
   getChangelogs: (issueId, request) =>

@@ -710,6 +710,69 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("searches newest Jira comments when reconciliation is page-bounded", () =>
+    Effect.gen(function*() {
+      const includeMatch = yield* Ref.make(true)
+      const requests = yield* Ref.make<ReadonlyArray<JiraPageRequest>>([])
+      const oldComment = { id: "c-old", body: "Older comment" }
+      const matchingComment = {
+        id: "c-new",
+        body: addedCommentBody,
+        properties: [{
+          key: "dev.knpkv.control-center.idempotency",
+          value: "jira-governed-action-1"
+        }]
+      }
+      return yield* withConnection(
+        baseProvider({
+          getComments: (_issueId, request) =>
+            Effect.gen(function*() {
+              yield* Ref.update(requests, (current) => [...current, request])
+              const newestFirst = (yield* Ref.get(includeMatch))
+                ? [matchingComment, oldComment]
+                : [oldComment]
+              const ordered = request.order === "newest" ? newestFirst : [...newestFirst].reverse()
+              return {
+                comments: ordered.slice(request.startAt, request.startAt + request.maxResults),
+                startAt: request.startAt,
+                maxResults: request.maxResults,
+                total: newestFirst.length
+              }
+            }),
+          addIssueComment: () => Effect.fail(new PluginTimeoutFailure({ operation: "jira-add-comment" }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(addCommentRequest)
+          const authorized = authorizeProposal(proposal)
+          const dispatched = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          if (!Result.isFailure(dispatched) || dispatched.failure._tag !== "PluginUnknownOutcomeFailure") {
+            return yield* Effect.die("expected a reconcilable Jira comment outcome")
+          }
+          const request = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+            reconciliationKey: dispatched.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+
+          const matched = yield* executor.reconcile(request)
+          assert.strictEqual(matched._tag, "succeeded")
+          assert.deepStrictEqual(yield* Ref.get(requests), [{
+            startAt: 0,
+            maxResults: 1,
+            order: "newest"
+          }])
+
+          yield* Ref.set(includeMatch, false)
+          const unmatched = yield* executor.reconcile(request)
+          assert.strictEqual(unmatched._tag, "pending")
+        }),
+        { ...configuration, maximumPages: 1, pageSize: 1 }
+      )
+    }))
+
   it.effect("reconciles a Jira comment with its authorized key after the issue key changes", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)

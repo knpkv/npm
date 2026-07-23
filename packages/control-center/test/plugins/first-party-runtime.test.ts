@@ -684,7 +684,15 @@ describe("first-party plugin runtime", () => {
             }
           } else if (testCase.missing === "none") {
             assert.strictEqual(outcome._tag, "Success")
-            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+            if (outcome._tag === "Success") {
+              const connection = Context.get(outcome.success, PluginConnection)
+              if (
+                testCase.providerId === "jira" &&
+                (testCase.generation === "scoped" || testCase.generation === "scoped-v0.2")
+              ) {
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+              }
+            }
           } else {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure") {

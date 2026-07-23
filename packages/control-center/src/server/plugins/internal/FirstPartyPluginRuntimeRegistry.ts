@@ -744,7 +744,15 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
     makeJiraReadPluginRuntime(
       configurationInput,
       authMode.value === "oauth" ? configuration.siteId : null
-    ).pipe(Effect.map(({ layer }) => layer))
+    ).pipe(
+      Effect.map(({ definition }) =>
+        buildPluginDefinitionLayerFromNegotiatedDescriptor(
+          definition,
+          configurationInput,
+          loaded.descriptor
+        )
+      )
+    )
   ).pipe(Layer.provide(client))
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })

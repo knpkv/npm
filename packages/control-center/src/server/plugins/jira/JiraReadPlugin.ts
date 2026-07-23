@@ -779,7 +779,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
       operation: "jira-reconcile-comments",
       configuration,
       load: (page) =>
-        provider.getComments(action.issueId, page).pipe(
+        provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
           Effect.map((response) => ({ values: response.comments, total: response.total }))
         ),
       maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
