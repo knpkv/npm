@@ -11,6 +11,7 @@ const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
     "@aws-sdk/credential-providers": "^3.1085.0",
+    "@effect/ai-openai-compat": "4.0.0-beta.98",
     "@effect/platform-browser": "4.0.0-beta.98",
     "@effect/platform-node": "4.0.0-beta.98",
     "@effect/sql-libsql": "4.0.0-beta.98",

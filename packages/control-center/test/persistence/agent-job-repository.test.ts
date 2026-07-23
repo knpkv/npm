@@ -53,6 +53,7 @@ const enqueueInput = (jobId: typeof JobId.Type, releaseId = RELEASE_ID) => ({
   providerId: PROVIDER_ID,
   model: "fake-model",
   access: READ_ONLY,
+  userPrompt: `Explain ${jobId}`,
   prompt: `Explain ${jobId}`,
   contextFingerprint: FINGERPRINT,
   subjectRevision: "release-revision-7",
@@ -128,7 +129,7 @@ describe("agent job repository", () => {
       yield* setupFoundation
       const oversized = {
         ...enqueueInput(JOB_ID),
-        prompt: "x".repeat(40 * 1_024)
+        userPrompt: "x".repeat(40 * 1_024)
       }
       assert.isTrue(Result.isFailure(
         Schema.decodeUnknownResult(Schema.toType(EnqueueAgentJobInput))(oversized)

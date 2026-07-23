@@ -2,8 +2,13 @@
 export {
   AgentApiGroup,
   AgentHistoryMessage,
+  AgentModelId,
   AgentPrompt,
   AgentProvider,
+  AgentProviderCatalog,
+  AgentProviderCatalogEntry,
+  AgentProviderHealth,
+  AgentSafeProfile,
   DurableAgentProviderId,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,

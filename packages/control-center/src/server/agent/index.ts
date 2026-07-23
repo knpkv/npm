@@ -7,7 +7,11 @@ export {
   type AgentJobWorkerService
 } from "./AgentJobWorker.js"
 export {
+  type AgentProviderRegistryOptions,
+  agentProviderRuntimeRegistryLayer,
   AgentRuntimeRegistry,
   agentRuntimeRegistryLayer,
-  type AgentRuntimeRegistryService
+  type AgentRuntimeRegistryService,
+  type AgentRuntimeSelection,
+  type SelectedAgentRuntime
 } from "./AgentRuntimeRegistry.js"

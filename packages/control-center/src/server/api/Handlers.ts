@@ -941,6 +941,16 @@ export const agentHandlersLayer = HttpApiBuilder.group(
       const agent = yield* ReleaseAgentTurns
       const jobs = yield* ReleaseAgentJobs
       return handlers
+        .handle("providers", () =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* jobs.providers().pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+          }))
         .handle("turn", ({ params, payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

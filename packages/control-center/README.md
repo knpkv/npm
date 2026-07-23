@@ -95,6 +95,30 @@ pnpm --filter @knpkv/control-center start
 
 `CONTROL_CENTER_AGENT_CODEX_EXECUTABLE`, `CONTROL_CENTER_AGENT_CODEX_MODEL`, `CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE`, and `CONTROL_CENTER_AGENT_CLAUDE_MODEL` provide server-only overrides. The respective CLI must already be installed and authenticated for the operating-system user running Control Center. Agent turns have a separate low-rate budget and a 130-second request deadline; each adapter applies a two-minute subprocess deadline and bounded output capture inside that request.
 
+An OpenAI-compatible chat-completions endpoint can be registered independently:
+
+```sh
+CONTROL_CENTER_AGENT_OPENAI_API_URL=https://provider.example/v1 \
+CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
+CONTROL_CENTER_AGENT_OPENAI_API_KEY=server-only-token \
+pnpm --filter @knpkv/control-center start
+```
+
+The API key is optional for trusted local endpoints. Provider credentials, API URLs, executable paths,
+working directories, provider-native values, and raw failures stay behind the server registry. The
+owner-only `GET /api/v1/agent/providers` response exposes only provider identity, configured model
+identifiers, and `available` / `not-configured` health. The enqueue contract accepts only the fixed
+`read-only` safe profile. OpenAI-compatible generation has an interruptible two-minute deadline; tests
+may inject a shorter deadline without using host timers.
+
+Durable enqueue requests must explicitly select the provider, one catalog model, and the `read-only`
+profile. The selection is validated fail-closed before enqueue and persisted in the existing job
+`provider_id`, `model`, and `access` fields. The provider receives a bounded frozen projection containing
+the release identity, service, version, lifecycle, freshness, collaborators, and other safe release facts;
+the replay stream retains the original user question. Legacy jobs with no persisted model resolve to the
+single configured catalog model at the registry boundary. A workspace-wide default is deliberately
+deferred to the revision-protected settings work in M5.2; there is no M4.3 schema migration.
+
 If the first code was lost after the workspace initialized, or no owner session remains, stop the server and run terminal recovery against the same data root:
 
 ```sh

@@ -551,6 +551,9 @@ importers:
       '@distilled.cloud/aws':
         specifier: 0.29.1
         version: 0.29.1(effect@4.0.0-beta.98)
+      '@effect/ai-openai-compat':
+        specifier: 4.0.0-beta.98
+        version: 4.0.0-beta.98(effect@4.0.0-beta.98)
       '@effect/platform-browser':
         specifier: 4.0.0-beta.98
         version: 4.0.0-beta.98(effect@4.0.0-beta.98)
@@ -1454,6 +1457,11 @@ packages:
   '@edge-runtime/vm@5.0.0':
     resolution: {integrity: sha512-NKBGBSIKUG584qrS1tyxVpX/AKJKQw5HgjYEnPLC0QsTw79JrGn+qUr8CXFb955Iy7GUdiiUv1rJ6JBGvaKb6w==}
     engines: {node: '>=18'}
+
+  '@effect/ai-openai-compat@4.0.0-beta.98':
+    resolution: {integrity: sha512-ittDFm4/oXpXnTIP9efTDkzC2RAgWHyzNQjEz4msIHgMiQRnvbrcaRWxLJIHfZnPO2eE7w4zDBsH8J+f5AK4UA==}
+    peerDependencies:
+      effect: 4.0.0-beta.98
 
   '@effect/atom-react@4.0.0-beta.98':
     resolution: {integrity: sha512-M7BMiXyJZ1sSOwkipkF8/yNYoAp5WA6xhD0u8wobI6h9OIQp5oxx+AvE4FCj0wmfexAsUZPfZ4McCXstXYskbg==}
@@ -8437,6 +8445,10 @@ snapshots:
     dependencies:
       '@edge-runtime/primitives': 6.0.0
     optional: true
+
+  '@effect/ai-openai-compat@4.0.0-beta.98(effect@4.0.0-beta.98)':
+    dependencies:
+      effect: 4.0.0-beta.98
 
   '@effect/atom-react@4.0.0-beta.98(effect@4.0.0-beta.98)(react@19.2.7)(scheduler@0.27.0)':
     dependencies:

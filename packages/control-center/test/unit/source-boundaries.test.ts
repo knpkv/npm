@@ -15,7 +15,7 @@ describe("Control Center source boundaries", () => {
   })
 
   it("keeps local AI provider packages behind the release-agent adapter", () => {
-    const reason = "only the release-agent application adapter can import local AI provider packages"
+    const reason = "only reviewed server agent adapters can import AI provider packages"
     expect(
       inspectSourceBoundaries(
         "src/client/AgentPage.tsx",
@@ -38,6 +38,22 @@ describe("Control Center source boundaries", () => {
         "import { model } from \"@knpkv/ai-codex\""
       )
     ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/agent/AgentRuntimeRegistry.ts",
+        "import * as OpenAiClient from \"@effect/ai-openai-compat/OpenAiClient\""
+      )
+    ).toEqual([])
+    expect(
+      inspectSourceBoundaries(
+        "src/server/api/Handlers.ts",
+        "import * as OpenAiClient from \"@effect/ai-openai-compat/OpenAiClient\""
+      )
+    ).toContainEqual({
+      importPath: "@effect/ai-openai-compat/OpenAiClient",
+      reason,
+      sourcePath: "src/server/api/Handlers.ts"
+    })
   })
 
   it("keeps Confluence provider packages behind the isolated adapter", () => {

@@ -47,7 +47,7 @@ const PersistedDigest = Schema.String.check(
 )
 
 const UserMessagePayload = Schema.Struct({
-  prompt: EnqueueAgentJobInput.fields.prompt
+  prompt: EnqueueAgentJobInput.fields.userPrompt
 })
 
 const JobQueuedPayload = Schema.Struct({
@@ -590,7 +590,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
           jobId: request.jobId,
           attemptSequence: null,
           eventKind: "user-message",
-          payload: { prompt: request.prompt },
+          payload: { prompt: request.userPrompt },
           payloadSchema: UserMessagePayload,
           occurredAt: request.createdAt
         })

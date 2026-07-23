@@ -419,6 +419,7 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(
       Object.entries(AgentApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
+        ["providers", "GET", "/api/v1/agent/providers"],
         ["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"],
         ["enqueueJob", "POST", "/api/v1/agent/releases/:releaseId/jobs"],
         ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"]
@@ -529,6 +530,7 @@ describe("ControlCenterApi contract", () => {
       exportJson: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(AgentApiGroup.endpoints), {
+      providers: [SessionCookieAuth.key],
       turn: [SessionCookieAuth.key, SessionMutationAuth.key],
       enqueueJob: [SessionCookieAuth.key, SessionMutationAuth.key],
       replayThread: [SessionCookieAuth.key]

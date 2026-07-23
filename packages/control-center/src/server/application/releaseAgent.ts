@@ -3,11 +3,18 @@ import { model as codexModel } from "@knpkv/ai-codex"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import type * as Redacted from "effect/Redacted"
 import * as Semaphore from "effect/Semaphore"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-import type { AgentHistoryMessage, AgentPrompt, AgentProvider, ReleaseAgentTurnResponse } from "../../api/agent.js"
+import type {
+  AgentHistoryMessage,
+  AgentModelId,
+  AgentPrompt,
+  AgentProvider,
+  ReleaseAgentTurnResponse
+} from "../../api/agent.js"
 import type { PortfolioReleaseSummary } from "../../api/portfolio.js"
 import {
   ApplicationResourceNotFound,
@@ -26,9 +33,14 @@ export interface ReleaseAgentRuntimeOptions {
   readonly cwd: string
   readonly enabledProviders: ReadonlyArray<AgentProvider>
   readonly codexExecutable?: string
-  readonly codexModel?: string
+  readonly codexModel?: AgentModelId
   readonly claudeExecutable?: string
-  readonly claudeModel?: string
+  readonly claudeModel?: AgentModelId
+  readonly openAiCompatible?: {
+    readonly apiKey?: Redacted.Redacted<string>
+    readonly apiUrl: string
+    readonly model: AgentModelId
+  }
 }
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })

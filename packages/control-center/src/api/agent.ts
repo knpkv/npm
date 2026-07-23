@@ -25,6 +25,7 @@ const MAXIMUM_HISTORY_CONTENT_LENGTH = 64_000
 const MAXIMUM_REPLY_LENGTH = 32_000
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
 const MAXIMUM_THREAD_EVENT_PAGE_SIZE = 128
+const MAXIMUM_AGENT_MODELS_PER_PROVIDER = 32
 
 /** Bounded current instruction sent to the release-aware model. */
 export const AgentPrompt = Schema.String.check(
@@ -57,6 +58,59 @@ export const DurableAgentProviderId = Schema.String.check(
 
 /** Decoded provider-neutral durable runtime identity. */
 export type DurableAgentProviderId = typeof DurableAgentProviderId.Type
+
+/** Bounded browser-safe model identifier accepted by the provider registry. */
+export const AgentModelId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200)
+).pipe(Schema.brand("AgentModelId"))
+
+/** Decoded browser-safe agent model identifier. */
+export type AgentModelId = typeof AgentModelId.Type
+
+/** Safe execution profile whose persisted representation is the existing read-only access mode. */
+export const AgentSafeProfile = Schema.Literal("read-only")
+
+/** Decoded safe execution profile. */
+export type AgentSafeProfile = typeof AgentSafeProfile.Type
+
+/** Redacted provider health; configuration and transport diagnostics remain server-only. */
+export const AgentProviderHealth = Schema.Literals(["available", "not-configured"])
+
+/** Decoded redacted provider health. */
+export type AgentProviderHealth = typeof AgentProviderHealth.Type
+
+/** Browser-safe catalog entry for one server-owned agent provider. */
+export const AgentProviderCatalogEntry = Schema.Struct({
+  providerId: DurableAgentProviderId,
+  models: Schema.Array(AgentModelId).check(
+    Schema.makeFilter((models) => models.length <= MAXIMUM_AGENT_MODELS_PER_PROVIDER, {
+      expected: `at most ${MAXIMUM_AGENT_MODELS_PER_PROVIDER} agent models`
+    }),
+    Schema.isUnique()
+  ),
+  health: AgentProviderHealth
+})
+
+/** Decoded browser-safe provider catalog entry. */
+export type AgentProviderCatalogEntry = typeof AgentProviderCatalogEntry.Type
+
+/** Redacted catalog for the fixed server-side provider registry. */
+export const AgentProviderCatalog = Schema.Struct({
+  providers: Schema.Array(AgentProviderCatalogEntry).check(
+    Schema.makeFilter((providers) => providers.length <= 3, {
+      expected: "at most three agent providers"
+    }),
+    Schema.makeFilter(
+      (providers) => new Set(providers.map(({ providerId }) => providerId)).size === providers.length,
+      { expected: "unique agent provider identifiers" }
+    )
+  )
+})
+
+/** Decoded redacted provider catalog. */
+export type AgentProviderCatalog = typeof AgentProviderCatalog.Type
 
 /** Prompt guaranteed to fit the durable user-message event envelope. */
 export const DurableAgentPrompt = Schema.String.check(
@@ -214,8 +268,10 @@ export type ReleaseAgentThreadEvent = typeof ReleaseAgentThreadEvent.Type
 /** Bounded request to enqueue one durable read-only release-agent job. */
 export const EnqueueReleaseAgentJobRequest = Schema.Struct({
   providerId: DurableAgentProviderId,
-  prompt: DurableAgentPrompt
-}).annotate({ identifier: "EnqueueReleaseAgentJobRequest" })
+  model: AgentModelId,
+  profile: AgentSafeProfile,
+  prompt: DurableAgentPrompt.check(Schema.isMaxLength(2_500))
+})
 
 /** Decoded durable release-agent enqueue request. */
 export type EnqueueReleaseAgentJobRequest = typeof EnqueueReleaseAgentJobRequest.Type
@@ -298,8 +354,20 @@ const replayThread = HttpApiEndpoint.get("replayThread", "/releases/:releaseId/t
   ]
 }).middleware(SessionCookieAuth)
 
+const providers = HttpApiEndpoint.get("providers", "/providers", {
+  success: AgentProviderCatalog,
+  error: [
+    UnauthorizedApiError,
+    ForbiddenApiError,
+    RequestTimedOutApiError,
+    RateLimitedApiError,
+    ServiceUnavailableApiError
+  ]
+}).middleware(SessionCookieAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
+  .add(providers)
   .add(turn)
   .add(enqueueJob)
   .add(replayThread)
