@@ -1936,6 +1936,7 @@ describe("normalized plugin page materialization", () => {
       }
       assert.strictEqual(timeEntryProjection.value.projection.projectionRevision, 2)
       assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 2)
+      assert.strictEqual(timeEntryProjection.value.projection.sourceEntityRevision, 1)
       if (timeEntryProjection.value.projection.details._tag !== "time-entry") {
         return yield* Effect.die("expected time-entry backfill details")
       }
@@ -1947,6 +1948,99 @@ describe("normalized plugin page materialization", () => {
       const currentTimeEntry = yield* materializeNormalizedPluginPage(timeEntryScope, timeEntryPage)
       assert.strictEqual(currentTimeEntry.acceptedEventCount, 0)
       assert.strictEqual(currentTimeEntry.entityProjectionCount, 0)
+      const persistedTimeEntry = yield* persistence.entities.get(WORKSPACE_ID, timeEntryEntityId)
+      assert.strictEqual(persistedTimeEntry.revision, 1)
+
+      const newerTimeEntryEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000259")
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId: newerTimeEntryEntityId,
+        entityType: "time-entry",
+        sourceRevision: Schema.decodeSync(SourceRevision)({
+          providerId: "clockify",
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          vendorImmutableId: "time-entry-newer",
+          revision: "time-entry-revision-2",
+          sourceUrl: "https://app.clockify.me/tracker",
+          firstObservedAt: "2026-07-19T09:02:00.000Z",
+          lastObservedAt: "2026-07-19T09:02:00.000Z",
+          synchronizedAt: "2026-07-19T09:02:00.000Z",
+          normalizationSchemaVersion: 1
+        }),
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId: newerTimeEntryEntityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-newer",
+            title: "Current entry",
+            details: {
+              _tag: "time-entry",
+              durationMinutes: 30,
+              billable: true,
+              approvalState: "approved"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const olderTimeEntryStreamKey = Schema.decodeSync(PluginStreamKey)("time-entry-older-replay")
+      const olderTimeEntryPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "time-entry-older-replay",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "time-entry-older-replay",
+          observedAt: "2026-07-19T08:30:00.000Z",
+          revision: "time-entry-revision-1",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-entry-newer",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "Older entry",
+          attributes: { durationMinutes: 15, billable: true }
+        }]
+      })
+      yield* persistence.pluginRuntime.commitNormalizedPageReceipt(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        olderTimeEntryStreamKey,
+        0,
+        olderTimeEntryPage,
+        T2,
+        { _tag: "healthy", checkedAt: T2 }
+      )
+      const olderReplay = yield* materializeNormalizedPluginPage({
+        ...timeEntryScope,
+        streamKey: olderTimeEntryStreamKey
+      }, olderTimeEntryPage)
+      assert.strictEqual(olderReplay.acceptedEventCount, 0)
+      assert.strictEqual(olderReplay.entityProjectionCount, 0)
+      const unchangedNewerProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: newerTimeEntryEntityId,
+        revision: null
+      })
+      if (unchangedNewerProjection._tag !== "entityProjection") {
+        return yield* Effect.die("expected unchanged newer time entry")
+      }
+      assert.strictEqual(unchangedNewerProjection.value.projection.projectionRevision, 1)
+      assert.strictEqual(unchangedNewerProjection.value.projection.projectionSchemaVersion, 1)
+      assert.strictEqual(
+        (yield* persistence.entities.get(WORKSPACE_ID, newerTimeEntryEntityId)).sourceRevision.revision,
+        "time-entry-revision-2"
+      )
 
       const issueEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000257")
       const issueSourceRevision = Schema.decodeSync(SourceRevision)({
@@ -2022,6 +2116,47 @@ describe("normalized plugin page materialization", () => {
       })
       if (currentIssue._tag !== "entityProjection") return yield* Effect.die("expected current issue projection")
       assert.strictEqual(currentIssue.value.projection.projectionRevision, 1)
+    })))
+
+  it.effect("rejects a Clockify interval whose end precedes its start", () =>
+    withMaterializer(Effect.gen(function*() {
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const failure = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          providerId: "clockify",
+          streamKey: Schema.decodeSync(PluginStreamKey)("time-entry-backward-interval"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "time-entry-backward-interval",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "time-entry-backward-interval",
+            observedAt: "2026-07-19T10:00:00.000Z",
+            revision: "time-entry-backward-interval-1",
+            entityType: "clockify.time-entry",
+            vendorImmutableId: "time-entry-backward-interval",
+            sourceUrl: null,
+            title: "Backward interval",
+            attributes: {
+              interval: {
+                start: "2026-07-19T10:00:00.000Z",
+                end: "2026-07-19T09:00:00.000Z"
+              }
+            }
+          }]
+        })
+      ).pipe(Effect.flip)
+      if (failure._tag !== "NormalizedPluginPageMaterializationError") {
+        return yield* Effect.die("expected backward Clockify interval failure")
+      }
+      assert.strictEqual(failure.diagnosticCode, "normalized-time-entry-timestamp-invalid")
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>

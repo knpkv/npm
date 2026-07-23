@@ -487,6 +487,11 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         event.eventId,
         "normalized-time-entry-timestamp-invalid"
       )
+      if (
+        startedAt !== null &&
+        endedAt !== null &&
+        DateTime.Order(endedAt, startedAt) < 0
+      ) return yield* malformed("normalized-time-entry-timestamp-invalid", event.eventId)
       const userId = optionalBounded(attributes.userId, 512)
       const projectId = optionalBounded(attributes.projectId, 512)
       const intervalMinutes = startedAt === null || endedAt === null
@@ -674,7 +679,7 @@ const requiresProjectionSchemaBackfill = Effect.fn(
   const kind = canonicalKind(event.entityType)
   if (kind !== "time-entry") return false
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
-  if (existing === null) return false
+  if (existing === null || existing.sourceRevision.revision !== event.revision) return false
   const currentProjection = yield* readProjection(persistence, scope.workspaceId, existing.entityId)
   return currentProjection?.projection.entityState === "present" &&
     currentProjection.projection.projectionSchemaVersion < projectionSchemaVersion(kind)
@@ -905,7 +910,8 @@ const materializeUpsertEntity = Effect.fn(
   scope: NormalizedPluginPageMaterializationScope,
   event: EntityUpsert,
   siblingEvents: ReadonlyArray<NormalizedPluginEventV1>,
-  forceProjection: boolean
+  forceProjection: boolean,
+  preserveSourceRevision: boolean
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
@@ -968,6 +974,8 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
+    : preserveSourceRevision && existing.sourceRevision.revision === event.revision
+    ? existing
     : effectiveForceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
     ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
@@ -1661,6 +1669,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       ...backfillEntityEvents,
       ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
     ]
+    const backfillEntityEventIds = new Set(backfillEntityEvents.map(({ eventId }) => eventId))
     const forcedPipelineExecutionEventIds = new Set(affectedExecutions.map(({ eventId }) => eventId))
     let entityProjectionCount = 0
     let evidenceClaimCount = 0
@@ -1680,13 +1689,17 @@ export const materializeNormalizedPluginPage = Effect.fn(
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
           continue
         }
+        const schemaBackfill = backfillEntityEventIds.has(event.eventId)
+        const forcedPipelineProjection = event.entityType === "aws.codepipeline.execution" &&
+          forcedPipelineExecutionEventIds.has(event.eventId)
         const receipt = yield* materializeUpsertEntity(
           persistence,
           cryptoService,
           scope,
           event,
           event.entityType === "aws.codepipeline.execution" ? pipelineEvents : acceptedEvents,
-          event.entityType === "aws.codepipeline.execution" && forcedPipelineExecutionEventIds.has(event.eventId)
+          forcedPipelineProjection || schemaBackfill,
+          schemaBackfill
         )
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount
