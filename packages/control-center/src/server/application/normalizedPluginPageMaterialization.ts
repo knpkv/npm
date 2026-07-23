@@ -630,8 +630,13 @@ const mergedPageContributors = (
   current: PageDetails["contributors"],
   incoming: PageDetails["contributors"],
   incomingWatchersComplete: boolean
-): PageDetails["contributors"] => {
-  if (current === undefined && incoming === undefined) return undefined
+): {
+  readonly contributors: PageDetails["contributors"]
+  readonly watcherCoverageTruncated: boolean
+} => {
+  if (current === undefined && incoming === undefined) {
+    return { contributors: undefined, watcherCoverageTruncated: false }
+  }
   const contributors = new Map<string, NonNullable<PageDetails["contributors"]>[number]>()
   const merge = (contributor: NonNullable<PageDetails["contributors"]>[number]): void => {
     const previous = contributors.get(contributor.sourcePersonId)
@@ -651,7 +656,16 @@ const mergedPageContributors = (
     if (roles.length > 0) merge({ ...contributor, roles })
   }
   for (const contributor of incoming ?? []) merge(contributor)
-  return [...contributors.values()]
+  const prioritized = [...contributors.values()].sort((left, right) => {
+    const leftWatcherOnly = left.roles.every((role) => role === "watcher")
+    const rightWatcherOnly = right.roles.every((role) => role === "watcher")
+    return Number(leftWatcherOnly) - Number(rightWatcherOnly)
+  })
+  const dropped = prioritized.slice(502)
+  return {
+    contributors: prioritized.slice(0, 502),
+    watcherCoverageTruncated: dropped.some(({ roles }) => roles.every((role) => role === "watcher"))
+  }
 }
 
 const mergePartialPageAttachments = (
@@ -675,24 +689,61 @@ const mergePartialPageVersions = (
   return [...versions.values()].sort((left, right) => right.number - left.number).slice(0, 500)
 }
 
+const pageRevisionNumber = (revision: PageDetails["revision"]): number | null => {
+  const versionNumber = Number(revision)
+  return Number.isSafeInteger(versionNumber) && versionNumber > 0 ? versionNumber : null
+}
+
+const accuratePageVersionHistory = (details: PageDetails): PageDetails => {
+  if (details.versionHistory?.complete !== true) return details
+  const currentVersionNumber = pageRevisionNumber(details.revision)
+  if (
+    currentVersionNumber === null ||
+    details.versions?.some(({ number }) => number === currentVersionNumber) === true
+  ) return details
+  return { ...details, versionHistory: { ...details.versionHistory, complete: false } }
+}
+
 const mergeCompletePageVersions = (
   current: PageDetails["versions"],
   incoming: PageDetails["versions"],
+  versionHistory: PageDetails["versionHistory"],
   currentRevision: PageDetails["revision"]
-): PageDetails["versions"] => {
-  if (current === undefined || incoming === undefined) return incoming
-  const currentVersionNumber = Number(currentRevision)
-  if (
-    !Number.isSafeInteger(currentVersionNumber) ||
-    currentVersionNumber <= 0 ||
-    incoming.some(({ number }) => number === currentVersionNumber)
-  ) return incoming
+): {
+  readonly versions: PageDetails["versions"]
+  readonly versionHistory: PageDetails["versionHistory"]
+} => {
+  if (current === undefined || incoming === undefined) return { versions: incoming, versionHistory }
+  const currentVersionNumber = pageRevisionNumber(currentRevision)
+  if (currentVersionNumber === null || incoming.some(({ number }) => number === currentVersionNumber)) {
+    return { versions: incoming, versionHistory }
+  }
   const currentVersion = current.find(({ number }) => number === currentVersionNumber)
-  return currentVersion === undefined ? incoming : mergePartialPageVersions([currentVersion], incoming)
+  if (currentVersion === undefined) {
+    return {
+      versions: incoming,
+      versionHistory: versionHistory === undefined ? undefined : { ...versionHistory, complete: false }
+    }
+  }
+  const overflowed = incoming.length >= 500
+  const versions = overflowed
+    ? [
+      currentVersion,
+      ...[...incoming]
+        .sort((left, right) => right.number - left.number)
+        .slice(0, 499)
+    ].sort((left, right) => right.number - left.number)
+    : mergePartialPageVersions([currentVersion], incoming)
+  return {
+    versions,
+    versionHistory: overflowed && versionHistory !== undefined
+      ? { ...versionHistory, complete: false }
+      : versionHistory
+  }
 }
 
 const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetails): PageDetails => {
-  const contributors = mergedPageContributors(
+  const contributorMerge = mergedPageContributors(
     current.contributors,
     incoming.contributors,
     incoming.watcherInventory?.complete === true
@@ -702,15 +753,31 @@ const mergeSameRevisionPageDetails = (current: PageDetails, incoming: PageDetail
   const attachments = incoming.attachmentInventory?.complete === false
     ? mergePartialPageAttachments(current.attachments, incoming.attachments)
     : incoming.attachments
-  const versions = incoming.versionHistory?.complete === false
-    ? mergePartialPageVersions(current.versions, incoming.versions)
-    : mergeCompletePageVersions(current.versions, incoming.versions, incoming.revision)
+  const versionMerge = incoming.versionHistory?.complete === false
+    ? {
+      versions: mergePartialPageVersions(current.versions, incoming.versions),
+      versionHistory: incoming.versionHistory
+    }
+    : mergeCompletePageVersions(
+      current.versions,
+      incoming.versions,
+      incoming.versionHistory,
+      incoming.revision
+    )
+  const watcherInventory = contributorMerge.watcherCoverageTruncated
+    ? {
+      complete: false,
+      pagesFetched: incoming.watcherInventory?.pagesFetched ?? current.watcherInventory?.pagesFetched ?? 0
+    }
+    : incoming.watcherInventory
   const merged: PageDetails = {
     ...current,
     ...incoming,
-    ...(contributors === undefined ? {} : { contributors }),
+    ...(contributorMerge.contributors === undefined ? {} : { contributors: contributorMerge.contributors }),
     ...(attachments === undefined ? {} : { attachments }),
-    ...(versions === undefined ? {} : { versions })
+    ...(versionMerge.versions === undefined ? {} : { versions: versionMerge.versions }),
+    ...(versionMerge.versionHistory === undefined ? {} : { versionHistory: versionMerge.versionHistory }),
+    ...(watcherInventory === undefined ? {} : { watcherInventory })
   }
   return preserveLoadedContent ? { ...merged, content: current.content ?? null, contentState: "loaded" } : merged
 }
@@ -803,6 +870,8 @@ const materializeUpsertEntity = Effect.fn(
   const effectivePresentation =
     sameRevisionPage && currentDetails?._tag === "page" && presentation.details._tag === "page"
       ? { ...presentation, details: mergeSameRevisionPageDetails(currentDetails, presentation.details) }
+      : presentation.details._tag === "page"
+      ? { ...presentation, details: accuratePageVersionHistory(presentation.details) }
       : presentation
   const pageEnrichment = sameRevisionPage &&
     currentDetails?._tag === "page" &&

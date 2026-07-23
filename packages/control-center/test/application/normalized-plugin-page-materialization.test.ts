@@ -4986,6 +4986,112 @@ describe("normalized plugin page materialization", () => {
       if (nextRevision?.details._tag !== "page") return yield* Effect.die("expected the next page revision")
       assert.strictEqual(nextRevision.details.contentState, "loaded")
       assert.isNull(nextRevision.details.content)
+      assert.isTrue(nextRevision.details.versionHistory?.complete)
+
+      const historyVersion = (number: number) => ({
+        number,
+        createdAt: "2026-07-19T09:06:00.000Z",
+        message: null,
+        minorEdit: false,
+        authorId: "account-ada"
+      })
+      const maximumRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...nextRevisionAttributes,
+        currentVersion: 501,
+        updatedAt: "2026-07-19T09:07:00.000Z",
+        versions: [historyVersion(501)]
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 12, committedAt: T4 },
+        normalizedPage("maximum-revision", maximumRevisionAttributes, "501")
+      )
+      const boundedCompleteHistoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...maximumRevisionAttributes,
+        versions: Array.from({ length: 499 }, (_, index) => historyVersion(index + 1)),
+        versionHistory: { complete: true, pagesFetched: 5 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 13, committedAt: T4 },
+        normalizedPage("bounded-complete-history", boundedCompleteHistoryAttributes, "501")
+      )
+      const boundedCompleteHistory = yield* exactFirstProjection()
+      if (boundedCompleteHistory?.details._tag !== "page") {
+        return yield* Effect.die("expected a bounded complete page history")
+      }
+      assert.lengthOf(boundedCompleteHistory.details.versions ?? [], 500)
+      assert.include(boundedCompleteHistory.details.versions?.map(({ number }) => number) ?? [], 501)
+      assert.isTrue(boundedCompleteHistory.details.versionHistory?.complete)
+
+      const overflowingHistoryAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...boundedCompleteHistoryAttributes,
+        versions: Array.from({ length: 500 }, (_, index) => historyVersion(index + 1))
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 14, committedAt: T4 },
+        normalizedPage("overflowing-complete-history", overflowingHistoryAttributes, "501")
+      )
+      const overflowingHistory = yield* exactFirstProjection()
+      if (overflowingHistory?.details._tag !== "page") {
+        return yield* Effect.die("expected an overflowed page history")
+      }
+      assert.lengthOf(overflowingHistory.details.versions ?? [], 500)
+      assert.include(overflowingHistory.details.versions?.map(({ number }) => number) ?? [], 501)
+      assert.isFalse(overflowingHistory.details.versionHistory?.complete)
+
+      const boundedContributors = [
+        owner,
+        ...Array.from(
+          { length: 501 },
+          (_, index) =>
+            contributor(`account-owner-${String(index).padStart(3, "0")}`, `Owner ${String(index)}`, ["owner"])
+        )
+      ]
+      const boundedContributorAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...overflowingHistoryAttributes,
+        contributors: boundedContributors,
+        watcherInventory: { complete: false, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 15, committedAt: T4 },
+        normalizedPage("bounded-contributors", boundedContributorAttributes, "501")
+      )
+      const overflowContributor = contributor("account-overflow-watcher", "Overflow Watcher", ["watcher"])
+      const overflowingContributorAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...overflowingHistoryAttributes,
+        contributors: [overflowContributor],
+        watcherInventory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 16, committedAt: T4 },
+        normalizedPage("overflowing-contributors", overflowingContributorAttributes, "501")
+      )
+      const afterContributorOverflow = yield* exactFirstProjection()
+      if (afterContributorOverflow?.details._tag !== "page") {
+        return yield* Effect.die("expected bounded contributors after same-revision enrichment")
+      }
+      assert.lengthOf(afterContributorOverflow.details.contributors ?? [], 502)
+      assert.notInclude(
+        afterContributorOverflow.details.contributors?.map(({ sourcePersonId }) => sourcePersonId) ?? [],
+        "account-overflow-watcher"
+      )
+      assert.isFalse(afterContributorOverflow.details.watcherInventory?.complete)
+
+      const currentlessNewRevisionAttributes = Schema.decodeSync(ConfluencePageAttributesV1)({
+        ...maximumRevisionAttributes,
+        currentVersion: 502,
+        updatedAt: "2026-07-19T09:08:00.000Z",
+        versions: [historyVersion(501)],
+        versionHistory: { complete: true, pagesFetched: 1 }
+      })
+      yield* materializeNormalizedPluginPage(
+        { ...scope, expectedRevision: 17, committedAt: T4 },
+        normalizedPage("currentless-new-revision", currentlessNewRevisionAttributes, "502")
+      )
+      const currentlessNewRevision = yield* exactFirstProjection()
+      if (currentlessNewRevision?.details._tag !== "page") {
+        return yield* Effect.die("expected a current-less new page revision")
+      }
+      assert.isFalse(currentlessNewRevision.details.versionHistory?.complete)
     })))
 
   it.effect("rolls back the checkpoint and canonical writes when materialization fails", () =>

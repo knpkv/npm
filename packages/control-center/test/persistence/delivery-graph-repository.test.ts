@@ -1121,6 +1121,49 @@ describe("DeliveryGraphRepository", () => {
       })
     ))
 
+  it.effect("quarantines malformed Confluence owner source identities", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        const quarantine = yield* QuarantineRepository
+        yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* database.sql`UPDATE entities
+          SET plugin_connection_id = ${OTHER_PLUGIN_ID}, provider_id = 'confluence'
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}`
+        yield* database.sql`PRAGMA ignore_check_constraints = ON`
+        yield* database.sql`INSERT INTO person_identities (
+            workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+          ) VALUES (
+            ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${OTHER_PLUGIN_ID}, 'confluence',
+            ' account-avery ', ${CREATED_AT}
+          )`
+        yield* database.sql`PRAGMA ignore_check_constraints = OFF`
+
+        const result = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, PersistedRecordError)
+          assert.deepInclude(result.failure, {
+            recordKind: "person",
+            recordKey: OWNER_PERSON_ID,
+            diagnosticCode: "person-schema-invalid"
+          })
+        }
+        const records = yield* quarantine.list(WORKSPACE_A)
+        assert.deepInclude(records.find(({ recordKind }) => recordKind === "person"), {
+          recordKind: "person",
+          recordKey: OWNER_PERSON_ID,
+          diagnosticCode: "person-schema-invalid"
+        })
+      })
+    ))
+
   it.effect("redacts page bodies in repository summaries while retaining exact entity content", () =>
     withRepository(
       Effect.gen(function*() {

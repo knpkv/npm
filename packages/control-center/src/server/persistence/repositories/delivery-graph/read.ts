@@ -414,7 +414,10 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           )
           ORDER BY identity.vendor_person_id
           LIMIT 16`
-        const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows)
+        const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows).pipe(
+          Effect.mapError(() => graphRecordError(workspaceId, "person", owner.personId, "person-schema-invalid")),
+          captureMalformedDeliveryGraphRow(identityRows)
+        )
         return sourceIdentities.length === 0 ? decoded : { ...decoded, sourceIdentities }
       }))
     return { owners, ownersTruncated: candidates.length > 20 }
