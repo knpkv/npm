@@ -38,6 +38,7 @@ export const WorkspaceScrollRestoration = (): ReactElement => {
   useEffect(() => {
     const target = savedWorkspaceScrollPositions.get(key)
     if (target === undefined || target === 0) return
+    savedWorkspaceScrollPositions.delete(key)
     let frame = 0
     let requestId = 0
     const restore = (): void => {

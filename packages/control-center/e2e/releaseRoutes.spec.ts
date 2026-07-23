@@ -483,6 +483,15 @@ test("restores the exact release scroll position after a canonical entity round 
 
   await expect(page).toHaveURL(fullPath)
   await expect.poll(() => page.evaluate<number>("window.scrollY")).toBeGreaterThanOrEqual(releaseScrollPosition - 2)
+
+  await page.evaluate("window.scrollTo(0, 0)")
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
+  await page.getByRole("link", { name: "Back to overview" }).click()
+  await page.getByRole("button", { name: "Preview Solar Grove" }).click()
+  await page.getByRole("button", { name: "Open Solar Grove full view" }).click()
+
+  await expect(page).toHaveURL(fullPath)
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
 })
 
 test("returns a directly loaded canonical entity to Items", async ({ page }) => {
