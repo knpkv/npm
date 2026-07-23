@@ -18,6 +18,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConfigurationFailure,
   PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
@@ -53,6 +54,25 @@ const JiraProviderIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(512)
 )
+/** Jira identifier that can occupy exactly one generated-client URL path segment. @internal */
+export const JiraProviderPathIdentifier = JiraProviderIdentifier.check(
+  Schema.makeFilter(
+    (value) => value !== "." && value !== ".." && /^[A-Za-z0-9._~-]+$/u.test(value),
+    { expected: "a Jira identifier safe for one URL path segment" }
+  )
+)
+
+/** Decode an untrusted Jira path parameter before crossing the provider boundary. @internal */
+export const decodeJiraProviderPathIdentifier = (
+  value: unknown
+): Effect.Effect<string, PluginConfigurationFailure> =>
+  Schema.decodeUnknownEffect(Schema.toType(JiraProviderPathIdentifier))(value).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "jira-provider-path-identifier-invalid"
+      })
+    )
+  )
 /**
  * Leave room for both issue-key watermarks and timestamps inside the 2,048-character
  * durable plugin checkpoint while accepting Jira cursors beyond identifier bounds.
@@ -103,6 +123,21 @@ export interface JiraIssueTransition {
   readonly toStatusName: string
 }
 
+/** Stable project-version data needed by the governed proposal boundary. @internal */
+export interface JiraProjectVersion {
+  readonly id: string
+  readonly name: string
+  readonly projectId: string | null
+}
+
+/** Stable issue-link type data needed by the governed proposal boundary. @internal */
+export interface JiraIssueLinkType {
+  readonly id: string
+  readonly name: string
+  readonly inward: string
+  readonly outward: string
+}
+
 /** Narrow provider surface required by the production issue-read adapter. @internal */
 export interface JiraReadProvider {
   readonly getCurrentUser: Effect.Effect<JiraApi.User, PluginFailure>
@@ -115,6 +150,10 @@ export interface JiraReadProvider {
     issueId: string,
     request: JiraPageRequest
   ) => Effect.Effect<JiraApi.PageOfComments, PluginFailure>
+  readonly getComment: (
+    issueId: string,
+    commentId: string
+  ) => Effect.Effect<Option.Option<JiraApi.Comment>, PluginFailure>
   readonly getChangelogs: (
     issueId: string,
     request: JiraPageRequest
@@ -138,6 +177,10 @@ export interface JiraReadProvider {
     issueId: string,
     transitionId: string
   ) => Effect.Effect<void, PluginFailure>
+  readonly getProjectVersion: (
+    versionId: string
+  ) => Effect.Effect<Option.Option<JiraProjectVersion>, PluginFailure>
+  readonly getIssueLinkTypes: Effect.Effect<ReadonlyArray<JiraIssueLinkType>, PluginFailure>
 }
 
 const StatusResponse = Schema.Struct({
@@ -239,6 +282,20 @@ const JiraTransitions = Schema.Struct({
     to: Schema.Struct({ id: Schema.String, name: Schema.String })
   })))
 })
+const JiraProjectVersionResponse = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  projectId: Schema.optionalKey(Schema.Number.check(Schema.isInt())),
+  project: Schema.optionalKey(Schema.String)
+})
+const JiraIssueLinkTypes = Schema.Struct({
+  issueLinkTypes: Schema.optionalKey(Schema.Array(Schema.Struct({
+    id: JiraProviderIdentifier,
+    name: JiraProviderIdentifier,
+    inward: JiraProviderIdentifier,
+    outward: JiraProviderIdentifier
+  })))
+})
 
 const escapeJqlString = (value: string): string => value.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")
 
@@ -300,32 +357,63 @@ const decodeProjectIssuePage = Effect.fn("JiraReadProvider.decodeProjectIssuePag
 export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvider => ({
   getCurrentUser: providerCall("jira-current-user", client.getCurrentUser(undefined)),
   getServerInfo: providerCall("jira-server-info", client.getServerInfo(undefined)),
-  getProject: (projectId) => providerCall("jira-get-project", client.getProject(projectId, undefined)),
+  getProject: (projectId) =>
+    decodeJiraProviderPathIdentifier(projectId).pipe(
+      Effect.flatMap((projectId) => providerCall("jira-get-project", client.getProject(projectId, undefined)))
+    ),
   getIssue: (issueId) =>
-    client.getIssue(issueId, { params: { fields: ISSUE_FIELDS } }).pipe(
-      Effect.map(Option.some),
-      Effect.catch((error) =>
-        isNotFound(error)
-          ? Effect.succeed(Option.none())
-          : mapFailure("jira-get-issue", error)
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        client.getIssue(issueId, { params: { fields: ISSUE_FIELDS } }).pipe(
+          Effect.map(Option.some),
+          Effect.catch((error) =>
+            isNotFound(error)
+              ? Effect.succeed(Option.none())
+              : mapFailure("jira-get-issue", error)
+          )
+        )
       )
     ),
   getComments: (issueId, request) =>
-    providerCall(
-      "jira-get-comments",
-      client.getComments(issueId, {
-        params: {
-          startAt: request.startAt,
-          maxResults: request.maxResults,
-          orderBy: request.order === "newest" ? "-created" : "created",
-          expand: "properties"
-        }
-      })
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        providerCall(
+          "jira-get-comments",
+          client.getComments(issueId, {
+            params: {
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              orderBy: request.order === "newest" ? "-created" : "created",
+              expand: "properties"
+            }
+          })
+        )
+      )
+    ),
+  getComment: (issueId, commentId) =>
+    Effect.all([
+      decodeJiraProviderPathIdentifier(issueId),
+      decodeJiraProviderPathIdentifier(commentId)
+    ]).pipe(
+      Effect.flatMap(([issueId, commentId]) =>
+        client.getComment(issueId, commentId, { params: { expand: "properties" } }).pipe(
+          Effect.map(Option.some),
+          Effect.catch((error) =>
+            isNotFound(error)
+              ? Effect.succeed(Option.none())
+              : mapFailure("jira-get-comment", error)
+          )
+        )
+      )
     ),
   getChangelogs: (issueId, request) =>
-    providerCall(
-      "jira-get-changelogs",
-      client.getChangeLogs(issueId, { params: request })
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        providerCall(
+          "jira-get-changelogs",
+          client.getChangeLogs(issueId, { params: request })
+        )
+      )
     ),
   searchProjectIssues: (request) =>
     projectJql(request).pipe(
@@ -345,26 +433,33 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       Effect.flatMap(decodeProjectIssuePage)
     ),
   updateIssueDescription: (issueId, description) =>
-    providerCall(
-      "jira-edit-issue",
-      client.editIssue(issueId, {
-        params: { notifyUsers: true },
-        payload: { fields: { description } }
-      }).pipe(Effect.asVoid)
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        providerCall(
+          "jira-edit-issue",
+          client.editIssue(issueId, {
+            params: { notifyUsers: true },
+            payload: { fields: { description } }
+          }).pipe(Effect.asVoid)
+        )
+      )
     ),
   addIssueComment: (issueId, body, idempotencyKey) =>
-    providerCall(
-      "jira-add-comment",
-      client.addComment(issueId, {
-        payload: {
-          body,
-          properties: [{
-            key: "dev.knpkv.control-center.idempotency",
-            value: idempotencyKey
-          }]
-        }
-      })
-    ).pipe(
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        providerCall(
+          "jira-add-comment",
+          client.addComment(issueId, {
+            payload: {
+              body,
+              properties: [{
+                key: "dev.knpkv.control-center.idempotency",
+                value: idempotencyKey
+              }]
+            }
+          })
+        )
+      ),
       Effect.flatMap(Schema.decodeUnknownEffect(JiraCommentMutationResult)),
       Effect.map((comment) => comment.id),
       Effect.mapError((error) =>
@@ -377,10 +472,13 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       )
     ),
   getIssueTransitions: (issueId) =>
-    providerCall(
-      "jira-get-transitions",
-      client.getTransitions(issueId, undefined)
-    ).pipe(
+    decodeJiraProviderPathIdentifier(issueId).pipe(
+      Effect.flatMap((issueId) =>
+        providerCall(
+          "jira-get-transitions",
+          client.getTransitions(issueId, undefined)
+        )
+      ),
       Effect.flatMap(Schema.decodeUnknownEffect(JiraTransitions)),
       Effect.map((response) =>
         (response.transitions ?? []).map((transition) => ({
@@ -400,10 +498,78 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
       )
     ),
   transitionIssue: (issueId, transitionId) =>
-    providerCall(
-      "jira-transition-issue",
-      client.doTransition(issueId, {
-        payload: { transition: { id: transitionId } }
-      })
+    Effect.all([
+      decodeJiraProviderPathIdentifier(issueId),
+      decodeJiraProviderPathIdentifier(transitionId)
+    ]).pipe(
+      Effect.flatMap(([issueId, transitionId]) =>
+        providerCall(
+          "jira-transition-issue",
+          client.doTransition(issueId, {
+            payload: { transition: { id: transitionId } }
+          })
+        )
+      )
+    ),
+  getProjectVersion: (versionId) =>
+    decodeJiraProviderPathIdentifier(versionId).pipe(
+      Effect.flatMap((versionId) =>
+        client.getVersion(versionId, undefined).pipe(
+          Effect.map((response): Option.Option<unknown> => Option.some(response)),
+          Effect.catch((error) =>
+            isNotFound(error)
+              ? Effect.succeed(Option.none<unknown>())
+              : mapFailure("jira-get-project-version", error)
+          )
+        )
+      ),
+      Effect.flatMap(
+        Option.match({
+          onNone: () => Effect.succeed(Option.none()),
+          onSome: (response) =>
+            Schema.decodeUnknownEffect(JiraProjectVersionResponse)(response).pipe(
+              Effect.mapError(() =>
+                new PluginMalformedResponseFailure({
+                  operation: "jira-get-project-version",
+                  diagnosticCode: "jira-project-version-response-invalid"
+                })
+              ),
+              Effect.flatMap((version) =>
+                version.id === versionId
+                  ? Effect.succeed(version)
+                  : Effect.fail(
+                    new PluginMalformedResponseFailure({
+                      operation: "jira-get-project-version",
+                      diagnosticCode: "jira-project-version-identity-mismatch"
+                    })
+                  )
+              ),
+              Effect.map((version) =>
+                Option.some({
+                  id: version.id,
+                  name: version.name,
+                  projectId: version.projectId === undefined
+                    ? version.project ?? null
+                    : String(version.projectId)
+                })
+              )
+            )
+        })
+      )
+    ),
+  getIssueLinkTypes: providerCall(
+    "jira-get-issue-link-types",
+    client.getIssueLinkTypes(undefined)
+  ).pipe(
+    Effect.flatMap(Schema.decodeUnknownEffect(JiraIssueLinkTypes)),
+    Effect.map((response) => response.issueLinkTypes ?? []),
+    Effect.mapError((error) =>
+      Schema.isSchemaError(error)
+        ? new PluginMalformedResponseFailure({
+          operation: "jira-get-issue-link-types",
+          diagnosticCode: "jira-issue-link-types-response-invalid"
+        })
+        : error
     )
+  )
 })

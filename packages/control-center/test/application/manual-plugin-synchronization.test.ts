@@ -458,12 +458,15 @@ describe("manual plugin synchronization", () => {
         getIssue: () => Effect.succeed(Option.none()),
         getComments: (_issueId, request) =>
           Effect.succeed({ comments: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        getComment: () => Effect.succeed(Option.none()),
         getChangelogs: (_issueId, request) =>
           Effect.succeed({ values: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
         updateIssueDescription: () => Effect.void,
         addIssueComment: () => Effect.succeed("comment-1"),
         getIssueTransitions: () => Effect.succeed([]),
         transitionIssue: () => Effect.void,
+        getProjectVersion: () => Effect.succeed(Option.none()),
+        getIssueLinkTypes: Effect.succeed([]),
         searchProjectIssues: () =>
           Effect.succeed({
             issues: [{

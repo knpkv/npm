@@ -161,6 +161,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/control-center/src/server/plugins/jira/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-jira-path-identifier-schema": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-direct-mutation-proof-read": "error",

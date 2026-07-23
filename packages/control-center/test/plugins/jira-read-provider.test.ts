@@ -3,6 +3,7 @@ import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as TestClock from "effect/testing/TestClock"
@@ -13,8 +14,8 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { makeJiraReadProvider, mapJiraReadProviderFailure } from "../../src/server/plugins/jira/JiraReadProvider.js"
 
-const jiraClientLayer = (
-  body: unknown,
+const jiraClientLayerFromResponse = (
+  responseBody: (request: HttpClientRequest.HttpClientRequest) => unknown,
   requests: Array<HttpClientRequest.HttpClientRequest>
 ) =>
   JiraApiClient.layer.pipe(
@@ -33,7 +34,7 @@ const jiraClientLayer = (
           requests.push(request)
           return HttpClientResponse.fromWeb(
             request,
-            new Response(JSON.stringify(body), {
+            new Response(JSON.stringify(responseBody(request)), {
               status: 200,
               headers: { "content-type": "application/json" }
             })
@@ -42,6 +43,11 @@ const jiraClientLayer = (
       )
     ))
   )
+
+const jiraClientLayer = (
+  body: unknown,
+  requests: Array<HttpClientRequest.HttpClientRequest>
+) => jiraClientLayerFromResponse(() => body, requests)
 
 const rateLimitError = (retryAfter: string): HttpClientError.HttpClientError => {
   const request = HttpClientRequest.get("https://acme.atlassian.net/rest/api/3/issue/PAY-42")
@@ -67,6 +73,117 @@ const mapRateLimit = Effect.fn("JiraReadProviderTest.mapRateLimit")(function*(re
 })
 
 describe("JiraReadProvider", () => {
+  it.effect("loads one exact Jira comment for reply validation", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const comment = yield* provider.getComment("10042", "c17")
+
+      assert.isTrue(Option.isSome(comment))
+      assert.include(requests[0]?.url ?? "", "/rest/api/3/issue/10042/comment/c17")
+      assert.strictEqual(new Map(requests[0]?.urlParams ?? []).get("expand"), "properties")
+    }).pipe(Effect.provide(jiraClientLayer({
+      id: "c17",
+      body: { type: "doc", version: 1, content: [] }
+    }, requests)))
+  })
+
+  it.effect("rejects unsafe Jira path identifiers before generated-client requests", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getIssue("../issueLinkType").pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+      }
+      assert.strictEqual(requests.length, 0)
+    }).pipe(Effect.provide(jiraClientLayer({}, requests)))
+  })
+
+  it.effect("loads only the requested Jira project versions by direct ID", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const versions = yield* Effect.forEach(
+        ["2026.31", "2026.30"],
+        provider.getProjectVersion
+      )
+
+      assert.deepStrictEqual(versions, [
+        Option.some({ id: "2026.31", name: "August 2026", projectId: "10" }),
+        Option.some({ id: "2026.30", name: "July 2026", projectId: "10" })
+      ])
+      assert.deepStrictEqual(
+        requests.map(({ url }) => new URL(url).pathname),
+        ["/rest/api/3/version/2026.31", "/rest/api/3/version/2026.30"]
+      )
+      assert.isFalse(requests.some(({ url }) => url.includes("/project/10/versions")))
+    }).pipe(Effect.provide(jiraClientLayerFromResponse(
+      (request) =>
+        request.url.endsWith("/2026.31")
+          ? { id: "2026.31", name: "August 2026", projectId: 10 }
+          : { id: "2026.30", name: "July 2026", projectId: 10 },
+      requests
+    )))
+  })
+
+  it.effect("rejects a Jira version response with an unsafe numeric project ID", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getProjectVersion("v").pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+        if (outcome.failure._tag === "PluginMalformedResponseFailure") {
+          assert.strictEqual(outcome.failure.diagnosticCode, "jira-openapi-response-invalid")
+        }
+      }
+    }).pipe(Effect.provide(jiraClientLayer({
+      id: "v",
+      name: "V",
+      projectId: Number.MAX_SAFE_INTEGER + 1
+    }, requests)))
+  })
+
+  it.effect("decodes Jira issue-link types used by governed proposals", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const linkTypes = yield* provider.getIssueLinkTypes
+
+      assert.deepStrictEqual(linkTypes, [{
+        id: "10000",
+        name: "Relates",
+        inward: "relates to",
+        outward: "relates to"
+      }])
+      assert.include(requests[0]?.url ?? "", "/rest/api/3/issueLinkType")
+    }).pipe(
+      Effect.provide(jiraClientLayer({
+        issueLinkTypes: [{
+          id: "10000",
+          name: "Relates",
+          inward: "relates to",
+          outward: "relates to"
+        }]
+      }, requests))
+    )
+  })
+
   it.effect("pins project JQL and formats ISO watermarks as Jira minute timestamps", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

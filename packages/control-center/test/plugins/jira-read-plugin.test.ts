@@ -203,6 +203,8 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
       maxResults: request.maxResults,
       total: comments.length
     }),
+  getComment: (_issueId, commentId) =>
+    Effect.succeed(Option.fromUndefinedOr(comments.find((comment) => comment.id === commentId))),
   getChangelogs: (_issueId, request) =>
     Effect.succeed({
       values: request.startAt === 0 ? changelogs : [],
@@ -215,6 +217,8 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
   addIssueComment: () => Effect.succeed("c42"),
   getIssueTransitions: () => Effect.succeed([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]),
   transitionIssue: () => Effect.void,
+  getProjectVersion: () => Effect.succeed(Option.none()),
+  getIssueLinkTypes: Effect.succeed([]),
   ...overrides
 })
 
@@ -268,6 +272,62 @@ const addCommentRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)
   evidenceIds: ["jira-comment-review"]
 })
 
+const replyCommentBody = {
+  type: "doc",
+  version: 1,
+  content: [{
+    type: "paragraph",
+    content: [{ type: "text", text: "The timeout path is covered now." }]
+  }]
+} satisfies { readonly type: "doc"; readonly version: 1; readonly content: ReadonlyArray<Schema.Json> }
+
+const replyCommentRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "reply-comment",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: {
+    parentCommentId: "c1",
+    body: replyCommentBody
+  },
+  evidenceIds: ["jira-comment-reply-review"]
+})
+
+const fixVersionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "set-fix-versions",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: { versionIds: ["2026.31", "2026.30"] },
+  evidenceIds: ["jira-release-association-review"]
+})
+
+const blocksLinkType = {
+  id: "10000",
+  name: "Blocks",
+  inward: "is blocked by",
+  outward: "blocks"
+}
+
+const linkIssueRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "link-issue",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: {
+    linkedIssueId: "PAY-43",
+    linkTypeName: "Blocks",
+    direction: "outward"
+  },
+  evidenceIds: ["jira-issue-link-review"]
+})
+
+const inwardLinkIssueRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  ...linkIssueRequest,
+  payload: {
+    linkedIssueId: "PAY-43",
+    linkTypeName: "Blocks",
+    direction: "inward"
+  }
+})
+
 const transitionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
   actionKind: "transition",
   target: { entityType: "jira.issue", vendorImmutableId: issue.id },
@@ -285,6 +345,19 @@ const authorizeProposal = (proposal: PluginActionProposalV1) =>
     authorizedAt: proposal.proposedAt,
     expiresAt: DateTime.add(proposal.proposedAt, { minutes: 5 })
   })
+
+const assertConflictDiagnostic = (
+  result: Result.Result<unknown, PluginFailure>,
+  diagnosticCode: string
+) => {
+  assert.isTrue(Result.isFailure(result))
+  if (Result.isFailure(result)) {
+    assert.strictEqual(result.failure._tag, "PluginConflictFailure")
+    if (result.failure._tag === "PluginConflictFailure") {
+      assert.strictEqual(result.failure.diagnosticCode, diagnosticCode)
+    }
+  }
+}
 
 describe("JiraReadPlugin", () => {
   it.effect("rejects Jira description edits without an atomic provider revision precondition", () =>
@@ -388,6 +461,29 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("rejects unsafe Jira read targets before provider reads", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Ref.update(issueReads, (count) => count + 1).pipe(
+              Effect.as(Option.none())
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const outcome = yield* connection.readEntity(issueReference("../issueLinkType")).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(outcome))
+          if (Result.isFailure(outcome)) {
+            assert.strictEqual(outcome.failure._tag, "PluginConfigurationFailure")
+          }
+          assert.strictEqual(yield* Ref.get(issueReads), 0)
+        })
+      )
+    }))
+
   it.effect("keeps every Jira executor method unsupported with zero provider mutation", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)
@@ -457,6 +553,389 @@ describe("JiraReadPlugin", () => {
         }
       })
     ))
+
+  it.effect("proposes a normal-comment reply fallback after inspecting the exact parent", () =>
+    Effect.gen(function*() {
+      const parentLookups = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
+      const parentComment = comments[0]
+      if (parentComment === undefined) return yield* Effect.die("expected a parent comment fixture")
+      return yield* withConnection(
+        baseProvider({
+          getComment: (issueId, commentId) =>
+            Ref.update(parentLookups, (lookups) => {
+              const lookup: readonly [string, string] = [issueId, commentId]
+              return [...lookups, lookup]
+            }).pipe(
+              Effect.as(Option.some(parentComment))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposal = yield* connection.proposeAction(replyCommentRequest)
+
+          assert.deepStrictEqual(proposal.request.target, replyCommentRequest.target)
+          assert.deepStrictEqual(proposal.request.payload, {
+            _tag: "reply-comment",
+            issueKey: "PAY-42",
+            parentCommentId: "c1",
+            body: {
+              type: "doc",
+              version: 1,
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "Reply to comment c1" }]
+                },
+                ...replyCommentBody.content
+              ]
+            }
+          })
+          assert.deepStrictEqual(yield* Ref.get(parentLookups), [["10042", "c1"]])
+        })
+      )
+    }))
+
+  it.effect("rejects a Jira reply when the exact parent is unavailable", () =>
+    withConnection(
+      baseProvider({ getComment: () => Effect.succeed(Option.none()) }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(replyCommentRequest).pipe(Effect.result)
+
+        assertConflictDiagnostic(proposed, "jira-parent-comment-not-found")
+      })
+    ))
+
+  it.effect("canonicalizes requested Jira fix versions without rewriting the target", () =>
+    Effect.gen(function*() {
+      const requestedIds = yield* Ref.make<ReadonlyArray<string>>([])
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersion: (versionId) =>
+            Ref.update(requestedIds, (ids) => [...ids, versionId]).pipe(
+              Effect.as(Option.some(
+                versionId === "2026.31"
+                  ? { id: "2026.31", name: "August 2026", projectId: "10" }
+                  : { id: "2026.30", name: "July 2026", projectId: "10" }
+              ))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposal = yield* connection.proposeAction(fixVersionRequest)
+
+          assert.deepStrictEqual(proposal.request.target, fixVersionRequest.target)
+          assert.deepStrictEqual(proposal.request.payload, {
+            _tag: "set-fix-versions",
+            issueKey: "PAY-42",
+            versions: [
+              { id: "2026.31", name: "August 2026" },
+              { id: "2026.30", name: "July 2026" }
+            ]
+          })
+          assert.deepStrictEqual(yield* Ref.get(requestedIds), ["2026.31", "2026.30"])
+        })
+      )
+    }))
+
+  it.effect("maps malformed selected Jira fix-version metadata to the plugin failure channel", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some(
+            versionId === "2026.31"
+              ? { id: "2026.31", name: "", projectId: "10" }
+              : { id: "2026.30", name: "July 2026", projectId: "10" }
+          ))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-project-version-metadata-invalid")
+          }
+        }
+      })
+    ))
+
+  it.effect("rejects an unavailable Jira fix version", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(
+            versionId === "2026.30"
+              ? Option.some({ id: "2026.30", name: "July 2026", projectId: "10" })
+              : Option.none()
+          )
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assertConflictDiagnostic(proposed, "jira-fix-version-unavailable")
+      })
+    ))
+
+  it.effect("rejects unsafe Jira path identifiers before provider reads", () =>
+    Effect.gen(function*() {
+      const versionReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getProjectVersion: () =>
+            Ref.update(versionReads, (count) => count + 1).pipe(
+              Effect.as(Option.none())
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+            ...fixVersionRequest,
+            payload: { versionIds: ["2026.31/../issueLinkType"] }
+          })
+          const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(proposed))
+          if (Result.isFailure(proposed)) {
+            assert.strictEqual(proposed.failure._tag, "PluginConfigurationFailure")
+          }
+          assert.strictEqual(yield* Ref.get(versionReads), 0)
+        })
+      )
+    }))
+
+  it.effect("rejects a requested Jira fix version from another project", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some({
+            id: versionId,
+            name: versionId,
+            projectId: versionId === "2026.31" ? "20" : "10"
+          }))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assertConflictDiagnostic(proposed, "jira-fix-version-outside-connection")
+      })
+    ))
+
+  it.effect("rejects a Jira fix version without confirmed project ownership", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersion: (versionId) =>
+          Effect.succeed(Option.some({
+            id: versionId,
+            name: versionId,
+            projectId: null
+          }))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-project-version-ownership-missing")
+          }
+        }
+      })
+    ))
+
+  it.effect("preserves both directions of an asymmetric Jira issue link", () => {
+    const linkedIssue = {
+      ...issue,
+      id: "10043",
+      key: "PAY-43"
+    }
+    return withConnection(
+      baseProvider({
+        getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const outward = yield* connection.proposeAction(linkIssueRequest)
+        const inward = yield* connection.proposeAction(inwardLinkIssueRequest)
+
+        assert.deepStrictEqual(outward.request.target, linkIssueRequest.target)
+        assert.deepStrictEqual(outward.request.payload, {
+          _tag: "link-issue",
+          issueKey: "PAY-42",
+          direction: "outward",
+          relationship: "blocks",
+          inwardIssueId: "10043",
+          inwardIssueKey: "PAY-43",
+          outwardIssueId: "10042",
+          outwardIssueKey: "PAY-42",
+          linkTypeId: "10000",
+          linkTypeName: "Blocks",
+          linkTypeInward: "is blocked by",
+          linkTypeOutward: "blocks"
+        })
+        assert.deepStrictEqual(inward.request.target, inwardLinkIssueRequest.target)
+        assert.deepStrictEqual(inward.request.payload, {
+          _tag: "link-issue",
+          issueKey: "PAY-42",
+          direction: "inward",
+          relationship: "is blocked by",
+          inwardIssueId: "10042",
+          inwardIssueKey: "PAY-42",
+          outwardIssueId: "10043",
+          outwardIssueKey: "PAY-43",
+          linkTypeId: "10000",
+          linkTypeName: "Blocks",
+          linkTypeInward: "is blocked by",
+          linkTypeOutward: "blocks"
+        })
+      })
+    )
+  })
+
+  it.effect("rejects a Jira issue link with a missing or invalid direction", () => {
+    const propose = (payload: Schema.Json) =>
+      withConnection(
+        baseProvider(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+            ...linkIssueRequest,
+            payload
+          })
+          return yield* connection.proposeAction(request).pipe(Effect.result)
+        })
+      )
+    return Effect.gen(function*() {
+      for (
+        const payload of [
+          { linkedIssueId: "PAY-43", linkTypeName: "Blocks" },
+          { linkedIssueId: "PAY-43", linkTypeName: "Blocks", direction: "sideways" }
+        ]
+      ) {
+        const proposed = yield* propose(payload)
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginConfigurationFailure")
+        }
+      }
+    })
+  })
+
+  it.effect("maps malformed selected Jira link-type metadata to the plugin failure channel", () => {
+    const linkedIssue = {
+      ...issue,
+      id: "10043",
+      key: "PAY-43"
+    }
+    return withConnection(
+      baseProvider({
+        getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
+        getIssueLinkTypes: Effect.succeed([{ ...blocksLinkType, id: "" }])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(linkIssueRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-issue-link-type-metadata-invalid")
+          }
+        }
+      })
+    )
+  })
+
+  it.effect("rejects unavailable and cross-project Jira issue-link resources", () => {
+    const linkedIssue = {
+      ...issue,
+      id: "10043",
+      key: "PAY-43"
+    }
+    const propose = (provider: JiraReadProvider) =>
+      withConnection(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(linkIssueRequest).pipe(Effect.result)
+        })
+      )
+    return Effect.gen(function*() {
+      const missingIssue = yield* propose(baseProvider({
+        getIssue: (issueId) => Effect.succeed(issueId === issue.id ? Option.some(issue) : Option.none()),
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
+      }))
+      assertConflictDiagnostic(missingIssue, "jira-linked-issue-not-found")
+
+      const outsideProject = yield* propose(baseProvider({
+        getIssue: (issueId) =>
+          Effect.succeed(Option.some(
+            issueId === issue.id
+              ? issue
+              : { ...linkedIssue, fields: { ...linkedIssue.fields, project: { id: "20" } } }
+          )),
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
+      }))
+      assertConflictDiagnostic(outsideProject, "jira-linked-issue-outside-connection")
+
+      const missingType = yield* propose(baseProvider({
+        getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
+        getIssueLinkTypes: Effect.succeed([])
+      }))
+      assertConflictDiagnostic(missingType, "jira-issue-link-type-unavailable")
+    })
+  })
+
+  it.effect("rejects a Jira self-link after resolving the requested issue key", () =>
+    withConnection(
+      baseProvider({
+        getIssue: () => Effect.succeed(Option.some(issue)),
+        getIssueLinkTypes: Effect.succeed([blocksLinkType])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+          ...linkIssueRequest,
+          payload: { linkedIssueId: issue.key, linkTypeName: "Blocks", direction: "outward" }
+        })
+        const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
+
+        assertConflictDiagnostic(proposed, "jira-issue-link-self-reference")
+      })
+    ))
+
+  it.effect("blocks every Jira association proposal when the inspected revision is stale", () =>
+    Effect.gen(function*() {
+      const associationReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Effect.succeed(Option.some({
+              ...issue,
+              fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+            })),
+          getComment: () => Ref.update(associationReads, (count) => count + 1).pipe(Effect.as(Option.none())),
+          getProjectVersion: () => Ref.update(associationReads, (count) => count + 1).pipe(Effect.as(Option.none())),
+          getIssueLinkTypes: Ref.update(associationReads, (count) => count + 1).pipe(Effect.as([]))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          for (const request of [replyCommentRequest, fixVersionRequest, linkIssueRequest]) {
+            const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
+            assertConflictDiagnostic(proposed, "jira-issue-revision-changed")
+          }
+          assert.strictEqual(yield* Ref.get(associationReads), 0)
+        })
+      )
+    }))
 
   it.effect("rejects Jira transitions without an atomic provider revision precondition", () =>
     Effect.gen(function*() {

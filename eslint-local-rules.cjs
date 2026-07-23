@@ -727,6 +727,87 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-jira-path-identifier-schema": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require path-safe schemas for Jira identifiers used in provider URL paths",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unsafePathIdentifier: "Use JiraProviderPathIdentifier for values passed to Jira provider path parameters."
+      }
+    },
+    create(context) {
+      const filename = context.filename.replaceAll("\\", "/")
+      if (!filename.includes("/server/plugins/jira/")) return {}
+
+      const requestPathFields = new Set(["linkedIssueId", "parentCommentId", "versionIds"])
+      const providerPathMethods = new Set([
+        "addIssueComment",
+        "getChangelogs",
+        "getComment",
+        "getComments",
+        "getIssue",
+        "getIssueTransitions",
+        "getProject",
+        "getProjectVersion",
+        "transitionIssue",
+        "updateIssueDescription"
+      ])
+      const containsVendorImmutableId = (node) => {
+        if (node.type === "MemberExpression" && staticPropertyName(node.property) === "vendorImmutableId") {
+          return true
+        }
+        const visitorKeys = context.sourceCode.visitorKeys[node.type] ?? []
+        return visitorKeys.some((key) => {
+          const child = node[key]
+          return Array.isArray(child)
+            ? child.some((entry) => entry !== null && containsVendorImmutableId(entry))
+            : child !== null && child !== undefined && containsVendorImmutableId(child)
+        })
+      }
+      const nearestProperty = (node) => {
+        let current = node.parent
+        while (current !== undefined && current.type !== "Property" && current.type !== "VariableDeclarator") {
+          current = current.parent
+        }
+        return current?.type === "Property" ? current : undefined
+      }
+      const enclosingVariableName = (node) => {
+        let current = node.parent
+        while (current !== undefined && current.type !== "VariableDeclarator") current = current.parent
+        return current?.type === "VariableDeclarator" && current.id.type === "Identifier" ? current.id.name : undefined
+      }
+
+      return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            node.callee.object.type !== "Identifier" ||
+            node.callee.object.name !== "provider" ||
+            !providerPathMethods.has(staticPropertyName(node.callee.property)) ||
+            !node.arguments.some((argument) => argument.type !== "SpreadElement" && containsVendorImmutableId(argument))
+          ) {
+            return
+          }
+          context.report({ messageId: "unsafePathIdentifier", node })
+        },
+        Identifier(node) {
+          if (node.name !== "JiraProviderIdentity") return
+          if (!filename.endsWith("/JiraGovernedActions.ts")) return
+          const property = nearestProperty(node)
+          if (property === undefined) return
+          const propertyName = staticPropertyName(property.key)
+          const isActionIssueId = propertyName === "id" && enclosingVariableName(node) === "JiraActionIssue"
+          if (!isActionIssueId && !requestPathFields.has(propertyName)) return
+          context.report({ messageId: "unsafePathIdentifier", node })
+        }
+      }
+    }
+  },
   "no-ad-hoc-workspace-entity-path": {
     meta: {
       type: "problem",
