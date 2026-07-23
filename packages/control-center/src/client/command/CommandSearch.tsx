@@ -23,6 +23,7 @@ import {
   type WorkspaceItemsTransport
 } from "../items/useWorkspaceItems.js"
 import { makeReleaseRouteState, releaseOriginFromLocation } from "../releases/releaseRoutes.js"
+import { rememberWorkspaceScrollPosition } from "../workspaceScrollRestoration.js"
 import { commandSearchItemsHref } from "./commandSearchRoutes.js"
 import {
   browserCommandReleasesTransport,
@@ -174,6 +175,7 @@ const CommandSearchSurface = ({
       return
     }
     const item = result.item
+    rememberWorkspaceScrollPosition(location)
     navigate(item.href, {
       state: makeWorkspaceEntityRouteState(
         location.state,

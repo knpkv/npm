@@ -470,6 +470,21 @@ test("preserves the exact overview origin through preview and canonical entity B
   await expect(page).toHaveURL(filteredOverviewPath)
 })
 
+test("restores the exact release scroll position after a canonical entity round trip", async ({ page }) => {
+  await page.goto(fullPath)
+  const itemLink = page.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  await itemLink.scrollIntoViewIfNeeded()
+  const releaseScrollPosition = await page.evaluate<number>("window.scrollY")
+  expect(releaseScrollPosition).toBeGreaterThan(0)
+
+  await itemLink.click()
+  await expect(page).toHaveURL(canonicalEntityPath)
+  await page.getByRole("link", { name: "Back to release" }).click()
+
+  await expect(page).toHaveURL(fullPath)
+  await expect.poll(() => page.evaluate<number>("window.scrollY")).toBeGreaterThanOrEqual(releaseScrollPosition - 2)
+})
+
 test("returns a directly loaded canonical entity to Items", async ({ page }) => {
   await page.goto(canonicalEntityPath)
   await expect(page.locator(`[data-workspace-entity-id="${canonicalEntityId}"]`)).toBeVisible()

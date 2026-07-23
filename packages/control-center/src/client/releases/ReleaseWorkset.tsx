@@ -8,6 +8,7 @@ import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { WorkspaceEntityLink, workspaceEntityStateForHref } from "../entities/WorkspaceEntityLink.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
+import { rememberWorkspaceScrollPosition } from "../workspaceScrollRestoration.js"
 import {
   presentReleaseWorkset,
   releaseWorksetRelationshipEvidenceClaims,
@@ -92,6 +93,9 @@ export const SelectedReleaseWorksetObjectPanel = ({
                       <Text tone="secondary">{relationship.other.title}</Text>
                     ) : (
                       <Link
+                        onClick={() => {
+                          if (linkLocation !== undefined) rememberWorkspaceScrollPosition(linkLocation)
+                        }}
                         state={
                           linkLocation === undefined
                             ? undefined
@@ -232,6 +236,7 @@ export const ReleaseWorkset = ({
                   <Link
                     className={styles.runbook}
                     key={runbook.id}
+                    onClick={() => rememberWorkspaceScrollPosition(location)}
                     state={workspaceEntityStateForHref(runbook.href, location)}
                     to={runbook.href}
                   >
