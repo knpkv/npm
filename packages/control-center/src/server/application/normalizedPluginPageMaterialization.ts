@@ -654,7 +654,7 @@ const sameSourceUrl = (
 ): boolean => left?.href === right?.href
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" || kind === "time-entry" ? 2 : 1
 
 const mergedPageContributors = (
   current: PageDetails["contributors"],

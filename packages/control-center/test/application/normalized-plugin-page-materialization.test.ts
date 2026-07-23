@@ -1720,11 +1720,12 @@ describe("normalized plugin page materialization", () => {
       )
     })))
 
-  it.effect("backfills stale pipeline schema without changing the current issue schema", () =>
+  it.effect("backfills stale pipeline and Clockify schemas without changing the current issue schema", () =>
     withMaterializer(Effect.gen(function*() {
       const persistence = yield* Persistence
       yield* setup
       yield* setupConnection(CODEPIPELINE_PLUGIN_ID, "codepipeline")
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
       const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000256")
       const sourceRevision = Schema.decodeSync(SourceRevision)({
         providerId: "codepipeline",
@@ -1833,6 +1834,106 @@ describe("normalized plugin page materialization", () => {
         projection.value.projection.details.actions?.map(({ actionName }) => actionName),
         ["Compile"]
       )
+
+      const timeEntryEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000258")
+      const timeEntrySourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "clockify",
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        vendorImmutableId: "time-entry-backfill",
+        revision: "time-entry-same-revision",
+        sourceUrl: "https://app.clockify.me/tracker",
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId: timeEntryEntityId,
+        entityType: "time-entry",
+        sourceRevision: timeEntrySourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId: timeEntryEntityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 1,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-backfill",
+            title: "PAY-258 release review",
+            details: {
+              _tag: "time-entry",
+              durationMinutes: 45,
+              billable: true,
+              approvalState: "approved"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const timeEntryReceipt = yield* materializeNormalizedPluginPage(
+        {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+          providerId: "clockify",
+          streamKey: Schema.decodeSync(PluginStreamKey)("time-entry-schema-backfill"),
+          expectedRevision: 0,
+          committedAt: T2,
+          successfulHealth: { _tag: "healthy", checkedAt: T2 }
+        },
+        Schema.decodeSync(PluginSyncPageV1)({
+          checkpointAfterPage: "time-entry-schema-backfill",
+          hasMore: false,
+          events: [{
+            _tag: "UpsertEntity",
+            eventId: "time-entry-schema-backfill",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "time-entry-same-revision",
+            entityType: "clockify.time-entry",
+            vendorImmutableId: "time-entry-backfill",
+            sourceUrl: "https://app.clockify.me/tracker",
+            title: "PAY-258 release review",
+            attributes: {
+              durationMinutes: 45,
+              billable: true,
+              approvalState: "approved",
+              projectId: "payments",
+              userId: "clockify-user-avery",
+              interval: {
+                start: "2026-07-19T08:17:00.000Z",
+                end: "2026-07-19T09:02:00.000Z"
+              }
+            }
+          }]
+        })
+      )
+      assert.strictEqual(timeEntryReceipt.entityProjectionCount, 1)
+      const timeEntryProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: timeEntryEntityId,
+        revision: null
+      })
+      if (timeEntryProjection._tag !== "entityProjection") {
+        return yield* Effect.die("expected backfilled time entry")
+      }
+      assert.strictEqual(timeEntryProjection.value.projection.projectionRevision, 2)
+      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 2)
+      if (timeEntryProjection.value.projection.details._tag !== "time-entry") {
+        return yield* Effect.die("expected time-entry backfill details")
+      }
+      assert.deepInclude(timeEntryProjection.value.projection.details, {
+        projectId: "payments",
+        userId: "clockify-user-avery"
+      })
 
       const issueEntityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000257")
       const issueSourceRevision = Schema.decodeSync(SourceRevision)({

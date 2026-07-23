@@ -33,6 +33,7 @@ const WORKSPACE_A = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-1000
 const WORKSPACE_B = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-100000000002")
 const PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000003")
 const OTHER_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-10000000000e")
+const CLOCKIFY_PLUGIN_ID = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-100000000018")
 const NOISE_CONFLUENCE_PLUGIN_IDS = Array.from(
   { length: 16 },
   (_, index) =>
@@ -1117,6 +1118,46 @@ describe("DeliveryGraphRepository", () => {
         assert.strictEqual(result._tag, "entitySlice")
         if (result._tag === "entitySlice") {
           assert.isUndefined(result.value.entity.owners[0]?.sourceIdentities)
+        }
+      })
+    ))
+
+  it.effect("hydrates an exact Clockify identity for a Clockify entity owner", () =>
+    withRepository(
+      Effect.gen(function*() {
+        yield* insertFoundation
+        const repository = yield* DeliveryGraphRepository
+        const database = yield* Database
+        yield* repository.write(WORKSPACE_A, initialBatch)
+        yield* database.sql`INSERT INTO plugin_connections (
+            workspace_id, plugin_connection_id, provider_id, display_name,
+            revision, is_enabled, created_at, updated_at
+          ) VALUES (
+            ${WORKSPACE_A}, ${CLOCKIFY_PLUGIN_ID}, 'clockify', 'Payments Clockify',
+            1, 1, ${CREATED_AT}, ${CREATED_AT}
+          )`
+        yield* database.sql`UPDATE entities
+          SET plugin_connection_id = ${CLOCKIFY_PLUGIN_ID}, provider_id = 'clockify'
+          WHERE workspace_id = ${WORKSPACE_A} AND entity_id = ${ISSUE_ID}`
+        yield* database.sql`INSERT INTO person_identities (
+            workspace_id, person_id, plugin_connection_id, provider_id, vendor_person_id, created_at
+          ) VALUES (
+            ${WORKSPACE_A}, ${OWNER_PERSON_ID}, ${CLOCKIFY_PLUGIN_ID}, 'clockify',
+            'clockify-user-avery', ${CREATED_AT}
+          )`
+
+        const result = yield* repository.read(WORKSPACE_A, {
+          _tag: "entitySlice",
+          entityId: ISSUE_ID,
+          limit: 100
+        })
+        assert.strictEqual(result._tag, "entitySlice")
+        if (result._tag === "entitySlice") {
+          assert.deepStrictEqual(result.value.entity.owners[0]?.sourceIdentities, [{
+            pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+            providerId: "clockify",
+            vendorPersonId: VendorImmutableId.make("clockify-user-avery")
+          }])
         }
       })
     ))
