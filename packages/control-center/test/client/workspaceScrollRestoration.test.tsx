@@ -19,6 +19,11 @@ const route = {
   pathname: "/w/workspace/releases/release",
   search: "?object=issue&relationship=delivery-link"
 }
+const previewRoute = {
+  hash: "",
+  pathname: "/w/workspace/releases/release/preview",
+  search: ""
+}
 const originalWindowMethods = {
   cancelAnimationFrame: window.cancelAnimationFrame,
   requestAnimationFrame: window.requestAnimationFrame,
@@ -54,14 +59,14 @@ const runFrame = (): boolean => {
   return true
 }
 
-const mountRestorer = (strict: boolean): void => {
+const mountRestorer = (strict: boolean, location = route): void => {
   const restorer = <DeferredWorkspaceScrollRestoration />
   mountedHost = document.createElement("div")
   document.body.append(mountedHost)
   mountedRoot = createRoot(mountedHost)
   act(() =>
     mountedRoot?.render(
-      <MemoryRouter initialEntries={[workspaceScrollRestorationKey(route)]}>
+      <MemoryRouter initialEntries={[workspaceScrollRestorationKey(location)]}>
         {strict ? <StrictMode>{restorer}</StrictMode> : restorer}
       </MemoryRouter>
     )
@@ -108,6 +113,7 @@ beforeEach(() => {
 afterEach(() => {
   if (mountedRoot !== undefined) act(() => mountedRoot?.unmount())
   mountedHost?.remove()
+  document.querySelectorAll("[data-rly-release-preview-scroll]").forEach((element) => element.remove())
   mountedRoot = undefined
   mountedHost = undefined
   Object.defineProperty(window, "cancelAnimationFrame", {
@@ -202,6 +208,25 @@ describe("workspace scroll restoration", () => {
     expect(scrollCalls).toEqual([200])
   })
 
+  it("keeps an untouched target pending while lazy content takes more than twelve frames to load", () => {
+    setViewport(200)
+    setScrollY(1_000)
+    rememberWorkspaceScrollPosition(route)
+    setScrollY(0)
+
+    mountRestorer(false)
+    expect(runFrame()).toBe(true)
+    for (let attempt = 0; attempt < 20; attempt += 1) expect(runFrame()).toBe(true)
+    expect(frames.size).toBe(1)
+    expect(window.scrollY).toBe(200)
+
+    setViewport(1_000)
+    expect(runFrame()).toBe(true)
+    expect(frames.size).toBe(0)
+    expect(window.scrollY).toBe(1_000)
+    expect(scrollCalls).toEqual([200, 1_000])
+  })
+
   it("follows a growing lazy page until the saved target becomes reachable", () => {
     setViewport(200)
     setScrollY(1_000)
@@ -220,5 +245,30 @@ describe("workspace scroll restoration", () => {
     expect(frames.size).toBe(0)
     expect(window.scrollY).toBe(1_000)
     expect(scrollCalls).toEqual([200, 400, 700, 1_000])
+  })
+
+  it("captures and restores the release preview's own scroll viewport", () => {
+    const sourceScroller = document.createElement("div")
+    sourceScroller.dataset.rlyReleasePreviewScroll = "dialog"
+    Object.defineProperty(sourceScroller, "clientHeight", { configurable: true, value: 600 })
+    Object.defineProperty(sourceScroller, "scrollHeight", { configurable: true, value: 1_600 })
+    sourceScroller.scrollTop = 1_000
+    document.body.append(sourceScroller)
+    rememberWorkspaceScrollPosition(previewRoute)
+    sourceScroller.remove()
+
+    mountRestorer(false, previewRoute)
+    for (let attempt = 0; attempt < 20; attempt += 1) expect(runFrame()).toBe(true)
+    const restoredScroller = document.createElement("div")
+    restoredScroller.dataset.rlyReleasePreviewScroll = "dialog"
+    Object.defineProperty(restoredScroller, "clientHeight", { configurable: true, value: 600 })
+    Object.defineProperty(restoredScroller, "scrollHeight", { configurable: true, value: 1_600 })
+    document.body.append(restoredScroller)
+    expect(runFrame()).toBe(true)
+
+    expect(frames.size).toBe(0)
+    expect(restoredScroller.scrollTop).toBe(1_000)
+    expect(window.scrollY).toBe(0)
+    expect(scrollCalls).toEqual([])
   })
 })
