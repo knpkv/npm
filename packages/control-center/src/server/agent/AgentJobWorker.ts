@@ -2,8 +2,6 @@
 import {
   AgentContextMismatchError,
   AgentProviderError,
-  AgentRunId,
-  type AgentRunRequest,
   type AgentRuntimeError,
   type AgentRuntimeEvent,
   AgentRuntimeProtocolError
@@ -29,7 +27,8 @@ import {
   type ClaimedAgentJob
 } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
-import { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
+import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
+import { AgentJobTaskExecutor, releaseChatTaskExecutorLayer } from "./internal/AgentJobTaskExecutor.js"
 
 /** Worker lease policy fixed when the server composes the module. */
 export interface AgentJobWorkerOptions {
@@ -87,6 +86,14 @@ const isDurableBoundFailure = (
   isAgentJobInputError(failure) &&
   (failure.reason === "event-limit-exceeded" || failure.reason === "output-limit-exceeded")
 
+const isInvalidReviewResult = (
+  failure: unknown
+): failure is AgentJobInputError & {
+  readonly reason: "invalid-result" | "task-mismatch"
+} =>
+  isAgentJobInputError(failure) &&
+  (failure.reason === "invalid-result" || failure.reason === "task-mismatch")
+
 const normalizeRuntimeFailure = (
   providerId: ClaimedAgentJob["providerId"],
   failure: AgentRuntimeError
@@ -133,7 +140,7 @@ const normalizeDurableBoundFailure = (
 const makeAgentJobWorker = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const jobs = yield* AgentJobRepository
-  const runtimes = yield* AgentRuntimeRegistry
+  const taskExecutor = yield* AgentJobTaskExecutor
 
   const failClaim = Effect.fn("AgentJobWorker.failClaim")(function*(
     claim: ClaimedAgentJob,
@@ -169,33 +176,54 @@ const makeAgentJobWorker = Effect.gen(function*() {
       } satisfies AgentJobWorkerRunResult
     }
 
-    const selected = yield* runtimes.select({
-      providerId: claim.providerId,
-      model: claim.model,
-      access: claim.access
-    }).pipe(Effect.result)
+    const selected = yield* taskExecutor.execute(claim).pipe(Effect.result)
     if (Result.isFailure(selected)) {
       return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
     }
+    if (selected.success._tag !== claim.context.task._tag) {
+      return yield* failClaim(
+        claim,
+        new AgentProviderError({
+          providerId: claim.providerId,
+          phase: "protocol",
+          message: "Agent task executor returned a result for a different task.",
+          retryable: false
+        })
+      )
+    }
+    if (selected.success._tag === "pr-review") {
+      const completedAt = yield* DateTime.now
+      const completion = yield* jobs.completeReview({
+        workspaceId: claim.workspaceId,
+        jobId: claim.jobId,
+        attemptSequence: claim.attemptSequence,
+        leaseToken: claim.leaseToken,
+        report: selected.success.report,
+        completedAt
+      }).pipe(Effect.result)
+      if (Result.isFailure(completion)) {
+        if (isInvalidReviewResult(completion.failure)) {
+          return yield* failClaim(
+            claim,
+            new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "protocol",
+              message: "Agent task executor returned an invalid PR review report.",
+              retryable: false
+            })
+          )
+        }
+        return yield* Effect.fail(completion.failure)
+      }
+      return {
+        _tag: "completed",
+        jobId: claim.jobId,
+        outcome: "success"
+      } satisfies AgentJobWorkerRunResult
+    }
 
     const terminal = yield* Ref.make<Extract<AgentRuntimeEvent, { readonly _tag: "completed" }> | null>(null)
-    const continuation: AgentRunRequest["continuation"] = claim.sessionRef === null
-      ? { _tag: "fresh" }
-      : {
-        _tag: "resume",
-        sessionRef: claim.sessionRef,
-        contextFingerprint: claim.context.fingerprint
-      }
-    const request: AgentRunRequest = {
-      runId: AgentRunId.make(claim.jobId),
-      providerId: claim.providerId,
-      model: selected.success.model,
-      access: claim.access,
-      prompt: claim.prompt,
-      context: claim.context,
-      continuation
-    }
-    const execution = yield* selected.success.runtime.run(request).pipe(
+    const execution = yield* selected.success.events.pipe(
       Stream.takeUntil((event) => event._tag === "completed"),
       Stream.flatMap((event) => Stream.fromIterable(chunkOutputEvent(event))),
       Stream.runForEach((event) => {
@@ -278,6 +306,14 @@ export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWork
 export const agentJobWorkerLayer = (
   options: AgentJobWorkerOptions
 ): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
+  agentJobWorkerWithTaskExecutorLayer(options).pipe(
+    Layer.provide(releaseChatTaskExecutorLayer)
+  )
+
+/** Internal composition hook used by deterministic task-executor contract tests. */
+export const agentJobWorkerWithTaskExecutorLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentJobTaskExecutor | Crypto.Crypto> =>
   Layer.effect(
     AgentJobWorker,
     makeAgentJobWorker.pipe(Effect.map((make) => AgentJobWorker.of(make(options))))

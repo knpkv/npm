@@ -3,6 +3,7 @@ import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessi
 import * as Schema from "effect/Schema"
 
 import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import { PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 /** Maximum persisted provider output across one attempt. */
@@ -68,6 +69,21 @@ export const AgentJobPrompt = Schema.String.check(
 )
 export type AgentJobPrompt = typeof AgentJobPrompt.Type
 
+/** Existing release-scoped conversational work. */
+const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
+
+/** Read-only review work bound to one immutable pull request head. */
+const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
+  subject: PrReviewSubject
+})
+
+/** Durable task context used to select an internal task executor. */
+export const AgentJobTask = Schema.Union([
+  ReleaseChatAgentJobTask,
+  PrReviewAgentJobTask
+]).pipe(Schema.toTaggedUnion("_tag"))
+export type AgentJobTask = typeof AgentJobTask.Type
+
 /** Lifecycle state of one durable agent job. */
 export const AgentJobState = Schema.Literals([
   "queued",
@@ -91,6 +107,7 @@ export const EnqueueAgentJobInput = Schema.Struct({
   prompt: AgentJobPrompt,
   contextFingerprint: AgentContextFingerprint,
   subjectRevision: SubjectRevision,
+  task: AgentJobTask,
   createdAt: UtcTimestamp
 })
 export type EnqueueAgentJobInput = typeof EnqueueAgentJobInput.Type
@@ -100,7 +117,8 @@ export const AgentContextSnapshotRecord = Schema.Struct({
   workspaceId: WorkspaceId,
   releaseId: ReleaseId,
   subjectRevision: SubjectRevision,
-  fingerprint: AgentContextFingerprint
+  fingerprint: AgentContextFingerprint,
+  task: AgentJobTask
 })
 export type AgentContextSnapshotRecord = typeof AgentContextSnapshotRecord.Type
 
@@ -150,6 +168,34 @@ export const AppendAgentEventInput = Schema.Struct({
 })
 export type AppendAgentEventInput = typeof AppendAgentEventInput.Type
 
+/** Untrusted complete review output presented under one active attempt lease. */
+export const CompleteAgentReviewInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken,
+  report: Schema.Unknown,
+  completedAt: UtcTimestamp
+})
+export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
+
+/** Workspace-scoped lookup for one durable review result. */
+export const AgentReviewResultInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId
+})
+export type AgentReviewResultInput = typeof AgentReviewResultInput.Type
+
+/** Sanitized durable review result attributable to one terminal attempt. */
+export const AgentReviewResultRecord = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  report: PrReviewReport,
+  completedAt: UtcTimestamp
+})
+export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
+
 /** One immutable event in a release thread. */
 export const AgentThreadEvent = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -157,6 +203,7 @@ export const AgentThreadEvent = Schema.Struct({
   eventSequence: AgentEventCursor.check(Schema.isGreaterThan(0)),
   jobId: JobId,
   attemptSequence: Schema.NullOr(AgentAttemptSequence),
+  task: Schema.optionalKey(AgentJobTask),
   eventKind: Schema.Literals([
     "user-message",
     "job-queued",
@@ -164,6 +211,7 @@ export const AgentThreadEvent = Schema.Struct({
     "assistant-output",
     "progress",
     "usage",
+    "review-report",
     "job-completed",
     "job-failed",
     "cancel-requested"
@@ -190,7 +238,9 @@ export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputErr
       "lease-lost",
       "lease-expired",
       "output-limit-exceeded",
-      "event-limit-exceeded"
+      "event-limit-exceeded",
+      "invalid-result",
+      "task-mismatch"
     ])
   }
 ) {}

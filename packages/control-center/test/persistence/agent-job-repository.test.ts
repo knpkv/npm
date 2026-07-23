@@ -11,6 +11,7 @@ import { PersistedRecordError } from "../../src/server/persistence/errors.js"
 import {
   AgentEventCursor,
   AgentJobInputError,
+  type AgentJobTask,
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
@@ -57,6 +58,7 @@ const enqueueInput = (jobId: typeof JobId.Type, releaseId = RELEASE_ID) => ({
   prompt: `Explain ${jobId}`,
   contextFingerprint: FINGERPRINT,
   subjectRevision: "release-revision-7",
+  task: { _tag: "release-chat" } satisfies AgentJobTask,
   createdAt: T0
 })
 
@@ -166,12 +168,42 @@ describe("agent job repository", () => {
 
       const page = yield* replay
       assert.deepStrictEqual(
-        page.events.map(({ eventKind, eventSequence, jobId }) => ({ eventKind, eventSequence, jobId })),
+        page.events.map(({ eventKind, eventSequence, jobId, payload, task }) => ({
+          eventKind,
+          eventSequence,
+          jobId,
+          payload,
+          task
+        })),
         [
-          { eventKind: "user-message", eventSequence: 1, jobId: JOB_ID },
-          { eventKind: "job-queued", eventSequence: 2, jobId: JOB_ID },
-          { eventKind: "user-message", eventSequence: 3, jobId: SECOND_JOB_ID },
-          { eventKind: "job-queued", eventSequence: 4, jobId: SECOND_JOB_ID }
+          {
+            eventKind: "user-message",
+            eventSequence: AgentEventCursor.make(1),
+            jobId: JOB_ID,
+            payload: { prompt: `Explain ${JOB_ID}` },
+            task: { _tag: "release-chat" }
+          },
+          {
+            eventKind: "job-queued",
+            eventSequence: AgentEventCursor.make(2),
+            jobId: JOB_ID,
+            payload: { providerId: PROVIDER_ID },
+            task: { _tag: "release-chat" }
+          },
+          {
+            eventKind: "user-message",
+            eventSequence: AgentEventCursor.make(3),
+            jobId: SECOND_JOB_ID,
+            payload: { prompt: `Explain ${SECOND_JOB_ID}` },
+            task: { _tag: "release-chat" }
+          },
+          {
+            eventKind: "job-queued",
+            eventSequence: AgentEventCursor.make(4),
+            jobId: SECOND_JOB_ID,
+            payload: { providerId: PROVIDER_ID },
+            task: { _tag: "release-chat" }
+          }
         ]
       )
       assert.strictEqual(page.nextCursor, 4)
@@ -236,7 +268,8 @@ describe("agent job repository", () => {
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,
         subjectRevision: "release-revision-7",
-        fingerprint: FINGERPRINT
+        fingerprint: FINGERPRINT,
+        task: { _tag: "release-chat" }
       })
 
       const activeClaim = yield* repository.claimNext(claimInput(THIRD_TOKEN))

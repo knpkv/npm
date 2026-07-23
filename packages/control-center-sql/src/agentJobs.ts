@@ -43,6 +43,8 @@ const agentJobs = table("agentJobs", {
   prompt: Column.text(),
   contextFingerprint: Column.text(),
   subjectRevision: Column.text(),
+  taskContextJson: Column.text(),
+  taskContextDigest: Column.text(),
   state: Column.text(),
   createdAt: Column.text(),
   cancelRequestedAt: Column.text().pipe(Column.nullable),
@@ -98,6 +100,8 @@ const jobProjection = {
   prompt: agentJobs.prompt,
   contextFingerprint: agentJobs.contextFingerprint,
   subjectRevision: agentJobs.subjectRevision,
+  taskContextJson: agentJobs.taskContextJson,
+  taskContextDigest: agentJobs.taskContextDigest,
   state: agentJobs.state,
   createdAt: agentJobs.createdAt,
   cancelRequestedAt: agentJobs.cancelRequestedAt,
@@ -221,9 +225,18 @@ export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput)
     payloadJson: agentThreadEvents.payloadJson,
     payloadDigest: agentThreadEvents.payloadDigest,
     payloadByteLength: agentThreadEvents.payloadByteLength,
+    taskContextJson: agentJobs.taskContextJson,
+    taskContextDigest: agentJobs.taskContextDigest,
     occurredAt: agentThreadEvents.occurredAt
   }).pipe(
     Query.from(agentThreadEvents),
+    Query.innerJoin(
+      agentJobs,
+      Query.and(
+        Query.eq(agentJobs.workspaceId, agentThreadEvents.workspaceId),
+        Query.eq(agentJobs.jobId, agentThreadEvents.jobId)
+      )
+    ),
     Query.where(
       Query.and(
         Query.eq(agentThreadEvents.workspaceId, input.workspaceId),

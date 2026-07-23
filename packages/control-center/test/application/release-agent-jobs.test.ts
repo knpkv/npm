@@ -23,6 +23,7 @@ import { makeReleaseAgentJobs } from "../../src/server/application/releaseAgentJ
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
+  type AgentJobTask,
   AgentThreadEvent,
   EnqueueAgentJobInput
 } from "../../src/server/persistence/repositories/agentJobModels.js"
@@ -40,6 +41,8 @@ const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-00000000020
 const UNAUTHORIZED_RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000208")
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000203")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000204")
+const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000211")
+const RELEASE_CHAT_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000212")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000205")
 const COLLABORATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000209")
 const ROLE_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000210")
@@ -93,17 +96,35 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
   roleAssignments: []
 })
 
+const reviewTask = {
+  _tag: "pr-review",
+  subject: {
+    providerId: "codecommit",
+    repository: "control-center",
+    pullRequestId: "267",
+    baseRevision: "1".repeat(40),
+    headRevision: "2".repeat(40)
+  }
+} satisfies AgentJobTask
+
+const releaseChatTask = { _tag: "release-chat" } satisfies AgentJobTask
+
 const threadEvent = (
   eventSequence: number,
   eventKind: AgentThreadEvent["eventKind"],
-  payload: unknown
+  payload: unknown,
+  options: {
+    readonly jobId?: typeof JobId.Type
+    readonly task?: AgentJobTask
+  } = {}
 ): AgentThreadEvent =>
   AgentThreadEvent.make({
     workspaceId: WORKSPACE_ID,
     threadId: THREAD_ID,
     eventSequence: AgentEventCursor.make(eventSequence),
-    jobId: JOB_ID,
+    jobId: options.jobId ?? JOB_ID,
     attemptSequence: null,
+    ...(options.task === undefined ? {} : { task: options.task }),
     eventKind,
     payload,
     occurredAt: STARTED_AT
@@ -112,11 +133,7 @@ const threadEvent = (
 const replayEvents: Array<AgentThreadEvent> = [
   threadEvent(1, "user-message", { prompt: "Explain the release." }),
   threadEvent(2, "job-queued", {
-    access: "read-only",
-    contextFingerprint: `sha256:${"a".repeat(64)}`,
-    model: null,
-    providerId: AgentProviderId.make("codex"),
-    subjectRevision: "release-revision:7"
+    providerId: AgentProviderId.make("codex")
   }),
   threadEvent(3, "job-started", {
     _tag: "started",
@@ -128,7 +145,10 @@ const replayEvents: Array<AgentThreadEvent> = [
     channel: "assistant",
     text: "The release is waiting for approval."
   }),
-  threadEvent(5, "job-failed", {
+  threadEvent(5, "review-report", {
+    privateReviewResult: "RAW_REVIEW_RESULT_MUST_NOT_REACH_RELEASE_CHAT"
+  }),
+  threadEvent(6, "job-failed", {
     error: new AgentProviderError({
       providerId: AgentProviderId.make("codex"),
       phase: "execution",
@@ -225,7 +245,7 @@ describe("release agent jobs", () => {
           enqueue: (input) => Ref.set(enqueuedInput, input).pipe(Effect.as(THREAD_ID)),
           threadAfter: (input) =>
             Ref.set(replayInput, input).pipe(
-              Effect.as({ events: replayEvents, nextCursor: AgentEventCursor.make(5) })
+              Effect.as({ events: replayEvents, nextCursor: AgentEventCursor.make(6) })
             )
         },
         releases: {
@@ -270,6 +290,7 @@ describe("release agent jobs", () => {
       assert.strictEqual(capturedEnqueue.access, "read-only")
       assert.strictEqual(capturedEnqueue.model, "review-model")
       assert.strictEqual(capturedEnqueue.providerId, "codex")
+      assert.deepStrictEqual(capturedEnqueue.task, { _tag: "release-chat" })
       assert.strictEqual(capturedEnqueue.userPrompt, "Explain the release.")
       assert.include(capturedEnqueue.prompt, `"releaseId":"${RELEASE_ID}"`)
       assert.include(capturedEnqueue.prompt, "\"service\":\"payments-api\"")
@@ -298,7 +319,7 @@ describe("release agent jobs", () => {
           { _tag: "job-queued", eventSequence: 2 },
           { _tag: "job-started", eventSequence: 3 },
           { _tag: "assistant-output", eventSequence: 4 },
-          { _tag: "job-failed", eventSequence: 5 }
+          { _tag: "job-failed", eventSequence: 6 }
         ]
       )
       assert.deepStrictEqual(yield* Ref.get(replayInput), {
@@ -311,6 +332,224 @@ describe("release agent jobs", () => {
       assert.notInclude(browserJson, "provider-native-run-secret")
       assert.notInclude(browserJson, "provider-native-session-secret")
       assert.notInclude(browserJson, "provider credential secret")
+      assert.notInclude(browserJson, "RAW_REVIEW_RESULT_MUST_NOT_REACH_RELEASE_CHAT")
       assert.include(browserJson, "\"retryable\":true")
+    })))
+
+  it.effect("pages past a hidden review report to fill the visible replay limit", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const replayInputs = yield* Ref.make<Array<unknown>>([])
+      const hiddenThenCompleted = [
+        threadEvent(5, "review-report", {
+          privateReviewResult: "RAW_REVIEW_RESULT_MUST_NOT_REACH_RELEASE_CHAT"
+        }),
+        threadEvent(6, "job-completed", {
+          _tag: "completed",
+          outcome: "success",
+          sessionRef: null
+        })
+      ]
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        agentJobs: {
+          ...persistence.agentJobs,
+          threadAfter: (input) => {
+            const pageEvents = hiddenThenCompleted
+              .filter(({ eventSequence }) => eventSequence > input.after)
+              .slice(0, input.limit)
+            return Ref.update(replayInputs, (inputs) => [...inputs, input]).pipe(
+              Effect.as({
+                events: pageEvents,
+                nextCursor: pageEvents.at(-1)?.eventSequence ?? input.after
+              })
+            )
+          }
+        },
+        releases: {
+          ...persistence.releases,
+          get: () => Effect.succeed(releaseSnapshot)
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
+
+      const page = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: ReleaseAgentThreadCursor.make(4),
+        limit: 1
+      })
+
+      assert.deepStrictEqual(
+        page.events.map(({ _tag, eventSequence }) => ({ _tag, eventSequence })),
+        [{ _tag: "job-completed", eventSequence: 6 }]
+      )
+      assert.strictEqual(page.nextCursor, 6)
+      assert.deepStrictEqual(yield* Ref.get(replayInputs), [
+        {
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(4),
+          limit: 1
+        },
+        {
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(5),
+          limit: 1
+        }
+      ])
+    })))
+
+  it.effect("hides classified review jobs while replaying release-chat and historical events", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const durableEvents = [
+        threadEvent(
+          1,
+          "user-message",
+          { prompt: "Review-only prompt must remain private." },
+          { jobId: REVIEW_JOB_ID, task: reviewTask }
+        ),
+        threadEvent(
+          2,
+          "job-queued",
+          { providerId: AgentProviderId.make("codex") },
+          { jobId: REVIEW_JOB_ID, task: reviewTask }
+        ),
+        threadEvent(
+          3,
+          "review-report",
+          { privateReviewResult: "review-only report" },
+          { jobId: REVIEW_JOB_ID, task: reviewTask }
+        ),
+        threadEvent(
+          4,
+          "job-completed",
+          { _tag: "completed", outcome: "success", sessionRef: null },
+          { jobId: REVIEW_JOB_ID, task: reviewTask }
+        ),
+        threadEvent(5, "job-queued", { providerId: AgentProviderId.make("historical") }),
+        threadEvent(
+          6,
+          "user-message",
+          { prompt: "Visible release question." },
+          { jobId: RELEASE_CHAT_JOB_ID, task: releaseChatTask }
+        ),
+        threadEvent(
+          7,
+          "job-queued",
+          { providerId: AgentProviderId.make("codex") },
+          { jobId: RELEASE_CHAT_JOB_ID, task: releaseChatTask }
+        )
+      ]
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        agentJobs: {
+          ...persistence.agentJobs,
+          threadAfter: (input) => {
+            const pageEvents = durableEvents
+              .filter(({ eventSequence }) => eventSequence > input.after)
+              .slice(0, input.limit)
+            return Effect.succeed({
+              events: pageEvents,
+              nextCursor: pageEvents.at(-1)?.eventSequence ?? input.after
+            })
+          }
+        },
+        releases: {
+          ...persistence.releases,
+          get: () => Effect.succeed(releaseSnapshot)
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
+
+      const page = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: ReleaseAgentThreadCursor.make(0),
+        limit: 3
+      })
+
+      assert.deepStrictEqual(
+        page.events.map(({ _tag, eventSequence }) => ({ _tag, eventSequence })),
+        [
+          { _tag: "job-queued", eventSequence: 5 },
+          { _tag: "user-message", eventSequence: 6 },
+          { _tag: "job-queued", eventSequence: 7 }
+        ]
+      )
+      assert.strictEqual(page.nextCursor, 7)
+      const browserJson = JSON.stringify(page)
+      assert.notInclude(browserJson, "Review-only prompt")
+      assert.notInclude(browserJson, "review-only report")
+      assert.include(browserJson, "historical")
+      assert.include(browserJson, "Visible release question")
+    })))
+
+  it.effect("rejects a historical queued event without its provider identity", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        agentJobs: {
+          ...persistence.agentJobs,
+          threadAfter: () =>
+            Effect.succeed({
+              events: [threadEvent(1, "job-queued", {})],
+              nextCursor: AgentEventCursor.make(1)
+            })
+        },
+        releases: {
+          ...persistence.releases,
+          get: () => Effect.succeed(releaseSnapshot)
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
+
+      const replay = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: ReleaseAgentThreadCursor.make(0),
+        limit: 1
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(replay))
+      if (Result.isFailure(replay)) {
+        assert.strictEqual(replay.failure._tag, "ApplicationServiceUnavailable")
+      }
+    })))
+
+  it.effect("fails a replay page whose durable cursor does not advance", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        agentJobs: {
+          ...persistence.agentJobs,
+          threadAfter: (input) =>
+            Effect.succeed({
+              events: [threadEvent(5, "review-report", {})],
+              nextCursor: input.after
+            })
+        },
+        releases: {
+          ...persistence.releases,
+          get: () => Effect.succeed(releaseSnapshot)
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
+
+      const replay = yield* service.replay({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        after: ReleaseAgentThreadCursor.make(4),
+        limit: 1
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(replay))
+      if (Result.isFailure(replay)) {
+        assert.strictEqual(replay.failure._tag, "ApplicationServiceUnavailable")
+      }
     })))
 })

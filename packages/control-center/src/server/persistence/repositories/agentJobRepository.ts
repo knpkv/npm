@@ -18,6 +18,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
 import { PersistedRecordError, PersistenceOperationError, RecordNotFoundError } from "../errors.js"
@@ -27,12 +28,16 @@ import {
   AgentEventCursor,
   AgentJobInputError,
   AgentJobState,
+  AgentJobTask,
   AgentLeaseToken,
+  AgentReviewResultInput,
+  AgentReviewResultRecord,
   AgentThreadEvent,
   AgentThreadEventPageSize,
   AppendAgentEventInput,
   ClaimAgentJobInput,
   ClaimedAgentJob,
+  CompleteAgentReviewInput,
   EnqueueAgentJobInput,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
 } from "./agentJobModels.js"
@@ -51,11 +56,16 @@ const UserMessagePayload = Schema.Struct({
 })
 
 const JobQueuedPayload = Schema.Struct({
+  providerId: EnqueueAgentJobInput.fields.providerId
+})
+
+const PersistedJobQueuedPayload = Schema.Struct({
   access: EnqueueAgentJobInput.fields.access,
   contextFingerprint: EnqueueAgentJobInput.fields.contextFingerprint,
   model: EnqueueAgentJobInput.fields.model,
   providerId: EnqueueAgentJobInput.fields.providerId,
-  subjectRevision: EnqueueAgentJobInput.fields.subjectRevision
+  subjectRevision: EnqueueAgentJobInput.fields.subjectRevision,
+  task: AgentJobTask
 })
 
 const CancellationRequestedPayload = Schema.Struct({
@@ -81,6 +91,8 @@ const JobRow = Schema.Struct({
   prompt: EnqueueAgentJobInput.fields.prompt,
   contextFingerprint: EnqueueAgentJobInput.fields.contextFingerprint,
   subjectRevision: EnqueueAgentJobInput.fields.subjectRevision,
+  taskContextJson: Schema.String,
+  taskContextDigest: PersistedDigest,
   state: AgentJobState,
   createdAt: UtcTimestamp,
   cancelRequestedAt: Schema.NullOr(UtcTimestamp),
@@ -90,9 +102,7 @@ const JobRow = Schema.Struct({
 const DispatchCandidateRow = Schema.Struct({
   ...JobRow.fields,
   state: Schema.Literals(["queued", "running", "cancel-requested"]),
-  attemptSequence: Schema.Int.check(
-    Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
-  )
+  attemptSequence: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }))
 })
 
 const PreviousAttemptRow = Schema.Struct({
@@ -122,6 +132,12 @@ const ThreadEventRow = Schema.Struct({
   payloadDigest: PersistedDigest,
   payloadByteLength: Schema.Int,
   occurredAt: UtcTimestamp
+})
+
+const ReplayThreadEventRow = Schema.Struct({
+  ...ThreadEventRow.fields,
+  taskContextJson: Schema.String,
+  taskContextDigest: PersistedDigest
 })
 
 const FailAgentAttemptInput = Schema.Struct({
@@ -169,17 +185,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const bytesFromText = Effect.fn("AgentJobRepository.bytesFromText")(function*(value: string) {
-    return yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(value))
-    ).pipe(
+    return yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.encode-utf8" }))
     )
   })
 
   const digestBytes = Effect.fn("AgentJobRepository.digestBytes")(function*(bytes: Uint8Array) {
-    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.digest" }))
-    )
+    const digest = yield* cryptoService
+      .digest("SHA-256", bytes)
+      .pipe(Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.digest" })))
     return `${SHA_256_PREFIX}${Encoding.encodeHex(digest)}`
   })
 
@@ -195,6 +209,40 @@ const makeAgentJobRepository = Effect.gen(function*() {
       return yield* new PersistenceOperationError({ operation: "agent-job.event-too-large" })
     }
     return { bytes, digest: yield* digestBytes(bytes), json }
+  })
+
+  const encodeReviewReport = Effect.fn("AgentJobRepository.encodeReviewReport")(function*(
+    report: typeof PrReviewReport.Type
+  ): Effect.fn.Return<EncodedPayload, PersistenceOperationError> {
+    const json = yield* Schema.encodeUnknownEffect(Schema.fromJsonString(PrReviewReport))(report).pipe(
+      Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.encode-review-report" }))
+    )
+    const bytes = yield* bytesFromText(json)
+    if (bytes.length > MAXIMUM_PR_REVIEW_REPORT_BYTES) {
+      return yield* new PersistenceOperationError({ operation: "agent-job.review-report-too-large" })
+    }
+    return { bytes, digest: yield* digestBytes(bytes), json }
+  })
+
+  const decodeTaskContext = Effect.fn("AgentJobRepository.decodeTaskContext")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    jobId: typeof JobId.Type,
+    taskContextJson: string,
+    taskContextDigest: typeof PersistedDigest.Type
+  ) {
+    const bytes = yield* bytesFromText(taskContextJson)
+    const actualDigest = yield* digestBytes(bytes)
+    if (actualDigest !== taskContextDigest) {
+      return yield* persistedRecordError(
+        workspaceId,
+        "agent-job",
+        jobId,
+        "agent-job-task-context-integrity-invalid"
+      )
+    }
+    return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(AgentJobTask))(taskContextJson).pipe(
+      Effect.mapError(() => persistedRecordError(workspaceId, "agent-job", jobId, "agent-job-task-context-invalid"))
+    )
   })
 
   const reserveEventSequence = Effect.fn("AgentJobRepository.reserveEventSequence")(function*(
@@ -267,12 +315,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     if (rows.length === 0) return Option.none<typeof ThreadRow.Type>()
     const decoded = Schema.decodeUnknownResult(ThreadRow)(rows[0])
     if (Result.isFailure(decoded)) {
-      return yield* persistedRecordError(
-        workspaceId,
-        "agent-thread",
-        releaseId,
-        "agent-thread-schema-invalid"
-      )
+      return yield* persistedRecordError(workspaceId, "agent-thread", releaseId, "agent-thread-schema-invalid")
     }
     return Option.some(decoded.success)
   })
@@ -288,12 +331,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       WHERE workspace_id = ${workspaceId} AND thread_id = ${threadId}`
     const decoded = Schema.decodeUnknownResult(ThreadRow)(rows[0])
     if (Result.isFailure(decoded)) {
-      return yield* persistedRecordError(
-        workspaceId,
-        "agent-thread",
-        jobId,
-        "agent-thread-schema-invalid"
-      )
+      return yield* persistedRecordError(workspaceId, "agent-thread", jobId, "agent-thread-schema-invalid")
     }
     return decoded.success
   })
@@ -306,6 +344,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       workspace_id AS workspaceId, job_id AS jobId, thread_id AS threadId,
       provider_id AS providerId, model, access, prompt,
       context_fingerprint AS contextFingerprint, subject_revision AS subjectRevision,
+      task_context_json AS taskContextJson, task_context_digest AS taskContextDigest,
       state, created_at AS createdAt, cancel_requested_at AS cancelRequestedAt,
       terminal_at AS terminalAt
       FROM agent_jobs
@@ -319,14 +358,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
     const decoded = Schema.decodeUnknownResult(JobRow)(rows[0])
     if (Result.isFailure(decoded)) {
-      return yield* persistedRecordError(
+      return yield* persistedRecordError(workspaceId, "agent-job", jobId, "agent-job-schema-invalid")
+    }
+    return {
+      ...decoded.success,
+      task: yield* decodeTaskContext(
         workspaceId,
-        "agent-job",
         jobId,
-        "agent-job-schema-invalid"
+        decoded.success.taskContextJson,
+        decoded.success.taskContextDigest
       )
     }
-    return decoded.success
   })
 
   const validateLease = Effect.fn("AgentJobRepository.validateLease")(function*(options: {
@@ -538,6 +580,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
             )
           )
         )
+      case "review-report":
+        return yield* Schema.decodeUnknownEffect(PrReviewReport)(payload).pipe(
+          Effect.mapError(() =>
+            persistedRecordError(
+              workspaceId,
+              "agent-thread-event",
+              `${row.threadId}/${row.eventSequence}`,
+              "agent-thread-event-payload-invalid"
+            )
+          )
+        )
       case "job-started":
       case "assistant-output":
       case "progress":
@@ -550,144 +603,163 @@ const makeAgentJobRepository = Effect.gen(function*() {
   return {
     enqueue: Effect.fn("AgentJobRepository.enqueue")(function*(input: typeof EnqueueAgentJobInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(EnqueueAgentJobInput))(input)
+      if (
+        request.task._tag === "pr-review" &&
+        (request.access !== "read-only" || request.subjectRevision !== request.task.subject.headRevision)
+      ) {
+        return yield* new AgentJobInputError({
+          workspaceId: request.workspaceId,
+          jobId: request.jobId,
+          reason: "task-mismatch"
+        })
+      }
+      const taskContext = yield* encodePayload(AgentJobTask, request.task)
       const candidateThreadId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(AgentThreadId)),
         Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.thread-id" }))
       )
-      return yield* database.transaction(Effect.gen(function*() {
-        const releaseRows = yield* sql`SELECT release_id FROM releases
+      return yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const releaseRows = yield* sql`SELECT release_id FROM releases
           WHERE workspace_id = ${request.workspaceId} AND release_id = ${request.releaseId}`
-        if (releaseRows.length === 0) {
-          return yield* new RecordNotFoundError({
-            workspaceId: request.workspaceId,
-            recordKind: "release",
-            recordKey: request.releaseId
-          })
-        }
-        yield* sql`INSERT INTO agent_threads (
+            if (releaseRows.length === 0) {
+              return yield* new RecordNotFoundError({
+                workspaceId: request.workspaceId,
+                recordKind: "release",
+                recordKey: request.releaseId
+              })
+            }
+            yield* sql`INSERT INTO agent_threads (
           workspace_id, thread_id, release_id, next_event_sequence, created_at
         ) VALUES (
           ${request.workspaceId}, ${candidateThreadId}, ${request.releaseId}, 1,
           ${encodeTimestamp(request.createdAt)}
         ) ON CONFLICT (workspace_id, release_id) DO NOTHING`
-        const thread = yield* findThreadForRelease(request.workspaceId, request.releaseId)
-        if (Option.isNone(thread)) {
-          return yield* new PersistenceOperationError({ operation: "agent-job.find-thread" })
-        }
-        yield* sql`INSERT INTO agent_jobs (
+            const thread = yield* findThreadForRelease(request.workspaceId, request.releaseId)
+            if (Option.isNone(thread)) {
+              return yield* new PersistenceOperationError({ operation: "agent-job.find-thread" })
+            }
+            yield* sql`INSERT INTO agent_jobs (
           workspace_id, job_id, thread_id, provider_id, model, access, prompt,
-          context_fingerprint, subject_revision, state, created_at,
+          context_fingerprint, subject_revision, task_context_json, task_context_digest, state, created_at,
           cancel_requested_at, terminal_at
         ) VALUES (
           ${request.workspaceId}, ${request.jobId}, ${thread.value.threadId},
           ${request.providerId}, ${request.model}, ${request.access}, ${request.prompt},
-          ${request.contextFingerprint}, ${request.subjectRevision}, 'queued',
+          ${request.contextFingerprint}, ${request.subjectRevision}, ${taskContext.json}, ${taskContext.digest}, 'queued',
           ${encodeTimestamp(request.createdAt)}, NULL, NULL
         )`
-        yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: thread.value.threadId,
-          jobId: request.jobId,
-          attemptSequence: null,
-          eventKind: "user-message",
-          payload: { prompt: request.userPrompt },
-          payloadSchema: UserMessagePayload,
-          occurredAt: request.createdAt
-        })
-        yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: thread.value.threadId,
-          jobId: request.jobId,
-          attemptSequence: null,
-          eventKind: "job-queued",
-          payload: {
-            access: request.access,
-            contextFingerprint: request.contextFingerprint,
-            model: request.model,
-            providerId: request.providerId,
-            subjectRevision: request.subjectRevision
-          },
-          payloadSchema: JobQueuedPayload,
-          occurredAt: request.createdAt
-        })
-        return thread.value.threadId
-      })).pipe(
-        mapAlreadyExists({
-          workspaceId: request.workspaceId,
-          recordKind: "agent-job",
-          recordKey: request.jobId
-        }),
-        mapPersistenceOperation("agent-job.enqueue")
-      )
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: thread.value.threadId,
+              jobId: request.jobId,
+              attemptSequence: null,
+              eventKind: "user-message",
+              payload: { prompt: request.userPrompt },
+              payloadSchema: UserMessagePayload,
+              occurredAt: request.createdAt
+            })
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: thread.value.threadId,
+              jobId: request.jobId,
+              attemptSequence: null,
+              eventKind: "job-queued",
+              payload: {
+                access: request.access,
+                contextFingerprint: request.contextFingerprint,
+                model: request.model,
+                providerId: request.providerId,
+                subjectRevision: request.subjectRevision,
+                task: request.task
+              },
+              payloadSchema: PersistedJobQueuedPayload,
+              occurredAt: request.createdAt
+            })
+            return thread.value.threadId
+          })
+        )
+        .pipe(
+          mapAlreadyExists({
+            workspaceId: request.workspaceId,
+            recordKind: "agent-job",
+            recordKey: request.jobId
+          }),
+          mapPersistenceOperation("agent-job.enqueue")
+        )
     }),
 
     claimNext: Effect.fn("AgentJobRepository.claimNext")(function*(input: typeof ClaimAgentJobInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(ClaimAgentJobInput))(input)
-      return yield* database.transaction(Effect.gen(function*() {
-        const claimedAt = yield* DateTime.now
-        const observedAt = encodeTimestamp(claimedAt)
-        const dispatch = renderAgentJobDispatchCandidatesQuery({
-          workspaceId: request.workspaceId,
-          observedAt,
-          limit: DISPATCH_CANDIDATE_LIMIT
-        })
-        const candidateRows = yield* sql.unsafe<Record<string, unknown>>(
-          dispatch.sql,
-          [...dispatch.params]
-        )
-        const candidates = Schema.decodeUnknownResult(Schema.Array(DispatchCandidateRow))(candidateRows)
-        if (Result.isFailure(candidates)) {
-          return yield* persistedRecordError(
-            request.workspaceId,
-            "agent-job",
-            request.workspaceId,
-            "agent-job-dispatch-schema-invalid"
-          )
-        }
-        for (const candidate of candidates.success) {
-          if (DateTime.Order(claimedAt, request.leaseExpiresAt) >= 0) {
-            return yield* new AgentJobInputError({
+      return yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const claimedAt = yield* DateTime.now
+            const observedAt = encodeTimestamp(claimedAt)
+            const dispatch = renderAgentJobDispatchCandidatesQuery({
               workspaceId: request.workspaceId,
-              jobId: candidate.jobId,
-              reason: "invalid-transition"
+              observedAt,
+              limit: DISPATCH_CANDIDATE_LIMIT
             })
-          }
-          const claim = renderAgentJobClaimQuery({
-            workspaceId: request.workspaceId,
-            jobId: candidate.jobId,
-            expectedAttemptSequence: candidate.attemptSequence,
-            expectedState: candidate.state satisfies ClaimableAgentJobState,
-            observedAt
-          })
-          const claimedRows = yield* sql.unsafe<Record<string, unknown>>(
-            claim.sql,
-            [...claim.params]
-          )
-          if (claimedRows.length === 0) continue
-          const claimed = Schema.decodeUnknownResult(JobRow)(claimedRows[0])
-          if (Result.isFailure(claimed)) {
-            return yield* persistedRecordError(
-              request.workspaceId,
-              "agent-job",
-              candidate.jobId,
-              "agent-job-schema-invalid"
-            )
-          }
-          const thread = yield* findThreadForJob(
-            request.workspaceId,
-            claimed.success.threadId,
-            claimed.success.jobId
-          )
-          const context = yield* Schema.decodeUnknownEffect(Schema.toType(AgentContextSnapshotRecord))({
-            workspaceId: request.workspaceId,
-            releaseId: thread.releaseId,
-            subjectRevision: claimed.success.subjectRevision,
-            fingerprint: claimed.success.contextFingerprint
-          })
-          const contextPayload = yield* encodePayload(AgentContextSnapshotRecord, context)
-          let sessionRef: null | typeof ClaimedAgentJob.fields.sessionRef.Type = null
-          if (candidate.attemptSequence > 0) {
-            const previousRows = yield* sql<Record<string, unknown>>`SELECT
+            const candidateRows = yield* sql.unsafe<Record<string, unknown>>(dispatch.sql, [...dispatch.params])
+            const candidates = Schema.decodeUnknownResult(Schema.Array(DispatchCandidateRow))(candidateRows)
+            if (Result.isFailure(candidates)) {
+              return yield* persistedRecordError(
+                request.workspaceId,
+                "agent-job",
+                request.workspaceId,
+                "agent-job-dispatch-schema-invalid"
+              )
+            }
+            for (const candidate of candidates.success) {
+              const task = yield* decodeTaskContext(
+                request.workspaceId,
+                candidate.jobId,
+                candidate.taskContextJson,
+                candidate.taskContextDigest
+              )
+              if (DateTime.Order(claimedAt, request.leaseExpiresAt) >= 0) {
+                return yield* new AgentJobInputError({
+                  workspaceId: request.workspaceId,
+                  jobId: candidate.jobId,
+                  reason: "invalid-transition"
+                })
+              }
+              const claim = renderAgentJobClaimQuery({
+                workspaceId: request.workspaceId,
+                jobId: candidate.jobId,
+                expectedAttemptSequence: candidate.attemptSequence,
+                expectedState: candidate.state satisfies ClaimableAgentJobState,
+                observedAt
+              })
+              const claimedRows = yield* sql.unsafe<Record<string, unknown>>(claim.sql, [...claim.params])
+              if (claimedRows.length === 0) continue
+              const claimed = Schema.decodeUnknownResult(JobRow)(claimedRows[0])
+              if (Result.isFailure(claimed)) {
+                return yield* persistedRecordError(
+                  request.workspaceId,
+                  "agent-job",
+                  candidate.jobId,
+                  "agent-job-schema-invalid"
+                )
+              }
+              const thread = yield* findThreadForJob(
+                request.workspaceId,
+                claimed.success.threadId,
+                claimed.success.jobId
+              )
+              const context = yield* Schema.decodeUnknownEffect(Schema.toType(AgentContextSnapshotRecord))({
+                workspaceId: request.workspaceId,
+                releaseId: thread.releaseId,
+                subjectRevision: claimed.success.subjectRevision,
+                fingerprint: claimed.success.contextFingerprint,
+                task
+              })
+              const contextPayload = yield* encodePayload(AgentContextSnapshotRecord, context)
+              let sessionRef: null | typeof ClaimedAgentJob.fields.sessionRef.Type = null
+              if (candidate.attemptSequence > 0) {
+                const previousRows = yield* sql<Record<string, unknown>>`SELECT
               context_snapshot_json AS contextSnapshotJson,
               context_snapshot_digest AS contextSnapshotDigest,
               session_ref AS sessionRef
@@ -695,32 +767,32 @@ const makeAgentJobRepository = Effect.gen(function*() {
               WHERE workspace_id = ${request.workspaceId}
                 AND job_id = ${candidate.jobId}
                 AND attempt_sequence = ${candidate.attemptSequence}`
-            const previous = Schema.decodeUnknownResult(PreviousAttemptRow)(previousRows[0])
-            const previousContext = Result.isSuccess(previous)
-              ? Schema.decodeUnknownResult(
-                Schema.fromJsonString(AgentContextSnapshotRecord)
-              )(previous.success.contextSnapshotJson)
-              : null
-            if (
-              Result.isFailure(previous) ||
-              previousContext === null ||
-              Result.isFailure(previousContext) ||
-              previous.success.contextSnapshotDigest !== contextPayload.digest ||
-              previous.success.contextSnapshotJson !== contextPayload.json
-            ) {
-              return yield* persistedRecordError(
-                request.workspaceId,
-                "agent-job-attempt",
-                `${candidate.jobId}/${candidate.attemptSequence}`,
-                "agent-job-context-invalid"
+                const previous = Schema.decodeUnknownResult(PreviousAttemptRow)(previousRows[0])
+                const previousContext = Result.isSuccess(previous)
+                  ? Schema.decodeUnknownResult(Schema.fromJsonString(AgentContextSnapshotRecord))(
+                    previous.success.contextSnapshotJson
+                  )
+                  : null
+                if (
+                  Result.isFailure(previous) ||
+                  previousContext === null ||
+                  Result.isFailure(previousContext) ||
+                  previous.success.contextSnapshotDigest !== contextPayload.digest ||
+                  previous.success.contextSnapshotJson !== contextPayload.json
+                ) {
+                  return yield* persistedRecordError(
+                    request.workspaceId,
+                    "agent-job-attempt",
+                    `${candidate.jobId}/${candidate.attemptSequence}`,
+                    "agent-job-context-invalid"
+                  )
+                }
+                sessionRef = previous.success.sessionRef
+              }
+              const attemptSequence = yield* Schema.decodeUnknownEffect(AgentAttemptSequence)(
+                candidate.attemptSequence + 1
               )
-            }
-            sessionRef = previous.success.sessionRef
-          }
-          const attemptSequence = yield* Schema.decodeUnknownEffect(AgentAttemptSequence)(
-            candidate.attemptSequence + 1
-          )
-          yield* sql`INSERT INTO agent_job_attempts (
+              yield* sql`INSERT INTO agent_job_attempts (
             workspace_id, job_id, attempt_sequence, context_snapshot_json,
             context_snapshot_digest, output_bytes, provider_run_ref, session_ref,
             started_at, completed_at, outcome, error_json
@@ -729,7 +801,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             ${contextPayload.json}, ${contextPayload.digest}, 0, NULL, ${sessionRef},
             ${observedAt}, NULL, NULL, NULL
           )`
-          yield* sql`INSERT INTO agent_job_leases (
+              yield* sql`INSERT INTO agent_job_leases (
             workspace_id, job_id, attempt_sequence, lease_owner, lease_token,
             acquired_at, last_renewed_at, lease_expires_at
           ) VALUES (
@@ -737,212 +809,370 @@ const makeAgentJobRepository = Effect.gen(function*() {
             ${request.leaseOwner}, ${request.leaseToken}, ${observedAt}, ${observedAt},
             ${encodeTimestamp(request.leaseExpiresAt)}
           )`
-          const claimedJob = yield* Schema.decodeUnknownEffect(Schema.toType(ClaimedAgentJob))({
-            workspaceId: request.workspaceId,
-            releaseId: thread.releaseId,
-            threadId: thread.threadId,
-            jobId: candidate.jobId,
-            attemptSequence,
-            leaseOwner: request.leaseOwner,
-            leaseToken: request.leaseToken,
-            leaseExpiresAt: request.leaseExpiresAt,
-            providerId: claimed.success.providerId,
-            model: claimed.success.model,
-            access: claimed.success.access,
-            prompt: claimed.success.prompt,
-            context,
-            sessionRef,
-            cancellationRequested: claimed.success.state === "cancel-requested"
+              const claimedJob = yield* Schema.decodeUnknownEffect(Schema.toType(ClaimedAgentJob))({
+                workspaceId: request.workspaceId,
+                releaseId: thread.releaseId,
+                threadId: thread.threadId,
+                jobId: candidate.jobId,
+                attemptSequence,
+                leaseOwner: request.leaseOwner,
+                leaseToken: request.leaseToken,
+                leaseExpiresAt: request.leaseExpiresAt,
+                providerId: claimed.success.providerId,
+                model: claimed.success.model,
+                access: claimed.success.access,
+                prompt: claimed.success.prompt,
+                context,
+                sessionRef,
+                cancellationRequested: claimed.success.state === "cancel-requested"
+              })
+              return Option.some(claimedJob)
+            }
+            return Option.none<typeof ClaimedAgentJob.Type>()
           })
-          return Option.some(claimedJob)
-        }
-        return Option.none<typeof ClaimedAgentJob.Type>()
-      })).pipe(mapPersistenceOperation("agent-job.claim-next"))
+        )
+        .pipe(mapPersistenceOperation("agent-job.claim-next"))
     }),
 
-    appendEvent: Effect.fn("AgentJobRepository.appendEvent")(function*(
-      input: typeof AppendAgentEventInput.Type
-    ) {
+    appendEvent: Effect.fn("AgentJobRepository.appendEvent")(function*(input: typeof AppendAgentEventInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(AppendAgentEventInput))(input)
-      return yield* database.transaction(Effect.gen(function*() {
-        const job = yield* getJob(request.workspaceId, request.jobId)
-        if (job.state !== "running" && job.state !== "cancel-requested") {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
-          })
-        }
-        yield* validateLease({
-          workspaceId: request.workspaceId,
-          jobId: request.jobId,
-          attemptSequence: request.attemptSequence,
-          leaseToken: request.leaseToken,
-          observedAt: request.occurredAt
-        })
-        let eventKind: EventKind
-        switch (request.event._tag) {
-          case "started":
-            eventKind = "job-started"
-            yield* sql`UPDATE agent_job_attempts
+      return yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const job = yield* getJob(request.workspaceId, request.jobId)
+            if (job.state !== "running" && job.state !== "cancel-requested") {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            yield* validateLease({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              leaseToken: request.leaseToken,
+              observedAt: request.occurredAt
+            })
+            if (
+              job.task._tag === "pr-review" &&
+              (
+                job.state !== "cancel-requested" ||
+                request.event._tag !== "completed" ||
+                request.event.outcome !== "cancelled"
+              )
+            ) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            let eventKind: EventKind
+            switch (request.event._tag) {
+              case "started":
+                eventKind = "job-started"
+                yield* sql`UPDATE agent_job_attempts
               SET provider_run_ref = ${request.event.providerRunRef},
                   session_ref = COALESCE(${request.event.sessionRef}, session_ref)
               WHERE workspace_id = ${request.workspaceId}
                 AND job_id = ${request.jobId}
                 AND attempt_sequence = ${request.attemptSequence}
                 AND completed_at IS NULL`
-            break
-          case "output": {
-            eventKind = request.event.channel === "assistant" ? "assistant-output" : "progress"
-            const outputBytes = yield* bytesFromText(request.event.text)
-            yield* sql`UPDATE agent_job_attempts
+                break
+              case "output": {
+                eventKind = request.event.channel === "assistant" ? "assistant-output" : "progress"
+                const outputBytes = yield* bytesFromText(request.event.text)
+                yield* sql`UPDATE agent_job_attempts
               SET output_bytes = output_bytes + ${outputBytes.length}
               WHERE workspace_id = ${request.workspaceId}
                 AND job_id = ${request.jobId}
                 AND attempt_sequence = ${request.attemptSequence}
                 AND completed_at IS NULL
                 AND output_bytes + ${outputBytes.length} <= ${MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES}`
-            if ((yield* readChanges(sql)) !== 1) {
+                if ((yield* readChanges(sql)) !== 1) {
+                  return yield* new AgentJobInputError({
+                    workspaceId: request.workspaceId,
+                    jobId: request.jobId,
+                    reason: "output-limit-exceeded"
+                  })
+                }
+                break
+              }
+              case "usage":
+                eventKind = "usage"
+                break
+              case "completed":
+                eventKind = "job-completed"
+                break
+            }
+            const persistedEvent = yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              eventKind,
+              payload: request.event,
+              payloadSchema: AgentRuntimeEvent,
+              occurredAt: request.occurredAt
+            })
+            if (request.event._tag === "completed") {
+              const state = request.event.outcome === "success"
+                ? "succeeded"
+                : request.event.outcome === "cancelled"
+                ? "cancelled"
+                : "failed"
+              yield* completeAttempt({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                attemptSequence: request.attemptSequence,
+                completedAt: request.occurredAt,
+                outcome: request.event.outcome,
+                state,
+                sessionRef: request.event.sessionRef,
+                errorJson: null
+              })
+            }
+            return persistedEvent
+          })
+        )
+        .pipe(mapPersistenceOperation("agent-job.append-event"))
+    }),
+
+    completeReview: Effect.fn("AgentJobRepository.completeReview")(function*(
+      input: typeof CompleteAgentReviewInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(CompleteAgentReviewInput))(input)
+      const report = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))(request.report).pipe(
+        Effect.mapError(
+          () =>
+            new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-result"
+            })
+        )
+      )
+      const encodedReport = yield* encodeReviewReport(report).pipe(
+        Effect.mapError(
+          () =>
+            new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-result"
+            })
+        )
+      )
+      return yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const job = yield* getJob(request.workspaceId, request.jobId)
+            if (
+              (job.state !== "running" && job.state !== "cancel-requested") ||
+              job.task._tag !== "pr-review" ||
+              job.subjectRevision !== job.task.subject.headRevision ||
+              !Schema.toEquivalence(PrReviewSubject)(job.task.subject, report.subject)
+            ) {
               return yield* new AgentJobInputError({
                 workspaceId: request.workspaceId,
                 jobId: request.jobId,
-                reason: "output-limit-exceeded"
+                reason: "task-mismatch"
               })
             }
-            break
-          }
-          case "usage":
-            eventKind = "usage"
-            break
-          case "completed":
-            eventKind = "job-completed"
-            break
-        }
-        const persistedEvent = yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: job.threadId,
-          jobId: request.jobId,
-          attemptSequence: request.attemptSequence,
-          eventKind,
-          payload: request.event,
-          payloadSchema: AgentRuntimeEvent,
-          occurredAt: request.occurredAt
-        })
-        if (request.event._tag === "completed") {
-          const state = request.event.outcome === "success"
-            ? "succeeded"
-            : request.event.outcome === "cancelled"
-            ? "cancelled"
-            : "failed"
-          yield* completeAttempt({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            attemptSequence: request.attemptSequence,
-            completedAt: request.occurredAt,
-            outcome: request.event.outcome,
-            state,
-            sessionRef: request.event.sessionRef,
-            errorJson: null
+            yield* validateLease({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              leaseToken: request.leaseToken,
+              observedAt: request.completedAt
+            })
+            const eventSequence = yield* reserveEventSequence(request.workspaceId, job.threadId)
+            yield* sql`INSERT INTO agent_thread_events (
+          workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        ) VALUES (
+          ${request.workspaceId}, ${job.threadId}, ${eventSequence}, ${request.jobId},
+          ${request.attemptSequence}, 'review-report', ${encodedReport.json},
+          ${encodedReport.digest}, ${encodedReport.bytes.length},
+          ${encodeTimestamp(request.completedAt)}
+        )`
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              eventKind: "job-completed",
+              payload: { _tag: "completed", outcome: "success", sessionRef: null },
+              payloadSchema: AgentRuntimeEvent,
+              occurredAt: request.completedAt
+            })
+            yield* completeAttempt({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              completedAt: request.completedAt,
+              outcome: "success",
+              state: "succeeded",
+              sessionRef: null,
+              errorJson: null
+            })
+            return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              report,
+              completedAt: request.completedAt
+            })
           })
-        }
-        return persistedEvent
-      })).pipe(mapPersistenceOperation("agent-job.append-event"))
+        )
+        .pipe(mapPersistenceOperation("agent-job.complete-review"))
     }),
 
-    failAttempt: Effect.fn("AgentJobRepository.failAttempt")(function*(
-      input: typeof FailAgentAttemptInput.Type
-    ) {
+    failAttempt: Effect.fn("AgentJobRepository.failAttempt")(function*(input: typeof FailAgentAttemptInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(FailAgentAttemptInput))(input)
-      return yield* database.transaction(Effect.gen(function*() {
-        const job = yield* getJob(request.workspaceId, request.jobId)
-        if (
-          (job.state !== "running" && job.state !== "cancel-requested") ||
-          job.providerId !== request.error.providerId
-        ) {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
+      return yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const job = yield* getJob(request.workspaceId, request.jobId)
+            if (
+              (job.state !== "running" && job.state !== "cancel-requested") ||
+              job.providerId !== request.error.providerId
+            ) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            yield* validateLease({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              leaseToken: request.leaseToken,
+              observedAt: request.failedAt
+            })
+            const payload = { error: request.error }
+            const persistedEvent = yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              eventKind: "job-failed",
+              payload,
+              payloadSchema: ProviderFailurePayload,
+              occurredAt: request.failedAt
+            })
+            const encodedFailure = yield* encodePayload(ProviderFailurePayload, payload)
+            yield* completeAttempt({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              attemptSequence: request.attemptSequence,
+              completedAt: request.failedAt,
+              outcome: "failed",
+              state: "failed",
+              sessionRef: null,
+              errorJson: encodedFailure.json
+            })
+            return persistedEvent
           })
-        }
-        yield* validateLease({
-          workspaceId: request.workspaceId,
-          jobId: request.jobId,
-          attemptSequence: request.attemptSequence,
-          leaseToken: request.leaseToken,
-          observedAt: request.failedAt
-        })
-        const payload = { error: request.error }
-        const persistedEvent = yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: job.threadId,
-          jobId: request.jobId,
-          attemptSequence: request.attemptSequence,
-          eventKind: "job-failed",
-          payload,
-          payloadSchema: ProviderFailurePayload,
-          occurredAt: request.failedAt
-        })
-        const encodedFailure = yield* encodePayload(ProviderFailurePayload, payload)
-        yield* completeAttempt({
-          workspaceId: request.workspaceId,
-          jobId: request.jobId,
-          attemptSequence: request.attemptSequence,
-          completedAt: request.failedAt,
-          outcome: "failed",
-          state: "failed",
-          sessionRef: null,
-          errorJson: encodedFailure.json
-        })
-        return persistedEvent
-      })).pipe(mapPersistenceOperation("agent-job.fail-attempt"))
+        )
+        .pipe(mapPersistenceOperation("agent-job.fail-attempt"))
     }),
 
     requestCancellation: Effect.fn("AgentJobRepository.requestCancellation")(function*(
       input: typeof RequestAgentCancellationInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(RequestAgentCancellationInput))(input)
-      yield* database.transaction(Effect.gen(function*() {
-        const job = yield* getJob(request.workspaceId, request.jobId)
-        if (job.state === "cancel-requested") return
-        if (job.state !== "queued" && job.state !== "running") {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
-          })
-        }
-        const requestedAt = encodeTimestamp(request.requestedAt)
-        const nextState = job.state === "queued" ? "cancelled" : "cancel-requested"
-        const terminalAt = job.state === "queued" ? requestedAt : null
-        yield* sql`UPDATE agent_jobs
+      yield* database
+        .transaction(
+          Effect.gen(function*() {
+            const job = yield* getJob(request.workspaceId, request.jobId)
+            if (job.state === "cancel-requested") return
+            if (job.state !== "queued" && job.state !== "running") {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            const requestedAt = encodeTimestamp(request.requestedAt)
+            const nextState = job.state === "queued" ? "cancelled" : "cancel-requested"
+            const terminalAt = job.state === "queued" ? requestedAt : null
+            yield* sql`UPDATE agent_jobs
           SET state = ${nextState}, cancel_requested_at = ${requestedAt}, terminal_at = ${terminalAt}
           WHERE workspace_id = ${request.workspaceId}
             AND job_id = ${request.jobId}
             AND state = ${job.state}`
-        if ((yield* readChanges(sql)) !== 1) {
-          return yield* new AgentJobInputError({
-            workspaceId: request.workspaceId,
-            jobId: request.jobId,
-            reason: "invalid-transition"
+            if ((yield* readChanges(sql)) !== 1) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            yield* appendThreadEvent({
+              workspaceId: request.workspaceId,
+              threadId: job.threadId,
+              jobId: request.jobId,
+              attemptSequence: null,
+              eventKind: "cancel-requested",
+              payload: { requestedAt: request.requestedAt },
+              payloadSchema: CancellationRequestedPayload,
+              occurredAt: request.requestedAt
+            })
           })
-        }
-        yield* appendThreadEvent({
-          workspaceId: request.workspaceId,
-          threadId: job.threadId,
-          jobId: request.jobId,
-          attemptSequence: null,
-          eventKind: "cancel-requested",
-          payload: { requestedAt: request.requestedAt },
-          payloadSchema: CancellationRequestedPayload,
-          occurredAt: request.requestedAt
-        })
-      })).pipe(mapPersistenceOperation("agent-job.request-cancellation"))
+        )
+        .pipe(mapPersistenceOperation("agent-job.request-cancellation"))
     }),
 
-    threadAfter: Effect.fn("AgentJobRepository.threadAfter")(function*(
-      input: typeof AgentThreadAfterInput.Type
-    ) {
+    reviewResult: Effect.fn("AgentJobRepository.reviewResult")(function*(input: typeof AgentReviewResultInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultInput))(input)
+      const rows = yield* sql<Record<string, unknown>>`SELECT
+        workspace_id AS workspaceId, thread_id AS threadId,
+        event_sequence AS eventSequence, job_id AS jobId,
+        attempt_sequence AS attemptSequence, event_kind AS eventKind,
+        payload_json AS payloadJson, payload_digest AS payloadDigest,
+        payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+        FROM agent_thread_events
+        WHERE workspace_id = ${request.workspaceId}
+          AND job_id = ${request.jobId}
+          AND event_kind = 'review-report'`.pipe(mapPersistenceOperation("agent-job.review-result"))
+      if (rows.length === 0) {
+        return yield* new RecordNotFoundError({
+          workspaceId: request.workspaceId,
+          recordKind: "agent-review-result",
+          recordKey: request.jobId
+        })
+      }
+      const row = Schema.decodeUnknownResult(ThreadEventRow)(rows[0])
+      if (rows.length !== 1 || Result.isFailure(row) || row.success.attemptSequence === null) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-result-schema-invalid"
+        )
+      }
+      const report = yield* decodeEventPayload(request.workspaceId, row.success)
+      const decodedReport = Schema.decodeUnknownResult(PrReviewReport)(report)
+      if (Result.isFailure(decodedReport)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-result-payload-invalid"
+        )
+      }
+      return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
+        workspaceId: request.workspaceId,
+        jobId: request.jobId,
+        attemptSequence: row.success.attemptSequence,
+        report: decodedReport.success,
+        completedAt: row.success.occurredAt
+      })
+    }),
+
+    threadAfter: Effect.fn("AgentJobRepository.threadAfter")(function*(input: typeof AgentThreadAfterInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(AgentThreadAfterInput))(input)
       const thread = yield* findThreadForRelease(request.workspaceId, request.releaseId).pipe(
         mapPersistenceOperation("agent-job.find-thread")
@@ -960,11 +1190,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
         afterSequence: request.after,
         limit: request.limit
       })
-      const rows = yield* sql.unsafe<Record<string, unknown>>(
-        replay.sql,
-        [...replay.params]
-      ).pipe(mapPersistenceOperation("agent-job.thread-after"))
-      const decodedRows = Schema.decodeUnknownResult(Schema.Array(ThreadEventRow))(rows)
+      const rows = yield* sql
+        .unsafe<Record<string, unknown>>(replay.sql, [...replay.params])
+        .pipe(mapPersistenceOperation("agent-job.thread-after"))
+      const decodedRows = Schema.decodeUnknownResult(Schema.Array(ReplayThreadEventRow))(rows)
       if (Result.isFailure(decodedRows)) {
         return yield* persistedRecordError(
           request.workspaceId,
@@ -973,23 +1202,34 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-thread-event-schema-invalid"
         )
       }
+      const tasksByJob = new Map<typeof JobId.Type, typeof AgentJobTask.Type>()
       const events = yield* Effect.forEach(
         decodedRows.success,
         (row) =>
-          decodeEventPayload(request.workspaceId, row).pipe(
-            Effect.flatMap((payload) =>
-              Schema.decodeUnknownEffect(Schema.toType(AgentThreadEvent))({
-                workspaceId: row.workspaceId,
-                threadId: row.threadId,
-                eventSequence: row.eventSequence,
-                jobId: row.jobId,
-                attemptSequence: row.attemptSequence,
-                eventKind: row.eventKind,
-                payload,
-                occurredAt: row.occurredAt
-              })
-            )
-          )
+          Effect.gen(function*() {
+            const payload = yield* decodeEventPayload(request.workspaceId, row)
+            let task = tasksByJob.get(row.jobId)
+            if (task === undefined) {
+              task = yield* decodeTaskContext(
+                request.workspaceId,
+                row.jobId,
+                row.taskContextJson,
+                row.taskContextDigest
+              )
+              tasksByJob.set(row.jobId, task)
+            }
+            return yield* Schema.decodeUnknownEffect(Schema.toType(AgentThreadEvent))({
+              workspaceId: row.workspaceId,
+              threadId: row.threadId,
+              eventSequence: row.eventSequence,
+              jobId: row.jobId,
+              attemptSequence: row.attemptSequence,
+              task,
+              eventKind: row.eventKind,
+              payload,
+              occurredAt: row.occurredAt
+            })
+          })
       )
       const nextCursor = events.at(-1)?.eventSequence ?? request.after
       return { events, nextCursor }

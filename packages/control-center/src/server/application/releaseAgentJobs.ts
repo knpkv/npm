@@ -108,6 +108,8 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
       const payload = yield* decodePayload(ProviderFailurePayload, event.payload)
       return { _tag: "job-failed", ...common, retryable: payload.error.retryable }
     }
+    case "review-report":
+      return yield* unavailable()
     case "cancel-requested": {
       const payload = yield* decodePayload(CancellationRequestedPayload, event.payload)
       return { _tag: "cancel-requested", ...common, requestedAt: payload.requestedAt }
@@ -176,6 +178,7 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         prompt: providerPrompt,
         contextFingerprint,
         subjectRevision,
+        task: { _tag: "release-chat" },
         createdAt
       }).pipe(
         Effect.mapError(mapPersistenceWriteError),
@@ -194,18 +197,40 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(input.limit).pipe(
         Effect.mapError(unavailable)
       )
-      const page = yield* mapPersistenceRead(
-        persistence.agentJobs.threadAfter({
-          workspaceId: input.workspaceId,
-          releaseId: input.releaseId,
-          after,
-          limit
-        }).pipe(
-          Effect.catchTag("RecordNotFoundError", () => Effect.succeed({ events: [], nextCursor: after }))
+      const events: Array<ReleaseAgentThreadEvent> = []
+      let nextAgentCursor = after
+      while (events.length < limit) {
+        const remaining = AgentThreadEventPageSize.make(limit - events.length)
+        const page = yield* mapPersistenceRead(
+          persistence.agentJobs.threadAfter({
+            workspaceId: input.workspaceId,
+            releaseId: input.releaseId,
+            after: nextAgentCursor,
+            limit: remaining
+          }).pipe(
+            Effect.catchTag(
+              "RecordNotFoundError",
+              () => Effect.succeed({ events: [], nextCursor: nextAgentCursor })
+            )
+          )
         )
-      )
-      const events = yield* Effect.forEach(page.events, mapThreadEvent)
-      const nextCursor = yield* Schema.decodeUnknownEffect(ReleaseAgentThreadCursor)(page.nextCursor).pipe(
+        if (page.events.length === 0) break
+        if (page.nextCursor <= nextAgentCursor) {
+          return yield* Effect.fail(unavailable())
+        }
+        nextAgentCursor = page.nextCursor
+        const visiblePage = yield* Effect.forEach(
+          page.events.filter(
+            ({ eventKind, task }) => eventKind !== "review-report" && task?._tag !== "pr-review"
+          ),
+          mapThreadEvent
+        )
+        for (const event of visiblePage) {
+          events.push(event)
+        }
+        if (page.events.length < remaining) break
+      }
+      const nextCursor = yield* Schema.decodeUnknownEffect(ReleaseAgentThreadCursor)(nextAgentCursor).pipe(
         Effect.mapError(unavailable)
       )
       return { releaseId: input.releaseId, events, nextCursor }
