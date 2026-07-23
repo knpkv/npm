@@ -31,6 +31,16 @@ export const PLUGIN_RETRY_BASE_DELAY_MILLIS = 100
 /** Hard upper bound for every full-jitter transient retry delay. */
 export const PLUGIN_RETRY_MAX_DELAY_MILLIS = 10_000
 
+/**
+ * Hard upper bound for honoring an explicit provider Retry-After instant.
+ *
+ * Higher than {@link PLUGIN_RETRY_MAX_DELAY_MILLIS} because a rate-limit failure
+ * carries a provider-supplied instant we should respect (e.g. CodeCommit surfaces
+ * a ~30s window after exhausting its own throttle backoff). Waits beyond this
+ * ceiling still fail fast rather than retaining a fiber.
+ */
+export const PLUGIN_RATE_LIMIT_MAX_DELAY_MILLIS = 60_000
+
 const permitsRetry = (safety: PluginOperationSafety): boolean => safety !== "unsafe-mutation"
 
 /** Whether one typed provider failure may be retried for the declared operation safety. */
@@ -63,7 +73,7 @@ const retryDelay = (failure: PluginFailure, failedAttempt: number): Effect.Effec
   }
   return Effect.flatMap(Clock.currentTimeMillis, (currentTimeMillis) => {
     const delay = Math.max(0, DateTime.toEpochMillis(failure.retryAt) - currentTimeMillis)
-    return delay <= PLUGIN_RETRY_MAX_DELAY_MILLIS ? Effect.sleep(delay) : Effect.fail(failure)
+    return delay <= PLUGIN_RATE_LIMIT_MAX_DELAY_MILLIS ? Effect.sleep(delay) : Effect.fail(failure)
   })
 }
 

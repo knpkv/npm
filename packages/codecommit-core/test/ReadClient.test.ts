@@ -3,6 +3,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -191,6 +192,31 @@ describe("CodeCommitReadClient", () => {
       })
     ))
 
+  it.effect("never writes raw blob bytes into logs when a blob response fails schema decode", () =>
+    Effect.gen(function*() {
+      // Blob content is raw repository file data; a schema-decode failure must not
+      // leak the rejected value into logs, unlike diagnostic metadata operations.
+      const secret = "AKIA-super-secret-blob-payload"
+      const messages = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const logger = Logger.make<unknown, void>((entry) => {
+        Effect.runSync(Ref.update(messages, (items) => [...items, entry.message]))
+      })
+      const result = yield* runWithProvider(
+        baseProvider({ getBlob: () => Effect.succeed({ content: secret }) }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReadClient
+          return yield* client.getBlob({ account, repositoryName: "payments-api", blobId: "blob-secret" }).pipe(
+            Effect.result
+          )
+        })
+      ).pipe(Effect.withLogger(logger))
+
+      assert.isTrue(Result.isFailure(result))
+      const logged = (yield* Ref.get(messages)).map((message) => String(message)).join("\n")
+      assert.notInclude(logged, secret)
+      assert.include(logged, "get-blob")
+    }))
+
   it.effect("interrupts an in-flight blob provider read", () =>
     Effect.gen(function*() {
       const entered = yield* Deferred.make<void>()
@@ -237,6 +263,39 @@ describe("CodeCommitReadClient", () => {
         assert.strictEqual(page.pullRequests[0]?.sourceCommit, "head-commit-17")
         assert.strictEqual(page.pullRequests[0]?.destinationCommit, "base-commit-17")
         assert.strictEqual(page.pullRequests[0]?.mergeBase, "merge-base-17")
+      })
+    ))
+
+  it.effect("normalizes untrimmed provider pull request titles instead of rejecting them", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: ({ pullRequestId }) =>
+          Effect.succeed({
+            pullRequest: {
+              ...pullRequestResponse(pullRequestId).pullRequest,
+              title: "chore(RPS-6255): patch dependency vulnerabilities\n"
+            }
+          })
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const revision = yield* client.getPullRequest({ account, pullRequestId: "17" })
+        assert.strictEqual(revision.title, "chore(RPS-6255): patch dependency vulnerabilities")
+      })
+    ))
+
+  it.effect("decodes a pull request whose author identity the provider omitted", () =>
+    runWithProvider(
+      baseProvider({
+        getPullRequest: ({ pullRequestId }) => {
+          const { authorArn: _omitted, ...pullRequest } = pullRequestResponse(pullRequestId).pullRequest
+          return Effect.succeed({ pullRequest })
+        }
+      }),
+      Effect.gen(function*() {
+        const client = yield* CodeCommitReadClient
+        const revision = yield* client.getPullRequest({ account, pullRequestId: "17" })
+        assert.strictEqual(revision.authorArn, null)
       })
     ))
 

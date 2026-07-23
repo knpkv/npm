@@ -492,6 +492,13 @@ export const makeManualPluginSynchronization = Effect.fn(
         const healthPersisted = yield* persistHealth(bound, authority, health, sourceUnavailable)
         return sourceUnavailable || !healthPersisted ? SOURCE_UNAVAILABLE_OUTCOME : SYNCHRONIZED_OUTCOME
       }
+      yield* Effect.logError("Manual plugin synchronization failed", synchronized.failure).pipe(
+        Effect.annotateLogs({
+          workspaceId: bound.workspaceId,
+          pluginConnectionId: bound.pluginConnectionId,
+          streamKey: bound.streamKey
+        })
+      )
       const failure = sourceFailure(synchronized.failure)
       if (failure === null) return yield* unavailable()
       const failedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))

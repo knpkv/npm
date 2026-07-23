@@ -85,7 +85,7 @@ export class CodeCommitPullRequestRevision extends Schema.Class<CodeCommitPullRe
   repositoryName: RepositoryName,
   title: NonEmptyString,
   description: Schema.optional(Schema.String),
-  authorArn: NonEmptyString,
+  authorArn: Schema.NullOr(NonEmptyString),
   status: Schema.Literals(["OPEN", "CLOSED", "MERGED"]),
   sourceReference: NonEmptyString,
   destinationReference: NonEmptyString,
