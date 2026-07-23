@@ -2685,6 +2685,31 @@ describe("normalized plugin page materialization", () => {
         page("clockify-active-page-2", false, [activeEntries[1]])
       )
       assert.strictEqual(yield* activeContributorCount(["active-entry-1", "active-entry-2"]), 2)
+
+      const reactivationPage = page("clockify-reactivated", false, [
+        person("inactive-user", true, "v1"),
+        inactiveEntries[0]
+      ])
+      const reactivated = yield* materializeNormalizedPluginPage(scope(5), reactivationPage)
+      assert.strictEqual(reactivated.acceptedEventCount, 1)
+      const reactivatedPerson = yield* persistence.people.findPersonBySourceIdentity(WORKSPACE_ID, {
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        providerId: "clockify",
+        vendorPersonId: VendorImmutableId.make("inactive-user")
+      })
+      assert.isTrue(reactivatedPerson.person.isActive)
+      assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 1)
+
+      const replayed = yield* materializeNormalizedPluginPage(
+        scope(6),
+        {
+          ...reactivationPage,
+          checkpointAfterPage: Schema.decodeSync(PluginCheckpointV1)("clockify-reactivated-replay")
+        }
+      )
+      assert.strictEqual(replayed.acceptedEventCount, 0)
+      assert.strictEqual(replayed.personCount, 0)
+      assert.strictEqual(yield* activeContributorCount(["inactive-entry-1", "inactive-entry-2"]), 1)
     })))
 
   it.effect("materializes inferred relationships across synchronized provider evidence", () =>

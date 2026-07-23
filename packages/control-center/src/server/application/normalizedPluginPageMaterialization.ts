@@ -31,7 +31,7 @@ import {
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { NormalizedIssueAttributes } from "../../domain/normalizedIssue.js"
-import { NormalizedPluginEventV1, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
+import { NormalizedPluginEventV1, PluginEventId, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
@@ -1348,6 +1348,45 @@ const materializePerson = Effect.fn("NormalizedPluginPageMaterialization.upsertP
   return 1
 })
 
+const sequenceClockifyPersonEvents = Effect.fn(
+  "NormalizedPluginPageMaterialization.sequenceClockifyPersonEvents"
+)(function*(
+  persistence: PersistenceService,
+  scope: NormalizedPluginPageMaterializationScope,
+  page: PluginSyncPageV1
+) {
+  if (scope.providerId !== "clockify") return page
+  const events = yield* Effect.forEach(
+    page.events,
+    (event) =>
+      Effect.gen(function*() {
+        if (event._tag !== "UpsertPerson") return event
+        const existing = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, {
+          pluginConnectionId: scope.pluginConnectionId,
+          providerId: scope.providerId,
+          vendorPersonId: VendorImmutableId.make(event.vendorPersonId)
+        }).pipe(Effect.result)
+        if (Result.isFailure(existing) && existing.failure._tag !== "RecordNotFoundError") {
+          return yield* existing.failure
+        }
+        const nextRevision = Result.isFailure(existing)
+          ? 1
+          : existing.success.revision + (
+            existing.success.person.displayName === event.displayName &&
+              existing.success.person.isActive === event.active
+              ? 0
+              : 1
+          )
+        const eventId = yield* Schema.decodeUnknownEffect(PluginEventId)(
+          `${event.eventId}:person-revision:${nextRevision}`
+        ).pipe(Effect.mapError(() => malformed("normalized-clockify-person-event-id-invalid", event.eventId)))
+        return { ...event, eventId }
+      }),
+    { concurrency: 1 }
+  )
+  return { ...page, events }
+})
+
 const evidencePredicate = (event: EvidenceAppend): typeof EvidencePredicate.Type => {
   const decoded = Schema.decodeUnknownResult(EvidencePredicate)(event.evidenceType)
   if (Result.isSuccess(decoded)) return decoded.success
@@ -1722,7 +1761,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
     if (scope.expectedAuthority !== undefined) {
       yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
     }
-    const pipelineTombstones = page.events.filter(isCodePipelineTombstone)
+    const materializationPage = yield* sequenceClockifyPersonEvents(persistence, scope, page)
+    const pipelineTombstones = materializationPage.events.filter(isCodePipelineTombstone)
     const previousPipelineRecords = pipelineTombstones.length === 0
       ? []
       : yield* persistence.pluginRuntime.getCodePipelineCacheBeforeTombstones(
@@ -1740,12 +1780,12 @@ export const materializeNormalizedPluginPage = Effect.fn(
       scope.providerId,
       scope.streamKey,
       scope.expectedRevision,
-      page,
+      materializationPage,
       scope.committedAt,
       scope.successfulHealth
     )
     const accepted = new Set(committed.acceptedEventIds)
-    const acceptedEvents = page.events.filter(({ eventId }) => accepted.has(eventId))
+    const acceptedEvents = materializationPage.events.filter(({ eventId }) => accepted.has(eventId))
     const acceptedClockifyTimeEntryIds = new Set(
       acceptedEvents.flatMap((event) =>
         event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
@@ -1754,7 +1794,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       )
     )
     const backfillEntityEvents = yield* Effect.filter(
-      page.events,
+      materializationPage.events,
       (event) =>
         !accepted.has(event.eventId) &&
           event._tag === "UpsertEntity" &&
@@ -1791,7 +1831,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
     const acceptedPersonIds = new Set(
       acceptedEvents.flatMap((event) => event._tag === "UpsertPerson" ? [event.vendorPersonId] : [])
     )
-    const roleBackfillCandidates = page.events.flatMap((event) => {
+    const roleBackfillCandidates = materializationPage.events.flatMap((event) => {
       if (
         accepted.has(event.eventId) ||
         event._tag !== "UpsertEntity" ||
