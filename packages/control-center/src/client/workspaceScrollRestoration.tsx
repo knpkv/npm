@@ -5,7 +5,12 @@ const MAXIMUM_DEFERRED_RESTORATION_FRAMES = 300
 export const RELEASE_PREVIEW_SCROLL_SELECTOR = "[data-rly-release-preview-scroll]"
 export const SCROLL_POSITION_TOLERANCE = 2
 
-export type SavedWorkspaceScrollPosition = readonly [top: number, preview: boolean, entityPath: string, active: boolean]
+export type SavedWorkspaceScrollPosition = readonly [
+  top: number,
+  preview: boolean,
+  entityPaths: ReadonlyArray<string>,
+  active: boolean
+]
 
 export const savedWorkspaceScrollPositions = new Map<string, SavedWorkspaceScrollPosition>()
 
@@ -30,7 +35,7 @@ export const DeferredWorkspaceScrollRestoration = (): null => {
   useEffect(() => {
     for (const [originKey, saved] of savedWorkspaceScrollPositions) {
       if (originKey === key) continue
-      if (saved[2] === location.pathname) {
+      if (saved[2].includes(location.pathname)) {
         if (!saved[3]) savedWorkspaceScrollPositions.set(originKey, [saved[0], saved[1], saved[2], true])
         continue
       }

@@ -35,20 +35,20 @@ export const rememberWorkspaceScrollPosition = (
   entityPath: string
 ): void => {
   const key = workspaceScrollRestorationKey(location)
+  for (const [originKey, saved] of savedWorkspaceScrollPositions) {
+    if (!saved[3] || !saved[2].includes(location.pathname)) continue
+    const entityPaths = saved[2].includes(entityPath) ? saved[2] : [...saved[2], entityPath]
+    savedWorkspaceScrollPositions.set(originKey, [saved[0], saved[1], entityPaths, true])
+  }
   savedWorkspaceScrollPositions.delete(key)
   const previewScroller = document.querySelector<HTMLElement>(RELEASE_PREVIEW_SCROLL_SELECTOR)
   const savedPosition = [
     previewScroller?.scrollTop ?? window.scrollY,
     previewScroller !== null,
-    entityPath,
+    [entityPath],
     false
   ] satisfies SavedWorkspaceScrollPosition
   if (savedPosition[0] <= SCROLL_POSITION_TOLERANCE) return
-  for (const [originKey, saved] of savedWorkspaceScrollPositions) {
-    if (saved[3] && saved[2] === location.pathname) {
-      savedWorkspaceScrollPositions.set(originKey, [saved[0], saved[1], entityPath, true])
-    }
-  }
   savedWorkspaceScrollPositions.set(key, savedPosition)
   if (savedWorkspaceScrollPositions.size <= MAXIMUM_SAVED_WORKSPACE_SCROLL_POSITIONS) return
   for (const oldestKey of savedWorkspaceScrollPositions.keys()) {
