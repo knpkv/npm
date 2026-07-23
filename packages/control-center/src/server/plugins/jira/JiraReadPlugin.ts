@@ -1,7 +1,9 @@
 /** Production Jira issue-read plugin runtime. */
 import { JiraApiClient } from "@knpkv/jira-api-client"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import type * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -9,16 +11,20 @@ import * as Stream from "effect/Stream"
 import { PluginHealth } from "../../../domain/freshness.js"
 import { MAXIMUM_NORMALIZED_ISSUE_COMMENTS, MAXIMUM_NORMALIZED_ISSUE_HISTORY } from "../../../domain/normalizedIssue.js"
 import {
+  PluginActionProposalV1,
   PluginDiscoveryV1,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
+  type ProposePluginActionRequestV1,
   type ReadPluginEntityRequestV1,
   type ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
 import { SourceUrl } from "../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
+import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginTimeoutFailure,
@@ -26,7 +32,7 @@ import {
 } from "../failures.js"
 import { pluginCapabilityCodecsV1 } from "../PluginCapabilityCodecs.js"
 import type { PluginConnectionV1 } from "../PluginConnection.js"
-import { buildPluginDefinitionLayer, definePluginV1 } from "../PluginDefinition.js"
+import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
@@ -152,7 +158,11 @@ export type JiraReadPluginConfiguration = typeof JiraReadPluginConfiguration.Typ
 /** Negotiated production runtime and its scoped plugin layer. */
 export interface JiraReadPluginRuntime {
   readonly definition: PluginDefinitionV1
-  readonly layer: ReturnType<typeof buildPluginDefinitionLayer>
+  readonly layer: Layer.Layer<
+    PluginDefinitionServices,
+    PluginFailure,
+    Crypto.Crypto
+  >
 }
 
 /** Descriptor persisted by provisioning before the runtime can be acquired. */
@@ -160,7 +170,7 @@ export const jiraReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.jira.read",
-  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  adapterVersion: { major: 0, minor: 3, patch: 0 },
   displayName: "Jira issue reader",
   configurationFields: [
     {
@@ -241,7 +251,7 @@ export const jiraReadPluginDescriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+  capabilities: ["entity.read", "sync.incremental", "action.propose"].map((capabilityId) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -260,8 +270,140 @@ const unsupported = (
   new PluginUnsupportedCapabilityFailure({
     capabilityId,
     requestedVersion: 1,
-    diagnosticCode: "jira-read-adapter-read-only"
+    diagnosticCode: "jira-capability-unnegotiated"
   })
+
+const JiraDescriptionDocument = Schema.Struct({
+  type: Schema.Literal("doc"),
+  version: Schema.Literal(1),
+  content: Schema.Array(Schema.Json)
+})
+const AddCommentRequestPayload = Schema.Struct({
+  body: JiraDescriptionDocument
+})
+const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+const JiraActionPayload = Schema.TaggedStruct("add-comment", {
+  issueKey: JiraIssueKey,
+  body: JiraDescriptionDocument
+})
+const JiraActionIssue = Schema.Struct({
+  id: Schema.String,
+  key: JiraIssueKey,
+  fields: Schema.Struct({
+    project: Schema.Struct({ id: JiraProjectId }),
+    updated: UtcTimestamp,
+    description: Schema.optionalKey(Schema.Json),
+    status: Schema.Struct({ id: Schema.String, name: Schema.String })
+  })
+})
+
+const loadActionIssue = Effect.fn("JiraReadPlugin.loadActionIssue")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraReadPluginConfiguration,
+  request: ProposePluginActionRequestV1
+) {
+  const found = yield* withTimeout(
+    "jira-propose-get-issue",
+    configuration.operationTimeoutMillis,
+    provider.getIssue(request.target.vendorImmutableId)
+  )
+  if (Option.isNone(found)) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "jira-issue-not-found"
+    })
+  }
+  const issue = yield* Schema.decodeUnknownEffect(JiraActionIssue)(found.value).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-propose-get-issue",
+        diagnosticCode: "jira-action-issue-invalid"
+      })
+    )
+  )
+  if (issue.id !== request.target.vendorImmutableId || issue.fields.project.id !== configuration.projectId) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "jira-action-target-outside-connection"
+    })
+  }
+  const expectedRevision = yield* Schema.decodeUnknownEffect(UtcTimestamp)(request.expectedRevision).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-propose-get-issue",
+        diagnosticCode: "jira-action-revision-invalid"
+      })
+    )
+  )
+  if (!DateTime.Equivalence(issue.fields.updated, expectedRevision)) {
+    return yield* new PluginConflictFailure({
+      operation: "propose-action",
+      diagnosticCode: "jira-issue-revision-changed"
+    })
+  }
+  return issue
+})
+
+const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
+  provider: JiraReadProvider,
+  configuration: JiraReadPluginConfiguration,
+  cryptoService: Crypto.Crypto,
+  request: ProposePluginActionRequestV1
+) {
+  if (
+    request.target.entityType !== "jira.issue" ||
+    request.actionKind !== "add-comment"
+  ) {
+    return yield* new PluginUnsupportedCapabilityFailure({
+      capabilityId: "action.propose",
+      requestedVersion: 1,
+      diagnosticCode: "jira-action-kind-or-target-unsupported"
+    })
+  }
+  const issue = yield* loadActionIssue(provider, configuration, request)
+  const payload = JiraActionPayload.make({
+    _tag: "add-comment",
+    issueKey: issue.key,
+    body: (yield* Schema.decodeUnknownEffect(
+      Schema.toType(AddCommentRequestPayload)
+    )(request.payload).pipe(
+      Effect.mapError(() =>
+        new PluginConfigurationFailure({
+          diagnosticCode: "jira-action-payload-invalid"
+        })
+      )
+    )).body
+  })
+  const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
+    Effect.provideService(Crypto.Crypto, cryptoService),
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "propose-action",
+        diagnosticCode: "jira-action-payload-digest-failed"
+      })
+    )
+  )
+  const proposedAt = yield* DateTime.now
+  return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionProposalV1))({
+    proposalKey: `jr:${request.actionKind}:${issue.id}:${request.expectedRevision}:${payloadDigest}`,
+    capabilityVersion: 1,
+    request: { ...request, payload },
+    payloadDigest,
+    summary: `Comment on Jira issue ${issue.key}`,
+    impact: {
+      level: "medium",
+      summary: "Adds a durable comment to the Jira issue"
+    },
+    proposedAt
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "propose-action",
+        diagnosticCode: "jira-action-proposal-invalid"
+      })
+    )
+  )
+})
 
 const withTimeout = <Value>(
   operation: string,
@@ -283,6 +425,7 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
   readonly configuration: JiraReadPluginConfiguration
   readonly load: (request: JiraPageRequest) => Effect.Effect<ProviderPage<Value>, PluginFailure>
   readonly maximumValues: number
+  readonly preservePrefix?: boolean
 }): Effect.fn.Return<JiraFetchedCollection<Value>, PluginFailure> {
   const values: Array<Value> = []
   let total = 0
@@ -307,7 +450,13 @@ const collectPages = Effect.fn("JiraReadPlugin.collectPages")(function*<Value>(o
     for (const value of pageValues) values.push(value)
     total = Math.max(total, values.length)
     startAt += pageValues.length
-    if (page === 1 && totalKnown && !skippedPrefix && options.configuration.maximumPages > 1) {
+    if (
+      page === 1 &&
+      totalKnown &&
+      !skippedPrefix &&
+      options.preservePrefix !== true &&
+      options.configuration.maximumPages > 1
+    ) {
       const sequentialCapacity = options.configuration.maximumPages * options.configuration.pageSize
       if (total > sequentialCapacity) {
         const tailCapacity = Math.min(
@@ -748,98 +897,101 @@ const makeRuntime = (
     configurationSchema: JiraReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
-      syncIncremental: pluginCapabilityCodecsV1.syncIncremental
+      syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
+      actionPropose: pluginCapabilityCodecsV1.actionPropose
     },
-    make: ({ configuration: decoded, descriptor: negotiated }) => {
-      const connection: PluginConnectionV1 = {
-        descriptor: negotiated,
-        discover: Effect.gen(function*() {
-          const server = yield* withTimeout(
-            "jira-server-info",
-            decoded.operationTimeoutMillis,
-            provider.getServerInfo
-          )
-          const user = yield* withTimeout(
-            "jira-current-user",
-            decoded.operationTimeoutMillis,
-            provider.getCurrentUser
-          )
-          const project = yield* withTimeout(
-            "jira-get-project",
-            decoded.operationTimeoutMillis,
-            provider.getProject(decoded.projectId)
-          )
-          if (project.id !== decoded.projectId) {
-            return yield* new PluginMalformedResponseFailure({
-              operation: "jira-get-project",
-              diagnosticCode: "jira-project-identity-mismatch"
-            })
-          }
-          const discoveredAt = yield* DateTime.now
-          return yield* Schema.decodeUnknownEffect(Schema.toType(PluginDiscoveryV1))({
-            account: user.accountId === undefined
-              ? null
-              : {
-                providerImmutableId: user.accountId,
-                displayName: user.displayName ?? user.accountId
-              },
-            workspace: verifiedSiteId === null
-              ? null
-              : {
-                providerImmutableId: verifiedSiteId,
-                displayName: server.serverTitle ?? decoded.webBaseUrl.hostname
-              },
-            resource: {
-              providerImmutableId: project.id,
-              displayName: project.name ?? project.key ?? project.id
-            },
-            endpoints: [
-              { kind: "web", url: decoded.webBaseUrl, label: "Jira" },
-              {
-                kind: "api",
-                url: new URL("rest/api/3/", decoded.webBaseUrl),
-                label: "Jira Cloud REST API v3"
-              }
-            ],
-            discoveredAt
-          }).pipe(
-            Effect.mapError(() =>
-              new PluginMalformedResponseFailure({
-                operation: "jira-discover",
-                diagnosticCode: "jira-discovery-shape-invalid"
-              })
+    make: ({ configuration: decoded, descriptor: negotiated }) =>
+      Effect.gen(function*() {
+        const cryptoService = yield* Crypto.Crypto
+        const connection: PluginConnectionV1 = {
+          descriptor: negotiated,
+          discover: Effect.gen(function*() {
+            const server = yield* withTimeout(
+              "jira-server-info",
+              decoded.operationTimeoutMillis,
+              provider.getServerInfo
             )
-          )
-        }),
-        health: Effect.gen(function*() {
-          yield* withTimeout(
-            "jira-current-user",
-            decoded.operationTimeoutMillis,
-            provider.getCurrentUser
-          )
-          const checkedAt = yield* DateTime.now
-          return yield* Schema.decodeUnknownEffect(Schema.toType(PluginHealth))({ _tag: "healthy", checkedAt }).pipe(
-            Effect.mapError(() =>
-              new PluginMalformedResponseFailure({
-                operation: "jira-health",
-                diagnosticCode: "jira-health-shape-invalid"
-              })
+            const user = yield* withTimeout(
+              "jira-current-user",
+              decoded.operationTimeoutMillis,
+              provider.getCurrentUser
             )
-          )
-        }),
-        sync: (request) => syncProject(provider, decoded, request),
-        readEntity: (request) => readIssue(provider, decoded, request),
-        diff: Option.none(),
-        proposeAction: () => Effect.fail(unsupported("action.propose"))
-      }
-      const executor: AuthorizedPluginExecutorV1 = {
-        preflight: () => Effect.fail(unsupported("action.execute")),
-        executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-        requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-        reconcile: () => Effect.fail(unsupported("action.reconcile"))
-      }
-      return Effect.succeed({ connection, executor })
-    }
+            const project = yield* withTimeout(
+              "jira-get-project",
+              decoded.operationTimeoutMillis,
+              provider.getProject(decoded.projectId)
+            )
+            if (project.id !== decoded.projectId) {
+              return yield* new PluginMalformedResponseFailure({
+                operation: "jira-get-project",
+                diagnosticCode: "jira-project-identity-mismatch"
+              })
+            }
+            const discoveredAt = yield* DateTime.now
+            return yield* Schema.decodeUnknownEffect(Schema.toType(PluginDiscoveryV1))({
+              account: user.accountId === undefined
+                ? null
+                : {
+                  providerImmutableId: user.accountId,
+                  displayName: user.displayName ?? user.accountId
+                },
+              workspace: verifiedSiteId === null
+                ? null
+                : {
+                  providerImmutableId: verifiedSiteId,
+                  displayName: server.serverTitle ?? decoded.webBaseUrl.hostname
+                },
+              resource: {
+                providerImmutableId: project.id,
+                displayName: project.name ?? project.key ?? project.id
+              },
+              endpoints: [
+                { kind: "web", url: decoded.webBaseUrl, label: "Jira" },
+                {
+                  kind: "api",
+                  url: new URL("rest/api/3/", decoded.webBaseUrl),
+                  label: "Jira Cloud REST API v3"
+                }
+              ],
+              discoveredAt
+            }).pipe(
+              Effect.mapError(() =>
+                new PluginMalformedResponseFailure({
+                  operation: "jira-discover",
+                  diagnosticCode: "jira-discovery-shape-invalid"
+                })
+              )
+            )
+          }),
+          health: Effect.gen(function*() {
+            yield* withTimeout(
+              "jira-current-user",
+              decoded.operationTimeoutMillis,
+              provider.getCurrentUser
+            )
+            const checkedAt = yield* DateTime.now
+            return yield* Schema.decodeUnknownEffect(Schema.toType(PluginHealth))({ _tag: "healthy", checkedAt }).pipe(
+              Effect.mapError(() =>
+                new PluginMalformedResponseFailure({
+                  operation: "jira-health",
+                  diagnosticCode: "jira-health-shape-invalid"
+                })
+              )
+            )
+          }),
+          sync: (request) => syncProject(provider, decoded, request),
+          readEntity: (request) => readIssue(provider, decoded, request),
+          diff: Option.none(),
+          proposeAction: (request) => proposeJiraAction(provider, decoded, cryptoService, request)
+        }
+        const executor: AuthorizedPluginExecutorV1 = {
+          preflight: () => Effect.fail(unsupported("action.execute")),
+          executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
+          requestCancellation: () => Effect.fail(unsupported("action.cancel")),
+          reconcile: () => Effect.fail(unsupported("action.reconcile"))
+        }
+        return { connection, executor }
+      })
   })
   return {
     definition,

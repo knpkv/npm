@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as DateTime from "effect/DateTime"
@@ -5,6 +6,7 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Fiber from "effect/Fiber"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -14,13 +16,21 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { NormalizedIssueAttributes } from "../../src/domain/normalizedIssue.js"
 import { MaximumPluginPayloadBytes } from "../../src/domain/plugins/bounds.js"
-import { PluginSyncRequestV1, ReadPluginEntityRequestV1 } from "../../src/domain/plugins/index.js"
-import type { PluginFailure } from "../../src/server/plugins/failures.js"
+import {
+  AuthorizedPluginActionV1,
+  type PluginActionProposalV1,
+  PluginActionReconciliationRequestV1,
+  PluginSyncRequestV1,
+  ProposePluginActionRequestV1,
+  ReadPluginEntityRequestV1
+} from "../../src/domain/plugins/index.js"
+import { type PluginFailure, PluginMalformedResponseFailure } from "../../src/server/plugins/failures.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import {
   JiraReadPluginConfiguration,
   makeJiraReadPluginRuntimeFromProvider
 } from "../../src/server/plugins/jira/JiraReadPlugin.js"
-import type { JiraPageRequest, JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
+import { type JiraPageRequest, type JiraReadProvider } from "../../src/server/plugins/jira/JiraReadProvider.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
 const configuration = {
@@ -201,21 +211,285 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
       total: changelogs.length
     }),
   searchProjectIssues: () => Effect.succeed({ issues: [], nextPageToken: null }),
+  updateIssueDescription: () => Effect.void,
+  addIssueComment: () => Effect.succeed("c42"),
+  getIssueTransitions: () => Effect.succeed([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]),
+  transitionIssue: () => Effect.void,
   ...overrides
 })
 
 const withConnection = <Value, Error>(
   provider: JiraReadProvider,
-  use: Effect.Effect<Value, Error, PluginConnection>,
+  use: Effect.Effect<Value, Error, AuthorizedPluginExecutor | PluginConnection>,
   configured: unknown = configuration
 ): Effect.Effect<Value, Error | PluginFailure> => {
   const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configured, configuration.siteId)
-  return use.pipe(Effect.provide(runtime.layer), Effect.scoped)
+  return use.pipe(
+    Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
+    Effect.scoped
+  )
 }
 
 const ExpectedAttributes = NormalizedIssueAttributes
 
+const editDescriptionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "edit-description",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: {
+    description: {
+      type: "doc",
+      version: 1,
+      content: [{
+        type: "paragraph",
+        content: [{ type: "text", text: "Keep retry state durable across restarts." }]
+      }]
+    }
+  },
+  evidenceIds: ["jira-description-review"]
+})
+
+const addedCommentBody = {
+  type: "doc",
+  version: 1,
+  content: [{
+    type: "paragraph",
+    content: [{ type: "text", text: "The restart scenario is verified." }]
+  }]
+} satisfies { readonly type: "doc"; readonly version: 1; readonly content: ReadonlyArray<Schema.Json> }
+
+const addCommentRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "add-comment",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: {
+    body: addedCommentBody
+  },
+  evidenceIds: ["jira-comment-review"]
+})
+
+const transitionRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "transition",
+  target: { entityType: "jira.issue", vendorImmutableId: issue.id },
+  expectedRevision: issue.fields.updated,
+  payload: { transitionId: "31" },
+  evidenceIds: ["jira-transition-review"]
+})
+
+const authorizeProposal = (proposal: PluginActionProposalV1) =>
+  Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+    proposal,
+    idempotencyKey: "jira-governed-action-1",
+    payloadDigest: proposal.payloadDigest,
+    authorizationId: "jira-authorization-1",
+    authorizedAt: proposal.proposedAt,
+    expiresAt: DateTime.add(proposal.proposedAt, { minutes: 5 })
+  })
+
 describe("JiraReadPlugin", () => {
+  it.effect("rejects Jira description edits without an atomic provider revision precondition", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      const proposed = yield* withConnection(
+        baseProvider({
+          getIssue: () => Ref.update(issueReads, (count) => count + 1).pipe(Effect.as(Option.some(issue))),
+          updateIssueDescription: () => Ref.update(mutations, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(editDescriptionRequest).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(proposed))
+      if (Result.isFailure(proposed)) {
+        assert.strictEqual(proposed.failure._tag, "PluginUnsupportedCapabilityFailure")
+        if (proposed.failure._tag === "PluginUnsupportedCapabilityFailure") {
+          assert.strictEqual(proposed.failure.diagnosticCode, "jira-action-kind-or-target-unsupported")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(issueReads), 0)
+      assert.strictEqual(yield* Ref.get(mutations), 0)
+    }))
+
+  it.effect("accepts an equivalent Jira offset revision while blocking a later instant", () => {
+    const providerRevision = "2026-07-17T09:30:00.000+0000"
+    const offsetRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+      ...addCommentRequest,
+      expectedRevision: providerRevision
+    })
+    return Effect.gen(function*() {
+      const equivalent = yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Effect.succeed(Option.some({
+              ...issue,
+              fields: { ...issue.fields, updated: providerRevision }
+            }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(offsetRequest)
+        })
+      )
+      assert.strictEqual(equivalent.request.expectedRevision, providerRevision)
+
+      const later = yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Effect.succeed(Option.some({
+              ...issue,
+              fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000+0000" }
+            }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(offsetRequest).pipe(Effect.result)
+        })
+      )
+      assert.isTrue(Result.isFailure(later))
+      if (Result.isFailure(later)) {
+        assert.strictEqual(later.failure._tag, "PluginConflictFailure")
+        if (later.failure._tag === "PluginConflictFailure") {
+          assert.strictEqual(later.failure.diagnosticCode, "jira-issue-revision-changed")
+        }
+      }
+    })
+  })
+
+  it.effect("proposes a revision-inspected Jira comment without rewriting its target", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () => Ref.update(issueReads, (count) => count + 1).pipe(Effect.as(Option.some(issue))),
+          addIssueComment: () => Ref.update(mutations, (count) => count + 1).pipe(Effect.as("unexpected-comment"))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposal = yield* connection.proposeAction(addCommentRequest)
+
+          assert.deepStrictEqual(proposal.request.target, addCommentRequest.target)
+          assert.deepStrictEqual(proposal.request.payload, {
+            _tag: "add-comment",
+            issueKey: issue.key,
+            body: addedCommentBody
+          })
+          assert.strictEqual(proposal.summary, "Comment on Jira issue PAY-42")
+          assert.deepStrictEqual(
+            connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
+            ["entity.read", "sync.incremental", "action.propose"]
+          )
+          assert.strictEqual(yield* Ref.get(issueReads), 1)
+          assert.strictEqual(yield* Ref.get(mutations), 0)
+        })
+      )
+    }))
+
+  it.effect("keeps every Jira executor method unsupported with zero provider mutation", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      const commentReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () => Ref.update(issueReads, (count) => count + 1).pipe(Effect.as(Option.some(issue))),
+          getComments: (_issueId, request) =>
+            Ref.update(commentReads, (count) => count + 1).pipe(
+              Effect.as({
+                comments: [],
+                startAt: request.startAt,
+                maxResults: request.maxResults,
+                total: 0
+              })
+            ),
+          addIssueComment: () => Ref.update(mutations, (count) => count + 1).pipe(Effect.as("unexpected-comment"))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const authorized = authorizeProposal(yield* connection.proposeAction(addCommentRequest))
+          const reconciliation = Schema.decodeUnknownSync(
+            Schema.toType(PluginActionReconciliationRequestV1)
+          )({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+
+          const assertUnsupported = (attempt: Result.Result<unknown, PluginFailure>) => {
+            assert.isTrue(Result.isFailure(attempt))
+            if (Result.isFailure(attempt)) {
+              assert.strictEqual(attempt.failure._tag, "PluginUnsupportedCapabilityFailure")
+            }
+          }
+          assertUnsupported(yield* executor.preflight(authorized).pipe(Effect.result))
+          assertUnsupported(yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result))
+          assertUnsupported(yield* executor.reconcile(reconciliation).pipe(Effect.result))
+          assert.strictEqual(yield* Ref.get(issueReads), 1)
+          assert.strictEqual(yield* Ref.get(commentReads), 0)
+          assert.strictEqual(yield* Ref.get(mutations), 0)
+        })
+      )
+    }))
+
+  it.effect("keeps a malformed Jira action pre-read as malformed", () =>
+    withConnection(
+      baseProvider({
+        getIssue: () =>
+          Effect.fail(
+            new PluginMalformedResponseFailure({
+              operation: "jira-get-issue",
+              diagnosticCode: "jira-http-response-invalid"
+            })
+          )
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(addCommentRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+        }
+      })
+    ))
+
+  it.effect("rejects Jira transitions without an atomic provider revision precondition", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      const transitionReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () => Ref.update(issueReads, (count) => count + 1).pipe(Effect.as(Option.some(issue))),
+          getIssueTransitions: () =>
+            Ref.update(transitionReads, (count) => count + 1).pipe(
+              Effect.as([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }])
+            ),
+          transitionIssue: () => Ref.update(mutations, (count) => count + 1)
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposed = yield* connection.proposeAction(transitionRequest).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(proposed))
+          if (Result.isFailure(proposed)) {
+            assert.strictEqual(proposed.failure._tag, "PluginUnsupportedCapabilityFailure")
+            if (proposed.failure._tag === "PluginUnsupportedCapabilityFailure") {
+              assert.strictEqual(proposed.failure.diagnosticCode, "jira-action-kind-or-target-unsupported")
+            }
+          }
+          assert.strictEqual(yield* Ref.get(issueReads), 0)
+          assert.strictEqual(yield* Ref.get(transitionReads), 0)
+          assert.strictEqual(yield* Ref.get(mutations), 0)
+        })
+      )
+    }))
+
   it("accepts only HTTPS Jira Cloud tenant root URLs", () => {
     const decode = Schema.decodeUnknownResult(JiraReadPluginConfiguration)
     const configured = (webBaseUrl: string) => ({ ...configuration, webBaseUrl })
@@ -264,7 +538,7 @@ describe("JiraReadPlugin", () => {
       const runtime = makeJiraReadPluginRuntimeFromProvider(baseProvider(), configuration)
       const discovery = yield* PluginConnection.pipe(
         Effect.flatMap((connection) => connection.discover),
-        Effect.provide(runtime.layer),
+        Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
         Effect.scoped
       )
       assert.isNull(discovery.workspace)
@@ -1605,7 +1879,7 @@ describe("JiraReadPlugin", () => {
       const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configuration)
       const fiber = yield* PluginConnection.pipe(
         Effect.flatMap((connection) => Stream.runDrain(connection.sync(syncRequest()))),
-        Effect.provide(runtime.layer),
+        Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
         Effect.scoped,
         Effect.forkChild
       )
@@ -1644,7 +1918,7 @@ describe("JiraReadPlugin", () => {
       const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configuration)
       const fiber = yield* PluginConnection.pipe(
         Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))),
-        Effect.provide(runtime.layer),
+        Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
         Effect.scoped,
         Effect.forkChild
       )

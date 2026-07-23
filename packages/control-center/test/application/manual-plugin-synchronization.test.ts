@@ -365,7 +365,7 @@ describe("manual plugin synchronization", () => {
       )
     })))
 
-  it.effect("preserves synchronization for a compatible historical Jira runtime", () =>
+  it.effect("rejects synchronization for a historical Jira runtime without sync capability", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "jira")
@@ -390,17 +390,19 @@ describe("manual plugin synchronization", () => {
       const synchronized = yield* synchronization.synchronize({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: fixture.pluginConnectionId
-      })
+      }).pipe(Effect.result)
 
-      assert.strictEqual(synchronized.result, "synchronized")
-      assert.strictEqual(synchronized.pagesCommitted, 1)
+      assert.isTrue(Result.isFailure(synchronized))
+      if (Result.isFailure(synchronized)) {
+        assert.instanceOf(synchronized.failure, ApplicationInvalidRequest)
+      }
       assert.lengthOf(
         yield* persistence.pluginRuntime.listSyncAttempts(
           WORKSPACE_ID,
           fixture.pluginConnectionId,
           streamKey
         ),
-        1
+        0
       )
     })))
 
@@ -458,6 +460,10 @@ describe("manual plugin synchronization", () => {
           Effect.succeed({ comments: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
         getChangelogs: (_issueId, request) =>
           Effect.succeed({ values: [], startAt: request.startAt, maxResults: request.maxResults, total: 0 }),
+        updateIssueDescription: () => Effect.void,
+        addIssueComment: () => Effect.succeed("comment-1"),
+        getIssueTransitions: () => Effect.succeed([]),
+        transitionIssue: () => Effect.void,
         searchProjectIssues: () =>
           Effect.succeed({
             issues: [{
@@ -480,10 +486,11 @@ describe("manual plugin synchronization", () => {
         maximumPages: 1,
         operationTimeoutMillis: 5_000
       }, "cloud-acme")
+      const cryptoService = yield* Crypto.Crypto
       const connections: PluginConnectionMapV1 = {
         contextEffect: ({ pluginConnectionId }) =>
           pluginConnectionId === fixture.pluginConnectionId
-            ? Layer.build(runtime.layer)
+            ? Layer.build(runtime.layer.pipe(Layer.provide(Layer.succeed(Crypto.Crypto, cryptoService))))
             : Effect.die("fixture connection not found"),
         invalidate: () => Effect.void
       }

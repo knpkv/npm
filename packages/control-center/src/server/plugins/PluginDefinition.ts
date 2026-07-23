@@ -31,6 +31,9 @@ import type { AuthorizedPluginExecutorV1 } from "./PluginExecutor.js"
 import { retryPluginOperation, retryPluginStream } from "./retryPolicy.js"
 
 type PluginServices = PluginConnection | AuthorizedPluginExecutor
+
+/** Services produced by a negotiated plugin definition layer. */
+export type PluginDefinitionServices = PluginServices
 type AdapterServices = {
   readonly connection: PluginConnectionV1
   readonly executor: AuthorizedPluginExecutorV1

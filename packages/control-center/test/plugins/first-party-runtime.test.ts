@@ -81,6 +81,15 @@ const historicalJiraDescriptor = {
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   capabilities: [{ capabilityId: "entity.read", supportedVersions: [1], requirement: "required" }]
 }
+const historicalJiraV02Descriptor = {
+  ...jiraReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
 
 const historicalConfluenceOAuthDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -218,6 +227,29 @@ const fakeClockifyClient = (
       )
     })
   )
+
+const unusedCodeCommitClients = (() => {
+  const readClient = Layer.succeed(ReadClient.CodeCommitReadClient, {
+    discoverAccount: () => Effect.die("unused discoverAccount"),
+    listRepositoriesPage: () => Effect.die("unused listRepositoriesPage"),
+    getBlob: () => Effect.die("unused getBlob"),
+    listPullRequestsPage: () => Effect.die("unused listPullRequestsPage"),
+    streamPullRequests: () => Stream.empty,
+    getPullRequest: () => Effect.die("unused getPullRequest"),
+    getChangedFilesPage: () => Effect.die("unused getChangedFilesPage"),
+    streamChangedFiles: () => Stream.empty
+  })
+  const reviewProvider = Layer.succeed(ReviewClient.CodeCommitReviewProvider, {
+    postComment: () => Effect.die("unused postComment"),
+    updateApprovalState: () => Effect.die("unused updateApprovalState"),
+    getApprovalStates: () => Effect.die("unused getApprovalStates"),
+    getCommentsPage: () => Effect.die("unused getCommentsPage")
+  })
+  const reviewClient = ReviewClient.CodeCommitReviewClient.layer.pipe(
+    Layer.provide(Layer.merge(readClient, reviewProvider))
+  )
+  return Layer.merge(readClient, reviewClient)
+})()
 
 describe("first-party plugin runtime", () => {
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
@@ -495,6 +527,91 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("keeps the current Jira runtime proposal-only in the production registry", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const config = yield* makePersistenceTestConfig("control-center-first-party-jira-proposal-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "jira",
+          displayName: PluginConnectionDisplayName.make("Payments Jira"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+          { _tag: "text", key: "authMode", value: "api-token" },
+          { _tag: "text", key: "email", value: "owner@example.com" },
+          { _tag: "integer", key: "maximumPages", value: 3 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 5_000 },
+          { _tag: "integer", key: "pageSize", value: 10 },
+          { _tag: "text", key: "projectId", value: "project-1" },
+          { _tag: "text", key: "siteId", value: "cloud-1" },
+          { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "jira",
+          jiraReadPluginDescriptor,
+          0,
+          CREATED_AT
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const connection = yield* Effect.gen(function*() {
+          return yield* PluginConnection
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+
+        assert.deepStrictEqual(
+          connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
+          ["entity.read", "sync.incremental", "action.propose"]
+        )
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+        assert.lengthOf(requests, 0)
+      }).pipe(
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it("keeps the historical Confluence descriptor independent of future current fields", () => {
     const futureCurrent = {
       ...confluencePagePluginDescriptor,
@@ -565,7 +682,12 @@ describe("first-party plugin runtime", () => {
           createdAt: CREATED_AT
         })
         const cases: ReadonlyArray<{
-          readonly generation: "pre-oauth" | "oauth-without-identity" | "oauth-with-site-only" | "scoped"
+          readonly generation:
+            | "pre-oauth"
+            | "oauth-without-identity"
+            | "oauth-with-site-only"
+            | "scoped"
+            | "scoped-v0.2"
           readonly missing: "none" | "apiToken" | "email"
           readonly providerId: "jira" | "confluence"
         }> = [
@@ -573,6 +695,7 @@ describe("first-party plugin runtime", () => {
           { providerId: "jira", generation: "oauth-without-identity", missing: "none" },
           { providerId: "jira", generation: "oauth-with-site-only", missing: "none" },
           { providerId: "jira", generation: "scoped", missing: "none" },
+          { providerId: "jira", generation: "scoped-v0.2", missing: "none" },
           { providerId: "confluence", generation: "pre-oauth", missing: "none" },
           { providerId: "jira", generation: "pre-oauth", missing: "email" },
           { providerId: "confluence", generation: "pre-oauth", missing: "apiToken" }
@@ -605,10 +728,14 @@ describe("first-party plugin runtime", () => {
                 ...(testCase.generation === "pre-oauth"
                   ? []
                   : [{ _tag: "text", key: "authMode", value: "api-token" }]),
-                ...(testCase.generation === "oauth-with-site-only" || testCase.generation === "scoped"
-                  ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
-                  : []),
-                ...(testCase.generation === "scoped"
+                ...(
+                  testCase.generation === "oauth-with-site-only" ||
+                    testCase.generation === "scoped" ||
+                    testCase.generation === "scoped-v0.2"
+                    ? [{ _tag: "text", key: "siteId", value: "cloud-1" }]
+                    : []
+                ),
+                ...(testCase.generation === "scoped" || testCase.generation === "scoped-v0.2"
                   ? [{ _tag: "text", key: "projectId", value: "project-1" }]
                   : []),
                 { _tag: "integer", key: "maximumPages", value: 3 },
@@ -643,6 +770,8 @@ describe("first-party plugin runtime", () => {
               ? jiraOAuthDescriptorWithoutIdentity
               : testCase.generation === "scoped"
               ? historicalJiraDescriptor
+              : testCase.generation === "scoped-v0.2"
+              ? historicalJiraV02Descriptor
               : jiraOAuthDescriptorWithSiteOnly,
             0,
             CREATED_AT
@@ -652,14 +781,26 @@ describe("first-party plugin runtime", () => {
           const outcome = yield* Effect.result(
             connections.contextEffect({ workspaceId: WORKSPACE_ID, pluginConnectionId })
           )
-          if (testCase.providerId === "jira" && testCase.generation !== "scoped") {
+          if (
+            testCase.providerId === "jira" &&
+            testCase.generation !== "scoped" &&
+            testCase.generation !== "scoped-v0.2"
+          ) {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure" && outcome.failure._tag === "PluginConfigurationFailure") {
               assert.strictEqual(outcome.failure.diagnosticCode, "plugin-configuration-migration-required")
             }
           } else if (testCase.missing === "none") {
             assert.strictEqual(outcome._tag, "Success")
-            if (outcome._tag === "Success") Context.get(outcome.success, PluginConnection)
+            if (outcome._tag === "Success") {
+              const connection = Context.get(outcome.success, PluginConnection)
+              if (
+                testCase.providerId === "jira" &&
+                (testCase.generation === "scoped" || testCase.generation === "scoped-v0.2")
+              ) {
+                assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+              }
+            }
           } else {
             assert.strictEqual(outcome._tag, "Failure")
             if (outcome._tag === "Failure") {
