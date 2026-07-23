@@ -930,7 +930,9 @@ const reconcileTimeEntryContributor = Effect.fn(
       assignment.scope.entityId !== entityId ||
       assignment.lifecycle._tag !== "active" ||
       assignment.actor._tag !== "human" ||
-      (Result.isSuccess(person) && assignment.actor.personId === person.success.person.personId)
+      (Result.isSuccess(person) &&
+        person.success.person.isActive &&
+        assignment.actor.personId === person.success.person.personId)
     ) continue
     const providerManagedAssignmentId = RoleAssignmentId.make(
       yield* stableUuid(
@@ -1824,7 +1826,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
     let relationshipCount = 0
     let skippedEntityCount = 0
 
-    for (const event of page.events) {
+    for (const event of acceptedEvents) {
       if (event._tag !== "UpsertPerson") continue
       personCount += yield* materializePerson(persistence, cryptoService, scope, event)
     }
@@ -1899,7 +1901,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       scope,
       acceptedEvents
     )
-    if (acceptedEvents.length > 0) {
+    if (acceptedEvents.length > 0 || entityProjectionCount > 0) {
       const inference = yield* materializeRelationshipInference(
         persistence,
         (identity) => stableUuid(cryptoService, identity, "relationship-inference"),

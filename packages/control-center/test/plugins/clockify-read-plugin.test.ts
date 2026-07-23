@@ -317,7 +317,7 @@ describe("ClockifyReadPlugin", () => {
       }
     }))
 
-  it.effect("keeps Clockify person payloads stable across provider pages", () =>
+  it.effect("emits one Clockify person payload across provider pages", () =>
     Effect.gen(function*() {
       const pages = yield* withConnection(
         baseProvider({
@@ -340,14 +340,10 @@ describe("ClockifyReadPlugin", () => {
         { ...configuration, userIds: "user-1", pageSize: 1, maximumPages: 3, maximumConcurrency: 1 }
       )
       const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
-      assert.lengthOf(people, 2)
+      assert.lengthOf(people, 1)
       const first = people[0]
       if (first === undefined) return assert.fail("expected a Clockify person on the first provider page")
-      const encodedFirst = Schema.encodeSync(NormalizedPluginEventV1)(first)
-      assert.deepStrictEqual(
-        people.map((person) => Schema.encodeSync(NormalizedPluginEventV1)(person)),
-        [encodedFirst, encodedFirst]
-      )
+      assert.strictEqual(first.vendorPersonId, "user-1")
     }))
 
   it.effect("changes Clockify person identity only when the profile changes", () =>

@@ -422,11 +422,10 @@ const streamSyncPages = (options: {
       }
       const usersById = new Map(options.workspaceUsers.map((user) => [user.id, user]))
       const personEvents = yield* Effect.forEach(
-        [...new Set(entries.map(({ userId }) => userId))],
+        page === options.startPage ? options.userIds : [],
         (userId) => {
           const user = usersById.get(userId)
-          const anchor = entityEvents.find((event) => event.attributes.userId === userId)
-          return user === undefined || anchor === undefined
+          return user === undefined
             ? Effect.succeed(null)
             : normalizeClockifyPerson({ user, workspaceId: options.configuration.workspaceId })
         },
