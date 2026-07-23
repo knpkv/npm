@@ -19,8 +19,10 @@ export class CodeCommitReviewConflictError extends Schema.TaggedErrorClass<CodeC
       "revision-changed",
       "source-commit-changed",
       "destination-commit-changed",
+      "destination-reference-changed",
       "repository-changed",
       "pull-request-closed",
+      "approval-by-author",
       "approval-rules-unsatisfied",
       "merge-conflict"
     ])

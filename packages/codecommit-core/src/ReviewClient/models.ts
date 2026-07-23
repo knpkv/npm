@@ -14,6 +14,7 @@ const BoundedText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(),
 const ClientRequestToken = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewRevision = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewCommitId = CodeCommitCommitId.check(Schema.isMaxLength(64))
+const ReviewReference = NonEmptyString.check(Schema.isMaxLength(256))
 
 /** Exact provider revision against which a review action was authorized. */
 export const CodeCommitReviewTarget = Schema.Struct({
@@ -22,7 +23,8 @@ export const CodeCommitReviewTarget = Schema.Struct({
   pullRequestId: PullRequestId,
   revisionId: ReviewRevision,
   sourceCommit: ReviewCommitId,
-  destinationCommit: ReviewCommitId
+  destinationCommit: ReviewCommitId,
+  destinationReference: ReviewReference
 }).annotate({ identifier: "CodeCommitReviewTarget" })
 
 /** Decoded immutable review target. */

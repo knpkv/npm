@@ -500,6 +500,42 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(proposals.approvalDispatch._tag, "confirmed")
     }))
 
+  it.effect("binds comment idempotency tokens to the pull-request target and keeps retries stable", () =>
+    Effect.gen(function*() {
+      const secondPullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        ...pullRequest,
+        pullRequestId: "18"
+      })
+      const secondRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        ...requestChangesProposal,
+        target: { entityType: "pull-request", vendorImmutableId: "18" }
+      })
+      const firstProposals = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return {
+            first: yield* connection.proposeAction(requestChangesProposal),
+            retry: yield* connection.proposeAction(requestChangesProposal)
+          }
+        })
+      )
+      const secondProposal = yield* runWithClient(
+        baseReadClient({ getPullRequest: () => Effect.succeed(secondPullRequest) }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(secondRequest)
+        })
+      )
+      const TokenPayload = Schema.Struct({ clientRequestToken: Schema.String })
+      const firstToken = Schema.decodeUnknownSync(TokenPayload)(firstProposals.first.request.payload).clientRequestToken
+      const retryToken = Schema.decodeUnknownSync(TokenPayload)(firstProposals.retry.request.payload).clientRequestToken
+      const secondToken = Schema.decodeUnknownSync(TokenPayload)(secondProposal.request.payload).clientRequestToken
+
+      assert.strictEqual(firstToken, retryToken)
+      assert.notStrictEqual(firstToken, secondToken)
+    }))
+
   it.effect("proposes and executes a governed request-changes action against the exact revision", () =>
     Effect.gen(function*() {
       const executed = yield* Ref.make<ReviewClient.CodeCommitReviewAction | null>(null)
@@ -589,6 +625,40 @@ describe("CodeCommitPlugin", () => {
               new ReviewClient.CodeCommitReviewConflictError({
                 operation: "post-comment",
                 reason: "revision-changed"
+              })
+            )
+        })
+      )
+
+      assert.strictEqual(result._tag, "confirmed")
+      if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
+  it.effect("records approval-by-author denial as a terminal failed receipt", () =>
+    Effect.gen(function*() {
+      const approveRequest = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+        actionKind: "approve",
+        target: { entityType: "pull-request", vendorImmutableId: "17" },
+        expectedRevision: "revision-17",
+        payload: {},
+        evidenceIds: []
+      })
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(approveRequest)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "updatePullRequestApprovalState",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "PullRequestCannotBeApprovedByAuthorException" }
               })
             )
         })

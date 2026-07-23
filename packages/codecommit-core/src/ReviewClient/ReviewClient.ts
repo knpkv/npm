@@ -46,10 +46,7 @@ const RawCommentsPage = Schema.Struct({
 })
 
 const RawMergeResponse = Schema.Struct({
-  pullRequest: Schema.optional(Schema.Struct({
-    pullRequestId: Schema.optional(Schema.String),
-    pullRequestStatus: Schema.optional(Schema.String)
-  }))
+  commitId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
 
 const malformed = (operation: string) =>
@@ -71,6 +68,7 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
   if (Predicate.isTagged(cause, "RevisionNotCurrentException")) return "revision-changed"
   if (Predicate.isTagged(cause, "TipOfSourceReferenceIsDifferentException")) return "source-commit-changed"
   if (Predicate.isTagged(cause, "PullRequestAlreadyClosedException")) return "pull-request-closed"
+  if (Predicate.isTagged(cause, "PullRequestCannotBeApprovedByAuthorException")) return "approval-by-author"
   if (Predicate.isTagged(cause, "PullRequestApprovalRulesNotSatisfiedException")) {
     return "approval-rules-unsatisfied"
   }
@@ -101,6 +99,7 @@ const targetConflict = (
   if (pullRequest.revisionId !== target.revisionId) return "revision-changed"
   if (pullRequest.sourceCommit !== target.sourceCommit) return "source-commit-changed"
   if (pullRequest.destinationCommit !== target.destinationCommit) return "destination-commit-changed"
+  if (pullRequest.destinationReference !== target.destinationReference) return "destination-reference-changed"
   return null
 }
 
@@ -130,7 +129,7 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
     case "revoke-approval":
       return "Pull request approval revoked"
     case "merge-fast-forward":
-      return "Pull request fast-forward merged"
+      return "Destination branch fast-forward merged"
   }
 }
 
@@ -189,7 +188,13 @@ export class CodeCommitReviewClient extends Context.Service<
             const raw = yield* provider.mergeFastForward(action).pipe(
               Effect.mapError(mapProviderError("merge-fast-forward"))
             )
-            yield* decodeProvider("merge-fast-forward", RawMergeResponse, raw)
+            const response = yield* decodeProvider("merge-fast-forward", RawMergeResponse, raw)
+            if (response.commitId !== action.target.sourceCommit) {
+              return yield* new CodeCommitReviewConflictError({
+                operation: "merge-fast-forward",
+                reason: "source-commit-changed"
+              })
+            }
             return new CodeCommitReviewReceipt({
               operationId: `merge:${action.target.pullRequestId}:${action.target.sourceCommit}`,
               summary: commentSummary(action._tag)
@@ -246,8 +251,10 @@ export class CodeCommitReviewClient extends Context.Service<
             )
             const states = yield* decodeProvider("reconcile-approval", RawApprovalStates, raw)
             const caller = (states.approvals ?? []).find(({ userArn }) => userArn === identity.arn)
-            const expected = action._tag === "approve" ? "APPROVE" : "REVOKE"
-            return caller?.approvalState === expected
+            const reconciled = action._tag === "approve"
+              ? caller?.approvalState === "APPROVE"
+              : caller === undefined
+            return reconciled
               ? {
                 _tag: "succeeded",
                 receipt: new CodeCommitReviewReceipt({
@@ -262,10 +269,7 @@ export class CodeCommitReviewClient extends Context.Service<
               account: action.target.account,
               pullRequestId: action.target.pullRequestId
             })
-            if (
-              pullRequest.status === "MERGED" &&
-              pullRequest.sourceCommit === action.target.sourceCommit
-            ) {
+            if (pullRequest.destinationCommit === action.target.sourceCommit) {
               return {
                 _tag: "succeeded",
                 receipt: new CodeCommitReviewReceipt({
@@ -278,6 +282,12 @@ export class CodeCommitReviewClient extends Context.Service<
               return {
                 _tag: "failed",
                 summary: "Pull request source revision changed before merge completed"
+              } satisfies CodeCommitReviewReconciliation
+            }
+            if (pullRequest.destinationCommit !== action.target.destinationCommit) {
+              return {
+                _tag: "failed",
+                summary: "Pull request destination revision changed before merge completed"
               } satisfies CodeCommitReviewReconciliation
             }
             return { _tag: "pending" } satisfies CodeCommitReviewReconciliation

@@ -102,12 +102,13 @@ export const CodeCommitReviewProviderLive = Layer.effect(
         )),
       mergeFastForward: (action) =>
         provideRuntime(callProvider(
-          "mergePullRequestByFastForward",
+          "mergeBranchesByFastForward",
           action.target,
-          codecommit.mergePullRequestByFastForward({
-            pullRequestId: action.target.pullRequestId,
+          codecommit.mergeBranchesByFastForward({
             repositoryName: action.target.repositoryName,
-            sourceCommitId: action.target.sourceCommit
+            sourceCommitSpecifier: action.target.sourceCommit,
+            destinationCommitSpecifier: action.target.destinationCommit,
+            targetBranch: action.target.destinationReference.replace(/^refs\/heads\//u, "")
           })
         )),
       getApprovalStates: (target) =>

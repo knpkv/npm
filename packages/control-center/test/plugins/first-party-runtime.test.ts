@@ -17,7 +17,7 @@ import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import { AuthorizedPluginActionV1, PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
@@ -29,7 +29,12 @@ import {
 } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
+import { codeCommitPluginDefinition } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
+import { FirstPartyPluginRuntimeRegistry } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import { pluginRuntimeKey } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
+import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -44,6 +49,28 @@ const OTHER_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-00000000008
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000083")
 const UNCONFIGURED_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000084")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z")
+const INVALID_AUTHORIZED_ACTION = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+  proposal: {
+    proposalKey: "registry-executor-precedence",
+    capabilityVersion: 1,
+    request: {
+      actionKind: "comment",
+      target: { entityType: "issue", vendorImmutableId: "RPS-1" },
+      expectedRevision: "revision-1",
+      payload: { content: "This target intentionally fails before a provider call." },
+      evidenceIds: []
+    },
+    payloadDigest: "0".repeat(64),
+    summary: "Exercise the selected provider executor",
+    impact: { level: "medium", summary: "No provider mutation is expected" },
+    proposedAt: CREATED_AT
+  },
+  idempotencyKey: "registry-executor-precedence",
+  payloadDigest: "0".repeat(64),
+  authorizationId: "registry-executor-precedence",
+  authorizedAt: CREATED_AT,
+  expiresAt: DateTime.add(CREATED_AT, { minutes: 5 })
+})
 
 const historicalJiraDescriptor = {
   ...jiraReadPluginDescriptor,
@@ -189,6 +216,77 @@ const fakeClockifyClient = (
   )
 
 describe("first-party plugin runtime", () => {
+  it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codecommit-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "codecommit",
+          displayName: PluginConnectionDisplayName.make("Payments CodeCommit"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          configuration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          CREATED_AT
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const result = yield* Effect.gen(function*() {
+          const executor = yield* AuthorizedPluginExecutor
+          return yield* executor.preflight(INVALID_AUTHORIZED_ACTION).pipe(Effect.result)
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+
+        assert.strictEqual(result._tag, "Failure")
+        if (result._tag === "Failure") {
+          assert.strictEqual(result.failure._tag, "PluginConfigurationFailure")
+          if (result.failure._tag === "PluginConfigurationFailure") {
+            assert.strictEqual(result.failure.diagnosticCode, "codecommit-action-kind-or-target-invalid")
+          }
+        }
+      }).pipe(
+        Effect.provide(FirstPartyPluginRuntimeRegistry),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it("keeps the historical Confluence descriptor independent of future current fields", () => {
     const futureCurrent = {
       ...confluencePagePluginDescriptor,

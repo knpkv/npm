@@ -842,7 +842,7 @@ const makeRegistry = Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
           const provider = yield* providerLayer(loaded)
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
-          return Layer.mergeAll(provider.layer, authority.layer, readOnlyExecutorLayer).pipe(
+          return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
           )
         }).pipe(

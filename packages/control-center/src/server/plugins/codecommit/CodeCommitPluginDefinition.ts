@@ -275,6 +275,7 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
         "ExpiredTokenException",
         "IdempotencyParameterMismatchException",
         "InvalidClientTokenId",
+        "PullRequestCannotBeApprovedByAuthorException",
         "ThrottlingException",
         "TooManyRequestsException",
         "UnrecognizedClientException"
@@ -306,35 +307,50 @@ const RequestReviewPayload = Schema.Struct({
 
 const EmptyPayload = Schema.Struct({})
 const ReviewCommitId = ReadClient.CodeCommitCommitId.check(Schema.isMaxLength(64))
+const ReviewReference = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
+const ReviewClientRequestToken = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(64)
+)
 
 const CodeCommitActionPayload = Schema.Union([
   Schema.TaggedStruct("request-review", {
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference,
     reviewerArns: RequestReviewPayload.fields.reviewerArns,
-    content: ReviewCommentPayload.fields.content
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
   }),
   Schema.TaggedStruct("comment", {
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
-    content: ReviewCommentPayload.fields.content
+    destinationReference: ReviewReference,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
   }),
   Schema.TaggedStruct("request-changes", {
     sourceCommit: ReviewCommitId,
     destinationCommit: ReviewCommitId,
-    content: ReviewCommentPayload.fields.content
+    destinationReference: ReviewReference,
+    content: ReviewCommentPayload.fields.content,
+    clientRequestToken: ReviewClientRequestToken
   }),
   Schema.TaggedStruct("approve", {
     sourceCommit: ReviewCommitId,
-    destinationCommit: ReviewCommitId
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference
   }),
   Schema.TaggedStruct("revoke-approval", {
     sourceCommit: ReviewCommitId,
-    destinationCommit: ReviewCommitId
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference
   }),
   Schema.TaggedStruct("merge-fast-forward", {
     sourceCommit: ReviewCommitId,
-    destinationCommit: ReviewCommitId
+    destinationCommit: ReviewCommitId,
+    destinationReference: ReviewReference
   })
 ]).pipe(Schema.toTaggedUnion("_tag"))
 
@@ -374,7 +390,7 @@ const actionSummary = (actionKind: CodeCommitActionKind, pullRequestId: string):
     case "revoke-approval":
       return `Revoke approval on CodeCommit pull request #${pullRequestId}`
     case "merge-fast-forward":
-      return `Merge CodeCommit pull request #${pullRequestId}`
+      return `Fast-forward the destination branch for CodeCommit pull request #${pullRequestId}`
   }
 }
 
@@ -382,7 +398,7 @@ const actionImpact = (
   actionKind: CodeCommitActionKind
 ): { readonly level: "medium" | "high"; readonly summary: string } =>
   actionKind === "merge-fast-forward"
-    ? { level: "high", summary: "Updates the destination branch and closes the pull request" }
+    ? { level: "high", summary: "Fast-forwards the destination branch from the exact authorized base commit" }
     : {
       level: "medium",
       summary: actionKind === "approve" || actionKind === "revoke-approval"
@@ -420,23 +436,47 @@ const decodeNormalizedActionPayload = (
     Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
   )
 
+const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientRequestToken")(function*(
+  actionKind: "comment" | "request-changes" | "request-review",
+  content: string,
+  pullRequest: ReadClient.CodeCommitPullRequestRevision,
+  cryptoService: Crypto.Crypto
+) {
+  return yield* digestGovernedActionPayload({
+    actionKind,
+    repositoryName: pullRequest.repositoryName,
+    pullRequestId: pullRequest.pullRequestId,
+    revisionId: pullRequest.revisionId,
+    sourceCommit: pullRequest.sourceCommit,
+    destinationCommit: pullRequest.destinationCommit,
+    content
+  }).pipe(
+    Effect.provideService(Crypto.Crypto, cryptoService),
+    Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
+  )
+})
+
 const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayload")(function*(
   actionKind: CodeCommitActionKind,
   payload: ProposePluginActionRequestV1["payload"],
-  pullRequest: ReadClient.CodeCommitPullRequestRevision
-): Effect.fn.Return<CodeCommitActionPayload, PluginConfigurationFailure> {
+  pullRequest: ReadClient.CodeCommitPullRequestRevision,
+  cryptoService: Crypto.Crypto
+): Effect.fn.Return<CodeCommitActionPayload, PluginConfigurationFailure | PluginOutageFailure> {
   const requested = yield* decodeRequestedPayload(actionKind, payload)
   switch (actionKind) {
     case "request-review": {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(RequestReviewPayload))(requested).pipe(
         Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
       )
+      const content = reviewRequestContent(decoded)
       return yield* decodeNormalizedActionPayload({
         _tag: actionKind,
         sourceCommit: pullRequest.sourceCommit,
         destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference,
         reviewerArns: decoded.reviewerArns,
-        content: reviewRequestContent(decoded)
+        content,
+        clientRequestToken: yield* commentClientRequestToken(actionKind, content, pullRequest, cryptoService)
       })
     }
     case "comment":
@@ -448,7 +488,9 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         _tag: actionKind,
         sourceCommit: pullRequest.sourceCommit,
         destinationCommit: pullRequest.destinationCommit,
-        content: decoded.content
+        destinationReference: pullRequest.destinationReference,
+        content: decoded.content,
+        clientRequestToken: yield* commentClientRequestToken(actionKind, decoded.content, pullRequest, cryptoService)
       })
     }
     case "approve":
@@ -457,7 +499,8 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
       return yield* decodeNormalizedActionPayload({
         _tag: actionKind,
         sourceCommit: pullRequest.sourceCommit,
-        destinationCommit: pullRequest.destinationCommit
+        destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference
       })
   }
 })
@@ -532,8 +575,7 @@ const actionFromPayload = (
   repositoryName: Domain.RepositoryName,
   pullRequestId: Domain.PullRequestId,
   revisionId: string,
-  payload: CodeCommitActionPayload,
-  clientRequestToken: string
+  payload: CodeCommitActionPayload
 ): ReviewClient.CodeCommitReviewAction => {
   const target = {
     account,
@@ -541,7 +583,8 @@ const actionFromPayload = (
     pullRequestId,
     revisionId,
     sourceCommit: payload.sourceCommit,
-    destinationCommit: payload.destinationCommit
+    destinationCommit: payload.destinationCommit,
+    destinationReference: payload.destinationReference
   }
   switch (payload._tag) {
     case "request-review":
@@ -551,7 +594,7 @@ const actionFromPayload = (
         _tag: payload._tag,
         target,
         content: payload.content,
-        clientRequestToken
+        clientRequestToken: payload.clientRequestToken
       }
     case "approve":
     case "revoke-approval":
@@ -571,7 +614,8 @@ const actionFromLocator = (
     pullRequestId: locator.pullRequestId,
     revisionId: locator.revisionId,
     sourceCommit: locator.sourceCommit,
-    destinationCommit: locator.destinationCommit
+    destinationCommit: locator.destinationCommit,
+    destinationReference: "refs/heads/reconciliation-only"
   }
   switch (locator.actionKind) {
     case "request-review":
@@ -640,8 +684,7 @@ const decodeAuthorizedAction = Effect.fn("CodeCommitPlugin.decodeAuthorizedActio
     repositoryName,
     pullRequestId,
     proposal.request.expectedRevision,
-    payload,
-    request.payloadDigest
+    payload
   )
 })
 
@@ -937,7 +980,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
           : "codecommit-revision-changed"
       })
     }
-    const payload = yield* normalizeActionPayload(request.actionKind, request.payload, pullRequest)
+    const payload = yield* normalizeActionPayload(request.actionKind, request.payload, pullRequest, cryptoService)
     const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))

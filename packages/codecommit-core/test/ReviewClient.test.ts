@@ -52,7 +52,8 @@ const commentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
     pullRequestId: "17",
     revisionId: "revision-17",
     sourceCommit: "head-commit-17",
-    destinationCommit: "base-commit-17"
+    destinationCommit: "base-commit-17",
+    destinationReference: "refs/heads/main"
   },
   content: "Please preserve the authorization binding.",
   clientRequestToken: "0".repeat(64)
@@ -95,7 +96,7 @@ const baseProvider = (
       comment: { commentId: "comment-1", clientRequestToken: "0".repeat(64) }
     }),
   updateApprovalState: () => Effect.succeed({}),
-  mergeFastForward: () => Effect.succeed({}),
+  mergeFastForward: () => Effect.succeed({ commitId: "head-commit-17" }),
   getApprovalStates: () => Effect.succeed({ approvals: [] }),
   getCommentsPage: () => Effect.succeed({ commentsForPullRequestData: [], nextToken: undefined }),
   ...overrides
@@ -196,5 +197,59 @@ describe("CodeCommitReviewClient", () => {
         assert.strictEqual(result.receipt.operationId, "comment:comment-reconciled")
       }
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("reconciles a revoked approval when the caller is absent while approval remains pending", () =>
+    Effect.gen(function*() {
+      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "revoke-approval",
+        target: commentAction.target
+      })
+      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "approve",
+        target: commentAction.target
+      })
+      const results = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({ getApprovalStates: () => Effect.succeed({ approvals: [] }) }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return {
+            approve: yield* client.reconcile(approveAction),
+            revoke: yield* client.reconcile(revokeAction)
+          }
+        })
+      )
+
+      assert.strictEqual(results.revoke._tag, "succeeded")
+      assert.strictEqual(results.approve._tag, "pending")
+    }))
+
+  it.effect("binds fast-forward execution to the authorized destination commit and branch", () =>
+    Effect.gen(function*() {
+      const observedTarget = yield* Ref.make<CodeCommitReviewAction["target"] | null>(null)
+      const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+        _tag: "merge-fast-forward",
+        target: commentAction.target
+      })
+      const receipt = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          mergeFastForward: (action) =>
+            Ref.set(observedTarget, action.target).pipe(
+              Effect.as({ commitId: action.target.sourceCommit })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(mergeAction)
+        })
+      )
+
+      assert.strictEqual(receipt.operationId, "merge:17:head-commit-17")
+      assert.deepInclude(yield* Ref.get(observedTarget), {
+        destinationCommit: "base-commit-17",
+        destinationReference: "refs/heads/main"
+      })
     }))
 })

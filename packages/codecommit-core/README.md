@@ -65,7 +65,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`CodeCommitReviewClient.live` supplies the raw mutation provider and still requires a `CodeCommitReadClient`, `AwsClientConfig`, and `HttpClient` when layers are composed. CodeCommit natively supports approve, revoke approval, and fast-forward merge. It has no request-review or request-changes state mutation, so those actions are idempotent comments attached to the authorized base/head commits. Comment reconciliation searches by AWS client request token; approval reconciliation reads the signed-in identity’s state; merge reconciliation verifies the exact merged source commit.
+`CodeCommitReviewClient.live` supplies the raw mutation provider and still requires a `CodeCommitReadClient`, `AwsClientConfig`, and `HttpClient` when layers are composed. CodeCommit natively supports approve, revoke approval, and branch fast-forward. Fast-forward execution uses the exact authorized destination commit as a compare-and-set guard and updates that destination branch; it does not claim that CodeCommit also closed the pull request. CodeCommit has no request-review or request-changes state mutation, so those actions are target-bound idempotent comments attached to the authorized base/head commits. Comment reconciliation searches by AWS client request token; approval reconciliation reads the signed-in identity’s state and treats an absent caller as a completed revoke; merge reconciliation verifies that the destination branch reached the exact authorized source commit.
 
 ### CacheService (SQLite)
 
