@@ -203,6 +203,8 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
       maxResults: request.maxResults,
       total: comments.length
     }),
+  getComment: (_issueId, commentId) =>
+    Effect.succeed(Option.fromUndefinedOr(comments.find((comment) => comment.id === commentId))),
   getChangelogs: (_issueId, request) =>
     Effect.succeed({
       values: request.startAt === 0 ? changelogs : [],
@@ -513,7 +515,149 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
-  it.effect("rejects Jira transitions without an atomic provider revision precondition", () =>
+  it.effect("ignores incomplete unrelated Jira links during action pre-read", () =>
+    withConnection(
+      baseProvider({
+        getIssue: () =>
+          Effect.succeed(Option.some({
+            ...issue,
+            fields: {
+              ...issue.fields,
+              issuelinks: [{
+                type: { name: "Blocks" },
+                inwardIssue: { id: "10043" }
+              }]
+            }
+          }))
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposal = yield* connection.proposeAction(addCommentRequest)
+
+        assert.strictEqual(proposal.request.actionKind, "add-comment")
+      })
+    ))
+
+  it.effect("reconciles a timed-out Jira comment by its durable provider property", () =>
+    Effect.gen(function*() {
+      const applied = yield* Ref.make(false)
+      return yield* withConnection(
+        baseProvider({
+          getComments: (_issueId, request) =>
+            Ref.get(applied).pipe(
+              Effect.map((isApplied) => ({
+                comments: isApplied
+                  ? [{
+                    id: "c99",
+                    body: addedCommentBody,
+                    properties: [{
+                      key: "dev.knpkv.control-center.idempotency",
+                      value: "jira-governed-action-1"
+                    }]
+                  }]
+                  : [],
+                startAt: request.startAt,
+                maxResults: request.maxResults,
+                total: isApplied ? 1 : 0
+              }))
+            ),
+          addIssueComment: () =>
+            Ref.set(applied, true).pipe(
+              Effect.andThen(Effect.fail(new PluginTimeoutFailure({ operation: "jira-add-comment" })))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(addCommentRequest)
+          const authorized = authorizeProposal(proposal)
+          const dispatched = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(dispatched))
+          if (!Result.isFailure(dispatched) || dispatched.failure._tag !== "PluginUnknownOutcomeFailure") {
+            return yield* Effect.die("expected a reconcilable Jira comment outcome")
+          }
+
+          const reconciled = yield* executor.reconcile(
+            Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+              reconciliationKey: dispatched.failure.reconciliationKey,
+              idempotencyKey: authorized.idempotencyKey,
+              payloadDigest: authorized.payloadDigest,
+              authorizedAction: authorized
+            })
+          )
+
+          assert.strictEqual(reconciled._tag, "succeeded")
+          if (reconciled._tag === "succeeded") {
+            assert.strictEqual(reconciled.receipt.providerOperationId, "jira-comment:c99")
+          }
+        })
+      )
+    }))
+
+  it.effect("searches newest Jira comments when reconciliation is page-bounded", () =>
+    Effect.gen(function*() {
+      const includeMatch = yield* Ref.make(true)
+      const requests = yield* Ref.make<ReadonlyArray<JiraPageRequest>>([])
+      const oldComment = { id: "c-old", body: "Older comment" }
+      const matchingComment = {
+        id: "c-new",
+        body: addedCommentBody,
+        properties: [{
+          key: "dev.knpkv.control-center.idempotency",
+          value: "jira-governed-action-1"
+        }]
+      }
+      return yield* withConnection(
+        baseProvider({
+          getComments: (_issueId, request) =>
+            Effect.gen(function*() {
+              yield* Ref.update(requests, (current) => [...current, request])
+              const newestFirst = (yield* Ref.get(includeMatch))
+                ? [matchingComment, oldComment]
+                : [oldComment]
+              const ordered = request.order === "newest" ? newestFirst : [...newestFirst].reverse()
+              return {
+                comments: ordered.slice(request.startAt, request.startAt + request.maxResults),
+                startAt: request.startAt,
+                maxResults: request.maxResults,
+                total: newestFirst.length
+              }
+            }),
+          addIssueComment: () => Effect.fail(new PluginTimeoutFailure({ operation: "jira-add-comment" }))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(addCommentRequest)
+          const authorized = authorizeProposal(proposal)
+          const dispatched = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          if (!Result.isFailure(dispatched) || dispatched.failure._tag !== "PluginUnknownOutcomeFailure") {
+            return yield* Effect.die("expected a reconcilable Jira comment outcome")
+          }
+          const request = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+            reconciliationKey: dispatched.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+
+          const matched = yield* executor.reconcile(request)
+          assert.strictEqual(matched._tag, "succeeded")
+          assert.deepStrictEqual(yield* Ref.get(requests), [{
+            startAt: 0,
+            maxResults: 1,
+            order: "newest"
+          }])
+
+          yield* Ref.set(includeMatch, false)
+          const unmatched = yield* executor.reconcile(request)
+          assert.strictEqual(unmatched._tag, "pending")
+        }),
+        { ...configuration, maximumPages: 1, pageSize: 1 }
+      )
+    }))
+
+  it.effect("reconciles a Jira comment with its authorized key after the issue key changes", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)
       const reconciledBody = yield* Ref.make<Schema.Json>(addedCommentBody)
@@ -601,6 +745,7 @@ describe("JiraReadPlugin", () => {
       const mutations = yield* Ref.make(0)
       return yield* withConnection(
         baseProvider({
+          getComment: () => Effect.succeed(Option.none()),
           getComments: (_issueId, request) =>
             Effect.succeed({
               comments: [],
@@ -620,6 +765,34 @@ describe("JiraReadPlugin", () => {
           }
           assert.strictEqual(yield* Ref.get(mutations), 0)
         })
+      )
+    }))
+
+  it.effect("locates an older Jira reply parent outside the activity tail window", () =>
+    Effect.gen(function*() {
+      const pageReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getComments: (_issueId, request) =>
+            Ref.update(pageReads, (count) => count + 1).pipe(
+              Effect.as({
+                comments: request.startAt === 0
+                  ? [{ id: "c1", body: "Old" }]
+                  : [{ id: "c-new", body: "New" }],
+                startAt: request.startAt,
+                maxResults: request.maxResults,
+                total: 10
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const proposal = yield* connection.proposeAction(replyCommentRequest)
+
+          assert.strictEqual(proposal.request.actionKind, "reply-comment")
+          assert.strictEqual(yield* Ref.get(pageReads), 0)
+        }),
+        { ...configuration, maximumPages: 2, pageSize: 1 }
       )
     }))
 
@@ -922,9 +1095,33 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
+  it.effect("rejects a Jira self-link resolved from the issue key", () =>
+    withConnection(
+      baseProvider({
+        getIssue: () => Effect.succeed(Option.some(issue)),
+        getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+          ...linkIssueRequest,
+          payload: {
+            linkedIssueId: issue.key,
+            linkTypeName: "Relates"
+          }
+        })
+        const proposed = yield* connection.proposeAction(request).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginConflictFailure")
+        }
+      })
+    ))
+
   it.effect("reconciles a timed-out Jira issue link from current provider state", () =>
     Effect.gen(function*() {
-      const applied = yield* Ref.make(false)
+      const direction = yield* Ref.make<"reverse" | "outward">("reverse")
       const linkedIssue = {
         ...issue,
         id: "10043",
@@ -935,29 +1132,26 @@ describe("JiraReadPlugin", () => {
           getIssue: (issueId) =>
             issueId === linkedIssue.id
               ? Effect.succeed(Option.some(linkedIssue))
-              : Ref.get(applied).pipe(
-                Effect.map((isApplied) =>
+              : Ref.get(direction).pipe(
+                Effect.map((currentDirection) =>
                   Option.some(
-                    isApplied
-                      ? {
-                        ...issue,
-                        fields: {
-                          ...issue.fields,
-                          issuelinks: [{
-                            type: { name: "Relates" },
-                            outwardIssue: { id: linkedIssue.id, key: linkedIssue.key }
-                          }]
-                        }
+                    {
+                      ...issue,
+                      fields: {
+                        ...issue.fields,
+                        issuelinks: [{
+                          type: { name: "Relates" },
+                          ...(currentDirection === "outward"
+                            ? { outwardIssue: { id: linkedIssue.id, key: linkedIssue.key } }
+                            : { inwardIssue: { id: linkedIssue.id, key: linkedIssue.key } })
+                        }]
                       }
-                      : issue
+                    }
                   )
                 )
               ),
           getIssueLinkTypes: Effect.succeed([{ id: "10000", name: "Relates" }]),
-          linkIssues: () =>
-            Ref.set(applied, true).pipe(
-              Effect.andThen(Effect.fail(new PluginTimeoutFailure({ operation: "jira-link-issues" })))
-            )
+          linkIssues: () => Effect.fail(new PluginTimeoutFailure({ operation: "jira-link-issues" }))
         }),
         Effect.gen(function*() {
           const connection = yield* PluginConnection
@@ -969,15 +1163,17 @@ describe("JiraReadPlugin", () => {
             return yield* Effect.die("expected a reconcilable Jira issue-link outcome")
           }
 
-          const reconciled = yield* executor.reconcile(
-            Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
-              reconciliationKey: dispatched.failure.reconciliationKey,
-              idempotencyKey: authorized.idempotencyKey,
-              payloadDigest: authorized.payloadDigest,
-              authorizedAction: authorized
-            })
-          )
+          const request = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+            reconciliationKey: dispatched.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+          const reverse = yield* executor.reconcile(request)
+          assert.strictEqual(reverse._tag, "pending")
 
+          yield* Ref.set(direction, "outward")
+          const reconciled = yield* executor.reconcile(request)
           assert.strictEqual(reconciled._tag, "succeeded")
           if (reconciled._tag === "succeeded") {
             assert.strictEqual(reconciled.receipt.safeSummary, "Jira issue PAY-42 linked to PAY-43")

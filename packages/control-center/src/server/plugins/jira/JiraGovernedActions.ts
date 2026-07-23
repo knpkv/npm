@@ -204,8 +204,14 @@ const JiraActionIssue = Schema.Struct({
     }))),
     issuelinks: Schema.optionalKey(Schema.Array(Schema.Struct({
       type: Schema.Struct({ name: Schema.String }),
-      inwardIssue: Schema.optionalKey(Schema.Struct({ id: Schema.String, key: JiraIssueKey })),
-      outwardIssue: Schema.optionalKey(Schema.Struct({ id: Schema.String, key: JiraIssueKey }))
+      inwardIssue: Schema.optionalKey(Schema.Struct({
+        id: Schema.optionalKey(Schema.String),
+        key: Schema.optionalKey(JiraIssueKey)
+      })),
+      outwardIssue: Schema.optionalKey(Schema.Struct({
+        id: Schema.optionalKey(Schema.String),
+        key: Schema.optionalKey(JiraIssueKey)
+      }))
     })))
   })
 })
@@ -320,16 +326,12 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
           })
         )
       )
-      const comments = yield* collectPages({
-        operation: "jira-propose-reply-comment",
-        configuration,
-        load: (page) =>
-          provider.getComments(issue.id, page).pipe(
-            Effect.map((response) => ({ values: response.comments, total: response.total }))
-          ),
-        maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
-      })
-      if (!comments.values.some((comment) => comment.id === requested.parentCommentId)) {
+      const parent = yield* withTimeout(
+        "jira-propose-reply-comment",
+        configuration.operationTimeoutMillis,
+        provider.getComment(issue.id, requested.parentCommentId)
+      )
+      if (Option.isNone(parent)) {
         return yield* new PluginConflictFailure({
           operation: "propose-action",
           diagnosticCode: "jira-parent-comment-not-found"
@@ -421,6 +423,12 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
           })
         )
       )
+      if (linkedIssue.id === issue.id) {
+        return yield* new PluginConflictFailure({
+          operation: "propose-action",
+          diagnosticCode: "jira-issue-link-self-reference"
+        })
+      }
       if (linkedIssue.fields.project.id !== configuration.projectId) {
         return yield* new PluginConflictFailure({
           operation: "propose-action",
@@ -870,7 +878,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
       operation: "jira-reconcile-comments",
       configuration,
       load: (page) =>
-        provider.getComments(action.issueId, page).pipe(
+        provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
           Effect.map((response) => ({ values: response.comments, total: response.total }))
         ),
       maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
@@ -963,10 +971,7 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
     const linkAction = action.payload
     const linked = (current.fields.issuelinks ?? []).some((link) =>
       link.type.name === linkAction.linkTypeName &&
-      (
-        link.inwardIssue?.id === linkAction.linkedIssueId ||
-        link.outwardIssue?.id === linkAction.linkedIssueId
-      )
+      link.outwardIssue?.id === linkAction.linkedIssueId
     )
     if (!linked) return { _tag: "pending", checkedAt }
     return {

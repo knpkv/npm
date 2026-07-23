@@ -127,6 +127,10 @@ export interface JiraReadProvider {
     issueId: string,
     request: JiraPageRequest
   ) => Effect.Effect<JiraApi.PageOfComments, PluginFailure>
+  readonly getComment: (
+    issueId: string,
+    commentId: string
+  ) => Effect.Effect<Option.Option<JiraApi.Comment>, PluginFailure>
   readonly getChangelogs: (
     issueId: string,
     request: JiraPageRequest
@@ -357,6 +361,15 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
           expand: "properties"
         }
       })
+    ),
+  getComment: (issueId, commentId) =>
+    client.getComment(issueId, commentId, { params: { expand: "properties" } }).pipe(
+      Effect.map(Option.some),
+      Effect.catch((error) =>
+        isNotFound(error)
+          ? Effect.succeed(Option.none())
+          : mapFailure("jira-get-comment", error)
+      )
     ),
   getChangelogs: (issueId, request) =>
     providerCall(
