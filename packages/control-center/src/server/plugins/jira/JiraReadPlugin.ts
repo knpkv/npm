@@ -299,9 +299,6 @@ const JiraDescriptionDocument = Schema.Struct({
 const AddCommentRequestPayload = Schema.Struct({
   body: JiraDescriptionDocument
 })
-const TransitionRequestPayload = Schema.Struct({
-  transitionId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-})
 const JiraActionComment = Schema.Struct({
   id: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
   body: JiraDescriptionDocument,
@@ -311,19 +308,10 @@ const JiraActionComment = Schema.Struct({
   })))
 })
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-const JiraActionPayload = Schema.Union([
-  Schema.TaggedStruct("add-comment", {
-    issueKey: JiraIssueKey,
-    body: JiraDescriptionDocument
-  }),
-  Schema.TaggedStruct("transition", {
-    issueKey: JiraIssueKey,
-    transitionId: Schema.String,
-    transitionName: Schema.String,
-    toStatusId: Schema.String,
-    toStatusName: Schema.String
-  })
-]).pipe(Schema.toTaggedUnion("_tag"))
+const JiraActionPayload = Schema.TaggedStruct("add-comment", {
+  issueKey: JiraIssueKey,
+  body: JiraDescriptionDocument
+})
 const JiraActionIssue = Schema.Struct({
   id: Schema.String,
   key: JiraIssueKey,
@@ -390,10 +378,7 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
 ) {
   if (
     request.target.entityType !== "jira.issue" ||
-    (
-      request.actionKind !== "add-comment" &&
-      request.actionKind !== "transition"
-    )
+    request.actionKind !== "add-comment"
   ) {
     return yield* new PluginUnsupportedCapabilityFailure({
       capabilityId: "action.propose",
@@ -402,57 +387,19 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
     })
   }
   const issue = yield* loadActionIssue(provider, configuration, request)
-  const payload = request.actionKind === "add-comment"
-    ? JiraActionPayload.make({
-      _tag: "add-comment",
-      issueKey: issue.key,
-      body: (yield* Schema.decodeUnknownEffect(
-        Schema.toType(AddCommentRequestPayload)
-      )(request.payload).pipe(
-        Effect.mapError(() =>
-          new PluginConfigurationFailure({
-            diagnosticCode: "jira-action-payload-invalid"
-          })
-        )
-      )).body
-    })
-    : yield* Effect.gen(function*() {
-      const requested = yield* Schema.decodeUnknownEffect(
-        Schema.toType(TransitionRequestPayload)
-      )(request.payload).pipe(
-        Effect.mapError(() =>
-          new PluginConfigurationFailure({
-            diagnosticCode: "jira-action-payload-invalid"
-          })
-        )
-      )
-      const transitions = yield* withTimeout(
-        "jira-get-transitions",
-        configuration.operationTimeoutMillis,
-        provider.getIssueTransitions(issue.id)
-      )
-      const transition = transitions.find((candidate) => candidate.id === requested.transitionId)
-      if (transition === undefined) {
-        return yield* new PluginConflictFailure({
-          operation: "propose-action",
-          diagnosticCode: "jira-transition-unavailable"
+  const payload = JiraActionPayload.make({
+    _tag: "add-comment",
+    issueKey: issue.key,
+    body: (yield* Schema.decodeUnknownEffect(
+      Schema.toType(AddCommentRequestPayload)
+    )(request.payload).pipe(
+      Effect.mapError(() =>
+        new PluginConfigurationFailure({
+          diagnosticCode: "jira-action-payload-invalid"
         })
-      }
-      if (transition.toStatusId === issue.fields.status.id) {
-        return yield* new PluginConflictFailure({
-          operation: "propose-action",
-          diagnosticCode: "jira-transition-already-current"
-        })
-      }
-      return JiraActionPayload.make({
-        _tag: "transition",
-        issueKey: issue.key,
-        transitionId: transition.id,
-        transitionName: transition.name,
-        toStatusId: transition.toStatusId,
-        toStatusName: transition.toStatusName
-      })
-    })
+      )
+    )).body
+  })
   const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
     Effect.mapError(() =>
@@ -466,16 +413,16 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
   return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionProposalV1))({
     proposalKey: `jr:${request.actionKind}:${issue.id}:${request.expectedRevision}:${payloadDigest}`,
     capabilityVersion: 1,
-    request: { ...request, payload },
+    request: {
+      ...request,
+      target: { ...request.target, entityType: "issue" },
+      payload
+    },
     payloadDigest,
-    summary: payload._tag === "add-comment"
-      ? `Comment on Jira issue ${issue.key}`
-      : `Move Jira issue ${issue.key} to ${payload.toStatusName}`,
+    summary: `Comment on Jira issue ${issue.key}`,
     impact: {
       level: "medium",
-      summary: payload._tag === "add-comment"
-        ? "Adds a durable comment to the Jira issue"
-        : `Transitions the Jira issue to ${payload.toStatusName}`
+      summary: "Adds a durable comment to the Jira issue"
     },
     proposedAt
   }).pipe(
@@ -488,7 +435,7 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
   )
 })
 
-interface JiraDescriptionAction {
+interface JiraGovernedAction {
   readonly issueId: string
   readonly expectedRevision: Revision
   readonly payload: typeof JiraActionPayload.Type
@@ -497,14 +444,11 @@ interface JiraDescriptionAction {
 
 const decodeAuthorizedJiraAction = Effect.fn("JiraReadPlugin.decodeAuthorizedAction")(function*(
   request: AuthorizedPluginActionV1
-): Effect.fn.Return<JiraDescriptionAction, PluginConfigurationFailure> {
+): Effect.fn.Return<JiraGovernedAction, PluginConfigurationFailure> {
   const proposalRequest = request.proposal.request
   if (
-    proposalRequest.target.entityType !== "jira.issue" ||
-    (
-      proposalRequest.actionKind !== "add-comment" &&
-      proposalRequest.actionKind !== "transition"
-    )
+    proposalRequest.target.entityType !== "issue" ||
+    proposalRequest.actionKind !== "add-comment"
   ) {
     return yield* new PluginConfigurationFailure({
       diagnosticCode: "jira-action-kind-or-target-invalid"
@@ -529,7 +473,7 @@ const decodeAuthorizedJiraAction = Effect.fn("JiraReadPlugin.decodeAuthorizedAct
 })
 
 const reconciliationKeyForAction = (
-  action: JiraDescriptionAction,
+  action: JiraGovernedAction,
   payloadDigest: AuthorizedPluginActionV1["payloadDigest"]
 ) =>
   PluginActionReconciliationKey.make(
@@ -537,7 +481,7 @@ const reconciliationKeyForAction = (
   )
 
 const confirmedJiraActionFailure = (
-  action: JiraDescriptionAction,
+  action: JiraGovernedAction,
   request: AuthorizedPluginActionV1,
   observedAt: DateTime.Utc
 ): PluginActionDispatchResultV1 => ({
@@ -564,7 +508,7 @@ const preflightJiraAction = Effect.fn("JiraReadPlugin.preflight")(function*(
     if (inspected.failure._tag === "PluginConflictFailure") {
       return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
         _tag: "blocked",
-        reasons: [`Jira description edit blocked: ${inspected.failure.diagnosticCode}`],
+        reasons: [`Jira comment blocked: ${inspected.failure.diagnosticCode}`],
         checkedAt
       }).pipe(
         Effect.mapError(() =>
@@ -576,33 +520,6 @@ const preflightJiraAction = Effect.fn("JiraReadPlugin.preflight")(function*(
       )
     }
     return yield* inspected.failure
-  }
-  if (action.payload._tag === "transition") {
-    const transitionAction = action.payload
-    const transitions = yield* withTimeout(
-      "jira-get-transitions",
-      configuration.operationTimeoutMillis,
-      provider.getIssueTransitions(action.issueId)
-    )
-    if (
-      !transitions.some((transition) =>
-        transition.id === transitionAction.transitionId &&
-        transition.toStatusId === transitionAction.toStatusId
-      )
-    ) {
-      return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
-        _tag: "blocked",
-        reasons: ["Jira transition blocked: jira-transition-unavailable"],
-        checkedAt
-      }).pipe(
-        Effect.mapError(() =>
-          new PluginMalformedResponseFailure({
-            operation: "preflight",
-            diagnosticCode: "jira-action-preflight-invalid"
-          })
-        )
-      )
-    }
   }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionPreflightV1))({
     _tag: "ready",
@@ -628,52 +545,24 @@ const executeJiraAction = Effect.fn("JiraReadPlugin.executeAuthorizedAction")(fu
   if (Result.isFailure(inspected)) {
     return confirmedJiraActionFailure(action, request, yield* DateTime.now)
   }
-  if (action.payload._tag === "transition") {
-    const transitionAction = action.payload
-    const transitions = yield* withTimeout(
-      "jira-get-transitions",
-      configuration.operationTimeoutMillis,
-      provider.getIssueTransitions(action.issueId)
-    )
-    if (
-      !transitions.some((transition) =>
-        transition.id === transitionAction.transitionId &&
-        transition.toStatusId === transitionAction.toStatusId
-      )
-    ) {
-      return confirmedJiraActionFailure(action, request, yield* DateTime.now)
-    }
-  }
   const reconciliationKey = reconciliationKeyForAction(action, request.payloadDigest)
-  const operation = action.payload._tag === "add-comment"
-    ? "jira-add-comment"
-    : "jira-transition-issue"
+  const operation = "jira-add-comment"
   const mutation = yield* withTimeout(
     operation,
     configuration.operationTimeoutMillis,
-    action.payload._tag === "add-comment"
-      ? provider.addIssueComment(action.issueId, action.payload.body, request.idempotencyKey).pipe(
-        Effect.map((commentId) => ({
-          providerOperationId: `jira-comment:${commentId}`,
-          safeSummary: `Comment added to Jira issue ${action.payload.issueKey}`
-        }))
-      )
-      : provider.transitionIssue(action.issueId, action.payload.transitionId).pipe(
-        Effect.as({
-          providerOperationId: `jr:transition:${action.issueId}:${request.payloadDigest}`,
-          safeSummary: `Jira issue ${action.payload.issueKey} moved to ${action.payload.toStatusName}`
-        })
-      )
+    provider.addIssueComment(action.issueId, action.payload.body, request.idempotencyKey).pipe(
+      Effect.map((commentId) => ({
+        providerOperationId: `jira-comment:${commentId}`,
+        safeSummary: `Comment added to Jira issue ${action.payload.issueKey}`
+      }))
+    )
   ).pipe(Effect.result)
   const observedAt = yield* DateTime.now
   if (Result.isFailure(mutation)) {
     if (
       mutation.failure._tag === "PluginTimeoutFailure" ||
       mutation.failure._tag === "PluginOutageFailure" ||
-      (
-        action.payload._tag === "add-comment" &&
-        mutation.failure._tag === "PluginMalformedResponseFailure"
-      )
+      mutation.failure._tag === "PluginMalformedResponseFailure"
     ) {
       return yield* new PluginUnknownOutcomeFailure({
         operation,
@@ -735,71 +624,54 @@ const reconcileJiraAction = Effect.fn("JiraReadPlugin.reconcile")(function*(
       diagnosticCode: "jira-action-target-outside-connection"
     })
   }
-  if (action.payload._tag === "add-comment") {
-    const comments = yield* collectPages({
-      operation: "jira-reconcile-comments",
-      configuration,
-      preservePrefix: true,
-      load: (page) =>
-        provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
-          Effect.map((response) => ({ values: response.comments, total: response.total }))
-        ),
-      maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
-    })
-    const candidate = comments.values.find((comment) =>
-      comment.properties?.some((property) =>
-        property.key === "dev.knpkv.control-center.idempotency" &&
-        property.value === request.idempotencyKey
-      ) === true
+  const comments = yield* collectPages({
+    operation: "jira-reconcile-comments",
+    configuration,
+    preservePrefix: true,
+    load: (page) =>
+      provider.getComments(action.issueId, { ...page, order: "newest" }).pipe(
+        Effect.map((response) => ({ values: response.comments, total: response.total }))
+      ),
+    maximumValues: MAXIMUM_NORMALIZED_ISSUE_COMMENTS
+  })
+  const candidate = comments.values.find((comment) =>
+    comment.properties?.some((property) =>
+      property.key === "dev.knpkv.control-center.idempotency" &&
+      property.value === request.idempotencyKey
+    ) === true
+  )
+  if (candidate === undefined) return { _tag: "pending", checkedAt }
+  const decoded = yield* Schema.decodeUnknownEffect(JiraActionComment)(candidate).pipe(
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "jira-reconcile-comments",
+        diagnosticCode: "jira-action-comment-invalid"
+      })
     )
-    if (candidate === undefined) return { _tag: "pending", checkedAt }
-    const decoded = yield* Schema.decodeUnknownEffect(JiraActionComment)(candidate).pipe(
-      Effect.mapError(() =>
-        new PluginMalformedResponseFailure({
-          operation: "jira-reconcile-comments",
-          diagnosticCode: "jira-action-comment-invalid"
-        })
-      )
+  )
+  const currentDigest = yield* digestGovernedActionPayload({
+    _tag: "add-comment",
+    issueKey: action.payload.issueKey,
+    body: decoded.body
+  }).pipe(
+    Effect.provideService(Crypto.Crypto, cryptoService),
+    Effect.mapError(() =>
+      new PluginMalformedResponseFailure({
+        operation: "reconcile",
+        diagnosticCode: "jira-action-payload-digest-failed"
+      })
     )
-    const currentDigest = yield* digestGovernedActionPayload({
-      _tag: "add-comment",
-      issueKey: action.payload.issueKey,
-      body: decoded.body
-    }).pipe(
-      Effect.provideService(Crypto.Crypto, cryptoService),
-      Effect.mapError(() =>
-        new PluginMalformedResponseFailure({
-          operation: "reconcile",
-          diagnosticCode: "jira-action-payload-digest-failed"
-        })
-      )
-    )
-    if (currentDigest !== request.payloadDigest) return { _tag: "pending", checkedAt }
-    return {
-      _tag: "succeeded",
-      receipt: {
-        status: "succeeded",
-        providerOperationId: PluginProviderOperationId.make(`jira-comment:${decoded.id}`),
-        safeSummary: `Comment added to Jira issue ${action.payload.issueKey}`,
-        observedAt: checkedAt
-      }
+  )
+  if (currentDigest !== request.payloadDigest) return { _tag: "pending", checkedAt }
+  return {
+    _tag: "succeeded",
+    receipt: {
+      status: "succeeded",
+      providerOperationId: PluginProviderOperationId.make(`jira-comment:${decoded.id}`),
+      safeSummary: `Comment added to Jira issue ${action.payload.issueKey}`,
+      observedAt: checkedAt
     }
   }
-  if (action.payload._tag === "transition") {
-    if (current.fields.status.id !== action.payload.toStatusId) return { _tag: "pending", checkedAt }
-    return {
-      _tag: "succeeded",
-      receipt: {
-        status: "succeeded",
-        providerOperationId: PluginProviderOperationId.make(
-          `jr:reconciled:transition:${action.issueId}:${request.payloadDigest}`
-        ),
-        safeSummary: `Jira issue ${action.payload.issueKey} moved to ${action.payload.toStatusName}`,
-        observedAt: checkedAt
-      }
-    }
-  }
-  return { _tag: "pending", checkedAt }
 })
 
 const withTimeout = <Value>(

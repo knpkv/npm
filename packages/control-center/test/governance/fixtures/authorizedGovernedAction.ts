@@ -38,7 +38,7 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
-export type GovernedActionFixtureVariant = "jira" | "codecommit"
+export type GovernedActionFixtureVariant = "jira" | "jira-comment" | "codecommit"
 
 const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
 
@@ -79,8 +79,18 @@ const jiraFixture = defineFixture({
   }
 })
 
+const jiraCommentFixture = defineFixture({
+  ...jiraFixture,
+  vendorImmutableId: "10042",
+  sourceRevision: "2026-07-17T09:30:00.000Z"
+})
+
 const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
-  variant === "codecommit" ? codeCommitFixture : jiraFixture
+  variant === "codecommit"
+    ? codeCommitFixture
+    : variant === "jira-comment"
+    ? jiraCommentFixture
+    : jiraFixture
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
@@ -247,6 +257,19 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
         content: "Registry wiring check.",
         clientRequestToken: "1".repeat(64)
       }
+      : variant === "jira-comment"
+      ? {
+        _tag: "add-comment",
+        issueKey: "PAY-42",
+        body: {
+          type: "doc",
+          version: 1,
+          content: [{
+            type: "paragraph",
+            content: [{ type: "text", text: "Registry wiring check." }]
+          }]
+        }
+      }
       : { fields: { resolution: null, status: "Done" }, notify: true }
   )
   const payloadDigest = yield* digestGovernedActionPayload(payload)
@@ -268,24 +291,40 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     actionId: ACTION_ID,
     idempotencyKey: variant === "codecommit"
       ? "governed-action:codecommit:17:comment:1"
+      : variant === "jira-comment"
+      ? "governed-action:jira:PAY-42:comment:1"
       : "governed-action:PAY-42:done:1",
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest ?? `sha256:${"a".repeat(64)}`,
-    pluginId: variant === "codecommit" ? "dev.knpkv.codecommit" : "dev.knpkv.jira",
+    pluginId: variant === "codecommit"
+      ? "dev.knpkv.codecommit"
+      : variant === "jira-comment"
+      ? "dev.knpkv.jira.read"
+      : "dev.knpkv.jira",
     pluginContractVersion: { major: 1, minor: 0, patch: 0 },
     pluginAdapterVersion: variant === "codecommit"
       ? { major: 0, minor: 1, patch: 0 }
+      : variant === "jira-comment"
+      ? { major: 0, minor: 3, patch: 0 }
       : { major: 1, minor: 2, patch: 3 },
     providerId: fixture.providerId,
     capability: { capabilityId: "action.execute", version: 1 },
     targetEntityId: ENTITY_ID,
     proposal: {
-      proposalKey: variant === "codecommit" ? "comment:codecommit:17" : "transition:PAY-42:done",
+      proposalKey: variant === "codecommit"
+        ? "comment:codecommit:17"
+        : variant === "jira-comment"
+        ? "comment:jira:PAY-42"
+        : "transition:PAY-42:done",
       capabilityVersion: 1,
       request: {
-        actionKind: variant === "codecommit" ? "comment" : "transition",
+        actionKind: variant === "codecommit"
+          ? "comment"
+          : variant === "jira-comment"
+          ? "add-comment"
+          : "transition",
         target: {
           entityType: fixture.entityType,
           vendorImmutableId: fixture.vendorImmutableId
@@ -295,10 +334,18 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
         evidenceIds: ["provider-evidence-1"]
       },
       payloadDigest,
-      summary: variant === "codecommit" ? "Comment on CodeCommit pull request 17" : "Move PAY-42 to Done",
+      summary: variant === "codecommit"
+        ? "Comment on CodeCommit pull request 17"
+        : variant === "jira-comment"
+        ? "Comment on Jira issue PAY-42"
+        : "Move PAY-42 to Done",
       impact: {
         level: "medium",
-        summary: variant === "codecommit" ? "Posts one review comment" : "Changes the issue workflow state"
+        summary: variant === "codecommit"
+          ? "Posts one review comment"
+          : variant === "jira-comment"
+          ? "Adds a durable comment to the Jira issue"
+          : "Changes the issue workflow state"
       },
       proposedAt: PROPOSED_AT
     },
@@ -312,7 +359,11 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     },
     proposalExpiresAt: "2026-07-15T10:10:00.000Z",
     causationId: null,
-    correlationId: variant === "codecommit" ? "action:codecommit:17:comment" : "action:PAY-42:done"
+    correlationId: variant === "codecommit"
+      ? "action:codecommit:17:comment"
+      : variant === "jira-comment"
+      ? "action:jira:PAY-42:comment"
+      : "action:PAY-42:done"
   })
   return (yield* makeGovernedActionEnvelope(material)).envelope
 })

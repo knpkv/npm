@@ -379,6 +379,7 @@ describe("JiraReadPlugin", () => {
           issueKey: issue.key,
           body: addedCommentBody
         })
+        assert.strictEqual(proposal.request.target.entityType, "issue")
         assert.strictEqual(proposal.summary, "Comment on Jira issue PAY-42")
 
         const dispatched = yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
@@ -390,7 +391,42 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
-  it.effect("confirms an execute-time Jira inspection failure before mutation", () =>
+  it.effect("names the authorized Jira comment when stale preflight blocks it", () =>
+    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
+      return yield* withConnection(
+        baseProvider({
+          getIssue: () =>
+            Ref.getAndUpdate(issueReads, (count) => count + 1).pipe(
+              Effect.map((count) =>
+                Option.some(
+                  count === 0
+                    ? issue
+                    : {
+                      ...issue,
+                      fields: { ...issue.fields, updated: "2026-07-17T09:31:00.000Z" }
+                    }
+                )
+              )
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(addCommentRequest)
+          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+
+          assert.strictEqual(preflight._tag, "blocked")
+          if (preflight._tag === "blocked") {
+            assert.deepStrictEqual(preflight.reasons, [
+              "Jira comment blocked: jira-issue-revision-changed"
+            ])
+          }
+        })
+      )
+    }))
+
+  it.effect("returns a terminal confirmed failure when execute-time Jira inspection fails before mutation", () =>
     Effect.gen(function*() {
       const issueReads = yield* Ref.make(0)
       const mutations = yield* Ref.make(0)
@@ -418,7 +454,9 @@ describe("JiraReadPlugin", () => {
           assert.strictEqual(dispatched._tag, "confirmed")
           if (dispatched._tag === "confirmed") {
             assert.strictEqual(dispatched.receipt.status, "failed")
+            assert.match(dispatched.receipt.providerOperationId, /^jr:rejected:add-comment:/u)
           }
+          assert.strictEqual(yield* Ref.get(issueReads), 3)
           assert.strictEqual(yield* Ref.get(mutations), 0)
         })
       )
@@ -766,79 +804,34 @@ describe("JiraReadPlugin", () => {
       )
     }))
 
-  it.effect("proposes and executes an available Jira transition", () =>
+  it.effect("rejects Jira transitions without an atomic provider revision precondition", () =>
     Effect.gen(function*() {
-      const transitions = yield* Ref.make<ReadonlyArray<string>>([])
-      return yield* withConnection(
-        baseProvider({
-          transitionIssue: (_issueId, transitionId) => Ref.update(transitions, (current) => [...current, transitionId])
-        }),
-        Effect.gen(function*() {
-          const connection = yield* PluginConnection
-          const executor = yield* AuthorizedPluginExecutor
-          const proposal = yield* connection.proposeAction(transitionRequest)
-
-          assert.deepStrictEqual(proposal.request.payload, {
-            _tag: "transition",
-            issueKey: issue.key,
-            transitionId: "31",
-            transitionName: "Done",
-            toStatusId: "4",
-            toStatusName: "Done"
-          })
-          const dispatched = yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
-          assert.strictEqual(dispatched._tag, "confirmed")
-          assert.deepStrictEqual(yield* Ref.get(transitions), ["31"])
-        })
-      )
-    }))
-
-  it.effect("rejects a Jira transition that already targets the current status", () =>
-    withConnection(
-      baseProvider({
-        getIssueTransitions: () =>
-          Effect.succeed([{ id: "31", name: "In Review", toStatusId: "3", toStatusName: "In Review" }])
-      }),
-      Effect.gen(function*() {
-        const connection = yield* PluginConnection
-        const proposed = yield* connection.proposeAction(transitionRequest).pipe(Effect.result)
-
-        assert.isTrue(Result.isFailure(proposed))
-        if (Result.isFailure(proposed)) {
-          assert.strictEqual(proposed.failure._tag, "PluginConflictFailure")
-          if (proposed.failure._tag === "PluginConflictFailure") {
-            assert.strictEqual(proposed.failure.diagnosticCode, "jira-transition-already-current")
-          }
-        }
-      })
-    ))
-
-  it.effect("blocks preflight when the authorized Jira transition is no longer available", () =>
-    Effect.gen(function*() {
+      const issueReads = yield* Ref.make(0)
       const transitionReads = yield* Ref.make(0)
+      const mutations = yield* Ref.make(0)
       return yield* withConnection(
         baseProvider({
+          getIssue: () => Ref.update(issueReads, (count) => count + 1).pipe(Effect.as(Option.some(issue))),
           getIssueTransitions: () =>
-            Ref.getAndUpdate(transitionReads, (count) => count + 1).pipe(
-              Effect.map((count) =>
-                count === 0
-                  ? [{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }]
-                  : []
-              )
-            )
+            Ref.update(transitionReads, (count) => count + 1).pipe(
+              Effect.as([{ id: "31", name: "Done", toStatusId: "4", toStatusName: "Done" }])
+            ),
+          transitionIssue: () => Ref.update(mutations, (count) => count + 1)
         }),
         Effect.gen(function*() {
           const connection = yield* PluginConnection
-          const executor = yield* AuthorizedPluginExecutor
-          const proposal = yield* connection.proposeAction(transitionRequest)
-          const preflight = yield* executor.preflight(authorizeProposal(proposal))
+          const proposed = yield* connection.proposeAction(transitionRequest).pipe(Effect.result)
 
-          assert.strictEqual(preflight._tag, "blocked")
-          if (preflight._tag === "blocked") {
-            assert.deepStrictEqual(preflight.reasons, [
-              "Jira transition blocked: jira-transition-unavailable"
-            ])
+          assert.isTrue(Result.isFailure(proposed))
+          if (Result.isFailure(proposed)) {
+            assert.strictEqual(proposed.failure._tag, "PluginUnsupportedCapabilityFailure")
+            if (proposed.failure._tag === "PluginUnsupportedCapabilityFailure") {
+              assert.strictEqual(proposed.failure.diagnosticCode, "jira-action-kind-or-target-unsupported")
+            }
           }
+          assert.strictEqual(yield* Ref.get(issueReads), 0)
+          assert.strictEqual(yield* Ref.get(transitionReads), 0)
+          assert.strictEqual(yield* Ref.get(mutations), 0)
         })
       )
     }))
