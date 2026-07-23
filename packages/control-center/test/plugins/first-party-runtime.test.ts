@@ -251,39 +251,6 @@ const unusedCodeCommitClients = (() => {
   return Layer.merge(readClient, reviewClient)
 })()
 
-const fakeJiraActionClient = (
-  issueReads: Ref.Ref<number>,
-  mutationCalls: Ref.Ref<number>
-): HttpClient.HttpClient =>
-  HttpClient.make((request) =>
-    Effect.gen(function*() {
-      const isIssueRequest = request.url.includes("/rest/api/3/issue/10042")
-      const body = request.method === "GET" && isIssueRequest
-        ? yield* Ref.update(issueReads, (count) => count + 1).pipe(Effect.as({
-          id: "10042",
-          key: "PAY-42",
-          fields: {
-            project: { id: "project-1" },
-            updated: "2026-07-17T09:30:00.000Z",
-            description: null,
-            status: { id: "3", name: "In Review" }
-          }
-        }))
-        : request.method === "POST" && request.url.includes("/rest/api/3/issue/10042/comment")
-        ? yield* Ref.update(mutationCalls, (count) => count + 1).pipe(
-          Effect.as({ id: "registry-jira-comment-1" })
-        )
-        : yield* Effect.die(`Unexpected Jira request: ${request.method} ${request.url}`)
-      return HttpClientResponse.fromWeb(
-        request,
-        new Response(JSON.stringify(body), {
-          status: 200,
-          headers: { "content-type": "application/json" }
-        })
-      )
-    })
-  )
-
 describe("first-party plugin runtime", () => {
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
     Effect.gen(function*() {
@@ -560,37 +527,40 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("executes one governed Jira comment through the production registry", () =>
+  it.effect("keeps the current Jira runtime proposal-only in the production registry", () =>
     Effect.gen(function*() {
-      yield* TestClock.setTime(DateTime.toEpochMillis(
-        Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
-      ))
-      const issueReads = yield* Ref.make(0)
-      const mutationCalls = yield* Ref.make(0)
-      const config = yield* makePersistenceTestConfig("control-center-first-party-jira-action-")
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const config = yield* makePersistenceTestConfig("control-center-first-party-jira-proposal-")
       const root = config.blobRoot.slice(0, -"/blobs".length)
       const database = databaseLayer(config)
       const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
       const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
-      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
-      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
       const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
       const dependencies = Layer.mergeAll(
         persistence,
         database,
         foundation,
-        governedActions,
-        deliveryGraph,
         runtimeAuthority,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
-        Layer.succeed(HttpClient.HttpClient, fakeJiraActionClient(issueReads, mutationCalls))
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient(requests))
       )
 
       yield* Effect.gen(function*() {
         const persistenceService = yield* Persistence
         const secretStore = yield* SecretStore
-        yield* seedGovernedActionAuthorityRoots("jira-comment")
         const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Delivery"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "jira",
+          displayName: PluginConnectionDisplayName.make("Payments Jira"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
         const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
           { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
           { _tag: "text", key: "authMode", value: "api-token" },
@@ -603,74 +573,39 @@ describe("first-party plugin runtime", () => {
           { _tag: "url", key: "webBaseUrl", value: "https://knpkv.atlassian.net/" }
         ])
         yield* persistenceService.pluginConfigurations.update(
-          GOVERNED_WORKSPACE,
-          GOVERNED_CONNECTION,
+          WORKSPACE_ID,
+          CONNECTION_ID,
           configuration,
           0,
-          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+          CREATED_AT
         )
         yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
-          GOVERNED_WORKSPACE,
-          GOVERNED_CONNECTION,
+          WORKSPACE_ID,
+          CONNECTION_ID,
           "jira",
           jiraReadPluginDescriptor,
           0,
-          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+          CREATED_AT
         )
 
         const registry = yield* PluginRuntimeRegistry
-        const governedAuthority = yield* Effect.gen(function*() {
-          return yield* PluginRuntimeAuthority
+        const connection = yield* Effect.gen(function*() {
+          return yield* PluginConnection
         }).pipe(
           Effect.provide(registry.layer(pluginRuntimeKey({
-            workspaceId: GOVERNED_WORKSPACE,
-            pluginConnectionId: GOVERNED_CONNECTION
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
           }))),
           Effect.scoped
         )
-        yield* seedGovernedAction({
-          pluginConnectionAuthorityDigest: governedAuthority,
-          seedAuthorityRoots: false,
-          variant: "jira-comment"
-        })
-        yield* seedGovernedActionCurrentInputs("jira-comment")
 
-        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
-        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
-        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
-        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
-          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
-          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
-          Layer.provideMerge(QuarantineRepository.layer)
+        assert.deepStrictEqual(
+          connection.descriptor.capabilities.map(({ capabilityId }) => capabilityId),
+          ["entity.read", "sync.incremental", "action.propose"]
         )
-        const engineLayer = GovernedActionExecutionEngine.layer.pipe(
-          Layer.provide(store),
-          Layer.provide(executors)
-        )
-        const execution = yield* Effect.gen(function*() {
-          const engine = yield* GovernedActionExecutionEngine
-          return yield* engine.run({
-            workspaceId: GOVERNED_WORKSPACE,
-            actionId: GOVERNED_ACTION
-          })
-        }).pipe(Effect.provide(engineLayer))
-        const governedRecord = yield* (yield* GovernedActionRepository).read({
-          workspaceId: GOVERNED_WORKSPACE,
-          actionId: GOVERNED_ACTION
-        })
-
-        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
-        assert.strictEqual(governedRecord.head.state, "succeeded")
-        assert.strictEqual(governedRecord.head.lineage._tag, "terminal")
-        if (governedRecord.head.lineage._tag === "terminal") {
-          assert.strictEqual(governedRecord.head.lineage.receipt.status, "succeeded")
-          assert.strictEqual(
-            governedRecord.head.lineage.receipt.providerOperationId,
-            "jira-comment:registry-jira-comment-1"
-          )
-        }
-        assert.strictEqual(yield* Ref.get(issueReads), 2)
-        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.reconcile", 1))
+        assert.lengthOf(requests, 0)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
         Effect.provide(dependencies)
