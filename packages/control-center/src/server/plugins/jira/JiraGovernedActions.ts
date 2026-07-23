@@ -46,6 +46,14 @@ const LinkIssueRequestPayload = Schema.Struct({
   linkedIssueId: JiraProviderIdentity,
   linkTypeName: JiraProviderIdentity
 })
+const JiraProjectVersionMetadata = Schema.Struct({
+  id: JiraProviderIdentity,
+  name: JiraProviderIdentity
+})
+const JiraIssueLinkTypeMetadata = Schema.Struct({
+  id: JiraProviderIdentity,
+  name: JiraProviderIdentity
+})
 const JiraAssociationPayload = Schema.Union([
   Schema.TaggedStruct("reply-comment", {
     issueKey: JiraIssueKey,
@@ -54,10 +62,7 @@ const JiraAssociationPayload = Schema.Union([
   }),
   Schema.TaggedStruct("set-fix-versions", {
     issueKey: JiraIssueKey,
-    versions: Schema.Array(Schema.Struct({
-      id: JiraProviderIdentity,
-      name: JiraProviderIdentity
-    }))
+    versions: Schema.Array(JiraProjectVersionMetadata)
   }),
   Schema.TaggedStruct("link-issue", {
     issueKey: JiraIssueKey,
@@ -209,15 +214,24 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
         provider.getProjectVersions(configuration.projectId)
       )
       const byId = new Map(available.map((version) => [version.id, version]))
-      const versions = requested.versionIds.flatMap((versionId) => {
+      const versions: Array<typeof JiraProjectVersionMetadata.Type> = []
+      for (const versionId of requested.versionIds) {
         const version = byId.get(versionId)
-        return version === undefined ? [] : [version]
-      })
-      if (versions.length !== requested.versionIds.length) {
-        return yield* new PluginConflictFailure({
-          operation: "propose-action",
-          diagnosticCode: "jira-fix-version-unavailable"
-        })
+        if (version === undefined) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "jira-fix-version-unavailable"
+          })
+        }
+        const canonical = yield* Schema.decodeUnknownEffect(JiraProjectVersionMetadata)(version).pipe(
+          Effect.mapError(() =>
+            new PluginMalformedResponseFailure({
+              operation: "jira-get-project-versions",
+              diagnosticCode: "jira-project-version-metadata-invalid"
+            })
+          )
+        )
+        versions.push(canonical)
       }
       return JiraAssociationPayload.make({
         _tag: "set-fix-versions",
@@ -263,13 +277,21 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
         configuration.operationTimeoutMillis,
         provider.getIssueLinkTypes
       )
-      const linkType = linkTypes.find((candidate) => candidate.name === requested.linkTypeName)
-      if (linkType === undefined) {
+      const selectedLinkType = linkTypes.find((candidate) => candidate.name === requested.linkTypeName)
+      if (selectedLinkType === undefined) {
         return yield* new PluginConflictFailure({
           operation: "propose-action",
           diagnosticCode: "jira-issue-link-type-unavailable"
         })
       }
+      const linkType = yield* Schema.decodeUnknownEffect(JiraIssueLinkTypeMetadata)(selectedLinkType).pipe(
+        Effect.mapError(() =>
+          new PluginMalformedResponseFailure({
+            operation: "jira-get-issue-link-types",
+            diagnosticCode: "jira-issue-link-type-metadata-invalid"
+          })
+        )
+      )
       return JiraAssociationPayload.make({
         _tag: "link-issue",
         issueKey: issue.key,

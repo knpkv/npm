@@ -591,6 +591,29 @@ describe("JiraReadPlugin", () => {
       })
     ))
 
+  it.effect("maps malformed selected Jira fix-version metadata to the plugin failure channel", () =>
+    withConnection(
+      baseProvider({
+        getProjectVersions: () =>
+          Effect.succeed([
+            { id: "2026.30", name: "July 2026" },
+            { id: "2026.31", name: "" }
+          ])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(fixVersionRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-project-version-metadata-invalid")
+          }
+        }
+      })
+    ))
+
   it.effect("rejects an unavailable Jira fix version", () =>
     withConnection(
       baseProvider({
@@ -630,6 +653,32 @@ describe("JiraReadPlugin", () => {
           linkTypeId: "10000",
           linkTypeName: "Relates"
         })
+      })
+    )
+  })
+
+  it.effect("maps malformed selected Jira link-type metadata to the plugin failure channel", () => {
+    const linkedIssue = {
+      ...issue,
+      id: "10043",
+      key: "PAY-43"
+    }
+    return withConnection(
+      baseProvider({
+        getIssue: (issueId) => Effect.succeed(Option.some(issueId === issue.id ? issue : linkedIssue)),
+        getIssueLinkTypes: Effect.succeed([{ id: "", name: "Relates" }])
+      }),
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const proposed = yield* connection.proposeAction(linkIssueRequest).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(proposed))
+        if (Result.isFailure(proposed)) {
+          assert.strictEqual(proposed.failure._tag, "PluginMalformedResponseFailure")
+          if (proposed.failure._tag === "PluginMalformedResponseFailure") {
+            assert.strictEqual(proposed.failure.diagnosticCode, "jira-issue-link-type-metadata-invalid")
+          }
+        }
       })
     )
   })
