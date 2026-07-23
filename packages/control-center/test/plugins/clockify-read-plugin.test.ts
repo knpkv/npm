@@ -21,6 +21,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import {
   MaximumPluginSyncPageBytes,
+  NormalizedPluginEventV1,
   PluginSyncPageV1,
   PluginSyncRequestV1,
   ReadPluginEntityRequestV1
@@ -28,6 +29,7 @@ import {
 import { makeClockifyReadPluginRuntimeFromProvider } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
+import { normalizeClockifyPerson } from "../../src/server/plugins/clockify/ClockifyTimeEntryNormalization.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import { PluginAuthenticationFailure, PluginOutageFailure } from "../../src/server/plugins/failures.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -60,6 +62,11 @@ const timeEntry = (id: string, userId = "user-1", overrides: Readonly<Record<str
 
 const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyReadProvider => ({
   getCurrentUser: Effect.succeed({ id: "user-1", name: "Ada Lovelace" }),
+  getWorkspaceUsers: () =>
+    Effect.succeed([
+      { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" },
+      { id: "user-2", name: "Grace Hopper", status: "ACTIVE" }
+    ]),
   getWorkspaces: Effect.succeed([{ id: "workspace-1", name: "Delivery" }]),
   getTimeEntry: (_workspaceId, entryId) => Effect.succeed(Option.some(timeEntry(entryId))),
   getTimeEntries: (_workspaceId, userId, request) =>
@@ -186,10 +193,19 @@ describe("ClockifyReadPlugin", () => {
       assert.isTrue(pages[0]?.hasMore)
       assert.match(pages[1]?.checkpointAfterPage ?? "", /^complete:[0-9a-f]{64}$/u)
       assert.isFalse(pages[1]?.hasMore)
-      assert.strictEqual(pages[0]?.events.length, 3)
+      assert.strictEqual(pages[0]?.events.length, 5)
       assert.lengthOf(yield* Ref.get(calls), 6)
 
-      const event = pages[0]?.events[0]
+      const person = pages[0]?.events.find(
+        (candidate) => candidate._tag === "UpsertPerson" && candidate.vendorPersonId === "user-1"
+      )
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected Clockify person event")
+      assert.strictEqual(person.displayName, "Ada Lovelace")
+
+      const event = pages[0]?.events.find(
+        (candidate) => candidate._tag === "UpsertEntity" && candidate.vendorImmutableId === "entry-1"
+      )
       assert.strictEqual(event?._tag, "UpsertEntity")
       if (event?._tag !== "UpsertEntity") return assert.fail("expected time-entry event")
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(event.attributes)
@@ -241,6 +257,128 @@ describe("ClockifyReadPlugin", () => {
       assert.match(observed[0] ?? "", /^restart:[0-9a-f]{64}$/u)
       assert.strictEqual(providerCalls.filter((page) => page === 1).length, 1)
     }))
+
+  it.effect("marks deleted Clockify workspace users inactive", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getWorkspaceUsers: () => Effect.succeed([{ id: "user-1", name: "Former User", status: "DELETED" }])
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", maximumPages: 1 }
+      )
+      const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected deleted Clockify person")
+      assert.isFalse(person.active)
+    }))
+
+  it.effect("derives Clockify person activity from workspace membership", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getWorkspaceUsers: () =>
+            Effect.succeed([{
+              id: "user-1",
+              name: "Former Member",
+              status: "ACTIVE",
+              memberships: [{ membershipType: "WORKSPACE", targetId: "workspace-1", membershipStatus: "INACTIVE" }]
+            }])
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", maximumPages: 1 }
+      )
+      const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+      assert.strictEqual(person?._tag, "UpsertPerson")
+      if (person?._tag !== "UpsertPerson") return assert.fail("expected workspace member")
+      assert.isFalse(person.active)
+    }))
+
+  it.effect("scopes large Clockify directories before decoding configured users", () =>
+    Effect.gen(function*() {
+      for (const directorySize of [10_000, 10_001]) {
+        const workspaceUsers = [
+          ...Array.from({ length: directorySize - 1 }, (_, index) => ({
+            id: `unconfigured-${String(index)}`,
+            name: `Unconfigured ${String(index)}`,
+            status: "ACTIVE"
+          })),
+          { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
+        ]
+        const pages = yield* withConnection(
+          baseProvider({ getWorkspaceUsers: () => Effect.succeed(workspaceUsers) }),
+          PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+          { ...configuration, userIds: "user-1", maximumPages: 1 }
+        )
+        const person = pages.flatMap(({ events }) => events).find((event) => event._tag === "UpsertPerson")
+        assert.strictEqual(person?._tag, "UpsertPerson")
+        if (person?._tag !== "UpsertPerson") return assert.fail("expected configured Clockify person")
+        assert.strictEqual(person.displayName, "Ada Lovelace")
+      }
+    }))
+
+  it.effect("emits one Clockify person payload across provider pages", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({
+          getTimeEntries: (_workspaceId, _userId, request) =>
+            Effect.succeed(
+              request.page === 1
+                ? [timeEntry("entry-1")]
+                : request.page === 2
+                ? [timeEntry("entry-2", "user-1", {
+                  timeInterval: {
+                    start: "2026-07-17T09:00:00.000Z",
+                    end: "2026-07-17T10:00:00.000Z",
+                    duration: "PT1H"
+                  }
+                })]
+                : []
+            )
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1", pageSize: 1, maximumPages: 3, maximumConcurrency: 1 }
+      )
+      const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
+      assert.lengthOf(people, 1)
+      const first = people[0]
+      if (first === undefined) return assert.fail("expected a Clockify person on the first provider page")
+      assert.strictEqual(first.vendorPersonId, "user-1")
+    }))
+
+  it.effect("emits configured Clockify people without time entries", () =>
+    Effect.gen(function*() {
+      const pages = yield* withConnection(
+        baseProvider({ getTimeEntries: () => Effect.succeed([]) }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.sync(syncRequest()).pipe(Stream.runCollect))),
+        { ...configuration, userIds: "user-1,user-2", maximumPages: 1 }
+      )
+      const people = pages.flatMap(({ events }) => events).filter((event) => event._tag === "UpsertPerson")
+      assert.isFalse(pages.flatMap(({ events }) => events).some((event) => event._tag === "UpsertEntity"))
+      assert.deepStrictEqual(
+        people.map(({ vendorPersonId }) => vendorPersonId),
+        ["user-1", "user-2"]
+      )
+    }))
+
+  it.effect("changes Clockify person identity only when the profile changes", () =>
+    Effect.gen(function*() {
+      const user = { id: "user-1", name: "Ada Lovelace", status: "ACTIVE" }
+      const first = yield* normalizeClockifyPerson({ user, workspaceId: "workspace-1" })
+      const second = yield* normalizeClockifyPerson({ user, workspaceId: "workspace-1" })
+      const renamed = yield* normalizeClockifyPerson({
+        user: { ...user, name: "Ada Byron" },
+        workspaceId: "workspace-1"
+      })
+      assert.strictEqual(first.eventId, second.eventId)
+      assert.strictEqual(first.revision, second.revision)
+      assert.deepStrictEqual(
+        Schema.encodeSync(NormalizedPluginEventV1)(first),
+        Schema.encodeSync(NormalizedPluginEventV1)(second)
+      )
+      assert.notStrictEqual(first.eventId, renamed.eventId)
+      assert.notStrictEqual(first.revision, renamed.revision)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
 
   it.effect("rejects duplicate vendor identities with different revisions in one page", () =>
     Effect.gen(function*() {
@@ -420,8 +558,8 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(yield* Ref.get(maximumActive), 2)
       yield* Deferred.succeed(release, undefined)
       const pages = yield* Fiber.join(fiber)
-      assert.strictEqual(pages[0]?.events.length, 6)
-      assert.strictEqual(yield* Ref.get(digestCalls), 7)
+      assert.strictEqual(pages[0]?.events.length, 8)
+      assert.strictEqual(yield* Ref.get(digestCalls), 9)
     }))
 
   it.effect("rejects configuration above the 100-entry provider aggregate", () =>
@@ -460,7 +598,7 @@ describe("ClockifyReadPlugin", () => {
       )
 
       assert.lengthOf(pages, 1)
-      assert.lengthOf(pages[0]?.events ?? [], 10)
+      assert.lengthOf(pages[0]?.events ?? [], 11)
       assert.isAtMost(new TextEncoder().encode(JSON.stringify(pages[0])).byteLength, MaximumPluginSyncPageBytes)
     }))
 
@@ -491,7 +629,7 @@ describe("ClockifyReadPlugin", () => {
       assert.isAbove(pages.length, 1)
       assert.strictEqual(
         pages.reduce((count, page) => count + page.events.length, 0),
-        100
+        102
       )
       for (const page of pages) {
         Schema.decodeUnknownSync(Schema.toType(PluginSyncPageV1))(page)

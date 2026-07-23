@@ -404,14 +404,14 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
           FROM person_identities AS identity
           WHERE identity.workspace_id = ${workspaceId}
             AND identity.person_id = ${owner.personId}
-            AND identity.provider_id = 'confluence'
-            AND identity.plugin_connection_id = (
-            SELECT entity.plugin_connection_id
-            FROM entities AS entity
-            WHERE entity.workspace_id = ${workspaceId}
-              AND entity.entity_id = ${entityId}
-              AND entity.provider_id = 'confluence'
-          )
+            AND EXISTS (
+              SELECT 1
+              FROM entities AS entity
+              WHERE entity.workspace_id = ${workspaceId}
+                AND entity.entity_id = ${entityId}
+                AND entity.provider_id = identity.provider_id
+                AND entity.plugin_connection_id = identity.plugin_connection_id
+            )
           ORDER BY identity.vendor_person_id
           LIMIT 16`
         const sourceIdentities = yield* decodeRows(PersonSourceIdentity, identityRows).pipe(

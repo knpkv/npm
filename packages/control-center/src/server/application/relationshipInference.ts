@@ -158,6 +158,8 @@ const metadata = (entity: RelationshipInferenceEntity): string => {
   const details = entity.projection.details
   return details._tag === "pull-request"
     ? [entity.projection.title, entity.projection.displayKey, details.sourceBranch, details.targetBranch].join("\n")
+    : details._tag === "time-entry"
+    ? [entity.projection.title, entity.projection.displayKey, details.description ?? ""].join("\n")
     : [entity.projection.title, entity.projection.displayKey].join("\n")
 }
 

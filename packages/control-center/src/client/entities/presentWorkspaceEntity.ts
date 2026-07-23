@@ -22,6 +22,10 @@ import type { SourceRevision } from "../../domain/sourceRevision.js"
 import { serviceFor, statusFor, statusPresentation } from "../items/presentWorkspaceItems.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 import {
+  presentWorkspaceClockifyTimeEntry,
+  type WorkspaceClockifyTimeEntryPresentation
+} from "./presentWorkspaceClockifyTimeEntry.js"
+import {
   presentWorkspaceConfluencePage,
   type WorkspaceConfluencePagePresentation
 } from "./presentWorkspaceConfluencePage.js"
@@ -74,6 +78,7 @@ export interface WorkspaceEntityPresentation {
   readonly activityEmptyLabel: string
   readonly agentContext: string
   readonly collaborators: WorkspaceEntityCollaboratorsPresentation
+  readonly clockifyTimeEntry: WorkspaceClockifyTimeEntryPresentation | null
   readonly confluencePage: WorkspaceConfluencePagePresentation | null
   readonly contentSummary: string
   readonly displayKey: string
@@ -494,6 +499,9 @@ export const presentWorkspaceEntity = (
   const confluencePage = projection.details._tag === "page"
     ? presentWorkspaceConfluencePage(projection.details, inspection)
     : null
+  const clockifyTimeEntry = projection.details._tag === "time-entry"
+    ? presentWorkspaceClockifyTimeEntry(workspaceId, projection.details, inspection)
+    : null
   const freshnessTimestampValue = freshnessTimestamp(inspection)
   const releaseCount = inspection.entity.releaseIds.length
   return {
@@ -511,6 +519,7 @@ export const presentWorkspaceEntity = (
       confluencePage,
       inspection.entity.owners
     ),
+    clockifyTimeEntry,
     confluencePage,
     contentSummary: `${kindNames[projection.entityType]} ${projection.displayKey} is tracked in ${serviceName}. ${
       releaseCount === 0

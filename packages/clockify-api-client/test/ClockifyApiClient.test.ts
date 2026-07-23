@@ -80,6 +80,56 @@ describe("ClockifyApiClient", () => {
     )
   })
 
+  it.effect("pages through the complete workspace user directory", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const firstPage = Array.from({ length: 500 }, (_, index) => ({
+      id: `user-${index}`,
+      name: `User ${index}`,
+      email: `user-${index}@example.test`,
+      status: "ACTIVE"
+    }))
+    const layer = ClockifyApiClient.layer.pipe(
+      Layer.provide(Layer.succeed(ClockifyApiConfig, {
+        apiKey: Redacted.make("secret"),
+        workspaceId: "workspace-1",
+        userId: "user-1",
+        baseUrl: "https://clockify.test/api"
+      })),
+      Layer.provide(Layer.succeed(
+        HttpClient.HttpClient,
+        HttpClient.make((request) =>
+          Effect.sync(() => {
+            requests.push(request)
+            const body = requests.length <= 20
+              ? firstPage
+              : [{ id: "configured-user", name: "Configured User", email: "configured@example.test", status: "ACTIVE" }]
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify(body), {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          })
+        )
+      ))
+    )
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      if (client.getWorkspaceUsers === undefined) return assert.fail("expected workspace user discovery")
+      const users = yield* client.getWorkspaceUsers("workspace-1")
+      expect(users).toHaveLength(10_001)
+      expect(users.at(-1)?.id).toBe("configured-user")
+      expect(requests).toHaveLength(21)
+      expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("1")
+      expect(new Map(requests[20]?.urlParams ?? []).get("page")).toBe("21")
+      expect(new Map(requests[0]?.urlParams ?? []).get("account-statuses")).toBe(
+        "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED"
+      )
+      expect(new Map(requests[0]?.urlParams ?? []).get("memberships")).toBe("ALL")
+    }).pipe(Effect.provide(layer))
+  })
+
   it.effect("decodes a created time entry whose optional id references are null", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

@@ -5,7 +5,7 @@ import * as Encoding from "effect/Encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import { derivePersonInitials, Person } from "../../domain/actors.js"
+import { derivePersonInitials, Person, RoleAssignment } from "../../domain/actors.js"
 import {
   DeliveryEntityDetails,
   type DeliveryEntityKind,
@@ -27,10 +27,11 @@ import {
   type PluginConnectionId,
   RelationshipId,
   ReleaseId,
+  RoleAssignmentId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import { NormalizedIssueAttributes } from "../../domain/normalizedIssue.js"
-import { NormalizedPluginEventV1, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
+import { NormalizedPluginEventV1, PluginEventId, type PluginSyncPageV1 } from "../../domain/plugins/events.js"
 import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
@@ -38,7 +39,7 @@ import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
-import type { EntityRecord } from "../persistence/repositories/models.js"
+import type { EntityRecord, RoleAssignmentRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
 import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
@@ -117,9 +118,13 @@ const EntityAttributes = Schema.Struct({
   durationMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   billable: Schema.optionalKey(Schema.Boolean),
   approvalState: OptionalText,
+  userId: OptionalText,
+  projectId: OptionalText,
   interval: Schema.optionalKey(Schema.Struct({
     duration: OptionalText,
-    state: OptionalText
+    state: OptionalText,
+    start: OptionalUnknown,
+    end: OptionalUnknown
   }))
 })
 const LegacyIssueAttributes = Schema.Struct({
@@ -152,7 +157,6 @@ const EvidenceData = Schema.Struct({
   predicate: Schema.optionalKey(EvidencePredicate),
   value: Schema.optionalKey(EvidenceValue)
 })
-
 /** Redacted failure raised before a normalized page can become a canonical projection. */
 export class NormalizedPluginPageMaterializationError extends Schema.TaggedErrorClass<
   NormalizedPluginPageMaterializationError
@@ -185,15 +189,16 @@ const optionalBounded = (value: string | null | undefined, maximum: number): str
 const namedText = (value: typeof NamedText.Type | null | undefined): string | null =>
   typeof value === "string" ? value : (value?.name ?? null)
 
-const decodedPullRequestTimestamp = Effect.fn(
-  "NormalizedPluginPageMaterialization.decodePullRequestTimestamp"
+const decodedOptionalEntityTimestamp = Effect.fn(
+  "NormalizedPluginPageMaterialization.decodeOptionalEntityTimestamp"
 )(function*(
   value: unknown,
-  eventId: string
+  eventId: string,
+  diagnosticCode: string
 ): Effect.fn.Return<UtcTimestamp | null, NormalizedPluginPageMaterializationError> {
   if (value === null || value === undefined) return null
   return yield* Schema.decodeUnknownEffect(UtcTimestamp)(value).pipe(
-    Effect.mapError(() => malformed("normalized-pull-request-timestamp-invalid", eventId))
+    Effect.mapError(() => malformed(diagnosticCode, eventId))
   )
 })
 
@@ -376,8 +381,16 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
       }
     }
     case "pull-request": {
-      const creationDate = yield* decodedPullRequestTimestamp(attributes.creationDate, event.eventId)
-      const lastActivityDate = yield* decodedPullRequestTimestamp(attributes.lastActivityDate, event.eventId)
+      const creationDate = yield* decodedOptionalEntityTimestamp(
+        attributes.creationDate,
+        event.eventId,
+        "normalized-pull-request-timestamp-invalid"
+      )
+      const lastActivityDate = yield* decodedOptionalEntityTimestamp(
+        attributes.lastActivityDate,
+        event.eventId,
+        "normalized-pull-request-timestamp-invalid"
+      )
       const status = namedText(attributes.status)
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
@@ -463,23 +476,54 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
         }
       }
     }
-    case "time-entry":
+    case "time-entry": {
+      const startedAt = yield* decodedOptionalEntityTimestamp(
+        attributes.interval?.start,
+        event.eventId,
+        "normalized-time-entry-timestamp-invalid"
+      )
+      const endedAt = yield* decodedOptionalEntityTimestamp(
+        attributes.interval?.end,
+        event.eventId,
+        "normalized-time-entry-timestamp-invalid"
+      )
+      if (
+        startedAt !== null &&
+        endedAt !== null &&
+        DateTime.Order(endedAt, startedAt) < 0
+      ) return yield* malformed("normalized-time-entry-timestamp-invalid", event.eventId)
+      const userId = optionalBounded(attributes.userId, 512)
+      const projectId = optionalBounded(attributes.projectId, 512)
+      const intervalMinutes = startedAt === null || endedAt === null
+        ? 0
+        : (DateTime.toEpochMillis(endedAt) - DateTime.toEpochMillis(startedAt)) / 60_000
+      const reportedMinutes = attributes.durationMinutes ?? (
+        attributes.interval?.duration === null || attributes.interval?.duration === undefined
+          ? intervalMinutes
+          : isoDurationMinutes(attributes.interval.duration)
+      )
       return {
         displayKey: bounded(event.vendorImmutableId, event.vendorImmutableId, 200),
         details: {
           _tag: "time-entry",
           durationMinutes: Math.max(
             0,
-            Math.round(attributes.durationMinutes ?? isoDurationMinutes(attributes.interval?.duration))
+            Math.round(reportedMinutes)
           ),
           billable: attributes.billable ?? false,
           approvalState: attributes.approvalState === "approved" || attributes.approvalState === "rejected"
             ? attributes.approvalState
             : attributes.interval?.state === "running"
             ? "pending"
-            : "not-required"
+            : "not-required",
+          description: optionalBounded(attributes.description, 4_000),
+          projectId,
+          ...(userId === null ? {} : { userId }),
+          ...(startedAt === null ? {} : { startedAt }),
+          endedAt
         }
       }
+    }
   }
 })
 
@@ -624,7 +668,23 @@ const sameSourceUrl = (
 ): boolean => left?.href === right?.href
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+  kind === "time-entry" ? 3 : kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+
+const requiresProjectionSchemaBackfill = Effect.fn(
+  "NormalizedPluginPageMaterialization.requiresProjectionSchemaBackfill"
+)(function*(
+  persistence: PersistenceService,
+  scope: NormalizedPluginPageMaterializationScope,
+  event: EntityUpsert
+) {
+  const kind = canonicalKind(event.entityType)
+  if (kind !== "time-entry") return false
+  const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+  if (existing === null || existing.sourceRevision.revision !== event.revision) return false
+  const currentProjection = yield* readProjection(persistence, scope.workspaceId, existing.entityId)
+  return currentProjection?.projection.entityState === "present" &&
+    currentProjection.projection.projectionSchemaVersion < projectionSchemaVersion(kind)
+})
 
 const mergedPageContributors = (
   current: PageDetails["contributors"],
@@ -843,6 +903,97 @@ const writeGraph = Effect.fn("NormalizedPluginPageMaterialization.writeGraph")(f
   return yield* persistence.deliveryGraph.write(workspaceId, encoded)
 })
 
+const reconcileTimeEntryContributor = Effect.fn(
+  "NormalizedPluginPageMaterialization.reconcileTimeEntryContributor"
+)(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  entityId: EntityId,
+  userId: string,
+  eventId: string,
+  roleAssignments: Map<RoleAssignmentId, RoleAssignmentRecord>
+) {
+  const identity = {
+    pluginConnectionId: scope.pluginConnectionId,
+    providerId: scope.providerId,
+    vendorPersonId: VendorImmutableId.make(userId)
+  }
+  const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, identity).pipe(Effect.result)
+  if (Result.isFailure(person) && person.failure._tag !== "RecordNotFoundError") return yield* person.failure
+  for (const record of roleAssignments.values()) {
+    const assignment = record.assignment
+    if (
+      assignment.role !== "contributor" ||
+      assignment.scope._tag !== "entity" ||
+      assignment.scope.entityId !== entityId ||
+      assignment.lifecycle._tag !== "active" ||
+      assignment.actor._tag !== "human" ||
+      (Result.isSuccess(person) &&
+        person.success.person.isActive &&
+        assignment.actor.personId === person.success.person.personId)
+    ) continue
+    const providerManagedAssignmentId = RoleAssignmentId.make(
+      yield* stableUuid(
+        cryptoService,
+        materializationKey(scope, "role-assignment", `${entityId}:contributor:${assignment.actor.personId}`),
+        eventId
+      )
+    )
+    if (assignment.assignmentId !== providerManagedAssignmentId) continue
+    const updated = yield* persistence.people.updateRoleAssignment(
+      scope.workspaceId,
+      {
+        ...assignment,
+        lifecycle: {
+          _tag: "ended",
+          assignedAt: assignment.lifecycle.assignedAt,
+          endedAt: laterTimestamp(assignment.lifecycle.assignedAt, scope.committedAt)
+        }
+      },
+      record.revision,
+      scope.committedAt
+    )
+    roleAssignments.set(updated.assignment.assignmentId, updated)
+  }
+  if (Result.isFailure(person) || !person.success.person.isActive) return
+  const assignmentId = RoleAssignmentId.make(
+    yield* stableUuid(
+      cryptoService,
+      materializationKey(scope, "role-assignment", `${entityId}:contributor:${person.success.person.personId}`),
+      eventId
+    )
+  )
+  const existingAssignment = yield* persistence.people.getRoleAssignment(scope.workspaceId, assignmentId).pipe(
+    Effect.result
+  )
+  if (Result.isFailure(existingAssignment) && existingAssignment.failure._tag !== "RecordNotFoundError") {
+    return yield* existingAssignment.failure
+  }
+  if (Result.isSuccess(existingAssignment) && existingAssignment.success.assignment.lifecycle._tag !== "active") {
+    const updated = yield* persistence.people.updateRoleAssignment(
+      scope.workspaceId,
+      {
+        ...existingAssignment.success.assignment,
+        lifecycle: { _tag: "active", assignedAt: scope.committedAt }
+      },
+      existingAssignment.success.revision,
+      scope.committedAt
+    )
+    roleAssignments.set(updated.assignment.assignmentId, updated)
+  } else if (Result.isFailure(existingAssignment)) {
+    const assignment = yield* Schema.decodeUnknownEffect(Schema.toType(RoleAssignment))({
+      actor: { _tag: "human", personId: person.success.person.personId },
+      assignmentId,
+      lifecycle: { _tag: "active", assignedAt: scope.committedAt },
+      role: "contributor",
+      scope: { _tag: "entity", entityId, workspaceId: scope.workspaceId }
+    }).pipe(Effect.mapError(() => malformed("normalized-time-entry-contributor-invalid", eventId)))
+    const created = yield* persistence.people.createRoleAssignment(scope.workspaceId, assignment, scope.committedAt)
+    roleAssignments.set(created.assignment.assignmentId, created)
+  }
+})
+
 const materializeUpsertEntity = Effect.fn(
   "NormalizedPluginPageMaterialization.upsertEntity"
 )(function*(
@@ -851,12 +1002,14 @@ const materializeUpsertEntity = Effect.fn(
   scope: NormalizedPluginPageMaterializationScope,
   event: EntityUpsert,
   siblingEvents: ReadonlyArray<NormalizedPluginEventV1>,
-  forceProjection: boolean
+  forceProjection: boolean,
+  preserveSourceRevision: boolean,
+  roleAssignments: Map<RoleAssignmentId, RoleAssignmentRecord>
 ) {
   const kind = canonicalKind(event.entityType)
   if (kind === null) return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 1 }
-  const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+  const presentation = yield* entityPresentation(event, kind, siblingEvents)
   const entityId = existing?.entityId ??
     (yield* entityIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId))
   const currentProjection = existing === null
@@ -904,6 +1057,17 @@ const materializeUpsertEntity = Effect.fn(
     !sourceMetadataChanged &&
     !effectiveForceProjection
   ) {
+    if (effectivePresentation.details._tag === "time-entry" && effectivePresentation.details.userId !== undefined) {
+      yield* reconcileTimeEntryContributor(
+        persistence,
+        cryptoService,
+        scope,
+        entityId,
+        effectivePresentation.details.userId,
+        event.eventId,
+        roleAssignments
+      )
+    }
     return { entityProjectionCount: 0, nodeCount: 0, skippedEntityCount: 0 }
   }
 
@@ -914,6 +1078,8 @@ const materializeUpsertEntity = Effect.fn(
       sourceRevision: sourceRevision(scope, event, event.observedAt, event.sourceUrl),
       createdAt: scope.committedAt
     })
+    : preserveSourceRevision && existing.sourceRevision.revision === event.revision
+    ? existing
     : effectiveForceProjection && existing.sourceRevision.revision === event.revision && !sourceMetadataChanged
     ? existing
     : yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
@@ -959,6 +1125,17 @@ const materializeUpsertEntity = Effect.fn(
     relationships: []
   } satisfies typeof DeliveryGraphWriteBatch.Type
   const receipt = yield* writeGraph(persistence, scope.workspaceId, batch, event.eventId)
+  if (effectivePresentation.details._tag === "time-entry" && effectivePresentation.details.userId !== undefined) {
+    yield* reconcileTimeEntryContributor(
+      persistence,
+      cryptoService,
+      scope,
+      entityId,
+      effectivePresentation.details.userId,
+      event.eventId,
+      roleAssignments
+    )
+  }
   return { ...receipt, skippedEntityCount: 0 }
 })
 
@@ -1169,6 +1346,45 @@ const materializePerson = Effect.fn("NormalizedPluginPageMaterialization.upsertP
     yield* persistence.people.createPerson(scope.workspaceId, person, scope.committedAt)
   }
   return 1
+})
+
+const sequenceClockifyPersonEvents = Effect.fn(
+  "NormalizedPluginPageMaterialization.sequenceClockifyPersonEvents"
+)(function*(
+  persistence: PersistenceService,
+  scope: NormalizedPluginPageMaterializationScope,
+  page: PluginSyncPageV1
+) {
+  if (scope.providerId !== "clockify") return page
+  const events = yield* Effect.forEach(
+    page.events,
+    (event) =>
+      Effect.gen(function*() {
+        if (event._tag !== "UpsertPerson") return event
+        const existing = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, {
+          pluginConnectionId: scope.pluginConnectionId,
+          providerId: scope.providerId,
+          vendorPersonId: VendorImmutableId.make(event.vendorPersonId)
+        }).pipe(Effect.result)
+        if (Result.isFailure(existing) && existing.failure._tag !== "RecordNotFoundError") {
+          return yield* existing.failure
+        }
+        const nextRevision = Result.isFailure(existing)
+          ? 1
+          : existing.success.revision + (
+            existing.success.person.displayName === event.displayName &&
+              existing.success.person.isActive === event.active
+              ? 0
+              : 1
+          )
+        const eventId = yield* Schema.decodeUnknownEffect(PluginEventId)(
+          `${event.eventId}:person-revision:${nextRevision}`
+        ).pipe(Effect.mapError(() => malformed("normalized-clockify-person-event-id-invalid", event.eventId)))
+        return { ...event, eventId }
+      }),
+    { concurrency: 1 }
+  )
+  return { ...page, events }
 })
 
 const evidencePredicate = (event: EvidenceAppend): typeof EvidencePredicate.Type => {
@@ -1545,7 +1761,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
     if (scope.expectedAuthority !== undefined) {
       yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
     }
-    const pipelineTombstones = page.events.filter(isCodePipelineTombstone)
+    const materializationPage = yield* sequenceClockifyPersonEvents(persistence, scope, page)
+    const pipelineTombstones = materializationPage.events.filter(isCodePipelineTombstone)
     const previousPipelineRecords = pipelineTombstones.length === 0
       ? []
       : yield* persistence.pluginRuntime.getCodePipelineCacheBeforeTombstones(
@@ -1563,17 +1780,33 @@ export const materializeNormalizedPluginPage = Effect.fn(
       scope.providerId,
       scope.streamKey,
       scope.expectedRevision,
-      page,
+      materializationPage,
       scope.committedAt,
       scope.successfulHealth
     )
     const accepted = new Set(committed.acceptedEventIds)
-    const events = page.events.filter(({ eventId }) => accepted.has(eventId))
+    const acceptedEvents = materializationPage.events.filter(({ eventId }) => accepted.has(eventId))
+    const acceptedClockifyTimeEntryIds = new Set(
+      acceptedEvents.flatMap((event) =>
+        event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
+          ? [event.vendorImmutableId]
+          : []
+      )
+    )
+    const backfillEntityEvents = yield* Effect.filter(
+      materializationPage.events,
+      (event) =>
+        !accepted.has(event.eventId) &&
+          event._tag === "UpsertEntity" &&
+          !acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
+          ? requiresProjectionSchemaBackfill(persistence, scope, event)
+          : Effect.succeed(false)
+    )
     const acceptedPipelineTombstones = new Set(
-      events.filter(isCodePipelineTombstone).map(pipelineEntityIdentity)
+      acceptedEvents.filter(isCodePipelineTombstone).map(pipelineEntityIdentity)
     )
     const pipelineChanges = [
-      ...events.filter(isCodePipelineUpsert),
+      ...acceptedEvents.filter(isCodePipelineUpsert),
       ...previousPipelineEvents.filter((event) => acceptedPipelineTombstones.has(pipelineEntityIdentity(event)))
     ]
     const acceptedPipelineEvent = pipelineChanges[0]
@@ -1586,7 +1819,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
       ? []
       : yield* currentPipelineEvents(persistence, scope, acceptedPipelineEvent.eventId, pipelineSelectors)
     const pipelineEventById = new Map<string, NormalizedPluginEventV1>()
-    for (const event of [...events, ...cachedPipelineEvents]) {
+    for (const event of [...acceptedEvents, ...cachedPipelineEvents]) {
       if (isCodePipelineUpsert(event)) pipelineEventById.set(event.eventId, event)
     }
     const pipelineEvents = [...pipelineEventById.values()]
@@ -1595,10 +1828,56 @@ export const materializeNormalizedPluginPage = Effect.fn(
       : yield* affectedPipelineExecutionEvents(pipelineEvents, pipelineChanges).pipe(
         Effect.mapError((error) => malformed(error.diagnosticCode, error.eventId))
       )
-    const entityEvents = [
-      ...events,
-      ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
-    ]
+    const acceptedPersonIds = new Set(
+      acceptedEvents.flatMap((event) => event._tag === "UpsertPerson" ? [event.vendorPersonId] : [])
+    )
+    const roleBackfillCandidates = materializationPage.events.flatMap((event) => {
+      if (
+        accepted.has(event.eventId) ||
+        event._tag !== "UpsertEntity" ||
+        canonicalKind(event.entityType) !== "time-entry" ||
+        acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
+      ) return []
+      const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
+      if (
+        Result.isFailure(attributes) ||
+        attributes.success.userId === null ||
+        attributes.success.userId === undefined
+      ) return []
+      return [{ event, vendorPersonId: VendorImmutableId.make(attributes.success.userId) }]
+    })
+    const persistedInactivePersonIds = new Set(
+      yield* Effect.filter(
+        [...new Set(roleBackfillCandidates.map(({ vendorPersonId }) => vendorPersonId))].filter(
+          (vendorPersonId) => !acceptedPersonIds.has(vendorPersonId)
+        ),
+        (vendorPersonId) =>
+          Effect.gen(function*() {
+            const person = yield* persistence.people.findPersonBySourceIdentity(scope.workspaceId, {
+              pluginConnectionId: scope.pluginConnectionId,
+              providerId: scope.providerId,
+              vendorPersonId
+            }).pipe(Effect.result)
+            if (Result.isSuccess(person)) return !person.success.person.isActive
+            if (person.failure._tag === "RecordNotFoundError") return false
+            return yield* person.failure
+          }),
+        { concurrency: 1 }
+      )
+    )
+    const roleBackfillEntityEvents = roleBackfillCandidates.filter(
+      ({ vendorPersonId }) => acceptedPersonIds.has(vendorPersonId) || persistedInactivePersonIds.has(vendorPersonId)
+    ).map(({ event }) => event)
+    const entityEventById = new Map<string, NormalizedPluginEventV1>()
+    for (
+      const event of [
+        ...acceptedEvents,
+        ...backfillEntityEvents,
+        ...affectedExecutions.filter(({ eventId }) => !accepted.has(eventId))
+      ]
+    ) entityEventById.set(event.eventId, event)
+    const entityEvents = [...entityEventById.values()]
+    const backfillEntityEventIds = new Set(backfillEntityEvents.map(({ eventId }) => eventId))
     const forcedPipelineExecutionEventIds = new Set(affectedExecutions.map(({ eventId }) => eventId))
     let entityProjectionCount = 0
     let evidenceClaimCount = 0
@@ -1608,9 +1887,36 @@ export const materializeNormalizedPluginPage = Effect.fn(
     let relationshipCount = 0
     let skippedEntityCount = 0
 
-    for (const event of events) {
+    for (const event of acceptedEvents) {
       if (event._tag !== "UpsertPerson") continue
       personCount += yield* materializePerson(persistence, cryptoService, scope, event)
+    }
+    const roleAssignments = new Map<RoleAssignmentId, RoleAssignmentRecord>()
+    if (
+      roleBackfillEntityEvents.length > 0 || entityEvents.some(
+        (event) => event._tag === "UpsertEntity" && canonicalKind(event.entityType) === "time-entry"
+      )
+    ) {
+      for (const record of yield* persistence.people.listRoleAssignments(scope.workspaceId)) {
+        roleAssignments.set(record.assignment.assignmentId, record)
+      }
+    }
+    for (const event of roleBackfillEntityEvents) {
+      if (event._tag !== "UpsertEntity") continue
+      const attributes = Schema.decodeUnknownResult(EntityAttributes)(event.attributes)
+      const userId = Result.isSuccess(attributes) ? attributes.success.userId : null
+      if (userId === null || userId === undefined) continue
+      const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+      if (existing === null) continue
+      yield* reconcileTimeEntryContributor(
+        persistence,
+        cryptoService,
+        scope,
+        existing.entityId,
+        userId,
+        event.eventId,
+        roleAssignments
+      )
     }
     for (const event of entityEvents) {
       if (event._tag === "UpsertEntity") {
@@ -1618,13 +1924,18 @@ export const materializeNormalizedPluginPage = Effect.fn(
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
           continue
         }
+        const schemaBackfill = backfillEntityEventIds.has(event.eventId)
+        const forcedPipelineProjection = event.entityType === "aws.codepipeline.execution" &&
+          forcedPipelineExecutionEventIds.has(event.eventId)
         const receipt = yield* materializeUpsertEntity(
           persistence,
           cryptoService,
           scope,
           event,
-          event.entityType === "aws.codepipeline.execution" ? pipelineEvents : events,
-          event.entityType === "aws.codepipeline.execution" && forcedPipelineExecutionEventIds.has(event.eventId)
+          event.entityType === "aws.codepipeline.execution" ? pipelineEvents : acceptedEvents,
+          forcedPipelineProjection || schemaBackfill,
+          schemaBackfill,
+          roleAssignments
         )
         entityProjectionCount += receipt.entityProjectionCount
         nodeCount += receipt.nodeCount
@@ -1633,13 +1944,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
         entityProjectionCount += (yield* materializeTombstoneEntity(persistence, scope, event)).entityProjectionCount
       }
     }
-    for (const event of events) {
+    for (const event of acceptedEvents) {
       if (event._tag !== "AppendEvidence") continue
       const receipt = yield* materializeEvidence(persistence, cryptoService, scope, event)
       evidenceItemCount += receipt.evidenceItemCount
       evidenceClaimCount += receipt.evidenceClaimCount
     }
-    for (const event of events) {
+    for (const event of acceptedEvents) {
       if (event._tag !== "ProposeRelationship") continue
       const receipt = yield* materializeRelationship(persistence, cryptoService, scope, event)
       nodeCount += receipt.nodeCount
@@ -1649,9 +1960,9 @@ export const materializeNormalizedPluginPage = Effect.fn(
       persistence,
       cryptoService,
       scope,
-      events
+      acceptedEvents
     )
-    if (events.length > 0) {
+    if (acceptedEvents.length > 0 || entityProjectionCount > 0) {
       const inference = yield* materializeRelationshipInference(
         persistence,
         (identity) => stableUuid(cryptoService, identity, "relationship-inference"),
@@ -1664,7 +1975,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
     }
     return {
       pageCommitted: committed.pageCommitted,
-      acceptedEventCount: events.length,
+      acceptedEventCount: acceptedEvents.length,
       entityProjectionCount,
       evidenceClaimCount,
       evidenceItemCount,
