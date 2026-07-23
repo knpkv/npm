@@ -195,15 +195,17 @@ const baseScenario = (overrides: Partial<FakePluginScenario> = {}): FakePluginSc
   ...overrides
 })
 
-const reconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+const reconciliationRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
   reconciliationKey: "reconcile-1",
   idempotencyKey: "action-1",
-  payloadDigest: "0".repeat(64)
+  payloadDigest: "0".repeat(64),
+  authorizedAction: authorized("0".repeat(64))
 })
-const idempotencyReconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+const idempotencyReconciliationRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
   reconciliationKey: null,
   idempotencyKey: "action-1",
-  payloadDigest: "0".repeat(64)
+  payloadDigest: "0".repeat(64),
+  authorizedAction: authorized("0".repeat(64))
 })
 const cancellationRequest = Schema.decodeUnknownSync(PluginActionCancellationRequestV1)({
   idempotencyKey: "action-1",

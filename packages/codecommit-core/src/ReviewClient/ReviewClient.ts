@@ -6,6 +6,7 @@
  */
 import { Context, Effect, Layer, Predicate, Schema } from "effect"
 
+import { identityMatches } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { CodeCommitMalformedResponseError, CodeCommitReadNotFoundError } from "../ReadClient/errors.js"
 import type { CodeCommitPullRequestRevision } from "../ReadClient/models.js"
@@ -20,6 +21,8 @@ import {
 import { CodeCommitReviewProvider, CodeCommitReviewProviderLive } from "./ReviewProvider.js"
 
 const MAXIMUM_COMMENT_PAGES = 20
+const COMMENT_MARKER_PREFIX = "<!-- knpkv-codecommit-review:"
+const COMMENT_MARKER_SUFFIX = " -->"
 
 const RawCommentResponse = Schema.Struct({
   comment: Schema.Struct({
@@ -39,7 +42,8 @@ const RawCommentsPage = Schema.Struct({
   commentsForPullRequestData: Schema.optional(Schema.Array(Schema.Struct({
     comments: Schema.optional(Schema.Array(Schema.Struct({
       commentId: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())),
-      clientRequestToken: Schema.optional(Schema.String)
+      clientRequestToken: Schema.optional(Schema.String),
+      content: Schema.optional(Schema.String)
     })))
   }))),
   nextToken: Schema.optional(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))
@@ -127,6 +131,16 @@ const commentSummary = (tag: CodeCommitReviewAction["_tag"]): string => {
   }
 }
 
+const commentMarker = (clientRequestToken: string): string =>
+  `${COMMENT_MARKER_PREFIX}${clientRequestToken}${COMMENT_MARKER_SUFFIX}`
+
+const withCommentMarker = <
+  A extends Extract<CodeCommitReviewAction, { readonly content: string }>
+>(action: A): A => ({
+  ...action,
+  content: `${action.content}\n\n${commentMarker(action.clientRequestToken)}`
+})
+
 /** Public review operations implemented over injectable read and raw-provider boundaries. */
 export interface CodeCommitReviewClientService {
   readonly preflight: (
@@ -159,7 +173,8 @@ export class CodeCommitReviewClient extends Context.Service<
           case "request-review":
           case "request-changes":
           case "comment": {
-            const raw = yield* provider.postComment(action).pipe(
+            yield* preflightTarget(readClient, action.target)
+            const raw = yield* provider.postComment(withCommentMarker(action)).pipe(
               Effect.mapError(mapProviderError("post-comment"))
             )
             const response = yield* decodeProvider("post-comment", RawCommentResponse, raw)
@@ -199,7 +214,10 @@ export class CodeCommitReviewClient extends Context.Service<
           )
           const comment = (page.commentsForPullRequestData ?? [])
             .flatMap(({ comments }) => comments ?? [])
-            .find(({ clientRequestToken }) => clientRequestToken === action.clientRequestToken)
+            .find(({ clientRequestToken, content }) =>
+              clientRequestToken === action.clientRequestToken ||
+              content?.includes(commentMarker(action.clientRequestToken)) === true
+            )
           if (comment?.commentId !== undefined) {
             return {
               _tag: "succeeded",
@@ -228,7 +246,9 @@ export class CodeCommitReviewClient extends Context.Service<
               Effect.mapError(mapProviderError("reconcile-approval"))
             )
             const states = yield* decodeProvider("reconcile-approval", RawApprovalStates, raw)
-            const caller = (states.approvals ?? []).find(({ userArn }) => userArn === identity.arn)
+            const caller = (states.approvals ?? []).find(({ userArn }) =>
+              userArn !== undefined && identityMatches(identity.arn, userArn)
+            )
             const reconciled = action._tag === "approve"
               ? caller?.approvalState === "APPROVE"
               : caller === undefined

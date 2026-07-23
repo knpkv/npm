@@ -206,6 +206,12 @@ const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
     case "AwsCredentialError":
       return yield* new PluginAuthenticationFailure({ operation })
     case "AwsThrottleError": {
+      if (ambiguousOutcome !== null) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation,
+          reconciliationKey: ambiguousOutcome
+        })
+      }
       const currentTimeMillis = yield* Clock.currentTimeMillis
       return yield* new PluginRateLimitFailure({
         operation,
@@ -246,6 +252,12 @@ const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
         return yield* new PluginAuthorizationFailure({ operation })
       }
       if (causeHasTag(error.cause, ["ThrottlingException", "TooManyRequestsException"])) {
+        if (ambiguousOutcome !== null) {
+          return yield* new PluginUnknownOutcomeFailure({
+            operation,
+            reconciliationKey: ambiguousOutcome
+          })
+        }
         const currentTimeMillis = yield* Clock.currentTimeMillis
         return yield* new PluginRateLimitFailure({
           operation,
@@ -1124,13 +1136,13 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     request: PluginActionReconciliationRequestV1
   ) {
     yield* verifyRuntimeIdentity()
-    if (request.reconciliationKey === null) {
-      return yield* new PluginConfigurationFailure({
-        diagnosticCode: "codecommit-reconciliation-key-required"
-      })
-    }
-    const locator = yield* decodeReconciliationLocator(request.reconciliationKey)
-    const action = actionFromLocator(account, configuration.repositoryName, locator)
+    const action = request.reconciliationKey === null
+      ? yield* decodeAuthorizedAction(account, configuration.repositoryName, request.authorizedAction)
+      : actionFromLocator(
+        account,
+        configuration.repositoryName,
+        yield* decodeReconciliationLocator(request.reconciliationKey)
+      )
     const result = yield* reviewClient.reconcile(action).pipe(
       Effect.catch((error) => failReview("reconcile", error, null))
     )
@@ -1154,7 +1166,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
           receipt: {
             status: "failed",
             providerOperationId: PluginProviderOperationId.make(
-              `reconciliation:${locator.pullRequestId}:${locator.revisionId}`
+              `reconciliation:${action.target.pullRequestId}:${action.target.revisionId}`
             ),
             safeSummary: result.summary,
             observedAt: checkedAt

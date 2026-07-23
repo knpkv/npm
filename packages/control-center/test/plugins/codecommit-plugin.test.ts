@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Domain, Errors, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -10,6 +11,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 
 import {
   AuthorizedPluginActionV1,
@@ -25,8 +27,7 @@ import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
-  PluginConflictFailure,
-  PluginRateLimitFailure
+  PluginConflictFailure
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -719,7 +720,7 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(yield* Ref.get(mutationCalls), 2)
     }))
 
-  it.effect("surfaces provider throttling as retryable instead of a terminal failed receipt", () =>
+  it.effect("preserves reconciliation identity when a post-intent write is throttled", () =>
     Effect.gen(function*() {
       const result = yield* runWithClient(
         baseReadClient(),
@@ -743,7 +744,50 @@ describe("CodeCommitPlugin", () => {
       ).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(result))
-      if (Result.isFailure(result)) assert.instanceOf(result.failure, PluginRateLimitFailure)
+      if (Result.isFailure(result)) {
+        assert.isTrue(Predicate.isTagged(result.failure, "PluginUnknownOutcomeFailure"))
+        if (Predicate.isTagged(result.failure, "PluginUnknownOutcomeFailure")) {
+          assert.match(result.failure.reconciliationKey, /^ccmt:v1:/u)
+        }
+      }
+    }))
+
+  it.effect("retries pre-intent throttling before dispatch", () =>
+    Effect.gen(function*() {
+      const attempts = yield* Ref.make(0)
+      const fiber = yield* Effect.forkChild(
+        runWithClient(
+          baseReadClient(),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const proposal = yield* connection.proposeAction(requestChangesProposal)
+            return yield* executor.preflight(authorizeProposal(proposal))
+          }),
+          baseReviewClient({
+            preflight: () =>
+              Ref.updateAndGet(attempts, (count) => count + 1).pipe(
+                Effect.flatMap((attempt) =>
+                  attempt === 1
+                    ? Effect.fail(
+                      new Errors.AwsApiError({
+                        operation: "getPullRequest",
+                        profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                        region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                        cause: { _tag: "ThrottlingException" }
+                      })
+                    )
+                    : Effect.succeed(pullRequest)
+                )
+              )
+          })
+        )
+      )
+      yield* TestClock.adjust("30 seconds")
+      const result = yield* Fiber.join(fiber)
+
+      assert.strictEqual(result._tag, "ready")
+      assert.strictEqual(yield* Ref.get(attempts), 2)
     }))
 
   it.effect("blocks governed writes when the configured AWS profile changes identity", () =>
@@ -820,17 +864,26 @@ describe("CodeCommitPlugin", () => {
           if (!Predicate.isTagged(dispatch.failure, "PluginUnknownOutcomeFailure")) {
             return yield* Effect.die("expected PluginUnknownOutcomeFailure")
           }
-          const reconciliationRequest = Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
+          const reconciliationRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
             reconciliationKey: dispatch.failure.reconciliationKey,
             idempotencyKey: authorized.idempotencyKey,
-            payloadDigest: authorized.payloadDigest
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
           })
-          return yield* executor.reconcile(reconciliationRequest)
+          const idempotencyRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+            ...reconciliationRequest,
+            reconciliationKey: null
+          })
+          return {
+            byIdempotency: yield* executor.reconcile(idempotencyRequest),
+            byLocator: yield* executor.reconcile(reconciliationRequest)
+          }
         }),
         reviewClient
       )
 
-      assert.strictEqual(result._tag, "succeeded")
+      assert.strictEqual(result.byIdempotency._tag, "succeeded")
+      assert.strictEqual(result.byLocator._tag, "succeeded")
       assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
 })

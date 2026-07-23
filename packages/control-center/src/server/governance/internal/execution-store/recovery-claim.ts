@@ -4,7 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
-import { PluginActionReconciliationRequestV1 } from "../../../../domain/plugins/actions.js"
+import { AuthorizedPluginActionV1, PluginActionReconciliationRequestV1 } from "../../../../domain/plugins/actions.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
 import type { GovernedActionRecord } from "../../../persistence/repositories/governed-action/contract.js"
@@ -111,10 +111,20 @@ export const makeGovernedActionExecutionRecoveryClaim = Effect.gen(function*() {
       ${record.envelope.workspaceId}, ${record.envelope.actionId}, ${claimSequence}, ${issued.digest},
       ${DateTime.formatIso(observedAt)}, ${DateTime.formatIso(claimExpiresAt)}
     )`
+    if (record.authorization === null) return yield* invalidRecord()
+    const authorizedAction = yield* Schema.decodeUnknownEffect(Schema.toType(AuthorizedPluginActionV1))({
+      proposal: record.envelope.proposal,
+      idempotencyKey: record.envelope.idempotencyKey,
+      payloadDigest: record.envelope.proposal.payloadDigest,
+      authorizationId: record.authorization.authorizationId,
+      authorizedAt: record.authorization.authorizedAt,
+      expiresAt: record.authorization.expiresAt
+    }).pipe(Effect.mapError(invalidRecord))
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(PluginActionReconciliationRequestV1))({
       reconciliationKey: governedActionReconciliationKey(record),
       idempotencyKey: record.envelope.idempotencyKey,
-      payloadDigest: record.envelope.proposal.payloadDigest
+      payloadDigest: record.envelope.proposal.payloadDigest,
+      authorizedAction
     }).pipe(Effect.mapError(invalidRecord))
 
     return {

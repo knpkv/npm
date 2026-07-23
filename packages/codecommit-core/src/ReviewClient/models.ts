@@ -10,7 +10,7 @@ import { PullRequestId, RepositoryName } from "../Domain.js"
 import { CodeCommitCommitId, CodeCommitReadAccount } from "../ReadClient/models.js"
 
 const NonEmptyString = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
-const BoundedText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_240))
+const BoundedText = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_100))
 const ClientRequestToken = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewRevision = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewCommitId = CodeCommitCommitId.check(Schema.isMaxLength(64))

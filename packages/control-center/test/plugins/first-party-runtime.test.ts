@@ -366,7 +366,7 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(result.preflight._tag, "ready")
         assert.strictEqual(result.dispatch._tag, "confirmed")
         if (result.dispatch._tag === "confirmed") assert.strictEqual(result.dispatch.receipt.status, "succeeded")
-        assert.strictEqual(yield* Ref.get(readCalls), 1)
+        assert.strictEqual(yield* Ref.get(readCalls), 2)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
 
         yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-reviewer")
