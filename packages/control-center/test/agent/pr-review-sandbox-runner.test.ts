@@ -787,6 +787,53 @@ describe("PrReviewSandboxRunner", () => {
       Effect.provide([NodeFileSystem.layer, NodePath.layer])
     ))
 
+  it.effect("rejects an in-workspace object store with an external Git alternate", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        const externalRepository = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-alternate-"
+        })
+        yield* runGit(["init", "--quiet", externalRepository])
+        yield* fileSystem.writeFileString(
+          path.join(externalRepository, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", externalRepository, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "external alternate"
+        ])
+        yield* fileSystem.remove(checkout, { recursive: true })
+        yield* runGit(["clone", "--quiet", "--shared", externalRepository, checkout])
+        const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
   it.effect("rejects submodule gitlinks instead of silently omitting their source", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const calls: Array<ChildProcess.StandardCommand> = []
@@ -1019,8 +1066,40 @@ describe("PrReviewSandboxRunner", () => {
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
+  it.effect("accepts deletion-only hunks without inventing changed head lines", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const deletionDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -1 +0,0 @@",
+        "-removed",
+        ""
+      ].join("\n")
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(evidence), CONTAINER_NAME, deletionDiff),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 0)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
   it.effect("applies durable evidence caps after removing unchanged findings", () =>
     withWorkspace((workspaceRoot, checkout) => {
+      const maximumRangeDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        ...Array.from(
+          { length: 100_000 },
+          (_, index) => `@@ -${index * 2 + 12},0 +${index * 2 + 12},1 @@`
+        ),
+        ""
+      ].join("\n")
       const noisyEvidence = {
         ...evidence,
         findings: [
@@ -1028,7 +1107,7 @@ describe("PrReviewSandboxRunner", () => {
             ...evidence.findings[0],
             message: "Changed finding ".repeat(30).trim()
           },
-          ...Array.from({ length: 100 }, (_, index) => ({
+          ...Array.from({ length: 999 }, (_, index) => ({
             ...evidence.findings[0],
             path: `src/legacy-${index}.ts`,
             message: `Unchanged legacy finding ${index} `.repeat(20).trim()
@@ -1042,7 +1121,12 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(
         workspaceRoot,
         [],
-        successResponses(checkout, JSON.stringify(noisyEvidence)),
+        successResponses(
+          checkout,
+          JSON.stringify(noisyEvidence),
+          CONTAINER_NAME,
+          maximumRangeDiff
+        ),
         run
       ).pipe(
         Effect.map((filtered) => {

@@ -361,6 +361,45 @@ interface ChangedLineRange {
   readonly startLine: number
 }
 
+interface ChangedLineInterval {
+  readonly endLine: number
+  readonly startLine: number
+}
+
+type ChangedLineIndex = ReadonlyMap<PrReviewPath, ReadonlyArray<ChangedLineInterval>>
+
+const indexChangedLineRanges = (
+  ranges: ReadonlyArray<ChangedLineRange>
+): ChangedLineIndex => {
+  const byPath = new Map<PrReviewPath, Array<ChangedLineInterval>>()
+  for (const { path, ...interval } of ranges) {
+    const intervals = byPath.get(path)
+    if (intervals === undefined) {
+      byPath.set(path, [interval])
+    } else {
+      intervals.push(interval)
+    }
+  }
+  const index = new Map<PrReviewPath, ReadonlyArray<ChangedLineInterval>>()
+  for (const [path, intervals] of byPath) {
+    intervals.sort((left, right) => left.startLine - right.startLine || left.endLine - right.endLine)
+    const merged = new Array<ChangedLineInterval>()
+    for (const interval of intervals) {
+      const previous = merged.at(-1)
+      if (previous === undefined || interval.startLine > previous.endLine + 1) {
+        merged.push(interval)
+      } else if (interval.endLine > previous.endLine) {
+        merged[merged.length - 1] = {
+          startLine: previous.startLine,
+          endLine: interval.endLine
+        }
+      }
+    }
+    index.set(path, merged)
+  }
+  return index
+}
+
 const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLineRanges")(function*(
   bytes: Uint8Array
 ) {
@@ -394,8 +433,8 @@ const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLi
     if (
       !Number.isSafeInteger(startLine) ||
       !Number.isSafeInteger(lineCount) ||
-      startLine < 1 ||
-      lineCount < 0
+      lineCount < 0 ||
+      startLine < (lineCount === 0 ? 0 : 1)
     ) {
       return yield* sandboxError("source-rejected")
     }
@@ -409,21 +448,39 @@ const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLi
       return yield* sandboxError("source-rejected")
     }
   }
-  return ranges
+  return indexChangedLineRanges(ranges)
 })
+
+const intersectsChangedLines = (
+  intervals: ReadonlyArray<ChangedLineInterval>,
+  startLine: number,
+  endLine: number
+): boolean => {
+  let low = 0
+  let high = intervals.length
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2)
+    const interval = intervals[middle]
+    if (interval === undefined || interval.endLine >= startLine) {
+      high = middle
+    } else {
+      low = middle + 1
+    }
+  }
+  const interval = intervals[low]
+  return interval !== undefined && interval.startLine <= endLine
+}
 
 const retainChangedLineEvidence = (
   evidence: UnfilteredPrReviewSandboxEvidence,
-  ranges: ReadonlyArray<ChangedLineRange>
+  changedLines: ChangedLineIndex
 ): UnfilteredPrReviewSandboxEvidence => ({
   ...evidence,
-  findings: evidence.findings.filter((finding) =>
-    ranges.some((range) =>
-      range.path === finding.path &&
-      range.startLine <= finding.endLine &&
-      finding.startLine <= range.endLine
-    )
-  )
+  findings: evidence.findings.filter((finding) => {
+    const intervals = changedLines.get(finding.path)
+    return intervals !== undefined &&
+      intersectsChangedLines(intervals, finding.startLine, finding.endLine)
+  })
 })
 
 const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
@@ -449,7 +506,7 @@ const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
 const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(function*(
   bytes: Uint8Array,
   headRevision: string,
-  changedLineRanges: ReadonlyArray<ChangedLineRange>
+  changedLines: ChangedLineIndex
 ) {
   const text = yield* decodeUtf8(bytes, "output-rejected")
   const evidence = yield* Schema.decodeUnknownEffect(
@@ -464,7 +521,7 @@ const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(functio
   return yield* Schema.decodeUnknownEffect(
     PrReviewSandboxEvidence,
     { onExcessProperty: "error" }
-  )(retainChangedLineEvidence(evidence, changedLineRanges)).pipe(
+  )(retainChangedLineEvidence(evidence, changedLines)).pipe(
     Effect.mapError(() => sandboxError("output-rejected"))
   )
 })
@@ -607,6 +664,12 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
     Effect.mapError(() => sandboxError("source-rejected"))
   )
   if (!isContainedPath(path, workspaceRoot, canonicalObjectStore)) {
+    return yield* sandboxError("source-rejected")
+  }
+  const hasAlternates = yield* fileSystem.exists(
+    path.join(canonicalObjectStore, "info", "alternates")
+  ).pipe(Effect.mapError(() => sandboxError("source-rejected")))
+  if (hasAlternates) {
     return yield* sandboxError("source-rejected")
   }
 
@@ -765,7 +828,7 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   analyzerEntrypoint: string,
   analyzerArguments: ReadonlyArray<string>,
   maximumDurationMillis: number,
-  changedLineRanges: ReadonlyArray<ChangedLineRange>
+  changedLines: ChangedLineIndex
 ) {
   const name = containerName(request.jobId, request.attemptId)
   const inspect = yield* executeControl(
@@ -837,7 +900,7 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   return yield* decodeEvidence(
     analysis.stdout,
     request.headRevision,
-    changedLineRanges
+    changedLines
   )
 })
 
@@ -977,7 +1040,7 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
         if (changedLines.exitCode !== ChildProcessSpawner.ExitCode(0)) {
           return yield* sandboxError("source-unavailable")
         }
-        const changedLineRanges = yield* decodeChangedLineRanges(changedLines.stdout)
+        const changedLineIndex = yield* decodeChangedLineRanges(changedLines.stdout)
         const evidence = yield* runContainedAnalysis(
           spawner,
           request,
@@ -986,7 +1049,7 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           analyzerEntrypoint,
           analyzerArguments,
           maximumDurationMillis,
-          changedLineRanges
+          changedLineIndex
         )
         return evidence
       })
