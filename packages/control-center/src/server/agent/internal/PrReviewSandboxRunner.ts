@@ -27,6 +27,7 @@ const MAXIMUM_GIT_DIFF_STDOUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_REVIEW_TREE_ARCHIVE_BYTES = 64 * 1_024 * 1_024
 const MAXIMUM_PR_REVIEW_SANDBOX_RAW_OUTPUT_BYTES = 1_024 * 1_024
 const MAXIMUM_CHANGED_LINE_RANGES = 100_000
+const MAXIMUM_GIT_OBJECT_STORE_ENTRIES = 1_000_000
 const DEFAULT_MAXIMUM_DURATION_MILLIS = 120_000
 const MAXIMUM_DURATION_MILLIS = 300_000
 const CONTROL_COMMAND_TIMEOUT_MILLIS = 30_000
@@ -503,6 +504,49 @@ const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
   return recordStart === bytes.byteLength
 }
 
+const validateContainedObjectStore = Effect.fn(
+  "PrReviewSandboxRunner.validateContainedObjectStore"
+)(function*(
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  workspaceRoot: string,
+  objectStore: string
+) {
+  const pending = [objectStore]
+  let entryCount = 0
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    if (directory === undefined) break
+    const entries = yield* fileSystem.readDirectory(directory).pipe(
+      Effect.mapError(() => sandboxError("source-rejected"))
+    )
+    for (const entry of entries) {
+      entryCount += 1
+      if (entryCount > MAXIMUM_GIT_OBJECT_STORE_ENTRIES) {
+        return yield* sandboxError("source-rejected")
+      }
+      const candidate = path.join(directory, entry)
+      const canonicalEntry = yield* fileSystem.realPath(candidate).pipe(
+        Effect.mapError(() => sandboxError("source-rejected"))
+      )
+      if (
+        canonicalEntry !== candidate ||
+        !isContainedPath(path, workspaceRoot, canonicalEntry)
+      ) {
+        return yield* sandboxError("source-rejected")
+      }
+      const info = yield* fileSystem.stat(canonicalEntry).pipe(
+        Effect.mapError(() => sandboxError("source-rejected"))
+      )
+      if (info.type === "Directory") {
+        pending.push(canonicalEntry)
+      } else if (info.type !== "File") {
+        return yield* sandboxError("source-rejected")
+      }
+    }
+  }
+})
+
 const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(function*(
   bytes: Uint8Array,
   headRevision: string,
@@ -672,6 +716,12 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
   if (hasAlternates) {
     return yield* sandboxError("source-rejected")
   }
+  yield* validateContainedObjectStore(
+    fileSystem,
+    path,
+    workspaceRoot,
+    canonicalObjectStore
+  )
 
   const treeEntries = yield* executeControl(
     spawner,
@@ -1020,7 +1070,12 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
             "-c",
             "core.quotePath=false",
             "diff",
+            "--default-prefix",
+            "--text",
             "--unified=0",
+            "--inter-hunk-context=0",
+            "--diff-algorithm=myers",
+            "--no-indent-heuristic",
             "--no-color",
             "--no-ext-diff",
             "--no-textconv",

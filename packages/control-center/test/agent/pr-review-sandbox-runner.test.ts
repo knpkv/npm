@@ -359,7 +359,12 @@ describe("PrReviewSandboxRunner", () => {
                 "-c",
                 "core.quotePath=false",
                 "diff",
+                "--default-prefix",
+                "--text",
                 "--unified=0",
+                "--inter-hunk-context=0",
+                "--diff-algorithm=myers",
+                "--no-indent-heuristic",
                 "--no-color",
                 "--no-ext-diff",
                 "--no-textconv",
@@ -515,7 +520,7 @@ describe("PrReviewSandboxRunner", () => {
         yield* runGit(["init", "--quiet", checkout])
         yield* fileSystem.writeFileString(
           path.join(checkout, ".gitattributes"),
-          "source.txt export-subst\nignored.txt export-ignore\nfiltered.txt filter=pwn\n"
+          "source.txt export-subst -diff\nignored.txt export-ignore\nfiltered.txt filter=pwn\n"
         )
         yield* fileSystem.writeFileString(path.join(checkout, ".gitignore"), "node_modules/\n")
         yield* fileSystem.writeFileString(path.join(checkout, "source.txt"), originalSource)
@@ -569,11 +574,14 @@ describe("PrReviewSandboxRunner", () => {
           "--quiet",
           originalRevision
         ])
+        yield* runGit(["-C", checkout, "gc", "--quiet"])
         yield* fileSystem.writeFileString(
           path.join(checkout, ".git", "info", "attributes"),
           "source.txt export-ignore\n"
         )
         yield* runGit(["-C", checkout, "config", "tar.umask", "0077"])
+        yield* runGit(["-C", checkout, "config", "diff.noprefix", "true"])
+        yield* runGit(["-C", checkout, "config", "diff.interHunkContext", "10"])
         const fsmonitorMarker = path.join(checkout, ".git", "fsmonitor-ran")
         const fsmonitorHook = path.join(checkout, ".git", "hooks", "fsmonitor-test")
         yield* fileSystem.writeFileString(
@@ -814,6 +822,57 @@ describe("PrReviewSandboxRunner", () => {
         yield* fileSystem.remove(checkout, { recursive: true })
         yield* runGit(["clone", "--quiet", "--shared", externalRepository, checkout])
         const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
+  it.effect("rejects symlinked directories inside the Git object store", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        yield* runGit(["init", "--quiet", checkout])
+        yield* fileSystem.writeFileString(
+          path.join(checkout, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", checkout, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "packed objects"
+        ])
+        const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+        yield* runGit(["-C", checkout, "gc", "--quiet"])
+
+        const outside = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-pack-"
+        })
+        const packDirectory = path.join(checkout, ".git", "objects", "pack")
+        const externalPackDirectory = path.join(outside, "pack")
+        yield* fileSystem.rename(packDirectory, externalPackDirectory)
+        yield* fileSystem.symlink(externalPackDirectory, packDirectory)
 
         const result = yield* Effect.gen(function*() {
           const runner = yield* PrReviewSandboxRunner
@@ -1084,6 +1143,48 @@ describe("PrReviewSandboxRunner", () => {
       ).pipe(
         Effect.map((filtered) => {
           assert.lengthOf(filtered.findings, 0)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("does not retain unchanged lines between separate zero-context hunks", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const separateHunks = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -1 +1 @@",
+        "-old first",
+        "+new first",
+        "@@ -5 +5 @@",
+        "-old last",
+        "+new last",
+        ""
+      ].join("\n")
+      const separatedEvidence = {
+        ...evidence,
+        findings: [
+          { ...evidence.findings[0], startLine: 1, endLine: 1 },
+          { ...evidence.findings[0], startLine: 3, endLine: 3 },
+          { ...evidence.findings[0], startLine: 5, endLine: 5 }
+        ]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(separatedEvidence),
+          CONTAINER_NAME,
+          separateHunks
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.deepStrictEqual(
+            filtered.findings.map(({ startLine }) => startLine),
+            [1, 5]
+          )
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
