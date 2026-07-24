@@ -31,6 +31,14 @@ const ANALYZER_COMMAND: readonly [string, string, string] = [
 ]
 const CONTAINER_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
 const encoder = new TextEncoder()
+const fixtureProcessEnvironment: Readonly<Record<string, string>> = {
+  GIT_CONFIG_GLOBAL: "/dev/null",
+  GIT_CONFIG_NOSYSTEM: "1",
+  HOME: "/nonexistent",
+  LANG: "C",
+  LC_ALL: "C",
+  PATH: "/usr/bin:/bin"
+}
 
 const evidence = Schema.decodeSync(PrReviewSandboxEvidence)({
   schemaVersion: 1,
@@ -223,6 +231,8 @@ const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   Effect.scoped(
     Effect.gen(function*() {
       const handle = yield* ChildProcess.make("git", args, {
+        env: fixtureProcessEnvironment,
+        extendEnv: false,
         stderr: "pipe",
         stdin: "ignore",
         stdout: "pipe"
@@ -700,6 +710,43 @@ describe("PrReviewSandboxRunner", () => {
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
+  it.effect("rejects committed symlinks before extracting the review tree", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        yield* runGit(["init", "--quiet", checkout])
+        yield* fileSystem.symlink("/etc/passwd", path.join(checkout, "escape.ts"))
+        yield* runGit(["-C", checkout, "add", "escape.ts"])
+        yield* runGit([
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "symlink"
+        ])
+        const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
   it.effect("stops before OCI access when the checkout head differs", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const calls: Array<ChildProcess.StandardCommand> = []
@@ -785,6 +832,49 @@ describe("PrReviewSandboxRunner", () => {
             CONTAINER_NAME
           ])
         }
+      })
+    ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("accepts scoped rule identifiers without accepting traversal tokens", () =>
+    withWorkspace((workspaceRoot, checkout) =>
+      Effect.gen(function*() {
+        const scoped = Schema.decodeSync(PrReviewSandboxEvidence)({
+          ...evidence,
+          findings: [{
+            ruleId: "@typescript-eslint/no-unused-vars",
+            severity: "warning",
+            path: "src/example.ts",
+            startLine: 12,
+            endLine: 14,
+            message: "The analyzer found a deterministic problem."
+          }]
+        })
+        const accepted = yield* provideRunner(
+          workspaceRoot,
+          [],
+          successResponses(checkout, JSON.stringify(scoped)),
+          run
+        )
+        assert.deepStrictEqual(accepted, scoped)
+
+        const traversal = {
+          ...evidence,
+          findings: [{
+            ruleId: "../secret",
+            severity: "warning",
+            path: "src/example.ts",
+            startLine: 12,
+            endLine: 14,
+            message: "The analyzer found a deterministic problem."
+          }]
+        }
+        const rejected = yield* provideRunner(
+          workspaceRoot,
+          [],
+          successResponses(checkout, JSON.stringify(traversal)),
+          run
+        ).pipe(Effect.result)
+        assertRedactedError(rejected, "output-rejected")
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 

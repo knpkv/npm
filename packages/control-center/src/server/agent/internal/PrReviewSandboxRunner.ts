@@ -106,12 +106,22 @@ const BoundedToolToken = Schema.String.check(
   })
 )
 
+const BoundedRuleId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200),
+  Schema.isPattern(
+    /^(?:@[A-Za-z0-9][A-Za-z0-9._+-]*\/)?[A-Za-z0-9][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9][A-Za-z0-9._+-]*)*$/u,
+    { expected: "a bounded analyzer rule identifier" }
+  )
+)
+
 const EvidenceLine = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
 )
 
 const PrReviewSandboxEvidenceItem = Schema.Struct({
-  ruleId: BoundedToolToken,
+  ruleId: BoundedRuleId,
   severity: Schema.Literals(["error", "warning", "info"]),
   path: PrReviewPath,
   startLine: EvidenceLine,
@@ -329,16 +339,21 @@ const exactGitHead = (text: string): string | undefined => {
   return text.includes("\n") || text.includes("\r") ? undefined : text
 }
 
-const hasNoGitlinks = (bytes: Uint8Array): boolean => {
-  const gitlink = new TextEncoder().encode("160000 commit ")
+const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
+  const regularFile = new TextEncoder().encode("100644 blob ")
+  const executableFile = new TextEncoder().encode("100755 blob ")
   let recordStart = 0
   for (let index = 0; index < bytes.byteLength; index++) {
     if (bytes[index] !== 0) continue
-    let isGitlink = index - recordStart >= gitlink.byteLength
-    for (let offset = 0; isGitlink && offset < gitlink.byteLength; offset++) {
-      isGitlink = bytes[recordStart + offset] === gitlink[offset]
+    let isRegularFile = index - recordStart >= regularFile.byteLength
+    let isExecutableFile = index - recordStart >= executableFile.byteLength
+    for (let offset = 0; offset < regularFile.byteLength; offset++) {
+      isRegularFile = isRegularFile &&
+        bytes[recordStart + offset] === regularFile[offset]
+      isExecutableFile = isExecutableFile &&
+        bytes[recordStart + offset] === executableFile[offset]
     }
-    if (isGitlink) return false
+    if (!isRegularFile && !isExecutableFile) return false
     recordStart = index + 1
   }
   return recordStart === bytes.byteLength
@@ -516,7 +531,7 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
   )
   if (
     treeEntries.exitCode !== ChildProcessSpawner.ExitCode(0) ||
-    !hasNoGitlinks(treeEntries.stdout)
+    !hasOnlyRegularFiles(treeEntries.stdout)
   ) {
     return yield* sandboxError("source-rejected")
   }
