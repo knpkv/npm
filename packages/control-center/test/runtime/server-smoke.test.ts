@@ -8,6 +8,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
@@ -843,6 +844,42 @@ describe("Control Center closed runtime", () => {
           })
         }
       })
+      const invalidRuntime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        releaseAgent: null,
+        prReviewWorker: {
+          workspaceId: WORKSPACE_ID,
+          workspaceRoot: path.join(dataRoot, "review-workspaces"),
+          image: `example.invalid/review@sha256:${"a".repeat(64)}`,
+          analyzerCommand: ["review-analyzer"],
+          leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
+          runOnceBeforeSupervision: true,
+          sourceWorkspace,
+          sandboxRunner
+        }
+      })).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalidRuntime))
+      if (Result.isFailure(invalidRuntime)) {
+        assert.isTrue(Predicate.isTagged(invalidRuntime.failure, "PrReviewWorkerConfigurationError"))
+      }
+      const queued = yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        return yield* persistence.agentJobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          subject
+        })
+      }).pipe(Effect.provide(seedPersistence))
+      assert.isTrue(Option.isSome(queued))
+      if (Option.isSome(queued)) {
+        assert.strictEqual(queued.value.state, "queued")
+      }
+      assert.strictEqual(sourceUses, 0)
+      assert.strictEqual(sandboxCalls, 0)
+      assert.strictEqual(providerCalls, 0)
+
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,

@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import type * as Path from "effect/Path"
+import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
@@ -19,7 +20,8 @@ import {
   codeCommitPrReviewSourceResolverLayer,
   type PrReviewSourceError,
   PrReviewSourceWorkspace,
-  prReviewSourceWorkspaceLayer
+  prReviewSourceWorkspaceLayer,
+  prReviewWorkspaceLeaseGuardLayer
 } from "../agent/internal/PrReviewSourceWorkspace.js"
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
 import type {
@@ -158,6 +160,13 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   >
 }
 
+/** Invalid production review composition rejected before a worker can claim durable work. */
+export class PrReviewWorkerConfigurationError extends Schema.TaggedErrorClass<
+  PrReviewWorkerConfigurationError
+>()("PrReviewWorkerConfigurationError", {
+  diagnosticCode: Schema.Literal("prompt-only-provider-required")
+}) {}
+
 /** Failures that can prevent the runtime from acquiring or listening. */
 export type ControlCenterServerError<ApplicationError = never> =
   | ApplicationError
@@ -165,6 +174,7 @@ export type ControlCenterServerError<ApplicationError = never> =
   | DirectTlsServerError
   | GovernedActionExecutionStartupError
   | PersistenceLayerError
+  | PrReviewWorkerConfigurationError
   | PrReviewSandboxError
   | PrReviewSourceError
   | ReleaseSynchronizationStartupError
@@ -332,6 +342,14 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   ).pipe(Layer.provide(database))
   const prReviewWorker = options.prReviewWorker === undefined || options.prReviewWorker === null
     ? Layer.empty
+    : options.releaseAgent?.openAiCompatible === undefined
+    ? Layer.effectDiscard(
+      Effect.fail(
+        new PrReviewWorkerConfigurationError({
+          diagnosticCode: "prompt-only-provider-required"
+        })
+      )
+    )
     : (() => {
       const configured = options.prReviewWorker
       const sourceWorkspace = configured.sourceWorkspace === undefined
@@ -341,7 +359,12 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
             ? {}
             : { maximumDuration: configured.maximumSourceDuration })
         }).pipe(
-          Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence)))
+          Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
+          Layer.provide(
+            prReviewWorkspaceLeaseGuardLayer(configured.workspaceId).pipe(
+              Layer.provide(AgentJobRepository.layer.pipe(Layer.provide(database)))
+            )
+          )
         )
         : Layer.succeed(PrReviewSourceWorkspace, configured.sourceWorkspace)
       const sandbox = configured.sandboxRunner === undefined

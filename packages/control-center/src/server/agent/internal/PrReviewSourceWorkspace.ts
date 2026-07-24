@@ -15,6 +15,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import { JobId, WorkspaceId } from "../../../domain/identifiers.js"
 import { Persistence } from "../../persistence/Persistence.js"
+import { AgentJobRepository } from "../../persistence/repositories/agentJobRepository.js"
 import type { StoredPluginConfiguration } from "../../persistence/repositories/pluginConfigurationModels.js"
 import { CodeCommitPluginConfiguration } from "../../plugins/codecommit/CodeCommitPluginDefinition.js"
 import { PR_REVIEW_SANDBOX_PREFIXES } from "./PrReviewWorkspaceProtocol.js"
@@ -289,12 +290,50 @@ export class PrReviewSourceWorkspace extends Context.Service<
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewSourceWorkspace") {}
 
+/** Durable lease fence used before reclaiming review artifacts from a crashed worker. */
+export class PrReviewWorkspaceLeaseGuard extends Context.Service<
+  PrReviewWorkspaceLeaseGuard,
+  {
+    readonly isActive: (jobId: JobId) => Effect.Effect<boolean>
+  }
+>()("@knpkv/control-center/server/agent/internal/PrReviewWorkspaceLeaseGuard") {}
+
+/** Bind artifact cleanup to the latest unexpired durable lease in one workspace. */
+export const prReviewWorkspaceLeaseGuardLayer = (
+  workspaceId: WorkspaceId
+): Layer.Layer<PrReviewWorkspaceLeaseGuard, never, AgentJobRepository> =>
+  Layer.effect(
+    PrReviewWorkspaceLeaseGuard,
+    Effect.gen(function*() {
+      const jobs = yield* AgentJobRepository
+      return PrReviewWorkspaceLeaseGuard.of({
+        isActive: (jobId) =>
+          jobs.isLeaseActive(workspaceId, jobId).pipe(
+            Effect.catch(() => Effect.succeed(true))
+          )
+      })
+    })
+  )
+
+const artifactJobId = (entry: string): JobId | undefined => {
+  if (Schema.is(JobId)(entry)) return entry
+  for (const prefix of [STAGING_PREFIX, ...PR_REVIEW_SANDBOX_PREFIXES]) {
+    if (!entry.startsWith(prefix)) continue
+    const candidate = entry.slice(prefix.length, prefix.length + 36)
+    if (Schema.is(JobId)(candidate) && entry.startsWith(`${prefix}${candidate}-`)) {
+      return candidate
+    }
+  }
+  return undefined
+}
+
 const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
   options: PrReviewSourceWorkspaceOptions
 ) {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const resolver = yield* PrReviewSourceResolver
+  const leaseGuard = yield* PrReviewWorkspaceLeaseGuard
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const home = yield* Config.string("HOME").pipe(
     Effect.mapError(() => sourceError("invalid-configuration"))
@@ -404,11 +443,8 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
       Effect.mapError(() => sourceError("cleanup-failed"))
     )
   ) {
-    if (
-      entry.startsWith(STAGING_PREFIX) ||
-      PR_REVIEW_SANDBOX_PREFIXES.some((prefix) => entry.startsWith(prefix)) ||
-      Schema.is(JobId)(entry)
-    ) {
+    const jobId = artifactJobId(entry)
+    if (jobId !== undefined && !(yield* leaseGuard.isActive(jobId))) {
       yield* removeSource(path.join(canonicalRoot, entry))
     }
   }
@@ -458,7 +494,7 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
         return yield* Effect.acquireUseRelease(
           fileSystem.makeTempDirectory({
             directory: canonicalRoot,
-            prefix: STAGING_PREFIX
+            prefix: `${STAGING_PREFIX}${request.jobId}-`
           }).pipe(
             Effect.mapError(() => sourceError("source-unavailable")),
             Effect.flatMap((stagingRoot) =>
@@ -538,5 +574,6 @@ export const prReviewSourceWorkspaceLayer = (
   | FileSystem.FileSystem
   | Path.Path
   | PrReviewSourceResolver
+  | PrReviewWorkspaceLeaseGuard
   | ChildProcessSpawner.ChildProcessSpawner
 > => Layer.effect(PrReviewSourceWorkspace, makeWorkspace(options))

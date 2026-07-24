@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -11,7 +11,8 @@ import {
   codeCommitPrReviewSourceResolverLayer,
   PrReviewSourceResolver,
   PrReviewSourceWorkspace,
-  prReviewSourceWorkspaceLayer
+  prReviewSourceWorkspaceLayer,
+  PrReviewWorkspaceLeaseGuard
 } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
@@ -23,6 +24,12 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000051")
 const CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000061")
 const CREATED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-24T10:00:00.000Z")
+const STALE_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000052")
+
+const inactiveLeaseGuard = Layer.succeed(
+  PrReviewWorkspaceLeaseGuard,
+  PrReviewWorkspaceLeaseGuard.of({ isActive: () => Effect.succeed(false) })
+)
 
 const gitEnvironment: Readonly<Record<string, string>> = {
   GIT_AUTHOR_EMAIL: "review-fixture@example.invalid",
@@ -151,7 +158,8 @@ describe("PR review source workspace", () => {
           })
         )
         const sources = prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
-          Layer.provide(resolver)
+          Layer.provide(resolver),
+          Layer.provide(inactiveLeaseGuard)
         )
         const materializedRoot = path.join(workspaceRoot, JOB_ID)
         const observed = yield* Effect.gen(function*() {
@@ -230,6 +238,7 @@ describe("PR review source workspace", () => {
               maximumSourceBytes: 1_024,
               maximumSourceEntries: 100
             }).pipe(Layer.provide(resolver))
+              .pipe(Layer.provide(inactiveLeaseGuard))
           ),
           Effect.result
         )
@@ -263,47 +272,110 @@ describe("PR review source workspace", () => {
         yield* Effect.gen(function*() {
           yield* PrReviewSourceWorkspace
         }).pipe(
-          Effect.provide(prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(Layer.provide(resolver)))
+          Effect.provide(
+            prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
+              Layer.provide(resolver),
+              Layer.provide(inactiveLeaseGuard)
+            )
+          )
         )
 
         assert.strictEqual((yield* fileSystem.stat(workspaceRoot)).mode & 0o777, 0o700)
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 
-  it.effect("reconciles owned crash leftovers without deleting unrelated directories", () =>
+  it.effect("reclaims expired artifacts without crossing a live worker lease", () =>
     Effect.scoped(
       Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-reconcile-" })
+        const repository = path.join(fixture, "repository")
         const workspaceRoot = path.join(fixture, "workspaces")
-        const staging = path.join(workspaceRoot, ".review-staging-crash")
-        const reviewTree = path.join(workspaceRoot, ".pr-review-tree-crash")
-        const reviewGit = path.join(workspaceRoot, ".pr-review-git-crash")
-        const job = path.join(workspaceRoot, JOB_ID)
+        yield* fileSystem.makeDirectory(repository)
+        yield* fileSystem.makeDirectory(workspaceRoot)
+        yield* runGit(["-C", repository, "init", "--quiet"])
+        yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const live = true\n")
+        yield* runGit(["-C", repository, "add", "--", "review.ts"])
+        yield* runGit(["-C", repository, "commit", "--quiet", "-m", "live"])
+        const revision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
+
+        const activeStaging = path.join(workspaceRoot, `.review-staging-${JOB_ID}-live`)
+        const activeTree = path.join(workspaceRoot, `.pr-review-tree-${JOB_ID}-live`)
+        const activeGit = path.join(workspaceRoot, `.pr-review-git-${JOB_ID}-live`)
+        const staleStaging = path.join(workspaceRoot, `.review-staging-${STALE_JOB_ID}-crash`)
+        const staleTree = path.join(workspaceRoot, `.pr-review-tree-${STALE_JOB_ID}-crash`)
+        const staleGit = path.join(workspaceRoot, `.pr-review-git-${STALE_JOB_ID}-crash`)
+        const staleJob = path.join(workspaceRoot, STALE_JOB_ID)
         const unrelated = path.join(workspaceRoot, "operator-owned")
-        yield* fileSystem.makeDirectory(staging, { recursive: true })
-        yield* fileSystem.makeDirectory(reviewTree)
-        yield* fileSystem.makeDirectory(reviewGit)
-        yield* fileSystem.makeDirectory(job)
-        yield* fileSystem.makeDirectory(unrelated)
         const resolver = Layer.succeed(
           PrReviewSourceResolver,
           PrReviewSourceResolver.of({
-            resolve: () => Effect.die("reconciliation must not resolve a source")
+            resolve: () =>
+              Effect.succeed({
+                repositoryUrl: repository,
+                profile: "unused-test-profile",
+                region: "eu-central-1"
+              })
           })
         )
+        const leaseGuard = Layer.succeed(
+          PrReviewWorkspaceLeaseGuard,
+          PrReviewWorkspaceLeaseGuard.of({
+            isActive: (jobId) => Effect.succeed(jobId === JOB_ID)
+          })
+        )
+        const workspaceLayer = prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
+          Layer.provide(resolver),
+          Layer.provide(leaseGuard)
+        )
+        const ready = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const liveWorker = yield* Effect.gen(function*() {
+          const workspace = yield* PrReviewSourceWorkspace
+          return yield* workspace.withSource(
+            {
+              workspaceId: WORKSPACE_ID,
+              jobId: JOB_ID,
+              repository: "control-center",
+              baseRevision: revision,
+              headRevision: revision
+            },
+            () =>
+              Effect.gen(function*() {
+                yield* fileSystem.makeDirectory(activeStaging)
+                yield* fileSystem.makeDirectory(activeTree)
+                yield* fileSystem.makeDirectory(activeGit)
+                yield* Deferred.succeed(ready, undefined)
+                yield* Deferred.await(release)
+              })
+          )
+        }).pipe(
+          Effect.provide(workspaceLayer),
+          Effect.forkScoped
+        )
+        yield* Deferred.await(ready)
+
+        yield* fileSystem.makeDirectory(staleStaging)
+        yield* fileSystem.makeDirectory(staleTree)
+        yield* fileSystem.makeDirectory(staleGit)
+        yield* fileSystem.makeDirectory(staleJob)
+        yield* fileSystem.makeDirectory(unrelated)
         yield* Effect.gen(function*() {
           yield* PrReviewSourceWorkspace
-        }).pipe(
-          Effect.provide(prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(Layer.provide(resolver)))
-        )
+        }).pipe(Effect.provide(workspaceLayer))
 
-        assert.isFalse(yield* fileSystem.exists(staging))
-        assert.isFalse(yield* fileSystem.exists(reviewTree))
-        assert.isFalse(yield* fileSystem.exists(reviewGit))
-        assert.isFalse(yield* fileSystem.exists(job))
+        assert.isTrue(yield* fileSystem.exists(path.join(workspaceRoot, JOB_ID)))
+        assert.isTrue(yield* fileSystem.exists(activeStaging))
+        assert.isTrue(yield* fileSystem.exists(activeTree))
+        assert.isTrue(yield* fileSystem.exists(activeGit))
+        assert.isFalse(yield* fileSystem.exists(staleStaging))
+        assert.isFalse(yield* fileSystem.exists(staleTree))
+        assert.isFalse(yield* fileSystem.exists(staleGit))
+        assert.isFalse(yield* fileSystem.exists(staleJob))
         assert.isTrue(yield* fileSystem.exists(unrelated))
+        yield* Deferred.succeed(release, undefined)
+        yield* Fiber.join(liveWorker)
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 })

@@ -12,7 +12,8 @@ export {
   type ControlCenterServerError,
   type ControlCenterServerOptions,
   makeControlCenterApplication,
-  makeControlCenterServer
+  makeControlCenterServer,
+  PrReviewWorkerConfigurationError
 } from "./ControlCenterServer.js"
 export { DomainEventWakeups } from "./DomainEventWakeups.js"
 export {

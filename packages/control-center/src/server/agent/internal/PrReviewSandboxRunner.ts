@@ -752,18 +752,20 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   workspaceRoot: string,
   checkout: string,
+  jobId: JobId,
   headRevision: string
 ) {
+  const treePrefix = `${PR_REVIEW_TREE_PREFIX}${jobId}-`
   const archive = yield* fileSystem.makeTempFileScoped({
     directory: workspaceRoot,
-    prefix: PR_REVIEW_TREE_PREFIX,
+    prefix: treePrefix,
     suffix: ".tar"
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )
   const reviewTree = yield* fileSystem.makeTempDirectoryScoped({
     directory: workspaceRoot,
-    prefix: PR_REVIEW_TREE_PREFIX
+    prefix: treePrefix
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )
@@ -857,7 +859,7 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
 
   const archiveGitDirectory = yield* fileSystem.makeTempDirectoryScoped({
     directory: workspaceRoot,
-    prefix: PR_REVIEW_GIT_PREFIX
+    prefix: `${PR_REVIEW_GIT_PREFIX}${jobId}-`
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )
@@ -1210,6 +1212,7 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           spawner,
           canonicalRoot,
           canonicalSource,
+          request.jobId,
           request.headRevision
         )
         const changedLines = yield* executeControl(

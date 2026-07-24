@@ -272,6 +272,7 @@ describe("agent job repository", () => {
         fingerprint: FINGERPRINT,
         task: { _tag: "release-chat" }
       })
+      assert.isTrue(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
 
       const activeClaim = yield* repository.claimNext(claimInput(THIRD_TOKEN))
       assert.isTrue(Option.isNone(activeClaim))
@@ -290,12 +291,14 @@ describe("agent job repository", () => {
       })
 
       yield* TestClock.setTime(DateTime.toEpochMillis(T3))
+      assert.isFalse(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
       const reclaimed = yield* repository.claimNext(claimInput(THIRD_TOKEN, T3, T4))
       assert.isTrue(Option.isSome(reclaimed))
       if (Option.isNone(reclaimed)) return yield* Effect.die("reclaim missing")
       assert.strictEqual(reclaimed.value.attemptSequence, 2)
       assert.strictEqual(reclaimed.value.sessionRef, SESSION_REF)
       assert.isTrue(reclaimed.value.cancellationRequested)
+      assert.isTrue(yield* repository.isLeaseActive(WORKSPACE_ID, JOB_ID))
       yield* repository.appendEvent({
         workspaceId: WORKSPACE_ID,
         jobId: JOB_ID,

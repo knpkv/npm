@@ -133,6 +133,10 @@ const LeaseRow = Schema.Struct({
   leaseExpiresAt: UtcTimestamp
 })
 
+const ActiveLeaseRow = Schema.Struct({
+  active: Schema.Int
+})
+
 const ThreadEventRow = Schema.Struct({
   workspaceId: WorkspaceId,
   threadId: AgentThreadId,
@@ -904,6 +908,40 @@ const makeAgentJobRepository = Effect.gen(function*() {
         )
         .pipe(mapPersistenceOperation("agent-job.claim-next"))
     }),
+
+    isLeaseActive: Effect.fn("AgentJobRepository.isLeaseActive")((
+      workspaceId: typeof WorkspaceId.Type,
+      jobId: typeof JobId.Type
+    ) =>
+      Effect.gen(function*() {
+        const observedAt = encodeTimestamp(yield* DateTime.now)
+        const rows = yield* sql<Record<string, unknown>>`SELECT COUNT(*) AS active
+        FROM agent_jobs job
+        JOIN agent_job_leases lease
+          ON lease.workspace_id = job.workspace_id
+          AND lease.job_id = job.job_id
+        WHERE job.workspace_id = ${workspaceId}
+          AND job.job_id = ${jobId}
+          AND job.state IN ('running', 'cancel-requested')
+          AND lease.lease_expires_at > ${observedAt}
+          AND lease.attempt_sequence = (
+            SELECT MAX(latest.attempt_sequence)
+            FROM agent_job_leases latest
+            WHERE latest.workspace_id = job.workspace_id
+              AND latest.job_id = job.job_id
+          )`
+        const decoded = Schema.decodeUnknownResult(Schema.Array(ActiveLeaseRow))(rows)
+        if (Result.isFailure(decoded) || decoded.success.length !== 1) {
+          return yield* persistedRecordError(
+            workspaceId,
+            "agent-job",
+            jobId,
+            "agent-job-active-lease-schema-invalid"
+          )
+        }
+        return decoded.success[0]?.active === 1
+      }).pipe(mapPersistenceOperation("agent-job.is-lease-active"))
+    ),
 
     heartbeat: Effect.fn("AgentJobRepository.heartbeat")(function*(
       input: typeof HeartbeatAgentJobInput.Type
