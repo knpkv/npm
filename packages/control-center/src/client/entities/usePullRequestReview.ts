@@ -17,9 +17,10 @@ interface ReviewProviderSelection {
 }
 
 interface PullRequestReviewScope {
+  readonly baseRevision: string | null
   readonly entityId: EntityId
+  readonly headRevision: string
   readonly sessionKey: string
-  readonly subjectRevision: string
 }
 
 export type PullRequestReviewControllerState =
@@ -100,21 +101,26 @@ const sameScope = (
   scope: PullRequestReviewScope
 ): boolean =>
   state._tag !== "idle" &&
+  state.baseRevision === scope.baseRevision &&
   state.entityId === scope.entityId &&
-  state.sessionKey === scope.sessionKey &&
-  state.subjectRevision === scope.subjectRevision
+  state.headRevision === scope.headRevision &&
+  state.sessionKey === scope.sessionKey
 
 const matchesScope = (
   review: PullRequestReviewState,
   scope: PullRequestReviewScope
 ): boolean =>
   review._tag === "unavailable" ||
-  review.subject.headRevision === scope.subjectRevision
+  (
+    review.subject.baseRevision === scope.baseRevision &&
+    review.subject.headRevision === scope.headRevision
+  )
 
 /** Keep review state scoped to the exact entity and authenticated browser session. */
 export const usePullRequestReview = (
   entityId: EntityId,
-  subjectRevision: string | null,
+  baseRevision: string | null,
+  headRevision: string | null,
   sessionKey: string | null,
   canEnqueue: boolean,
   onSessionExpired: (sessionKey: string) => void,
@@ -129,11 +135,11 @@ export const usePullRequestReview = (
   const mutationAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
-    if (sessionKey === null || subjectRevision === null) {
+    if (sessionKey === null || headRevision === null) {
       setState({ _tag: "idle" })
       return
     }
-    const scope = { entityId, sessionKey, subjectRevision } satisfies PullRequestReviewScope
+    const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
     const abort = new AbortController()
     setState({ _tag: "loading", ...scope })
     const providers = canEnqueue
@@ -162,7 +168,16 @@ export const usePullRequestReview = (
       }
     )
     return () => abort.abort()
-  }, [canEnqueue, entityId, onSessionExpired, requestRevision, sessionKey, subjectRevision, transport])
+  }, [
+    baseRevision,
+    canEnqueue,
+    entityId,
+    headRevision,
+    onSessionExpired,
+    requestRevision,
+    sessionKey,
+    transport
+  ])
 
   useEffect(() => {
     if (state._tag !== "ready" || state.review._tag !== "pending") return
@@ -175,9 +190,10 @@ export const usePullRequestReview = (
         if (!abort.signal.aborted) {
           setState({
             _tag: "failed",
+            baseRevision: state.baseRevision,
             entityId: state.entityId,
-            sessionKey: state.sessionKey,
-            subjectRevision: state.subjectRevision
+            headRevision: state.headRevision,
+            sessionKey: state.sessionKey
           })
         }
       }
@@ -207,9 +223,10 @@ export const usePullRequestReview = (
             : latest._tag === "ready" && sameScope(latest, current)
             ? {
               _tag: "failed",
+              baseRevision: current.baseRevision,
               entityId: current.entityId,
-              sessionKey: current.sessionKey,
-              subjectRevision: current.subjectRevision
+              headRevision: current.headRevision,
+              sessionKey: current.sessionKey
             }
             : latest
         )
@@ -226,9 +243,9 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, state, transport])
 
-  const scope = sessionKey === null || subjectRevision === null
+  const scope = sessionKey === null || headRevision === null
     ? null
-    : { entityId, sessionKey, subjectRevision }
+    : { baseRevision, entityId, headRevision, sessionKey }
   const currentState: PullRequestReviewControllerState = scope === null
     ? { _tag: "idle" }
     : sameScope(state, scope)

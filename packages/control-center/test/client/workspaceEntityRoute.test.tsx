@@ -652,9 +652,10 @@ const pullRequestReviewSubject = Schema.decodeSync(PrReviewSubject)({
 
 const pullRequestReviewState = {
   _tag: "ready",
+  baseRevision: pullRequestReviewSubject.baseRevision,
   entityId: pullRequestInspection.entity.projection.entityId,
+  headRevision: pullRequestReviewSubject.headRevision,
   sessionKey: "session-a",
-  subjectRevision: pullRequestReviewSubject.headRevision,
   action: "idle",
   provider: {
     providerId: DurableAgentProviderId.make("openai-compatible"),

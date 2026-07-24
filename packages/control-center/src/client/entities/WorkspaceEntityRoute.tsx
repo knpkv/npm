@@ -458,14 +458,18 @@ const ConnectedWorkspaceEntity = ({
   const controller = useWorkspaceEntity(workspaceId, entityId, refreshKey, sessionKey, browserSession.invalidateSession)
   const reviewCanEnqueue =
     browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
-  const reviewSubjectRevision =
+  const reviewSubject =
     (controller.state._tag === "ready" || controller.state._tag === "stale") &&
     controller.state.inspection.entity.projection.details._tag === "pull-request"
-      ? controller.state.inspection.entity.projection.details.headRevision
+      ? {
+          baseRevision: controller.state.inspection.entity.projection.details.baseRevision ?? null,
+          headRevision: controller.state.inspection.entity.projection.details.headRevision
+        }
       : null
   const reviewController = usePullRequestReview(
     entityId,
-    reviewSubjectRevision,
+    reviewSubject?.baseRevision ?? null,
+    reviewSubject?.headRevision ?? null,
     sessionKey,
     reviewCanEnqueue,
     browserSession.invalidateSession

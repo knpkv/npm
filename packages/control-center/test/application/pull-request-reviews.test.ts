@@ -16,7 +16,8 @@ import {
   AgentEventCursor,
   AgentLeaseOwner,
   AgentLeaseToken,
-  AgentThreadEventPageSize
+  AgentThreadEventPageSize,
+  LatestAgentReviewRecord
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -152,12 +153,18 @@ const localRegistry = AgentRuntimeRegistry.of({
   select: () => Effect.succeed({ model: MODEL, runtime, filesystemAccess: "configured-workspace" })
 })
 
+const offlineRegistry = AgentRuntimeRegistry.of({
+  ...registry,
+  select: () => Effect.die("provider selection must not run while recovering active work")
+})
+
 const withService = <Success, Failure>(
   use: (
     service: PullRequestReviews["Service"],
     enqueueInput: Ref.Ref<unknown>
   ) => Effect.Effect<Success, Failure>,
-  selectedRegistry = registry
+  selectedRegistry = registry,
+  latestReview: Option.Option<LatestAgentReviewRecord> = Option.none()
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -169,7 +176,7 @@ const withService = <Success, Failure>(
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: () => Effect.succeed(Option.none())
+          latestReview: () => Effect.succeed(latestReview)
         }
       })
       const service = yield* PullRequestReviews.pipe(
@@ -275,6 +282,37 @@ describe("pull request reviews", () => {
         }),
       localRegistry
     ))
+
+  it.effect("recovers an active exact-subject review before selecting its provider", () => {
+    const active = Schema.decodeSync(LatestAgentReviewRecord)({
+      jobId: "01890f6f-6d6a-7cc0-98d2-000000000406",
+      providerId: "openai-compatible",
+      model: "review-model",
+      state: "queued",
+      createdAt: STARTED_AT,
+      terminalAt: null,
+      report: null
+    })
+    return withService(
+      (service, enqueueInput) =>
+        Effect.gen(function*() {
+          const recovered = yield* service.enqueue({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              providerId: PROVIDER_ID,
+              model: MODEL,
+              profile: "read-only"
+            }
+          })
+          assert.strictEqual(recovered.jobId, active.jobId)
+          assert.strictEqual(recovered.state, "queued")
+          assert.isNull(yield* Ref.get(enqueueInput))
+        }),
+      offlineRegistry,
+      Option.some(active)
+    )
+  })
 
   it.effect("atomically reuses one active exact-head review and permits a retry after terminal failure", () =>
     withRealService((service, persistence) =>

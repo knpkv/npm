@@ -127,7 +127,7 @@ describe("agent provider registry", () => {
           {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             models: [OPENAI_MODEL],
-            capabilities: ["release-chat", "pr-review"],
+            capabilities: ["release-chat"],
             health: "available"
           }
         ]

@@ -187,6 +187,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         return yield* new ApplicationInvalidRequest()
       }
       const target = derived
+      const existing = yield* currentFor(input.workspaceId, target)
+      if (existing._tag === "pending") return existing
       const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(input.request.providerId).pipe(
         Effect.mapError(unavailable)
       )
