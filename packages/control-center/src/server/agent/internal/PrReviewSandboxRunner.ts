@@ -25,6 +25,7 @@ const MAXIMUM_GIT_STDOUT_BYTES = 128
 const MAXIMUM_GIT_TREE_STDOUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_GIT_DIFF_STDOUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_REVIEW_TREE_ARCHIVE_BYTES = 64 * 1_024 * 1_024
+const MAXIMUM_PR_REVIEW_SANDBOX_RAW_OUTPUT_BYTES = 1_024 * 1_024
 const MAXIMUM_CHANGED_LINE_RANGES = 100_000
 const DEFAULT_MAXIMUM_DURATION_MILLIS = 120_000
 const MAXIMUM_DURATION_MILLIS = 300_000
@@ -137,14 +138,25 @@ const PrReviewSandboxEvidenceItem = Schema.Struct({
 
 const jsonEncoder = new TextEncoder()
 
-/** Bounded static-analysis evidence. Host-side A12 model execution consumes this internal envelope. */
-export const PrReviewSandboxEvidence = Schema.Struct({
+const PrReviewSandboxEvidenceEnvelope = {
   schemaVersion: Schema.Literal(1),
   headRevision: GitHeadRevision,
   tool: Schema.Struct({
     name: BoundedToolToken,
     version: BoundedToolToken
-  }),
+  })
+}
+
+const UnfilteredPrReviewSandboxEvidence = Schema.Struct({
+  ...PrReviewSandboxEvidenceEnvelope,
+  findings: Schema.Array(PrReviewSandboxEvidenceItem)
+})
+
+type UnfilteredPrReviewSandboxEvidence = typeof UnfilteredPrReviewSandboxEvidence.Type
+
+/** Bounded static-analysis evidence. Host-side A12 model execution consumes this internal envelope. */
+export const PrReviewSandboxEvidence = Schema.Struct({
+  ...PrReviewSandboxEvidenceEnvelope,
   findings: Schema.Array(PrReviewSandboxEvidenceItem).check(Schema.isMaxLength(100))
 }).check(
   Schema.makeFilter((value) => {
@@ -401,9 +413,9 @@ const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLi
 })
 
 const retainChangedLineEvidence = (
-  evidence: PrReviewSandboxEvidence,
+  evidence: UnfilteredPrReviewSandboxEvidence,
   ranges: ReadonlyArray<ChangedLineRange>
-): PrReviewSandboxEvidence => ({
+): UnfilteredPrReviewSandboxEvidence => ({
   ...evidence,
   findings: evidence.findings.filter((finding) =>
     ranges.some((range) =>
@@ -436,11 +448,12 @@ const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
 
 const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(function*(
   bytes: Uint8Array,
-  headRevision: string
+  headRevision: string,
+  changedLineRanges: ReadonlyArray<ChangedLineRange>
 ) {
   const text = yield* decodeUtf8(bytes, "output-rejected")
   const evidence = yield* Schema.decodeUnknownEffect(
-    Schema.fromJsonString(PrReviewSandboxEvidence),
+    Schema.fromJsonString(UnfilteredPrReviewSandboxEvidence),
     { onExcessProperty: "error" }
   )(text).pipe(
     Effect.mapError(() => sandboxError("output-rejected"))
@@ -448,7 +461,12 @@ const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(functio
   if (evidence.headRevision !== headRevision) {
     return yield* sandboxError("output-rejected")
   }
-  return evidence
+  return yield* Schema.decodeUnknownEffect(
+    PrReviewSandboxEvidence,
+    { onExcessProperty: "error" }
+  )(retainChangedLineEvidence(evidence, changedLineRanges)).pipe(
+    Effect.mapError(() => sandboxError("output-rejected"))
+  )
 })
 
 const containerName = (jobId: JobId, attemptId: string): string => `cc-pr-review-${jobId}-${attemptId}`
@@ -746,7 +764,8 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   image: string,
   analyzerEntrypoint: string,
   analyzerArguments: ReadonlyArray<string>,
-  maximumDurationMillis: number
+  maximumDurationMillis: number,
+  changedLineRanges: ReadonlyArray<ChangedLineRange>
 ) {
   const name = containerName(request.jobId, request.attemptId)
   const inspect = yield* executeControl(
@@ -794,7 +813,7 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
             spawner,
             OCI_EXECUTABLE,
             ["container", "start", "--attach", name],
-            MAXIMUM_PR_REVIEW_SANDBOX_EVIDENCE_BYTES
+            MAXIMUM_PR_REVIEW_SANDBOX_RAW_OUTPUT_BYTES
           ).pipe(
             Effect.timeoutOrElse({
               duration: Duration.millis(maximumDurationMillis),
@@ -815,7 +834,11 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   )
   const cleanupError = yield* Ref.get(cleanupFailure)
   if (cleanupError !== undefined) return yield* cleanupError
-  return yield* decodeEvidence(analysis.stdout, request.headRevision)
+  return yield* decodeEvidence(
+    analysis.stdout,
+    request.headRevision,
+    changedLineRanges
+  )
 })
 
 /** Process-isolated PR-review service exported only for explicit server composition. */
@@ -931,6 +954,8 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           spawner,
           GIT_EXECUTABLE,
           sourceGitArguments(canonicalSource, [
+            "-c",
+            "core.quotePath=false",
             "diff",
             "--unified=0",
             "--no-color",
@@ -960,9 +985,10 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           options.image,
           analyzerEntrypoint,
           analyzerArguments,
-          maximumDurationMillis
+          maximumDurationMillis,
+          changedLineRanges
         )
-        return retainChangedLineEvidence(evidence, changedLineRanges)
+        return evidence
       })
     )
   })

@@ -356,6 +356,8 @@ describe("PrReviewSandboxRunner", () => {
             [
               "git",
               sourceGitArguments(checkout, [
+                "-c",
+                "core.quotePath=false",
                 "diff",
                 "--unified=0",
                 "--no-color",
@@ -976,6 +978,76 @@ describe("PrReviewSandboxRunner", () => {
           assert.lengthOf(filtered.findings, 1)
           assert.strictEqual(filtered.findings[0]?.path, "src/example.ts")
           assert.strictEqual(filtered.findings[0]?.startLine, 21)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("retains changed evidence for an unquoted non-ASCII Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const unicodeDiff = [
+        "diff --git a/café.ts b/café.ts",
+        "--- a/café.ts",
+        "+++ b/café.ts",
+        "@@ -0,0 +1,1 @@",
+        "+export const café = true",
+        ""
+      ].join("\n")
+      const unicodeEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "café.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(unicodeEvidence),
+          CONTAINER_NAME,
+          unicodeDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "café.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("applies durable evidence caps after removing unchanged findings", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const noisyEvidence = {
+        ...evidence,
+        findings: [
+          {
+            ...evidence.findings[0],
+            message: "Changed finding ".repeat(30).trim()
+          },
+          ...Array.from({ length: 100 }, (_, index) => ({
+            ...evidence.findings[0],
+            path: `src/legacy-${index}.ts`,
+            message: `Unchanged legacy finding ${index} `.repeat(20).trim()
+          }))
+        ]
+      }
+      assert.isAbove(
+        encoder.encode(JSON.stringify(noisyEvidence)).byteLength,
+        MAXIMUM_PR_REVIEW_SANDBOX_EVIDENCE_BYTES
+      )
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(noisyEvidence)),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/example.ts")
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
