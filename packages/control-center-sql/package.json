@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/control-center-sql",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Typed SQL plans for Control Center persistence",
   "license": "MIT",
   "author": "knpkv",

@@ -1,5 +1,22 @@
 # @knpkv/codecommit-core
 
+## 0.10.0
+
+### Minor Changes
+
+- [#262](https://github.com/knpkv/npm/pull/262) [`dd0163e`](https://github.com/knpkv/npm/commit/dd0163ec002ae8abbce0b19df61431b3a4701314) Thanks [@konopkov](https://github.com/konopkov)! - Add immutable CodeCommit pull-request review actions with governed proposals, durable provider receipts, and non-replaying reconciliation.
+
+### Patch Changes
+
+- [#259](https://github.com/knpkv/npm/pull/259) [`7da266b`](https://github.com/knpkv/npm/commit/7da266bbb8cbf47f0f826274cc890384011e08e0) Thanks [@konopkov](https://github.com/konopkov)! - Make CodeCommit manual synchronization resilient to real provider responses.
+  Pull-request decoding now normalizes untrimmed titles and tolerates omitted
+  author identities instead of failing the whole stream, and schema-decode
+  failures are surfaced in logs with the offending field. Reduce the
+  GetPullRequest hydration fan-out to stay under CodeCommit's throttle ceiling,
+  and honor a bounded provider Retry-After when retrying rate-limited syncs.
+  Correct the manual-sync timestamp rendering and show an explicit in-progress
+  state in the services UI.
+
 ## 0.9.1
 
 ### Patch Changes

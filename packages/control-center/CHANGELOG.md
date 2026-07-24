@@ -1,5 +1,53 @@
 # @knpkv/control-center
 
+## 0.3.0
+
+### Minor Changes
+
+- [#256](https://github.com/knpkv/npm/pull/256) [`00ede59`](https://github.com/knpkv/npm/commit/00ede595e7521d334cdeb3101b2e30bdf2486cd7) Thanks [@konopkov](https://github.com/konopkov)! - Add the canonical read-first CodePipeline execution page with bounded stage and action detail, human attribution, delivery evidence, and proxy-only artifact metadata.
+
+- [#270](https://github.com/knpkv/npm/pull/270) [`f7ffb0f`](https://github.com/knpkv/npm/commit/f7ffb0f834bf368598019fe7b3c1e05029c8a88e) Thanks [@konopkov](https://github.com/konopkov)! - Add host-side pull-request review orchestration that sends base-to-head changed-line sandbox evidence to an explicitly selected prompt-only agent, validates structured findings against exact evidence anchors, derives stable finding identities before durable persistence, and keeps release-chat workers independent from opt-in sandbox configuration. Add task-scoped agent-job dispatch query inputs to the SQL package.
+
+- [#260](https://github.com/knpkv/npm/pull/260) [`38848a2`](https://github.com/knpkv/npm/commit/38848a2660aa98295f96d54d232e4cec15ea95a5) Thanks [@konopkov](https://github.com/konopkov)! - Add a read-first Clockify time-entry page with deterministic totals, source facts, people roles, and explicit Jira attribution states.
+
+- [#264](https://github.com/knpkv/npm/pull/264) [`1873b71`](https://github.com/knpkv/npm/commit/1873b71e9223db481531cbf549accbf73f1dfbe4) Thanks [@konopkov](https://github.com/konopkov)! - Add revision-inspected Jira proposals for reply fallbacks, fix-version assignments, and issue-link associations. Provider writes remain unnegotiated until atomic revision guards or explicit append-only authorization semantics are available.
+
+- [#258](https://github.com/knpkv/npm/pull/258) [`864d595`](https://github.com/knpkv/npm/commit/864d595f66135c47ca2d4b125137b6bee4cecfc2) Thanks [@konopkov](https://github.com/konopkov)! - Add the canonical read-first Confluence page with safely rendered content, revision history, human attribution, bounded attachment metadata, and explicit lazy and partial states.
+
+- [#262](https://github.com/knpkv/npm/pull/262) [`dd0163e`](https://github.com/knpkv/npm/commit/dd0163ec002ae8abbce0b19df61431b3a4701314) Thanks [@konopkov](https://github.com/konopkov)! - Add immutable CodeCommit pull-request review actions with governed proposals, durable provider receipts, and non-replaying reconciliation.
+
+- [#271](https://github.com/knpkv/npm/pull/271) [`30eda5a`](https://github.com/knpkv/npm/commit/30eda5a171909a1c3339a8d5307771a1f14401c7) Thanks [@konopkov](https://github.com/konopkov)! - Add authenticated exact-head pull-request review state and enqueue APIs, durable latest-review lookup, provider capability discovery, and a compact PR-page review surface for pending, failed, and completed findings. Split the agent API contract into its own lazy browser chunk so the generated client remains within its enforced artifact budget.
+
+- [#266](https://github.com/knpkv/npm/pull/266) [`d973d9a`](https://github.com/knpkv/npm/commit/d973d9a4bb9753f9a907f182c6b14a4528266765) Thanks [@konopkov](https://github.com/konopkov)! - Connect complete, immutable CodeCommit pull-request inventories and lazy bounded content reads to the authenticated rly diff workbench.
+
+- [#263](https://github.com/knpkv/npm/pull/263) [`87e2666`](https://github.com/knpkv/npm/commit/87e266624c2d82abe2757669726e55bcf04b4728) Thanks [@konopkov](https://github.com/konopkov)! - Add revision-inspected Jira comment proposals while keeping Jira provider writes unnegotiated. Comment execution, description replacement, and workflow transitions remain disabled until Jira exposes an atomic provider revision guard or the product adopts an explicit append-only authorization contract.
+
+- [#261](https://github.com/knpkv/npm/pull/261) [`1d28dff`](https://github.com/knpkv/npm/commit/1d28dffd133b81d0b4ffc69ff0aba55995dfe02d) Thanks [@konopkov](https://github.com/konopkov)! - Preserve exact workspace route context and restore the prior scroll position after canonical entity round trips.
+
+- [#265](https://github.com/knpkv/npm/pull/265) [`a974cdf`](https://github.com/knpkv/npm/commit/a974cdff01a50f75da1b9e33f1ddef0c97bb9b37) Thanks [@konopkov](https://github.com/konopkov)! - Add server-only Codex, Claude, and OpenAI-compatible agent provider administration with explicit durable model and read-only profile selection, bounded contextual prompts and remote deadlines, redacted health, fail-closed runtime routing, and intentional legacy-model reconciliation.
+
+- [#268](https://github.com/knpkv/npm/pull/268) [`b546479`](https://github.com/knpkv/npm/commit/b546479b794753ebb20a1b57af18916af13cc55e) Thanks [@konopkov](https://github.com/konopkov)! - Add an internal immutable pull-request static-analysis sandbox with digest-pinned images, non-root read-only networkless execution, bounded evidence, exact-head verification, and cancellation-safe container cleanup.
+
+- [#267](https://github.com/knpkv/npm/pull/267) [`e0d7e9a`](https://github.com/knpkv/npm/commit/e0d7e9a4153a97f3cedaac3b41e7e2790170317c) Thanks [@konopkov](https://github.com/konopkov)! - Add bounded, durable pull-request review task results with structured prevention proposals.
+
+- [#269](https://github.com/knpkv/npm/pull/269) [`2112142`](https://github.com/knpkv/npm/commit/21121422eb3a4f2be9d975ebb6015bc7381dd305) Thanks [@konopkov](https://github.com/konopkov)! - Render complete CodeCommit file changes as an on-demand split or unified line diff, and add a strict-budget rly diff entry backed by the Diffs parser.
+
+### Patch Changes
+
+- [#259](https://github.com/knpkv/npm/pull/259) [`7da266b`](https://github.com/knpkv/npm/commit/7da266bbb8cbf47f0f826274cc890384011e08e0) Thanks [@konopkov](https://github.com/konopkov)! - Make CodeCommit manual synchronization resilient to real provider responses.
+  Pull-request decoding now normalizes untrimmed titles and tolerates omitted
+  author identities instead of failing the whole stream, and schema-decode
+  failures are surfaced in logs with the offending field. Reduce the
+  GetPullRequest hydration fan-out to stay under CodeCommit's throttle ceiling,
+  and honor a bounded provider Retry-After when retrying rate-limited syncs.
+  Correct the manual-sync timestamp rendering and show an explicit in-progress
+  state in the services UI.
+- Updated dependencies [[`f7ffb0f`](https://github.com/knpkv/npm/commit/f7ffb0f834bf368598019fe7b3c1e05029c8a88e), [`38848a2`](https://github.com/knpkv/npm/commit/38848a2660aa98295f96d54d232e4cec15ea95a5), [`dd0163e`](https://github.com/knpkv/npm/commit/dd0163ec002ae8abbce0b19df61431b3a4701314), [`30eda5a`](https://github.com/knpkv/npm/commit/30eda5a171909a1c3339a8d5307771a1f14401c7), [`7da266b`](https://github.com/knpkv/npm/commit/7da266bbb8cbf47f0f826274cc890384011e08e0), [`d973d9a`](https://github.com/knpkv/npm/commit/d973d9a4bb9753f9a907f182c6b14a4528266765), [`e0d7e9a`](https://github.com/knpkv/npm/commit/e0d7e9a4153a97f3cedaac3b41e7e2790170317c), [`2112142`](https://github.com/knpkv/npm/commit/21121422eb3a4f2be9d975ebb6015bc7381dd305)]:
+  - @knpkv/control-center-sql@0.2.0
+  - @knpkv/clockify-api-client@1.0.3
+  - @knpkv/codecommit-core@0.10.0
+  - @knpkv/rly@0.2.0
+
 ## 0.2.0
 
 ### Minor Changes
