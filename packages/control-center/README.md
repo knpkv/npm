@@ -128,7 +128,10 @@ When both review variables are absent, the worker is disabled and no provider ad
 `pr-review`. Supplying only one variable, or enabling review without an OpenAI-compatible provider,
 fails startup. For each durable claim the worker resolves exactly one enabled CodeCommit connection,
 clones into a private data-root workspace, verifies the full base and head object IDs, checks out the
-head detached, and removes the checkout after the networkless read-only analyzer sandbox exits.
+head detached, enforces source byte and entry bounds, and removes the checkout after the networkless
+read-only analyzer sandbox exits. Startup removes only worker-owned crash leftovers. While a review is
+running, the worker renews its durable lease and observes cancellation; cancellation interrupts the
+scoped checkout, sandbox, and model work before durably completing the job as cancelled.
 `CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` controls the sandbox deadline and defaults to
 120,000 milliseconds.
 

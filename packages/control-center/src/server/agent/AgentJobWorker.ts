@@ -9,7 +9,7 @@ import {
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
-import type * as Duration from "effect/Duration"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
@@ -26,7 +26,7 @@ import {
   AgentLeaseToken,
   type ClaimedAgentJob
 } from "../persistence/repositories/agentJobModels.js"
-import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
+import { AgentJobRepository, type AgentJobRepositoryService } from "../persistence/repositories/agentJobRepository.js"
 import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
 import {
   AgentJobTaskExecutor,
@@ -165,22 +165,26 @@ const makeAgentJobWorker = Effect.gen(function*() {
     return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
   })
 
+  const cancelClaim = Effect.fn("AgentJobWorker.cancelClaim")(function*(claim: ClaimedAgentJob) {
+    const occurredAt = yield* DateTime.now
+    yield* jobs.appendEvent({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId,
+      attemptSequence: claim.attemptSequence,
+      leaseToken: claim.leaseToken,
+      event: { _tag: "completed", outcome: "cancelled", sessionRef: claim.sessionRef },
+      occurredAt
+    })
+    return {
+      _tag: "completed",
+      jobId: claim.jobId,
+      outcome: "cancelled"
+    } satisfies AgentJobWorkerRunResult
+  })
+
   const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
     if (claim.cancellationRequested) {
-      const occurredAt = yield* DateTime.now
-      yield* jobs.appendEvent({
-        workspaceId: claim.workspaceId,
-        jobId: claim.jobId,
-        attemptSequence: claim.attemptSequence,
-        leaseToken: claim.leaseToken,
-        event: { _tag: "completed", outcome: "cancelled", sessionRef: claim.sessionRef },
-        occurredAt
-      })
-      return {
-        _tag: "completed",
-        jobId: claim.jobId,
-        outcome: "cancelled"
-      } satisfies AgentJobWorkerRunResult
+      return yield* cancelClaim(claim)
     }
 
     const selected = yield* taskExecutor.execute(claim).pipe(Effect.result)
@@ -280,6 +284,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
 
   return (options: AgentJobWorkerOptions) => ({
     runOnce: Effect.fn("AgentJobWorker.runOnce")(function*(workspaceId: WorkspaceId) {
+      const leaseDuration = Duration.fromInputUnsafe(options.leaseDuration)
       const claimedAt = yield* DateTime.now
       const leaseToken = AgentLeaseToken.make(
         Encoding.encodeHex(yield* cryptoService.randomBytes(32))
@@ -290,11 +295,40 @@ const makeAgentJobWorker = Effect.gen(function*() {
         leaseOwner: options.leaseOwner,
         leaseToken,
         claimedAt,
-        leaseExpiresAt: DateTime.addDuration(claimedAt, options.leaseDuration)
+        leaseExpiresAt: DateTime.addDuration(claimedAt, leaseDuration)
       })
-      return Option.isNone(claim)
-        ? { _tag: "idle" } satisfies AgentJobWorkerRunResult
-        : yield* executeClaim(claim.value)
+      if (Option.isNone(claim)) return { _tag: "idle" } satisfies AgentJobWorkerRunResult
+      const claimed = claim.value
+      if (claimed.cancellationRequested) return yield* cancelClaim(claimed)
+      const heartbeatInterval = Duration.millis(
+        Math.max(1, Math.min(10_000, Math.floor(Duration.toMillis(leaseDuration) / 3)))
+      )
+      const awaitCancellation = (): Effect.Effect<
+        void,
+        Effect.Error<ReturnType<AgentJobRepositoryService["heartbeat"]>>
+      > =>
+        Effect.sleep(heartbeatInterval).pipe(
+          Effect.andThen(DateTime.now),
+          Effect.flatMap((renewedAt) =>
+            jobs.heartbeat({
+              workspaceId: claimed.workspaceId,
+              jobId: claimed.jobId,
+              attemptSequence: claimed.attemptSequence,
+              leaseToken: claimed.leaseToken,
+              leaseExpiresAt: DateTime.addDuration(renewedAt, leaseDuration)
+            })
+          ),
+          Effect.flatMap((cancellationRequested) =>
+            cancellationRequested ? Effect.void : Effect.suspend(awaitCancellation)
+          )
+        )
+      const observed = yield* Effect.raceFirst(
+        executeClaim(claimed).pipe(Effect.map(Option.some)),
+        awaitCancellation().pipe(Effect.as(Option.none<AgentJobWorkerRunResult>()))
+      )
+      return Option.isSome(observed)
+        ? observed.value
+        : yield* cancelClaim(claimed)
     })
   })
 })

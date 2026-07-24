@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
+import { Effect, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -113,10 +113,8 @@ describe("PR review source workspace", () => {
         })
         assert.deepStrictEqual(location, {
           repositoryUrl: "https://git-codecommit.eu-central-1.amazonaws.com/v1/repos/control-center",
-          environment: {
-            AWS_DEFAULT_REGION: "eu-central-1",
-            AWS_PROFILE: "review-profile"
-          }
+          profile: "review-profile",
+          region: "eu-central-1"
         })
       }).pipe(Effect.provide(Layer.merge(persistence, resolver)))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
@@ -144,7 +142,12 @@ describe("PR review source workspace", () => {
         const resolver = Layer.succeed(
           PrReviewSourceResolver,
           PrReviewSourceResolver.of({
-            resolve: () => Effect.succeed({ repositoryUrl: repository, environment: {} })
+            resolve: () =>
+              Effect.succeed({
+                repositoryUrl: repository,
+                profile: "unused-test-profile",
+                region: "eu-central-1"
+              })
           })
         )
         const sources = prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
@@ -175,6 +178,99 @@ describe("PR review source workspace", () => {
           headRevision
         )
         assert.isFalse(yield* fileSystem.exists(materializedRoot))
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("rejects an over-quota source before the callback and removes owned staging", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-quota-" })
+        const repository = path.join(fixture, "repository")
+        const workspaceRoot = path.join(fixture, "workspaces")
+        yield* fileSystem.makeDirectory(repository)
+        yield* fileSystem.makeDirectory(workspaceRoot)
+        yield* runGit(["-C", repository, "init", "--quiet"])
+        yield* fileSystem.writeFileString(path.join(repository, "large.txt"), "x".repeat(4_096))
+        yield* runGit(["-C", repository, "add", "--", "large.txt"])
+        yield* runGit(["-C", repository, "commit", "--quiet", "-m", "large"])
+        const revision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
+        const resolver = Layer.succeed(
+          PrReviewSourceResolver,
+          PrReviewSourceResolver.of({
+            resolve: () =>
+              Effect.succeed({
+                repositoryUrl: repository,
+                profile: "unused-test-profile",
+                region: "eu-central-1"
+              })
+          })
+        )
+        let callbackCalled = false
+        const observed = yield* Effect.gen(function*() {
+          const workspace = yield* PrReviewSourceWorkspace
+          return yield* workspace.withSource(
+            {
+              workspaceId: WORKSPACE_ID,
+              jobId: JOB_ID,
+              repository: "control-center",
+              baseRevision: revision,
+              headRevision: revision
+            },
+            () =>
+              Effect.sync(() => {
+                callbackCalled = true
+              })
+          )
+        }).pipe(
+          Effect.provide(
+            prReviewSourceWorkspaceLayer({
+              workspaceRoot,
+              maximumSourceBytes: 1_024,
+              maximumSourceEntries: 100
+            }).pipe(Layer.provide(resolver))
+          ),
+          Effect.result
+        )
+
+        assert.isTrue(Result.isFailure(observed))
+        if (Result.isFailure(observed)) {
+          assert.strictEqual(observed.failure.reason, "source-rejected")
+        }
+        assert.isFalse(callbackCalled)
+        assert.deepStrictEqual(yield* fileSystem.readDirectory(workspaceRoot), [])
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("reconciles owned crash leftovers without deleting unrelated directories", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-reconcile-" })
+        const workspaceRoot = path.join(fixture, "workspaces")
+        const staging = path.join(workspaceRoot, ".review-staging-crash")
+        const job = path.join(workspaceRoot, JOB_ID)
+        const unrelated = path.join(workspaceRoot, "operator-owned")
+        yield* fileSystem.makeDirectory(staging, { recursive: true })
+        yield* fileSystem.makeDirectory(job)
+        yield* fileSystem.makeDirectory(unrelated)
+        const resolver = Layer.succeed(
+          PrReviewSourceResolver,
+          PrReviewSourceResolver.of({
+            resolve: () => Effect.die("reconciliation must not resolve a source")
+          })
+        )
+        yield* Effect.gen(function*() {
+          yield* PrReviewSourceWorkspace
+        }).pipe(
+          Effect.provide(prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(Layer.provide(resolver)))
+        )
+
+        assert.isFalse(yield* fileSystem.exists(staging))
+        assert.isFalse(yield* fileSystem.exists(job))
+        assert.isTrue(yield* fileSystem.exists(unrelated))
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 })

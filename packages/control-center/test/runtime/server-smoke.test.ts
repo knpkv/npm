@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { AgentContextFingerprint, AgentProviderId } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -15,6 +16,7 @@ import * as TestClock from "effect/testing/TestClock"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { createServer } from "node:net"
 
 import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
@@ -24,6 +26,7 @@ import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EnvironmentId,
   GovernedActionId,
+  JobId,
   PersonId,
   PluginConnectionId,
   ReleaseId,
@@ -31,11 +34,22 @@ import {
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
+import type { PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { PrReviewSandboxRunner } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
+import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import {
+  Persistence,
+  persistenceLayer,
+  persistenceLayerFromDatabase
+} from "../../src/server/persistence/Persistence.js"
 import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
-import { AgentEventCursor, AgentThreadEventPageSize } from "../../src/server/persistence/repositories/agentJobModels.js"
+import {
+  AgentEventCursor,
+  AgentLeaseOwner,
+  AgentThreadEventPageSize
+} from "../../src/server/persistence/repositories/agentJobModels.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -706,6 +720,167 @@ describe("Control Center closed runtime", () => {
         durableThread.events.map(({ eventKind }) => eventKind),
         ["user-message", "job-queued"]
       )
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("crosses production review composition once and durably persists the provider result", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-review-" })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const bindConfig = yield* decodeBindConfig({ port })
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+        maxConnections: 1
+      }
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000081")
+      const subject = {
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: "1".repeat(40),
+        headRevision: "2".repeat(40)
+      } satisfies PrReviewSubject
+      const output = JSON.stringify({
+        schemaVersion: 1,
+        subject,
+        recommendation: "no-material-findings",
+        summary: "The immutable head has no material findings.",
+        findings: []
+      })
+      let providerCalls = 0
+      const providerClient = HttpClient.make((request) => {
+        providerCalls += 1
+        return Effect.succeed(
+          HttpClientResponse.fromWeb(
+            request,
+            new Response(
+              JSON.stringify({
+                id: "chatcmpl_runtime_review",
+                object: "chat.completion",
+                model: "review-model",
+                created: 1,
+                choices: [{
+                  index: 0,
+                  finish_reason: "stop",
+                  message: { role: "assistant", content: output }
+                }],
+                usage: {
+                  prompt_tokens: 8,
+                  completion_tokens: 2,
+                  total_tokens: 10
+                }
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              }
+            )
+          )
+        )
+      })
+      const seedDatabase = databaseLayer(persistenceConfig)
+      const seedPersistence = persistenceLayerFromDatabase(persistenceConfig).pipe(
+        Layer.provideMerge(seedDatabase)
+      )
+      yield* Effect.gen(function*() {
+        const database = yield* Database
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Runtime review"),
+          createdAt: FIXTURE_TIME
+        })
+        yield* database.sql`INSERT INTO releases (
+          workspace_id, release_id, current_revision, created_at, updated_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${RELEASE_ID}, 1, ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+        )`
+        yield* persistence.agentJobs.enqueue({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          jobId,
+          providerId: AgentProviderId.make("openai-compatible"),
+          model: "review-model",
+          access: "read-only",
+          userPrompt: "Review the immutable pull request.",
+          prompt: "Review the immutable pull request.",
+          contextFingerprint: AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`),
+          subjectRevision: subject.headRevision,
+          task: { _tag: "pr-review", subject },
+          createdAt: FIXTURE_TIME
+        })
+      }).pipe(
+        Effect.provide(Layer.merge(
+          seedPersistence,
+          seedDatabase
+        ))
+      )
+
+      let sourceUses = 0
+      let sandboxCalls = 0
+      const sourceWorkspace = PrReviewSourceWorkspace.of({
+        withSource: (_request, use) => {
+          sourceUses += 1
+          return use("/deterministic-review-source")
+        }
+      })
+      const sandboxRunner = PrReviewSandboxRunner.of({
+        run: () => {
+          sandboxCalls += 1
+          return Effect.succeed({
+            schemaVersion: 1,
+            headRevision: subject.headRevision,
+            tool: { name: "eslint", version: "10.7.0" },
+            findings: []
+          })
+        }
+      })
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        outboundHttpClient: providerClient,
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: [],
+          openAiCompatible: {
+            apiUrl: "https://provider-fixture.example/v1",
+            model: AgentModelId.make("review-model")
+          }
+        },
+        prReviewWorker: {
+          workspaceId: WORKSPACE_ID,
+          workspaceRoot: path.join(dataRoot, "review-workspaces"),
+          image: `example.invalid/review@sha256:${"a".repeat(64)}`,
+          analyzerCommand: ["review-analyzer"],
+          leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
+          runOnceBeforeSupervision: true,
+          sourceWorkspace,
+          sandboxRunner
+        }
+      }))
+      const persistence = Context.get(runtime, Persistence)
+      const latest = yield* persistence.agentJobs.latestReview({
+        workspaceId: WORKSPACE_ID,
+        subject
+      })
+
+      assert.isTrue(Option.isSome(latest))
+      if (Option.isSome(latest)) {
+        assert.strictEqual(latest.value.report?.recommendation, "no-material-findings")
+      }
+      assert.strictEqual(sourceUses, 1)
+      assert.strictEqual(sandboxCalls, 1)
+      assert.strictEqual(providerCalls, 1)
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

@@ -4,16 +4,21 @@ import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import type * as Path from "effect/Path"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
 import { type AgentJobWorkerOptions, agentJobWorkerWithPrReviewLayer } from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
-import { type PrReviewSandboxError, prReviewSandboxRunnerLayer } from "../agent/internal/PrReviewSandboxRunner.js"
+import {
+  type PrReviewSandboxError,
+  PrReviewSandboxRunner,
+  prReviewSandboxRunnerLayer
+} from "../agent/internal/PrReviewSandboxRunner.js"
 import {
   codeCommitPrReviewSourceResolverLayer,
   type PrReviewSourceError,
+  PrReviewSourceWorkspace,
   prReviewSourceWorkspaceLayer
 } from "../agent/internal/PrReviewSourceWorkspace.js"
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
@@ -118,8 +123,14 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly leaseDuration?: Duration.Input
   readonly idlePollInterval?: Duration.Input
   readonly failurePollInterval?: Duration.Input
+  /** Deterministic composition-test hook; production omits it. @internal */
+  readonly runOnceBeforeSupervision?: boolean
   readonly maximumSandboxDurationMillis?: number
   readonly maximumSourceDuration?: Duration.Input
+  /** Deterministic composition seam; production omits it. @internal */
+  readonly sourceWorkspace?: PrReviewSourceWorkspace["Service"]
+  /** Deterministic composition seam; production omits it. @internal */
+  readonly sandboxRunner?: PrReviewSandboxRunner["Service"]
 }
 
 /** Runtime construction settings after security and persistence decoding. */
@@ -132,6 +143,8 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly firstPartyPluginRuntime?: boolean | undefined
   readonly secretRoot: SecretRoot
   readonly staticAssets: StaticAssetStoreOptions
+  /** Deterministic outbound transport seam; production omits it. @internal */
+  readonly outboundHttpClient?: HttpClient.HttpClient
   readonly bootstrap?: ControlCenterBootstrapOptions | null
   readonly releaseSynchronization?: ReleaseSynchronizationStartupOptions | null
   readonly releaseAgent?: ReleaseAgentRuntimeOptions | null
@@ -321,23 +334,26 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ? Layer.empty
     : (() => {
       const configured = options.prReviewWorker
-      const sourceResolver = codeCommitPrReviewSourceResolverLayer.pipe(
-        Layer.provide(persistence)
-      )
-      const sourceWorkspace = prReviewSourceWorkspaceLayer({
-        workspaceRoot: configured.workspaceRoot,
-        ...(configured.maximumSourceDuration === undefined
-          ? {}
-          : { maximumDuration: configured.maximumSourceDuration })
-      }).pipe(Layer.provide(sourceResolver))
-      const sandbox = prReviewSandboxRunnerLayer({
-        workspaceRoot: configured.workspaceRoot,
-        image: configured.image,
-        analyzerCommand: configured.analyzerCommand,
-        ...(configured.maximumSandboxDurationMillis === undefined
-          ? {}
-          : { maximumDurationMillis: configured.maximumSandboxDurationMillis })
-      })
+      const sourceWorkspace = configured.sourceWorkspace === undefined
+        ? prReviewSourceWorkspaceLayer({
+          workspaceRoot: configured.workspaceRoot,
+          ...(configured.maximumSourceDuration === undefined
+            ? {}
+            : { maximumDuration: configured.maximumSourceDuration })
+        }).pipe(
+          Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence)))
+        )
+        : Layer.succeed(PrReviewSourceWorkspace, configured.sourceWorkspace)
+      const sandbox = configured.sandboxRunner === undefined
+        ? prReviewSandboxRunnerLayer({
+          workspaceRoot: configured.workspaceRoot,
+          image: configured.image,
+          analyzerCommand: configured.analyzerCommand,
+          ...(configured.maximumSandboxDurationMillis === undefined
+            ? {}
+            : { maximumDurationMillis: configured.maximumSandboxDurationMillis })
+        })
+        : Layer.succeed(PrReviewSandboxRunner, configured.sandboxRunner)
       const repository = AgentJobRepository.layer.pipe(Layer.provide(database))
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,
@@ -356,7 +372,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           : { idlePollInterval: configured.idlePollInterval }),
         ...(configured.failurePollInterval === undefined
           ? {}
-          : { failurePollInterval: configured.failurePollInterval })
+          : { failurePollInterval: configured.failurePollInterval }),
+        ...(configured.runOnceBeforeSupervision === undefined
+          ? {}
+          : { runOnceBeforeSupervision: configured.runOnceBeforeSupervision })
       }).pipe(Layer.provide(worker))
     })()
   const runtimeServices = Layer.mergeAll(
@@ -407,12 +426,15 @@ const makeServer = <ApplicationError = never, ApplicationRequirements = never>(
     Layer.provide(nodeSecretPlatformLayer)
   )
   const transport = makeNodeTransportLayer(options.bindConfig)
+  const outboundHttpClient = options.outboundHttpClient === undefined
+    ? nodeOutboundHttpClientLayer
+    : Layer.succeed(HttpClient.HttpClient, options.outboundHttpClient)
   const application = makeApplication(options)
   const server = HttpRouter.serve(application.application, { disableLogger: true }).pipe(
     Layer.provide(application.runtimeServices),
     Layer.provide(transport),
     Layer.provide(secrets),
-    Layer.provide(nodeOutboundHttpClientLayer),
+    Layer.provide(outboundHttpClient),
     Layer.provideMerge(application.lifecycle)
   )
   return server

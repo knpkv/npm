@@ -22,6 +22,9 @@ const GIT_EXECUTABLE = "git"
 const STAGING_PREFIX = ".review-staging-"
 const MAXIMUM_PROCESS_OUTPUT_BYTES = 8_192
 const DEFAULT_MAXIMUM_DURATION = Duration.minutes(2)
+const DEFAULT_MAXIMUM_SOURCE_BYTES = 256 * 1_024 * 1_024
+const DEFAULT_MAXIMUM_SOURCE_ENTRIES = 1_000_000
+const SOURCE_QUOTA_POLL_INTERVAL = Duration.millis(25)
 
 const GitRevision = Schema.String.check(
   Schema.isPattern(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u, {
@@ -74,7 +77,8 @@ export interface PrReviewSourceRequest {
 /** Server-owned clone location. Credentials stay in the child-process environment. */
 export interface PrReviewSourceLocation {
   readonly repositoryUrl: string
-  readonly environment: Readonly<Record<string, string>>
+  readonly profile: string
+  readonly region: string
 }
 
 /** Stable source failures that retain neither paths nor provider diagnostics. */
@@ -86,6 +90,7 @@ export class PrReviewSourceError extends Schema.TaggedErrorClass<PrReviewSourceE
       "invalid-request",
       "connection-unavailable",
       "source-unavailable",
+      "source-rejected",
       "revision-mismatch",
       "cleanup-failed"
     ])
@@ -150,10 +155,8 @@ const makeCodeCommitResolver = Effect.gen(function*() {
       return {
         repositoryUrl:
           `https://git-codecommit.${configuration.region}.amazonaws.com/v1/repos/${configuration.repositoryName}`,
-        environment: {
-          AWS_DEFAULT_REGION: configuration.region,
-          AWS_PROFILE: configuration.profile
-        }
+        profile: configuration.profile,
+        region: configuration.region
       } satisfies PrReviewSourceLocation
     })
   })
@@ -199,15 +202,19 @@ const collectBounded = (
 
 const command = (
   args: ReadonlyArray<string>,
-  environment: Readonly<Record<string, string>>,
+  location: PrReviewSourceLocation,
   platformEnvironment: Readonly<Record<string, string>>
 ): ChildProcess.StandardCommand =>
   ChildProcess.make(GIT_EXECUTABLE, args, {
     env: {
       ...platformEnvironment,
-      ...environment,
+      AWS_DEFAULT_REGION: location.region,
+      AWS_PROFILE: location.profile,
       GCM_INTERACTIVE: "Never",
+      GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_NOSYSTEM: "1",
+      GIT_LFS_SKIP_SMUDGE: "1",
+      GIT_OPTIONAL_LOCKS: "0",
       GIT_TERMINAL_PROMPT: "0",
       LANG: "C",
       LC_ALL: "C"
@@ -223,13 +230,13 @@ const command = (
 const execute = Effect.fn("PrReviewSourceWorkspace.execute")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   args: ReadonlyArray<string>,
-  environment: Readonly<Record<string, string>>,
+  location: PrReviewSourceLocation,
   platformEnvironment: Readonly<Record<string, string>>,
   maximumDuration: Duration.Duration
 ) {
   return yield* Effect.scoped(
     Effect.gen(function*() {
-      const handle = yield* spawner.spawn(command(args, environment, platformEnvironment)).pipe(
+      const handle = yield* spawner.spawn(command(args, location, platformEnvironment)).pipe(
         Effect.mapError(() => sourceError("source-unavailable"))
       )
       const { exitCode, stdout } = yield* Effect.all({
@@ -266,6 +273,8 @@ const successful = (result: ProcessResult): boolean => result.exitCode === Child
 export interface PrReviewSourceWorkspaceOptions {
   readonly workspaceRoot: string
   readonly maximumDuration?: Duration.Input
+  readonly maximumSourceBytes?: number
+  readonly maximumSourceEntries?: number
 }
 
 /** Scoped source owner: the callback runs only while the exact checkout exists. */
@@ -302,11 +311,86 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
   )
   if (canonicalRoot !== configuredRoot) return yield* sourceError("invalid-configuration")
   const maximumDuration = Duration.fromInputUnsafe(options.maximumDuration ?? DEFAULT_MAXIMUM_DURATION)
+  const maximumSourceBytes = options.maximumSourceBytes ?? DEFAULT_MAXIMUM_SOURCE_BYTES
+  const maximumSourceEntries = options.maximumSourceEntries ?? DEFAULT_MAXIMUM_SOURCE_ENTRIES
+  if (
+    !Number.isSafeInteger(maximumSourceBytes) ||
+    maximumSourceBytes < 1 ||
+    !Number.isSafeInteger(maximumSourceEntries) ||
+    maximumSourceEntries < 1
+  ) {
+    return yield* sourceError("invalid-configuration")
+  }
 
   const removeSource = (sourceRoot: string) =>
     fileSystem.remove(sourceRoot, { force: true, recursive: true }).pipe(
       Effect.mapError(() => sourceError("cleanup-failed"))
     )
+
+  const inspectSourceQuota = Effect.fn("PrReviewSourceWorkspace.inspectSourceQuota")(function*(
+    sourceRoot: string
+  ) {
+    const pending = [sourceRoot]
+    let bytes = 0
+    let entries = 0
+    while (pending.length > 0) {
+      const directory = pending.pop()
+      if (directory === undefined) break
+      for (
+        const entry of yield* fileSystem.readDirectory(directory).pipe(
+          Effect.mapError(() => sourceError("source-unavailable"))
+        )
+      ) {
+        const child = path.join(directory, entry)
+        const canonicalChild = yield* fileSystem.realPath(child).pipe(
+          Effect.mapError(() => sourceError("source-unavailable"))
+        )
+        const relative = path.relative(sourceRoot, canonicalChild)
+        if (
+          relative === ".." ||
+          relative.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(relative)
+        ) {
+          return yield* sourceError("source-rejected")
+        }
+        const info = yield* fileSystem.stat(canonicalChild).pipe(
+          Effect.mapError(() => sourceError("source-unavailable"))
+        )
+        entries += 1
+        if (entries > maximumSourceEntries) return yield* sourceError("source-rejected")
+        if (info.type === "Directory") {
+          pending.push(canonicalChild)
+        } else {
+          bytes += Number(info.size)
+          if (bytes > maximumSourceBytes) return yield* sourceError("source-rejected")
+        }
+      }
+    }
+  })
+
+  const monitorSourceQuota = (sourceRoot: string) =>
+    Effect.forever(
+      Effect.sleep(SOURCE_QUOTA_POLL_INTERVAL).pipe(
+        Effect.andThen(
+          fileSystem.exists(sourceRoot).pipe(
+            Effect.mapError(() => sourceError("source-unavailable")),
+            Effect.flatMap((exists) => exists ? inspectSourceQuota(sourceRoot) : Effect.void),
+            Effect.catchTag("PrReviewSourceError", (failure) =>
+              failure.reason === "source-unavailable" ? Effect.void : Effect.fail(failure))
+          )
+        )
+      )
+    )
+
+  for (
+    const entry of yield* fileSystem.readDirectory(canonicalRoot).pipe(
+      Effect.mapError(() => sourceError("cleanup-failed"))
+    )
+  ) {
+    if (entry.startsWith(STAGING_PREFIX) || Schema.is(JobId)(entry)) {
+      yield* removeSource(path.join(canonicalRoot, entry))
+    }
+  }
 
   return PrReviewSourceWorkspace.of({
     withSource: (unknownRequest, use) =>
@@ -322,6 +406,29 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
           return yield* sourceError("invalid-request")
         }
         const location = yield* resolver.resolve(request)
+        const runGit = (args: ReadonlyArray<string>, monitoredRoot?: string) => {
+          const process = execute(
+            spawner,
+            [
+              "--no-replace-objects",
+              "--no-optional-locks",
+              "-c",
+              "core.fsmonitor=false",
+              "-c",
+              "core.hooksPath=/dev/null",
+              ...args
+            ],
+            location,
+            platformEnvironment,
+            maximumDuration
+          )
+          return monitoredRoot === undefined
+            ? process
+            : Effect.raceFirst(
+              process,
+              monitorSourceQuota(monitoredRoot)
+            )
+        }
         const existing = yield* fileSystem.exists(sourceRoot).pipe(
           Effect.mapError(() => sourceError("source-unavailable"))
         )
@@ -339,8 +446,7 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
                 (stagingRoot) =>
                   Effect.gen(function*() {
                     const stagedSource = path.join(stagingRoot, "source")
-                    const cloned = yield* execute(
-                      spawner,
+                    const cloned = yield* runGit(
                       [
                         "-c",
                         "credential.helper=!aws codecommit credential-helper $@",
@@ -354,43 +460,31 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
                         location.repositoryUrl,
                         stagedSource
                       ],
-                      location.environment,
-                      platformEnvironment,
-                      maximumDuration
+                      stagedSource
                     )
                     if (!successful(cloned)) return yield* sourceError("source-unavailable")
+                    yield* inspectSourceQuota(stagedSource)
 
-                    const base = yield* execute(
-                      spawner,
+                    const base = yield* runGit(
                       ["-C", stagedSource, "cat-file", "-e", `${request.baseRevision}^{commit}`],
-                      location.environment,
-                      platformEnvironment,
-                      maximumDuration
+                      stagedSource
                     )
-                    const head = yield* execute(
-                      spawner,
+                    const head = yield* runGit(
                       ["-C", stagedSource, "cat-file", "-e", `${request.headRevision}^{commit}`],
-                      location.environment,
-                      platformEnvironment,
-                      maximumDuration
+                      stagedSource
                     )
                     if (!successful(base) || !successful(head)) {
                       return yield* sourceError("source-unavailable")
                     }
-                    const checkedOut = yield* execute(
-                      spawner,
+                    const checkedOut = yield* runGit(
                       ["-C", stagedSource, "checkout", "--quiet", "--detach", "--force", request.headRevision],
-                      location.environment,
-                      platformEnvironment,
-                      maximumDuration
+                      stagedSource
                     )
                     if (!successful(checkedOut)) return yield* sourceError("source-unavailable")
-                    const actualHead = yield* execute(
-                      spawner,
+                    yield* inspectSourceQuota(stagedSource)
+                    const actualHead = yield* runGit(
                       ["-C", stagedSource, "rev-parse", "--verify", "HEAD"],
-                      location.environment,
-                      platformEnvironment,
-                      maximumDuration
+                      stagedSource
                     )
                     if (!successful(actualHead) || decodedLine(actualHead.stdout) !== request.headRevision) {
                       return yield* sourceError("revision-mismatch")

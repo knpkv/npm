@@ -167,6 +167,14 @@ const RequestAgentCancellationInput = Schema.Struct({
   requestedAt: UtcTimestamp
 })
 
+const HeartbeatAgentJobInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken,
+  leaseExpiresAt: UtcTimestamp
+})
+
 const AgentThreadAfterInput = Schema.Struct({
   workspaceId: WorkspaceId,
   releaseId: ReleaseId,
@@ -895,6 +903,54 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         )
         .pipe(mapPersistenceOperation("agent-job.claim-next"))
+    }),
+
+    heartbeat: Effect.fn("AgentJobRepository.heartbeat")(function*(
+      input: typeof HeartbeatAgentJobInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(Schema.toType(HeartbeatAgentJobInput))(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const renewedAt = yield* DateTime.now
+          if (DateTime.Order(renewedAt, request.leaseExpiresAt) >= 0) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          const job = yield* getJob(request.workspaceId, request.jobId)
+          if (job.state !== "running" && job.state !== "cancel-requested") {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          yield* validateLease({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            attemptSequence: request.attemptSequence,
+            leaseToken: request.leaseToken,
+            observedAt: renewedAt
+          })
+          yield* sql`UPDATE agent_job_leases
+            SET last_renewed_at = ${encodeTimestamp(renewedAt)},
+                lease_expires_at = ${encodeTimestamp(request.leaseExpiresAt)}
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND attempt_sequence = ${request.attemptSequence}
+              AND lease_token = ${request.leaseToken}`
+          if ((yield* readChanges(sql)) !== 1) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "lease-lost"
+            })
+          }
+          return job.state === "cancel-requested"
+        })
+      ).pipe(mapPersistenceOperation("agent-job.heartbeat"))
     }),
 
     appendEvent: Effect.fn("AgentJobRepository.appendEvent")(function*(input: typeof AppendAgentEventInput.Type) {
