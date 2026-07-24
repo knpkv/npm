@@ -117,6 +117,7 @@ const claimReview = Effect.gen(function*() {
   yield* TestClock.setTime(DateTime.toEpochMillis(T1))
   const claimed = yield* jobs.claimNext({
     workspaceId: WORKSPACE_ID,
+    taskTags: ["pr-review"],
     leaseOwner: LEASE_OWNER,
     leaseToken: LEASE_TOKEN,
     claimedAt: T1,
@@ -409,6 +410,7 @@ describe("agent job review results", () => {
         const claim = yield* jobs
           .claimNext({
             workspaceId: WORKSPACE_ID,
+            taskTags: ["release-chat", "pr-review"],
             leaseOwner: LEASE_OWNER,
             leaseToken: LEASE_TOKEN,
             claimedAt: T1,

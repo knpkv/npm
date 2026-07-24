@@ -11,7 +11,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as Stream from "effect/Stream"
 
-import type { ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
+import type { AgentJobTaskTag, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { PrReviewTaskExecutor } from "./PrReviewTaskExecutor.js"
 
@@ -28,6 +28,7 @@ export type AgentJobTaskExecution =
 
 /** Server-owned task executor contract hidden behind the durable worker. */
 export interface AgentJobTaskExecutorService {
+  readonly taskTags: ReadonlyArray<AgentJobTaskTag>
   readonly execute: (claim: ClaimedAgentJob) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError>
 }
 
@@ -38,14 +39,14 @@ export class AgentJobTaskExecutor extends Context.Service<AgentJobTaskExecutor, 
 
 /** Provide one task executor implementation without exposing it from the package entry point. */
 export const agentJobTaskExecutorLayer = (
-  execute: AgentJobTaskExecutorService["execute"]
-): Layer.Layer<AgentJobTaskExecutor> => Layer.succeed(AgentJobTaskExecutor, AgentJobTaskExecutor.of({ execute }))
+  service: AgentJobTaskExecutorService
+): Layer.Layer<AgentJobTaskExecutor> => Layer.succeed(AgentJobTaskExecutor, AgentJobTaskExecutor.of(service))
 
 /**
  * Existing release-chat executor.
  *
- * The production PR-review branch deliberately fails closed until the later
- * immutable sandbox slice provides its own executor.
+ * Its worker claim is scoped to release chat. The executor also fails closed
+ * if a review claim is ever routed here outside the worker boundary.
  */
 export const releaseChatTaskExecutorLayer: Layer.Layer<AgentJobTaskExecutor, never, AgentRuntimeRegistry> = Layer
   .effect(
@@ -53,6 +54,7 @@ export const releaseChatTaskExecutorLayer: Layer.Layer<AgentJobTaskExecutor, nev
     Effect.gen(function*() {
       const runtimes = yield* AgentRuntimeRegistry
       return AgentJobTaskExecutor.of({
+        taskTags: ["release-chat"],
         execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim) {
           if (claim.context.task._tag === "pr-review") {
             return yield* new AgentProviderError({
@@ -107,6 +109,7 @@ export const reviewEnabledTaskExecutorLayer: Layer.Layer<
     const reviews = yield* PrReviewTaskExecutor
     const runtimes = yield* AgentRuntimeRegistry
     return AgentJobTaskExecutor.of({
+      taskTags: ["release-chat", "pr-review"],
       execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim) {
         if (claim.context.task._tag === "pr-review") {
           return {

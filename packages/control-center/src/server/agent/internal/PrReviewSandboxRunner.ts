@@ -392,6 +392,53 @@ const hasAsciiPrefix = (
   return true
 }
 
+const gitQuotedEscapes: Readonly<Record<string, string>> = {
+  a: "\u0007",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\u000b",
+  "\\": "\\",
+  "\"": "\""
+}
+
+const decodeGitHeaderPath = (header: string): string | undefined => {
+  const encoded = header.slice(4)
+  if (!encoded.startsWith("\"")) {
+    return encoded.startsWith("b/") ? encoded.slice(2) : undefined
+  }
+  if (!encoded.endsWith("\"")) return undefined
+  let decoded = ""
+  for (let index = 1; index < encoded.length - 1; index++) {
+    const character = encoded[index]
+    if (character !== "\\") {
+      if (character === "\"") return undefined
+      decoded += character
+      continue
+    }
+    const escaped = encoded[index + 1]
+    if (escaped === undefined) return undefined
+    const replacement = gitQuotedEscapes[escaped]
+    if (replacement !== undefined) {
+      decoded += replacement
+      index += 1
+      continue
+    }
+    if (!/^[0-7]$/u.test(escaped)) return undefined
+    let octal = escaped
+    while (octal.length < 3 && /^[0-7]$/u.test(encoded[index + octal.length + 1] ?? "")) {
+      octal += encoded[index + octal.length + 1]
+    }
+    const byte = Number.parseInt(octal, 8)
+    if (byte > 0xff) return undefined
+    decoded += String.fromCharCode(byte)
+    index += octal.length
+  }
+  return decoded.startsWith("b/") ? decoded.slice(2) : undefined
+}
+
 const indexChangedLineRanges = (
   ranges: ReadonlyArray<ChangedLineRange>
 ): ChangedLineIndex => {
@@ -449,7 +496,7 @@ const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLi
       continue
     }
     if (headerState === "awaiting-new" && line.startsWith("+++ ")) {
-      const candidate = line.startsWith("+++ b/") ? line.slice(6) : undefined
+      const candidate = decodeGitHeaderPath(line)
       path = candidate !== undefined && Schema.is(PrReviewPath)(candidate)
         ? candidate
         : undefined

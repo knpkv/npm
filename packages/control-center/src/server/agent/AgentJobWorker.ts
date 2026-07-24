@@ -285,6 +285,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
       )
       const claim = yield* jobs.claimNext({
         workspaceId,
+        taskTags: taskExecutor.taskTags,
         leaseOwner: options.leaseOwner,
         leaseToken,
         claimedAt,

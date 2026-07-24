@@ -700,6 +700,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             const dispatch = renderAgentJobDispatchCandidatesQuery({
               workspaceId: request.workspaceId,
               observedAt,
+              taskTags: request.taskTags,
               limit: DISPATCH_CANDIDATE_LIMIT
             })
             const candidateRows = yield* sql.unsafe<Record<string, unknown>>(dispatch.sql, [...dispatch.params])
@@ -719,6 +720,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 candidate.taskContextJson,
                 candidate.taskContextDigest
               )
+              if (!request.taskTags.includes(task._tag)) continue
               if (DateTime.Order(claimedAt, request.leaseExpiresAt) >= 0) {
                 return yield* new AgentJobInputError({
                   workspaceId: request.workspaceId,

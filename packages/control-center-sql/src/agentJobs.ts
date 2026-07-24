@@ -10,6 +10,7 @@ export type ClaimableAgentJobState = "cancel-requested" | "queued" | "running"
 export interface AgentJobDispatchCandidatesQueryInput {
   readonly limit: number
   readonly observedAt: string
+  readonly taskTags: ReadonlyArray<"pr-review" | "release-chat">
   readonly workspaceId: string
 }
 
@@ -137,6 +138,14 @@ const latestAttemptSequenceForJob = () =>
 export const renderAgentJobDispatchCandidatesQuery = (
   input: AgentJobDispatchCandidatesQueryInput
 ): RenderedSql => {
+  const releaseChat = Query.like(agentJobs.taskContextJson, "{\"_tag\":\"release-chat\"%")
+  const prReview = Query.like(agentJobs.taskContextJson, "{\"_tag\":\"pr-review\"%")
+  const taskMatches = input.taskTags.includes("release-chat") &&
+      input.taskTags.includes("pr-review")
+    ? Query.or(releaseChat, prReview)
+    : input.taskTags.includes("release-chat")
+    ? releaseChat
+    : prReview
   const plan = Query.select({
     ...jobProjection,
     attemptSequence: Query.scalar(latestAttemptSequenceForJob())
@@ -145,6 +154,7 @@ export const renderAgentJobDispatchCandidatesQuery = (
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
+        taskMatches,
         Query.or(
           Query.eq(agentJobs.state, "queued"),
           Query.and(

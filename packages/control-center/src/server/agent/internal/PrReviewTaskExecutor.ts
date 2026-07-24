@@ -41,6 +41,11 @@ import {
 const MAXIMUM_REVIEW_PROMPT_BYTES = 65_536
 const FINDING_ID_PREFIX = "sha256:"
 const evidenceToken = (index: number): string => `evidence-${String(index + 1)}`
+const promptJson = (value: unknown): string =>
+  JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
 
 interface ReviewOutputAccumulator {
   readonly completed: Extract<AgentRuntimeEvent, { readonly _tag: "completed" }> | null
@@ -141,11 +146,11 @@ Control Center replaces each evidence findingId with a stable immutable identity
 after validating the complete anchor.
 
 <immutable-subject-json>
-${JSON.stringify(subject)}
+${promptJson(subject)}
 </immutable-subject-json>
 
 <sandbox-evidence-json>
-${JSON.stringify(addressedEvidence)}
+${promptJson(addressedEvidence)}
 </sandbox-evidence-json>
 `.trim()
 }

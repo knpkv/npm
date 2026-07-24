@@ -300,7 +300,7 @@ const withTaskExecutor = <Success, Failure>(
     const worker = agentJobWorkerWithTaskExecutorLayer({
       leaseOwner: LEASE_OWNER,
       leaseDuration: "5 minutes"
-    }).pipe(Layer.provide(agentJobTaskExecutorLayer(executor.execute)), Layer.provideMerge(jobs))
+    }).pipe(Layer.provide(agentJobTaskExecutorLayer(executor)), Layer.provideMerge(jobs))
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -308,6 +308,7 @@ describe("agent job worker", () => {
   it.effect("persists one sanitized PR review report without durable raw model chunks", () => {
     const claims = new Array<Parameters<AgentJobTaskExecutorService["execute"]>[0]>()
     const executor: AgentJobTaskExecutorService = {
+      taskTags: ["pr-review"],
       execute: (claim) => {
         claims.push(claim)
         return Effect.succeed({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
@@ -341,6 +342,7 @@ describe("agent job worker", () => {
   it.effect("terminally rejects malformed review output without persisting its raw canary", () => {
     const rawCanary = "RAW_MODEL_CANARY_MUST_NOT_PERSIST"
     const executor: AgentJobTaskExecutorService = {
+      taskTags: ["pr-review"],
       execute: () =>
         Effect.succeed(
           {
@@ -414,18 +416,49 @@ describe("agent job worker", () => {
           return reviewEvidence
         })
     })
+    const defaultRegistry = agentRuntimeRegistryLayer({
+      catalog: () => Effect.succeed({ providers: [] }),
+      select: ({ model, providerId }) =>
+        providerId === PROVIDER_ID
+          ? Effect.succeed({
+            model: AgentModelId.make(model ?? "deterministic-model"),
+            runtime
+          })
+          : Effect.fail(
+            new AgentProviderError({
+              providerId,
+              phase: "configuration",
+              message: "No deterministic provider configured.",
+              retryable: false
+            })
+          )
+    })
     return withReviewWorker(
       runtime,
       sandbox,
       Effect.gen(function*() {
         const jobs = yield* AgentJobRepository
+        const reviewWorker = yield* AgentJobWorker
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
         yield* enqueueReview
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const defaultWorker = agentJobWorkerLayer({
+          leaseOwner: LEASE_OWNER,
+          leaseDuration: "5 minutes"
+        }).pipe(
+          Layer.provide(defaultRegistry),
+          Layer.provide(Layer.succeed(AgentJobRepository, jobs)),
+          Layer.provide(NodeServices.layer)
+        )
+        const defaultResult = yield* AgentJobWorker.pipe(
+          Effect.flatMap((worker) => worker.runOnce(WORKSPACE_ID)),
+          Effect.provide(defaultWorker)
+        )
+        const result = yield* reviewWorker.runOnce(WORKSPACE_ID)
         const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
 
+        assert.deepStrictEqual(defaultResult, { _tag: "idle" })
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(sandboxRequests.length, 1)
         assert.strictEqual(runtimeRequests.length, 1)
@@ -782,6 +815,7 @@ describe("agent job worker", () => {
         yield* enqueue()
         const original = yield* jobs.claimNext({
           workspaceId: WORKSPACE_ID,
+          taskTags: ["release-chat"],
           leaseOwner: LEASE_OWNER,
           leaseToken: Schema.decodeSync(AgentLeaseToken)("e".repeat(64)),
           claimedAt: STARTED_AT,
@@ -841,6 +875,7 @@ describe("agent job worker", () => {
             Option.isNone(
               yield* (yield* AgentJobRepository).claimNext({
                 workspaceId: WORKSPACE_ID,
+                taskTags: ["release-chat"],
                 leaseOwner: LEASE_OWNER,
                 leaseToken: Schema.decodeSync(AgentLeaseToken)("f".repeat(64)),
                 claimedAt: STARTED_AT,

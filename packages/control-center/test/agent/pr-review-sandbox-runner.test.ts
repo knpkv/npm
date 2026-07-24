@@ -1176,6 +1176,43 @@ describe("PrReviewSandboxRunner", () => {
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
+  it.effect("retains changed evidence for a C-quoted Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const quotedDiff = [
+        "diff --git \"a/src/a\\\"b.ts\" \"b/src/a\\\"b.ts\"",
+        "--- \"a/src/a\\\"b.ts\"",
+        "+++ \"b/src/a\\\"b.ts\"",
+        "@@ -0,0 +1,1 @@",
+        "+export const quoted = true",
+        ""
+      ].join("\n")
+      const quotedEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "src/a\"b.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(quotedEvidence),
+          CONTAINER_NAME,
+          quotedDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/a\"b.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
   it.effect("accepts deletion-only hunks without inventing changed head lines", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const deletionDiff = [
