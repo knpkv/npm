@@ -28,7 +28,13 @@ import {
 } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
 import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
-import { AgentJobTaskExecutor, releaseChatTaskExecutorLayer } from "./internal/AgentJobTaskExecutor.js"
+import {
+  AgentJobTaskExecutor,
+  releaseChatTaskExecutorLayer,
+  reviewEnabledTaskExecutorLayer
+} from "./internal/AgentJobTaskExecutor.js"
+import type { PrReviewSandboxRunner } from "./internal/PrReviewSandboxRunner.js"
+import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
 
 /** Worker lease policy fixed when the server composes the module. */
 export interface AgentJobWorkerOptions {
@@ -279,6 +285,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
       )
       const claim = yield* jobs.claimNext({
         workspaceId,
+        taskTags: taskExecutor.taskTags,
         leaseOwner: options.leaseOwner,
         leaseToken,
         claimedAt,
@@ -302,12 +309,28 @@ export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWork
   "@knpkv/control-center/server/agent/AgentJobWorker"
 ) {}
 
-/** Captures worker policy while acquiring persistence, crypto, and runtime selection. */
+/** Default release-chat worker composition; it remains independent of sandbox configuration. */
 export const agentJobWorkerLayer = (
   options: AgentJobWorkerOptions
 ): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(releaseChatTaskExecutorLayer)
+  )
+
+/** Opt-in worker composition that also executes immutable pull-request reviews. */
+export const agentJobWorkerWithPrReviewLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner
+> =>
+  agentJobWorkerWithTaskExecutorLayer(options).pipe(
+    Layer.provide(
+      reviewEnabledTaskExecutorLayer.pipe(
+        Layer.provide(prReviewTaskExecutorLayer)
+      )
+    )
   )
 
 /** Internal composition hook used by deterministic task-executor contract tests. */

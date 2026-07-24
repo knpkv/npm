@@ -4,7 +4,8 @@ export {
   agentJobWorkerLayer,
   type AgentJobWorkerOptions,
   type AgentJobWorkerRunResult,
-  type AgentJobWorkerService
+  type AgentJobWorkerService,
+  agentJobWorkerWithPrReviewLayer
 } from "./AgentJobWorker.js"
 export {
   type AgentProviderRegistryOptions,
@@ -15,3 +16,10 @@ export {
   type AgentRuntimeSelection,
   type SelectedAgentRuntime
 } from "./AgentRuntimeRegistry.js"
+export {
+  PrReviewSandboxError,
+  PrReviewSandboxRunner,
+  prReviewSandboxRunnerLayer,
+  type PrReviewSandboxRunnerOptions,
+  type PrReviewSandboxRunnerService
+} from "./internal/PrReviewSandboxRunner.js"

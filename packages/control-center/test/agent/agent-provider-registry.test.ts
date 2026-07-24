@@ -157,6 +157,11 @@ describe("agent provider registry", () => {
         model: OPENAI_MODEL,
         access: "read-only"
       })
+      const codexSelected = yield* registry.select({
+        providerId: AgentProviderId.make("codex"),
+        model: "configured-default",
+        access: "read-only"
+      })
       const legacy = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: null,
@@ -164,6 +169,8 @@ describe("agent provider registry", () => {
       })
       assert.strictEqual(selected.model, OPENAI_MODEL)
       assert.strictEqual(legacy.model, OPENAI_MODEL)
+      assert.strictEqual(selected.filesystemAccess, "none")
+      assert.strictEqual(codexSelected.filesystemAccess, "configured-workspace")
       const events = new Array<AgentRuntimeEvent>()
       yield* selected.runtime
         .run(runRequest(selected.model))

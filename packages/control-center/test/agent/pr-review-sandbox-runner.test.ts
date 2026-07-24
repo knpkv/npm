@@ -22,6 +22,7 @@ import {
 const JOB_ID = Schema.decodeSync(JobId)("01890f6f-6d6a-7cc0-98d2-000000000001")
 const ATTEMPT_ID = "0123456789ab"
 const SECOND_ATTEMPT_ID = "fedcba987654"
+const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const IMAGE = `registry.example.invalid/control-center/pr-review@sha256:${"a".repeat(64)}`
 const ANALYZER_COMMAND: readonly [string, string, string] = [
@@ -144,13 +145,20 @@ const missingContainerFor = (name: string): FakeResponse => ({
 
 const missingContainer = (): FakeResponse => missingContainerFor(CONTAINER_NAME)
 
-const reviewTreeResponses = (): Array<FakeResponse> => [
+const ordinaryChangedDiff =
+  "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -11,0 +12,3 @@\n"
+
+const reviewTreeResponses = (
+  checkout: string,
+  changedDiff: string | Uint8Array = ordinaryChangedDiff
+): Array<FakeResponse> => [
   { stdout: "sha1\n" },
-  { stdout: "/trusted/git/objects\n" },
+  { stdout: `${checkout}\n` },
   { stdout: `100644 blob ${HEAD_REVISION}\tsrc/example.ts\u0000` },
   {},
   {},
-  {}
+  {},
+  { stdout: changedDiff }
 ]
 
 const sourceGitArguments = (
@@ -171,11 +179,13 @@ const sourceGitArguments = (
 const successResponses = (
   checkout: string,
   analysisOutput: string | Uint8Array = JSON.stringify(evidence),
-  container = CONTAINER_NAME
+  container = CONTAINER_NAME,
+  changedDiff: string | Uint8Array = ordinaryChangedDiff
 ): Array<FakeResponse> => [
   { stdout: `${checkout}\n` },
   { stdout: `${HEAD_REVISION}\n` },
-  ...reviewTreeResponses(),
+  ...reviewTreeResponses(checkout, changedDiff),
+  { stdout: "" },
   missingContainerFor(container),
   { stdout: "container-id\n" },
   { stdout: analysisOutput },
@@ -252,6 +262,7 @@ const run = Effect.gen(function*() {
   return yield* runner.run({
     attemptId: ATTEMPT_ID,
     jobId: JOB_ID,
+    baseRevision: BASE_REVISION,
     headRevision: HEAD_REVISION
   })
 })
@@ -280,7 +291,7 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, successResponses(checkout), run).pipe(
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
-          assert.strictEqual(calls.length, 12)
+          assert.strictEqual(calls.length, 14)
           const archiveGitDirectory = calls[5]?.args[4]
           const archive = calls[7]?.args[2]
           const reviewTree = calls[7]?.args[4]
@@ -343,6 +354,36 @@ describe("PrReviewSandboxRunner", () => {
               "--no-same-owner",
               "--same-permissions"
             ]],
+            [
+              "git",
+              sourceGitArguments(checkout, [
+                "-c",
+                "core.quotePath=false",
+                "diff",
+                "--default-prefix",
+                "--text",
+                "--unified=0",
+                "--inter-hunk-context=0",
+                "--diff-algorithm=myers",
+                "--no-indent-heuristic",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                BASE_REVISION,
+                HEAD_REVISION,
+                "--"
+              ])
+            ],
+            ["docker", [
+              "container",
+              "ls",
+              "--all",
+              "--filter",
+              `label=dev.knpkv.control-center.pr-review.job=${JOB_ID}`,
+              "--format",
+              "{{.Names}}"
+            ]],
             ["docker", [
               "container",
               "inspect",
@@ -357,6 +398,10 @@ describe("PrReviewSandboxRunner", () => {
               "create",
               "--name",
               CONTAINER_NAME,
+              "--label",
+              `dev.knpkv.control-center.pr-review.job=${JOB_ID}`,
+              "--label",
+              `dev.knpkv.control-center.pr-review.attempt=${ATTEMPT_ID}`,
               "--pull",
               "never",
               "--log-driver",
@@ -395,10 +440,10 @@ describe("PrReviewSandboxRunner", () => {
             ["docker", ["container", "rm", "--force", "--volumes", CONTAINER_NAME]]
           ])
           assert.notStrictEqual(reviewTree, checkout)
-          assert.notInclude(calls[9]?.args.join(" "), checkout)
-          assert.notInclude(calls[9]?.args.join(" "), ".git")
+          assert.notInclude(calls[11]?.args.join(" "), checkout)
+          assert.notInclude(calls[11]?.args.join(" "), ".git")
           assert.strictEqual(
-            calls[9]?.args.filter((argument) => argument === "--head-revision").length,
+            calls[11]?.args.filter((argument) => argument === "--head-revision").length,
             1
           )
           for (const child of calls) {
@@ -408,6 +453,7 @@ describe("PrReviewSandboxRunner", () => {
               DOCKER_CONFIG: "/nonexistent",
               GIT_CONFIG_GLOBAL: "/dev/null",
               GIT_CONFIG_NOSYSTEM: "1",
+              GIT_NO_LAZY_FETCH: "1",
               HOME: "/nonexistent",
               LANG: "C",
               LC_ALL: "C",
@@ -461,6 +507,7 @@ describe("PrReviewSandboxRunner", () => {
         return yield* runner.run({
           attemptId: SECOND_ATTEMPT_ID,
           jobId: JOB_ID,
+          baseRevision: BASE_REVISION,
           headRevision: HEAD_REVISION
         })
       })
@@ -473,10 +520,10 @@ describe("PrReviewSandboxRunner", () => {
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
           assert.notStrictEqual(secondContainer, CONTAINER_NAME)
-          assert.strictEqual(calls[8]?.args.at(-1), secondContainer)
-          assert.strictEqual(calls[9]?.args[3], secondContainer)
           assert.strictEqual(calls[10]?.args.at(-1), secondContainer)
-          assert.strictEqual(calls[11]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[11]?.args[3], secondContainer)
+          assert.strictEqual(calls[12]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[13]?.args.at(-1), secondContainer)
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
@@ -488,7 +535,7 @@ describe("PrReviewSandboxRunner", () => {
         yield* runGit(["init", "--quiet", checkout])
         yield* fileSystem.writeFileString(
           path.join(checkout, ".gitattributes"),
-          "source.txt export-subst\nignored.txt export-ignore\nfiltered.txt filter=pwn\n"
+          "source.txt export-subst -diff\nignored.txt export-ignore\nfiltered.txt filter=pwn\n"
         )
         yield* fileSystem.writeFileString(path.join(checkout, ".gitignore"), "node_modules/\n")
         yield* fileSystem.writeFileString(path.join(checkout, "source.txt"), originalSource)
@@ -542,11 +589,14 @@ describe("PrReviewSandboxRunner", () => {
           "--quiet",
           originalRevision
         ])
+        yield* runGit(["-C", checkout, "gc", "--quiet"])
         yield* fileSystem.writeFileString(
           path.join(checkout, ".git", "info", "attributes"),
           "source.txt export-ignore\n"
         )
         yield* runGit(["-C", checkout, "config", "tar.umask", "0077"])
+        yield* runGit(["-C", checkout, "config", "diff.noprefix", "true"])
+        yield* runGit(["-C", checkout, "config", "diff.interHunkContext", "10"])
         const fsmonitorMarker = path.join(checkout, ".git", "fsmonitor-ran")
         const fsmonitorHook = path.join(checkout, ".git", "hooks", "fsmonitor-test")
         yield* fileSystem.writeFileString(
@@ -580,7 +630,16 @@ describe("PrReviewSandboxRunner", () => {
           "ignored worktree artifact\n"
         )
 
-        const expectedEvidence = { ...evidence, headRevision: originalRevision }
+        const expectedEvidence = Schema.decodeSync(PrReviewSandboxEvidence)({
+          ...evidence,
+          headRevision: originalRevision,
+          findings: evidence.findings.map((finding) => ({
+            ...finding,
+            path: "source.txt",
+            startLine: 2,
+            endLine: 2
+          }))
+        })
         const dockerCalls: Array<ChildProcess.StandardCommand> = []
         const verifyReviewTree = (
           child: ChildProcess.StandardCommand
@@ -624,11 +683,13 @@ describe("PrReviewSandboxRunner", () => {
           return yield* runner.run({
             attemptId: ATTEMPT_ID,
             jobId: JOB_ID,
+            baseRevision: replacementRevision,
             headRevision: originalRevision
           })
         }).pipe(
           Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
           Effect.provide(hybridProcessLayer(dockerCalls, [
+            { stdout: "" },
             missingContainer(),
             { onSpawn: verifyReviewTree },
             { stdout: JSON.stringify(expectedEvidence) },
@@ -641,6 +702,7 @@ describe("PrReviewSandboxRunner", () => {
         assert.deepStrictEqual(
           dockerCalls.map(({ args }) => args.slice(0, 2)),
           [
+            ["container", "ls"],
             ["container", "inspect"],
             ["container", "create"],
             ["container", "start"],
@@ -689,6 +751,165 @@ describe("PrReviewSandboxRunner", () => {
       Effect.provide([NodeFileSystem.layer, NodePath.layer])
     ))
 
+  it.effect("rejects a linked checkout whose Git object store is outside the workspace", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        const externalRepository = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-repository-"
+        })
+        yield* runGit(["init", "--quiet", externalRepository])
+        yield* fileSystem.writeFileString(
+          path.join(externalRepository, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", externalRepository, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "external object store"
+        ])
+        const revision = (yield* runGit([
+          "-C",
+          externalRepository,
+          "rev-parse",
+          "HEAD"
+        ])).trim()
+        yield* fileSystem.remove(checkout, { recursive: true })
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "worktree",
+          "add",
+          "--quiet",
+          "--detach",
+          checkout,
+          revision
+        ])
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
+  it.effect("rejects an in-workspace object store with an external Git alternate", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        const externalRepository = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-alternate-"
+        })
+        yield* runGit(["init", "--quiet", externalRepository])
+        yield* fileSystem.writeFileString(
+          path.join(externalRepository, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", externalRepository, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "external alternate"
+        ])
+        yield* fileSystem.remove(checkout, { recursive: true })
+        yield* runGit(["clone", "--quiet", "--shared", externalRepository, checkout])
+        const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
+  it.effect("rejects symlinked directories inside the Git object store", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        yield* runGit(["init", "--quiet", checkout])
+        yield* fileSystem.writeFileString(
+          path.join(checkout, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", checkout, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          checkout,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "packed objects"
+        ])
+        const revision = (yield* runGit(["-C", checkout, "rev-parse", "HEAD"])).trim()
+        yield* runGit(["-C", checkout, "gc", "--quiet"])
+
+        const outside = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-pack-"
+        })
+        const packDirectory = path.join(checkout, ".git", "objects", "pack")
+        const externalPackDirectory = path.join(outside, "pack")
+        yield* fileSystem.rename(packDirectory, externalPackDirectory)
+        yield* fileSystem.symlink(externalPackDirectory, packDirectory)
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
   it.effect("rejects submodule gitlinks instead of silently omitting their source", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const calls: Array<ChildProcess.StandardCommand> = []
@@ -696,7 +917,7 @@ describe("PrReviewSandboxRunner", () => {
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
         { stdout: "sha1\n" },
-        { stdout: "/trusted/git/objects\n" },
+        { stdout: `${checkout}\n` },
         { stdout: `160000 commit ${HEAD_REVISION}\tvendor/module\u0000` }
       ], run).pipe(
         Effect.result,
@@ -734,6 +955,7 @@ describe("PrReviewSandboxRunner", () => {
           return yield* runner.run({
             attemptId: ATTEMPT_ID,
             jobId: JOB_ID,
+            baseRevision: revision,
             headRevision: revision
           })
         }).pipe(
@@ -786,6 +1008,7 @@ describe("PrReviewSandboxRunner", () => {
             return yield* runner.run({
               attemptId: ATTEMPT_ID,
               jobId: "../outside",
+              baseRevision: BASE_REVISION,
               headRevision: HEAD_REVISION
             })
           })
@@ -834,6 +1057,347 @@ describe("PrReviewSandboxRunner", () => {
         }
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("ignores source lines that resemble diff headers while retaining later changed hunks", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const spoofedHeaderDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -11,0 +12,1 @@",
+        "+++ b/src/unchanged.ts",
+        "@@ -20,0 +21,1 @@",
+        "+ordinary changed source",
+        ""
+      ].join("\n")
+      const mixed = Schema.decodeSync(PrReviewSandboxEvidence)({
+        ...evidence,
+        findings: [
+          {
+            ruleId: "example/no-example",
+            severity: "warning",
+            path: "src/example.ts",
+            startLine: 21,
+            endLine: 21,
+            message: "The analyzer found a deterministic problem."
+          },
+          {
+            ruleId: "example/unchanged",
+            severity: "warning",
+            path: "src/unchanged.ts",
+            startLine: 21,
+            endLine: 21,
+            message: "This finding is outside the pull-request diff."
+          }
+        ]
+      })
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(mixed), CONTAINER_NAME, spoofedHeaderDiff),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/example.ts")
+          assert.strictEqual(filtered.findings[0]?.startLine, 21)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("ignores invalid UTF-8 in binary source lines while retaining later text hunks", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const beforeBinary = encoder.encode([
+        "diff --git a/image.bin b/image.bin",
+        "--- a/image.bin",
+        "+++ b/image.bin",
+        "@@ -0,0 +1,1 @@",
+        ""
+      ].join("\n"))
+      const afterBinary = encoder.encode([
+        "",
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -11,0 +12,3 @@",
+        ""
+      ].join("\n"))
+      const binaryDiff = new Uint8Array(beforeBinary.length + 4 + afterBinary.length)
+      binaryDiff.set(beforeBinary)
+      binaryDiff.set([0x2b, 0xc3, 0x28, 0x0a], beforeBinary.length)
+      binaryDiff.set(afterBinary, beforeBinary.length + 4)
+
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(evidence), CONTAINER_NAME, binaryDiff),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.deepStrictEqual(filtered, evidence)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("retains changed evidence for an unquoted non-ASCII Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const unicodeDiff = [
+        "diff --git a/café.ts b/café.ts",
+        "--- a/café.ts",
+        "+++ b/café.ts",
+        "@@ -0,0 +1,1 @@",
+        "+export const café = true",
+        ""
+      ].join("\n")
+      const unicodeEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "café.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(unicodeEvidence),
+          CONTAINER_NAME,
+          unicodeDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "café.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("retains changed evidence for an unquoted Git path with spaces", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const spacedDiff = [
+        "diff --git a/src/a b.ts b/src/a b.ts",
+        "--- a/src/a b.ts",
+        "+++ b/src/a b.ts\t",
+        "@@ -0,0 +1,1 @@",
+        "+export const spaced = true",
+        ""
+      ].join("\n")
+      const spacedEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "src/a b.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(spacedEvidence),
+          CONTAINER_NAME,
+          spacedDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/a b.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("retains changed evidence for a C-quoted Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const quotedDiff = [
+        "diff --git \"a/src/a\\\"b.ts\" \"b/src/a\\\"b.ts\"",
+        "--- \"a/src/a\\\"b.ts\"",
+        "+++ \"b/src/a\\\"b.ts\"",
+        "@@ -0,0 +1,1 @@",
+        "+export const quoted = true",
+        ""
+      ].join("\n")
+      const quotedEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "src/a\"b.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(quotedEvidence),
+          CONTAINER_NAME,
+          quotedDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/a\"b.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("decodes UTF-8 octal bytes in a C-quoted Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const quotedUnicodeDiff = [
+        "diff --git \"a/src/caf\\303\\251\\\"x.ts\" \"b/src/caf\\303\\251\\\"x.ts\"",
+        "--- \"a/src/caf\\303\\251\\\"x.ts\"",
+        "+++ \"b/src/caf\\303\\251\\\"x.ts\"",
+        "@@ -0,0 +1,1 @@",
+        "+export const quotedUnicode = true",
+        ""
+      ].join("\n")
+      const quotedUnicodeEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "src/café\"x.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(quotedUnicodeEvidence),
+          CONTAINER_NAME,
+          quotedUnicodeDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/café\"x.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("accepts deletion-only hunks without inventing changed head lines", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const deletionDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -1 +0,0 @@",
+        "-removed",
+        ""
+      ].join("\n")
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(evidence), CONTAINER_NAME, deletionDiff),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 0)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("does not retain unchanged lines between separate zero-context hunks", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const separateHunks = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -1 +1 @@",
+        "-old first",
+        "+new first",
+        "@@ -5 +5 @@",
+        "-old last",
+        "+new last",
+        ""
+      ].join("\n")
+      const separatedEvidence = {
+        ...evidence,
+        findings: [
+          { ...evidence.findings[0], startLine: 1, endLine: 1 },
+          { ...evidence.findings[0], startLine: 3, endLine: 3 },
+          { ...evidence.findings[0], startLine: 5, endLine: 5 }
+        ]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(separatedEvidence),
+          CONTAINER_NAME,
+          separateHunks
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.deepStrictEqual(
+            filtered.findings.map(({ startLine }) => startLine),
+            [1, 5]
+          )
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("applies durable evidence caps after removing unchanged findings", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const maximumRangeDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        ...Array.from(
+          { length: 100_000 },
+          (_, index) => `@@ -${index * 2 + 12},0 +${index * 2 + 12},1 @@`
+        ),
+        ""
+      ].join("\n")
+      const noisyEvidence = {
+        ...evidence,
+        findings: [
+          {
+            ...evidence.findings[0],
+            message: "Changed finding ".repeat(30).trim()
+          },
+          ...Array.from({ length: 999 }, (_, index) => ({
+            ...evidence.findings[0],
+            path: `src/legacy-${index}.ts`,
+            message: `Unchanged legacy finding ${index} `.repeat(20).trim()
+          }))
+        ]
+      }
+      assert.isAbove(
+        encoder.encode(JSON.stringify(noisyEvidence)).byteLength,
+        MAXIMUM_PR_REVIEW_SANDBOX_EVIDENCE_BYTES
+      )
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(noisyEvidence),
+          CONTAINER_NAME,
+          maximumRangeDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/example.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
   it.effect("accepts scoped rule identifiers without accepting traversal tokens", () =>
     withWorkspace((workspaceRoot, checkout) =>
@@ -884,7 +1448,8 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, [
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
-        ...reviewTreeResponses(),
+        ...reviewTreeResponses(checkout),
+        { stdout: "" },
         missingContainer(),
         {},
         { exitCode: 23, stderr: "hostile daemon detail /host/path" },
@@ -910,7 +1475,8 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, [
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
-        ...reviewTreeResponses(),
+        ...reviewTreeResponses(checkout),
+        { stdout: "" },
         missingContainer(),
         { exitCode: 125, stderr: "daemon failed after allocating a container" },
         { exitCode: 1, stderr: "cleanup daemon unavailable" }
@@ -937,7 +1503,8 @@ describe("PrReviewSandboxRunner", () => {
         const fiber = yield* Effect.forkChild(provideRunner(workspaceRoot, calls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
+          { stdout: "" },
           missingContainer(),
           { hanging: true, started: createStarted },
           {}
@@ -966,7 +1533,8 @@ describe("PrReviewSandboxRunner", () => {
             [
               { stdout: `${checkout}\n` },
               { stdout: `${HEAD_REVISION}\n` },
-              ...reviewTreeResponses(),
+              ...reviewTreeResponses(checkout),
+              { stdout: "" },
               missingContainer(),
               {},
               { hanging: true, started },
@@ -998,7 +1566,8 @@ describe("PrReviewSandboxRunner", () => {
         const fiber = yield* Effect.forkChild(provideRunner(workspaceRoot, calls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
+          { stdout: "" },
           missingContainer(),
           {},
           { hanging: true, started },
@@ -1025,7 +1594,8 @@ describe("PrReviewSandboxRunner", () => {
           provideRunner(workspaceRoot, calls, [
             { stdout: `${checkout}\n` },
             { stdout: `${HEAD_REVISION}\n` },
-            ...reviewTreeResponses(),
+            ...reviewTreeResponses(checkout),
+            { stdout: "" },
             missingContainer(),
             {},
             { stdout: JSON.stringify(evidence) },
@@ -1039,41 +1609,52 @@ describe("PrReviewSandboxRunner", () => {
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
-  it.effect("reconciles a stale same-job container and does not mask inspect daemon failures", () =>
+  it.effect("reconciles a prior attempt for the same job and does not mask list failures", () =>
     withWorkspace((workspaceRoot, checkout) =>
       Effect.gen(function*() {
         const staleCalls: Array<ChildProcess.StandardCommand> = []
+        const staleContainer = `cc-pr-review-${JOB_ID}-${SECOND_ATTEMPT_ID}`
         const staleResult = yield* provideRunner(workspaceRoot, staleCalls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
-          { stdout: "running\n" },
+          ...reviewTreeResponses(checkout),
+          { stdout: `${staleContainer}\n` },
           {},
+          missingContainer(),
           {},
           { stdout: JSON.stringify(evidence) },
           {}
         ], run)
         assert.deepStrictEqual(staleResult, evidence)
-        assert.deepStrictEqual(staleCalls[9]?.args, [
+        assert.deepStrictEqual(staleCalls[10]?.args, [
           "container",
           "rm",
           "--force",
           "--volumes",
+          staleContainer
+        ])
+        assert.deepStrictEqual(staleCalls[11]?.args, [
+          "container",
+          "inspect",
+          "--type",
+          "container",
+          "--format",
+          "{{.Id}}",
           CONTAINER_NAME
         ])
-        assert.deepStrictEqual(staleCalls[10]?.args.slice(0, 2), ["container", "create"])
+        assert.deepStrictEqual(staleCalls[12]?.args.slice(0, 2), ["container", "create"])
 
         const daemonCalls: Array<ChildProcess.StandardCommand> = []
         const daemonResult = yield* provideRunner(workspaceRoot, daemonCalls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
           { exitCode: 1, stderr: "Cannot connect to the container daemon at /host/socket.\n" }
         ], run).pipe(Effect.result)
         assertRedactedError(daemonResult, "sandbox-unavailable")
         assert.deepStrictEqual(
           daemonCalls.map(({ command }) => command),
-          ["git", "git", "git", "git", "git", "git", "git", "tar", "docker"]
+          ["git", "git", "git", "git", "git", "git", "git", "tar", "git", "docker"]
         )
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))

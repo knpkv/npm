@@ -11,13 +11,23 @@ describe("durable agent job queries", () => {
     const rendered = renderAgentJobDispatchCandidatesQuery({
       limit: 32,
       observedAt: "2026-07-19T10:00:00.000Z",
+      taskTags: ["release-chat"],
       workspaceId: "workspace-secret"
     })
 
     expect(rendered).toEqual({
-      params: [0, "workspace-secret", "queued", "running", "cancel-requested", "2026-07-19T10:00:00.000Z", 32],
+      params: [
+        0,
+        "workspace-secret",
+        "{\"_tag\":\"release-chat\"%",
+        "queued",
+        "running",
+        "cancel-requested",
+        "2026-07-19T10:00:00.000Z",
+        32
+      ],
       sql:
-        "select \"agent_jobs\".\"workspace_id\" as \"workspaceId\", \"agent_jobs\".\"job_id\" as \"jobId\", \"agent_jobs\".\"thread_id\" as \"threadId\", \"agent_jobs\".\"provider_id\" as \"providerId\", \"agent_jobs\".\"model\" as \"model\", \"agent_jobs\".\"access\" as \"access\", \"agent_jobs\".\"prompt\" as \"prompt\", \"agent_jobs\".\"context_fingerprint\" as \"contextFingerprint\", \"agent_jobs\".\"subject_revision\" as \"subjectRevision\", \"agent_jobs\".\"task_context_json\" as \"taskContextJson\", \"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\", \"agent_jobs\".\"state\" as \"state\", \"agent_jobs\".\"created_at\" as \"createdAt\", \"agent_jobs\".\"cancel_requested_at\" as \"cancelRequestedAt\", \"agent_jobs\".\"terminal_at\" as \"terminalAt\", (select coalesce(max(\"agent_job_attempts\".\"attempt_sequence\"), ?) as \"attemptSequence\" from \"agent_job_attempts\" where ((\"agent_job_attempts\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_attempts\".\"job_id\" = \"agent_jobs\".\"job_id\"))) as \"attemptSequence\" from \"agent_jobs\" where ((\"agent_jobs\".\"workspace_id\" = ?) and ((\"agent_jobs\".\"state\" = ?) or ((\"agent_jobs\".\"state\" in (?, ?)) and (not exists (select \"agent_job_leases\".\"job_id\" as \"jobId\" from \"agent_job_leases\" where ((\"agent_job_leases\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_leases\".\"job_id\" = \"agent_jobs\".\"job_id\") and (\"agent_job_leases\".\"lease_expires_at\" > ?))))))) order by \"agent_jobs\".\"created_at\" asc, \"agent_jobs\".\"job_id\" asc limit ?"
+        "select \"agent_jobs\".\"workspace_id\" as \"workspaceId\", \"agent_jobs\".\"job_id\" as \"jobId\", \"agent_jobs\".\"thread_id\" as \"threadId\", \"agent_jobs\".\"provider_id\" as \"providerId\", \"agent_jobs\".\"model\" as \"model\", \"agent_jobs\".\"access\" as \"access\", \"agent_jobs\".\"prompt\" as \"prompt\", \"agent_jobs\".\"context_fingerprint\" as \"contextFingerprint\", \"agent_jobs\".\"subject_revision\" as \"subjectRevision\", \"agent_jobs\".\"task_context_json\" as \"taskContextJson\", \"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\", \"agent_jobs\".\"state\" as \"state\", \"agent_jobs\".\"created_at\" as \"createdAt\", \"agent_jobs\".\"cancel_requested_at\" as \"cancelRequestedAt\", \"agent_jobs\".\"terminal_at\" as \"terminalAt\", (select coalesce(max(\"agent_job_attempts\".\"attempt_sequence\"), ?) as \"attemptSequence\" from \"agent_job_attempts\" where ((\"agent_job_attempts\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_attempts\".\"job_id\" = \"agent_jobs\".\"job_id\"))) as \"attemptSequence\" from \"agent_jobs\" where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"task_context_json\" like ?) and ((\"agent_jobs\".\"state\" = ?) or ((\"agent_jobs\".\"state\" in (?, ?)) and (not exists (select \"agent_job_leases\".\"job_id\" as \"jobId\" from \"agent_job_leases\" where ((\"agent_job_leases\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_leases\".\"job_id\" = \"agent_jobs\".\"job_id\") and (\"agent_job_leases\".\"lease_expires_at\" > ?))))))) order by \"agent_jobs\".\"created_at\" asc, \"agent_jobs\".\"job_id\" asc limit ?"
     })
   })
 

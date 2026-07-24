@@ -57,6 +57,13 @@ export interface AgentRuntimeRegistryService {
 export interface SelectedAgentRuntime {
   readonly model: AgentModelId
   readonly runtime: AgentRuntimeService
+  /**
+   * Filesystem capability declared by the registry.
+   *
+   * Omitted capabilities fail closed for immutable PR review while remaining
+   * backward-compatible for release-chat-only test registries.
+   */
+  readonly filesystemAccess?: "none" | "configured-workspace"
 }
 
 /** Local Codex registration. Commands and environment remain inside the adapter package. */
@@ -225,7 +232,13 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
           provider.runtime !== null &&
           selection.access === "read-only" &&
           model !== undefined
-        ? Effect.succeed({ model, runtime: provider.runtime })
+        ? Effect.succeed({
+          model,
+          runtime: provider.runtime,
+          filesystemAccess: provider.providerId === OPENAI_COMPATIBLE_PROVIDER_ID
+            ? "none"
+            : "configured-workspace"
+        })
         : Effect.fail(providerFailure(selection.providerId))
     }
   }

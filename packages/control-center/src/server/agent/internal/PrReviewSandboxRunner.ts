@@ -19,11 +19,17 @@ const OCI_EXECUTABLE = "docker"
 const GIT_EXECUTABLE = "git"
 const CONTAINER_SOURCE = "/workspace"
 const CONTAINER_UID_GID = "65532:65532"
+const CONTAINER_JOB_LABEL = "dev.knpkv.control-center.pr-review.job"
+const CONTAINER_ATTEMPT_LABEL = "dev.knpkv.control-center.pr-review.attempt"
 const MAXIMUM_STDERR_BYTES = 8_192
 const MAXIMUM_CONTROL_STDOUT_BYTES = 4_096
 const MAXIMUM_GIT_STDOUT_BYTES = 128
 const MAXIMUM_GIT_TREE_STDOUT_BYTES = 16 * 1_024 * 1_024
+const MAXIMUM_GIT_DIFF_STDOUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_REVIEW_TREE_ARCHIVE_BYTES = 64 * 1_024 * 1_024
+const MAXIMUM_PR_REVIEW_SANDBOX_RAW_OUTPUT_BYTES = 1_024 * 1_024
+const MAXIMUM_CHANGED_LINE_RANGES = 100_000
+const MAXIMUM_GIT_OBJECT_STORE_ENTRIES = 1_000_000
 const DEFAULT_MAXIMUM_DURATION_MILLIS = 120_000
 const MAXIMUM_DURATION_MILLIS = 300_000
 const CONTROL_COMMAND_TIMEOUT_MILLIS = 30_000
@@ -135,14 +141,25 @@ const PrReviewSandboxEvidenceItem = Schema.Struct({
 
 const jsonEncoder = new TextEncoder()
 
-/** Bounded static-analysis evidence. Host-side A12 model execution consumes this internal envelope. */
-export const PrReviewSandboxEvidence = Schema.Struct({
+const PrReviewSandboxEvidenceEnvelope = {
   schemaVersion: Schema.Literal(1),
   headRevision: GitHeadRevision,
   tool: Schema.Struct({
     name: BoundedToolToken,
     version: BoundedToolToken
-  }),
+  })
+}
+
+const UnfilteredPrReviewSandboxEvidence = Schema.Struct({
+  ...PrReviewSandboxEvidenceEnvelope,
+  findings: Schema.Array(PrReviewSandboxEvidenceItem)
+})
+
+type UnfilteredPrReviewSandboxEvidence = typeof UnfilteredPrReviewSandboxEvidence.Type
+
+/** Bounded static-analysis evidence. Host-side A12 model execution consumes this internal envelope. */
+export const PrReviewSandboxEvidence = Schema.Struct({
+  ...PrReviewSandboxEvidenceEnvelope,
   findings: Schema.Array(PrReviewSandboxEvidenceItem).check(Schema.isMaxLength(100))
 }).check(
   Schema.makeFilter((value) => {
@@ -160,6 +177,7 @@ export type PrReviewSandboxEvidence = typeof PrReviewSandboxEvidence.Type
 const SandboxRequest = Schema.Struct({
   attemptId: SandboxAttemptId,
   jobId: JobId,
+  baseRevision: GitHeadRevision,
   headRevision: GitHeadRevision
 })
 
@@ -189,6 +207,7 @@ export interface PrReviewSandboxRunnerOptions {
 export interface PrReviewSandboxRequest {
   readonly attemptId: string
   readonly jobId: JobId
+  readonly baseRevision: string
   readonly headRevision: string
 }
 
@@ -274,6 +293,7 @@ const processEnvironment: Readonly<Record<string, string>> = {
   DOCKER_CONFIG: "/nonexistent",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
+  GIT_NO_LAZY_FETCH: "1",
   HOME: "/nonexistent",
   LANG: "C",
   LC_ALL: "C",
@@ -339,6 +359,231 @@ const exactGitHead = (text: string): string | undefined => {
   return text.includes("\n") || text.includes("\r") ? undefined : text
 }
 
+interface ChangedLineRange {
+  readonly endLine: number
+  readonly path: PrReviewPath
+  readonly startLine: number
+}
+
+interface ChangedLineInterval {
+  readonly endLine: number
+  readonly startLine: number
+}
+
+type ChangedLineIndex = ReadonlyMap<PrReviewPath, ReadonlyArray<ChangedLineInterval>>
+
+const structuralPatchPrefixes: ReadonlyArray<string> = [
+  "diff --git ",
+  "--- ",
+  "+++ ",
+  "@@ "
+]
+
+const hasAsciiPrefix = (
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  prefix: string
+): boolean => {
+  if (end - start < prefix.length) return false
+  for (let index = 0; index < prefix.length; index++) {
+    if (bytes[start + index] !== prefix.charCodeAt(index)) return false
+  }
+  return true
+}
+
+const gitQuotedEscapes: Readonly<Record<string, string>> = {
+  a: "\u0007",
+  b: "\b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\u000b",
+  "\\": "\\",
+  "\"": "\""
+}
+
+const decodeGitHeaderPath = (header: string): string | undefined => {
+  const encoded = header.slice(4)
+  if (!encoded.startsWith("\"")) {
+    const separator = encoded.indexOf("\t")
+    const path = separator === -1 ? encoded : encoded.slice(0, separator)
+    return path.startsWith("b/") ? path.slice(2) : undefined
+  }
+  if (!encoded.endsWith("\"")) return undefined
+  const bytes = new Array<number>()
+  const encoder = new TextEncoder()
+  let literal = ""
+  const appendUtf8 = (value: string): void => {
+    for (const byte of encoder.encode(value)) {
+      bytes.push(byte)
+    }
+  }
+  const flushLiteral = (): void => {
+    appendUtf8(literal)
+    literal = ""
+  }
+  for (let index = 1; index < encoded.length - 1; index++) {
+    const character = encoded[index]
+    if (character !== "\\") {
+      if (character === "\"") return undefined
+      literal += character
+      continue
+    }
+    flushLiteral()
+    const escaped = encoded[index + 1]
+    if (escaped === undefined) return undefined
+    const replacement = gitQuotedEscapes[escaped]
+    if (replacement !== undefined) {
+      appendUtf8(replacement)
+      index += 1
+      continue
+    }
+    if (!/^[0-7]$/u.test(escaped)) return undefined
+    let octal = escaped
+    while (octal.length < 3 && /^[0-7]$/u.test(encoded[index + octal.length + 1] ?? "")) {
+      octal += encoded[index + octal.length + 1]
+    }
+    const byte = Number.parseInt(octal, 8)
+    if (byte > 0xff) return undefined
+    bytes.push(byte)
+    index += octal.length
+  }
+  flushLiteral()
+  const decoded = (() => {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes))
+    } catch {
+      return undefined
+    }
+  })()
+  if (decoded === undefined) return undefined
+  return decoded.startsWith("b/") ? decoded.slice(2) : undefined
+}
+
+const indexChangedLineRanges = (
+  ranges: ReadonlyArray<ChangedLineRange>
+): ChangedLineIndex => {
+  const byPath = new Map<PrReviewPath, Array<ChangedLineInterval>>()
+  for (const { path, ...interval } of ranges) {
+    const intervals = byPath.get(path)
+    if (intervals === undefined) {
+      byPath.set(path, [interval])
+    } else {
+      intervals.push(interval)
+    }
+  }
+  const index = new Map<PrReviewPath, ReadonlyArray<ChangedLineInterval>>()
+  for (const [path, intervals] of byPath) {
+    intervals.sort((left, right) => left.startLine - right.startLine || left.endLine - right.endLine)
+    const merged = new Array<ChangedLineInterval>()
+    for (const interval of intervals) {
+      const previous = merged.at(-1)
+      if (previous === undefined || interval.startLine > previous.endLine + 1) {
+        merged.push(interval)
+      } else if (interval.endLine > previous.endLine) {
+        merged[merged.length - 1] = {
+          startLine: previous.startLine,
+          endLine: interval.endLine
+        }
+      }
+    }
+    index.set(path, merged)
+  }
+  return index
+}
+
+const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLineRanges")(function*(
+  bytes: Uint8Array
+) {
+  const ranges = new Array<ChangedLineRange>()
+  let path: PrReviewPath | undefined
+  let headerState: "awaiting-old" | "awaiting-new" | "body" = "body"
+  let lineStart = 0
+  for (let lineEnd = 0; lineEnd <= bytes.byteLength; lineEnd++) {
+    if (lineEnd < bytes.byteLength && bytes[lineEnd] !== 0x0a) continue
+    const isStructural = structuralPatchPrefixes.some((prefix) => hasAsciiPrefix(bytes, lineStart, lineEnd, prefix))
+    const line = isStructural
+      ? yield* decodeUtf8(bytes.subarray(lineStart, lineEnd), "source-rejected")
+      : undefined
+    lineStart = lineEnd + 1
+    if (line === undefined) continue
+    if (line.startsWith("diff --git ")) {
+      path = undefined
+      headerState = "awaiting-old"
+      continue
+    }
+    if (headerState === "awaiting-old" && line.startsWith("--- ")) {
+      headerState = "awaiting-new"
+      continue
+    }
+    if (headerState === "awaiting-new" && line.startsWith("+++ ")) {
+      const candidate = decodeGitHeaderPath(line)
+      path = candidate !== undefined && Schema.is(PrReviewPath)(candidate)
+        ? candidate
+        : undefined
+      headerState = "body"
+      continue
+    }
+    if (path === undefined || !line.startsWith("@@ ")) continue
+    const matched = /^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@/u.exec(line)
+    if (matched === null) continue
+    const startLine = Number(matched[1])
+    const lineCount = matched[2] === undefined ? 1 : Number(matched[2])
+    if (
+      !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(lineCount) ||
+      lineCount < 0 ||
+      startLine < (lineCount === 0 ? 0 : 1)
+    ) {
+      return yield* sandboxError("source-rejected")
+    }
+    if (lineCount === 0) continue
+    const endLine = startLine + lineCount - 1
+    if (!Number.isSafeInteger(endLine)) {
+      return yield* sandboxError("source-rejected")
+    }
+    ranges.push({ path, startLine, endLine })
+    if (ranges.length > MAXIMUM_CHANGED_LINE_RANGES) {
+      return yield* sandboxError("source-rejected")
+    }
+  }
+  return indexChangedLineRanges(ranges)
+})
+
+const intersectsChangedLines = (
+  intervals: ReadonlyArray<ChangedLineInterval>,
+  startLine: number,
+  endLine: number
+): boolean => {
+  let low = 0
+  let high = intervals.length
+  while (low < high) {
+    const middle = low + Math.floor((high - low) / 2)
+    const interval = intervals[middle]
+    if (interval === undefined || interval.endLine >= startLine) {
+      high = middle
+    } else {
+      low = middle + 1
+    }
+  }
+  const interval = intervals[low]
+  return interval !== undefined && interval.startLine <= endLine
+}
+
+const retainChangedLineEvidence = (
+  evidence: UnfilteredPrReviewSandboxEvidence,
+  changedLines: ChangedLineIndex
+): UnfilteredPrReviewSandboxEvidence => ({
+  ...evidence,
+  findings: evidence.findings.filter((finding) => {
+    const intervals = changedLines.get(finding.path)
+    return intervals !== undefined &&
+      intersectsChangedLines(intervals, finding.startLine, finding.endLine)
+  })
+})
+
 const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
   const regularFile = new TextEncoder().encode("100644 blob ")
   const executableFile = new TextEncoder().encode("100755 blob ")
@@ -359,13 +604,57 @@ const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
   return recordStart === bytes.byteLength
 }
 
+const validateContainedObjectStore = Effect.fn(
+  "PrReviewSandboxRunner.validateContainedObjectStore"
+)(function*(
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  workspaceRoot: string,
+  objectStore: string
+) {
+  const pending = [objectStore]
+  let entryCount = 0
+  while (pending.length > 0) {
+    const directory = pending.pop()
+    if (directory === undefined) break
+    const entries = yield* fileSystem.readDirectory(directory).pipe(
+      Effect.mapError(() => sandboxError("source-rejected"))
+    )
+    for (const entry of entries) {
+      entryCount += 1
+      if (entryCount > MAXIMUM_GIT_OBJECT_STORE_ENTRIES) {
+        return yield* sandboxError("source-rejected")
+      }
+      const candidate = path.join(directory, entry)
+      const canonicalEntry = yield* fileSystem.realPath(candidate).pipe(
+        Effect.mapError(() => sandboxError("source-rejected"))
+      )
+      if (
+        canonicalEntry !== candidate ||
+        !isContainedPath(path, workspaceRoot, canonicalEntry)
+      ) {
+        return yield* sandboxError("source-rejected")
+      }
+      const info = yield* fileSystem.stat(canonicalEntry).pipe(
+        Effect.mapError(() => sandboxError("source-rejected"))
+      )
+      if (info.type === "Directory") {
+        pending.push(canonicalEntry)
+      } else if (info.type !== "File") {
+        return yield* sandboxError("source-rejected")
+      }
+    }
+  }
+})
+
 const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(function*(
   bytes: Uint8Array,
-  headRevision: string
+  headRevision: string,
+  changedLines: ChangedLineIndex
 ) {
   const text = yield* decodeUtf8(bytes, "output-rejected")
   const evidence = yield* Schema.decodeUnknownEffect(
-    Schema.fromJsonString(PrReviewSandboxEvidence),
+    Schema.fromJsonString(UnfilteredPrReviewSandboxEvidence),
     { onExcessProperty: "error" }
   )(text).pipe(
     Effect.mapError(() => sandboxError("output-rejected"))
@@ -373,7 +662,12 @@ const decodeEvidence = Effect.fn("PrReviewSandboxRunner.decodeEvidence")(functio
   if (evidence.headRevision !== headRevision) {
     return yield* sandboxError("output-rejected")
   }
-  return evidence
+  return yield* Schema.decodeUnknownEffect(
+    PrReviewSandboxEvidence,
+    { onExcessProperty: "error" }
+  )(retainChangedLineEvidence(evidence, changedLines)).pipe(
+    Effect.mapError(() => sandboxError("output-rejected"))
+  )
 })
 
 const containerName = (jobId: JobId, attemptId: string): string => `cc-pr-review-${jobId}-${attemptId}`
@@ -401,6 +695,8 @@ const missingContainerStderr = (container: string): ReadonlyArray<string> => [
 const createArguments = (
   source: string,
   name: string,
+  jobId: JobId,
+  attemptId: string,
   image: string,
   analyzerEntrypoint: string,
   analyzerArguments: ReadonlyArray<string>,
@@ -410,6 +706,10 @@ const createArguments = (
   "create",
   "--name",
   name,
+  "--label",
+  `${CONTAINER_JOB_LABEL}=${jobId}`,
+  "--label",
+  `${CONTAINER_ATTEMPT_LABEL}=${attemptId}`,
   "--pull",
   "never",
   "--log-driver",
@@ -510,6 +810,24 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
   ) {
     return yield* sandboxError("source-rejected")
   }
+  const canonicalObjectStore = yield* fileSystem.realPath(objectStore).pipe(
+    Effect.mapError(() => sandboxError("source-rejected"))
+  )
+  if (!isContainedPath(path, workspaceRoot, canonicalObjectStore)) {
+    return yield* sandboxError("source-rejected")
+  }
+  const hasAlternates = yield* fileSystem.exists(
+    path.join(canonicalObjectStore, "info", "alternates")
+  ).pipe(Effect.mapError(() => sandboxError("source-rejected")))
+  if (hasAlternates) {
+    return yield* sandboxError("source-rejected")
+  }
+  yield* validateContainedObjectStore(
+    fileSystem,
+    path,
+    workspaceRoot,
+    canonicalObjectStore
+  )
 
   const treeEntries = yield* executeControl(
     spawner,
@@ -570,7 +888,7 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
     Effect.andThen(
       fileSystem.writeFileString(
         path.join(archiveGitDirectory, "objects", "info", "alternates"),
-        `${objectStore}\n`,
+        `${canonicalObjectStore}\n`,
         { mode: 0o600 }
       )
     ),
@@ -658,6 +976,45 @@ const cleanupContainer = (
     })
   )
 
+const reconcileJobContainers = Effect.fn(
+  "PrReviewSandboxRunner.reconcileJobContainers"
+)(function*(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  jobId: JobId,
+  currentName: string
+) {
+  const listed = yield* executeControl(
+    spawner,
+    OCI_EXECUTABLE,
+    [
+      "container",
+      "ls",
+      "--all",
+      "--filter",
+      `label=${CONTAINER_JOB_LABEL}=${jobId}`,
+      "--format",
+      "{{.Names}}"
+    ],
+    MAXIMUM_CONTROL_STDOUT_BYTES
+  )
+  if (listed.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* sandboxError("sandbox-unavailable")
+  }
+  const text = yield* decodeUtf8(listed.stdout, "sandbox-unavailable")
+  const prefix = `cc-pr-review-${jobId}-`
+  for (const staleName of text.split("\n").filter((candidate) => candidate.length > 0)) {
+    if (
+      !staleName.startsWith(prefix) ||
+      !Schema.is(SandboxAttemptId)(staleName.slice(prefix.length))
+    ) {
+      return yield* sandboxError("sandbox-unavailable")
+    }
+    if (staleName !== currentName) {
+      yield* cleanupContainer(spawner, staleName)
+    }
+  }
+})
+
 const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalysis")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   request: PrReviewSandboxRequest,
@@ -665,9 +1022,11 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   image: string,
   analyzerEntrypoint: string,
   analyzerArguments: ReadonlyArray<string>,
-  maximumDurationMillis: number
+  maximumDurationMillis: number,
+  changedLines: ChangedLineIndex
 ) {
   const name = containerName(request.jobId, request.attemptId)
+  yield* reconcileJobContainers(spawner, request.jobId, name)
   const inspect = yield* executeControl(
     spawner,
     OCI_EXECUTABLE,
@@ -689,6 +1048,8 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
     createArguments(
       source,
       name,
+      request.jobId,
+      request.attemptId,
       image,
       analyzerEntrypoint,
       analyzerArguments,
@@ -713,7 +1074,7 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
             spawner,
             OCI_EXECUTABLE,
             ["container", "start", "--attach", name],
-            MAXIMUM_PR_REVIEW_SANDBOX_EVIDENCE_BYTES
+            MAXIMUM_PR_REVIEW_SANDBOX_RAW_OUTPUT_BYTES
           ).pipe(
             Effect.timeoutOrElse({
               duration: Duration.millis(maximumDurationMillis),
@@ -734,17 +1095,21 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   )
   const cleanupError = yield* Ref.get(cleanupFailure)
   if (cleanupError !== undefined) return yield* cleanupError
-  return yield* decodeEvidence(analysis.stdout, request.headRevision)
+  return yield* decodeEvidence(
+    analysis.stdout,
+    request.headRevision,
+    changedLines
+  )
 })
 
-/** Internal process-isolated PR-review service. It is intentionally absent from package entry points. */
+/** Process-isolated PR-review service exported only for explicit server composition. */
 export interface PrReviewSandboxRunnerService {
   readonly run: (
     request: unknown
   ) => Effect.Effect<PrReviewSandboxEvidence, PrReviewSandboxError>
 }
 
-/** Dependency-injection seam for the hardened production runner. */
+/** Dependency-injection tag for the hardened production runner. */
 export class PrReviewSandboxRunner extends Context.Service<
   PrReviewSandboxRunner,
   PrReviewSandboxRunnerService
@@ -846,15 +1211,50 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           canonicalSource,
           request.headRevision
         )
-        return yield* runContainedAnalysis(
+        const changedLines = yield* executeControl(
+          spawner,
+          GIT_EXECUTABLE,
+          sourceGitArguments(canonicalSource, [
+            "-c",
+            "core.quotePath=false",
+            "diff",
+            "--default-prefix",
+            "--text",
+            "--unified=0",
+            "--inter-hunk-context=0",
+            "--diff-algorithm=myers",
+            "--no-indent-heuristic",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            request.baseRevision,
+            request.headRevision,
+            "--"
+          ]),
+          MAXIMUM_GIT_DIFF_STDOUT_BYTES
+        ).pipe(
+          Effect.mapError((error) =>
+            error.reason === "output-rejected"
+              ? sandboxError("source-rejected")
+              : error
+          )
+        )
+        if (changedLines.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+          return yield* sandboxError("source-unavailable")
+        }
+        const changedLineIndex = yield* decodeChangedLineRanges(changedLines.stdout)
+        const evidence = yield* runContainedAnalysis(
           spawner,
           request,
           reviewTree,
           options.image,
           analyzerEntrypoint,
           analyzerArguments,
-          maximumDurationMillis
+          maximumDurationMillis,
+          changedLineIndex
         )
+        return evidence
       })
     )
   })

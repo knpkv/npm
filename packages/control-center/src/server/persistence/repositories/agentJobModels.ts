@@ -69,6 +69,10 @@ export const AgentJobPrompt = Schema.String.check(
 )
 export type AgentJobPrompt = typeof AgentJobPrompt.Type
 
+/** Durable task discriminator used to scope worker claims before execution. */
+export const AgentJobTaskTag = Schema.Literals(["release-chat", "pr-review"])
+export type AgentJobTaskTag = typeof AgentJobTaskTag.Type
+
 /** Existing release-scoped conversational work. */
 const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 
@@ -150,6 +154,11 @@ export type ClaimedAgentJob = typeof ClaimedAgentJob.Type
  */
 export const ClaimAgentJobInput = Schema.Struct({
   workspaceId: WorkspaceId,
+  taskTags: Schema.Array(AgentJobTaskTag).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AgentJobTaskTag.literals.length),
+    Schema.isUnique()
+  ),
   leaseOwner: AgentLeaseOwner,
   leaseToken: AgentLeaseToken,
   claimedAt: UtcTimestamp,

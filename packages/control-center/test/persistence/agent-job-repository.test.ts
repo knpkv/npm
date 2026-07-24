@@ -68,6 +68,7 @@ const claimInput = (
   leaseExpiresAt = T2
 ) => ({
   workspaceId: WORKSPACE_ID,
+  taskTags: ["release-chat"] satisfies ReadonlyArray<AgentJobTask["_tag"]>,
   leaseOwner: LEASE_OWNER,
   leaseToken,
   claimedAt,

@@ -19,6 +19,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   AgentJobWorker,
   agentJobWorkerLayer,
+  agentJobWorkerWithPrReviewLayer,
   agentJobWorkerWithTaskExecutorLayer
 } from "../../src/server/agent/AgentJobWorker.js"
 import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
@@ -27,6 +28,10 @@ import {
   agentJobTaskExecutorLayer,
   type AgentJobTaskExecutorService
 } from "../../src/server/agent/internal/AgentJobTaskExecutor.js"
+import {
+  PrReviewSandboxEvidence,
+  PrReviewSandboxRunner
+} from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
@@ -94,7 +99,21 @@ const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
     }
   ]
 })
-
+const reviewEvidence = Schema.decodeUnknownSync(PrReviewSandboxEvidence)({
+  schemaVersion: 1,
+  headRevision: reviewSubject.headRevision,
+  tool: { name: "eslint", version: "10.7.0" },
+  findings: [
+    {
+      ruleId: "control-center/review-output-boundary",
+      severity: "error",
+      path: reviewReport.findings[0]?.path,
+      startLine: reviewReport.findings[0]?.startLine,
+      endLine: reviewReport.findings[0]?.endLine,
+      message: "Review output must cross a typed boundary."
+    }
+  ]
+})
 const OUTPUT_CHUNK_BYTES = 32_000
 const MAXIMUM_RUNTIME_OUTPUT_CHARACTERS = 32_768
 const outputEvents = (count: number): ReadonlyArray<AgentRuntimeEvent> => [
@@ -232,6 +251,44 @@ const withWorker = <Success, Failure>(
     return yield* withDatabaseConfig(config, runtime, use)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
+const withReviewWorker = <Success, Failure>(
+  runtime: AgentRuntimeService,
+  sandbox: PrReviewSandboxRunner["Service"],
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
+) =>
+  Effect.gen(function*() {
+    const config = yield* makePersistenceTestConfig("control-center-agent-review-worker-")
+    const database = databaseLayer(config)
+    const jobs = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+    const registry = agentRuntimeRegistryLayer({
+      catalog: () => Effect.succeed({ providers: [] }),
+      select: ({ model, providerId }) =>
+        providerId === PROVIDER_ID
+          ? Effect.succeed({
+            model: AgentModelId.make(model ?? "deterministic-model"),
+            runtime,
+            filesystemAccess: "none"
+          })
+          : Effect.fail(
+            new AgentProviderError({
+              providerId,
+              phase: "configuration",
+              message: "No deterministic provider configured.",
+              retryable: false
+            })
+          )
+    })
+    const worker = agentJobWorkerWithPrReviewLayer({
+      leaseOwner: LEASE_OWNER,
+      leaseDuration: "5 minutes"
+    }).pipe(
+      Layer.provide(registry),
+      Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
+      Layer.provideMerge(jobs)
+    )
+    return yield* use.pipe(Effect.provide(worker), Effect.scoped)
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+
 const withTaskExecutor = <Success, Failure>(
   executor: AgentJobTaskExecutorService,
   use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
@@ -243,7 +300,7 @@ const withTaskExecutor = <Success, Failure>(
     const worker = agentJobWorkerWithTaskExecutorLayer({
       leaseOwner: LEASE_OWNER,
       leaseDuration: "5 minutes"
-    }).pipe(Layer.provide(agentJobTaskExecutorLayer(executor.execute)), Layer.provideMerge(jobs))
+    }).pipe(Layer.provide(agentJobTaskExecutorLayer(executor)), Layer.provideMerge(jobs))
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -251,6 +308,7 @@ describe("agent job worker", () => {
   it.effect("persists one sanitized PR review report without durable raw model chunks", () => {
     const claims = new Array<Parameters<AgentJobTaskExecutorService["execute"]>[0]>()
     const executor: AgentJobTaskExecutorService = {
+      taskTags: ["pr-review"],
       execute: (claim) => {
         claims.push(claim)
         return Effect.succeed({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
@@ -284,6 +342,7 @@ describe("agent job worker", () => {
   it.effect("terminally rejects malformed review output without persisting its raw canary", () => {
     const rawCanary = "RAW_MODEL_CANARY_MUST_NOT_PERSIST"
     const executor: AgentJobTaskExecutorService = {
+      taskTags: ["pr-review"],
       execute: () =>
         Effect.succeed(
           {
@@ -326,26 +385,88 @@ describe("agent job worker", () => {
     )
   })
 
-  it.effect("fails PR review closed when no immutable review executor is composed", () => {
-    let runtimeCalls = 0
+  it.effect("runs an immutable PR review through the production worker composition", () => {
+    const runtimeRequests = new Array<Parameters<AgentRuntimeService["run"]>[0]>()
+    const sandboxRequests = new Array<unknown>()
     const runtime = makeAgentRuntime({
-      run: () => {
-        runtimeCalls += 1
-        return Stream.fromIterable(completedEvents)
-      }
+      run: (request) =>
+        Stream.suspend(() => {
+          runtimeRequests.push(request)
+          return Stream.fromIterable([
+            { _tag: "started", providerRunRef: "review-run-1", sessionRef: null },
+            {
+              _tag: "output",
+              channel: "assistant",
+              text: JSON.stringify({
+                ...reviewReport,
+                findings: reviewReport.findings.map((finding) => ({
+                  ...finding,
+                  findingId: "evidence-1"
+                }))
+              })
+            },
+            { _tag: "completed", outcome: "success", sessionRef: null }
+          ])
+        })
     })
-    return withWorker(
+    const sandbox = PrReviewSandboxRunner.of({
+      run: (request) =>
+        Effect.sync(() => {
+          sandboxRequests.push(request)
+          return reviewEvidence
+        })
+    })
+    const defaultRegistry = agentRuntimeRegistryLayer({
+      catalog: () => Effect.succeed({ providers: [] }),
+      select: ({ model, providerId }) =>
+        providerId === PROVIDER_ID
+          ? Effect.succeed({
+            model: AgentModelId.make(model ?? "deterministic-model"),
+            runtime
+          })
+          : Effect.fail(
+            new AgentProviderError({
+              providerId,
+              phase: "configuration",
+              message: "No deterministic provider configured.",
+              retryable: false
+            })
+          )
+    })
+    return withReviewWorker(
       runtime,
+      sandbox,
       Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        const reviewWorker = yield* AgentJobWorker
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
         yield* enqueueReview
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const defaultWorker = agentJobWorkerLayer({
+          leaseOwner: LEASE_OWNER,
+          leaseDuration: "5 minutes"
+        }).pipe(
+          Layer.provide(defaultRegistry),
+          Layer.provide(Layer.succeed(AgentJobRepository, jobs)),
+          Layer.provide(NodeServices.layer)
+        )
+        const defaultResult = yield* AgentJobWorker.pipe(
+          Effect.flatMap((worker) => worker.runOnce(WORKSPACE_ID)),
+          Effect.provide(defaultWorker)
+        )
+        const result = yield* reviewWorker.runOnce(WORKSPACE_ID)
+        const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
 
-        assert.deepStrictEqual(result, { _tag: "failed", jobId: JOB_ID })
-        assert.strictEqual(runtimeCalls, 0)
-        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-failed")
+        assert.deepStrictEqual(defaultResult, { _tag: "idle" })
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.strictEqual(sandboxRequests.length, 1)
+        assert.strictEqual(runtimeRequests.length, 1)
+        assert.strictEqual(runtimeRequests[0]?.access, "read-only")
+        assert.deepStrictEqual(runtimeRequests[0]?.continuation, { _tag: "fresh" })
+        assert.strictEqual(persisted.report.subject.headRevision, reviewSubject.headRevision)
+        assert.match(persisted.report.findings[0]?.findingId ?? "", /^sha256:[0-9a-f]{64}$/u)
+        assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
       })
     )
   })
@@ -694,6 +815,7 @@ describe("agent job worker", () => {
         yield* enqueue()
         const original = yield* jobs.claimNext({
           workspaceId: WORKSPACE_ID,
+          taskTags: ["release-chat"],
           leaseOwner: LEASE_OWNER,
           leaseToken: Schema.decodeSync(AgentLeaseToken)("e".repeat(64)),
           claimedAt: STARTED_AT,
@@ -753,6 +875,7 @@ describe("agent job worker", () => {
             Option.isNone(
               yield* (yield* AgentJobRepository).claimNext({
                 workspaceId: WORKSPACE_ID,
+                taskTags: ["release-chat"],
                 leaseOwner: LEASE_OWNER,
                 leaseToken: Schema.decodeSync(AgentLeaseToken)("f".repeat(64)),
                 claimedAt: STARTED_AT,
