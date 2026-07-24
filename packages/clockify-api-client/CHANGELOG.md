@@ -1,5 +1,11 @@
 # @knpkv/clockify-api-client
 
+## 1.0.3
+
+### Patch Changes
+
+- [#260](https://github.com/knpkv/npm/pull/260) [`38848a2`](https://github.com/knpkv/npm/commit/38848a2660aa98295f96d54d232e4cec15ea95a5) Thanks [@konopkov](https://github.com/konopkov)! - Add a read-first Clockify time-entry page with deterministic totals, source facts, people roles, and explicit Jira attribution states.
+
 ## 1.0.2
 
 ### Patch Changes

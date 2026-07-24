@@ -1,5 +1,13 @@
 # @knpkv/rly
 
+## 0.2.0
+
+### Minor Changes
+
+- [#266](https://github.com/knpkv/npm/pull/266) [`d973d9a`](https://github.com/knpkv/npm/commit/d973d9a4bb9753f9a907f182c6b14a4528266765) Thanks [@konopkov](https://github.com/konopkov)! - Add a lightweight diff workbench entrypoint for applications that do not load the syntax renderer.
+
+- [#269](https://github.com/knpkv/npm/pull/269) [`2112142`](https://github.com/knpkv/npm/commit/21121422eb3a4f2be9d975ebb6015bc7381dd305) Thanks [@konopkov](https://github.com/konopkov)! - Render complete CodeCommit file changes as an on-demand split or unified line diff, and add a strict-budget rly diff entry backed by the Diffs parser.
+
 ## 0.1.1
 
 ### Patch Changes
