@@ -19,6 +19,8 @@ const OCI_EXECUTABLE = "docker"
 const GIT_EXECUTABLE = "git"
 const CONTAINER_SOURCE = "/workspace"
 const CONTAINER_UID_GID = "65532:65532"
+const CONTAINER_JOB_LABEL = "dev.knpkv.control-center.pr-review.job"
+const CONTAINER_ATTEMPT_LABEL = "dev.knpkv.control-center.pr-review.attempt"
 const MAXIMUM_STDERR_BYTES = 8_192
 const MAXIMUM_CONTROL_STDOUT_BYTES = 4_096
 const MAXIMUM_GIT_STDOUT_BYTES = 128
@@ -291,6 +293,7 @@ const processEnvironment: Readonly<Record<string, string>> = {
   DOCKER_CONFIG: "/nonexistent",
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
+  GIT_NO_LAZY_FETCH: "1",
   HOME: "/nonexistent",
   LANG: "C",
   LC_ALL: "C",
@@ -369,6 +372,26 @@ interface ChangedLineInterval {
 
 type ChangedLineIndex = ReadonlyMap<PrReviewPath, ReadonlyArray<ChangedLineInterval>>
 
+const structuralPatchPrefixes: ReadonlyArray<string> = [
+  "diff --git ",
+  "--- ",
+  "+++ ",
+  "@@ "
+]
+
+const hasAsciiPrefix = (
+  bytes: Uint8Array,
+  start: number,
+  end: number,
+  prefix: string
+): boolean => {
+  if (end - start < prefix.length) return false
+  for (let index = 0; index < prefix.length; index++) {
+    if (bytes[start + index] !== prefix.charCodeAt(index)) return false
+  }
+  return true
+}
+
 const indexChangedLineRanges = (
   ranges: ReadonlyArray<ChangedLineRange>
 ): ChangedLineIndex => {
@@ -404,11 +427,18 @@ const indexChangedLineRanges = (
 const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLineRanges")(function*(
   bytes: Uint8Array
 ) {
-  const patch = yield* decodeUtf8(bytes, "source-rejected")
   const ranges = new Array<ChangedLineRange>()
   let path: PrReviewPath | undefined
   let headerState: "awaiting-old" | "awaiting-new" | "body" = "body"
-  for (const line of patch.split("\n")) {
+  let lineStart = 0
+  for (let lineEnd = 0; lineEnd <= bytes.byteLength; lineEnd++) {
+    if (lineEnd < bytes.byteLength && bytes[lineEnd] !== 0x0a) continue
+    const isStructural = structuralPatchPrefixes.some((prefix) => hasAsciiPrefix(bytes, lineStart, lineEnd, prefix))
+    const line = isStructural
+      ? yield* decodeUtf8(bytes.subarray(lineStart, lineEnd), "source-rejected")
+      : undefined
+    lineStart = lineEnd + 1
+    if (line === undefined) continue
     if (line.startsWith("diff --git ")) {
       path = undefined
       headerState = "awaiting-old"
@@ -595,6 +625,8 @@ const missingContainerStderr = (container: string): ReadonlyArray<string> => [
 const createArguments = (
   source: string,
   name: string,
+  jobId: JobId,
+  attemptId: string,
   image: string,
   analyzerEntrypoint: string,
   analyzerArguments: ReadonlyArray<string>,
@@ -604,6 +636,10 @@ const createArguments = (
   "create",
   "--name",
   name,
+  "--label",
+  `${CONTAINER_JOB_LABEL}=${jobId}`,
+  "--label",
+  `${CONTAINER_ATTEMPT_LABEL}=${attemptId}`,
   "--pull",
   "never",
   "--log-driver",
@@ -870,6 +906,45 @@ const cleanupContainer = (
     })
   )
 
+const reconcileJobContainers = Effect.fn(
+  "PrReviewSandboxRunner.reconcileJobContainers"
+)(function*(
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  jobId: JobId,
+  currentName: string
+) {
+  const listed = yield* executeControl(
+    spawner,
+    OCI_EXECUTABLE,
+    [
+      "container",
+      "ls",
+      "--all",
+      "--filter",
+      `label=${CONTAINER_JOB_LABEL}=${jobId}`,
+      "--format",
+      "{{.Names}}"
+    ],
+    MAXIMUM_CONTROL_STDOUT_BYTES
+  )
+  if (listed.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* sandboxError("sandbox-unavailable")
+  }
+  const text = yield* decodeUtf8(listed.stdout, "sandbox-unavailable")
+  const prefix = `cc-pr-review-${jobId}-`
+  for (const staleName of text.split("\n").filter((candidate) => candidate.length > 0)) {
+    if (
+      !staleName.startsWith(prefix) ||
+      !Schema.is(SandboxAttemptId)(staleName.slice(prefix.length))
+    ) {
+      return yield* sandboxError("sandbox-unavailable")
+    }
+    if (staleName !== currentName) {
+      yield* cleanupContainer(spawner, staleName)
+    }
+  }
+})
+
 const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalysis")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
   request: PrReviewSandboxRequest,
@@ -881,6 +956,7 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   changedLines: ChangedLineIndex
 ) {
   const name = containerName(request.jobId, request.attemptId)
+  yield* reconcileJobContainers(spawner, request.jobId, name)
   const inspect = yield* executeControl(
     spawner,
     OCI_EXECUTABLE,
@@ -902,6 +978,8 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
     createArguments(
       source,
       name,
+      request.jobId,
+      request.attemptId,
       image,
       analyzerEntrypoint,
       analyzerArguments,

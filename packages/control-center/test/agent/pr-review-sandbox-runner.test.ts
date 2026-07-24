@@ -150,7 +150,7 @@ const ordinaryChangedDiff =
 
 const reviewTreeResponses = (
   checkout: string,
-  changedDiff: string = ordinaryChangedDiff
+  changedDiff: string | Uint8Array = ordinaryChangedDiff
 ): Array<FakeResponse> => [
   { stdout: "sha1\n" },
   { stdout: `${checkout}\n` },
@@ -180,11 +180,12 @@ const successResponses = (
   checkout: string,
   analysisOutput: string | Uint8Array = JSON.stringify(evidence),
   container = CONTAINER_NAME,
-  changedDiff: string = ordinaryChangedDiff
+  changedDiff: string | Uint8Array = ordinaryChangedDiff
 ): Array<FakeResponse> => [
   { stdout: `${checkout}\n` },
   { stdout: `${HEAD_REVISION}\n` },
   ...reviewTreeResponses(checkout, changedDiff),
+  { stdout: "" },
   missingContainerFor(container),
   { stdout: "container-id\n" },
   { stdout: analysisOutput },
@@ -290,7 +291,7 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, successResponses(checkout), run).pipe(
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
-          assert.strictEqual(calls.length, 13)
+          assert.strictEqual(calls.length, 14)
           const archiveGitDirectory = calls[5]?.args[4]
           const archive = calls[7]?.args[2]
           const reviewTree = calls[7]?.args[4]
@@ -376,6 +377,15 @@ describe("PrReviewSandboxRunner", () => {
             ],
             ["docker", [
               "container",
+              "ls",
+              "--all",
+              "--filter",
+              `label=dev.knpkv.control-center.pr-review.job=${JOB_ID}`,
+              "--format",
+              "{{.Names}}"
+            ]],
+            ["docker", [
+              "container",
               "inspect",
               "--type",
               "container",
@@ -388,6 +398,10 @@ describe("PrReviewSandboxRunner", () => {
               "create",
               "--name",
               CONTAINER_NAME,
+              "--label",
+              `dev.knpkv.control-center.pr-review.job=${JOB_ID}`,
+              "--label",
+              `dev.knpkv.control-center.pr-review.attempt=${ATTEMPT_ID}`,
               "--pull",
               "never",
               "--log-driver",
@@ -426,10 +440,10 @@ describe("PrReviewSandboxRunner", () => {
             ["docker", ["container", "rm", "--force", "--volumes", CONTAINER_NAME]]
           ])
           assert.notStrictEqual(reviewTree, checkout)
-          assert.notInclude(calls[10]?.args.join(" "), checkout)
-          assert.notInclude(calls[10]?.args.join(" "), ".git")
+          assert.notInclude(calls[11]?.args.join(" "), checkout)
+          assert.notInclude(calls[11]?.args.join(" "), ".git")
           assert.strictEqual(
-            calls[10]?.args.filter((argument) => argument === "--head-revision").length,
+            calls[11]?.args.filter((argument) => argument === "--head-revision").length,
             1
           )
           for (const child of calls) {
@@ -439,6 +453,7 @@ describe("PrReviewSandboxRunner", () => {
               DOCKER_CONFIG: "/nonexistent",
               GIT_CONFIG_GLOBAL: "/dev/null",
               GIT_CONFIG_NOSYSTEM: "1",
+              GIT_NO_LAZY_FETCH: "1",
               HOME: "/nonexistent",
               LANG: "C",
               LC_ALL: "C",
@@ -505,10 +520,10 @@ describe("PrReviewSandboxRunner", () => {
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
           assert.notStrictEqual(secondContainer, CONTAINER_NAME)
-          assert.strictEqual(calls[9]?.args.at(-1), secondContainer)
-          assert.strictEqual(calls[10]?.args[3], secondContainer)
-          assert.strictEqual(calls[11]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[10]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[11]?.args[3], secondContainer)
           assert.strictEqual(calls[12]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[13]?.args.at(-1), secondContainer)
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
@@ -674,6 +689,7 @@ describe("PrReviewSandboxRunner", () => {
         }).pipe(
           Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
           Effect.provide(hybridProcessLayer(dockerCalls, [
+            { stdout: "" },
             missingContainer(),
             { onSpawn: verifyReviewTree },
             { stdout: JSON.stringify(expectedEvidence) },
@@ -686,6 +702,7 @@ describe("PrReviewSandboxRunner", () => {
         assert.deepStrictEqual(
           dockerCalls.map(({ args }) => args.slice(0, 2)),
           [
+            ["container", "ls"],
             ["container", "inspect"],
             ["container", "create"],
             ["container", "start"],
@@ -1088,6 +1105,40 @@ describe("PrReviewSandboxRunner", () => {
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
+  it.effect("ignores invalid UTF-8 in binary source lines while retaining later text hunks", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const beforeBinary = encoder.encode([
+        "diff --git a/image.bin b/image.bin",
+        "--- a/image.bin",
+        "+++ b/image.bin",
+        "@@ -0,0 +1,1 @@",
+        ""
+      ].join("\n"))
+      const afterBinary = encoder.encode([
+        "",
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -11,0 +12,3 @@",
+        ""
+      ].join("\n"))
+      const binaryDiff = new Uint8Array(beforeBinary.length + 4 + afterBinary.length)
+      binaryDiff.set(beforeBinary)
+      binaryDiff.set([0x2b, 0xc3, 0x28, 0x0a], beforeBinary.length)
+      binaryDiff.set(afterBinary, beforeBinary.length + 4)
+
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(evidence), CONTAINER_NAME, binaryDiff),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.deepStrictEqual(filtered, evidence)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
   it.effect("retains changed evidence for an unquoted non-ASCII Git path", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const unicodeDiff = [
@@ -1287,6 +1338,7 @@ describe("PrReviewSandboxRunner", () => {
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
         ...reviewTreeResponses(checkout),
+        { stdout: "" },
         missingContainer(),
         {},
         { exitCode: 23, stderr: "hostile daemon detail /host/path" },
@@ -1313,6 +1365,7 @@ describe("PrReviewSandboxRunner", () => {
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
         ...reviewTreeResponses(checkout),
+        { stdout: "" },
         missingContainer(),
         { exitCode: 125, stderr: "daemon failed after allocating a container" },
         { exitCode: 1, stderr: "cleanup daemon unavailable" }
@@ -1340,6 +1393,7 @@ describe("PrReviewSandboxRunner", () => {
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
           ...reviewTreeResponses(checkout),
+          { stdout: "" },
           missingContainer(),
           { hanging: true, started: createStarted },
           {}
@@ -1369,6 +1423,7 @@ describe("PrReviewSandboxRunner", () => {
               { stdout: `${checkout}\n` },
               { stdout: `${HEAD_REVISION}\n` },
               ...reviewTreeResponses(checkout),
+              { stdout: "" },
               missingContainer(),
               {},
               { hanging: true, started },
@@ -1401,6 +1456,7 @@ describe("PrReviewSandboxRunner", () => {
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
           ...reviewTreeResponses(checkout),
+          { stdout: "" },
           missingContainer(),
           {},
           { hanging: true, started },
@@ -1428,6 +1484,7 @@ describe("PrReviewSandboxRunner", () => {
             { stdout: `${checkout}\n` },
             { stdout: `${HEAD_REVISION}\n` },
             ...reviewTreeResponses(checkout),
+            { stdout: "" },
             missingContainer(),
             {},
             { stdout: JSON.stringify(evidence) },
@@ -1441,16 +1498,18 @@ describe("PrReviewSandboxRunner", () => {
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
-  it.effect("reconciles a stale same-job container and does not mask inspect daemon failures", () =>
+  it.effect("reconciles a prior attempt for the same job and does not mask list failures", () =>
     withWorkspace((workspaceRoot, checkout) =>
       Effect.gen(function*() {
         const staleCalls: Array<ChildProcess.StandardCommand> = []
+        const staleContainer = `cc-pr-review-${JOB_ID}-${SECOND_ATTEMPT_ID}`
         const staleResult = yield* provideRunner(workspaceRoot, staleCalls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
           ...reviewTreeResponses(checkout),
-          { stdout: "running\n" },
+          { stdout: `${staleContainer}\n` },
           {},
+          missingContainer(),
           {},
           { stdout: JSON.stringify(evidence) },
           {}
@@ -1461,9 +1520,18 @@ describe("PrReviewSandboxRunner", () => {
           "rm",
           "--force",
           "--volumes",
+          staleContainer
+        ])
+        assert.deepStrictEqual(staleCalls[11]?.args, [
+          "container",
+          "inspect",
+          "--type",
+          "container",
+          "--format",
+          "{{.Id}}",
           CONTAINER_NAME
         ])
-        assert.deepStrictEqual(staleCalls[11]?.args.slice(0, 2), ["container", "create"])
+        assert.deepStrictEqual(staleCalls[12]?.args.slice(0, 2), ["container", "create"])
 
         const daemonCalls: Array<ChildProcess.StandardCommand> = []
         const daemonResult = yield* provideRunner(workspaceRoot, daemonCalls, [
