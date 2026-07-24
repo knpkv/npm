@@ -145,16 +145,17 @@ const missingContainerFor = (name: string): FakeResponse => ({
 
 const missingContainer = (): FakeResponse => missingContainerFor(CONTAINER_NAME)
 
-const reviewTreeResponses = (): Array<FakeResponse> => [
+const ordinaryChangedDiff =
+  "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -11,0 +12,3 @@\n"
+
+const reviewTreeResponses = (changedDiff: string = ordinaryChangedDiff): Array<FakeResponse> => [
   { stdout: "sha1\n" },
   { stdout: "/trusted/git/objects\n" },
   { stdout: `100644 blob ${HEAD_REVISION}\tsrc/example.ts\u0000` },
   {},
   {},
   {},
-  {
-    stdout: "diff --git a/src/example.ts b/src/example.ts\n+++ b/src/example.ts\n@@ -11,0 +12,3 @@\n"
-  }
+  { stdout: changedDiff }
 ]
 
 const sourceGitArguments = (
@@ -175,11 +176,12 @@ const sourceGitArguments = (
 const successResponses = (
   checkout: string,
   analysisOutput: string | Uint8Array = JSON.stringify(evidence),
-  container = CONTAINER_NAME
+  container = CONTAINER_NAME,
+  changedDiff: string = ordinaryChangedDiff
 ): Array<FakeResponse> => [
   { stdout: `${checkout}\n` },
   { stdout: `${HEAD_REVISION}\n` },
-  ...reviewTreeResponses(),
+  ...reviewTreeResponses(changedDiff),
   missingContainerFor(container),
   { stdout: "container-id\n" },
   { stdout: analysisOutput },
@@ -867,8 +869,18 @@ describe("PrReviewSandboxRunner", () => {
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
-  it.effect("retains only analyzer findings that intersect base-to-head changed lines", () =>
+  it.effect("ignores source lines that resemble diff headers while retaining later changed hunks", () =>
     withWorkspace((workspaceRoot, checkout) => {
+      const spoofedHeaderDiff = [
+        "diff --git a/src/example.ts b/src/example.ts",
+        "--- a/src/example.ts",
+        "+++ b/src/example.ts",
+        "@@ -11,0 +12,1 @@",
+        "+++ b/src/unchanged.ts",
+        "@@ -20,0 +21,1 @@",
+        "+ordinary changed source",
+        ""
+      ].join("\n")
       const mixed = Schema.decodeSync(PrReviewSandboxEvidence)({
         ...evidence,
         findings: [
@@ -876,16 +888,16 @@ describe("PrReviewSandboxRunner", () => {
             ruleId: "example/no-example",
             severity: "warning",
             path: "src/example.ts",
-            startLine: 12,
-            endLine: 14,
+            startLine: 21,
+            endLine: 21,
             message: "The analyzer found a deterministic problem."
           },
           {
             ruleId: "example/unchanged",
             severity: "warning",
             path: "src/unchanged.ts",
-            startLine: 12,
-            endLine: 14,
+            startLine: 21,
+            endLine: 21,
             message: "This finding is outside the pull-request diff."
           }
         ]
@@ -893,11 +905,13 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(
         workspaceRoot,
         [],
-        successResponses(checkout, JSON.stringify(mixed)),
+        successResponses(checkout, JSON.stringify(mixed), CONTAINER_NAME, spoofedHeaderDiff),
         run
       ).pipe(
         Effect.map((filtered) => {
-          assert.deepStrictEqual(filtered.findings, evidence.findings)
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/example.ts")
+          assert.strictEqual(filtered.findings[0]?.startLine, 21)
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))

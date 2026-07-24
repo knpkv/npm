@@ -355,12 +355,23 @@ const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLi
   const patch = yield* decodeUtf8(bytes, "source-rejected")
   const ranges = new Array<ChangedLineRange>()
   let path: PrReviewPath | undefined
+  let headerState: "awaiting-old" | "awaiting-new" | "body" = "body"
   for (const line of patch.split("\n")) {
-    if (line.startsWith("+++ ")) {
+    if (line.startsWith("diff --git ")) {
+      path = undefined
+      headerState = "awaiting-old"
+      continue
+    }
+    if (headerState === "awaiting-old" && line.startsWith("--- ")) {
+      headerState = "awaiting-new"
+      continue
+    }
+    if (headerState === "awaiting-new" && line.startsWith("+++ ")) {
       const candidate = line.startsWith("+++ b/") ? line.slice(6) : undefined
       path = candidate !== undefined && Schema.is(PrReviewPath)(candidate)
         ? candidate
         : undefined
+      headerState = "body"
       continue
     }
     if (path === undefined || !line.startsWith("@@ ")) continue
@@ -801,14 +812,14 @@ const runContainedAnalysis = Effect.fn("PrReviewSandboxRunner.runContainedAnalys
   return yield* decodeEvidence(analysis.stdout, request.headRevision)
 })
 
-/** Internal process-isolated PR-review service. It is intentionally absent from package entry points. */
+/** Process-isolated PR-review service exported only for explicit server composition. */
 export interface PrReviewSandboxRunnerService {
   readonly run: (
     request: unknown
   ) => Effect.Effect<PrReviewSandboxEvidence, PrReviewSandboxError>
 }
 
-/** Dependency-injection seam for the hardened production runner. */
+/** Dependency-injection tag for the hardened production runner. */
 export class PrReviewSandboxRunner extends Context.Service<
   PrReviewSandboxRunner,
   PrReviewSandboxRunnerService

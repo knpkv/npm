@@ -16,3 +16,10 @@ export {
   type AgentRuntimeSelection,
   type SelectedAgentRuntime
 } from "./AgentRuntimeRegistry.js"
+export {
+  PrReviewSandboxError,
+  PrReviewSandboxRunner,
+  prReviewSandboxRunnerLayer,
+  type PrReviewSandboxRunnerOptions,
+  type PrReviewSandboxRunnerService
+} from "./internal/PrReviewSandboxRunner.js"
