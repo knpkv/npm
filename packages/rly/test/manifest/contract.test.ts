@@ -107,6 +107,7 @@ describe("component manifest contract", () => {
     }
 
     expect(componentStyleSources(manifest)).toEqual([
+      "src/diff/bounded/BoundedDiffCodeView.module.css",
       "src/diff/DiffCodeView.module.css",
       "src/diff/DiffFileTree.module.css",
       "src/diff/DiffFinding.module.css",
@@ -156,6 +157,7 @@ describe("component manifest contract", () => {
 
   it("projects every component stylesheet from the checked-in manifest", () => {
     expect(componentStyleSources(componentManifest)).toEqual([
+      "src/diff/bounded/BoundedDiffCodeView.module.css",
       "src/diff/DiffCodeView.module.css",
       "src/diff/DiffFileTree.module.css",
       "src/diff/DiffFinding.module.css",

@@ -104,6 +104,23 @@
       ]
     },
     {
+      "name": "BoundedDiffCodeView",
+      "paths": {
+        "source": "packages/rly/src/diff/bounded/BoundedDiffCodeView.tsx",
+        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "styles": [
+          "packages/rly/src/diff/bounded/BoundedDiffCodeView.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/diff/BoundedDiffCodeView.test.tsx"
+        ]
+      },
+      "storyId": "diff-diffcodeview--workbench",
+      "storyIds": [
+        "diff-diffcodeview--workbench"
+      ]
+    },
+    {
       "name": "Button",
       "paths": {
         "source": "packages/rly/src/primitives/Button.tsx",

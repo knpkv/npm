@@ -36,6 +36,7 @@ load the opt-in diff renderer or its worker graph.
 | `@knpkv/rly/primitives`               | Typography, surfaces, controls, state, and modal overlays   |
 | `@knpkv/rly/patterns`                 | Releases, relationships, collaborators, and governed agents |
 | `@knpkv/rly/diff`                     | Opt-in complete diff workbench and bounded worker provider  |
+| `@knpkv/rly/diff/bounded`             | Strict-budget line diffs without syntax packs or WASM       |
 | `@knpkv/rly/diff/workbench`           | Lightweight diff inventory and workbench composition        |
 | `@knpkv/rly/tokens`                   | Browser-safe semantic token names                           |
 | `@knpkv/rly/styles.css`               | Generated fonts, tokens, reset, and component styles        |
@@ -145,5 +146,17 @@ export const CompleteDiff = ({ items }: { readonly items: ReadonlyArray<RlyDiffC
   <DiffWorkerProvider poolSize={2}>
     <DiffCodeView initialItems={items} mode="split" />
   </DiffWorkerProvider>
+)
+```
+
+Use the bounded entry when a route needs complete split or unified line
+changes but cannot ship the syntax-language and worker payload. It uses the
+same Diffs parser and keeps syntax highlighting as an additive upgrade:
+
+```tsx
+import { BoundedDiffCodeView, type RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
+
+export const ReviewDiff = ({ items }: { readonly items: ReadonlyArray<RlyDiffCodeItem> }) => (
+  <BoundedDiffCodeView initialItems={items} mode="split" />
 )
 ```

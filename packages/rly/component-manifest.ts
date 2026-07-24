@@ -8,6 +8,7 @@ export type EntryId =
   | "primitives"
   | "patterns"
   | "diff"
+  | "diff/bounded"
   | "diff/workbench"
 
 /** A JavaScript module entry generated into the published package. */
@@ -142,6 +143,13 @@ export const componentManifest = {
     {
       aggregates: [],
       environment: "client",
+      id: "diff/bounded",
+      source: "src/diff/bounded/index.ts",
+      subpath: "./diff/bounded"
+    },
+    {
+      aggregates: [],
+      environment: "client",
       id: "diff/workbench",
       source: "src/diff/workbench/index.ts",
       subpath: "./diff/workbench"
@@ -149,6 +157,28 @@ export const componentManifest = {
   ],
   components: [
     // scaffold:components:insert
+    {
+      category: "diff",
+      exports: [
+        { kind: "value", name: "BoundedDiffCodeView" },
+        { kind: "type", name: "BoundedDiffCodeViewProps" },
+        { kind: "type", name: "RlyDiffCodeItem" }
+      ],
+      name: "BoundedDiffCodeView",
+      publicEntry: "diff/bounded",
+      registry: false,
+      source: "src/diff/bounded/BoundedDiffCodeView.tsx",
+      status: "experimental",
+      styles: ["src/diff/bounded/BoundedDiffCodeView.module.css"],
+      variants: [
+        { defaultValue: "split", name: "mode", values: ["split", "stacked"] }
+      ],
+      visual: {
+        story: "stories/diff/DiffCodeView.stories.tsx",
+        storyId: "diff-diffcodeview--workbench",
+        tests: ["test/diff/BoundedDiffCodeView.test.tsx"]
+      }
+    },
     {
       category: "foundation",
       exports: [

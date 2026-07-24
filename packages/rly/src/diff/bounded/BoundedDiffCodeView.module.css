@@ -1,0 +1,103 @@
+.root {
+  overflow: hidden;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+}
+
+.file + .file {
+  border-top: 1px solid var(--rly-color-border-1);
+}
+
+.noChanges {
+  margin: 0;
+  padding: var(--rly-space-16);
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+    var(--rly-type-body-font);
+}
+
+.fileName {
+  margin: 0;
+  padding: var(--rly-space-12) var(--rly-space-16);
+  border-bottom: 1px solid var(--rly-color-border-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.scroller {
+  max-height: min(70vh, 56rem);
+  overflow: auto;
+}
+
+.table {
+  width: 100%;
+  border-spacing: 0;
+  border-collapse: collapse;
+  font-family: var(--rly-font-mono);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.table td {
+  min-width: 0;
+  padding: 0;
+  vertical-align: top;
+}
+
+.hunk td {
+  padding: var(--rly-space-4) var(--rly-space-12);
+  border-block: 1px solid var(--rly-color-border-1);
+  background: var(--rly-color-surface-2);
+  color: var(--rly-color-text-2);
+}
+
+.lineNumber {
+  width: 3.25rem;
+  padding-inline: var(--rly-space-2) !important;
+  border-right: 1px solid var(--rly-color-border-1);
+  color: var(--rly-color-text-3);
+  text-align: right;
+  user-select: none;
+}
+
+.marker {
+  width: 1.5rem;
+  color: var(--rly-color-text-3);
+  text-align: center;
+  user-select: none;
+}
+
+.code,
+.wrappedCode {
+  display: block;
+  min-height: 1.55em;
+  padding-inline: var(--rly-space-12);
+  white-space: pre;
+}
+
+.wrappedCode {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.deletion > td,
+.change .deletionCode {
+  background: var(--rly-color-blocked-tint);
+}
+
+.addition > td,
+.change .additionCode {
+  background: var(--rly-color-success-tint);
+}
+
+.context > td {
+  background: var(--rly-color-surface-1);
+}
+
+.deletionCode,
+.additionCode {
+  width: 50%;
+  border-right: 1px solid var(--rly-color-border-1);
+}

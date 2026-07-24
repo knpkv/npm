@@ -24,6 +24,13 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const roots: Array<ReturnType<typeof createRoot>> = []
 
+const flushLazyDiffViewer = async (): Promise<void> => {
+  await act(async () => {
+    await import("@knpkv/rly/diff/bounded")
+    await Promise.resolve()
+  })
+}
+
 afterEach(async () => {
   await act(async () => {
     for (const root of roots.splice(0)) root.unmount()
@@ -253,14 +260,15 @@ describe("WorkspacePullRequestDiff", () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+    await flushLazyDiffViewer()
 
     expect(content).toHaveBeenCalledTimes(4)
     expect(host.querySelector("[data-rly-diff-content-state='ready']")).not.toBeNull()
-    expect(host.textContent).toContain("answer = 42")
-    expect(host.textContent).toContain("answer = 43")
+    expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
+    expect(host.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
   })
 
-  it("loads bounded content into the selected rly workbench scope", async () => {
+  it("renders bounded content through the complete line diff viewer", async () => {
     const transport: WorkspacePullRequestDiffTransport = {
       inventory: async (): Promise<CompleteDiffInventory> => ({
         ready: true,
@@ -276,8 +284,9 @@ describe("WorkspacePullRequestDiff", () => {
           }
         ]
       }),
-      content: async () => ({
-        bytesBase64: "ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDQyCg==",
+      content: async (_scope, _entry, side) => ({
+        bytesBase64:
+          side === "before" ? "ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDQyCg==" : "ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDQzCg==",
         totalBytes: 25,
         unavailableReason: null
       })
@@ -294,8 +303,12 @@ describe("WorkspacePullRequestDiff", () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+    await flushLazyDiffViewer()
 
     expect(host.querySelector("[data-rly-diff-workbench-slot='viewer']")).not.toBeNull()
+    expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
     expect(host.textContent).toContain("answer = 42")
+    expect(host.textContent).toContain("answer = 43")
+    expect(host.querySelectorAll("[data-control-center-diff-layout]")).toHaveLength(0)
   })
 })
