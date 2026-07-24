@@ -7,6 +7,7 @@ import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
   agentHandlersLayer,
   deliveryGraphHandlersLayer,
+  diffHandlersLayer,
   liveEventHandlersLayer,
   mediaHandlersLayer,
   pluginHandlersLayer,
@@ -18,10 +19,7 @@ import {
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
 /** Contract middleware implementations shared by every authenticated API group. */
-const controlCenterApiMiddlewareLayerWithLifecycle = Layer.mergeAll(
-  sessionCookieAuthLayer,
-  mutationCsrfLayer
-)
+const controlCenterApiMiddlewareLayerWithLifecycle = Layer.mergeAll(sessionCookieAuthLayer, mutationCsrfLayer)
 
 /** Standalone middleware composition with an isolated accepting lifecycle. */
 export const controlCenterApiMiddlewareLayer = controlCenterApiMiddlewareLayerWithLifecycle.pipe(
@@ -36,13 +34,11 @@ const controlCenterApiHandlersLayerWithLifecycle = Layer.mergeAll(
   portfolioHandlersLayer,
   timelineHandlersLayer,
   deliveryGraphHandlersLayer,
+  diffHandlersLayer,
   agentHandlersLayer,
   mediaHandlersLayer,
   liveEventHandlersLayer
-).pipe(
-  Layer.provide(controlCenterApiMiddlewareLayerWithLifecycle),
-  Layer.provide(LiveStreamAdmission.layer)
-)
+).pipe(Layer.provide(controlCenterApiMiddlewareLayerWithLifecycle), Layer.provide(LiveStreamAdmission.layer))
 
 /** Standalone handler composition with an isolated accepting lifecycle. */
 export const controlCenterApiHandlersLayer = controlCenterApiHandlersLayerWithLifecycle.pipe(

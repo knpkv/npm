@@ -1,7 +1,14 @@
 import { COMPONENT_REGISTRY_METADATA } from "./manifest/registry-metadata.js"
 
 /** Stable identifiers for rly's public package entries. */
-export type EntryId = "root" | "tokens" | "foundations" | "primitives" | "patterns" | "diff"
+export type EntryId =
+  | "root"
+  | "tokens"
+  | "foundations"
+  | "primitives"
+  | "patterns"
+  | "diff"
+  | "diff/workbench"
 
 /** A JavaScript module entry generated into the published package. */
 export interface ModuleEntry {
@@ -126,11 +133,18 @@ export const componentManifest = {
       subpath: "./patterns"
     },
     {
-      aggregates: [],
+      aggregates: ["diff/workbench"],
       environment: "client",
       id: "diff",
       source: "src/diff/index.ts",
       subpath: "./diff"
+    },
+    {
+      aggregates: [],
+      environment: "client",
+      id: "diff/workbench",
+      source: "src/diff/workbench/index.ts",
+      subpath: "./diff/workbench"
     }
   ],
   components: [
@@ -217,7 +231,7 @@ export const componentManifest = {
         { kind: "type", name: "RlyDiffInventory" }
       ],
       name: "DiffFileTree",
-      publicEntry: "diff",
+      publicEntry: "diff/workbench",
       registry: true,
       source: "src/diff/DiffFileTree.tsx",
       status: "stable",
@@ -265,7 +279,7 @@ export const componentManifest = {
         { kind: "type", name: "RlyDiffLayout" }
       ],
       name: "DiffHeader",
-      publicEntry: "diff",
+      publicEntry: "diff/workbench",
       registry: true,
       source: "src/diff/DiffHeader.tsx",
       status: "stable",
@@ -305,7 +319,7 @@ export const componentManifest = {
         { kind: "type", name: "RlyDiffWorkbenchScope" }
       ],
       name: "DiffWorkbench",
-      publicEntry: "diff",
+      publicEntry: "diff/workbench",
       registry: true,
       source: "src/diff/DiffWorkbench.tsx",
       status: "stable",

@@ -55,6 +55,10 @@ const profileFor = (request: HttpServerRequest.HttpServerRequest): RequestLimitP
     request.method === "POST" &&
     /^\/api\/v1\/plugins\/[^/?]+\/sync(?:\?|$)/u.test(request.url)
   ) return "synchronization"
+  if (
+    request.method === "POST" &&
+    /^\/api\/v1\/diffs\/[^/?]+\/pull-requests\/[^/?]+\/content(?:\?|$)/u.test(request.url)
+  ) return "read"
   return request.method === "GET" || request.method === "HEAD" ? "read" : "mutation"
 }
 

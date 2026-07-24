@@ -61,7 +61,7 @@ describe("plugin contract negotiation", () => {
         descriptor([
           {
             capabilityId: "entity.read",
-            supportedVersions: [2],
+            supportedVersions: [3],
             requirement: "required"
           }
         ])
@@ -81,7 +81,7 @@ describe("plugin contract negotiation", () => {
           supportedEntityRead,
           {
             capabilityId: "diff.content",
-            supportedVersions: [2],
+            supportedVersions: [3],
             requirement: "optional"
           }
         ])

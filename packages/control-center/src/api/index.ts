@@ -39,6 +39,14 @@ export {
   WorkspaceEntityInspection
 } from "./deliveryGraph.js"
 export {
+  CompleteDiffContentRange,
+  CompleteDiffContentRequest,
+  CompleteDiffInventory,
+  CompleteDiffInventoryEntry,
+  DiffApiGroup,
+  DiffFileAnchor
+} from "./diff.js"
+export {
   ConflictApiError,
   CorrelationId,
   CorrelationResponseHeaders,

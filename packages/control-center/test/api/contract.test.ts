@@ -4,9 +4,11 @@ import { OpenApi } from "effect/unstable/httpapi"
 
 import {
   AgentApiGroup,
+  CompleteDiffContentRequest,
   ControlCenterApi,
   CreateAtlassianOAuthGrantRequest,
   DeliveryGraphApiGroup,
+  DiffApiGroup,
   LiveEventsApiGroup,
   makeControlCenterApiClient,
   makeControlCenterApiUrls,
@@ -35,6 +37,8 @@ import {
   ShareId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { PluginRelativePathV1 } from "../../src/domain/plugins/events.js"
+import { Revision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 
 const middlewareKeys = (middlewares: ReadonlySet<{ readonly key: string }>): ReadonlyArray<string> =>
   Array.from(middlewares, ({ key }) => key)
@@ -154,6 +158,41 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(jsonExportPath.get)
     assert.isDefined(jsonExportPath.get.responses["200"]?.content?.["application/json; charset=utf-8"])
 
+    const diffInventoryPath =
+      specification.paths["/api/v1/diffs/{pluginConnectionId}/pull-requests/{vendorImmutableId}/inventory"]
+    assert.isDefined(diffInventoryPath)
+    assert.isDefined(diffInventoryPath.get)
+    assert.deepStrictEqual(Object.keys(diffInventoryPath.get.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "429",
+      "503"
+    ])
+
+    const diffContentPath =
+      specification.paths["/api/v1/diffs/{pluginConnectionId}/pull-requests/{vendorImmutableId}/content"]
+    assert.isDefined(diffContentPath)
+    assert.isUndefined(diffContentPath.get)
+    assert.isDefined(diffContentPath.post)
+    assert.isDefined(diffContentPath.post.requestBody)
+    assert.deepStrictEqual(Object.keys(diffContentPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "413",
+      "429",
+      "503"
+    ])
+
     const agentTurnPath = specification.paths["/api/v1/agent/releases/{releaseId}/turns"]
     assert.isDefined(agentTurnPath)
     assert.isDefined(agentTurnPath.post)
@@ -243,7 +282,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the nine API groups and endpoint routes explicit", () => {
+  it("keeps the ten API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -251,6 +290,7 @@ describe("ControlCenterApi contract", () => {
       "plugins",
       "portfolio",
       "deliveryGraph",
+      "diff",
       "media",
       "liveEvents",
       "timeline",
@@ -338,6 +378,25 @@ describe("ControlCenterApi contract", () => {
         ["relationship", "GET", "/api/v1/relationships/:relationshipId"],
         ["relationshipHistory", "GET", "/api/v1/relationships/:relationshipId/history"],
         ["evidence", "GET", "/api/v1/evidence/:evidenceId"]
+      ]
+    )
+    assert.deepStrictEqual(
+      Object.entries(DiffApiGroup.endpoints).map(([identifier, { method, path }]) => [
+        identifier,
+        method,
+        path
+      ]),
+      [
+        [
+          "inventory",
+          "GET",
+          "/api/v1/diffs/:pluginConnectionId/pull-requests/:vendorImmutableId/inventory"
+        ],
+        [
+          "content",
+          "POST",
+          "/api/v1/diffs/:pluginConnectionId/pull-requests/:vendorImmutableId/content"
+        ]
       ]
     )
     assert.deepStrictEqual(
@@ -453,6 +512,10 @@ describe("ControlCenterApi contract", () => {
       relationshipHistory: [SessionCookieAuth.key],
       evidence: [SessionCookieAuth.key]
     })
+    assert.deepStrictEqual(middlewareByEndpoint(DiffApiGroup.endpoints), {
+      inventory: [SessionCookieAuth.key],
+      content: [SessionCookieAuth.key]
+    })
     assert.deepStrictEqual(middlewareByEndpoint(MediaApiGroup.endpoints), {
       read: [SessionCookieAuth.key]
     })
@@ -491,6 +554,7 @@ describe("ControlCenterApi contract", () => {
     const shareId = Schema.decodeSync(ShareId)("01890f6f-6d6a-7cc0-98d2-000000000097")
     const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000001")
     const urls = makeControlCenterApiUrls({ baseUrl: "https://control.example" })
+    const vendorImmutableId = VendorImmutableId.make("184")
 
     assert.strictEqual(urls.session.current(), "https://control.example/api/v1/session/current")
     assert.strictEqual(
@@ -508,6 +572,27 @@ describe("ControlCenterApi contract", () => {
     assert.strictEqual(
       urls.plugins.synchronizeConnection({ params: { pluginConnectionId } }),
       "https://control.example/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/sync"
+    )
+    const contentUrl = urls.diff.content({
+      params: { pluginConnectionId, vendorImmutableId }
+    })
+    assert.strictEqual(
+      contentUrl,
+      "https://control.example/api/v1/diffs/01890f6f-6d6a-7cc0-98d2-000000000092/pull-requests/184/content"
+    )
+    assert.isBelow(contentUrl.length, 8 * 1024)
+    const maximumPath = PluginRelativePathV1.make("a".repeat(4_096))
+    assert.isTrue(
+      Schema.is(CompleteDiffContentRequest)({
+        revision: Revision.make("revision-9"),
+        anchor: `sha256:${"a".repeat(64)}`,
+        path: maximumPath,
+        previousPath: maximumPath,
+        status: "renamed",
+        side: "before",
+        offset: 0,
+        length: 1_048_576
+      })
     )
     assert.strictEqual(urls.plugins.list(), "https://control.example/api/v1/plugins")
     assert.strictEqual(urls.plugins.overview(), "https://control.example/api/v1/plugins/overview")

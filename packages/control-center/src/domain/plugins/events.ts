@@ -242,6 +242,29 @@ export const DiffContentRangeRequestV1 = Schema.Struct({
   length: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_048_576 }))
 })
 
+/** Exact immutable request for one page of a complete diff inventory. */
+export const DiffInventoryPageRequestV2 = Schema.Struct({
+  entity: PluginEntityReferenceV1,
+  expectedRevision: Revision,
+  baseRevision: Revision,
+  headRevision: Revision,
+  cursor: Schema.NullOr(PluginPageCursorV1)
+})
+
+/** Exact immutable request for a bounded byte range of before/after diff content. */
+export const DiffContentRangeRequestV2 = Schema.Struct({
+  entity: PluginEntityReferenceV1,
+  expectedRevision: Revision,
+  baseRevision: Revision,
+  headRevision: Revision,
+  path: PluginRelativePathV1,
+  previousPath: Schema.NullOr(PluginRelativePathV1),
+  status: PluginDiffInventoryEntryV1.fields.status,
+  side: Schema.Literals(["before", "after"]),
+  offset: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  length: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_048_576 }))
+})
+
 /** Bounded content range with explicit availability metadata. */
 export const DiffContentRangeV1 = Schema.Struct({
   bytesBase64: Schema.NullOr(PluginDiffContentBase64V1),
@@ -258,6 +281,8 @@ export const DiffContentRangeV1 = Schema.Struct({
 )
 
 export type DiffInventoryPageRequestV1 = typeof DiffInventoryPageRequestV1.Type
+export type DiffInventoryPageRequestV2 = typeof DiffInventoryPageRequestV2.Type
 export type DiffInventoryPageV1 = typeof DiffInventoryPageV1.Type
 export type DiffContentRangeRequestV1 = typeof DiffContentRangeRequestV1.Type
+export type DiffContentRangeRequestV2 = typeof DiffContentRangeRequestV2.Type
 export type DiffContentRangeV1 = typeof DiffContentRangeV1.Type

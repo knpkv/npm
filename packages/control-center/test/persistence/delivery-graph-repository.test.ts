@@ -14,7 +14,7 @@ import {
   RoleAssignmentId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { VendorImmutableId } from "../../src/domain/sourceRevision.js"
+import { Revision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   PersistedRecordError,
@@ -966,6 +966,30 @@ describe("DeliveryGraphRepository", () => {
         assert.strictEqual(pipeline._tag, "entityProjection")
         if (pipeline._tag === "entityProjection") {
           assert.strictEqual(pipeline.value.projection.entityType, "pipeline-execution")
+        }
+
+        const synchronized = yield* repository.read(WORKSPACE_A, {
+          _tag: "sourceEntityProjection",
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          vendorImmutableId: VendorImmutableId.make("PAY-42"),
+          revision: Revision.make("source-1")
+        })
+        assert.strictEqual(synchronized._tag, "sourceEntityProjection")
+        if (synchronized._tag === "sourceEntityProjection") {
+          assert.strictEqual(synchronized.value.sourceRevision, "source-1")
+          assert.strictEqual(synchronized.value.projection.entityId, ISSUE_ID)
+        }
+        const mismatchedRevision = yield* repository.read(WORKSPACE_A, {
+          _tag: "sourceEntityProjection",
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          vendorImmutableId: VendorImmutableId.make("PAY-42"),
+          revision: Revision.make("source-2")
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(mismatchedRevision))
+        if (Result.isFailure(mismatchedRevision)) {
+          assert.instanceOf(mismatchedRevision.failure, RecordNotFoundError)
         }
 
         const slice = yield* repository.read(WORKSPACE_A, {

@@ -2,10 +2,12 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Redacted, Result, Schema } from "effect"
 
+import { isAuthenticatedReadTransportEndpoint } from "../../src/server/api/ApiMiddleware.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import {
   authorizeAuthenticatedMutation,
   authorizeAuthenticatedRead,
+  authorizeAuthenticatedReadPost,
   authorizeInsecureLanCapability,
   authorizeRequest,
   decodeBindConfig,
@@ -32,6 +34,35 @@ const request = {
 }
 
 describe("bind and request security", () => {
+  it.effect("authorizes only the bounded diff content POST as a read transport", () =>
+    Effect.gen(function*() {
+      const config = yield* decodeBindConfig({})
+      assert.isTrue(isAuthenticatedReadTransportEndpoint("diff", "content", "POST"))
+      assert.isFalse(isAuthenticatedReadTransportEndpoint("agent", "turn", "POST"))
+
+      yield* authorizeAuthenticatedReadPost({
+        capability: "policy-administration",
+        config,
+        request: {
+          ...request,
+          method: "POST",
+          origin: "http://127.0.0.1:4173"
+        }
+      })
+
+      const foreignOrigin = yield* authorizeAuthenticatedReadPost({
+        capability: "policy-administration",
+        config,
+        request: {
+          ...request,
+          method: "POST",
+          origin: "http://attacker.example"
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(foreignOrigin))
+      if (Result.isFailure(foreignOrigin)) assert.strictEqual(foreignOrigin.failure.reason, "origin-rejected")
+    }))
+
   it.effect("defaults to one explicit loopback URL and strict session cookie", () =>
     Effect.gen(function*() {
       const config = yield* decodeBindConfig({})

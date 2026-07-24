@@ -16,6 +16,7 @@ import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import {
   authorizeAuthenticatedMutation,
   authorizeAuthenticatedRead,
+  authorizeAuthenticatedReadPost,
   authorizeRequest,
   type InsecureLanCapability
 } from "../security/RequestSecurity.js"
@@ -58,6 +59,17 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
   }
 }
 
+/** Identify safe reads, including the one bounded body transport represented by POST. */
+export const isAuthenticatedReadTransportEndpoint = (
+  groupIdentifier: string,
+  endpointIdentifier: string,
+  method: string
+): boolean =>
+  method === "GET" ||
+  method === "HEAD" ||
+  method === "OPTIONS" ||
+  (method === "POST" && groupIdentifier === "diff" && endpointIdentifier === "content")
+
 /** Guard the sole unauthenticated endpoint with the same authority and Origin policy. */
 export const authorizePairingRequest = Effect.fn("ApiMiddleware.authorizePairing")(function*() {
   const config = yield* ApiBindConfiguration
@@ -79,8 +91,11 @@ export const sessionCookieAuthLayer = Layer.effect(
         lifecycle.runMutation(
           Effect.gen(function*() {
             const request = yield* HttpServerRequest.HttpServerRequest
-            if (endpoint.method === "GET" || endpoint.method === "HEAD" || endpoint.method === "OPTIONS") {
-              yield* authorizeAuthenticatedRead({
+            if (isAuthenticatedReadTransportEndpoint(group.identifier, endpoint.identifier, endpoint.method)) {
+              const authorizeRead = endpoint.method === "POST"
+                ? authorizeAuthenticatedReadPost
+                : authorizeAuthenticatedRead
+              yield* authorizeRead({
                 capability: capabilityFor(group.identifier, endpoint.identifier),
                 config,
                 request: requestShape(request)

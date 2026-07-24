@@ -232,6 +232,21 @@ export const authorizeAuthenticatedRead = Effect.fn("RequestSecurity.authorizeAu
 })
 
 /**
+ * Authorize a read-only operation transported as POST so a bounded structured
+ * selector can stay in the request body without acquiring mutation authority.
+ */
+export const authorizeAuthenticatedReadPost = Effect.fn("RequestSecurity.authorizeAuthenticatedReadPost")(function*(
+  authorization: AuthenticatedReadAuthorization
+) {
+  const request = yield* authorizeRequestAuthority(authorization.config, authorization.request)
+  if (request.method.toUpperCase() !== "POST") {
+    return yield* new RequestSecurityError({ reason: "method-mismatch" })
+  }
+  yield* authorizeMutationOrigin(authorization.config, request)
+  yield* authorizeInsecureLanCapability(authorization.config, authorization.capability)
+})
+
+/**
  * Authorize transport, exact Origin, session-owned CSRF verification, and
  * capability as one mutation guard. The required verifier is normally
  * `Auth.authorizeMutation` closed over the request's session token.

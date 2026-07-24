@@ -2,14 +2,6 @@
 "use client"
 
 export { DiffCodeView } from "./DiffCodeView.js"
-export { DiffFileTree } from "./DiffFileTree.js"
-export type {
-  DiffFileTreeProps,
-  RlyDiffFile,
-  RlyDiffFileChange,
-  RlyDiffFileContent,
-  RlyDiffInventory
-} from "./DiffFileTree.js"
 export { DiffFinding } from "./DiffFinding.js"
 export type {
   DiffFindingProps,
@@ -18,10 +10,6 @@ export type {
   RlyDiffFindingPrevention,
   RlyDiffFindingPreventionEnforcement
 } from "./DiffFinding.js"
-export { DiffHeader } from "./DiffHeader.js"
-export type { DiffHeaderProps, RlyDiffFindingFilter, RlyDiffLayout } from "./DiffHeader.js"
-export { DiffWorkbench } from "./DiffWorkbench.js"
-export type { DiffWorkbenchProps, RlyDiffWorkbenchFinding, RlyDiffWorkbenchScope } from "./DiffWorkbench.js"
 export { RLY_DIFF_THEMES } from "./themes.js"
 export type {
   RlyDiffCodeAnnotation,
@@ -32,5 +20,6 @@ export type {
   RlyDiffCodeViewProps,
   RlyDiffTextFile
 } from "./types.js"
+export * from "./workbench/index.js"
 export { createDiffWorkerFactory, DiffWorkerProvider, normalizeDiffWorkerPoolSize } from "./worker-pool.js"
 export type { CreateDiffWorkerFactoryOptions, DiffWorkerProviderProps } from "./worker-pool.js"

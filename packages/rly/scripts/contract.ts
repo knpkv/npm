@@ -156,9 +156,9 @@ export const componentStyleSources = (manifest: ComponentManifest): ReadonlyArra
   return manifest.components.flatMap(({ styles }) => styles).sort((left, right) => left.localeCompare(right))
 }
 
-const relativeModulePath = (entry: ModuleEntry, component: ComponentRecord): string => {
-  const from = entry.source.split("/").slice(0, -1)
-  const to = component.source.replace(/\.tsx?$/, ".js").split("/")
+const relativeSourceModulePath = (fromSource: string, toSource: string): string => {
+  const from = fromSource.split("/").slice(0, -1)
+  const to = toSource.replace(/\.tsx?$/, ".js").split("/")
   while (from[0] !== undefined && from[0] === to[0]) {
     from.shift()
     to.shift()
@@ -166,6 +166,9 @@ const relativeModulePath = (entry: ModuleEntry, component: ComponentRecord): str
   const relative = [...from.map(() => ".."), ...to].join("/")
   return relative.startsWith(".") ? relative : `./${relative}`
 }
+
+const relativeModulePath = (entry: ModuleEntry, component: ComponentRecord): string =>
+  relativeSourceModulePath(entry.source, component.source)
 
 const renderNamedExport = (kind: "type" | "value", names: ReadonlyArray<string>, from: string): string => {
   const prefix = kind === "type" ? "export type" : "export"
@@ -226,27 +229,27 @@ const renderBarrel = (
   const aggregateExports = [...entry.aggregates].sort().map((aggregate) => {
     const target = entries.get(aggregate)
     if (target === undefined) throw new ContractError({ reason: `Unknown aggregate entry: ${aggregate}` })
-    const from = entry.subpath === "." ? `./${target.id}/index.js` : `../${target.id}/index.js`
-    return `export * from "${from}"`
+    const from = relativeSourceModulePath(entry.source, target.source)
+    return { from, lines: [`export * from "${from}"`] }
   })
   const componentExports = components
     .filter(({ publicEntry }) => publicEntry === entry.id)
-    .sort(
-      (left, right) =>
-        relativeModulePath(entry, left).localeCompare(relativeModulePath(entry, right)) ||
-        left.name.localeCompare(right.name)
-    )
-    .flatMap((component) => {
+    .map((component) => {
       const from = relativeModulePath(entry, component)
       const exports = [...component.exports].sort((left, right) => left.name.localeCompare(right.name))
       const values = exports.filter(({ kind }) => kind === "value").map(({ name }) => name)
       const types = exports.filter(({ kind }) => kind === "type").map(({ name }) => name)
-      return [
-        ...(values.length === 0 ? [] : [renderNamedExport("value", values, from)]),
-        ...(types.length === 0 ? [] : [renderNamedExport("type", types, from)])
-      ]
+      return {
+        from,
+        lines: [
+          ...(values.length === 0 ? [] : [renderNamedExport("value", values, from)]),
+          ...(types.length === 0 ? [] : [renderNamedExport("type", types, from)])
+        ]
+      }
     })
-  const exports = [...aggregateExports, ...componentExports]
+  const exports = [...componentExports, ...aggregateExports]
+    .sort((left, right) => left.from.localeCompare(right.from))
+    .flatMap(({ lines }) => lines)
   return `${directives}\n${exports.length === 0 ? "export {}" : exports.join("\n")}\n`
 }
 

@@ -515,13 +515,75 @@ export const historicalCodeCommitDescriptor = {
   }))
 }
 
+/** Frozen descriptor accepted for the immediately previous action-capable CodeCommit runtime. @internal */
+export const historicalActionCodeCommitDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.codecommit",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "AWS CodeCommit",
+  configurationFields: [
+    {
+      _tag: "text",
+      key: "profile",
+      label: "AWS profile",
+      description: "Local AWS credential profile resolved by the CodeCommit owning package.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "region",
+      label: "AWS region",
+      description: "AWS region containing the configured CodeCommit repository.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "repositoryName",
+      label: "Repository",
+      description: "One CodeCommit repository normalized by this connection.",
+      required: true
+    }
+  ],
+  capabilities: [
+    "entity.read",
+    "sync.incremental",
+    "action.propose",
+    "action.execute",
+    "action.reconcile",
+    "diff.inventory"
+  ].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
+
+/** Frozen descriptor accepted for the previous v1 complete-diff CodeCommit runtime. @internal */
+export const historicalCompleteDiffCodeCommitDescriptor = {
+  ...historicalActionCodeCommitDescriptor,
+  capabilities: [
+    ...historicalActionCodeCommitDescriptor.capabilities,
+    {
+      capabilityId: "diff.content",
+      supportedVersions: [1],
+      requirement: "required"
+    }
+  ]
+}
+
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
     return [confluencePagePluginDescriptor, ...historicalConfluenceDescriptors]
   }
   if (providerId === "codecommit") {
-    return [codeCommitPluginDescriptor, historicalCodeCommitDescriptor]
+    return [
+      codeCommitPluginDescriptor,
+      historicalCompleteDiffCodeCommitDescriptor,
+      historicalActionCodeCommitDescriptor,
+      historicalCodeCommitDescriptor
+    ]
   }
   return [expectedDescriptor(providerId)]
 }

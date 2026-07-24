@@ -1,6 +1,7 @@
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -24,6 +25,7 @@ import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
   AuthorizedShares,
+  CompleteDiffReads,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -558,6 +560,65 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
             }).pipe(Effect.catchTags({
               ApplicationConflict: mapApplicationConflict,
               ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+    })
+)
+
+/** Complete, immutable, workspace-scoped diff inventory and lazy content handlers. */
+export const diffHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "diff",
+  (handlers) =>
+    Effect.gen(function*() {
+      const reads = yield* Effect.serviceOption(CompleteDiffReads)
+      const diffReads = Option.getOrUndefined(reads)
+      return handlers
+        .handle("inventory", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            if (diffReads === undefined) return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "private, no-store"))
+            )
+            return yield* diffReads.inventory({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: params.pluginConnectionId,
+              vendorImmutableId: params.vendorImmutableId,
+              revision: query.revision
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("content", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            if (diffReads === undefined) return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(HttpServerResponse.setHeader(response, "cache-control", "private, no-store"))
+            )
+            return yield* diffReads.content({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: params.pluginConnectionId,
+              vendorImmutableId: params.vendorImmutableId,
+              revision: payload.revision,
+              anchor: payload.anchor,
+              path: payload.path,
+              previousPath: payload.previousPath,
+              status: payload.status,
+              side: payload.side,
+              offset: payload.offset,
+              length: payload.length
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
               ApplicationRateLimited: mapApplicationRateLimited,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable

@@ -21,6 +21,10 @@
       "types": "./dist/dts/diff/index.d.ts",
       "import": "./dist/diff/index.js"
     },
+    "./diff/workbench": {
+      "types": "./dist/dts/diff/workbench/index.d.ts",
+      "import": "./dist/diff/workbench/index.js"
+    },
     "./foundations": {
       "types": "./dist/dts/foundations/index.d.ts",
       "import": "./dist/foundations/index.js"

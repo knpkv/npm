@@ -1022,9 +1022,9 @@ describe("canonical workspace entity", () => {
       }
     }
 
-    const accepted = presentWorkspacePullRequest(details, graphInspection.source.sourceUrl, graphInspection)
-    const rejected = presentWorkspacePullRequest(details, rejectedInspection.source.sourceUrl, rejectedInspection)
-    const deleted = presentWorkspacePullRequest(details, deletedInspection.source.sourceUrl, deletedInspection)
+    const accepted = presentWorkspacePullRequest(details, graphInspection.source, graphInspection)
+    const rejected = presentWorkspacePullRequest(details, rejectedInspection.source, rejectedInspection)
+    const deleted = presentWorkspacePullRequest(details, deletedInspection.source, deletedInspection)
 
     expect(accepted).toMatchObject({ issueCount: 3, pipelineCount: 1 })
     expect(rejected).toMatchObject({ issueCount: 2, pipelineCount: 1 })
@@ -1223,7 +1223,8 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Mina Ortiz")
     expect(host.textContent).toContain("Human review requested")
     expect(host.textContent).toContain("Agent review not run")
-    expect(host.textContent).toContain("Open files and diff in CodeCommit")
+    expect(host.textContent).toContain("Complete file inventory")
+    expect(host.textContent).toContain("Open this revision in CodeCommit")
     expect(host.querySelector("[data-workspace-pull-request-detail]")).not.toBeNull()
     const deliveryCounts = new Map(
       [...host.querySelectorAll("dt")].map((term) => [

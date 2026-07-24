@@ -10,6 +10,7 @@ import type { ServeError } from "effect/unstable/http/HttpServerError"
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
 import type {
   AuthorizedShares,
+  CompleteDiffReads,
   DeliveryGraphInspection,
   MediaReads,
   PluginAdministration,
@@ -23,6 +24,7 @@ import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
 import {
   authorizedSharesLayer,
+  completeDiffReadsLayer,
   deliveryGraphInspectionLayer,
   liveEventsLayer,
   mediaReadsLayer,
@@ -85,6 +87,7 @@ import { ServerLifecycle } from "./ServerLifecycle.js"
 
 type ControlCenterCoreApplicationServices =
   | AuthorizedShares
+  | CompleteDiffReads
   | DeliveryGraphInspection
   | MediaReads
   | PluginAdministration
@@ -126,10 +129,42 @@ export type ControlCenterServerError<ApplicationError = never> =
   | ServeError
   | StaticAssetStoreError
 
-const liveApplicationServices = (
+const pluginApplicationServices = (
   pluginConnections: PluginConnectionMapV1 | null,
   firstPartyPluginRuntime: boolean,
-  publicOrigin: string
+  publicOrigin: string,
+  firstPartyConnectionsLayer: typeof firstPartyPluginConnectionMapLayer
+) => {
+  if (pluginConnections !== null) {
+    return Layer.merge(
+      pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin),
+      completeDiffReadsLayer(pluginConnections)
+    )
+  }
+  if (!firstPartyPluginRuntime) {
+    return Layer.merge(
+      pluginAdministrationOAuthLayer(publicOrigin),
+      completeDiffReadsLayer(null)
+    )
+  }
+  return Layer.unwrap(
+    Effect.map(
+      PluginConnectionMap,
+      (connections) =>
+        Layer.merge(
+          pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin),
+          completeDiffReadsLayer(connections)
+        )
+    )
+  ).pipe(Layer.provideMerge(firstPartyConnectionsLayer))
+}
+
+/** Compose the live application boundary, with an injectable first-party map layer for focused runtime tests. @internal */
+export const liveApplicationServices = (
+  pluginConnections: PluginConnectionMapV1 | null,
+  firstPartyPluginRuntime: boolean,
+  publicOrigin: string,
+  firstPartyConnectionsLayer = firstPartyPluginConnectionMapLayer
 ): Layer.Layer<
   ControlCenterCoreApplicationServices,
   never,
@@ -144,16 +179,12 @@ const liveApplicationServices = (
 > =>
   Layer.mergeAll(
     authorizedSharesLayer,
-    pluginConnections !== null
-      ? pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin)
-      : firstPartyPluginRuntime
-      ? Layer.unwrap(
-        Effect.map(
-          PluginConnectionMap,
-          (connections) => pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin)
-        )
-      ).pipe(Layer.provide(firstPartyPluginConnectionMapLayer))
-      : pluginAdministrationOAuthLayer(publicOrigin),
+    pluginApplicationServices(
+      pluginConnections,
+      firstPartyPluginRuntime,
+      publicOrigin,
+      firstPartyConnectionsLayer
+    ),
     deliveryGraphInspectionLayer,
     portfolioSnapshotsLayer,
     timelineExportAuditsLayer,

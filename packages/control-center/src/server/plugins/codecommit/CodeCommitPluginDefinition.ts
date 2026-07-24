@@ -30,7 +30,11 @@ import * as SynchronizedRef from "effect/SynchronizedRef"
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
   type AuthorizedPluginActionV1,
+  type DiffContentRangeRequestV1,
+  DiffContentRangeRequestV2,
+  DiffContentRangeV1,
   type DiffInventoryPageRequestV1,
+  type DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
   type PluginActionDispatchResultV1,
   PluginActionPreflightV1,
@@ -124,10 +128,13 @@ const descriptor = {
     "action.propose",
     "action.execute",
     "action.reconcile",
-    "diff.inventory"
+    "diff.inventory",
+    "diff.content"
   ].map((capabilityId) => ({
     capabilityId,
-    supportedVersions: [1],
+    supportedVersions: capabilityId === "diff.inventory" || capabilityId === "diff.content"
+      ? [1, 2]
+      : [1],
     requirement: "required"
   }))
 } satisfies unknown
@@ -784,7 +791,7 @@ interface InventoryEntryInput {
   readonly previousPath: string | null
   readonly status: "added" | "modified" | "deleted" | "renamed"
   readonly binary: false
-  readonly generated: false
+  readonly generated: boolean
   readonly oversized: false
 }
 
@@ -803,7 +810,7 @@ const inventoryEntry = Effect.fn("CodeCommitPlugin.inventoryEntry")(function*(
     previousPath: file.status === "renamed" ? file.before?.path ?? null : null,
     status: file.status,
     binary: false,
-    generated: false,
+    generated: ReadClient.classifyCodeCommitFile(path, new Uint8Array()).generated,
     oversized: false
   }
 })
@@ -957,6 +964,17 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     return yield* output("read-entity", ReadPluginEntityResultV1, { _tag: "found", event })
   })
 
+  const pullRequestForDiff = Effect.fn("CodeCommitPlugin.pullRequestForDiff")(function*(
+    request: DiffInventoryPageRequestV1["entity"]
+  ) {
+    const pullRequest = yield* readClient.getPullRequest({
+      account,
+      pullRequestId: request.vendorImmutableId
+    }).pipe(Effect.catch((error) => failRead("diff-revision", error)))
+    yield* enforceConfiguredRepository(configuration.repositoryName, pullRequest)
+    return pullRequest
+  })
+
   const readInventoryPage = Effect.fn("CodeCommitPlugin.readInventoryPage")(function*(
     request: DiffInventoryPageRequestV1
   ) {
@@ -967,11 +985,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
         diagnosticCode: "codecommit-diff-entity-type-unsupported"
       })
     }
-    const pullRequest = yield* readClient.getPullRequest({
-      account,
-      pullRequestId: request.entity.vendorImmutableId
-    }).pipe(Effect.catch((error) => failRead("diff-inventory", error)))
-    yield* enforceConfiguredRepository(configuration.repositoryName, pullRequest)
+    const pullRequest = yield* pullRequestForDiff(request.entity)
     const page = yield* readClient.getChangedFilesPage({
       account,
       repositoryName: configuration.repositoryName,
@@ -984,6 +998,198 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       entries,
       nextCursor: page.nextToken
     })
+  })
+
+  const readInventoryPageV2 = Effect.fn("CodeCommitPlugin.readInventoryPageV2")(function*(
+    request: DiffInventoryPageRequestV2
+  ) {
+    if (request.entity.entityType !== "pull-request") {
+      return yield* new PluginUnsupportedCapabilityFailure({
+        capabilityId: "diff.inventory",
+        requestedVersion: 2,
+        diagnosticCode: "codecommit-diff-entity-type-unsupported"
+      })
+    }
+    yield* pullRequestForDiff(request.entity)
+    const page = yield* readClient.getChangedFilesPage({
+      account,
+      repositoryName: configuration.repositoryName,
+      beforeCommitSpecifier: request.baseRevision,
+      afterCommitSpecifier: request.headRevision,
+      nextToken: request.cursor
+    }).pipe(Effect.catch((error) => failRead("diff-inventory", error)))
+    const entries = yield* Effect.forEach(page.files, inventoryEntry)
+    return yield* output("diff-inventory", DiffInventoryPageV1, {
+      entries,
+      nextCursor: page.nextToken
+    })
+  })
+
+  const findChangedFile = Effect.fn("CodeCommitPlugin.findChangedFile")(function*(
+    commits: { readonly baseRevision: string; readonly headRevision: string },
+    request: Pick<DiffContentRangeRequestV2, "path" | "previousPath" | "status">
+  ) {
+    let nextToken: ReadClient.CodeCommitPageToken | null = null
+    const seenTokens = new Set<string>()
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page: ReadClient.CodeCommitChangedFilesPage = yield* readClient.getChangedFilesPage({
+        account,
+        repositoryName: configuration.repositoryName,
+        beforeCommitSpecifier: commits.baseRevision,
+        afterCommitSpecifier: commits.headRevision,
+        nextToken
+      }).pipe(Effect.catch((error) => failRead("diff-content-inventory", error)))
+      for (const candidate of page.files) {
+        const entry = yield* inventoryEntry(candidate)
+        if (
+          entry.path !== request.path ||
+          entry.previousPath !== request.previousPath ||
+          entry.status !== request.status
+        ) continue
+        return candidate
+      }
+      if (page.nextToken === null) return null
+      if (seenTokens.has(page.nextToken)) {
+        return yield* new PluginOutageFailure({ operation: "diff-content-inventory-cursor-cycle" })
+      }
+      seenTokens.add(page.nextToken)
+      nextToken = page.nextToken
+    }
+    return yield* new PluginOutageFailure({ operation: "diff-content-inventory-page-limit" })
+  })
+
+  const readContentRangeAt = Effect.fn("CodeCommitPlugin.readContentRangeAt")(function*(
+    request: DiffContentRangeRequestV2
+  ) {
+    if (request.entity.entityType !== "pull-request") {
+      return yield* new PluginUnsupportedCapabilityFailure({
+        capabilityId: "diff.content",
+        requestedVersion: 2,
+        diagnosticCode: "codecommit-diff-entity-type-unsupported"
+      })
+    }
+    yield* pullRequestForDiff(request.entity)
+    const file = yield* findChangedFile(request, request)
+    if (file === null) {
+      return yield* new PluginConflictFailure({
+        operation: "diff-content-entry",
+        diagnosticCode: "codecommit-diff-entry-identity-mismatch"
+      })
+    }
+    const metadata = request.side === "before" ? file.before : file.after
+    if (metadata === null) {
+      return yield* output("diff-content", DiffContentRangeV1, {
+        bytesBase64: null,
+        totalBytes: null,
+        unavailableReason: "missing"
+      })
+    }
+    const blobResult = yield* readClient.getBlob({
+      account,
+      repositoryName: configuration.repositoryName,
+      blobId: metadata.blobId
+    }).pipe(Effect.result)
+    if (Result.isFailure(blobResult)) {
+      if (blobResult.failure._tag === "CodeCommitReadNotFoundError") {
+        return yield* new PluginConflictFailure({
+          operation: "diff-content",
+          diagnosticCode: "codecommit-diff-blob-disappeared"
+        })
+      }
+      if (blobResult.failure._tag !== "CodeCommitBlobTooLargeError") {
+        return yield* failRead("diff-content", blobResult.failure)
+      }
+      return yield* output("diff-content", DiffContentRangeV1, {
+        bytesBase64: null,
+        totalBytes: blobResult.failure.actualBytes,
+        unavailableReason: "oversized"
+      })
+    }
+    const classification = ReadClient.classifyCodeCommitFile(metadata.path, blobResult.success.bytes)
+    if (classification.binary || classification.generated) {
+      return yield* output("diff-content", DiffContentRangeV1, {
+        bytesBase64: null,
+        totalBytes: blobResult.success.byteLength,
+        unavailableReason: classification.binary ? "binary" : "generated"
+      })
+    }
+    const end = Math.min(blobResult.success.byteLength, request.offset + request.length)
+    const bytes = blobResult.success.bytes.slice(Math.min(request.offset, end), end)
+    return yield* output("diff-content", DiffContentRangeV1, {
+      bytesBase64: Encoding.encodeBase64(bytes),
+      totalBytes: blobResult.success.byteLength,
+      unavailableReason: null
+    })
+  })
+
+  const readContentRange = Effect.fn("CodeCommitPlugin.readContentRange")(function*(
+    request: DiffContentRangeRequestV1
+  ) {
+    if (request.entity.entityType !== "pull-request") {
+      return yield* new PluginUnsupportedCapabilityFailure({
+        capabilityId: "diff.content",
+        requestedVersion: 1,
+        diagnosticCode: "codecommit-diff-entity-type-unsupported"
+      })
+    }
+    const pullRequest = yield* pullRequestForDiff(request.entity)
+    let candidate: ReadClient.CodeCommitChangedFile | undefined
+    let nextToken: ReadClient.CodeCommitPageToken | null = null
+    let complete = false
+    const seenTokens = new Set<string>()
+    for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
+      const page: ReadClient.CodeCommitChangedFilesPage = yield* readClient.getChangedFilesPage({
+        account,
+        repositoryName: configuration.repositoryName,
+        beforeCommitSpecifier: pullRequest.destinationCommit,
+        afterCommitSpecifier: pullRequest.sourceCommit,
+        nextToken
+      }).pipe(Effect.catch((error) => failRead("diff-content-inventory", error)))
+      candidate = page.files.find((file) => {
+        const requested = request.side === "before" ? file.before : file.after
+        if (requested?.path === request.path) return true
+        return request.side === "before"
+          ? file.status === "added" && file.before === null && file.after?.path === request.path
+          : file.status === "deleted" && file.after === null && file.before?.path === request.path
+      })
+      if (candidate !== undefined) break
+      if (page.nextToken === null) {
+        complete = true
+        break
+      }
+      if (seenTokens.has(page.nextToken)) {
+        return yield* new PluginOutageFailure({ operation: "diff-content-inventory-cursor-cycle" })
+      }
+      seenTokens.add(page.nextToken)
+      nextToken = page.nextToken
+    }
+    if (candidate === undefined && !complete) {
+      return yield* new PluginOutageFailure({ operation: "diff-content-inventory-page-limit" })
+    }
+    if (candidate === undefined) {
+      return yield* new PluginConflictFailure({
+        operation: "diff-content-entry",
+        diagnosticCode: "codecommit-diff-entry-identity-mismatch"
+      })
+    }
+    const entry = yield* inventoryEntry(candidate)
+    return yield* Schema.decodeUnknownEffect(DiffContentRangeRequestV2)({
+      ...request,
+      expectedRevision: Revision.make(pullRequest.revisionId),
+      baseRevision: Revision.make(pullRequest.destinationCommit),
+      headRevision: Revision.make(pullRequest.sourceCommit),
+      path: entry.path,
+      previousPath: entry.previousPath,
+      status: entry.status
+    }).pipe(
+      Effect.mapError(() =>
+        new PluginMalformedResponseFailure({
+          operation: "diff-content",
+          diagnosticCode: "codecommit-legacy-diff-request-invalid"
+        })
+      ),
+      Effect.flatMap(readContentRangeAt)
+    )
   })
 
   const proposeAction = Effect.fn("CodeCommitPlugin.proposeAction")(function*(
@@ -1037,7 +1243,9 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     readEntity,
     diff: Option.some({
       readInventoryPage,
-      readContentRange: () => Effect.fail(unsupported("diff.content"))
+      readContentRange,
+      readInventoryPageV2,
+      readContentRangeV2: readContentRangeAt
     }),
     proposeAction
   }
@@ -1214,7 +1422,10 @@ export const codeCommitPluginDefinition = definePluginV1({
     actionPropose: pluginCapabilityCodecsV1.actionPropose,
     actionExecute: pluginCapabilityCodecsV1.actionExecute,
     actionReconcile: pluginCapabilityCodecsV1.actionReconcile,
-    diffInventory: pluginCapabilityCodecsV1.diffInventory
+    diffInventory: pluginCapabilityCodecsV1.diffInventory,
+    diffContent: pluginCapabilityCodecsV1.diffContent,
+    diffInventoryV2: pluginCapabilityCodecsV1.diffInventoryV2,
+    diffContentV2: pluginCapabilityCodecsV1.diffContentV2
   },
   make: ({ configuration, descriptor: negotiatedDescriptor }) => makeConnection(configuration, negotiatedDescriptor)
 })

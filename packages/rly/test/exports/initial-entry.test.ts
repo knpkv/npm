@@ -124,14 +124,14 @@ describe("public entries", () => {
 
     expect(Object.keys(Diff)).toEqual([
       "DiffCodeView",
-      "DiffFileTree",
       "DiffFinding",
-      "DiffHeader",
-      "DiffWorkbench",
       "RLY_DIFF_THEMES",
       "createDiffWorkerFactory",
       "DiffWorkerProvider",
-      "normalizeDiffWorkerPoolSize"
+      "normalizeDiffWorkerPoolSize",
+      "DiffFileTree",
+      "DiffHeader",
+      "DiffWorkbench"
     ])
   })
 })

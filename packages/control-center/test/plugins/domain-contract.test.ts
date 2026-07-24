@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 import {
   AuthorizedPluginActionV1,
   DiffContentRangeRequestV1,
+  DiffContentRangeRequestV2,
   DiffContentRangeV1,
   NegotiatedPluginDescriptorV1,
   NormalizedPluginEventV1,
@@ -289,6 +290,8 @@ describe("plugin domain contract", () => {
           Schema.decodeUnknownResult(DiffContentRangeRequestV1)({
             entity: { entityType: "pull-request", vendorImmutableId: "42" },
             path,
+            previousPath: null,
+            status: "modified",
             side: "after",
             offset: 0,
             length: 10
@@ -310,6 +313,30 @@ describe("plugin domain contract", () => {
 
     assert.isTrue(Result.isFailure(invalidBase64))
     assert.isTrue(Result.isFailure(oversizedBase64))
+  })
+
+  it("keeps v1 content identity optional and requires immutable exact identity in v2", () => {
+    const legacy = {
+      entity: { entityType: "pull-request", vendorImmutableId: "42" },
+      path: "src/file.ts",
+      side: "after",
+      offset: 0,
+      length: 10
+    }
+    assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(DiffContentRangeRequestV1)(legacy)))
+    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(DiffContentRangeRequestV2)(legacy)))
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(DiffContentRangeRequestV2)({
+          ...legacy,
+          expectedRevision: "provider-revision-7",
+          baseRevision: "base-commit-7",
+          headRevision: "head-commit-7",
+          previousPath: null,
+          status: "modified"
+        })
+      )
+    )
   })
 
   it("bounds plugin source URLs before URL decoding", () => {

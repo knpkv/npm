@@ -214,7 +214,7 @@ export const renderRegistrySchema = (): string =>
                 },
                 importPath: {
                   type: "string",
-                  pattern: "^@knpkv/rly(?:/(?:tokens|foundations|primitives|patterns|diff))?$"
+                  pattern: "^@knpkv/rly(?:/(?:tokens|foundations|primitives|patterns|diff(?:/workbench)?))?$"
                 },
                 name: { type: "string", minLength: 1 },
                 props: {
