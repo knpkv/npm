@@ -966,6 +966,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 reason: "invalid-transition"
               })
             }
+            if (
+              job.state === "cancel-requested" &&
+              request.event._tag === "completed" &&
+              request.event.outcome !== "cancelled"
+            ) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "cancellation-requested"
+              })
+            }
             yield* validateLease({
               workspaceId: request.workspaceId,
               jobId: request.jobId,
@@ -1086,8 +1097,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .transaction(
           Effect.gen(function*() {
             const job = yield* getJob(request.workspaceId, request.jobId)
+            if (job.state === "cancel-requested") {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "cancellation-requested"
+              })
+            }
             if (
-              (job.state !== "running" && job.state !== "cancel-requested") ||
+              job.state !== "running" ||
               job.task._tag !== "pr-review" ||
               job.subjectRevision !== job.task.subject.headRevision ||
               !Schema.toEquivalence(PrReviewSubject)(job.task.subject, report.subject)
@@ -1153,8 +1171,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .transaction(
           Effect.gen(function*() {
             const job = yield* getJob(request.workspaceId, request.jobId)
+            if (job.state === "cancel-requested") {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "cancellation-requested"
+              })
+            }
             if (
-              (job.state !== "running" && job.state !== "cancel-requested") ||
+              job.state !== "running" ||
               job.providerId !== request.error.providerId
             ) {
               return yield* new AgentJobInputError({

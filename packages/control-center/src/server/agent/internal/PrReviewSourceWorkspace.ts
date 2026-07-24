@@ -311,6 +311,22 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
     Effect.mapError(() => sourceError("invalid-configuration"))
   )
   if (canonicalRoot !== configuredRoot) return yield* sourceError("invalid-configuration")
+  yield* fileSystem.chmod(canonicalRoot, 0o700).pipe(
+    Effect.mapError(() => sourceError("invalid-configuration"))
+  )
+  const rootInfo = yield* fileSystem.stat(canonicalRoot).pipe(
+    Effect.mapError(() => sourceError("invalid-configuration"))
+  )
+  const confirmedRoot = yield* fileSystem.realPath(configuredRoot).pipe(
+    Effect.mapError(() => sourceError("invalid-configuration"))
+  )
+  if (
+    rootInfo.type !== "Directory" ||
+    (rootInfo.mode & 0o777) !== 0o700 ||
+    confirmedRoot !== canonicalRoot
+  ) {
+    return yield* sourceError("invalid-configuration")
+  }
   const maximumDuration = Duration.fromInputUnsafe(options.maximumDuration ?? DEFAULT_MAXIMUM_DURATION)
   const maximumSourceBytes = options.maximumSourceBytes ?? DEFAULT_MAXIMUM_SOURCE_BYTES
   const maximumSourceEntries = options.maximumSourceEntries ?? DEFAULT_MAXIMUM_SOURCE_ENTRIES

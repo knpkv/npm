@@ -102,6 +102,11 @@ const isInvalidReviewResult = (
   isAgentJobInputError(failure) &&
   (failure.reason === "invalid-result" || failure.reason === "task-mismatch")
 
+const isCancellationRequested = (
+  failure: unknown
+): failure is AgentJobInputError & { readonly reason: "cancellation-requested" } =>
+  isAgentJobInputError(failure) && failure.reason === "cancellation-requested"
+
 const normalizeRuntimeFailure = (
   providerId: ClaimedAgentJob["providerId"],
   failure: AgentRuntimeError
@@ -150,22 +155,6 @@ const makeAgentJobWorker = Effect.gen(function*() {
   const jobs = yield* AgentJobRepository
   const taskExecutor = yield* AgentJobTaskExecutor
 
-  const failClaim = Effect.fn("AgentJobWorker.failClaim")(function*(
-    claim: ClaimedAgentJob,
-    error: AgentProviderError
-  ) {
-    const failedAt = yield* DateTime.now
-    yield* jobs.failAttempt({
-      workspaceId: claim.workspaceId,
-      jobId: claim.jobId,
-      attemptSequence: claim.attemptSequence,
-      leaseToken: claim.leaseToken,
-      error,
-      failedAt
-    })
-    return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
-  })
-
   const cancelClaim = Effect.fn("AgentJobWorker.cancelClaim")(function*(claim: ClaimedAgentJob) {
     const occurredAt = yield* DateTime.now
     yield* jobs.appendEvent({
@@ -181,6 +170,27 @@ const makeAgentJobWorker = Effect.gen(function*() {
       jobId: claim.jobId,
       outcome: "cancelled"
     } satisfies AgentJobWorkerRunResult
+  })
+
+  const failClaim = Effect.fn("AgentJobWorker.failClaim")(function*(
+    claim: ClaimedAgentJob,
+    error: AgentProviderError
+  ) {
+    const failedAt = yield* DateTime.now
+    const failed = yield* jobs.failAttempt({
+      workspaceId: claim.workspaceId,
+      jobId: claim.jobId,
+      attemptSequence: claim.attemptSequence,
+      leaseToken: claim.leaseToken,
+      error,
+      failedAt
+    }).pipe(Effect.result)
+    if (Result.isFailure(failed)) {
+      return isCancellationRequested(failed.failure)
+        ? yield* cancelClaim(claim)
+        : yield* Effect.fail(failed.failure)
+    }
+    return { _tag: "failed", jobId: claim.jobId } satisfies AgentJobWorkerRunResult
   })
 
   const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
@@ -214,6 +224,9 @@ const makeAgentJobWorker = Effect.gen(function*() {
         completedAt
       }).pipe(Effect.result)
       if (Result.isFailure(completion)) {
+        if (isCancellationRequested(completion.failure)) {
+          return yield* cancelClaim(claim)
+        }
         if (isInvalidReviewResult(completion.failure)) {
           return yield* failClaim(
             claim,
@@ -257,6 +270,9 @@ const makeAgentJobWorker = Effect.gen(function*() {
     )
     if (Result.isFailure(execution)) {
       const failure = execution.failure
+      if (isCancellationRequested(failure)) {
+        return yield* cancelClaim(claim)
+      }
       if (isAgentRuntimeFailure(failure)) {
         return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, failure))
       }

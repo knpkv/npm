@@ -243,6 +243,33 @@ describe("PR review source workspace", () => {
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 
+  it.effect("repairs an existing workspace root to private permissions before use", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-mode-" })
+        const workspaceRoot = path.join(fixture, "workspaces")
+        yield* fileSystem.chmod(fixture, 0o755)
+        yield* fileSystem.makeDirectory(workspaceRoot, { mode: 0o755 })
+        assert.strictEqual((yield* fileSystem.stat(workspaceRoot)).mode & 0o777, 0o755)
+        const resolver = Layer.succeed(
+          PrReviewSourceResolver,
+          PrReviewSourceResolver.of({
+            resolve: () => Effect.die("workspace mode test must not resolve a source")
+          })
+        )
+
+        yield* Effect.gen(function*() {
+          yield* PrReviewSourceWorkspace
+        }).pipe(
+          Effect.provide(prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(Layer.provide(resolver)))
+        )
+
+        assert.strictEqual((yield* fileSystem.stat(workspaceRoot)).mode & 0o777, 0o700)
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("reconciles owned crash leftovers without deleting unrelated directories", () =>
     Effect.scoped(
       Effect.gen(function*() {

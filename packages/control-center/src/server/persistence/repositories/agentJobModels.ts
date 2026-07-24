@@ -270,6 +270,7 @@ export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputErr
       "invalid-transition",
       "lease-lost",
       "lease-expired",
+      "cancellation-requested",
       "output-limit-exceeded",
       "event-limit-exceeded",
       "invalid-result",
