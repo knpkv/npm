@@ -92,6 +92,8 @@ export interface AgentProviderRegistryOptions {
   readonly codex?: CodexAgentProviderOptions
   readonly claude?: ClaudeAgentProviderOptions
   readonly openAiCompatible?: OpenAiCompatibleAgentProviderOptions
+  /** Advertise prompt-only immutable review only when its worker is attached. */
+  readonly prReviewEnabled?: boolean
 }
 
 interface ConfiguredProvider {
@@ -119,11 +121,12 @@ const unavailableCatalogEntry = (
 
 const availableCatalogEntry = (
   providerId: "codex" | "claude" | "openai-compatible",
-  model: AgentModelId
+  model: AgentModelId,
+  capabilities: AgentProviderCatalogEntry["capabilities"] = ["release-chat"]
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [model],
-  capabilities: ["release-chat"],
+  capabilities,
   health: "available"
 })
 
@@ -321,7 +324,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     }
     : {
       providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
-      catalog: availableCatalogEntry("openai-compatible", openAiConfigured.model),
+      catalog: availableCatalogEntry(
+        "openai-compatible",
+        openAiConfigured.model,
+        options.prReviewEnabled === true
+          ? ["release-chat", "pr-review"]
+          : ["release-chat"]
+      ),
       runtime: makeLanguageModelRuntime(
         OPENAI_COMPATIBLE_PROVIDER_ID,
         ({ model, prompt }) =>

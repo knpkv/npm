@@ -20,6 +20,7 @@ import {
   PrReviewSandboxEvidence,
   PrReviewSandboxRunner
 } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
+import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import {
   PrReviewTaskExecutor,
   prReviewTaskExecutorLayer
@@ -155,7 +156,13 @@ const runExecutor = <Success, Failure>(
     Effect.provide(
       prReviewTaskExecutorLayer.pipe(
         Layer.provide(makeRegistry(run, filesystemAccess)),
-        Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox))
+        Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
+        Layer.provide(Layer.succeed(
+          PrReviewSourceWorkspace,
+          PrReviewSourceWorkspace.of({
+            withSource: (_request, useSource) => useSource("/unused-test-source")
+          })
+        ))
       )
     ),
     Effect.provide(NodeServices.layer),

@@ -34,6 +34,7 @@ import {
   reviewEnabledTaskExecutorLayer
 } from "./internal/AgentJobTaskExecutor.js"
 import type { PrReviewSandboxRunner } from "./internal/PrReviewSandboxRunner.js"
+import type { PrReviewSourceWorkspace } from "./internal/PrReviewSourceWorkspace.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
 
 /** Worker lease policy fixed when the server composes the module. */
@@ -323,7 +324,7 @@ export const agentJobWorkerWithPrReviewLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner
+  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner | PrReviewSourceWorkspace
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(

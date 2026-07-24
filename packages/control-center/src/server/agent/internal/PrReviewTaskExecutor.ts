@@ -37,6 +37,7 @@ import {
   type PrReviewSandboxEvidence,
   PrReviewSandboxRunner
 } from "./PrReviewSandboxRunner.js"
+import { type PrReviewSourceError, PrReviewSourceWorkspace } from "./PrReviewSourceWorkspace.js"
 
 const MAXIMUM_REVIEW_PROMPT_BYTES = 65_536
 const FINDING_ID_PREFIX = "sha256:"
@@ -83,6 +84,19 @@ const sandboxFailure = (
     retryable
   )
 }
+
+const sourceFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  failure: PrReviewSourceError
+): AgentProviderError =>
+  providerFailure(
+    providerId,
+    failure.reason === "connection-unavailable" || failure.reason === "invalid-configuration"
+      ? "configuration"
+      : "execution",
+    `PR review source preparation failed (${failure.reason}).`,
+    failure.reason === "source-unavailable" || failure.reason === "cleanup-failed"
+  )
 
 const runtimeFailure = (
   providerId: ClaimedAgentJob["providerId"],
@@ -319,6 +333,7 @@ const makeExecutor = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const runtimes = yield* AgentRuntimeRegistry
   const sandbox = yield* PrReviewSandboxRunner
+  const sources = yield* PrReviewSourceWorkspace
 
   return PrReviewTaskExecutor.of({
     execute: Effect.fn("PrReviewTaskExecutor.execute")(function*(claim) {
@@ -343,13 +358,29 @@ const makeExecutor = Effect.gen(function*() {
           false
         )
       }
-      const evidence = yield* sandbox.run({
-        attemptId: yield* attemptId(cryptoService, claim),
-        jobId: claim.jobId,
-        baseRevision: claim.context.task.subject.baseRevision,
-        headRevision: claim.context.task.subject.headRevision
-      }).pipe(Effect.mapError((failure) => sandboxFailure(claim.providerId, failure)))
-      const prompt = renderPrompt(claim.context.task.subject, evidence)
+      const subject = claim.context.task.subject
+      const reviewAttemptId = yield* attemptId(cryptoService, claim)
+      const evidence = yield* sources.withSource(
+        {
+          workspaceId: claim.workspaceId,
+          jobId: claim.jobId,
+          repository: subject.repository,
+          baseRevision: subject.baseRevision,
+          headRevision: subject.headRevision
+        },
+        () =>
+          sandbox.run({
+            attemptId: reviewAttemptId,
+            jobId: claim.jobId,
+            baseRevision: subject.baseRevision,
+            headRevision: subject.headRevision
+          }).pipe(Effect.mapError((failure) => sandboxFailure(claim.providerId, failure)))
+      ).pipe(Effect.mapError((failure) =>
+        failure._tag === "PrReviewSourceError"
+          ? sourceFailure(claim.providerId, failure)
+          : failure
+      ))
+      const prompt = renderPrompt(subject, evidence)
       const promptBytes = yield* utf8Bytes(claim.providerId, prompt)
       if (promptBytes.byteLength > MAXIMUM_REVIEW_PROMPT_BYTES) {
         return yield* providerFailure(
@@ -388,5 +419,5 @@ export class PrReviewTaskExecutor extends Context.Service<
 export const prReviewTaskExecutorLayer: Layer.Layer<
   PrReviewTaskExecutor,
   never,
-  AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner
+  AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner | PrReviewSourceWorkspace
 > = Layer.effect(PrReviewTaskExecutor, makeExecutor)

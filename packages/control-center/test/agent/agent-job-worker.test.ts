@@ -32,6 +32,7 @@ import {
   PrReviewSandboxEvidence,
   PrReviewSandboxRunner
 } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
+import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
@@ -284,6 +285,12 @@ const withReviewWorker = <Success, Failure>(
     }).pipe(
       Layer.provide(registry),
       Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
+      Layer.provide(Layer.succeed(
+        PrReviewSourceWorkspace,
+        PrReviewSourceWorkspace.of({
+          withSource: (_request, useSource) => useSource("/unused-test-source")
+        })
+      )),
       Layer.provideMerge(jobs)
     )
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
