@@ -177,6 +177,17 @@ describe("agent job review results", () => {
         assert.deepStrictEqual(persisted.report, report)
         assert.isTrue(DateTime.Equivalence(persisted.completedAt, T2))
 
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.jobId, JOB_ID)
+          assert.strictEqual(latest.value.state, "succeeded")
+          assert.deepStrictEqual(latest.value.report, report)
+        }
+
         const page = yield* jobs.threadAfter({
           workspaceId: WORKSPACE_ID,
           releaseId: RELEASE_ID,

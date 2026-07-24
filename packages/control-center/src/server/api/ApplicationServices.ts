@@ -9,8 +9,11 @@ import type {
   AgentPrompt,
   AgentProvider,
   AgentProviderCatalog,
+  EnqueuePullRequestReviewRequest,
+  EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
+  PullRequestReviewState,
   ReleaseAgentThreadCursor,
   ReleaseAgentThreadPage,
   ReleaseAgentTurnResponse
@@ -499,6 +502,25 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/ReleaseAgentJobs") {}
+
+/** Server-owned orchestration for one exact immutable pull-request review. */
+export class PullRequestReviews extends Context.Service<PullRequestReviews, {
+  readonly current: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+  }) => Effect.Effect<
+    PullRequestReviewState,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly enqueue: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly request: EnqueuePullRequestReviewRequest
+  }) => Effect.Effect<
+    EnqueuePullRequestReviewResponse,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+}>()("@knpkv/control-center/server/api/PullRequestReviews") {}
 
 /** Injectable durable replay boundary used by the authenticated SSE handler. */
 export class LiveEvents extends Context.Service<LiveEvents, {

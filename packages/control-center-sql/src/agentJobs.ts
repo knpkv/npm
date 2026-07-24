@@ -31,6 +31,14 @@ export interface AgentThreadReplayQueryInput {
   readonly workspaceId: string
 }
 
+/** Exact immutable review subject used to recover its newest durable job. */
+export interface LatestAgentReviewQueryInput {
+  readonly subjectRevision: string
+  readonly taskContextDigest: string
+  readonly taskContextJson: string
+  readonly workspaceId: string
+}
+
 const table = Casing.make({ tables: "snake_case", columns: "snake_case" }).table
 const renderer = Sqlite.Renderer.make().pipe(Casing.withCasing("snake_case"))
 
@@ -256,6 +264,35 @@ export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput)
     ),
     Query.orderBy(agentThreadEvents.eventSequence),
     Query.limit(input.limit)
+  )
+  const rendered = renderer.render(plan)
+  return { params: rendered.params, sql: rendered.sql }
+}
+
+/** Render the exact newest durable job for one immutable PR-review subject. */
+export const renderLatestAgentReviewQuery = (
+  input: LatestAgentReviewQueryInput
+): RenderedSql => {
+  const plan = Query.select({
+    jobId: agentJobs.jobId,
+    providerId: agentJobs.providerId,
+    model: agentJobs.model,
+    state: agentJobs.state,
+    createdAt: agentJobs.createdAt,
+    terminalAt: agentJobs.terminalAt
+  }).pipe(
+    Query.from(agentJobs),
+    Query.where(
+      Query.and(
+        Query.eq(agentJobs.workspaceId, input.workspaceId),
+        Query.eq(agentJobs.subjectRevision, input.subjectRevision),
+        Query.eq(agentJobs.taskContextJson, input.taskContextJson),
+        Query.eq(agentJobs.taskContextDigest, input.taskContextDigest)
+      )
+    ),
+    Query.orderBy(agentJobs.createdAt, "desc"),
+    Query.orderBy(agentJobs.jobId, "desc"),
+    Query.limit(1)
   )
   const rendered = renderer.render(plan)
   return { params: rendered.params, sql: rendered.sql }

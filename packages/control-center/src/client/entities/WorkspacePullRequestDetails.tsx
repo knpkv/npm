@@ -1,8 +1,10 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
-import { Button, Text } from "@knpkv/rly/primitives"
+import { Text } from "@knpkv/rly/primitives"
 import type { ReactElement, ReactNode } from "react"
 
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
+import { PullRequestReviewPanel } from "./PullRequestReviewPanel.js"
+import type { PullRequestReviewControllerState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
@@ -45,16 +47,22 @@ const People = ({ empty, people }: { readonly empty: string; readonly people: Re
 /** Render the exact CodeCommit revision as a compact review document. */
 export const WorkspacePullRequestDetails = ({
   approvers,
-  onAskAgent,
+  onReviewRetry,
+  onReviewStart,
   onSessionExpired,
   pullRequest,
+  reviewCanEnqueue,
+  reviewState,
   reviewers,
   sessionKey
 }: {
   readonly approvers: ReadonlyArray<RlyPerson>
-  readonly onAskAgent: () => void
   readonly onSessionExpired: (sessionKey: string) => void
+  readonly onReviewRetry: () => void
+  readonly onReviewStart: () => void
   readonly pullRequest: WorkspacePullRequestPresentation
+  readonly reviewCanEnqueue: boolean
+  readonly reviewState: PullRequestReviewControllerState
   readonly reviewers: ReadonlyArray<RlyPerson>
   readonly sessionKey: string | null
 }): ReactElement => (
@@ -152,9 +160,12 @@ export const WorkspacePullRequestDetails = ({
         </div>
         <div>
           <small>Relay recommendation</small>
-          <strong>{pullRequest.agentReviewLabel}</strong>
-          <span>An agent recommendation never counts as human approval.</span>
-          <Button onClick={onAskAgent}>Ask Relay to review</Button>
+          <PullRequestReviewPanel
+            canEnqueue={reviewCanEnqueue}
+            onRetry={onReviewRetry}
+            onStart={onReviewStart}
+            state={reviewState}
+          />
         </div>
       </div>
     </Section>

@@ -105,7 +105,8 @@ describe("agent provider registry", () => {
       const publicJson = JSON.stringify(catalog)
 
       assert.deepStrictEqual(
-        catalog.providers.map(({ health, models, providerId }) => ({
+        catalog.providers.map(({ capabilities, health, models, providerId }) => ({
+          capabilities,
           health,
           models,
           providerId
@@ -114,16 +115,19 @@ describe("agent provider registry", () => {
           {
             providerId: DurableAgentProviderId.make("codex"),
             models: [AgentModelId.make("configured-default")],
+            capabilities: ["release-chat"],
             health: "available"
           },
           {
             providerId: DurableAgentProviderId.make("claude"),
             models: [],
+            capabilities: ["release-chat"],
             health: "not-configured"
           },
           {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             models: [OPENAI_MODEL],
+            capabilities: ["release-chat", "pr-review"],
             health: "available"
           }
         ]

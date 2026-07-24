@@ -32,6 +32,7 @@ import {
   pluginAdministrationOAuthLayer,
   pluginAdministrationOAuthLayerWithConnections,
   portfolioSnapshotsLayer,
+  pullRequestReviewsLayer,
   relationshipRepairProposalsLayer,
   releaseAgentJobsLayer,
   type ReleaseAgentRuntimeOptions,
@@ -271,6 +272,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(providerRegistry),
     Layer.provide(persistence)
   )
+  const pullRequestReviews = pullRequestReviewsLayer.pipe(
+    Layer.provide(providerRegistry),
+    Layer.provide(persistence),
+    Layer.provide(applicationServices)
+  )
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),
@@ -289,6 +295,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     applicationServices,
     releaseAgent,
     releaseAgentJobs,
+    pullRequestReviews,
     liveEventRuntime,
     databaseDrain
   )

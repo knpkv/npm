@@ -10,6 +10,10 @@
 .people,
 .reviewLanes,
 .reviewLanes > div,
+.reviewFindings,
+.reviewFindings > li,
+.findingHeading,
+.preventionProposal,
 .deliveryCounts {
   display: grid;
 }
@@ -173,6 +177,70 @@
 
 .reviewLanes button {
   inline-size: fit-content;
+}
+
+.reviewHead {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+    var(--rly-type-code-font);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.reviewFindings {
+  gap: var(--rly-space-12);
+  list-style: none;
+  margin: var(--rly-space-4) var(--rly-space-0);
+  padding: var(--rly-space-0);
+}
+
+.reviewFindings > li {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-inline-start: var(--rly-space-4) solid var(--rly-color-text-3);
+  border-radius: var(--rly-radius-field);
+  gap: var(--rly-space-8);
+  padding: var(--rly-space-16);
+}
+
+.reviewFindings > li[data-severity="critical"],
+.reviewFindings > li[data-severity="high"] {
+  border-inline-start-color: var(--rly-color-blocked-ink);
+}
+
+.reviewFindings > li[data-severity="medium"] {
+  border-inline-start-color: var(--rly-color-held-ink);
+}
+
+.reviewFindings code {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+    var(--rly-type-code-font);
+  overflow-wrap: anywhere;
+}
+
+.findingHeading {
+  align-items: baseline;
+  gap: var(--rly-space-8);
+  grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
+}
+
+.findingHeading > span {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  text-transform: uppercase;
+}
+
+.preventionProposal {
+  background: color-mix(in srgb, var(--rly-color-service-codecommit) 7%, transparent);
+  border-radius: var(--rly-radius-field);
+  gap: var(--rly-space-4);
+  padding: var(--rly-space-12);
+}
+
+.preventionProposal small {
+  color: var(--rly-color-text-2);
 }
 
 .deliveryCounts {

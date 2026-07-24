@@ -10,6 +10,7 @@ export {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
+  PullRequestReviews,
   RelationshipRepairProposals,
   ReleaseAgentJobs
 } from "./ApplicationServices.js"

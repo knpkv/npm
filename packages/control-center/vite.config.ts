@@ -30,6 +30,14 @@ export default defineConfig(({ mode }) => {
         emptyOutDir: true,
         manifest: true,
         outDir: "dist/client",
+        rollupOptions: {
+          output: {
+            manualChunks: (id) =>
+              id.replaceAll("\\", "/").endsWith("/src/api/agent.ts")
+                ? "agent-api"
+                : undefined
+          }
+        },
         sourcemap: true
       },
     plugins: [react(), controlCenterBuildGraph(packageRoot, isServer ? "server" : "client")],

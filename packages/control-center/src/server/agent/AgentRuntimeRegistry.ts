@@ -37,6 +37,12 @@ const CODEX_DEFAULT_MODEL = AgentModelId.make("configured-default")
 const CLAUDE_DEFAULT_MODEL = AgentModelId.make("default")
 const MINIMUM_OPENAI_GENERATION_TIMEOUT = Duration.millis(1)
 const MAXIMUM_OPENAI_GENERATION_TIMEOUT = Duration.minutes(2)
+const capabilitiesFor = (
+  providerId: "codex" | "claude" | "openai-compatible"
+): AgentProviderCatalogEntry["capabilities"] =>
+  providerId === "openai-compatible"
+    ? ["release-chat", "pr-review"]
+    : ["release-chat"]
 
 /** Persisted provider selection presented to the server-owned registry. */
 export interface AgentRuntimeSelection {
@@ -114,6 +120,7 @@ const unavailableCatalogEntry = (
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [],
+  capabilities: capabilitiesFor(providerId),
   health: "not-configured"
 })
 
@@ -123,6 +130,7 @@ const availableCatalogEntry = (
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [model],
+  capabilities: capabilitiesFor(providerId),
   health: "available"
 })
 

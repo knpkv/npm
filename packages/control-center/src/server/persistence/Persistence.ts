@@ -188,6 +188,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
       failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
         publicOperation("agent-job.fail-attempt", agentJobs.failAttempt(...args)),
+      latestReview: (...args: Parameters<AgentJobRepositoryService["latestReview"]>) =>
+        publicOperation("agent-job.latest-review", agentJobs.latestReview(...args)),
       requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
       reviewResult: (...args: Parameters<AgentJobRepositoryService["reviewResult"]>) =>

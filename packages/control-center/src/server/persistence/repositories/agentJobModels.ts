@@ -205,6 +205,30 @@ export const AgentReviewResultRecord = Schema.Struct({
 })
 export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
 
+/** Exact immutable subject used to recover its newest durable review job. */
+export const LatestAgentReviewInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  subject: PrReviewSubject
+})
+export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
+
+/** Newest durable lifecycle state for one exact immutable review subject. */
+export const LatestAgentReviewRecord = Schema.Struct({
+  jobId: JobId,
+  providerId: AgentProviderId,
+  model: AgentModel,
+  state: AgentJobState,
+  createdAt: UtcTimestamp,
+  terminalAt: Schema.NullOr(UtcTimestamp),
+  report: Schema.NullOr(PrReviewReport)
+}).check(
+  Schema.makeFilter(
+    ({ report, state }) => (state === "succeeded") === (report !== null),
+    { expected: "only succeeded review jobs to carry a report" }
+  )
+)
+export type LatestAgentReviewRecord = typeof LatestAgentReviewRecord.Type
+
 /** One immutable event in a release thread. */
 export const AgentThreadEvent = Schema.Struct({
   workspaceId: WorkspaceId,

@@ -6,7 +6,13 @@ import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
 
-import { AgentModelId, DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  PullRequestReviewNotStarted,
+  PullRequestReviewPending,
+  ReleaseAgentThreadCursor
+} from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
@@ -47,6 +53,7 @@ import {
   ShareId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
+import { PrReviewSubject } from "../../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
@@ -59,6 +66,7 @@ import {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
+  PullRequestReviews,
   RelationshipRepairProposals,
   ReleaseAgentJobs,
   ReleaseAgentTurns,
@@ -356,9 +364,15 @@ const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
   replay: () => Effect.die("not used")
 })
 
-const agentLayer = Layer.merge(
+const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
+  current: () => Effect.die("not used"),
+  enqueue: () => Effect.die("not used")
+})
+
+const agentLayer = Layer.mergeAll(
   Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }),
-  releaseAgentJobsLayer
+  releaseAgentJobsLayer,
+  pullRequestReviewsLayer
 )
 
 const liveEvents = LiveEvents.of({ open: () => Effect.succeed(Stream.never) })
@@ -1823,6 +1837,7 @@ describe("Control Center API handlers", () => {
       if (release === undefined) return yield* Effect.die("release fixture is missing")
       const requestedWorkspace = yield* Ref.make<string | null>(null)
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(releaseAgentJobsLayer),
@@ -1871,6 +1886,7 @@ describe("Control Center API handlers", () => {
         replay: () => Effect.die("not used")
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(jobs),
@@ -1908,6 +1924,80 @@ describe("Control Center API handlers", () => {
       })
     }))
 
+  it.effect("reads and enqueues immutable pull-request reviews in the authenticated workspace", () =>
+    Effect.gen(function*() {
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000025")
+      const subject = Schema.decodeSync(PrReviewSubject)({
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: "1".repeat(40),
+        headRevision: "2".repeat(40)
+      })
+      const received = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const reviews = Layer.succeed(PullRequestReviews, {
+        current: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(new PullRequestReviewNotStarted({ subject }))
+          ),
+        enqueue: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(
+              new PullRequestReviewPending({
+                subject,
+                jobId,
+                providerId: input.request.providerId,
+                model: input.request.model,
+                requestedAt: session.lastSeenAt,
+                state: "queued"
+              })
+            )
+          )
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const current = yield* client.agent.pullRequestReview({ params: { entityId } })
+        const accepted = yield* client.agent.enqueuePullRequestReview({
+          params: { entityId },
+          payload: {
+            providerId: DurableAgentProviderId.make("openai-compatible"),
+            model: AgentModelId.make("review-model"),
+            profile: "read-only"
+          }
+        })
+        return { accepted, current }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.current._tag, "not-started")
+      assert.strictEqual(result.accepted._tag, "pending")
+      assert.deepStrictEqual(yield* Ref.get(received), [
+        { workspaceId: session.workspaceId, entityId },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          request: {
+            providerId: DurableAgentProviderId.make("openai-compatible"),
+            model: AgentModelId.make("review-model"),
+            profile: "read-only"
+          }
+        }
+      ])
+    }))
+
   it.effect("returns only the redacted agent provider catalog to an owner", () =>
     Effect.gen(function*() {
       const jobs = Layer.succeed(ReleaseAgentJobs, {
@@ -1917,12 +2007,14 @@ describe("Control Center API handlers", () => {
             providers: [{
               providerId: DurableAgentProviderId.make("openai-compatible"),
               models: [AgentModelId.make("review-model")],
+              capabilities: ["release-chat", "pr-review"],
               health: "available"
             }]
           }),
         replay: () => Effect.die("not used")
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(jobs),
@@ -1945,6 +2037,7 @@ describe("Control Center API handlers", () => {
         providers: [{
           providerId: DurableAgentProviderId.make("openai-compatible"),
           models: [AgentModelId.make("review-model")],
+          capabilities: ["release-chat", "pr-review"],
           health: "available"
         }]
       })
@@ -1975,6 +2068,7 @@ describe("Control Center API handlers", () => {
           )
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(jobs),
@@ -2016,6 +2110,7 @@ describe("Control Center API handlers", () => {
             : Effect.fail(new ApplicationResourceNotFound())
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(jobs),
@@ -2053,6 +2148,7 @@ describe("Control Center API handlers", () => {
         sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(releaseAgentJobsLayer),
@@ -2092,6 +2188,7 @@ describe("Control Center API handlers", () => {
         replay: () => Effect.die("watcher reached durable replay")
       })
       const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(jobs),

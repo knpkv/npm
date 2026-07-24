@@ -8,9 +8,11 @@ export {
   type AgentJobDispatchCandidatesQueryInput,
   type AgentThreadReplayQueryInput,
   type ClaimableAgentJobState,
+  type LatestAgentReviewQueryInput,
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
-  renderAgentThreadReplayQuery
+  renderAgentThreadReplayQuery,
+  renderLatestAgentReviewQuery
 } from "./agentJobs.js"
 export {
   renderWorkspaceEntityOwnersQuery,
