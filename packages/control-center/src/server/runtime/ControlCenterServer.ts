@@ -7,6 +7,7 @@ import type * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
+import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
 import type {
   AuthorizedShares,
@@ -33,7 +34,6 @@ import {
   portfolioSnapshotsLayer,
   relationshipRepairProposalsLayer,
   releaseAgentJobsLayer,
-  releaseAgentJobsUnavailableLayer,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
@@ -232,11 +232,45 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const releaseAgent = options.releaseAgent === undefined || options.releaseAgent === null
     ? releaseAgentUnavailableLayer
     : releaseAgentTurnsLayer(options.releaseAgent).pipe(Layer.provide(applicationServices))
-  const releaseAgentJobs = (
+  const providerRegistry = agentProviderRuntimeRegistryLayer(
     options.releaseAgent === undefined || options.releaseAgent === null
-      ? releaseAgentJobsUnavailableLayer
-      : releaseAgentJobsLayer
-  ).pipe(Layer.provide(persistence))
+      ? {}
+      : {
+        ...(options.releaseAgent.enabledProviders.includes("codex")
+          ? {
+            codex: {
+              cwd: options.releaseAgent.cwd,
+              ...(options.releaseAgent.codexExecutable === undefined
+                ? {}
+                : { executable: options.releaseAgent.codexExecutable }),
+              ...(options.releaseAgent.codexModel === undefined
+                ? {}
+                : { model: options.releaseAgent.codexModel })
+            }
+          }
+          : {}),
+        ...(options.releaseAgent.enabledProviders.includes("claude")
+          ? {
+            claude: {
+              cwd: options.releaseAgent.cwd,
+              ...(options.releaseAgent.claudeExecutable === undefined
+                ? {}
+                : { executable: options.releaseAgent.claudeExecutable }),
+              ...(options.releaseAgent.claudeModel === undefined
+                ? {}
+                : { model: options.releaseAgent.claudeModel })
+            }
+          }
+          : {}),
+        ...(options.releaseAgent.openAiCompatible === undefined
+          ? {}
+          : { openAiCompatible: options.releaseAgent.openAiCompatible })
+      }
+  )
+  const releaseAgentJobs = releaseAgentJobsLayer.pipe(
+    Layer.provide(providerRegistry),
+    Layer.provide(persistence)
+  )
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),

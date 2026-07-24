@@ -87,6 +87,7 @@ export const EnqueueAgentJobInput = Schema.Struct({
   providerId: AgentProviderId,
   model: AgentModel,
   access: Schema.Literals(["read-only", "workspace-write"]),
+  userPrompt: AgentJobPrompt,
   prompt: AgentJobPrompt,
   contextFingerprint: AgentContextFingerprint,
   subjectRevision: SubjectRevision,

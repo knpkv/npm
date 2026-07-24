@@ -1,15 +1,24 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { AgentProviderError, AgentProviderId } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Ref, Result, Schema } from "effect"
+import { AgentProviderError, AgentProviderId, makeAgentRuntime } from "@knpkv/ai-runtime"
+import { DateTime, Effect, Ref, Result, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as TestClock from "effect/testing/TestClock"
 
-import { DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
-import { AgentThreadId, JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentModelId, DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
+import {
+  AgentThreadId,
+  JobId,
+  PersonId,
+  PluginConnectionId,
+  ReleaseId,
+  RoleAssignmentId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import { makeReleaseAgentJobs } from "../../src/server/application/releaseAgentJobs.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
@@ -32,6 +41,9 @@ const UNAUTHORIZED_RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-00000000
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000203")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000204")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000205")
+const COLLABORATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000209")
+const ROLE_ASSIGNMENT_ID = RoleAssignmentId.make("01890f6f-6d6a-7cc0-98d2-000000000210")
+const PROVIDER_CREDENTIAL_CANARY = "provider-credential-must-not-enter-prompt"
 const STARTED_AT_STRING = "2026-07-19T12:00:00.000Z"
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)(STARTED_AT_STRING)
 
@@ -57,8 +69,19 @@ const release = Schema.decodeSync(Release)({
   updatedAt: STARTED_AT_STRING
 })
 
+const releaseWithCollaborator = Schema.decodeSync(Schema.toType(Release))({
+  ...release,
+  roleAssignments: [{
+    actor: { _tag: "human", personId: COLLABORATOR_ID },
+    assignmentId: ROLE_ASSIGNMENT_ID,
+    lifecycle: { _tag: "active", assignedAt: STARTED_AT },
+    role: "release-owner",
+    scope: { _tag: "release", releaseId: RELEASE_ID, workspaceId: WORKSPACE_ID }
+  }]
+})
+
 const releaseSnapshot = ReleaseSnapshotRecord.make({
-  release,
+  release: releaseWithCollaborator,
   revision: RecordRevision.make(7)
 })
 
@@ -66,7 +89,8 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
   ...release,
   id: UNAUTHORIZED_RELEASE_ID,
   workspaceId: OTHER_WORKSPACE_ID,
-  relay: deriveReleaseRelay(UNAUTHORIZED_RELEASE_ID)
+  relay: deriveReleaseRelay(UNAUTHORIZED_RELEASE_ID),
+  roleAssignments: []
 })
 
 const threadEvent = (
@@ -114,10 +138,31 @@ const replayEvents: Array<AgentThreadEvent> = [
   })
 ]
 
-const withPersistence = <Success, Failure>(use: Effect.Effect<Success, Failure, Crypto.Crypto | Persistence>) =>
+const configuredRuntime = makeAgentRuntime({ run: () => Stream.empty })
+const configuredRegistry = AgentRuntimeRegistry.of({
+  catalog: () => Effect.succeed({ providers: [] }),
+  select: ({ access, model, providerId }) =>
+    providerId === "codex" && model === "review-model" && access === "read-only"
+      ? Effect.succeed({ model: AgentModelId.make("review-model"), runtime: configuredRuntime })
+      : Effect.fail(
+        new AgentProviderError({
+          providerId,
+          phase: "configuration",
+          message: "Selection unavailable.",
+          retryable: false
+        })
+      )
+})
+
+const withPersistence = <Success, Failure>(
+  use: Effect.Effect<Success, Failure, AgentRuntimeRegistry | Crypto.Crypto | Persistence>
+) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-release-agent-jobs-")
-    return yield* use.pipe(Effect.provide(persistenceLayer(config)))
+    return yield* use.pipe(
+      Effect.provideService(AgentRuntimeRegistry, configuredRegistry),
+      Effect.provide(persistenceLayer(config))
+    )
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("release agent jobs", () => {
@@ -190,10 +235,28 @@ describe("release agent jobs", () => {
       })
       const service = yield* makeReleaseAgentJobs.pipe(Effect.provideService(Persistence, fakePersistence))
 
+      const rejected = yield* service.enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("unregistered-model"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      assert.isNull(yield* Ref.get(enqueuedInput))
+
       const enqueued = yield* service.enqueue({
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,
-        request: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
       })
       const capturedEnqueue = Schema.decodeUnknownSync(Schema.toType(EnqueueAgentJobInput))(
         yield* Ref.get(enqueuedInput)
@@ -205,8 +268,17 @@ describe("release agent jobs", () => {
       assert.strictEqual(capturedEnqueue.releaseId, RELEASE_ID)
       assert.strictEqual(capturedEnqueue.subjectRevision, "release-revision:7")
       assert.strictEqual(capturedEnqueue.access, "read-only")
-      assert.strictEqual(capturedEnqueue.model, null)
+      assert.strictEqual(capturedEnqueue.model, "review-model")
       assert.strictEqual(capturedEnqueue.providerId, "codex")
+      assert.strictEqual(capturedEnqueue.userPrompt, "Explain the release.")
+      assert.include(capturedEnqueue.prompt, `"releaseId":"${RELEASE_ID}"`)
+      assert.include(capturedEnqueue.prompt, "\"service\":\"payments-api\"")
+      assert.include(capturedEnqueue.prompt, "\"version\":\"2.18.0\"")
+      assert.include(capturedEnqueue.prompt, "\"status\":\"candidate\"")
+      assert.include(capturedEnqueue.prompt, "\"freshness\":\"unavailable\"")
+      assert.include(capturedEnqueue.prompt, `"actorId":"${COLLABORATOR_ID}"`)
+      assert.include(capturedEnqueue.prompt, "<current-question>\nExplain the release.")
+      assert.notInclude(capturedEnqueue.prompt, PROVIDER_CREDENTIAL_CANARY)
       assert.isTrue(DateTime.Equivalence(capturedEnqueue.createdAt, STARTED_AT))
       assert.strictEqual(
         capturedEnqueue.contextFingerprint,

@@ -15,7 +15,7 @@ import * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 
-import { AgentProvider } from "../api/agent.js"
+import { AgentModelId, AgentProvider } from "../api/agent.js"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
 import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery.js"
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
@@ -54,6 +54,11 @@ const serverConfiguration = Config.all({
   agentClaudeModel: Config.string("CONTROL_CENTER_AGENT_CLAUDE_MODEL").pipe(Config.withDefault("")),
   agentCodexExecutable: Config.string("CONTROL_CENTER_AGENT_CODEX_EXECUTABLE").pipe(Config.withDefault("")),
   agentCodexModel: Config.string("CONTROL_CENTER_AGENT_CODEX_MODEL").pipe(Config.withDefault("")),
+  agentOpenAiApiKey: Config.redacted("CONTROL_CENTER_AGENT_OPENAI_API_KEY").pipe(
+    Config.withDefault(Redacted.make(""))
+  ),
+  agentOpenAiApiUrl: Config.string("CONTROL_CENTER_AGENT_OPENAI_API_URL").pipe(Config.withDefault("")),
+  agentOpenAiModel: Config.string("CONTROL_CENTER_AGENT_OPENAI_MODEL").pipe(Config.withDefault("")),
   agentCwd: Config.string("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
   agentProviders: Config.string("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
@@ -149,6 +154,26 @@ const program = Effect.scoped(
         : yield* Schema.decodeUnknownEffect(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))(
           configured.agentCwd
         )
+      const codexModel = configured.agentCodexModel.length === 0
+        ? undefined
+        : yield* Schema.decodeUnknownEffect(AgentModelId)(configured.agentCodexModel)
+      const claudeModel = configured.agentClaudeModel.length === 0
+        ? undefined
+        : yield* Schema.decodeUnknownEffect(AgentModelId)(configured.agentClaudeModel)
+      const openAiConfigured = configured.agentOpenAiApiUrl.length > 0 ||
+        configured.agentOpenAiModel.length > 0 ||
+        Redacted.value(configured.agentOpenAiApiKey).length > 0
+      const openAiCompatible = openAiConfigured
+        ? {
+          apiUrl: yield* Schema.decodeUnknownEffect(
+            Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_000))
+          )(configured.agentOpenAiApiUrl),
+          model: yield* Schema.decodeUnknownEffect(AgentModelId)(configured.agentOpenAiModel),
+          ...(Redacted.value(configured.agentOpenAiApiKey).length === 0
+            ? {}
+            : { apiKey: configured.agentOpenAiApiKey })
+        }
+        : undefined
       const allowedHosts = commaSeparated(configured.allowedHosts)
       const allowedOrigins = commaSeparated(configured.allowedOrigins)
       const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -182,19 +207,20 @@ const program = Effect.scoped(
             workspaceName: WorkspaceName.make("Control Center")
           },
           persistenceConfig: dataPaths.persistenceConfig,
-          releaseAgent: agentCwd === null
+          releaseAgent: agentCwd === null && openAiCompatible === undefined
             ? null
             : {
-              cwd: agentCwd,
+              cwd: agentCwd ?? ".",
               enabledProviders: agentProviders,
               ...(configured.agentCodexExecutable.length > 0
                 ? { codexExecutable: configured.agentCodexExecutable }
                 : {}),
-              ...(configured.agentCodexModel.length > 0 ? { codexModel: configured.agentCodexModel } : {}),
+              ...(codexModel === undefined ? {} : { codexModel }),
               ...(configured.agentClaudeExecutable.length > 0
                 ? { claudeExecutable: configured.agentClaudeExecutable }
                 : {}),
-              ...(configured.agentClaudeModel.length > 0 ? { claudeModel: configured.agentClaudeModel } : {})
+              ...(claudeModel === undefined ? {} : { claudeModel }),
+              ...(openAiCompatible === undefined ? {} : { openAiCompatible })
             },
           secretRoot: dataPaths.secretRoot,
           staticAssets: { root: staticRoot }

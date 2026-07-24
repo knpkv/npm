@@ -8,6 +8,7 @@ import type {
   AgentHistoryMessage,
   AgentPrompt,
   AgentProvider,
+  AgentProviderCatalog,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
   ReleaseAgentThreadCursor,
@@ -483,6 +484,10 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
   }) => Effect.Effect<
     EnqueueReleaseAgentJobResponse,
     ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly providers: () => Effect.Effect<
+    AgentProviderCatalog,
+    ApplicationServiceUnavailable
   >
   readonly replay: (input: {
     readonly workspaceId: WorkspaceId

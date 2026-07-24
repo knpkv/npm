@@ -64,6 +64,7 @@
   "dependencies": {
     "@aws-sdk/credential-providers": "^3.1085.0",
     "@distilled.cloud/aws": "0.29.1",
+    "@effect/ai-openai-compat": "4.0.0-beta.98",
     "@effect/platform-browser": "4.0.0-beta.98",
     "@effect/platform-node": "4.0.0-beta.98",
     "@effect/sql-libsql": "4.0.0-beta.98",

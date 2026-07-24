@@ -52,6 +52,7 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
 
   const runtimeKeys = [
     "@aws-sdk/credential-providers",
+    "@effect/ai-openai-compat",
     "@effect/platform-browser",
     "@effect/platform-node",
     "@effect/sql-libsql",
@@ -117,6 +118,9 @@ export const inspectPackageContract = (value: unknown): ReadonlyArray<string> =>
   }
   if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-beta.98") {
     violations.push("@effect/sql-libsql must align with the pinned Effect beta")
+  }
+  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-beta.98") {
+    violations.push("@effect/ai-openai-compat must align with the pinned Effect beta")
   }
   if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-beta.98") {
     violations.push("@effect/platform-node must align with the pinned Effect beta")

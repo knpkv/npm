@@ -15,10 +15,13 @@ import {
 } from "../../api/agent.js"
 import { JobId, ReleaseId, WorkspaceId } from "../../domain/identifiers.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
+import { renderDurableReleaseAgentPrompt } from "../agent/ReleaseAgentPrompt.js"
 import { ApplicationServiceUnavailable, ReleaseAgentJobs } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import {
   AgentEventCursor,
+  AgentJobPrompt,
   type AgentThreadEvent,
   AgentThreadEventPageSize
 } from "../persistence/repositories/agentJobModels.js"
@@ -116,6 +119,7 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
 export const makeReleaseAgentJobs = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
+  const runtimes = yield* AgentRuntimeRegistry
 
   const makeContextFingerprint = Effect.fn("ReleaseAgentJobs.makeContextFingerprint")(function*(input: {
     readonly workspaceId: typeof WorkspaceId.Type
@@ -136,15 +140,23 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
 
   return ReleaseAgentJobs.of({
     enqueue: Effect.fn("ReleaseAgentJobs.enqueue")(function*(input) {
+      const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(input.request.providerId).pipe(
+        Effect.mapError(unavailable)
+      )
+      yield* runtimes.select({
+        providerId,
+        model: input.request.model,
+        access: input.request.profile
+      }).pipe(Effect.mapError(unavailable))
       const release = yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)
       )
       const subjectRevision = `release-revision:${release.revision}`
+      const providerPrompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(
+        renderDurableReleaseAgentPrompt(release.release, input.request.prompt)
+      ).pipe(Effect.mapError(unavailable))
       const jobId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
-        Effect.mapError(unavailable)
-      )
-      const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(input.request.providerId).pipe(
         Effect.mapError(unavailable)
       )
       const contextFingerprint = yield* makeContextFingerprint({
@@ -158,9 +170,10 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         releaseId: input.releaseId,
         jobId,
         providerId,
-        model: null,
-        access: "read-only",
-        prompt: input.request.prompt,
+        model: input.request.model,
+        access: input.request.profile,
+        userPrompt: input.request.prompt,
+        prompt: providerPrompt,
         contextFingerprint,
         subjectRevision,
         createdAt
@@ -170,6 +183,7 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       )
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
+    providers: () => runtimes.catalog().pipe(Effect.mapError(unavailable)),
     replay: Effect.fn("ReleaseAgentJobs.replay")(function*(input) {
       yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)
@@ -200,7 +214,11 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
 })
 
 /** Live provider-neutral durable release-agent application layer. */
-export const releaseAgentJobsLayer: Layer.Layer<ReleaseAgentJobs, never, Crypto.Crypto | Persistence> = Layer.effect(
+export const releaseAgentJobsLayer: Layer.Layer<
+  ReleaseAgentJobs,
+  never,
+  AgentRuntimeRegistry | Crypto.Crypto | Persistence
+> = Layer.effect(
   ReleaseAgentJobs,
   makeReleaseAgentJobs
 )
@@ -209,13 +227,14 @@ export const releaseAgentJobsLayer: Layer.Layer<ReleaseAgentJobs, never, Crypto.
 export const releaseAgentJobsUnavailableLayer: Layer.Layer<
   ReleaseAgentJobs,
   never,
-  Crypto.Crypto | Persistence
+  AgentRuntimeRegistry | Crypto.Crypto | Persistence
 > = Layer.effect(
   ReleaseAgentJobs,
   makeReleaseAgentJobs.pipe(
     Effect.map((jobs) =>
       ReleaseAgentJobs.of({
         enqueue: () => Effect.fail(unavailable()),
+        providers: jobs.providers,
         replay: jobs.replay
       })
     )

@@ -169,7 +169,11 @@ const makeAgentJobWorker = Effect.gen(function*() {
       } satisfies AgentJobWorkerRunResult
     }
 
-    const selected = yield* runtimes.select(claim.providerId).pipe(Effect.result)
+    const selected = yield* runtimes.select({
+      providerId: claim.providerId,
+      model: claim.model,
+      access: claim.access
+    }).pipe(Effect.result)
     if (Result.isFailure(selected)) {
       return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
     }
@@ -185,13 +189,13 @@ const makeAgentJobWorker = Effect.gen(function*() {
     const request: AgentRunRequest = {
       runId: AgentRunId.make(claim.jobId),
       providerId: claim.providerId,
-      model: claim.model,
+      model: selected.success.model,
       access: claim.access,
       prompt: claim.prompt,
       context: claim.context,
       continuation
     }
-    const execution = yield* selected.success.run(request).pipe(
+    const execution = yield* selected.success.runtime.run(request).pipe(
       Stream.takeUntil((event) => event._tag === "completed"),
       Stream.flatMap((event) => Stream.fromIterable(chunkOutputEvent(event))),
       Stream.runForEach((event) => {

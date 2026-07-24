@@ -22,7 +22,12 @@ const BLOB_STORE_REASON = "only persistence composition and ContentStore can imp
 const CLI_BACKUP_BOUNDARY_REASON = "the CLI must use the public backup barrel instead of backup or database internals"
 const DATA_ROOT_PROTOCOL_REASON =
   "only CLI configuration and the backup archive entry point can import the data-root protocol"
-const LOCAL_AGENT_ADAPTER_REASON = "only the release-agent application adapter can import local AI provider packages"
+const LOCAL_AGENT_ADAPTER_REASON = "only reviewed server agent adapters can import AI provider packages"
+const AGENT_PROVIDER_PACKAGES: ReadonlyArray<string> = [
+  "@effect/ai-openai-compat",
+  "@knpkv/ai-claude",
+  "@knpkv/ai-codex"
+]
 const CONFLUENCE_ADAPTER_REASON = "only the isolated Confluence adapter can import Confluence provider packages"
 const CONFLUENCE_PROVIDER_PACKAGES: ReadonlyArray<string> = [
   "@knpkv/confluence-api-client",
@@ -190,8 +195,11 @@ const reasonForImport = (sourcePath: string, importPath: string): string | undef
 
   if (isPrototypeImport(importPath)) return PROTOTYPE_RUNTIME_REASON
   if (
-    (importPath === "@knpkv/ai-codex" || importPath === "@knpkv/ai-claude") &&
-    normalizedSource !== "src/server/application/releaseAgent"
+    AGENT_PROVIDER_PACKAGES.some(
+      (packageName) => importPath === packageName || importPath.startsWith(`${packageName}/`)
+    ) &&
+    normalizedSource !== "src/server/application/releaseAgent" &&
+    normalizedSource !== "src/server/agent/AgentRuntimeRegistry"
   ) {
     return LOCAL_AGENT_ADAPTER_REASON
   }

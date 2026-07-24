@@ -17,7 +17,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import { createServer } from "node:net"
 
-import { DurableAgentProviderId } from "../../src/api/agent.js"
+import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
 import { makeControlCenterApiClient } from "../../src/api/client.js"
 import { PairingCode } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
@@ -381,7 +381,12 @@ describe("Control Center closed runtime", () => {
       })
       const rejectedAgentJob = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
-        payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+        payload: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(rejectedAgentJob))
       if (Result.isFailure(rejectedAgentJob)) {
@@ -682,7 +687,12 @@ describe("Control Center closed runtime", () => {
       })
       const enqueued = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
-        payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+        payload: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
       })
       const durableThread = yield* runtimePersistence.agentJobs.threadAfter({
         workspaceId: WORKSPACE_ID,

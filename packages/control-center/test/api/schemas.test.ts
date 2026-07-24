@@ -691,19 +691,41 @@ describe("public API schemas", () => {
     assert.isTrue(Result.isSuccess(
       Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
         providerId: "codex",
+        model: "review-model",
+        profile: "read-only",
         prompt: "Explain the current release blockers."
       })
     ))
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
         providerId: " padded ",
+        model: "review-model",
+        profile: "read-only",
         prompt: "Explain the current release blockers."
       })
     ))
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
         providerId: "codex",
-        prompt: "x".repeat(5_001)
+        model: "review-model",
+        profile: "read-only",
+        prompt: "x".repeat(2_501)
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
+        providerId: "codex",
+        model: "",
+        profile: "read-only",
+        prompt: "Explain the current release blockers."
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueueReleaseAgentJobRequest)({
+        providerId: "codex",
+        model: "review-model",
+        profile: "workspace-write",
+        prompt: "Explain the current release blockers."
       })
     ))
     assert.isTrue(Result.isSuccess(Schema.decodeUnknownResult(ReleaseAgentThreadCursorFromString)("0")))

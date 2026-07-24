@@ -6,7 +6,7 @@ import * as TestClock from "effect/testing/TestClock"
 import { HttpRouter, HttpServer } from "effect/unstable/http"
 import { HttpApiTest } from "effect/unstable/httpapi"
 
-import { DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
+import { AgentModelId, DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import type { ControlCenterLiveEvent } from "../../src/api/liveEvents.js"
@@ -352,6 +352,7 @@ const authorizedSharesLayer = Layer.succeed(AuthorizedShares, {
 
 const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
   enqueue: () => Effect.die("not used"),
+  providers: () => Effect.succeed({ providers: [] }),
   replay: () => Effect.die("not used")
 })
 
@@ -1866,6 +1867,7 @@ describe("Control Center API handlers", () => {
           Ref.set(received, input).pipe(
             Effect.as({ releaseId: input.releaseId, jobId, state: "queued" })
           ),
+        providers: () => Effect.die("not used"),
         replay: () => Effect.die("not used")
       })
       const handler = agentHandlersLayer.pipe(
@@ -1879,7 +1881,12 @@ describe("Control Center API handlers", () => {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         return yield* client.agent.enqueueJob({
           params: { releaseId },
-          payload: { prompt: "Explain the release blockers.", providerId: DurableAgentProviderId.make("codex") }
+          payload: {
+            prompt: "Explain the release blockers.",
+            providerId: DurableAgentProviderId.make("codex"),
+            model: AgentModelId.make("review-model"),
+            profile: "read-only"
+          }
         })
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
@@ -1892,7 +1899,54 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(yield* Ref.get(received), {
         workspaceId: session.workspaceId,
         releaseId,
-        request: { prompt: "Explain the release blockers.", providerId: DurableAgentProviderId.make("codex") }
+        request: {
+          prompt: "Explain the release blockers.",
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only"
+        }
+      })
+    }))
+
+  it.effect("returns only the redacted agent provider catalog to an owner", () =>
+    Effect.gen(function*() {
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        providers: () =>
+          Effect.succeed({
+            providers: [{
+              providerId: DurableAgentProviderId.make("openai-compatible"),
+              models: [AgentModelId.make("review-model")],
+              health: "available"
+            }]
+          }),
+        replay: () => Effect.die("not used")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.providers()
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.deepStrictEqual(result, {
+        providers: [{
+          providerId: DurableAgentProviderId.make("openai-compatible"),
+          models: [AgentModelId.make("review-model")],
+          health: "available"
+        }]
       })
     }))
 
@@ -1904,6 +1958,7 @@ describe("Control Center API handlers", () => {
       const received = yield* Ref.make<unknown>(null)
       const jobs = Layer.succeed(ReleaseAgentJobs, {
         enqueue: () => Effect.die("not used"),
+        providers: () => Effect.die("not used"),
         replay: (input) =>
           Ref.set(received, input).pipe(
             Effect.as({
@@ -1954,6 +2009,7 @@ describe("Control Center API handlers", () => {
       const after = ReleaseAgentThreadCursor.make(19)
       const jobs = Layer.succeed(ReleaseAgentJobs, {
         enqueue: () => Effect.die("not used"),
+        providers: () => Effect.die("not used"),
         replay: (input) =>
           input.releaseId === releaseId
             ? Effect.succeed({ releaseId, events: [], nextCursor: input.after })
@@ -2024,7 +2080,7 @@ describe("Control Center API handlers", () => {
       if (Result.isFailure(result)) assert.strictEqual(result.failure._tag, "ForbiddenApiError")
     }))
 
-  it.effect("rejects watcher durable enqueue and thread replay before application access", () =>
+  it.effect("rejects watcher provider administration, durable enqueue, and replay before application access", () =>
     Effect.gen(function*() {
       const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
       const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
@@ -2032,6 +2088,7 @@ describe("Control Center API handlers", () => {
       })
       const jobs = Layer.succeed(ReleaseAgentJobs, {
         enqueue: () => Effect.die("watcher reached durable enqueue"),
+        providers: () => Effect.die("watcher reached provider catalog"),
         replay: () => Effect.die("watcher reached durable replay")
       })
       const handler = agentHandlersLayer.pipe(
@@ -2044,13 +2101,19 @@ describe("Control Center API handlers", () => {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const enqueue = yield* client.agent.enqueueJob({
           params: { releaseId },
-          payload: { providerId: DurableAgentProviderId.make("codex"), prompt: "Explain the release." }
+          payload: {
+            providerId: DurableAgentProviderId.make("codex"),
+            model: AgentModelId.make("review-model"),
+            profile: "read-only",
+            prompt: "Explain the release."
+          }
         }).pipe(Effect.result)
         const replay = yield* client.agent.replayThread({
           params: { releaseId },
           query: {}
         }).pipe(Effect.result)
-        return { enqueue, replay }
+        const providers = yield* client.agent.providers().pipe(Effect.result)
+        return { enqueue, providers, replay }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2059,6 +2122,7 @@ describe("Control Center API handlers", () => {
       ]))
 
       assertForbidden(attempted.enqueue)
+      assertForbidden(attempted.providers)
       assertForbidden(attempted.replay)
     }))
 

@@ -12,6 +12,7 @@ import {
 import { DateTime, Effect, Fiber, Layer, Option, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
+import { AgentModelId } from "../../src/api/agent.js"
 import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentJobWorker, agentJobWorkerLayer } from "../../src/server/agent/AgentJobWorker.js"
@@ -75,21 +76,23 @@ const setupFoundation = Effect.gen(function*() {
   )`
 })
 
-const enqueue = Effect.gen(function*() {
-  const jobs = yield* AgentJobRepository
-  yield* jobs.enqueue({
-    workspaceId: WORKSPACE_ID,
-    releaseId: RELEASE_ID,
-    jobId: JOB_ID,
-    providerId: PROVIDER_ID,
-    model: "deterministic-model",
-    access: "read-only",
-    prompt: "Explain the release",
-    contextFingerprint: FINGERPRINT,
-    subjectRevision: "release-revision-7",
-    createdAt: STARTED_AT
+const enqueue = (model: string | null = "deterministic-model") =>
+  Effect.gen(function*() {
+    const jobs = yield* AgentJobRepository
+    yield* jobs.enqueue({
+      workspaceId: WORKSPACE_ID,
+      releaseId: RELEASE_ID,
+      jobId: JOB_ID,
+      providerId: PROVIDER_ID,
+      model,
+      access: "read-only",
+      userPrompt: "Explain the release",
+      prompt: "Explain the release",
+      contextFingerprint: FINGERPRINT,
+      subjectRevision: "release-revision-7",
+      createdAt: STARTED_AT
+    })
   })
-})
 
 const replay = Effect.gen(function*() {
   const jobs = yield* AgentJobRepository
@@ -130,18 +133,23 @@ const withDatabaseConfig = <Success, Failure>(
 ) => {
   const database = databaseLayer(config)
   const jobs = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
-  const registry = agentRuntimeRegistryLayer((providerId) =>
-    providerId === PROVIDER_ID
-      ? Effect.succeed(runtime)
-      : Effect.fail(
-        new AgentProviderError({
-          providerId,
-          phase: "configuration",
-          message: "No deterministic provider configured.",
-          retryable: false
+  const registry = agentRuntimeRegistryLayer({
+    catalog: () => Effect.succeed({ providers: [] }),
+    select: ({ model, providerId }) =>
+      providerId === PROVIDER_ID
+        ? Effect.succeed({
+          model: AgentModelId.make(model ?? "deterministic-model"),
+          runtime
         })
-      )
-  )
+        : Effect.fail(
+          new AgentProviderError({
+            providerId,
+            phase: "configuration",
+            message: "No deterministic provider configured.",
+            retryable: false
+          })
+        )
+  })
   const worker = agentJobWorkerLayer({
     leaseOwner: LEASE_OWNER,
     leaseDuration: "5 minutes"
@@ -176,14 +184,40 @@ describe("agent job worker", () => {
       Effect.gen(function*() {
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
 
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(requests.length, 1)
         assert.strictEqual(requests[0]?.runId, AgentRunId.make(JOB_ID))
+        assert.strictEqual(requests[0]?.model, "deterministic-model")
         assert.strictEqual(requests[0]?.context.workspaceId, WORKSPACE_ID)
+      })
+    )
+  })
+
+  it.effect("maps a legacy null model to the configured default before runtime execution", () => {
+    const requests = new Array<Parameters<AgentRuntimeService["run"]>[0]>()
+    const runtime = makeAgentRuntime({
+      run: (request) =>
+        Stream.suspend(() => {
+          requests.push(request)
+          return Stream.fromIterable(completedEvents)
+        })
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue(null)
+
+        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+
+        assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.strictEqual(requests.length, 1)
+        assert.strictEqual(requests[0]?.model, "deterministic-model")
       })
     )
   })
@@ -203,7 +237,7 @@ describe("agent job worker", () => {
       Effect.gen(function*() {
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
         const page = yield* replay
@@ -236,7 +270,7 @@ describe("agent job worker", () => {
       Effect.gen(function*() {
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
         const page = yield* replay
@@ -263,7 +297,7 @@ describe("agent job worker", () => {
         const database = yield* Database
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
@@ -295,7 +329,7 @@ describe("agent job worker", () => {
         const database = yield* Database
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
@@ -331,7 +365,7 @@ describe("agent job worker", () => {
           const database = yield* Database
           yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
           yield* setupFoundation
-          yield* enqueue
+          yield* enqueue()
 
           const observed = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
           const rows = yield* database.sql<{
@@ -369,7 +403,7 @@ describe("agent job worker", () => {
         const database = yield* Database
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(
           Effect.result,
@@ -417,7 +451,7 @@ describe("agent job worker", () => {
       Effect.gen(function*() {
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
         const worker = yield* AgentJobWorker
 
         const results = yield* Effect.all(
@@ -450,7 +484,7 @@ describe("agent job worker", () => {
         const database = yield* Database
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
 
         const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
@@ -490,7 +524,7 @@ describe("agent job worker", () => {
         const jobs = yield* AgentJobRepository
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
-        yield* enqueue
+        yield* enqueue()
         const original = yield* jobs.claimNext({
           workspaceId: WORKSPACE_ID,
           leaseOwner: LEASE_OWNER,
@@ -526,7 +560,7 @@ describe("agent job worker", () => {
         runtime,
         Effect.gen(function*() {
           yield* setupFoundation
-          yield* enqueue
+          yield* enqueue()
           const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
           assert.strictEqual(result._tag, "completed")
         })
