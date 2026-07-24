@@ -148,7 +148,8 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       yield* runtimes.select({
         providerId,
         model: input.request.model,
-        access: input.request.profile
+        access: input.request.profile,
+        capability: "release-chat"
       }).pipe(Effect.mapError(unavailable))
       const release = yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)

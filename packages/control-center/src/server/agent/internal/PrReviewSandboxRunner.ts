@@ -14,6 +14,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import { JobId } from "../../../domain/identifiers.js"
 import { PrReviewPath } from "../../../domain/prReview.js"
+import { PR_REVIEW_GIT_PREFIX, PR_REVIEW_TREE_PREFIX } from "./PrReviewWorkspaceProtocol.js"
 
 const OCI_EXECUTABLE = "docker"
 const GIT_EXECUTABLE = "git"
@@ -755,14 +756,14 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
 ) {
   const archive = yield* fileSystem.makeTempFileScoped({
     directory: workspaceRoot,
-    prefix: ".pr-review-tree-",
+    prefix: PR_REVIEW_TREE_PREFIX,
     suffix: ".tar"
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )
   const reviewTree = yield* fileSystem.makeTempDirectoryScoped({
     directory: workspaceRoot,
-    prefix: ".pr-review-tree-"
+    prefix: PR_REVIEW_TREE_PREFIX
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )
@@ -856,7 +857,7 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
 
   const archiveGitDirectory = yield* fileSystem.makeTempDirectoryScoped({
     directory: workspaceRoot,
-    prefix: ".pr-review-git-"
+    prefix: PR_REVIEW_GIT_PREFIX
   }).pipe(
     Effect.mapError(() => sandboxError("source-unavailable"))
   )

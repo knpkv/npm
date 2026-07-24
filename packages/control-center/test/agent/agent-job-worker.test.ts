@@ -19,8 +19,8 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   AgentJobWorker,
   agentJobWorkerLayer,
-  agentJobWorkerWithPrReviewLayer,
-  agentJobWorkerWithTaskExecutorLayer
+  agentJobWorkerWithTaskExecutorLayer,
+  prReviewAgentJobWorkerLayer
 } from "../../src/server/agent/AgentJobWorker.js"
 import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
@@ -48,6 +48,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+const RELEASE_CHAT_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000042")
 const PROVIDER_ID = AgentProviderId.make("deterministic")
 const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
 const LEASE_OWNER = AgentLeaseOwner.make("agent-worker-test")
@@ -142,13 +143,16 @@ const setupFoundation = Effect.gen(function*() {
   )`
 })
 
-const enqueue = (model: string | null = "deterministic-model") =>
+const enqueue = (
+  model: string | null = "deterministic-model",
+  jobId: JobId = JOB_ID
+) =>
   Effect.gen(function*() {
     const jobs = yield* AgentJobRepository
     yield* jobs.enqueue({
       workspaceId: WORKSPACE_ID,
       releaseId: RELEASE_ID,
-      jobId: JOB_ID,
+      jobId,
       providerId: PROVIDER_ID,
       model,
       access: "read-only",
@@ -278,7 +282,7 @@ const withReviewWorker = <Success, Failure>(
             })
           )
     })
-    const worker = agentJobWorkerWithPrReviewLayer({
+    const worker = prReviewAgentJobWorkerLayer({
       leaseOwner: LEASE_OWNER,
       leaseDuration: "5 minutes"
     }).pipe(
@@ -552,11 +556,24 @@ describe("agent job worker", () => {
           Effect.flatMap((worker) => worker.runOnce(WORKSPACE_ID)),
           Effect.provide(defaultWorker)
         )
+        yield* enqueue("deterministic-model", RELEASE_CHAT_JOB_ID)
         const result = yield* reviewWorker.runOnce(WORKSPACE_ID)
         const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+        const releaseChatClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["release-chat"],
+          leaseOwner: AgentLeaseOwner.make("release-chat-worker"),
+          leaseToken: Schema.decodeSync(AgentLeaseToken)("b".repeat(64)),
+          claimedAt: STARTED_AT,
+          leaseExpiresAt: DateTime.addDuration(STARTED_AT, "5 minutes")
+        })
 
         assert.deepStrictEqual(defaultResult, { _tag: "idle" })
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+        assert.isTrue(Option.isSome(releaseChatClaim))
+        if (Option.isSome(releaseChatClaim)) {
+          assert.strictEqual(releaseChatClaim.value.jobId, RELEASE_CHAT_JOB_ID)
+        }
         assert.strictEqual(sandboxRequests.length, 1)
         assert.strictEqual(runtimeRequests.length, 1)
         assert.strictEqual(runtimeRequests[0]?.access, "read-only")

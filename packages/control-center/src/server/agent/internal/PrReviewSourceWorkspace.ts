@@ -17,6 +17,7 @@ import { JobId, WorkspaceId } from "../../../domain/identifiers.js"
 import { Persistence } from "../../persistence/Persistence.js"
 import type { StoredPluginConfiguration } from "../../persistence/repositories/pluginConfigurationModels.js"
 import { CodeCommitPluginConfiguration } from "../../plugins/codecommit/CodeCommitPluginDefinition.js"
+import { PR_REVIEW_SANDBOX_PREFIXES } from "./PrReviewWorkspaceProtocol.js"
 
 const GIT_EXECUTABLE = "git"
 const STAGING_PREFIX = ".review-staging-"
@@ -387,7 +388,11 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
       Effect.mapError(() => sourceError("cleanup-failed"))
     )
   ) {
-    if (entry.startsWith(STAGING_PREFIX) || Schema.is(JobId)(entry)) {
+    if (
+      entry.startsWith(STAGING_PREFIX) ||
+      PR_REVIEW_SANDBOX_PREFIXES.some((prefix) => entry.startsWith(prefix)) ||
+      Schema.is(JobId)(entry)
+    ) {
       yield* removeSource(path.join(canonicalRoot, entry))
     }
   }

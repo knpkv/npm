@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, makeAgentRuntime } from "@knpkv/ai-runtime"
-import { DateTime, Duration, Effect, Option, Ref, Schema, Stream } from "effect"
+import { DateTime, Duration, Effect, Option, Ref, Result, Schema, Stream } from "effect"
 
 import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -153,6 +153,21 @@ const localRegistry = AgentRuntimeRegistry.of({
   select: () => Effect.succeed({ model: MODEL, runtime, filesystemAccess: "configured-workspace" })
 })
 
+const reviewDisabledRegistry = AgentRuntimeRegistry.of({
+  ...registry,
+  select: ({ capability, providerId }) =>
+    capability === "pr-review"
+      ? Effect.fail(
+        new AgentProviderError({
+          providerId,
+          phase: "configuration",
+          message: "PR review worker is not configured.",
+          retryable: false
+        })
+      )
+      : Effect.succeed({ model: MODEL, runtime, filesystemAccess: "none" })
+})
+
 const offlineRegistry = AgentRuntimeRegistry.of({
   ...registry,
   select: () => Effect.die("provider selection must not run while recovering active work")
@@ -281,6 +296,25 @@ describe("pull request reviews", () => {
           assert.isNull(yield* Ref.get(enqueueInput))
         }),
       localRegistry
+    ))
+
+  it.effect("rejects direct review enqueue when the provider has no review worker opt-in", () =>
+    withService(
+      (service, enqueueInput) =>
+        Effect.gen(function*() {
+          const result = yield* service.enqueue({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              providerId: PROVIDER_ID,
+              model: MODEL,
+              profile: "read-only"
+            }
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(result))
+          assert.isNull(yield* Ref.get(enqueueInput))
+        }),
+      reviewDisabledRegistry
     ))
 
   it.effect("recovers an active exact-subject review before selecting its provider", () => {

@@ -348,7 +348,8 @@ const makeExecutor = Effect.gen(function*() {
       const selected = yield* runtimes.select({
         providerId: claim.providerId,
         model: claim.model,
-        access: "read-only"
+        access: "read-only",
+        capability: "pr-review"
       })
       if (selected.filesystemAccess !== "none") {
         return yield* providerFailure(

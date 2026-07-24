@@ -8,7 +8,7 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
-import { type AgentJobWorkerOptions, agentJobWorkerWithPrReviewLayer } from "../agent/AgentJobWorker.js"
+import { type AgentJobWorkerOptions, prReviewAgentJobWorkerLayer } from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
 import {
   type PrReviewSandboxError,
@@ -359,7 +359,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
         leaseOwner: configured.leaseOwner,
         leaseDuration: configured.leaseDuration ?? "5 minutes"
       }
-      const worker = agentJobWorkerWithPrReviewLayer(workerOptions).pipe(
+      const worker = prReviewAgentJobWorkerLayer(workerOptions).pipe(
         Layer.provide(providerRegistry),
         Layer.provide(sandbox),
         Layer.provide(sourceWorkspace),

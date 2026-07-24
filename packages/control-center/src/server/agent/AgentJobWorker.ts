@@ -30,6 +30,7 @@ import { AgentJobRepository, type AgentJobRepositoryService } from "../persisten
 import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
 import {
   AgentJobTaskExecutor,
+  prReviewOnlyTaskExecutorLayer,
   releaseChatTaskExecutorLayer,
   reviewEnabledTaskExecutorLayer
 } from "./internal/AgentJobTaskExecutor.js"
@@ -323,7 +324,9 @@ const makeAgentJobWorker = Effect.gen(function*() {
           )
         )
       const observed = yield* Effect.raceFirst(
-        executeClaim(claimed).pipe(Effect.map(Option.some)),
+        executeClaim(claimed).pipe(
+          Effect.map((result) => Option.some<AgentJobWorkerRunResult>(result))
+        ),
         awaitCancellation().pipe(Effect.as(Option.none<AgentJobWorkerRunResult>()))
       )
       return Option.isSome(observed)
@@ -363,6 +366,22 @@ export const agentJobWorkerWithPrReviewLayer = (
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
       reviewEnabledTaskExecutorLayer.pipe(
+        Layer.provide(prReviewTaskExecutorLayer)
+      )
+    )
+  )
+
+/** Review-only worker composition used by the production review supervisor. */
+export const prReviewAgentJobWorkerLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner | PrReviewSourceWorkspace
+> =>
+  agentJobWorkerWithTaskExecutorLayer(options).pipe(
+    Layer.provide(
+      prReviewOnlyTaskExecutorLayer.pipe(
         Layer.provide(prReviewTaskExecutorLayer)
       )
     )

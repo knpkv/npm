@@ -25,6 +25,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import {
   AgentModelId,
+  type AgentProviderCapability,
   type AgentProviderCatalog,
   type AgentProviderCatalogEntry,
   DurableAgentProviderId
@@ -42,6 +43,7 @@ export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
   readonly model: string | null
   readonly access: "read-only" | "workspace-write"
+  readonly capability: AgentProviderCapability
 }
 
 /** Selects configured runtimes and exposes only a redacted public catalog. */
@@ -235,6 +237,7 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
       return provider !== undefined &&
           provider.runtime !== null &&
           selection.access === "read-only" &&
+          provider.catalog.capabilities.includes(selection.capability) &&
           model !== undefined
         ? Effect.succeed({
           model,

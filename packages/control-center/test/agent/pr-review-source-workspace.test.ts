@@ -251,9 +251,13 @@ describe("PR review source workspace", () => {
         const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-reconcile-" })
         const workspaceRoot = path.join(fixture, "workspaces")
         const staging = path.join(workspaceRoot, ".review-staging-crash")
+        const reviewTree = path.join(workspaceRoot, ".pr-review-tree-crash")
+        const reviewGit = path.join(workspaceRoot, ".pr-review-git-crash")
         const job = path.join(workspaceRoot, JOB_ID)
         const unrelated = path.join(workspaceRoot, "operator-owned")
         yield* fileSystem.makeDirectory(staging, { recursive: true })
+        yield* fileSystem.makeDirectory(reviewTree)
+        yield* fileSystem.makeDirectory(reviewGit)
         yield* fileSystem.makeDirectory(job)
         yield* fileSystem.makeDirectory(unrelated)
         const resolver = Layer.succeed(
@@ -269,6 +273,8 @@ describe("PR review source workspace", () => {
         )
 
         assert.isFalse(yield* fileSystem.exists(staging))
+        assert.isFalse(yield* fileSystem.exists(reviewTree))
+        assert.isFalse(yield* fileSystem.exists(reviewGit))
         assert.isFalse(yield* fileSystem.exists(job))
         assert.isTrue(yield* fileSystem.exists(unrelated))
       })

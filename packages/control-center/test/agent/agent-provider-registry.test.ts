@@ -177,36 +177,49 @@ describe("agent provider registry", () => {
       const unavailable = yield* registry.select({
         providerId: AgentProviderId.make("claude"),
         model: "review-model",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       }).pipe(Effect.result)
       const wrongModel = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: "unregistered-model",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       }).pipe(Effect.result)
       const unsafeProfile = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: OPENAI_MODEL,
-        access: "workspace-write"
+        access: "workspace-write",
+        capability: "release-chat"
+      }).pipe(Effect.result)
+      const reviewWithoutWorker = yield* registry.select({
+        providerId: OPENAI_PROVIDER_ID,
+        model: OPENAI_MODEL,
+        access: "read-only",
+        capability: "pr-review"
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(unavailable))
       assert.isTrue(Result.isFailure(wrongModel))
       assert.isTrue(Result.isFailure(unsafeProfile))
+      assert.isTrue(Result.isFailure(reviewWithoutWorker))
 
       const selected = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: OPENAI_MODEL,
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       const codexSelected = yield* registry.select({
         providerId: AgentProviderId.make("codex"),
         model: "configured-default",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       const legacy = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: null,
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       assert.strictEqual(selected.model, OPENAI_MODEL)
       assert.strictEqual(legacy.model, OPENAI_MODEL)
@@ -255,7 +268,8 @@ describe("agent provider registry", () => {
         const selected = yield* registry.select({
           providerId: OPENAI_PROVIDER_ID,
           model: OPENAI_MODEL,
-          access: "read-only"
+          access: "read-only",
+          capability: "release-chat"
         })
         return yield* selected.runtime.run(runRequest(selected.model)).pipe(
           Stream.runCollect,
