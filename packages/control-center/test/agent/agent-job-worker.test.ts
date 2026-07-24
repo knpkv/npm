@@ -9,7 +9,7 @@ import {
   type AgentRuntimeService,
   makeAgentRuntime
 } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Fiber, Layer, Option, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { AgentModelId } from "../../src/api/agent.js"
@@ -32,10 +32,10 @@ import {
   PrReviewSandboxEvidence,
   PrReviewSandboxRunner
 } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
+import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
-  AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
   type AgentThreadEvent,
@@ -284,6 +284,12 @@ const withReviewWorker = <Success, Failure>(
     }).pipe(
       Layer.provide(registry),
       Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
+      Layer.provide(Layer.succeed(
+        PrReviewSourceWorkspace,
+        PrReviewSourceWorkspace.of({
+          withSource: (_request, useSource) => useSource("/unused-test-source")
+        })
+      )),
       Layer.provideMerge(jobs)
     )
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
@@ -337,6 +343,97 @@ describe("agent job worker", () => {
         assert.isFalse(events.events.some(({ eventKind }) => eventKind === "assistant-output"))
       })
     )
+  })
+
+  it.effect("interrupts a running review after durable cancellation and cleans through scope release", () => {
+    let interrupted = false
+    return Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const executor: AgentJobTaskExecutorService = {
+        taskTags: ["pr-review"],
+        execute: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() =>
+              Effect.sync(() => {
+                interrupted = true
+              })
+            )
+          )
+      }
+      return yield* withTaskExecutor(
+        executor,
+        Effect.gen(function*() {
+          const jobs = yield* AgentJobRepository
+          yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+          yield* setupFoundation
+          yield* enqueueReview
+          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+          yield* jobs.requestCancellation({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            requestedAt: STARTED_AT
+          })
+          yield* TestClock.adjust("10 seconds")
+          const result = yield* Fiber.join(fiber)
+          const events = yield* replay
+
+          assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "cancelled" })
+          assert.isTrue(interrupted)
+          assert.deepStrictEqual(
+            events.events.map(({ eventKind }) => eventKind),
+            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+          )
+        })
+      )
+    })
+  })
+
+  it.effect("renews a long review lease so another worker cannot duplicate the claim", () => {
+    let executionCount = 0
+    return Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const executor: AgentJobTaskExecutorService = {
+        taskTags: ["pr-review"],
+        execute: () => {
+          executionCount += 1
+          return Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.sleep("6 minutes")),
+            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+          )
+        }
+      }
+      return yield* withTaskExecutor(
+        executor,
+        Effect.gen(function*() {
+          const jobs = yield* AgentJobRepository
+          yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+          yield* setupFoundation
+          yield* enqueueReview
+          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+          yield* TestClock.adjust("330 seconds")
+          const secondClaimAt = yield* DateTime.now
+          const secondClaim = yield* jobs.claimNext({
+            workspaceId: WORKSPACE_ID,
+            taskTags: ["pr-review"],
+            leaseOwner: AgentLeaseOwner.make("second-review-worker"),
+            leaseToken: Schema.decodeSync(AgentLeaseToken)("d".repeat(64)),
+            claimedAt: secondClaimAt,
+            leaseExpiresAt: DateTime.addDuration(secondClaimAt, "5 minutes")
+          })
+          assert.isTrue(Option.isNone(secondClaim))
+          yield* TestClock.adjust("30 seconds")
+          const result = yield* Fiber.join(fiber)
+          const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
+
+          assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
+          assert.strictEqual(executionCount, 1)
+          assert.deepStrictEqual(persisted.report, reviewReport)
+        })
+      )
+    })
   })
 
   it.effect("terminally rejects malformed review output without persisting its raw canary", () => {
@@ -684,47 +781,6 @@ describe("agent job worker", () => {
         assert.strictEqual(rows[0]?.state, "succeeded")
         assert.strictEqual(rows[0]?.leaseCount, 0)
         assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
-      })
-    )
-  })
-
-  it.effect("does not terminalize an attempt after its lease expires", () => {
-    const runtime = makeAgentRuntime({
-      run: () => Stream.fromEffect(Effect.sleep("6 minutes").pipe(Effect.as(completedEvents[0]!)))
-    })
-    return withWorker(
-      runtime,
-      Effect.gen(function*() {
-        const database = yield* Database
-        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
-        yield* setupFoundation
-        yield* enqueue()
-
-        const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.result, Effect.forkChild)
-        yield* TestClock.adjust("6 minutes")
-        const observed = yield* Fiber.join(fiber)
-        const rows = yield* database.sql<{
-          readonly leaseCount: number
-          readonly outcome: null | string
-          readonly state: string
-        }>`SELECT job.state, attempt.outcome,
-        (SELECT COUNT(*) FROM agent_job_leases lease
-          WHERE lease.workspace_id = job.workspace_id AND lease.job_id = job.job_id) AS leaseCount
-        FROM agent_jobs job
-        JOIN agent_job_attempts attempt
-          ON attempt.workspace_id = job.workspace_id AND attempt.job_id = job.job_id
-        WHERE job.workspace_id = ${WORKSPACE_ID} AND job.job_id = ${JOB_ID}`
-
-        assert.isTrue(Result.isFailure(observed))
-        if (Result.isFailure(observed)) {
-          assert.isTrue(Schema.is(AgentJobInputError)(observed.failure))
-          if (Schema.is(AgentJobInputError)(observed.failure)) {
-            assert.strictEqual(observed.failure.reason, "lease-expired")
-          }
-        }
-        assert.strictEqual(rows[0]?.state, "running")
-        assert.isNull(rows[0]?.outcome)
-        assert.strictEqual(rows[0]?.leaseCount, 1)
       })
     )
   })
