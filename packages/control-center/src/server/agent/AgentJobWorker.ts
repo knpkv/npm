@@ -28,7 +28,11 @@ import {
 } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
 import type { AgentRuntimeRegistry } from "./AgentRuntimeRegistry.js"
-import { AgentJobTaskExecutor, reviewEnabledTaskExecutorLayer } from "./internal/AgentJobTaskExecutor.js"
+import {
+  AgentJobTaskExecutor,
+  releaseChatTaskExecutorLayer,
+  reviewEnabledTaskExecutorLayer
+} from "./internal/AgentJobTaskExecutor.js"
 import type { PrReviewSandboxRunner } from "./internal/PrReviewSandboxRunner.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
 
@@ -304,8 +308,16 @@ export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWork
   "@knpkv/control-center/server/agent/AgentJobWorker"
 ) {}
 
-/** Captures worker policy while acquiring persistence, crypto, runtime selection, and immutable review execution. */
+/** Default release-chat worker composition; it remains independent of sandbox configuration. */
 export const agentJobWorkerLayer = (
+  options: AgentJobWorkerOptions
+): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
+  agentJobWorkerWithTaskExecutorLayer(options).pipe(
+    Layer.provide(releaseChatTaskExecutorLayer)
+  )
+
+/** Opt-in worker composition that also executes immutable pull-request reviews. */
+export const agentJobWorkerWithPrReviewLayer = (
   options: AgentJobWorkerOptions
 ): Layer.Layer<
   AgentJobWorker,

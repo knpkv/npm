@@ -4,7 +4,8 @@ export {
   agentJobWorkerLayer,
   type AgentJobWorkerOptions,
   type AgentJobWorkerRunResult,
-  type AgentJobWorkerService
+  type AgentJobWorkerService,
+  agentJobWorkerWithPrReviewLayer
 } from "./AgentJobWorker.js"
 export {
   type AgentProviderRegistryOptions,

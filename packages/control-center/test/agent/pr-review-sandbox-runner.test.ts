@@ -22,6 +22,7 @@ import {
 const JOB_ID = Schema.decodeSync(JobId)("01890f6f-6d6a-7cc0-98d2-000000000001")
 const ATTEMPT_ID = "0123456789ab"
 const SECOND_ATTEMPT_ID = "fedcba987654"
+const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const IMAGE = `registry.example.invalid/control-center/pr-review@sha256:${"a".repeat(64)}`
 const ANALYZER_COMMAND: readonly [string, string, string] = [
@@ -150,7 +151,10 @@ const reviewTreeResponses = (): Array<FakeResponse> => [
   { stdout: `100644 blob ${HEAD_REVISION}\tsrc/example.ts\u0000` },
   {},
   {},
-  {}
+  {},
+  {
+    stdout: "diff --git a/src/example.ts b/src/example.ts\n+++ b/src/example.ts\n@@ -11,0 +12,3 @@\n"
+  }
 ]
 
 const sourceGitArguments = (
@@ -252,6 +256,7 @@ const run = Effect.gen(function*() {
   return yield* runner.run({
     attemptId: ATTEMPT_ID,
     jobId: JOB_ID,
+    baseRevision: BASE_REVISION,
     headRevision: HEAD_REVISION
   })
 })
@@ -280,7 +285,7 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, successResponses(checkout), run).pipe(
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
-          assert.strictEqual(calls.length, 12)
+          assert.strictEqual(calls.length, 13)
           const archiveGitDirectory = calls[5]?.args[4]
           const archive = calls[7]?.args[2]
           const reviewTree = calls[7]?.args[4]
@@ -343,6 +348,20 @@ describe("PrReviewSandboxRunner", () => {
               "--no-same-owner",
               "--same-permissions"
             ]],
+            [
+              "git",
+              sourceGitArguments(checkout, [
+                "diff",
+                "--unified=0",
+                "--no-color",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--no-renames",
+                BASE_REVISION,
+                HEAD_REVISION,
+                "--"
+              ])
+            ],
             ["docker", [
               "container",
               "inspect",
@@ -395,10 +414,10 @@ describe("PrReviewSandboxRunner", () => {
             ["docker", ["container", "rm", "--force", "--volumes", CONTAINER_NAME]]
           ])
           assert.notStrictEqual(reviewTree, checkout)
-          assert.notInclude(calls[9]?.args.join(" "), checkout)
-          assert.notInclude(calls[9]?.args.join(" "), ".git")
+          assert.notInclude(calls[10]?.args.join(" "), checkout)
+          assert.notInclude(calls[10]?.args.join(" "), ".git")
           assert.strictEqual(
-            calls[9]?.args.filter((argument) => argument === "--head-revision").length,
+            calls[10]?.args.filter((argument) => argument === "--head-revision").length,
             1
           )
           for (const child of calls) {
@@ -461,6 +480,7 @@ describe("PrReviewSandboxRunner", () => {
         return yield* runner.run({
           attemptId: SECOND_ATTEMPT_ID,
           jobId: JOB_ID,
+          baseRevision: BASE_REVISION,
           headRevision: HEAD_REVISION
         })
       })
@@ -473,10 +493,10 @@ describe("PrReviewSandboxRunner", () => {
         Effect.map((result) => {
           assert.deepStrictEqual(result, evidence)
           assert.notStrictEqual(secondContainer, CONTAINER_NAME)
-          assert.strictEqual(calls[8]?.args.at(-1), secondContainer)
-          assert.strictEqual(calls[9]?.args[3], secondContainer)
-          assert.strictEqual(calls[10]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[9]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[10]?.args[3], secondContainer)
           assert.strictEqual(calls[11]?.args.at(-1), secondContainer)
+          assert.strictEqual(calls[12]?.args.at(-1), secondContainer)
         })
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
@@ -580,7 +600,16 @@ describe("PrReviewSandboxRunner", () => {
           "ignored worktree artifact\n"
         )
 
-        const expectedEvidence = { ...evidence, headRevision: originalRevision }
+        const expectedEvidence = Schema.decodeSync(PrReviewSandboxEvidence)({
+          ...evidence,
+          headRevision: originalRevision,
+          findings: evidence.findings.map((finding) => ({
+            ...finding,
+            path: "source.txt",
+            startLine: 2,
+            endLine: 2
+          }))
+        })
         const dockerCalls: Array<ChildProcess.StandardCommand> = []
         const verifyReviewTree = (
           child: ChildProcess.StandardCommand
@@ -624,6 +653,7 @@ describe("PrReviewSandboxRunner", () => {
           return yield* runner.run({
             attemptId: ATTEMPT_ID,
             jobId: JOB_ID,
+            baseRevision: replacementRevision,
             headRevision: originalRevision
           })
         }).pipe(
@@ -734,6 +764,7 @@ describe("PrReviewSandboxRunner", () => {
           return yield* runner.run({
             attemptId: ATTEMPT_ID,
             jobId: JOB_ID,
+            baseRevision: revision,
             headRevision: revision
           })
         }).pipe(
@@ -786,6 +817,7 @@ describe("PrReviewSandboxRunner", () => {
             return yield* runner.run({
               attemptId: ATTEMPT_ID,
               jobId: "../outside",
+              baseRevision: BASE_REVISION,
               headRevision: HEAD_REVISION
             })
           })
@@ -834,6 +866,41 @@ describe("PrReviewSandboxRunner", () => {
         }
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
+  it.effect("retains only analyzer findings that intersect base-to-head changed lines", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const mixed = Schema.decodeSync(PrReviewSandboxEvidence)({
+        ...evidence,
+        findings: [
+          {
+            ruleId: "example/no-example",
+            severity: "warning",
+            path: "src/example.ts",
+            startLine: 12,
+            endLine: 14,
+            message: "The analyzer found a deterministic problem."
+          },
+          {
+            ruleId: "example/unchanged",
+            severity: "warning",
+            path: "src/unchanged.ts",
+            startLine: 12,
+            endLine: 14,
+            message: "This finding is outside the pull-request diff."
+          }
+        ]
+      })
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(checkout, JSON.stringify(mixed)),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.deepStrictEqual(filtered.findings, evidence.findings)
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
   it.effect("accepts scoped rule identifiers without accepting traversal tokens", () =>
     withWorkspace((workspaceRoot, checkout) =>
@@ -1054,14 +1121,14 @@ describe("PrReviewSandboxRunner", () => {
           {}
         ], run)
         assert.deepStrictEqual(staleResult, evidence)
-        assert.deepStrictEqual(staleCalls[9]?.args, [
+        assert.deepStrictEqual(staleCalls[10]?.args, [
           "container",
           "rm",
           "--force",
           "--volumes",
           CONTAINER_NAME
         ])
-        assert.deepStrictEqual(staleCalls[10]?.args.slice(0, 2), ["container", "create"])
+        assert.deepStrictEqual(staleCalls[11]?.args.slice(0, 2), ["container", "create"])
 
         const daemonCalls: Array<ChildProcess.StandardCommand> = []
         const daemonResult = yield* provideRunner(workspaceRoot, daemonCalls, [
@@ -1073,7 +1140,7 @@ describe("PrReviewSandboxRunner", () => {
         assertRedactedError(daemonResult, "sandbox-unavailable")
         assert.deepStrictEqual(
           daemonCalls.map(({ command }) => command),
-          ["git", "git", "git", "git", "git", "git", "git", "tar", "docker"]
+          ["git", "git", "git", "git", "git", "git", "git", "tar", "git", "docker"]
         )
       })
     ).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))

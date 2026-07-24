@@ -44,6 +44,7 @@ const LEASE_EXPIRES_AT = Schema.decodeSync(UtcTimestamp)("2026-07-24T10:05:00.00
 const TestSandboxRequest = Schema.Struct({
   attemptId: Schema.String,
   jobId: JobId,
+  baseRevision: Schema.String,
   headRevision: Schema.String
 })
 
@@ -122,13 +123,18 @@ const modelReport = Schema.decodeUnknownSync(PrReviewReport)({
 })
 
 const makeRegistry = (
-  run: (request: AgentRunRequest) => Stream.Stream<AgentRuntimeEvent, AgentProviderError>
+  run: (request: AgentRunRequest) => Stream.Stream<AgentRuntimeEvent, AgentProviderError>,
+  filesystemAccess: "none" | "configured-workspace" = "none"
 ) =>
   agentRuntimeRegistryLayer({
     catalog: () => Effect.succeed({ providers: [] }),
     select: ({ access, model, providerId }) =>
       access === "read-only" && model === MODEL_ID && providerId === PROVIDER_ID
-        ? Effect.succeed({ model: MODEL_ID, runtime: makeAgentRuntime({ run }) })
+        ? Effect.succeed({
+          model: MODEL_ID,
+          runtime: makeAgentRuntime({ run }),
+          filesystemAccess
+        })
         : Effect.fail(
           new AgentProviderError({
             providerId,
@@ -142,12 +148,13 @@ const makeRegistry = (
 const runExecutor = <Success, Failure>(
   sandbox: PrReviewSandboxRunner["Service"],
   run: Parameters<typeof makeRegistry>[0],
-  use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>
+  use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>,
+  filesystemAccess: "none" | "configured-workspace" = "none"
 ) =>
   use.pipe(
     Effect.provide(
       prReviewTaskExecutorLayer.pipe(
-        Layer.provide(makeRegistry(run)),
+        Layer.provide(makeRegistry(run, filesystemAccess)),
         Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox))
       )
     ),
@@ -202,8 +209,18 @@ describe("PR review task executor", () => {
         assert.deepStrictEqual(
           sandboxRequests,
           [
-            { attemptId: sandboxAttemptId, jobId: JOB_ID, headRevision: HEAD_REVISION },
-            { attemptId: sandboxAttemptId, jobId: JOB_ID, headRevision: HEAD_REVISION }
+            {
+              attemptId: sandboxAttemptId,
+              jobId: JOB_ID,
+              baseRevision: subject.baseRevision,
+              headRevision: HEAD_REVISION
+            },
+            {
+              attemptId: sandboxAttemptId,
+              jobId: JOB_ID,
+              baseRevision: subject.baseRevision,
+              headRevision: HEAD_REVISION
+            }
           ]
         )
         assert.match(sandboxAttemptId ?? "", /^[0-9a-f]{12}$/u)
@@ -325,6 +342,38 @@ describe("PR review task executor", () => {
         assert.strictEqual(sandboxCalls, 0)
         assert.strictEqual(modelCalls, 0)
       })
+    )
+  })
+
+  it.effect("rejects a filesystem-capable provider before sandbox or model execution", () => {
+    let sandboxCalls = 0
+    let modelCalls = 0
+    const sandbox = PrReviewSandboxRunner.of({
+      run: () => {
+        sandboxCalls += 1
+        return Effect.succeed(evidence)
+      }
+    })
+    return runExecutor(
+      sandbox,
+      () => {
+        modelCalls += 1
+        return Stream.empty
+      },
+      Effect.gen(function*() {
+        const result = yield* (yield* PrReviewTaskExecutor).execute(claim).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure.phase, "configuration")
+          assert.strictEqual(
+            result.failure.message,
+            "PR review requires a prompt-only provider without filesystem access."
+          )
+        }
+        assert.strictEqual(sandboxCalls, 0)
+        assert.strictEqual(modelCalls, 0)
+      }),
+      "configured-workspace"
     )
   })
 })

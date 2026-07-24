@@ -23,7 +23,9 @@ const MAXIMUM_STDERR_BYTES = 8_192
 const MAXIMUM_CONTROL_STDOUT_BYTES = 4_096
 const MAXIMUM_GIT_STDOUT_BYTES = 128
 const MAXIMUM_GIT_TREE_STDOUT_BYTES = 16 * 1_024 * 1_024
+const MAXIMUM_GIT_DIFF_STDOUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_REVIEW_TREE_ARCHIVE_BYTES = 64 * 1_024 * 1_024
+const MAXIMUM_CHANGED_LINE_RANGES = 100_000
 const DEFAULT_MAXIMUM_DURATION_MILLIS = 120_000
 const MAXIMUM_DURATION_MILLIS = 300_000
 const CONTROL_COMMAND_TIMEOUT_MILLIS = 30_000
@@ -160,6 +162,7 @@ export type PrReviewSandboxEvidence = typeof PrReviewSandboxEvidence.Type
 const SandboxRequest = Schema.Struct({
   attemptId: SandboxAttemptId,
   jobId: JobId,
+  baseRevision: GitHeadRevision,
   headRevision: GitHeadRevision
 })
 
@@ -189,6 +192,7 @@ export interface PrReviewSandboxRunnerOptions {
 export interface PrReviewSandboxRequest {
   readonly attemptId: string
   readonly jobId: JobId
+  readonly baseRevision: string
   readonly headRevision: string
 }
 
@@ -338,6 +342,66 @@ const exactGitHead = (text: string): string | undefined => {
   if (text.endsWith("\n") && !text.endsWith("\n\n")) return text.slice(0, -1)
   return text.includes("\n") || text.includes("\r") ? undefined : text
 }
+
+interface ChangedLineRange {
+  readonly endLine: number
+  readonly path: PrReviewPath
+  readonly startLine: number
+}
+
+const decodeChangedLineRanges = Effect.fn("PrReviewSandboxRunner.decodeChangedLineRanges")(function*(
+  bytes: Uint8Array
+) {
+  const patch = yield* decodeUtf8(bytes, "source-rejected")
+  const ranges = new Array<ChangedLineRange>()
+  let path: PrReviewPath | undefined
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const candidate = line.startsWith("+++ b/") ? line.slice(6) : undefined
+      path = candidate !== undefined && Schema.is(PrReviewPath)(candidate)
+        ? candidate
+        : undefined
+      continue
+    }
+    if (path === undefined || !line.startsWith("@@ ")) continue
+    const matched = /^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@/u.exec(line)
+    if (matched === null) continue
+    const startLine = Number(matched[1])
+    const lineCount = matched[2] === undefined ? 1 : Number(matched[2])
+    if (
+      !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(lineCount) ||
+      startLine < 1 ||
+      lineCount < 0
+    ) {
+      return yield* sandboxError("source-rejected")
+    }
+    if (lineCount === 0) continue
+    const endLine = startLine + lineCount - 1
+    if (!Number.isSafeInteger(endLine)) {
+      return yield* sandboxError("source-rejected")
+    }
+    ranges.push({ path, startLine, endLine })
+    if (ranges.length > MAXIMUM_CHANGED_LINE_RANGES) {
+      return yield* sandboxError("source-rejected")
+    }
+  }
+  return ranges
+})
+
+const retainChangedLineEvidence = (
+  evidence: PrReviewSandboxEvidence,
+  ranges: ReadonlyArray<ChangedLineRange>
+): PrReviewSandboxEvidence => ({
+  ...evidence,
+  findings: evidence.findings.filter((finding) =>
+    ranges.some((range) =>
+      range.path === finding.path &&
+      range.startLine <= finding.endLine &&
+      finding.startLine <= range.endLine
+    )
+  )
+})
 
 const hasOnlyRegularFiles = (bytes: Uint8Array): boolean => {
   const regularFile = new TextEncoder().encode("100644 blob ")
@@ -846,7 +910,33 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           canonicalSource,
           request.headRevision
         )
-        return yield* runContainedAnalysis(
+        const changedLines = yield* executeControl(
+          spawner,
+          GIT_EXECUTABLE,
+          sourceGitArguments(canonicalSource, [
+            "diff",
+            "--unified=0",
+            "--no-color",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            request.baseRevision,
+            request.headRevision,
+            "--"
+          ]),
+          MAXIMUM_GIT_DIFF_STDOUT_BYTES
+        ).pipe(
+          Effect.mapError((error) =>
+            error.reason === "output-rejected"
+              ? sandboxError("source-rejected")
+              : error
+          )
+        )
+        if (changedLines.exitCode !== ChildProcessSpawner.ExitCode(0)) {
+          return yield* sandboxError("source-unavailable")
+        }
+        const changedLineRanges = yield* decodeChangedLineRanges(changedLines.stdout)
+        const evidence = yield* runContainedAnalysis(
           spawner,
           request,
           reviewTree,
@@ -855,6 +945,7 @@ const makeRunner = Effect.fn("PrReviewSandboxRunner.make")(function*(
           analyzerArguments,
           maximumDurationMillis
         )
+        return retainChangedLineEvidence(evidence, changedLineRanges)
       })
     )
   })

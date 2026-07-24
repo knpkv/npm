@@ -19,6 +19,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   AgentJobWorker,
   agentJobWorkerLayer,
+  agentJobWorkerWithPrReviewLayer,
   agentJobWorkerWithTaskExecutorLayer
 } from "../../src/server/agent/AgentJobWorker.js"
 import { agentRuntimeRegistryLayer } from "../../src/server/agent/AgentRuntimeRegistry.js"
@@ -28,7 +29,6 @@ import {
   type AgentJobTaskExecutorService
 } from "../../src/server/agent/internal/AgentJobTaskExecutor.js"
 import {
-  PrReviewSandboxError,
   PrReviewSandboxEvidence,
   PrReviewSandboxRunner
 } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
@@ -114,10 +114,6 @@ const reviewEvidence = Schema.decodeUnknownSync(PrReviewSandboxEvidence)({
     }
   ]
 })
-const unavailableSandbox = PrReviewSandboxRunner.of({
-  run: () => Effect.fail(new PrReviewSandboxError({ reason: "sandbox-unavailable" }))
-})
-
 const OUTPUT_CHUNK_BYTES = 32_000
 const MAXIMUM_RUNTIME_OUTPUT_CHARACTERS = 32_768
 const outputEvents = (count: number): ReadonlyArray<AgentRuntimeEvent> => [
@@ -218,7 +214,6 @@ const withDatabaseConfig = <Success, Failure>(
     readonly maxConnections: number
   },
   runtime: AgentRuntimeService,
-  sandbox: PrReviewSandboxRunner["Service"],
   use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
 ) => {
   const database = databaseLayer(config)
@@ -243,22 +238,55 @@ const withDatabaseConfig = <Success, Failure>(
   const worker = agentJobWorkerLayer({
     leaseOwner: LEASE_OWNER,
     leaseDuration: "5 minutes"
-  }).pipe(
-    Layer.provide(registry),
-    Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
-    Layer.provideMerge(jobs)
-  )
+  }).pipe(Layer.provide(registry), Layer.provideMerge(jobs))
   return use.pipe(Effect.provide(worker), Effect.scoped)
 }
 
 const withWorker = <Success, Failure>(
   runtime: AgentRuntimeService,
-  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>,
-  sandbox: PrReviewSandboxRunner["Service"] = unavailableSandbox
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-agent-worker-")
-    return yield* withDatabaseConfig(config, runtime, sandbox, use)
+    return yield* withDatabaseConfig(config, runtime, use)
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+
+const withReviewWorker = <Success, Failure>(
+  runtime: AgentRuntimeService,
+  sandbox: PrReviewSandboxRunner["Service"],
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
+) =>
+  Effect.gen(function*() {
+    const config = yield* makePersistenceTestConfig("control-center-agent-review-worker-")
+    const database = databaseLayer(config)
+    const jobs = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+    const registry = agentRuntimeRegistryLayer({
+      catalog: () => Effect.succeed({ providers: [] }),
+      select: ({ model, providerId }) =>
+        providerId === PROVIDER_ID
+          ? Effect.succeed({
+            model: AgentModelId.make(model ?? "deterministic-model"),
+            runtime,
+            filesystemAccess: "none"
+          })
+          : Effect.fail(
+            new AgentProviderError({
+              providerId,
+              phase: "configuration",
+              message: "No deterministic provider configured.",
+              retryable: false
+            })
+          )
+    })
+    const worker = agentJobWorkerWithPrReviewLayer({
+      leaseOwner: LEASE_OWNER,
+      leaseDuration: "5 minutes"
+    }).pipe(
+      Layer.provide(registry),
+      Layer.provide(Layer.succeed(PrReviewSandboxRunner, sandbox)),
+      Layer.provideMerge(jobs)
+    )
+    return yield* use.pipe(Effect.provide(worker), Effect.scoped)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 const withTaskExecutor = <Success, Failure>(
@@ -386,8 +414,9 @@ describe("agent job worker", () => {
           return reviewEvidence
         })
     })
-    return withWorker(
+    return withReviewWorker(
       runtime,
+      sandbox,
       Effect.gen(function*() {
         const jobs = yield* AgentJobRepository
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
@@ -405,8 +434,7 @@ describe("agent job worker", () => {
         assert.strictEqual(persisted.report.subject.headRevision, reviewSubject.headRevision)
         assert.match(persisted.report.findings[0]?.findingId ?? "", /^sha256:[0-9a-f]{64}$/u)
         assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
-      }),
-      sandbox
+      })
     )
   })
 
@@ -785,7 +813,6 @@ describe("agent job worker", () => {
       yield* withDatabaseConfig(
         config,
         runtime,
-        unavailableSandbox,
         Effect.gen(function*() {
           yield* setupFoundation
           yield* enqueue()
@@ -797,7 +824,6 @@ describe("agent job worker", () => {
       yield* withDatabaseConfig(
         config,
         runtime,
-        unavailableSandbox,
         Effect.gen(function*() {
           const page = yield* replay
           assert.deepStrictEqual(

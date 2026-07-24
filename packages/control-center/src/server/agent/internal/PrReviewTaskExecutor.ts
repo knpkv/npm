@@ -218,6 +218,7 @@ const stableFindingId = Effect.fn("PrReviewTaskExecutor.stableFindingId")(functi
   evidence: PrReviewSandboxEvidence["findings"][number]
 ) {
   const material = JSON.stringify([
+    subject.baseRevision,
     subject.headRevision,
     evidence.path,
     evidence.startLine,
@@ -324,9 +325,23 @@ const makeExecutor = Effect.gen(function*() {
           false
         )
       }
+      const selected = yield* runtimes.select({
+        providerId: claim.providerId,
+        model: claim.model,
+        access: "read-only"
+      })
+      if (selected.filesystemAccess !== "none") {
+        return yield* providerFailure(
+          claim.providerId,
+          "configuration",
+          "PR review requires a prompt-only provider without filesystem access.",
+          false
+        )
+      }
       const evidence = yield* sandbox.run({
         attemptId: yield* attemptId(cryptoService, claim),
         jobId: claim.jobId,
+        baseRevision: claim.context.task.subject.baseRevision,
         headRevision: claim.context.task.subject.headRevision
       }).pipe(Effect.mapError((failure) => sandboxFailure(claim.providerId, failure)))
       const prompt = renderPrompt(claim.context.task.subject, evidence)
@@ -339,11 +354,6 @@ const makeExecutor = Effect.gen(function*() {
           false
         )
       }
-      const selected = yield* runtimes.select({
-        providerId: claim.providerId,
-        model: claim.model,
-        access: "read-only"
-      })
       const request: AgentRunRequest = {
         runId: AgentRunId.make(claim.jobId),
         providerId: claim.providerId,
