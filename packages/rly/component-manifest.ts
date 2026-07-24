@@ -174,8 +174,8 @@ export const componentManifest = {
         { defaultValue: "split", name: "mode", values: ["split", "stacked"] }
       ],
       visual: {
-        story: "stories/diff/DiffCodeView.stories.tsx",
-        storyId: "diff-diffcodeview--workbench",
+        story: "stories/diff/BoundedDiffCodeView.stories.tsx",
+        storyId: "diff-boundeddiffcodeview--split",
         tests: ["test/diff/BoundedDiffCodeView.test.tsx"]
       }
     },

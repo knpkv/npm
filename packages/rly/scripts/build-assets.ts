@@ -43,12 +43,25 @@ const program = Effect.gen(function*() {
   const sourceDirectory = path.dirname(path.join(packageRoot, styles.source))
   const outputDirectory = path.dirname(path.join(packageRoot, styles.output))
   const fontOutput = path.join(outputDirectory, "fonts")
+  const componentStylesPath = path.join(outputDirectory, "components.css")
+  const boundedStylesPath = path.join(outputDirectory, "diff", "bounded", "index.css")
   const hasComponentStyles = componentStyleSources(componentManifest).length > 0
   yield* fs.makeDirectory(outputDirectory, { recursive: true })
   yield* fs.makeDirectory(fontOutput, { recursive: true })
 
-  if (hasComponentStyles && !(yield* fs.exists(path.join(outputDirectory, "components.css")))) {
+  if (hasComponentStyles && !(yield* fs.exists(componentStylesPath))) {
     return yield* Effect.fail(new BuildAssetError({ reason: "Vite did not emit manifest-owned component CSS" }))
+  }
+  if (yield* fs.exists(boundedStylesPath)) {
+    const [componentStyles, boundedStyles] = yield* Effect.all([
+      fs.readFileString(componentStylesPath),
+      fs.readFileString(boundedStylesPath)
+    ])
+    yield* fs.writeFileString(
+      componentStylesPath,
+      `${componentStyles.trimEnd()}\n${boundedStyles.trim()}\n`
+    )
+    yield* fs.remove(boundedStylesPath)
   }
 
   for (const file of ["styles.css", "generated-tokens.css", "base.css", "fonts.css"]) {

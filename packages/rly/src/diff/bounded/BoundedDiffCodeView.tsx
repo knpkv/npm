@@ -53,7 +53,7 @@ export interface BoundedDiffCodeViewProps {
   readonly wrap?: boolean
 }
 
-const contentAt = (lines: ReadonlyArray<string>, index: number): string => lines[index]?.replace(/\n$/, "") ?? ""
+const contentAt = (lines: ReadonlyArray<string>, index: number): string => lines[index]?.replace(/\r?\n$/, "") ?? ""
 
 const hunkLabel = (hunk: Hunk): string =>
   hunk.hunkSpecs?.trim() ??

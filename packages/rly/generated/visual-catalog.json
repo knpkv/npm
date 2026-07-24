@@ -107,7 +107,7 @@
       "name": "BoundedDiffCodeView",
       "paths": {
         "source": "packages/rly/src/diff/bounded/BoundedDiffCodeView.tsx",
-        "story": "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+        "story": "packages/rly/stories/diff/BoundedDiffCodeView.stories.tsx",
         "styles": [
           "packages/rly/src/diff/bounded/BoundedDiffCodeView.module.css"
         ],
@@ -115,9 +115,9 @@
           "packages/rly/test/diff/BoundedDiffCodeView.test.tsx"
         ]
       },
-      "storyId": "diff-diffcodeview--workbench",
+      "storyId": "diff-boundeddiffcodeview--split",
       "storyIds": [
-        "diff-diffcodeview--workbench"
+        "diff-boundeddiffcodeview--split"
       ]
     },
     {

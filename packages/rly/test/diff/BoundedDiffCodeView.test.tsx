@@ -44,4 +44,17 @@ describe("BoundedDiffCodeView", () => {
       "No textual changes in this file."
     )
   })
+
+  it("strips CRLF terminators from rendered code lines", () => {
+    const crlf = {
+      after: { contents: "a\r\nB\r\n", name: "src/crlf.ts" },
+      before: { contents: "a\r\nb\r\n", name: "src/crlf.ts" },
+      id: "crlf"
+    } satisfies RlyDiffCodeItem
+    const html = renderToStaticMarkup(<BoundedDiffCodeView initialItems={[crlf]} />)
+
+    expect(html).toContain(">a<")
+    expect(html).toContain(">B<")
+    expect(html).not.toContain("\r")
+  })
 })
