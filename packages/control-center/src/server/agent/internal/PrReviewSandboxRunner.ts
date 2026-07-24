@@ -407,7 +407,9 @@ const gitQuotedEscapes: Readonly<Record<string, string>> = {
 const decodeGitHeaderPath = (header: string): string | undefined => {
   const encoded = header.slice(4)
   if (!encoded.startsWith("\"")) {
-    return encoded.startsWith("b/") ? encoded.slice(2) : undefined
+    const separator = encoded.indexOf("\t")
+    const path = separator === -1 ? encoded : encoded.slice(0, separator)
+    return path.startsWith("b/") ? path.slice(2) : undefined
   }
   if (!encoded.endsWith("\"")) return undefined
   let decoded = ""
