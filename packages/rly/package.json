@@ -21,6 +21,10 @@
       "types": "./dist/dts/diff/index.d.ts",
       "import": "./dist/diff/index.js"
     },
+    "./diff/bounded": {
+      "types": "./dist/dts/diff/bounded/index.d.ts",
+      "import": "./dist/diff/bounded/index.js"
+    },
     "./diff/workbench": {
       "types": "./dist/dts/diff/workbench/index.d.ts",
       "import": "./dist/diff/workbench/index.js"
@@ -60,12 +64,12 @@
     "**/*.css"
   ],
   "scripts": {
-    "build": "pnpm codegen:check && pnpm validate:registry && rimraf dist && vite build && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
+    "build": "pnpm codegen:check && pnpm validate:registry && rimraf dist && vite build && vite build --config vite.bounded.config.ts && tsx scripts/build-assets.ts && tsc -b tsconfig.build.json --force && pnpm validate:dist",
     "check": "pnpm codegen:check && pnpm validate:registry && pnpm lint:colors && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
     "codegen": "tsx scripts/generate-contract.ts write",
     "codegen:check": "tsx scripts/generate-contract.ts check",
-    "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
+    "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vite.bounded.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors",
     "lint:colors": "tsx scripts/tokens/lint-colors.ts",
     "prepack": "pnpm build",
     "scaffold": "tsx scripts/scaffold-component.ts",

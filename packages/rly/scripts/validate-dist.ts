@@ -121,6 +121,13 @@ const program = Effect.gen(function*() {
   if (hasComponentStyles && (yield* fs.exists(componentStylesPath))) {
     const componentStyles = yield* fs.readFileString(componentStylesPath)
     if (componentStyles.trim().length === 0) failures.push("published component CSS is empty")
+    for (const style of componentStyleSources(componentManifest)) {
+      if (!style.endsWith(".module.css")) continue
+      const marker = `rly_${path.basename(style, ".module.css")}-module__`
+      if (!componentStyles.includes(marker)) {
+        failures.push(`published component CSS is missing ${style}`)
+      }
+    }
   } else if (!hasComponentStyles && (yield* fs.exists(componentStylesPath))) {
     failures.push("component CSS exists without manifest styles")
   }

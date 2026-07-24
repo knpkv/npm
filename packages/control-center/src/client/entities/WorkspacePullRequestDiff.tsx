@@ -7,16 +7,22 @@ import {
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
+import type { RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { type ReactElement, useEffect, useMemo, useState } from "react"
+import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
+
+const BoundedDiffCodeView = lazy(async () => {
+  const module = await import("@knpkv/rly/diff/bounded")
+  return { default: module.BoundedDiffCodeView }
+})
 
 export interface WorkspacePullRequestDiffScope {
   readonly pluginConnectionId: PluginConnectionId
@@ -243,7 +249,7 @@ export const WorkspacePullRequestDiff = ({
         setContentStates((current) =>
           new Map(current).set(selectedEntry.anchor, {
             state: "error",
-            reason: "The content worker failed; select the file to retry."
+            reason: "The file content request failed; select the file to retry."
           })
         )
       }
@@ -269,6 +275,27 @@ export const WorkspacePullRequestDiff = ({
           }
         : { files, state: "ready" }
   const selectedText = selectedFileId === undefined ? undefined : loadedText.get(selectedFileId)
+  const selectedCodeItems = useMemo<ReadonlyArray<RlyDiffCodeItem>>(
+    () =>
+      selectedEntry === undefined || selectedText === undefined
+        ? []
+        : [
+            {
+              id: selectedEntry.anchor,
+              before: {
+                cacheKey: `${scope.revision}:${selectedEntry.anchor}:before`,
+                contents: selectedText.before,
+                name: selectedEntry.previousPath ?? selectedEntry.path
+              },
+              after: {
+                cacheKey: `${scope.revision}:${selectedEntry.anchor}:after`,
+                contents: selectedText.after,
+                name: selectedEntry.path
+              }
+            }
+          ],
+    [scope.revision, selectedEntry, selectedText]
+  )
 
   return (
     <DiffWorkbench
@@ -326,16 +353,14 @@ export const WorkspacePullRequestDiff = ({
         selectedEntry === undefined || selectedText === undefined ? (
           "Select a supported text file to render its change."
         ) : (
-          <div data-control-center-diff-layout={layout} data-control-center-diff-wrap={isWrapped ? "true" : "false"}>
-            <section aria-label={`Before ${selectedEntry.path}`}>
-              <h3>Before</h3>
-              <pre>{selectedText.before}</pre>
-            </section>
-            <section aria-label={`After ${selectedEntry.path}`}>
-              <h3>After</h3>
-              <pre>{selectedText.after}</pre>
-            </section>
-          </div>
+          <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
+            <BoundedDiffCodeView
+              key={selectedEntry.anchor}
+              initialItems={selectedCodeItems}
+              mode={layout}
+              wrap={isWrapped}
+            />
+          </Suspense>
         )
       }
     />

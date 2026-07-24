@@ -7,6 +7,10 @@
     "types": "./dist/dts/diff/index.d.ts",
     "import": "./dist/diff/index.js"
   },
+  "./diff/bounded": {
+    "types": "./dist/dts/diff/bounded/index.d.ts",
+    "import": "./dist/diff/bounded/index.js"
+  },
   "./diff/workbench": {
     "types": "./dist/dts/diff/workbench/index.d.ts",
     "import": "./dist/diff/workbench/index.js"

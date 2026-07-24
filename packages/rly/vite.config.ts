@@ -6,10 +6,12 @@ import { moduleEntrySources } from "./generated/vite-entries.js"
 import { componentStyleSources } from "./scripts/contract.js"
 
 const entries = Object.fromEntries(
-  Object.entries(moduleEntrySources).map(([id, source]) => [
-    id === "root" ? "index" : `${id}/index`,
-    new URL(`./${source}`, import.meta.url).pathname
-  ])
+  Object.entries(moduleEntrySources)
+    .filter(([id]) => id !== "diff/bounded")
+    .map(([id, source]) => [
+      id === "root" ? "index" : `${id}/index`,
+      new URL(`./${source}`, import.meta.url).pathname
+    ])
 )
 
 const componentStyles = (): Plugin => {
