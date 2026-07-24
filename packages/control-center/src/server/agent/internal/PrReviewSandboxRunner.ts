@@ -585,6 +585,12 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
   ) {
     return yield* sandboxError("source-rejected")
   }
+  const canonicalObjectStore = yield* fileSystem.realPath(objectStore).pipe(
+    Effect.mapError(() => sandboxError("source-rejected"))
+  )
+  if (!isContainedPath(path, workspaceRoot, canonicalObjectStore)) {
+    return yield* sandboxError("source-rejected")
+  }
 
   const treeEntries = yield* executeControl(
     spawner,
@@ -645,7 +651,7 @@ const prepareReviewTree = Effect.fn("PrReviewSandboxRunner.prepareReviewTree")(f
     Effect.andThen(
       fileSystem.writeFileString(
         path.join(archiveGitDirectory, "objects", "info", "alternates"),
-        `${objectStore}\n`,
+        `${canonicalObjectStore}\n`,
         { mode: 0o600 }
       )
     ),

@@ -148,9 +148,12 @@ const missingContainer = (): FakeResponse => missingContainerFor(CONTAINER_NAME)
 const ordinaryChangedDiff =
   "diff --git a/src/example.ts b/src/example.ts\n--- a/src/example.ts\n+++ b/src/example.ts\n@@ -11,0 +12,3 @@\n"
 
-const reviewTreeResponses = (changedDiff: string = ordinaryChangedDiff): Array<FakeResponse> => [
+const reviewTreeResponses = (
+  checkout: string,
+  changedDiff: string = ordinaryChangedDiff
+): Array<FakeResponse> => [
   { stdout: "sha1\n" },
-  { stdout: "/trusted/git/objects\n" },
+  { stdout: `${checkout}\n` },
   { stdout: `100644 blob ${HEAD_REVISION}\tsrc/example.ts\u0000` },
   {},
   {},
@@ -181,7 +184,7 @@ const successResponses = (
 ): Array<FakeResponse> => [
   { stdout: `${checkout}\n` },
   { stdout: `${HEAD_REVISION}\n` },
-  ...reviewTreeResponses(changedDiff),
+  ...reviewTreeResponses(checkout, changedDiff),
   missingContainerFor(container),
   { stdout: "container-id\n" },
   { stdout: analysisOutput },
@@ -721,6 +724,67 @@ describe("PrReviewSandboxRunner", () => {
       Effect.provide([NodeFileSystem.layer, NodePath.layer])
     ))
 
+  it.effect("rejects a linked checkout whose Git object store is outside the workspace", () =>
+    withWorkspace((workspaceRoot, checkout, path, fileSystem) =>
+      Effect.gen(function*() {
+        const externalRepository = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-external-repository-"
+        })
+        yield* runGit(["init", "--quiet", externalRepository])
+        yield* fileSystem.writeFileString(
+          path.join(externalRepository, "source.ts"),
+          "export const source = true\n"
+        )
+        yield* runGit(["-C", externalRepository, "add", "source.ts"])
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "-c",
+          "user.name=Control Center",
+          "-c",
+          "user.email=control-center@example.invalid",
+          "commit",
+          "--quiet",
+          "-m",
+          "external object store"
+        ])
+        const revision = (yield* runGit([
+          "-C",
+          externalRepository,
+          "rev-parse",
+          "HEAD"
+        ])).trim()
+        yield* fileSystem.remove(checkout, { recursive: true })
+        yield* runGit([
+          "-C",
+          externalRepository,
+          "worktree",
+          "add",
+          "--quiet",
+          "--detach",
+          checkout,
+          revision
+        ])
+
+        const result = yield* Effect.gen(function*() {
+          const runner = yield* PrReviewSandboxRunner
+          return yield* runner.run({
+            attemptId: ATTEMPT_ID,
+            jobId: JOB_ID,
+            baseRevision: revision,
+            headRevision: revision
+          })
+        }).pipe(
+          Effect.provide(prReviewSandboxRunnerLayer(options(workspaceRoot))),
+          Effect.result
+        )
+        assertRedactedError(result, "source-rejected")
+      })
+    ).pipe(
+      Effect.provide(NodeChildProcessSpawner.layer),
+      Effect.provide([NodeFileSystem.layer, NodePath.layer])
+    ))
+
   it.effect("rejects submodule gitlinks instead of silently omitting their source", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const calls: Array<ChildProcess.StandardCommand> = []
@@ -728,7 +792,7 @@ describe("PrReviewSandboxRunner", () => {
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
         { stdout: "sha1\n" },
-        { stdout: "/trusted/git/objects\n" },
+        { stdout: `${checkout}\n` },
         { stdout: `160000 commit ${HEAD_REVISION}\tvendor/module\u0000` }
       ], run).pipe(
         Effect.result,
@@ -965,7 +1029,7 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, [
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
-        ...reviewTreeResponses(),
+        ...reviewTreeResponses(checkout),
         missingContainer(),
         {},
         { exitCode: 23, stderr: "hostile daemon detail /host/path" },
@@ -991,7 +1055,7 @@ describe("PrReviewSandboxRunner", () => {
       return provideRunner(workspaceRoot, calls, [
         { stdout: `${checkout}\n` },
         { stdout: `${HEAD_REVISION}\n` },
-        ...reviewTreeResponses(),
+        ...reviewTreeResponses(checkout),
         missingContainer(),
         { exitCode: 125, stderr: "daemon failed after allocating a container" },
         { exitCode: 1, stderr: "cleanup daemon unavailable" }
@@ -1018,7 +1082,7 @@ describe("PrReviewSandboxRunner", () => {
         const fiber = yield* Effect.forkChild(provideRunner(workspaceRoot, calls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
           missingContainer(),
           { hanging: true, started: createStarted },
           {}
@@ -1047,7 +1111,7 @@ describe("PrReviewSandboxRunner", () => {
             [
               { stdout: `${checkout}\n` },
               { stdout: `${HEAD_REVISION}\n` },
-              ...reviewTreeResponses(),
+              ...reviewTreeResponses(checkout),
               missingContainer(),
               {},
               { hanging: true, started },
@@ -1079,7 +1143,7 @@ describe("PrReviewSandboxRunner", () => {
         const fiber = yield* Effect.forkChild(provideRunner(workspaceRoot, calls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
           missingContainer(),
           {},
           { hanging: true, started },
@@ -1106,7 +1170,7 @@ describe("PrReviewSandboxRunner", () => {
           provideRunner(workspaceRoot, calls, [
             { stdout: `${checkout}\n` },
             { stdout: `${HEAD_REVISION}\n` },
-            ...reviewTreeResponses(),
+            ...reviewTreeResponses(checkout),
             missingContainer(),
             {},
             { stdout: JSON.stringify(evidence) },
@@ -1127,7 +1191,7 @@ describe("PrReviewSandboxRunner", () => {
         const staleResult = yield* provideRunner(workspaceRoot, staleCalls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
           { stdout: "running\n" },
           {},
           {},
@@ -1148,7 +1212,7 @@ describe("PrReviewSandboxRunner", () => {
         const daemonResult = yield* provideRunner(workspaceRoot, daemonCalls, [
           { stdout: `${checkout}\n` },
           { stdout: `${HEAD_REVISION}\n` },
-          ...reviewTreeResponses(),
+          ...reviewTreeResponses(checkout),
           { exitCode: 1, stderr: "Cannot connect to the container daemon at /host/socket.\n" }
         ], run).pipe(Effect.result)
         assertRedactedError(daemonResult, "sandbox-unavailable")
