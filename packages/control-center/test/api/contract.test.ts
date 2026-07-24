@@ -29,6 +29,7 @@ import {
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
+  EntityId,
   EvidenceId,
   PluginConnectionId,
   RelationshipId,
@@ -422,7 +423,9 @@ describe("ControlCenterApi contract", () => {
         ["providers", "GET", "/api/v1/agent/providers"],
         ["turn", "POST", "/api/v1/agent/releases/:releaseId/turns"],
         ["enqueueJob", "POST", "/api/v1/agent/releases/:releaseId/jobs"],
-        ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"]
+        ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"],
+        ["pullRequestReview", "GET", "/api/v1/agent/pull-requests/:entityId/review"],
+        ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"]
       ]
     )
   })
@@ -533,7 +536,9 @@ describe("ControlCenterApi contract", () => {
       providers: [SessionCookieAuth.key],
       turn: [SessionCookieAuth.key, SessionMutationAuth.key],
       enqueueJob: [SessionCookieAuth.key, SessionMutationAuth.key],
-      replayThread: [SessionCookieAuth.key]
+      replayThread: [SessionCookieAuth.key],
+      pullRequestReview: [SessionCookieAuth.key],
+      enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")
@@ -549,6 +554,7 @@ describe("ControlCenterApi contract", () => {
     const pluginConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000092")
     const mediaId = Schema.decodeSync(OpaqueMediaId)(`media_${"ab".repeat(32)}`)
     const releaseId = Schema.decodeSync(ReleaseId)("01890f6f-6d6a-7cc0-98d2-000000000093")
+    const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d2-000000000098")
     const relationshipId = Schema.decodeSync(RelationshipId)("01890f6f-6d6a-7cc0-98d2-000000000094")
     const proposalId = Schema.decodeSync(RelationshipRepairProposalId)("01890f6f-6d6a-7cc0-98d2-000000000096")
     const revision = Schema.decodeSync(LedgerRevision)(1)
@@ -629,6 +635,14 @@ describe("ControlCenterApi contract", () => {
         query: { after: ReleaseAgentThreadCursor.make(12), limit: 32 }
       }),
       "https://control.example/api/v1/agent/releases/01890f6f-6d6a-7cc0-98d2-000000000093/thread/events?after=12&limit=32"
+    )
+    assert.strictEqual(
+      urls.agent.pullRequestReview({ params: { entityId } }),
+      "https://control.example/api/v1/agent/pull-requests/01890f6f-6d6a-7cc0-98d2-000000000098/review"
+    )
+    assert.strictEqual(
+      urls.agent.enqueuePullRequestReview({ params: { entityId } }),
+      "https://control.example/api/v1/agent/pull-requests/01890f6f-6d6a-7cc0-98d2-000000000098/reviews"
     )
     assert.strictEqual(
       urls.deliveryGraph.relationship({ params: { relationshipId }, query: {} }),

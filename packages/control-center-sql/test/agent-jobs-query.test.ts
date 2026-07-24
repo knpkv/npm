@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
-  renderAgentThreadReplayQuery
+  renderAgentThreadReplayQuery,
+  renderLatestAgentReviewQuery
 } from "../src/index.js"
 
 describe("durable agent job queries", () => {
@@ -84,5 +85,28 @@ describe("durable agent job queries", () => {
       sql:
         "select \"agent_thread_events\".\"workspace_id\" as \"workspaceId\", \"agent_thread_events\".\"thread_id\" as \"threadId\", \"agent_thread_events\".\"event_sequence\" as \"eventSequence\", \"agent_thread_events\".\"job_id\" as \"jobId\", \"agent_thread_events\".\"attempt_sequence\" as \"attemptSequence\", \"agent_thread_events\".\"event_kind\" as \"eventKind\", \"agent_thread_events\".\"payload_json\" as \"payloadJson\", \"agent_thread_events\".\"payload_digest\" as \"payloadDigest\", \"agent_thread_events\".\"payload_byte_length\" as \"payloadByteLength\", \"agent_jobs\".\"task_context_json\" as \"taskContextJson\", \"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\", \"agent_thread_events\".\"occurred_at\" as \"occurredAt\" from \"agent_thread_events\" inner join \"agent_jobs\" on ((\"agent_jobs\".\"workspace_id\" = \"agent_thread_events\".\"workspace_id\") and (\"agent_jobs\".\"job_id\" = \"agent_thread_events\".\"job_id\")) where ((\"agent_thread_events\".\"workspace_id\" = ?) and (\"agent_thread_events\".\"thread_id\" = ?) and (\"agent_thread_events\".\"event_sequence\" > ?)) order by \"agent_thread_events\".\"event_sequence\" asc limit ?"
     })
+  })
+
+  it("renders a bounded newest-job lookup for one exact immutable review subject", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      subjectRevision: "head-secret",
+      taskContextJson: "task-json",
+      taskContextDigest: "task-digest"
+    })
+
+    expect(rendered.params).toEqual([
+      "workspace-secret",
+      "head-secret",
+      "task-json",
+      "task-digest",
+      1
+    ])
+    expect(rendered.sql).toContain(
+      "where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"subject_revision\" = ?) and (\"agent_jobs\".\"task_context_json\" = ?) and (\"agent_jobs\".\"task_context_digest\" = ?))"
+    )
+    expect(rendered.sql).toContain(
+      "order by \"agent_jobs\".\"created_at\" desc, \"agent_jobs\".\"job_id\" desc limit ?"
+    )
   })
 })

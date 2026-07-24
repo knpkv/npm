@@ -33,6 +33,7 @@ import { WorkspaceConfluencePageDetails } from "./WorkspaceConfluencePageDetails
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
 import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionDetails.js"
 import { WorkspacePullRequestDetails } from "./WorkspacePullRequestDetails.js"
+import { usePullRequestReview, type PullRequestReviewControllerState } from "./usePullRequestReview.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
 const originLabel = (href: string, workspaceId: WorkspaceIdType): string => {
@@ -246,16 +247,22 @@ const staleMessage = (state: Extract<WorkspaceEntityState, { readonly _tag: "sta
 }
 
 const EntityContent = ({
-  onAskAgent,
   onSessionExpired,
   presentation,
   retry,
+  reviewCanEnqueue,
+  reviewRetry,
+  reviewStart,
+  reviewState,
   sessionKey,
   stale
 }: {
-  readonly onAskAgent: () => void
   readonly onSessionExpired: (sessionKey: string) => void
   readonly presentation: WorkspaceEntityPresentation
+  readonly reviewCanEnqueue: boolean
+  readonly reviewRetry: () => void
+  readonly reviewStart: () => void
+  readonly reviewState: PullRequestReviewControllerState
   readonly retry: () => void
   readonly sessionKey: string | null
   readonly stale: Extract<WorkspaceEntityState, { readonly _tag: "stale" }> | null
@@ -286,9 +293,12 @@ const EntityContent = ({
     {presentation.pullRequest === null ? null : (
       <WorkspacePullRequestDetails
         approvers={presentation.collaborators.approvers}
-        onAskAgent={onAskAgent}
         onSessionExpired={onSessionExpired}
+        onReviewRetry={reviewRetry}
+        onReviewStart={reviewStart}
         pullRequest={presentation.pullRequest}
+        reviewCanEnqueue={reviewCanEnqueue}
+        reviewState={reviewState}
         reviewers={presentation.collaborators.reviewers}
         sessionKey={sessionKey}
       />
@@ -304,12 +314,17 @@ interface WorkspaceEntityViewProps {
   readonly originLabel: string
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
+  readonly reviewCanEnqueue?: boolean
+  readonly reviewRetry?: () => void
+  readonly reviewStart?: () => void
+  readonly reviewState?: PullRequestReviewControllerState
   readonly state: WorkspaceEntityState
   readonly sessionKey?: string | null
   readonly workspaceId: WorkspaceIdType
 }
 
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
+const ignoreAction = (): void => undefined
 
 /** Pure state renderer for the canonical entity route. */
 export const WorkspaceEntityView = ({
@@ -319,6 +334,10 @@ export const WorkspaceEntityView = ({
   originLabel: backLabel,
   originState,
   retry,
+  reviewCanEnqueue = false,
+  reviewRetry = ignoreAction,
+  reviewStart = ignoreAction,
+  reviewState = { _tag: "idle" },
   sessionKey = null,
   state,
   workspaceId
@@ -386,9 +405,12 @@ export const WorkspaceEntityView = ({
         className={styles.shell}
         content={
           <EntityContent
-            onAskAgent={onAskAgent}
             onSessionExpired={onSessionExpired}
             presentation={presentation}
+            reviewCanEnqueue={reviewCanEnqueue}
+            reviewRetry={reviewRetry}
+            reviewStart={reviewStart}
+            reviewState={reviewState}
             retry={retry}
             sessionKey={sessionKey}
             stale={state._tag === "stale" ? state : null}
@@ -434,6 +456,24 @@ const ConnectedWorkspaceEntity = ({
     context.controller.state._tag === "ready" ? context.controller.state.portfolio.generatedAt : "pending"
   const sessionKey = browserReadableSessionKey(browserSession.state)
   const controller = useWorkspaceEntity(workspaceId, entityId, refreshKey, sessionKey, browserSession.invalidateSession)
+  const reviewCanEnqueue =
+    browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
+  const reviewSubject =
+    (controller.state._tag === "ready" || controller.state._tag === "stale") &&
+    controller.state.inspection.entity.projection.details._tag === "pull-request"
+      ? {
+          baseRevision: controller.state.inspection.entity.projection.details.baseRevision ?? null,
+          headRevision: controller.state.inspection.entity.projection.details.headRevision
+        }
+      : null
+  const reviewController = usePullRequestReview(
+    entityId,
+    reviewSubject?.baseRevision ?? null,
+    reviewSubject?.headRevision ?? null,
+    sessionKey,
+    reviewCanEnqueue,
+    browserSession.invalidateSession
+  )
   const resolvedOrigin = resolveWorkspaceEntityOrigin(location.state, workspaceId, entityId)
   const resolvedOriginHref = workspaceEntityOriginHref(resolvedOrigin.origin)
   const releaseContext =
@@ -458,6 +498,10 @@ const ConnectedWorkspaceEntity = ({
       originLabel={originLabel(resolvedOriginHref, workspaceId)}
       originState={resolvedOrigin.origin.state}
       retry={controller.retry}
+      reviewCanEnqueue={reviewCanEnqueue}
+      reviewRetry={reviewController.retry}
+      reviewStart={reviewController.start}
+      reviewState={reviewController.state}
       state={controller.state}
       sessionKey={sessionKey}
       workspaceId={workspaceId}

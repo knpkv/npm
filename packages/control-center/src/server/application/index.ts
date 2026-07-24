@@ -17,6 +17,7 @@ export {
   pluginAdministrationOAuthLayerWithConnections
 } from "./pluginAdministration.js"
 export { makePortfolioSnapshots, portfolioSnapshotsLayer } from "./portfolioSnapshots.js"
+export { pullRequestReviewsLayer } from "./pullRequestReviews.js"
 export {
   digestEnvironmentReadinessCandidate,
   digestReadinessRule,

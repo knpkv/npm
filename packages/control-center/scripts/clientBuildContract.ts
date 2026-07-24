@@ -1,7 +1,8 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 365_000
+// Includes the tiny module-preload index entry for the lazily split agent API contract.
+export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 365_100
 
 export const CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY = "src/client/BrowserSessionHydrator.tsx"
 

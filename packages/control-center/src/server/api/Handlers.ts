@@ -31,6 +31,7 @@ import {
   MediaReads,
   PluginAdministration,
   PortfolioSnapshots,
+  PullRequestReviews,
   RelationshipRepairProposals,
   ReleaseAgentJobs,
   ReleaseAgentTurns,
@@ -940,6 +941,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
     Effect.gen(function*() {
       const agent = yield* ReleaseAgentTurns
       const jobs = yield* ReleaseAgentJobs
+      const reviews = yield* PullRequestReviews
       return handlers
         .handle("providers", () =>
           Effect.gen(function*() {
@@ -993,6 +995,34 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               after: query.after ?? INITIAL_AGENT_THREAD_CURSOR,
               limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
             }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("pullRequestReview", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            return yield* reviews.current({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("enqueuePullRequestReview", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* reviews.enqueue({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              request: payload
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))

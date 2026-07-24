@@ -2,7 +2,8 @@ import { MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
-import { EventCursor, JobId, ReleaseId } from "../domain/identifiers.js"
+import { EntityId, EventCursor, JobId, ReleaseId } from "../domain/identifiers.js"
+import { PrReviewReport, PrReviewSubject } from "../domain/prReview.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -81,6 +82,12 @@ export const AgentProviderHealth = Schema.Literals(["available", "not-configured
 /** Decoded redacted provider health. */
 export type AgentProviderHealth = typeof AgentProviderHealth.Type
 
+/** Browser-safe task capabilities supported by one agent provider. */
+export const AgentProviderCapability = Schema.Literals(["release-chat", "pr-review"])
+
+/** Decoded browser-safe agent task capability. */
+export type AgentProviderCapability = typeof AgentProviderCapability.Type
+
 /** Browser-safe catalog entry for one server-owned agent provider. */
 export const AgentProviderCatalogEntry = Schema.Struct({
   providerId: DurableAgentProviderId,
@@ -88,6 +95,11 @@ export const AgentProviderCatalogEntry = Schema.Struct({
     Schema.makeFilter((models) => models.length <= MAXIMUM_AGENT_MODELS_PER_PROVIDER, {
       expected: `at most ${MAXIMUM_AGENT_MODELS_PER_PROVIDER} agent models`
     }),
+    Schema.isUnique()
+  ),
+  capabilities: Schema.Array(AgentProviderCapability).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AgentProviderCapability.literals.length),
     Schema.isUnique()
   ),
   health: AgentProviderHealth
@@ -286,6 +298,82 @@ export const EnqueueReleaseAgentJobResponse = Schema.Struct({
 /** Decoded durable release-agent enqueue response. */
 export type EnqueueReleaseAgentJobResponse = typeof EnqueueReleaseAgentJobResponse.Type
 
+/** Bounded request to enqueue one immutable read-only pull-request review. */
+export const EnqueuePullRequestReviewRequest = Schema.Struct({
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  profile: AgentSafeProfile
+})
+
+/** Decoded immutable pull-request review enqueue request. */
+export type EnqueuePullRequestReviewRequest = typeof EnqueuePullRequestReviewRequest.Type
+
+const pullRequestReviewIdentity = {
+  subject: PrReviewSubject
+}
+
+const pullRequestReviewJob = {
+  ...pullRequestReviewIdentity,
+  jobId: JobId,
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  requestedAt: UtcTimestamp
+}
+
+/** Review cannot run for the canonical entity in its current state. */
+export class PullRequestReviewUnavailable extends Schema.TaggedClass<PullRequestReviewUnavailable>()("unavailable", {
+  reason: Schema.Literals([
+    "not-codecommit",
+    "not-pull-request",
+    "source-stale",
+    "release-unavailable",
+    "base-revision-unavailable"
+  ])
+}) {}
+
+/** No durable review exists yet for this exact immutable subject. */
+export class PullRequestReviewNotStarted
+  extends Schema.TaggedClass<PullRequestReviewNotStarted>()("not-started", pullRequestReviewIdentity)
+{}
+
+/** One durable exact-head review is queued or running. */
+export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestReviewPending>()("pending", {
+  ...pullRequestReviewJob,
+  state: Schema.Literals(["queued", "running", "cancel-requested"])
+}) {}
+
+/** Sanitized exact-head findings completed without changing human disposition. */
+export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestReviewCompleted>()("completed", {
+  ...pullRequestReviewJob,
+  completedAt: UtcTimestamp,
+  report: PrReviewReport
+}) {}
+
+/** Durable exact-head review stopped without publishing a recommendation. */
+export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestReviewFailed>()("failed", {
+  ...pullRequestReviewJob,
+  completedAt: UtcTimestamp,
+  state: Schema.Literals(["failed", "cancelled"])
+}) {}
+
+/** Browser-safe current review state for one canonical pull-request entity. */
+export const PullRequestReviewState = Schema.Union([
+  PullRequestReviewUnavailable,
+  PullRequestReviewNotStarted,
+  PullRequestReviewPending,
+  PullRequestReviewCompleted,
+  PullRequestReviewFailed
+]).pipe(Schema.toTaggedUnion("_tag"))
+
+/** Decoded current pull-request review state. */
+export type PullRequestReviewState = typeof PullRequestReviewState.Type
+
+/** Accepted durable review job, including idempotent recovery of active work. */
+export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
+
+/** Decoded accepted durable review job. */
+export type EnqueuePullRequestReviewResponse = typeof EnqueuePullRequestReviewResponse.Type
+
 /** Ordered, bounded release-thread replay page. */
 export const ReleaseAgentThreadPage = Schema.Struct({
   releaseId: ReleaseId,
@@ -365,11 +453,52 @@ const providers = HttpApiEndpoint.get("providers", "/providers", {
   ]
 }).middleware(SessionCookieAuth)
 
+const pullRequestReview = HttpApiEndpoint.get(
+  "pullRequestReview",
+  "/pull-requests/:entityId/review",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    success: PullRequestReviewState,
+    error: [
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
+const enqueuePullRequestReview = HttpApiEndpoint.post(
+  "enqueuePullRequestReview",
+  "/pull-requests/:entityId/reviews",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    payload: EnqueuePullRequestReviewRequest,
+    success: EnqueuePullRequestReviewResponse.pipe(HttpApiSchema.status(202)),
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(providers)
   .add(turn)
   .add(enqueueJob)
   .add(replayThread)
+  .add(pullRequestReview)
+  .add(enqueuePullRequestReview)
   .prefix("/api/v1/agent")
 {}

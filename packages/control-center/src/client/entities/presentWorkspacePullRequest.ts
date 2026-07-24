@@ -15,7 +15,6 @@ export interface WorkspacePullRequestTimestamp {
 }
 
 export interface WorkspacePullRequestPresentation {
-  readonly agentReviewLabel: string
   readonly author: RlyPerson | null
   readonly baseRevision: string | null
   readonly createdAt: WorkspacePullRequestTimestamp | null
@@ -141,7 +140,6 @@ export const presentWorkspacePullRequest = (
   const pipelineCount = relatedCount("pipeline-execution")
   const evidenceCountLabel = (count: number): string => `${String(count)}${inspection.graph.truncated ? "+" : ""}`
   return {
-    agentReviewLabel: "Agent review not run",
     author: authorFor(details.authorReference),
     baseRevision: details.baseRevision ?? null,
     createdAt: timestampFor(details.createdAt),

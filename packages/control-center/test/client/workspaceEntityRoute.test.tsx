@@ -11,11 +11,19 @@ import {
   WorkspaceEntityInspection,
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  PullRequestReviewNotStarted,
+  PullRequestReviewState
+} from "../../src/api/agent.js"
 import { RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
+import { PrReviewSubject } from "../../src/domain/prReview.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
+import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
 import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
@@ -634,6 +642,69 @@ const pullRequestState = {
   workspaceId: WORKSET_WORKSPACE_ID
 } satisfies WorkspaceEntityState
 
+const pullRequestReviewSubject = Schema.decodeSync(PrReviewSubject)({
+  providerId: "codecommit",
+  repository: "payments-api",
+  pullRequestId: "184",
+  baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
+  headRevision: "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19"
+})
+
+const pullRequestReviewState = {
+  _tag: "ready",
+  baseRevision: pullRequestReviewSubject.baseRevision,
+  entityId: pullRequestInspection.entity.projection.entityId,
+  headRevision: pullRequestReviewSubject.headRevision,
+  sessionKey: "session-a",
+  action: "idle",
+  provider: {
+    providerId: DurableAgentProviderId.make("openai-compatible"),
+    model: AgentModelId.make("review-model")
+  },
+  review: new PullRequestReviewNotStarted({ subject: pullRequestReviewSubject })
+} satisfies PullRequestReviewControllerState
+
+const completedPullRequestReviewState = {
+  ...pullRequestReviewState,
+  review: Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "completed",
+    subject: pullRequestReviewSubject,
+    jobId: "01890f6f-6d6a-7cc0-98d2-000000000099",
+    providerId: "openai-compatible",
+    model: "review-model",
+    requestedAt: "2026-07-14T10:00:00.000Z",
+    completedAt: "2026-07-14T10:01:00.000Z",
+    report: {
+      schemaVersion: 1,
+      subject: pullRequestReviewSubject,
+      recommendation: "changes-recommended",
+      summary: "One exact-head finding needs a person to decide.",
+      findings: [
+        {
+          findingId: "finding-1",
+          severity: "high",
+          path: "src/capture.ts",
+          startLine: 42,
+          endLine: 42,
+          title: "Retry can duplicate capture",
+          detail: "The retry path does not reuse the original idempotency key.",
+          prevention: {
+            summary: "Add a focused retry contract test.",
+            enforcement: "test",
+            existingRuleOrConfig: "capture integration suite",
+            targetFile: "test/capture-retry.test.ts",
+            sourcePaths: ["src/capture.ts"],
+            matcherOrInvariant: "Every retry reuses its original idempotency key.",
+            invalidFixture: "capture({ retry: true, idempotencyKey: freshKey })",
+            validFixture: "capture({ retry: true, idempotencyKey: originalKey })",
+            boundary: "Only capture retries are covered."
+          }
+        }
+      ]
+    }
+  })
+} satisfies PullRequestReviewControllerState
+
 const pipelineState = {
   _tag: "ready",
   entityId: pipelineInspection.entity.projection.entityId,
@@ -669,7 +740,12 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const renderView = async (onAskAgent: () => void, viewState: WorkspaceEntityState = state): Promise<HTMLElement> => {
+const renderView = async (
+  onAskAgent: () => void,
+  viewState: WorkspaceEntityState = state,
+  onReviewStart: () => void = () => undefined,
+  reviewState: PullRequestReviewControllerState = pullRequestReviewState
+): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
@@ -681,6 +757,13 @@ const renderView = async (onAskAgent: () => void, viewState: WorkspaceEntityStat
         originLabel="Back to items"
         originState={null}
         retry={() => undefined}
+        reviewCanEnqueue
+        reviewStart={onReviewStart}
+        reviewState={
+          viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
+            ? reviewState
+            : { _tag: "idle" }
+        }
         state={viewState}
         workspaceId={WORKSET_WORKSPACE_ID}
       />
@@ -741,7 +824,6 @@ describe("canonical workspace entity", () => {
       service: "codecommit",
       verdict: "Open",
       pullRequest: {
-        agentReviewLabel: "Agent review not run",
         author: { name: "Alice", role: "Pull request author" },
         baseRevision: "91c3627b4ce7447e38c906529a4af4be6bc6812d",
         createdAt: {
@@ -1212,7 +1294,8 @@ describe("canonical workspace entity", () => {
 
   it("renders the CodeCommit revision, human review, delivery evidence, and agent entry point", async () => {
     const onAskAgent = vi.fn()
-    const host = await renderView(onAskAgent, pullRequestState)
+    const onReviewStart = vi.fn()
+    const host = await renderView(onAskAgent, pullRequestState, onReviewStart)
 
     expect(host.textContent).toContain("feature/capture")
     expect(host.textContent).toContain("a5d8c9e4f013bdf17c2e6765579e2770f63e7b19")
@@ -1236,11 +1319,28 @@ describe("canonical workspace entity", () => {
     expect(deliveryCounts.get("Pipeline runs")).toMatch(/\+$/u)
 
     const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Ask Relay to review"
+      (button) => button.textContent === "Review exact head"
     )
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
-    expect(onAskAgent).toHaveBeenCalledOnce()
+    expect(onReviewStart).toHaveBeenCalledOnce()
+    expect(onAskAgent).not.toHaveBeenCalled()
+  })
+
+  it("renders exact-head findings and keeps prevention proposals separate from human approval", async () => {
+    const host = await renderView(
+      () => undefined,
+      pullRequestState,
+      () => undefined,
+      completedPullRequestReviewState
+    )
+
+    expect(host.textContent).toContain("Changes recommended")
+    expect(host.textContent).toContain("Retry can duplicate capture")
+    expect(host.textContent).toContain("src/capture.ts:42")
+    expect(host.textContent).toContain("Prevention proposal · separate review required")
+    expect(host.textContent).toContain("Agent advice only. A person must still approve or request changes.")
+    expect(host.textContent).toContain("Human review requested")
   })
 
   it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {
@@ -1484,10 +1584,8 @@ describe("canonical workspace entity", () => {
           </MemoryRouter>
         )
       )
-      const reviewButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-        (button) => button.textContent === "Ask Relay to review"
-      )
-      if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
+      const reviewButton = host.querySelector<HTMLButtonElement>("[data-rly-agent-context-button]")
+      if (reviewButton === null) throw new Error("Expected the pull-request contextual agent button")
 
       await act(async () => reviewButton.click())
 

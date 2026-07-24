@@ -37,7 +37,6 @@ const CODEX_DEFAULT_MODEL = AgentModelId.make("configured-default")
 const CLAUDE_DEFAULT_MODEL = AgentModelId.make("default")
 const MINIMUM_OPENAI_GENERATION_TIMEOUT = Duration.millis(1)
 const MAXIMUM_OPENAI_GENERATION_TIMEOUT = Duration.minutes(2)
-
 /** Persisted provider selection presented to the server-owned registry. */
 export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
@@ -114,6 +113,7 @@ const unavailableCatalogEntry = (
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [],
+  capabilities: ["release-chat"],
   health: "not-configured"
 })
 
@@ -123,6 +123,7 @@ const availableCatalogEntry = (
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [model],
+  capabilities: ["release-chat"],
   health: "available"
 })
 
