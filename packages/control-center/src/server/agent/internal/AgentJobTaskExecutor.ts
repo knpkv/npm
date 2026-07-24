@@ -42,6 +42,24 @@ export const agentJobTaskExecutorLayer = (
   service: AgentJobTaskExecutorService
 ): Layer.Layer<AgentJobTaskExecutor> => Layer.succeed(AgentJobTaskExecutor, AgentJobTaskExecutor.of(service))
 
+const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
+  reviews: PrReviewTaskExecutor["Service"],
+  claim: ClaimedAgentJob
+): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError> {
+  if (claim.context.task._tag !== "pr-review") {
+    return yield* new AgentProviderError({
+      providerId: claim.providerId,
+      phase: "configuration",
+      message: "The PR review worker accepts only immutable review jobs.",
+      retryable: false
+    })
+  }
+  return {
+    _tag: "pr-review",
+    report: yield* reviews.execute(claim)
+  }
+})
+
 /**
  * Existing release-chat executor.
  *
@@ -67,7 +85,8 @@ export const releaseChatTaskExecutorLayer: Layer.Layer<AgentJobTaskExecutor, nev
           const selected = yield* runtimes.select({
             providerId: claim.providerId,
             model: claim.model,
-            access: claim.access
+            access: claim.access,
+            capability: "release-chat"
           })
           const continuation: AgentRunRequest["continuation"] = claim.sessionRef === null
             ? { _tag: "fresh" }
@@ -112,15 +131,13 @@ export const reviewEnabledTaskExecutorLayer: Layer.Layer<
       taskTags: ["release-chat", "pr-review"],
       execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim) {
         if (claim.context.task._tag === "pr-review") {
-          return {
-            _tag: "pr-review",
-            report: yield* reviews.execute(claim)
-          } satisfies AgentJobTaskExecution
+          return yield* executeReview(reviews, claim)
         }
         const selected = yield* runtimes.select({
           providerId: claim.providerId,
           model: claim.model,
-          access: claim.access
+          access: claim.access,
+          capability: "release-chat"
         })
         const continuation: AgentRunRequest["continuation"] = claim.sessionRef === null
           ? { _tag: "fresh" }
@@ -143,6 +160,22 @@ export const reviewEnabledTaskExecutorLayer: Layer.Layer<
           events: selected.runtime.run(request)
         } satisfies AgentJobTaskExecution
       })
+    })
+  })
+)
+
+/** Review-supervisor executor that never claims or executes release-chat work. */
+export const prReviewOnlyTaskExecutorLayer: Layer.Layer<
+  AgentJobTaskExecutor,
+  never,
+  PrReviewTaskExecutor
+> = Layer.effect(
+  AgentJobTaskExecutor,
+  Effect.gen(function*() {
+    const reviews = yield* PrReviewTaskExecutor
+    return AgentJobTaskExecutor.of({
+      taskTags: ["pr-review"],
+      execute: (claim) => executeReview(reviews, claim)
     })
   })
 )

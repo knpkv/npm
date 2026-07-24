@@ -25,6 +25,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import {
   AgentModelId,
+  type AgentProviderCapability,
   type AgentProviderCatalog,
   type AgentProviderCatalogEntry,
   DurableAgentProviderId
@@ -42,6 +43,7 @@ export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
   readonly model: string | null
   readonly access: "read-only" | "workspace-write"
+  readonly capability: AgentProviderCapability
 }
 
 /** Selects configured runtimes and exposes only a redacted public catalog. */
@@ -92,6 +94,8 @@ export interface AgentProviderRegistryOptions {
   readonly codex?: CodexAgentProviderOptions
   readonly claude?: ClaudeAgentProviderOptions
   readonly openAiCompatible?: OpenAiCompatibleAgentProviderOptions
+  /** Advertise prompt-only immutable review only when its worker is attached. */
+  readonly prReviewEnabled?: boolean
 }
 
 interface ConfiguredProvider {
@@ -119,11 +123,12 @@ const unavailableCatalogEntry = (
 
 const availableCatalogEntry = (
   providerId: "codex" | "claude" | "openai-compatible",
-  model: AgentModelId
+  model: AgentModelId,
+  capabilities: AgentProviderCatalogEntry["capabilities"] = ["release-chat"]
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [model],
-  capabilities: ["release-chat"],
+  capabilities,
   health: "available"
 })
 
@@ -232,6 +237,7 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
       return provider !== undefined &&
           provider.runtime !== null &&
           selection.access === "read-only" &&
+          provider.catalog.capabilities.includes(selection.capability) &&
           model !== undefined
         ? Effect.succeed({
           model,
@@ -321,7 +327,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     }
     : {
       providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
-      catalog: availableCatalogEntry("openai-compatible", openAiConfigured.model),
+      catalog: availableCatalogEntry(
+        "openai-compatible",
+        openAiConfigured.model,
+        options.prReviewEnabled === true
+          ? ["release-chat", "pr-review"]
+          : ["release-chat"]
+      ),
       runtime: makeLanguageModelRuntime(
         OPENAI_COMPATIBLE_PROVIDER_ID,
         ({ model, prompt }) =>

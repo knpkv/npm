@@ -195,7 +195,8 @@ const makePullRequestReviews = Effect.gen(function*() {
       const selected = yield* runtimes.select({
         providerId,
         model: input.request.model,
-        access: input.request.profile
+        access: input.request.profile,
+        capability: "pr-review"
       }).pipe(Effect.mapError(unavailable))
       if (selected.filesystemAccess !== "none") return yield* unavailable()
 

@@ -43,6 +43,43 @@ const runRequest = (model: AgentModelId): AgentRunRequest => ({
 })
 
 describe("agent provider registry", () => {
+  it.effect("advertises PR review only for a configured prompt-only provider when the worker is enabled", () =>
+    Effect.gen(function*() {
+      const registry = yield* AgentRuntimeRegistry
+      const catalog = yield* registry.catalog()
+      assert.deepStrictEqual(
+        catalog.providers.map(({ capabilities, providerId }) => ({ capabilities, providerId })),
+        [
+          {
+            providerId: DurableAgentProviderId.make("codex"),
+            capabilities: ["release-chat"]
+          },
+          {
+            providerId: DurableAgentProviderId.make("claude"),
+            capabilities: ["release-chat"]
+          },
+          {
+            providerId: DurableAgentProviderId.make("openai-compatible"),
+            capabilities: ["release-chat", "pr-review"]
+          }
+        ]
+      )
+    }).pipe(
+      Effect.provide(agentProviderRuntimeRegistryLayer({
+        openAiCompatible: {
+          apiUrl: API_URL_CANARY,
+          model: OPENAI_MODEL
+        },
+        prReviewEnabled: true
+      })),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("catalog test must not call the provider"))
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
   it.effect("routes an explicit OpenAI-compatible selection and redacts provider administration", () => {
     let providerCalls = 0
     const providerClient = HttpClient.make((request) => {
@@ -140,36 +177,49 @@ describe("agent provider registry", () => {
       const unavailable = yield* registry.select({
         providerId: AgentProviderId.make("claude"),
         model: "review-model",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       }).pipe(Effect.result)
       const wrongModel = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: "unregistered-model",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       }).pipe(Effect.result)
       const unsafeProfile = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: OPENAI_MODEL,
-        access: "workspace-write"
+        access: "workspace-write",
+        capability: "release-chat"
+      }).pipe(Effect.result)
+      const reviewWithoutWorker = yield* registry.select({
+        providerId: OPENAI_PROVIDER_ID,
+        model: OPENAI_MODEL,
+        access: "read-only",
+        capability: "pr-review"
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(unavailable))
       assert.isTrue(Result.isFailure(wrongModel))
       assert.isTrue(Result.isFailure(unsafeProfile))
+      assert.isTrue(Result.isFailure(reviewWithoutWorker))
 
       const selected = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: OPENAI_MODEL,
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       const codexSelected = yield* registry.select({
         providerId: AgentProviderId.make("codex"),
         model: "configured-default",
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       const legacy = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: null,
-        access: "read-only"
+        access: "read-only",
+        capability: "release-chat"
       })
       assert.strictEqual(selected.model, OPENAI_MODEL)
       assert.strictEqual(legacy.model, OPENAI_MODEL)
@@ -218,7 +268,8 @@ describe("agent provider registry", () => {
         const selected = yield* registry.select({
           providerId: OPENAI_PROVIDER_ID,
           model: OPENAI_MODEL,
-          access: "read-only"
+          access: "read-only",
+          capability: "release-chat"
         })
         return yield* selected.runtime.run(runRequest(selected.model)).pipe(
           Stream.runCollect,

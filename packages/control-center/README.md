@@ -111,6 +111,30 @@ identifiers, and `available` / `not-configured` health. The enqueue contract acc
 `read-only` safe profile. OpenAI-compatible generation has an interruptible two-minute deadline; tests
 may inject a shorter deadline without using host timers.
 
+Immutable CodeCommit review execution is a separate opt-in worker. It currently requires the
+prompt-only OpenAI-compatible provider, Docker, `git`, the AWS CLI credential helper, and an enabled
+CodeCommit connection whose repository matches the review subject. The analyzer image must be pinned
+by digest, and its command is a JSON array rather than a shell fragment:
+
+```sh
+CONTROL_CENTER_AGENT_OPENAI_API_URL=http://127.0.0.1:11434/v1 \
+CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
+CONTROL_CENTER_PR_REVIEW_IMAGE=registry.example/control-center-review@sha256:<64-lowercase-hex> \
+CONTROL_CENTER_PR_REVIEW_ANALYZER_COMMAND='["/opt/control-center/bin/analyze","--format","json-v1"]' \
+pnpm --filter @knpkv/control-center start
+```
+
+When both review variables are absent, the worker is disabled and no provider advertises
+`pr-review`. Supplying only one variable, or enabling review without an OpenAI-compatible provider,
+fails startup. For each durable claim the worker resolves exactly one enabled CodeCommit connection,
+clones into a private data-root workspace, verifies the full base and head object IDs, checks out the
+head detached, enforces source byte and entry bounds, and removes the checkout after the networkless
+read-only analyzer sandbox exits. Startup removes only worker-owned crash leftovers. While a review is
+running, the worker renews its durable lease and observes cancellation; cancellation interrupts the
+scoped checkout, sandbox, and model work before durably completing the job as cancelled.
+`CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` controls the sandbox deadline and defaults to
+120,000 milliseconds.
+
 Durable enqueue requests must explicitly select the provider, one catalog model, and the `read-only`
 profile. The selection is validated fail-closed before enqueue and persisted in the existing job
 `provider_id`, `model`, and `access` fields. The provider receives a bounded frozen projection containing
