@@ -182,12 +182,16 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.append-event", agentJobs.appendEvent(...args)),
       claimNext: (...args: Parameters<AgentJobRepositoryService["claimNext"]>) =>
         publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
+      completeReview: (...args: Parameters<AgentJobRepositoryService["completeReview"]>) =>
+        publicOperation("agent-job.complete-review", agentJobs.completeReview(...args)),
       enqueue: (...args: Parameters<AgentJobRepositoryService["enqueue"]>) =>
         publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
       failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
         publicOperation("agent-job.fail-attempt", agentJobs.failAttempt(...args)),
       requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
+      reviewResult: (...args: Parameters<AgentJobRepositoryService["reviewResult"]>) =>
+        publicOperation("agent-job.review-result", agentJobs.reviewResult(...args)),
       threadAfter: (...args: Parameters<AgentJobRepositoryService["threadAfter"]>) =>
         publicOperation("agent-job.thread-after", agentJobs.threadAfter(...args))
     },
