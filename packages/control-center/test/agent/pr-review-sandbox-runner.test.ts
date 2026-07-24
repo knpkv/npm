@@ -1250,6 +1250,43 @@ describe("PrReviewSandboxRunner", () => {
       )
     }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
 
+  it.effect("decodes UTF-8 octal bytes in a C-quoted Git path", () =>
+    withWorkspace((workspaceRoot, checkout) => {
+      const quotedUnicodeDiff = [
+        "diff --git \"a/src/caf\\303\\251\\\"x.ts\" \"b/src/caf\\303\\251\\\"x.ts\"",
+        "--- \"a/src/caf\\303\\251\\\"x.ts\"",
+        "+++ \"b/src/caf\\303\\251\\\"x.ts\"",
+        "@@ -0,0 +1,1 @@",
+        "+export const quotedUnicode = true",
+        ""
+      ].join("\n")
+      const quotedUnicodeEvidence = {
+        ...evidence,
+        findings: [{
+          ...evidence.findings[0],
+          path: "src/café\"x.ts",
+          startLine: 1,
+          endLine: 1
+        }]
+      }
+      return provideRunner(
+        workspaceRoot,
+        [],
+        successResponses(
+          checkout,
+          JSON.stringify(quotedUnicodeEvidence),
+          CONTAINER_NAME,
+          quotedUnicodeDiff
+        ),
+        run
+      ).pipe(
+        Effect.map((filtered) => {
+          assert.lengthOf(filtered.findings, 1)
+          assert.strictEqual(filtered.findings[0]?.path, "src/café\"x.ts")
+        })
+      )
+    }).pipe(Effect.provide([NodeFileSystem.layer, NodePath.layer])))
+
   it.effect("accepts deletion-only hunks without inventing changed head lines", () =>
     withWorkspace((workspaceRoot, checkout) => {
       const deletionDiff = [

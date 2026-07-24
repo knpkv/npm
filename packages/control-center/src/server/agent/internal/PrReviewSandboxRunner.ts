@@ -412,19 +412,31 @@ const decodeGitHeaderPath = (header: string): string | undefined => {
     return path.startsWith("b/") ? path.slice(2) : undefined
   }
   if (!encoded.endsWith("\"")) return undefined
-  let decoded = ""
+  const bytes = new Array<number>()
+  const encoder = new TextEncoder()
+  let literal = ""
+  const appendUtf8 = (value: string): void => {
+    for (const byte of encoder.encode(value)) {
+      bytes.push(byte)
+    }
+  }
+  const flushLiteral = (): void => {
+    appendUtf8(literal)
+    literal = ""
+  }
   for (let index = 1; index < encoded.length - 1; index++) {
     const character = encoded[index]
     if (character !== "\\") {
       if (character === "\"") return undefined
-      decoded += character
+      literal += character
       continue
     }
+    flushLiteral()
     const escaped = encoded[index + 1]
     if (escaped === undefined) return undefined
     const replacement = gitQuotedEscapes[escaped]
     if (replacement !== undefined) {
-      decoded += replacement
+      appendUtf8(replacement)
       index += 1
       continue
     }
@@ -435,9 +447,18 @@ const decodeGitHeaderPath = (header: string): string | undefined => {
     }
     const byte = Number.parseInt(octal, 8)
     if (byte > 0xff) return undefined
-    decoded += String.fromCharCode(byte)
+    bytes.push(byte)
     index += octal.length
   }
+  flushLiteral()
+  const decoded = (() => {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(bytes))
+    } catch {
+      return undefined
+    }
+  })()
+  if (decoded === undefined) return undefined
   return decoded.startsWith("b/") ? decoded.slice(2) : undefined
 }
 
