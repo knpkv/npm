@@ -59,6 +59,24 @@ const callProvider = <A, E>(
     { retry: false }
   )
 
+/** Map one decoded comment action to the exact Distilled CodeCommit request. */
+export const makePostCommentForPullRequestRequest = (
+  action: Extract<
+    CodeCommitReviewAction,
+    { readonly _tag: "comment" | "request-changes" | "request-review" }
+  >
+) => ({
+  pullRequestId: action.target.pullRequestId,
+  repositoryName: action.target.repositoryName,
+  beforeCommitId: action.target.destinationCommit,
+  afterCommitId: action.target.sourceCommit,
+  content: action.content,
+  clientRequestToken: action.clientRequestToken,
+  ...(action._tag === "comment" && action.location !== undefined
+    ? { location: action.location }
+    : {})
+})
+
 /** Live raw provider layer backed by @distilled.cloud/aws CodeCommit operations. */
 export const CodeCommitReviewProviderLive = Layer.effect(
   CodeCommitReviewProvider,
@@ -78,17 +96,9 @@ export const CodeCommitReviewProviderLive = Layer.effect(
         provideRuntime(callProvider(
           "postPullRequestComment",
           action.target,
-          codecommit.postCommentForPullRequest({
-            pullRequestId: action.target.pullRequestId,
-            repositoryName: action.target.repositoryName,
-            beforeCommitId: action.target.destinationCommit,
-            afterCommitId: action.target.sourceCommit,
-            content: action.content,
-            clientRequestToken: action.clientRequestToken,
-            ...(action._tag === "comment" && action.location !== undefined
-              ? { location: action.location }
-              : {})
-          })
+          codecommit.postCommentForPullRequest(
+            makePostCommentForPullRequestRequest(action)
+          )
         )),
       updateApprovalState: (action) =>
         provideRuntime(callProvider(

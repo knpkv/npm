@@ -27,6 +27,7 @@ import {
 } from "../../domain/identifiers.js"
 import { ProposePluginActionRequestV1 } from "../../domain/plugins/actions.js"
 import { Revision } from "../../domain/sourceRevision.js"
+import type { SessionSummary } from "../auth/models.js"
 import { digestGovernedActionEvidenceSet, makeGovernedActionEnvelope } from "../governance/governedActionDigests.js"
 import { GovernedActionPolicyBindingSource, GovernedActionSubmission } from "../governance/GovernedActionSubmission.js"
 import { Persistence } from "../persistence/Persistence.js"
@@ -50,6 +51,19 @@ const isGatewayFailure = Schema.is(ReviewSuggestionPublicationGatewayError)
 const mapFailure = Effect.catch((failure) =>
   isGatewayFailure(failure) ? Effect.fail(failure) : Effect.fail(unavailable())
 )
+
+/** Pure fail-closed preflight used before acquiring any provider proposal capability. */
+export const reviewPublicationSessionIsAuthorized = (
+  session: SessionSummary,
+  workspaceId: ReviewSuggestionPublicationTarget["workspaceId"],
+  checkedAt: DateTime.Utc
+): boolean =>
+  session.actor._tag === "human" &&
+  session.workspaceId === workspaceId &&
+  session.permission === "workspace-owner" &&
+  session.revokedAt === null &&
+  DateTime.Order(checkedAt, session.idleExpiresAt) < 0 &&
+  DateTime.Order(checkedAt, session.absoluteExpiresAt) < 0
 
 const makeGateway = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -90,10 +104,13 @@ const makeGateway = Effect.gen(function*() {
   })
 
   const publish = Effect.fn("ReviewSuggestionPublicationGateway.publish")(function*(command) {
+    const checkedAt = yield* DateTime.now
     if (
-      command.session.actor._tag !== "human" ||
-      command.session.workspaceId !== command.target.workspaceId ||
-      command.session.revokedAt !== null
+      !reviewPublicationSessionIsAuthorized(
+        command.session,
+        command.target.workspaceId,
+        checkedAt
+      )
     ) return yield* conflict()
 
     const prepared = yield* withProposalLease(

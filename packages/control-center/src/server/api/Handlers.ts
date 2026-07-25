@@ -1049,7 +1049,10 @@ export const agentHandlersLayer = HttpApiBuilder.group(
         .handle("publishReviewSuggestion", ({ params, payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
-            if (session.actor._tag !== "human") {
+            if (
+              session.actor._tag !== "human" ||
+              session.permission !== "workspace-owner"
+            ) {
               return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
             }
             return yield* reviews.publishSuggestion({

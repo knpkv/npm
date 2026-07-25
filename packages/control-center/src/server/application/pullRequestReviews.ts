@@ -12,6 +12,7 @@ import * as Schema from "effect/Schema"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
   PublishedReviewComment,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
@@ -48,6 +49,7 @@ import { AgentJobPrompt, type LatestAgentReviewRecord } from "../persistence/rep
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 import {
   ReviewSuggestionPublicationGateway,
+  type ReviewSuggestionPublicationGatewayError,
   type ReviewSuggestionPublicationTarget
 } from "./ReviewSuggestionPublicationGateway.js"
 
@@ -233,15 +235,31 @@ const makePullRequestReviews = Effect.gen(function*() {
     subject: target.subject
   })
 
-  const publicationContent = Effect.fn("PullRequestReviews.publicationContent")(function*(
-    content: string,
+  const publicationFooter = (
     profile: typeof ReviewSuggestionPublicationPreview.Type["proposingAgent"],
     publishingOperator: typeof ReviewSuggestionPublicationPreview.Type["publishingOperator"],
     headRevision: string
+  ): string => `— ${profile.label} · head ${headRevision.slice(0, 12)} · operator ${publishingOperator}`
+
+  const publicationContent = Effect.fn("PullRequestReviews.publicationContent")(function*(
+    content: string,
+    footer: string
   ) {
     return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationContent)(
-      `${content}\n\n— ${profile.label} · head ${headRevision.slice(0, 12)} · operator ${publishingOperator}`
+      `${content}\n\n${footer}`
     ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+  })
+
+  const confirmedPublicationContent = Effect.fn(
+    "PullRequestReviews.confirmedPublicationContent"
+  )(function*(content: string, footer: string) {
+    const decoded = yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationContent)(
+      content
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    if (!decoded.endsWith(`\n\n${footer}`)) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return decoded
   })
 
   const defaultPublicationContent = Effect.fn("PullRequestReviews.defaultPublicationContent")(function*(
@@ -255,7 +273,12 @@ const makePullRequestReviews = Effect.gen(function*() {
     ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
   })
 
-  const mapPublicationFailure = () => new ApplicationServiceUnavailable({ retryAt: null })
+  const mapPublicationFailure = (
+    failure: ReviewSuggestionPublicationGatewayError
+  ): ApplicationInvalidRequest | ApplicationServiceUnavailable =>
+    failure.reason === "publication-conflict"
+      ? new ApplicationInvalidRequest()
+      : new ApplicationServiceUnavailable({ retryAt: null })
 
   return PullRequestReviews.of({
     current: Effect.fn("PullRequestReviews.current")(function*(input) {
@@ -359,7 +382,13 @@ const makePullRequestReviews = Effect.gen(function*() {
       const connectedIdentity = yield* publications.identity(
         publicationTarget(input.workspaceId, target)
       ).pipe(Effect.mapError(mapPublicationFailure))
-      const finalContent = yield* defaultPublicationContent(selected.suggestion)
+      const editableContent = yield* defaultPublicationContent(selected.suggestion)
+      const footer = publicationFooter(
+        selected.latest.reviewProfile,
+        input.publishingOperator,
+        target.subject.headRevision
+      )
+      const finalContent = yield* publicationContent(editableContent, footer)
       return new ReviewSuggestionPublicationPreview({
         jobId: input.jobId,
         suggestionId: selected.suggestion.suggestionId,
@@ -374,7 +403,10 @@ const makePullRequestReviews = Effect.gen(function*() {
           line: selected.suggestion.evidence.startLine,
           relativeFileVersion: "AFTER"
         },
+        editableContent,
+        editableContentMaximumLength: MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH - footer.length - 2,
         finalContent,
+        publicationFooter: footer,
         replacement: selected.suggestion.replacement?.content ?? null,
         connectedIdentity,
         proposingAgent: selected.latest.reviewProfile,
@@ -394,11 +426,14 @@ const makePullRequestReviews = Effect.gen(function*() {
       const connectedIdentity = yield* publications.identity(
         publicationTarget(input.workspaceId, target)
       ).pipe(Effect.mapError(mapPublicationFailure))
-      const publishedContent = yield* publicationContent(
-        input.request.finalContent,
+      const footer = publicationFooter(
         selected.latest.reviewProfile,
         input.session.actor.personId,
         target.subject.headRevision
+      )
+      const publishedContent = yield* confirmedPublicationContent(
+        input.request.finalContent,
+        footer
       )
       const result = yield* publications.publish({
         target: publicationTarget(input.workspaceId, target),

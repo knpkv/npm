@@ -3,15 +3,24 @@
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import * as Schema from "effect/Schema"
 
-import { PullRequestReviewNotStarted } from "../../src/api/agent.js"
-import type { PullRequestReviewState } from "../../src/api/agent.js"
+import {
+  PublishedReviewComment,
+  PullRequestReviewNotStarted,
+  PullRequestReviewState,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview
+} from "../../src/api/agent.js"
 import {
   type PullRequestReviewTransport,
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
-import { EntityId } from "../../src/domain/identifiers.js"
-import { PrReviewSubject } from "../../src/domain/prReview.js"
+import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
+import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -20,6 +29,17 @@ const BASE_A = "0".repeat(40)
 const BASE_B = "1".repeat(40)
 const HEAD_A = "a".repeat(40)
 const HEAD_B = "b".repeat(40)
+const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000602")
+const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
+const WRONG_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"8".repeat(64)}`)
+const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000603")
+const REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+  label: "Full-project review · openai-compatible · review-model",
+  budgetMillis: 1_200_000,
+  networkAccess: "blocked",
+  sandbox: "sbx"
+}
 
 const reviewFor = (baseRevision: string, headRevision: string): PullRequestReviewState =>
   new PullRequestReviewNotStarted({
@@ -30,6 +50,56 @@ const reviewFor = (baseRevision: string, headRevision: string): PullRequestRevie
       baseRevision,
       headRevision
     })
+  })
+
+const completedReviewFor = (baseRevision: string, headRevision: string): PullRequestReviewState =>
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "completed",
+    subject: {
+      providerId: "codecommit",
+      repository: "control-center",
+      pullRequestId: "212",
+      baseRevision,
+      headRevision
+    },
+    jobId: JOB_ID,
+    providerId: "openai-compatible",
+    model: "review-model",
+    reviewProfile: REVIEW_PROFILE,
+    activity: { events: [], truncated: false },
+    requestedAt: "2026-07-24T15:00:00.000Z",
+    completedAt: "2026-07-24T15:04:00.000Z",
+    outcome: "changes-required",
+    report: {
+      schemaVersion: 2,
+      subject: {
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision,
+        headRevision
+      },
+      completion: { status: "complete" },
+      suggestions: [
+        {
+          suggestionId: SUGGESTION_ID,
+          severity: "P1",
+          problem: "Mutation happens before authorization",
+          impact: "An unauthorized caller can mutate durable state.",
+          evidence: {
+            path: "src/authorization.ts",
+            startLine: 42,
+            endLine: 42,
+            excerpt: "yield* mutate()"
+          },
+          recommendation: "Authorize first.",
+          confidence: {
+            level: "high",
+            reason: "The execution order is explicit."
+          }
+        }
+      ]
+    }
   })
 
 const deferred = <Value,>() => {
@@ -82,7 +152,145 @@ const Harness = ({
   )
 }
 
+const PublicationHarness = ({
+  headRevision,
+  transport
+}: {
+  readonly headRevision: string
+  readonly transport: PullRequestReviewTransport
+}): ReactElement => {
+  const controller = usePullRequestReview(
+    ENTITY_ID,
+    BASE_A,
+    headRevision,
+    "session-a",
+    false,
+    ignoreSessionExpired,
+    transport
+  )
+  return (
+    <>
+      <span data-publication>
+        {controller.publication._tag}
+        {controller.publication._tag === "published"
+          ? `:${controller.publication.headSuperseded ? "superseded" : "current"}:${controller.publication.publication.receipt.providerOperationId}`
+          : ""}
+      </span>
+      <button
+        data-preview
+        onClick={() =>
+          controller.previewPublication({
+            jobId: JOB_ID,
+            suggestionId: SUGGESTION_ID
+          })
+        }
+      />
+      <button
+        data-preview-wrong
+        onClick={() =>
+          controller.previewPublication({
+            jobId: JOB_ID,
+            suggestionId: WRONG_SUGGESTION_ID
+          })
+        }
+      />
+      <button
+        data-publish
+        onClick={() => controller.publishSuggestion(ReviewSuggestionPublicationContent.make("Confirmed content."))}
+      />
+    </>
+  )
+}
+
 describe("usePullRequestReview", () => {
+  it("gates publication, preserves a superseded-head receipt, and resets on scope change", async () => {
+    const footer = `— ${REVIEW_PROFILE.label} · head ${HEAD_A.slice(0, 12)} · operator ${OPERATOR_ID}`
+    const editableContent = ReviewSuggestionPublicationContent.make("Authorize before mutating.")
+    const finalContent = ReviewSuggestionPublicationContent.make(`${editableContent}\n\n${footer}`)
+    const preview = new ReviewSuggestionPublicationPreview({
+      jobId: JOB_ID,
+      suggestionId: SUGGESTION_ID,
+      subject: PrReviewSubject.make({
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: BASE_A,
+        headRevision: HEAD_A
+      }),
+      suggestionRevision: {
+        jobId: JOB_ID,
+        suggestionId: SUGGESTION_ID,
+        reviewedHead: HEAD_A
+      },
+      anchor: {
+        path: "src/authorization.ts",
+        line: 42,
+        relativeFileVersion: "AFTER"
+      },
+      editableContent,
+      editableContentMaximumLength: 10_100 - footer.length - 2,
+      finalContent,
+      publicationFooter: footer,
+      replacement: null,
+      connectedIdentity: {
+        accountId: "123456789012",
+        arn: "arn:aws:iam::123456789012:user/local-operator"
+      },
+      proposingAgent: REVIEW_PROFILE,
+      publishingOperator: OPERATOR_ID
+    })
+    const receipt = Schema.decodeUnknownSync(PluginProviderReceiptV1)({
+      providerOperationId: PluginProviderOperationId.make("comment-42"),
+      status: "succeeded",
+      safeSummary: "Posted an inline pull-request comment",
+      observedAt: "2026-07-24T15:05:00.000Z"
+    })
+    const published = new PublishedReviewComment({
+      publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000604"),
+      jobId: JOB_ID,
+      suggestionId: SUGGESTION_ID,
+      subject: preview.subject,
+      suggestionRevision: {
+        ...preview.suggestionRevision,
+        reviewedHead: HEAD_B
+      },
+      anchor: preview.anchor,
+      content: finalContent,
+      connectedIdentity: preview.connectedIdentity,
+      proposingAgent: REVIEW_PROFILE,
+      publishingOperator: OPERATOR_ID,
+      receipt,
+      publishedAt: receipt.observedAt
+    })
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn((_entityId, _signal) => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      previewPublication: vi.fn(() => Promise.resolve(preview)),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: vi.fn(() => Promise.resolve(published))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_A} transport={transport} />))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-preview-wrong]")?.click())
+    expect(transport.previewPublication).not.toHaveBeenCalled()
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
+    expect(transport.previewPublication).toHaveBeenCalledWith(
+      ENTITY_ID,
+      { jobId: JOB_ID, suggestionId: SUGGESTION_ID },
+      expect.any(AbortSignal)
+    )
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("preview")
+
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("idle")
+  })
+
   it("never presents a prior immutable head while the refreshed head loads", async () => {
     const requestA = deferred<PullRequestReviewState>()
     const requestB = deferred<PullRequestReviewState>()

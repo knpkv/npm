@@ -80,6 +80,43 @@ const failMalformed = (
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
 
+/** @internal Decode the unique action identity returned by an idempotency lookup. */
+export const decodeGovernedActionIdempotencyRows = Effect.fn(
+  "GovernedActionReader.decodeIdempotencyRows"
+)(function*(
+  request: GovernedActionIdempotencyReadInput,
+  rows: ReadonlyArray<unknown>
+) {
+  if (rows.length === 0) {
+    return yield* new RecordNotFoundError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey
+    })
+  }
+  if (rows.length !== 1) {
+    return yield* new PersistedRecordError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey,
+      diagnosticCode: "governed-action-identity-mismatch"
+    })
+  }
+  const decoded = yield* Schema.decodeUnknownEffect(
+    Schema.Struct({ actionId: GovernedActionId })
+  )(rows[0]).pipe(
+    Effect.mapError(() =>
+      new PersistedRecordError({
+        workspaceId: request.workspaceId,
+        recordKind: "governed-action",
+        recordKey: request.idempotencyKey,
+        diagnosticCode: "governed-action-schema-invalid"
+      })
+    )
+  )
+  return decoded.actionId
+})
+
 /** Build verified governed-action aggregate reads over one transaction-local SQL client. */
 export const makeGovernedActionRead = Effect.gen(function*() {
   const { sql } = yield* Database
@@ -458,34 +495,8 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     "GovernedActionReader.readByIdempotencyKey"
   )(function*(request: GovernedActionIdempotencyReadInput) {
     const rows = yield* run(renderGovernedActionIdempotencyQuery(request))
-    if (rows.length === 0) {
-      return yield* new RecordNotFoundError({
-        workspaceId: request.workspaceId,
-        recordKind: "governed-action",
-        recordKey: request.idempotencyKey
-      })
-    }
-    if (rows.length !== 1) {
-      return yield* new PersistedRecordError({
-        workspaceId: request.workspaceId,
-        recordKind: "governed-action",
-        recordKey: request.idempotencyKey,
-        diagnosticCode: "governed-action-identity-mismatch"
-      })
-    }
-    const actionId = yield* Schema.decodeUnknownEffect(
-      Schema.Struct({ actionId: GovernedActionId })
-    )(rows[0]).pipe(
-      Effect.mapError(() =>
-        new PersistedRecordError({
-          workspaceId: request.workspaceId,
-          recordKind: "governed-action",
-          recordKey: request.idempotencyKey,
-          diagnosticCode: "governed-action-schema-invalid"
-        })
-      )
-    )
-    return yield* read({ workspaceId: request.workspaceId, actionId: actionId.actionId })
+    const actionId = yield* decodeGovernedActionIdempotencyRows(request, rows)
+    return yield* read({ workspaceId: request.workspaceId, actionId })
   })
 
   return { read, readByIdempotencyKey }

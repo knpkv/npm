@@ -2040,8 +2040,14 @@ describe("Control Center API handlers", () => {
         networkAccess: "blocked",
         sandbox: "sbx"
       }
-      const finalContent = ReviewSuggestionPublicationContent.make(
+      const editableContent = ReviewSuggestionPublicationContent.make(
         "Authorize before mutating.\n\n```suggestion\nyield* authorize()\nyield* mutate()\n```"
+      )
+      const publicationFooter = `— ${reviewProfile.label} · head ${
+        subject.headRevision.slice(0, 12)
+      } · operator ${sessionPersonId}`
+      const finalContent = ReviewSuggestionPublicationContent.make(
+        `${editableContent}\n\n${publicationFooter}`
       )
       const preview = new ReviewSuggestionPublicationPreview({
         jobId,
@@ -2057,7 +2063,10 @@ describe("Control Center API handlers", () => {
           line: 42,
           relativeFileVersion: "AFTER"
         },
+        editableContent,
+        editableContentMaximumLength: 10_100 - publicationFooter.length - 2,
         finalContent,
+        publicationFooter,
         replacement: "yield* authorize()\nyield* mutate()",
         connectedIdentity: {
           accountId: "123456789012",
@@ -2117,9 +2126,37 @@ describe("Control Center API handlers", () => {
         sessionMiddlewareLayer,
         handler
       ]))
+      const approverMiddleware = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, approverSession)
+      })
+      const approverHandler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(approverMiddleware),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("not used")
+        }))
+      )
+      const rejected = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        return yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: { jobId, suggestionId, finalContent }
+        }).pipe(Effect.result)
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        approverMiddleware,
+        approverHandler
+      ]))
 
       assert.deepStrictEqual(result.publicationPreview, preview)
       assert.deepStrictEqual(result.publication, published)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ForbiddenApiError")
+      }
       assert.deepStrictEqual(yield* Ref.get(received), [
         {
           workspaceId: session.workspaceId,

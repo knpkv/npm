@@ -351,9 +351,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const governedActionStartupBase = governedActionConfiguration === null
     ? governedActionExecutionStartupLayer(null)
     : governedActionConfiguration.pluginRuntimes === undefined
-    ? governedActionExecutionStartupFromRegistryLayer(governedActionConfiguration.workspaceId).pipe(
-      Layer.provide(firstPartyPluginRuntimeRegistryLayer)
-    )
+    ? firstPartyPluginRuntime
+      ? governedActionExecutionStartupFromRegistryLayer(governedActionConfiguration.workspaceId).pipe(
+        Layer.provide(firstPartyPluginRuntimeRegistryLayer)
+      )
+      : governedActionExecutionStartupLayer(null)
     : governedActionExecutionStartupLayer({
       workspaceId: governedActionConfiguration.workspaceId,
       pluginRuntimes: governedActionConfiguration.pluginRuntimes

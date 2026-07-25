@@ -41,9 +41,11 @@ const REVIEW_PROFILE: ReviewAgentProfile = {
   networkAccess: "blocked",
   sandbox: "sbx"
 }
-const FINAL_CONTENT = ReviewSuggestionPublicationContent.make(
+const EDITABLE_CONTENT = ReviewSuggestionPublicationContent.make(
   "Authorize before mutating.\n\n```suggestion\nyield* authorize()\nyield* mutate()\n```"
 )
+const PUBLICATION_FOOTER = `— ${REVIEW_PROFILE.label} · head ${SUBJECT.headRevision.slice(0, 12)} · operator ${OPERATOR_ID}`
+const FINAL_CONTENT = ReviewSuggestionPublicationContent.make(`${EDITABLE_CONTENT}\n\n${PUBLICATION_FOOTER}`)
 const PREVIEW = new ReviewSuggestionPublicationPreview({
   jobId: JOB_ID,
   suggestionId: SUGGESTION_ID,
@@ -58,7 +60,10 @@ const PREVIEW = new ReviewSuggestionPublicationPreview({
     line: 42,
     relativeFileVersion: "AFTER"
   },
+  editableContent: EDITABLE_CONTENT,
+  editableContentMaximumLength: 10_100 - PUBLICATION_FOOTER.length - 2,
   finalContent: FINAL_CONTENT,
+  publicationFooter: PUBLICATION_FOOTER,
   replacement: "yield* authorize()\nyield* mutate()",
   connectedIdentity: {
     accountId: "123456789012",
@@ -154,6 +159,7 @@ describe("PullRequestReviewPanel", () => {
   it("previews an exact suggestion and requires an editable human confirmation", async () => {
     const onPreview = vi.fn()
     const onPublish = vi.fn()
+    const onCancel = vi.fn()
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
@@ -162,7 +168,7 @@ describe("PullRequestReviewPanel", () => {
         root?.render(
           <PullRequestReviewPanel
             canEnqueue
-            onCancelPublication={() => undefined}
+            onCancelPublication={onCancel}
             onPreviewPublication={onPreview}
             onPublishSuggestion={onPublish}
             onRetry={() => undefined}
@@ -185,6 +191,7 @@ describe("PullRequestReviewPanel", () => {
     await render({ _tag: "preview", preview: PREVIEW })
     await act(async () => vi.dynamicImportSettled())
     expect(host.querySelector("[role=dialog]")).not.toBeNull()
+    expect(host.querySelector("[role=dialog]")?.getAttribute("aria-modal")).toBe("true")
     expect(host.textContent).toContain(PREVIEW.connectedIdentity.arn)
     expect(host.textContent).toContain(`${PREVIEW.anchor.path}:${String(PREVIEW.anchor.line)} · AFTER`)
     expect(host.textContent).toContain(SUBJECT.headRevision)
@@ -203,7 +210,29 @@ describe("PullRequestReviewPanel", () => {
     )
     if (confirm === undefined) throw new Error("Expected explicit publication confirmation")
     await act(async () => confirm.click())
-    expect(onPublish).toHaveBeenCalledWith("Edited operator comment.")
+    expect(onPublish).toHaveBeenCalledWith(`Edited operator comment.\n\n${PUBLICATION_FOOTER}`)
+
+    const dialog = host.querySelector<HTMLElement>("[role=dialog]")
+    if (dialog === null) throw new Error("Expected publication dialog")
+    await act(async () => {
+      confirm.focus()
+      confirm.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Tab"
+        })
+      )
+    })
+    expect(document.activeElement).toBe(textarea)
+    await act(async () => {
+      dialog.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          bubbles: true,
+          key: "Escape"
+        })
+      )
+    })
+    expect(onCancel).toHaveBeenCalledOnce()
   })
 
   it("renders the durable provider receipt after publication", async () => {
@@ -220,7 +249,12 @@ describe("PullRequestReviewPanel", () => {
           onPublishSuggestion={() => undefined}
           onRetry={() => undefined}
           onStart={() => undefined}
-          publication={{ _tag: "published", preview: PREVIEW, publication: PUBLICATION }}
+          publication={{
+            _tag: "published",
+            headSuperseded: false,
+            preview: PREVIEW,
+            publication: PUBLICATION
+          }}
           state={REVIEW_STATE}
         />
       )

@@ -279,8 +279,10 @@
 }
 
 .publicationDialog > header > strong {
-  font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
-    var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+  font-family: var(--rly-type-section-title-font);
+  font-size: var(--rly-type-section-title-size);
+  font-weight: var(--rly-type-section-title-weight);
+  line-height: var(--rly-type-section-title-line-height);
 }
 
 .publicationFacts {

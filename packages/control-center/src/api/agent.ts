@@ -409,10 +409,12 @@ export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
 export type EnqueuePullRequestReviewResponse = typeof EnqueuePullRequestReviewResponse.Type
 
 /** Editable CodeCommit comment content bounded by the provider contract. */
+export const MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH = 10_100
+
 export const ReviewSuggestionPublicationContent = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
-  Schema.isMaxLength(10_100)
+  Schema.isMaxLength(MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH)
 )
 
 /** Decoded final review-comment content. */
@@ -451,7 +453,14 @@ export class ReviewSuggestionPublicationPreview
       line: Schema.Int.check(Schema.isGreaterThan(0)),
       relativeFileVersion: Schema.Literal("AFTER")
     }),
+    editableContent: ReviewSuggestionPublicationContent,
+    editableContentMaximumLength: Schema.Int.check(Schema.isGreaterThan(0)),
     finalContent: ReviewSuggestionPublicationContent,
+    publicationFooter: Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(4_096)
+    ),
     replacement: Schema.NullOr(
       Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_000))
     ),

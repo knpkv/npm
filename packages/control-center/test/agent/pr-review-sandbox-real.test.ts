@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Stream } from "effect"
+import { Config, Effect, FileSystem, Layer, Path, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -12,7 +12,7 @@ import {
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 
-const gitEnvironment: Readonly<Record<string, string>> = {
+const gitEnvironment = (path: string): Readonly<Record<string, string>> => ({
   GIT_AUTHOR_EMAIL: "review-sbx-smoke@example.invalid",
   GIT_AUTHOR_NAME: "Review sbx smoke",
   GIT_COMMITTER_EMAIL: "review-sbx-smoke@example.invalid",
@@ -22,10 +22,13 @@ const gitEnvironment: Readonly<Record<string, string>> = {
   HOME: "/nonexistent",
   LANG: "C",
   LC_ALL: "C",
-  PATH: "/usr/bin:/bin"
-}
+  PATH: path
+})
 
-const runGit = (args: ReadonlyArray<string>): Effect.Effect<
+const runGit = (
+  args: ReadonlyArray<string>,
+  executablePath: string
+): Effect.Effect<
   string,
   PlatformError.PlatformError,
   ChildProcessSpawner.ChildProcessSpawner
@@ -33,7 +36,7 @@ const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   Effect.scoped(
     Effect.gen(function*() {
       const handle = yield* ChildProcess.make("git", args, {
-        env: gitEnvironment,
+        env: gitEnvironment(executablePath),
         extendEnv: false,
         stderr: "pipe",
         stdin: "ignore",
@@ -54,17 +57,24 @@ it.effect("runs the review session through the installed sbx runtime", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
+      const executablePath = yield* Config.string("PATH")
       const sourceRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "control-center-real-sbx-"
       })
-      yield* runGit(["-C", sourceRoot, "init", "--quiet"])
+      yield* runGit(["-C", sourceRoot, "init", "--quiet"], executablePath)
       yield* fileSystem.writeFileString(
         path.join(sourceRoot, "README.md"),
         "# Review sandbox smoke\n"
       )
-      yield* runGit(["-C", sourceRoot, "add", "--", "README.md"])
-      yield* runGit(["-C", sourceRoot, "commit", "--quiet", "-m", "fixture"])
-      const headRevision = yield* runGit(["-C", sourceRoot, "rev-parse", "HEAD"])
+      yield* runGit(["-C", sourceRoot, "add", "--", "README.md"], executablePath)
+      yield* runGit(
+        ["-C", sourceRoot, "commit", "--quiet", "-m", "fixture"],
+        executablePath
+      )
+      const headRevision = yield* runGit(
+        ["-C", sourceRoot, "rev-parse", "HEAD"],
+        executablePath
+      )
       const sourceLayer = Layer.succeed(
         PrReviewSourceWorkspace,
         PrReviewSourceWorkspace.of({

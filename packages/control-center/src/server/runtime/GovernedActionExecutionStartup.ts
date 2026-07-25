@@ -96,6 +96,13 @@ export const governedActionSubmissionLayer = Layer.effect(
         execution._tag === "ready"
           ? execution.advance(reference).pipe(
             Effect.asVoid,
+            Effect.tapError((cause) =>
+              Effect.logError("Governed action submission failed", {
+                actionId: reference.actionId,
+                cause,
+                workspaceId: reference.workspaceId
+              })
+            ),
             Effect.catch(() => Effect.fail(submissionUnavailable()))
           )
           : Effect.fail(submissionUnavailable())

@@ -1,5 +1,5 @@
 import { Button, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useEffect, useState } from "react"
+import { type KeyboardEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
 import type { PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
@@ -15,6 +15,7 @@ export const ReviewSuggestionPublicationSurface = ({
   readonly publication: PullRequestReviewPublicationState
 }): ReactElement | null => {
   const [content, setContent] = useState("")
+  const dialogRef = useRef<HTMLDivElement>(null)
   const preview =
     publication._tag === "preview" || publication._tag === "publishing" || publication._tag === "published"
       ? publication.preview
@@ -22,8 +23,39 @@ export const ReviewSuggestionPublicationSurface = ({
         ? publication.preview
         : null
   useEffect(() => {
-    if (preview !== null) setContent(preview.finalContent)
+    if (preview !== null) setContent(preview.editableContent)
   }, [preview])
+  useEffect(() => {
+    const previouslyFocused = document.activeElement
+    return () => {
+      if (previouslyFocused !== null && "focus" in previouslyFocused && typeof previouslyFocused.focus === "function") {
+        previouslyFocused.focus()
+      }
+    }
+  }, [])
+
+  const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === "Escape" && publication._tag !== "publishing") {
+      event.preventDefault()
+      onCancel()
+      return
+    }
+    if (event.key !== "Tab") return
+    const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+    )
+    if (focusable === undefined || focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (first === undefined || last === undefined) return
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault()
+      last.focus()
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
 
   if (publication._tag === "published") {
     return (
@@ -37,6 +69,9 @@ export const ReviewSuggestionPublicationSurface = ({
         <span>
           {publication.publication.proposingAgent.label} · operator {publication.publication.publishingOperator}
         </span>
+        {publication.headSuperseded ? (
+          <span>The comment was published against a head that is no longer current.</span>
+        ) : null}
       </div>
     )
   }
@@ -50,7 +85,10 @@ export const ReviewSuggestionPublicationSurface = ({
       <div
         aria-describedby="review-publication-context"
         aria-labelledby="review-publication-title"
+        aria-modal="true"
         className={styles.publicationDialog}
+        onKeyDown={handleDialogKeyDown}
+        ref={dialogRef}
         role="dialog"
       >
         <header>
@@ -82,14 +120,17 @@ export const ReviewSuggestionPublicationSurface = ({
         </dl>
         <label className={styles.publicationEditor}>
           <span>Comment and replacement suggestion</span>
-          <textarea autoFocus onChange={(event) => setContent(event.currentTarget.value)} rows={12} value={content} />
+          <textarea
+            autoFocus
+            maxLength={preview.editableContentMaximumLength}
+            onChange={(event) => setContent(event.currentTarget.value)}
+            rows={12}
+            value={content}
+          />
         </label>
         <div className={styles.publicationFooter}>
           <small>Required publication footer</small>
-          <code>
-            — {preview.proposingAgent.label} · head {preview.suggestionRevision.reviewedHead.slice(0, 12)} · operator{" "}
-            {preview.publishingOperator}
-          </code>
+          <code>{preview.publicationFooter}</code>
         </div>
         {publication._tag === "failed" ? (
           <span role="alert">
@@ -102,7 +143,7 @@ export const ReviewSuggestionPublicationSurface = ({
           </Button>
           <Button
             disabled={publication._tag === "publishing" || content.trim().length === 0}
-            onClick={() => onPublish(content)}
+            onClick={() => onPublish(`${content}\n\n${preview.publicationFooter}`)}
           >
             {publication._tag === "publishing" ? "Publishing…" : "Post to CodeCommit"}
           </Button>

@@ -59,6 +59,7 @@ export type PullRequestReviewPublicationState =
   }
   | {
     readonly _tag: "published"
+    readonly headSuperseded: boolean
     readonly preview: ReviewSuggestionPublicationPreview
     readonly publication: PublishedReviewComment
   }
@@ -372,11 +373,12 @@ export const usePullRequestReview = (
     transport.publishSuggestion(entityId, selection, finalContent, abort.signal).then(
       (published) => {
         if (abort.signal.aborted) return
-        setPublication(
-          published.suggestionRevision.reviewedHead === current.headRevision
-            ? { _tag: "published", preview, publication: published }
-            : { _tag: "failed", preview, selection }
-        )
+        setPublication({
+          _tag: "published",
+          headSuperseded: published.suggestionRevision.reviewedHead !== current.headRevision,
+          preview,
+          publication: published
+        })
       },
       (failure) => {
         if (abort.signal.aborted) return

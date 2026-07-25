@@ -35,11 +35,13 @@ import {
   DeliveryGraphInspection,
   PullRequestReviews
 } from "../../src/server/api/ApplicationServices.js"
+import { reviewPublicationSessionIsAuthorized } from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import {
   type PublishReviewSuggestionCommand,
   ReviewSuggestionPublicationGateway
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
+import { SessionSummary } from "../../src/server/auth/models.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
@@ -361,6 +363,52 @@ const withRealService = <Success, Failure>(
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("pull request reviews", () => {
+  it("rejects non-owner, expired, revoked, and cross-workspace publication sessions", () => {
+    const checkedAt = Schema.decodeUnknownSync(UtcTimestamp)(
+      "2026-07-24T15:30:00.000Z"
+    )
+    const session = Schema.decodeUnknownSync(SessionSummary)({
+      sessionId: SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+      actor: { _tag: "human", personId: OPERATOR_ID },
+      permission: "workspace-owner",
+      createdAt: STARTED_AT,
+      lastSeenAt: STARTED_AT,
+      idleExpiresAt: "2026-07-24T16:00:00.000Z",
+      absoluteExpiresAt: "2026-08-24T15:00:00.000Z",
+      revokedAt: null
+    })
+
+    assert.isTrue(
+      reviewPublicationSessionIsAuthorized(session, WORKSPACE_ID, checkedAt)
+    )
+    assert.isFalse(reviewPublicationSessionIsAuthorized(
+      { ...session, permission: "workspace-approver" },
+      WORKSPACE_ID,
+      checkedAt
+    ))
+    assert.isFalse(reviewPublicationSessionIsAuthorized(
+      { ...session, idleExpiresAt: checkedAt },
+      WORKSPACE_ID,
+      checkedAt
+    ))
+    assert.isFalse(reviewPublicationSessionIsAuthorized(
+      { ...session, absoluteExpiresAt: checkedAt },
+      WORKSPACE_ID,
+      checkedAt
+    ))
+    assert.isFalse(reviewPublicationSessionIsAuthorized(
+      { ...session, revokedAt: checkedAt },
+      WORKSPACE_ID,
+      checkedAt
+    ))
+    assert.isFalse(reviewPublicationSessionIsAuthorized(
+      session,
+      WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000499"),
+      checkedAt
+    ))
+  })
+
   it.effect("derives the immutable subject and release server-side before enqueue", () =>
     withService((service, enqueueInput) =>
       Effect.gen(function*() {
@@ -533,10 +581,14 @@ describe("pull request reviews", () => {
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
           assert.strictEqual(preview.replacement, "yield* authorize()\nyield* mutate()")
           assert.include(preview.finalContent, "```suggestion")
+          assert.include(preview.finalContent, preview.publicationFooter)
           assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
 
-          const editedContent = ReviewSuggestionPublicationContent.make(
+          const editedBody = ReviewSuggestionPublicationContent.make(
             "Authorization must run first.\n\n```suggestion\nyield* authorize()\nyield* mutate()\n```"
+          )
+          const editedContent = ReviewSuggestionPublicationContent.make(
+            `${editedBody}\n\n${preview.publicationFooter}`
           )
           const published = yield* service.publishSuggestion({
             workspaceId: WORKSPACE_ID,
@@ -560,7 +612,7 @@ describe("pull request reviews", () => {
           })
 
           assert.strictEqual(published.publicationId, PUBLICATION_ID)
-          assert.include(published.content, editedContent)
+          assert.include(published.content, editedBody)
           assert.include(published.content, REVIEW_PROFILE.label)
           assert.strictEqual(published.receipt.status, "succeeded")
           const commands = yield* Ref.get(publicationCommands)
@@ -602,6 +654,9 @@ describe("pull request reviews", () => {
             }
           }).pipe(Effect.result)
           assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.isTrue(Schema.is(ApplicationInvalidRequest)(result.failure))
+          }
           assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
         }),
       registry,

@@ -21,7 +21,11 @@ import { CodeCommitReadClient, type CodeCommitReadClientService } from "../src/R
 import { CodeCommitReviewConflictError } from "../src/ReviewClient/errors.js"
 import { CodeCommitReviewAction } from "../src/ReviewClient/models.js"
 import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
-import { CodeCommitReviewProvider, type CodeCommitReviewProviderService } from "../src/ReviewClient/ReviewProvider.js"
+import {
+  CodeCommitReviewProvider,
+  type CodeCommitReviewProviderService,
+  makePostCommentForPullRequestRequest
+} from "../src/ReviewClient/ReviewProvider.js"
 
 const account = {
   profile: Schema.decodeUnknownSync(AwsProfileName)("production"),
@@ -138,6 +142,16 @@ describe("CodeCommitReviewClient", () => {
       assert.strictEqual(inlineCommentAction.location.filePosition, 42)
       assert.strictEqual(inlineCommentAction.location.relativeFileVersion, "AFTER")
     }
+  })
+
+  it("maps inline location only for an inline comment provider request", () => {
+    const inline = makePostCommentForPullRequestRequest(inlineCommentAction)
+    const nonInline = makePostCommentForPullRequestRequest(commentAction)
+
+    assert.strictEqual(inline.location.filePath, "src/authorization.ts")
+    assert.strictEqual(inline.location.filePosition, 42)
+    assert.strictEqual(inline.location.relativeFileVersion, "AFTER")
+    assert.notProperty(nonInline, "location")
   })
 
   it.effect("blocks a stale immutable revision before any provider mutation", () =>

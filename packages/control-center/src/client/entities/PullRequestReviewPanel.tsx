@@ -217,7 +217,10 @@ export const PullRequestReviewPanel = ({
                 )}
                 {canEnqueue ? (
                   <Button
-                    disabled={publication._tag === "previewing"}
+                    disabled={
+                      publication._tag === "previewing" &&
+                      publication.selection.suggestionId === suggestion.suggestionId
+                    }
                     onClick={() =>
                       onPreviewPublication({
                         jobId: review.jobId,
