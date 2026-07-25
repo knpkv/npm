@@ -1,0 +1,3 @@
+# Test agent review through its public seams
+
+Agent review is complete only when its observable interfaces pass: pure suggestion lifecycle and reconciliation state-machine tests; scripted fake-model tests for the `@knpkv/ai-runtime` tool loop covering tool calls, schema repair, output bounds, cancellation, and timeouts; a credential-free real Docker integration test over a local fixture repository; CodeCommit adapter contract tests for exact-head checkout and comment publication; and a browser flow covering launch, inline suggestion, edit, revalidation, publication preview, staleness, and re-review. An opt-in smoke test exercises the real authenticated local Codex CLI without making it a credential-dependent default gate.
