@@ -175,7 +175,9 @@ const PublicationHarness = ({
         {controller.publication._tag}
         {controller.publication._tag === "published"
           ? `:${controller.publication.headSuperseded ? "superseded" : "current"}:${controller.publication.publication.receipt.providerOperationId}`
-          : ""}
+          : controller.publication._tag === "receipt-conflict"
+            ? `:${controller.publication.publication.receipt.providerOperationId}`
+            : ""}
       </span>
       <button
         data-preview
@@ -204,7 +206,7 @@ const PublicationHarness = ({
 }
 
 describe("usePullRequestReview", () => {
-  it("gates publication, preserves a superseded-head receipt, and resets on scope change", async () => {
+  it("gates publication, quarantines a mismatched receipt, and resets on scope change", async () => {
     const footer = `— ${REVIEW_PROFILE.label} · head ${HEAD_A.slice(0, 12)} · operator ${OPERATOR_ID}`
     const editableContent = ReviewSuggestionPublicationContent.make("Authorize before mutating.")
     const finalContent = ReviewSuggestionPublicationContent.make(`${editableContent}\n\n${footer}`)
@@ -294,7 +296,7 @@ describe("usePullRequestReview", () => {
       preview.authorityBinding,
       expect.any(AbortSignal)
     )
-    expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("receipt-conflict:comment-42")
 
     await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
     expect(host.querySelector("[data-publication]")?.textContent).toBe("idle")

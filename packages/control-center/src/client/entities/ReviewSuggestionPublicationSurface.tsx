@@ -16,23 +16,26 @@ export const ReviewSuggestionPublicationSurface = ({
 }): ReactElement | null => {
   const [content, setContent] = useState("")
   const dialogRef = useRef<HTMLDivElement>(null)
+  const returnFocusRef = useRef(document.activeElement)
   const preview =
     publication._tag === "preview" || publication._tag === "publishing" || publication._tag === "published"
       ? publication.preview
       : publication._tag === "failed"
         ? publication.preview
         : null
+  const dialogIsOpen = preview !== null && publication._tag !== "published"
   useEffect(() => {
     if (preview !== null) setContent(preview.editableContent)
   }, [preview])
   useEffect(() => {
-    const previouslyFocused = document.activeElement
+    if (!dialogIsOpen) return
     return () => {
-      if (previouslyFocused !== null && "focus" in previouslyFocused && typeof previouslyFocused.focus === "function") {
-        previouslyFocused.focus()
+      const returnFocus = returnFocusRef.current
+      if (returnFocus !== null && "focus" in returnFocus && typeof returnFocus.focus === "function") {
+        returnFocus.focus()
       }
     }
-  }, [])
+  }, [dialogIsOpen])
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape" && publication._tag !== "publishing") {
@@ -57,10 +60,13 @@ export const ReviewSuggestionPublicationSurface = ({
     }
   }
 
-  if (publication._tag === "published") {
+  if (publication._tag === "published" || publication._tag === "receipt-conflict") {
+    const receiptConflict = publication._tag === "receipt-conflict"
     return (
       <div className={styles.publishedComment} role="status">
-        <small>Published Review Comment</small>
+        <small>
+          {receiptConflict ? "Published comment · receipt verification conflict" : "Published Review Comment"}
+        </small>
         <strong>
           {publication.publication.anchor.path}:{publication.publication.anchor.line}
         </strong>
@@ -69,7 +75,11 @@ export const ReviewSuggestionPublicationSurface = ({
         <span>
           {publication.publication.proposingAgent.label} · operator {publication.publication.publishingOperator}
         </span>
-        {publication.headSuperseded ? (
+        {receiptConflict ? (
+          <span role="alert">
+            The provider receipt did not match the confirmed review revision. Do not retry automatically.
+          </span>
+        ) : publication.headSuperseded ? (
           <span>The comment was published against a head that is no longer current.</span>
         ) : null}
       </div>

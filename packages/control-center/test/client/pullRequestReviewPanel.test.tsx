@@ -186,7 +186,10 @@ describe("PullRequestReviewPanel", () => {
       ({ textContent }) => textContent === "Post comment"
     )
     if (postComment === undefined) throw new Error("Expected a publication preview action")
-    await act(async () => postComment.click())
+    await act(async () => {
+      postComment.focus()
+      postComment.click()
+    })
     expect(onPreview).toHaveBeenCalledWith({ jobId: JOB_ID, suggestionId: SUGGESTION_ID })
     expect(onPublish).not.toHaveBeenCalled()
 
@@ -235,6 +238,15 @@ describe("PullRequestReviewPanel", () => {
       )
     })
     expect(onCancel).toHaveBeenCalledOnce()
+
+    await render({
+      _tag: "published",
+      headSuperseded: false,
+      preview: PREVIEW,
+      publication: PUBLICATION
+    })
+    await act(async () => vi.dynamicImportSettled())
+    expect(document.activeElement).toBe(postComment)
   })
 
   it("renders the durable provider receipt after publication", async () => {

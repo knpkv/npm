@@ -76,6 +76,13 @@ const inlineCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   }
 })
 
+const plainCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "comment",
+  target: commentAction.target,
+  content: "Preserve the authorization binding.",
+  clientRequestToken: "3".repeat(64)
+})
+
 const baseReadClient = (
   overrides: Partial<CodeCommitReadClientService> = {}
 ): CodeCommitReadClientService => ({
@@ -144,14 +151,16 @@ describe("CodeCommitReviewClient", () => {
     }
   })
 
-  it("maps inline location only for an inline comment provider request", () => {
+  it("maps location only for an inline comment provider request", () => {
     const inline = makePostCommentForPullRequestRequest(inlineCommentAction)
-    const nonInline = makePostCommentForPullRequestRequest(commentAction)
+    const plain = makePostCommentForPullRequestRequest(plainCommentAction)
+    const reviewState = makePostCommentForPullRequestRequest(commentAction)
 
     assert.strictEqual(inline.location.filePath, "src/authorization.ts")
     assert.strictEqual(inline.location.filePosition, 42)
     assert.strictEqual(inline.location.relativeFileVersion, "AFTER")
-    assert.notProperty(nonInline, "location")
+    assert.notProperty(plain, "location")
+    assert.notProperty(reviewState, "location")
   })
 
   it.effect("blocks a stale immutable revision before any provider mutation", () =>

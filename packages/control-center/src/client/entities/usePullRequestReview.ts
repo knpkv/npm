@@ -64,6 +64,11 @@ export type PullRequestReviewPublicationState =
     readonly publication: PublishedReviewComment
   }
   | {
+    readonly _tag: "receipt-conflict"
+    readonly preview: ReviewSuggestionPublicationPreview
+    readonly publication: PublishedReviewComment
+  }
+  | {
     readonly _tag: "failed"
     readonly preview: ReviewSuggestionPublicationPreview | null
     readonly selection: ReviewSuggestionPublicationSelection
@@ -380,12 +385,18 @@ export const usePullRequestReview = (
     ).then(
       (published) => {
         if (abort.signal.aborted) return
-        setPublication({
-          _tag: "published",
-          headSuperseded: published.suggestionRevision.reviewedHead !== current.headRevision,
-          preview,
-          publication: published
-        })
+        setPublication(
+          published.suggestionRevision.reviewedHead ===
+              preview.suggestionRevision.reviewedHead
+            ? {
+              _tag: "published",
+              headSuperseded: published.suggestionRevision.reviewedHead !==
+                current.headRevision,
+              preview,
+              publication: published
+            }
+            : { _tag: "receipt-conflict", preview, publication: published }
+        )
       },
       (failure) => {
         if (abort.signal.aborted) return
