@@ -337,6 +337,12 @@ export const WorkspacePullRequestDiff = ({
       }),
     [entries, suggestions]
   )
+  const unattachedSuggestionCount = useMemo(
+    () =>
+      suggestions.filter((suggestion) => !entries.some(({ path }) => String(path) === String(suggestion.evidence.path)))
+        .length,
+    [entries, suggestions]
+  )
   const findings = useMemo(
     () =>
       suggestions.map((suggestion) => ({
@@ -356,72 +362,81 @@ export const WorkspacePullRequestDiff = ({
   )
 
   return (
-    <DiffWorkbench
-      emptyFindings="No validated review suggestions are attached to this revision."
-      findings={findings}
-      header={
-        <DiffHeader
-          findingFilter="all"
-          heading={heading}
-          indexedCount={files.length}
-          isWrapped={isWrapped}
-          layout={layout}
-          onFindingFilterChange={() => undefined}
-          onLayoutChange={setLayout}
-          onWrapChange={setIsWrapped}
-          totalCount={files.length}
-          {...(selectedEntry === undefined ? {} : { selectedFileLabel: selectedEntry.path })}
-        />
-      }
-      inventory={
-        <DiffFileTree
-          data={inventory}
-          heading="Complete file inventory"
-          onSelectedFileChange={(fileId) => {
-            if (contentStates.get(fileId)?.state === "error") {
-              setContentStates((current) => {
-                const next = new Map(current)
-                next.delete(fileId)
-                return next
-              })
-              setContentRetryKey((current) => current + 1)
-            }
-            setSelectedFileId(fileId)
-          }}
-          {...(selectedFileId === undefined ? {} : { selectedFileId })}
-        />
-      }
-      label={`Complete diff for ${heading}`}
-      onShowAllFiles={() => setSelectedFileId(undefined)}
-      scope={
-        selectedEntry === undefined
-          ? { label: "All changed files", mode: "all-files" }
-          : { fileId: selectedEntry.anchor, label: selectedEntry.path, mode: "selected-file" }
-      }
-      statusNotice={
-        selectedEntry === undefined
-          ? "Select a supported file to load its content."
-          : selectedText === undefined
-            ? contentStates.get(selectedEntry.anchor)?.state === "loading"
-              ? "Loading this file only."
-              : "Content is not rendered for this file."
-            : undefined
-      }
-      viewer={
-        selectedEntry === undefined || selectedText === undefined ? (
-          "Select a supported text file to render its change."
-        ) : (
-          <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-            <BoundedDiffCodeView
-              annotations={annotations}
-              key={selectedEntry.anchor}
-              initialItems={selectedCodeItems}
-              mode={layout}
-              wrap={isWrapped}
-            />
-          </Suspense>
-        )
-      }
-    />
+    <>
+      {unattachedSuggestionCount === 0 ? null : (
+        <p role="status">
+          {unattachedSuggestionCount} validated review{" "}
+          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the evidence path
+          is absent from this diff inventory.
+        </p>
+      )}
+      <DiffWorkbench
+        emptyFindings="No validated review suggestions are attached to this revision."
+        findings={findings}
+        header={
+          <DiffHeader
+            findingFilter="all"
+            heading={heading}
+            indexedCount={files.length}
+            isWrapped={isWrapped}
+            layout={layout}
+            onFindingFilterChange={() => undefined}
+            onLayoutChange={setLayout}
+            onWrapChange={setIsWrapped}
+            totalCount={files.length}
+            {...(selectedEntry === undefined ? {} : { selectedFileLabel: selectedEntry.path })}
+          />
+        }
+        inventory={
+          <DiffFileTree
+            data={inventory}
+            heading="Complete file inventory"
+            onSelectedFileChange={(fileId) => {
+              if (contentStates.get(fileId)?.state === "error") {
+                setContentStates((current) => {
+                  const next = new Map(current)
+                  next.delete(fileId)
+                  return next
+                })
+                setContentRetryKey((current) => current + 1)
+              }
+              setSelectedFileId(fileId)
+            }}
+            {...(selectedFileId === undefined ? {} : { selectedFileId })}
+          />
+        }
+        label={`Complete diff for ${heading}`}
+        onShowAllFiles={() => setSelectedFileId(undefined)}
+        scope={
+          selectedEntry === undefined
+            ? { label: "All changed files", mode: "all-files" }
+            : { fileId: selectedEntry.anchor, label: selectedEntry.path, mode: "selected-file" }
+        }
+        statusNotice={
+          selectedEntry === undefined
+            ? "Select a supported file to load its content."
+            : selectedText === undefined
+              ? contentStates.get(selectedEntry.anchor)?.state === "loading"
+                ? "Loading this file only."
+                : "Content is not rendered for this file."
+              : undefined
+        }
+        viewer={
+          selectedEntry === undefined || selectedText === undefined ? (
+            "Select a supported text file to render its change."
+          ) : (
+            <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
+              <BoundedDiffCodeView
+                annotations={annotations}
+                key={selectedEntry.anchor}
+                initialItems={selectedCodeItems}
+                mode={layout}
+                wrap={isWrapped}
+              />
+            </Suspense>
+          )
+        }
+      />
+    </>
   )
 }

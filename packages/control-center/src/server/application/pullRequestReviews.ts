@@ -207,14 +207,16 @@ const makePullRequestReviews = Effect.gen(function*() {
       }).pipe(Effect.mapError(unavailable))
       const catalog = yield* runtimes.catalog()
       const reviewProfile = catalog.providers.find(
-        ({ providerId, reviewProfile }) =>
-          providerId === input.request.providerId &&
-          reviewProfile?.profileId === input.request.reviewProfileId
+        (provider) =>
+          String(provider.providerId) === String(providerId) &&
+          provider.reviewProfile?.profileId === input.request.reviewProfileId
       )?.reviewProfile
+      if (reviewProfile === undefined) {
+        return yield* new ApplicationInvalidRequest()
+      }
       if (
         selected.filesystemAccess !== "none" ||
-        selected.languageModel === undefined ||
-        reviewProfile === undefined
+        selected.languageModel === undefined
       ) return yield* unavailable()
 
       const jobId = yield* cryptoService.randomUUIDv7.pipe(

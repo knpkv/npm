@@ -336,4 +336,30 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[aria-label='P2 review suggestion with high confidence']")).not.toBeNull()
     expect(host.querySelectorAll("[data-control-center-diff-layout]")).toHaveLength(0)
   })
+
+  it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: []
+      }),
+      content: () => Promise.reject(new Error("no inventory entry"))
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff heading="PR 184" scope={scope} suggestions={[suggestion]} transport={transport} />
+      )
+      await Promise.resolve()
+    })
+
+    expect(host.querySelector("[role='status']")?.textContent).toContain(
+      "1 validated review suggestion is not attached"
+    )
+    expect(host.textContent).toContain("P2 · The answer changed without updating its invariant.")
+  })
 })

@@ -3,7 +3,10 @@ import { Deferred, Effect, Layer } from "effect"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { AgentJobWorker, type AgentJobWorkerRunResult } from "../../src/server/agent/AgentJobWorker.js"
-import { PrReviewSandboxSessions } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
+import {
+  PrReviewSandboxSessionError,
+  PrReviewSandboxSessions
+} from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
   PrReviewWorkerRunning,
   PrReviewWorkerStartup,
@@ -50,5 +53,46 @@ describe("PR review worker startup", () => {
 
       assert.instanceOf(running, PrReviewWorkerRunning)
       assert.strictEqual(running.workspaceId, WORKSPACE_ID)
+    }).pipe(Effect.scoped))
+
+  it.effect("starts the worker when stale-sandbox reconciliation is unavailable", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const started = yield* Deferred.make<void>()
+      const worker = AgentJobWorker.of({
+        runOnce: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.as({ _tag: "idle" } satisfies AgentJobWorkerRunResult)
+          )
+      })
+      const sandboxes = PrReviewSandboxSessions.of({
+        withSession: () => Effect.die("not used"),
+        reconcile: () =>
+          Effect.fail(
+            new PrReviewSandboxSessionError({
+              reason: "sandbox-unavailable"
+            })
+          )
+      })
+      const startup = prReviewWorkerStartupLayer({
+        workspaceId: WORKSPACE_ID,
+        idlePollInterval: "1 hour"
+      }).pipe(
+        Layer.provide(Layer.mergeAll(
+          Layer.succeed(AgentJobWorker, worker),
+          Layer.succeed(PrReviewSandboxSessions, sandboxes),
+          Layer.succeed(ServerLifecycle, lifecycle)
+        ))
+      )
+
+      const running = yield* Effect.gen(function*() {
+        const state = yield* PrReviewWorkerStartup
+        yield* Deferred.await(started)
+        yield* lifecycle.beginDrain
+        yield* lifecycle.awaitWorkDrained
+        return state
+      }).pipe(Effect.provide(startup))
+
+      assert.instanceOf(running, PrReviewWorkerRunning)
     }).pipe(Effect.scoped))
 })

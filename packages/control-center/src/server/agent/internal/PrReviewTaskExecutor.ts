@@ -21,10 +21,12 @@ import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import {
+  MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewCompletion,
   PrReviewReport,
   type PrReviewSubject,
@@ -32,7 +34,7 @@ import {
   type PrReviewSuggestionDraft as PrReviewSuggestionDraftType,
   PrReviewSuggestionId
 } from "../../../domain/prReview.js"
-import type { ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
+import type { AgentJobInputError, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import {
   type PrReviewSandboxSession,
@@ -51,6 +53,7 @@ const ModelReviewReport = Schema.Struct({
 interface ReviewOutputAccumulator {
   readonly completed: Extract<AgentRuntimeEvent, { readonly _tag: "completed" }> | null
   readonly output: string
+  readonly outputBytes: number
 }
 
 interface AddedLineInterval {
@@ -78,6 +81,14 @@ const runtimeFailure = (
     })
     : providerFailure(providerId, "protocol", "PR review provider violated the runtime protocol.", false)
 
+const executionFailure = (
+  providerId: ClaimedAgentJob["providerId"],
+  failure: AgentRuntimeError | AgentJobInputError
+): AgentProviderError | AgentJobInputError =>
+  failure._tag === "AgentJobInputError"
+    ? failure
+    : runtimeFailure(providerId, failure)
+
 const sandboxFailure = (
   providerId: ClaimedAgentJob["providerId"],
   failure: typeof PrReviewSandboxSessionError.Type
@@ -104,6 +115,7 @@ const utf8Bytes = (
   )
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
+const textEncoder = new TextEncoder()
 
 const addedLineIntervals = (diff: string): ReadonlyArray<AddedLineInterval> => {
   const intervals = new Array<AddedLineInterval>()
@@ -153,8 +165,8 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     )
   }
   const source = yield* session.runCommand(
-    `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p' < ` +
-      `${shellQuote(path)}`
+    `git show ${shellQuote(`${session.headRevision}:${path}`)} | ` +
+      `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
   if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifactId !== null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion source evidence was unavailable.", false)
@@ -206,7 +218,10 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   cryptoService: Crypto.Crypto,
   claim: ClaimedAgentJob,
   session: PrReviewSandboxSession,
-  untrustedOutput: string
+  untrustedOutput: string,
+  onActivity: (
+    event: AgentRuntimeEvent
+  ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
 ) {
   const modelReport = yield* Schema.decodeUnknownEffect(
     Schema.fromJsonString(ModelReviewReport),
@@ -220,19 +235,39 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     return yield* providerFailure(claim.providerId, "protocol", "PR review task context was unavailable.", false)
   }
   const subject = claim.context.task.subject
-  const suggestions = yield* Effect.forEach(
-    modelReport.suggestions,
-    (suggestion) =>
-      exactEvidence(claim.providerId, session, suggestion).pipe(
-        Effect.andThen(stableSuggestionId(
-          cryptoService,
-          claim.providerId,
-          subject,
-          suggestion
-        )),
-        Effect.map((suggestionId) => ({ ...suggestion, suggestionId }))
-      )
-  )
+  const suggestions = new Array<(typeof PrReviewReport.Type)["suggestions"][number]>()
+  const seenSuggestionIds = new Set<string>()
+  for (const suggestion of modelReport.suggestions) {
+    const evidence = yield* exactEvidence(claim.providerId, session, suggestion).pipe(Effect.result)
+    if (Result.isFailure(evidence)) {
+      yield* onActivity({
+        _tag: "output",
+        channel: "progress",
+        text: `Rejected unverifiable suggestion at ${suggestion.evidence.path}:${
+          String(suggestion.evidence.startLine)
+        }-${String(suggestion.evidence.endLine)}.`
+      }).pipe(Effect.mapError((failure) => executionFailure(claim.providerId, failure)))
+      continue
+    }
+    const suggestionId = yield* stableSuggestionId(
+      cryptoService,
+      claim.providerId,
+      subject,
+      suggestion
+    )
+    if (seenSuggestionIds.has(suggestionId)) {
+      yield* onActivity({
+        _tag: "output",
+        channel: "progress",
+        text: `Dropped duplicate validated suggestion at ${suggestion.evidence.path}:${
+          String(suggestion.evidence.startLine)
+        }-${String(suggestion.evidence.endLine)}.`
+      }).pipe(Effect.mapError((failure) => executionFailure(claim.providerId, failure)))
+      continue
+    }
+    seenSuggestionIds.add(suggestionId)
+    suggestions.push({ ...suggestion, suggestionId })
+  }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
     schemaVersion: 2,
     subject,
@@ -248,22 +283,39 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
 const collectReviewOutput = (
   claim: ClaimedAgentJob,
   events: Stream.Stream<AgentRuntimeEvent, AgentRuntimeError>,
-  onActivity: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
-): Effect.Effect<string, AgentProviderError> =>
+  onActivity: (
+    event: AgentRuntimeEvent
+  ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+): Effect.Effect<string, AgentProviderError | AgentJobInputError> =>
   events.pipe(
     Stream.runFoldEffect(
-      (): ReviewOutputAccumulator => ({ completed: null, output: "" }),
+      (): ReviewOutputAccumulator => ({ completed: null, output: "", outputBytes: 0 }),
       (accumulator, event) => {
         if (event._tag === "completed") {
           return Effect.succeed({ ...accumulator, completed: event })
         }
         if (event._tag === "output" && event.channel === "assistant") {
-          return Effect.succeed({ ...accumulator, output: accumulator.output + event.text })
+          const outputBytes = accumulator.outputBytes + textEncoder.encode(event.text).byteLength
+          if (outputBytes > MAXIMUM_PR_REVIEW_REPORT_BYTES) {
+            return Effect.fail(
+              providerFailure(
+                claim.providerId,
+                "protocol",
+                "PR review provider output exceeded the structured result limit.",
+                false
+              )
+            )
+          }
+          return Effect.succeed({
+            ...accumulator,
+            output: accumulator.output + event.text,
+            outputBytes
+          })
         }
         return onActivity(event).pipe(Effect.as(accumulator))
       }
     ),
-    Effect.mapError((failure) => runtimeFailure(claim.providerId, failure)),
+    Effect.mapError((failure) => executionFailure(claim.providerId, failure)),
     Effect.flatMap((accumulator) => {
       if (accumulator.completed?.outcome !== "success") {
         return Effect.fail(
@@ -322,12 +374,13 @@ const makeExecutor = Effect.gen(function*() {
       })
       const catalog = yield* runtimes.catalog()
       const persistedProfile = claim.context.task.reviewProfile
+      const languageModel = selected.languageModel
       const profile = catalog.providers.find(
         ({ providerId }) => String(providerId) === String(claim.providerId)
       )?.reviewProfile
       if (
         selected.filesystemAccess !== "none" ||
-        selected.languageModel === undefined ||
+        languageModel === undefined ||
         profile === undefined ||
         profile.profileId !== persistedProfile.profileId ||
         profile.label !== persistedProfile.label ||
@@ -368,15 +421,6 @@ const makeExecutor = Effect.gen(function*() {
             const toolkit = yield* PrReviewSandboxTools.pipe(
               Effect.provide(prReviewSandboxToolsLayer(session))
             )
-            const languageModel = selected.languageModel
-            if (languageModel === undefined) {
-              return yield* providerFailure(
-                claim.providerId,
-                "configuration",
-                "The selected Review Agent Profile has no Effect AI model.",
-                false
-              )
-            }
             const adapter = makeToolAgentAdapter(() =>
               runToolAgent({
                 budget: persistedProfile.budgetMillis,
@@ -401,7 +445,7 @@ const makeExecutor = Effect.gen(function*() {
               continuation: { _tag: "fresh" }
             }
             const output = yield* collectReviewOutput(claim, adapter.run(request), onActivity)
-            return yield* anchorReport(cryptoService, claim, session, output)
+            return yield* anchorReport(cryptoService, claim, session, output, onActivity)
           })
       ).pipe(
         Effect.mapError((failure) =>
@@ -420,8 +464,10 @@ export class PrReviewTaskExecutor extends Context.Service<
   {
     readonly execute: (
       claim: ClaimedAgentJob,
-      onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
-    ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError>
+      onActivity?: (
+        event: AgentRuntimeEvent
+      ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+    ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError | AgentJobInputError>
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewTaskExecutor") {}
 

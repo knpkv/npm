@@ -373,8 +373,7 @@ const makeOutput = Effect.fn("PrReviewSandboxSession.makeOutput")(function*(
       truncated: false
     } satisfies PrReviewSandboxOutput
   }
-  const next = (yield* Ref.get(artifactSequence)) + 1
-  yield* Ref.set(artifactSequence, next)
+  const next = yield* Ref.updateAndGet(artifactSequence, (current) => current + 1)
   const artifactId = PrReviewCommandArtifactId.make(`review-artifact-${String(next)}`)
   yield* Ref.update(artifacts, (current) => {
     const retained = new Map(current)
@@ -443,13 +442,17 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       )
     )
 
+  const forceRemoveSandbox = Effect.fn("PrReviewSandboxSession.forceRemoveSandbox")(function*(name: string) {
+    const removed = yield* runControl(["rm", "--force", name])
+    if (!successful(removed)) return yield* sessionError("cleanup-failed")
+  })
+
   const removeSandbox = Effect.fn("PrReviewSandboxSession.removeSandbox")(function*(name: string) {
     const listed = yield* runControl(["ls", "--quiet"])
     if (!successful(listed)) return yield* sessionError("cleanup-failed")
     const names = (yield* decodeUtf8(listed.stdout, "cleanup-failed")).split("\n")
     if (!names.includes(name)) return
-    const removed = yield* runControl(["rm", "--force", name])
-    if (!successful(removed)) return yield* sessionError("cleanup-failed")
+    yield* forceRemoveSandbox(name)
   })
 
   const withSession = Effect.fn("PrReviewSandboxSessions.withSession")(function*<
@@ -468,21 +471,25 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       request,
       (sourceRoot) =>
         Effect.acquireUseRelease(
-          runControl([
-            "create",
-            "shell",
-            sourceRoot,
-            "--clone",
-            "--name",
-            name,
-            "--quiet",
-            ...(options.template === undefined ? [] : ["--template", options.template])
-          ], SOURCE_HANDOFF_TIMEOUT).pipe(
+          runControl(
+            [
+              "create",
+              "shell",
+              sourceRoot,
+              "--clone",
+              "--name",
+              name,
+              "--quiet",
+              ...(options.template === undefined ? [] : ["--template", options.template])
+            ],
+            SOURCE_HANDOFF_TIMEOUT
+          ).pipe(
             Effect.flatMap((created) =>
               successful(created)
                 ? Effect.succeed(name)
                 : Effect.fail(sessionError("sandbox-unavailable"))
-            )
+            ),
+            Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
           ),
           () =>
             Effect.gen(function*() {
@@ -584,8 +591,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       Effect.mapError(() => sessionError("invalid-request"))
                     )
                     return yield* runCommand(
-                      `dd if=${shellQuote(safe)} bs=1 skip=${String(decodedOffset)} ` +
-                        `count=${String(decodedLimit)} status=none`
+                      `test -f ${shellQuote(safe)} && ` +
+                        `tail -c +${String(decodedOffset + 1)} -- ${shellQuote(safe)} | ` +
+                        `head -c ${String(decodedLimit)}`
                     )
                   }),
                 listFiles: (unknownPath = ".") =>
@@ -696,7 +704,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       .filter((name) => name.startsWith(SANDBOX_PREFIX))
       .sort()
     for (const name of names) {
-      yield* removeSandbox(name)
+      yield* forceRemoveSandbox(name)
     }
     return { removedSandboxes: names } satisfies PrReviewSandboxReconciliation
   })

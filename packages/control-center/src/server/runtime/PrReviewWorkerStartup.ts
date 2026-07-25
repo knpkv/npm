@@ -40,7 +40,9 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const lifecycle = yield* ServerLifecycle
   const worker = yield* AgentJobWorker
   const sandboxes = yield* PrReviewSandboxSessions
-  yield* sandboxes.reconcile().pipe(Effect.orDie)
+  yield* sandboxes.reconcile().pipe(
+    Effect.catch((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
+  )
   const idlePollInterval = Duration.fromInputUnsafe(
     options.idlePollInterval ?? DEFAULT_IDLE_POLL_INTERVAL
   )

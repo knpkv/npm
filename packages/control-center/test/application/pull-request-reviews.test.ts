@@ -15,7 +15,11 @@ import { AgentThreadId, EntityId, PluginConnectionId, ReleaseId, WorkspaceId } f
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
-import { DeliveryGraphInspection, PullRequestReviews } from "../../src/server/api/ApplicationServices.js"
+import {
+  ApplicationInvalidRequest,
+  DeliveryGraphInspection,
+  PullRequestReviews
+} from "../../src/server/api/ApplicationServices.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
@@ -339,6 +343,9 @@ describe("pull request reviews", () => {
           }
         }).pipe(Effect.result)
         assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, ApplicationInvalidRequest)
+        }
         assert.isNull(yield* Ref.get(enqueueInput))
       })
     ))

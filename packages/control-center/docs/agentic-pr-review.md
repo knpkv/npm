@@ -215,8 +215,8 @@ A Review Checkout Broker:
 
 1. Uses the connected CodeCommit profile on the host.
 2. Fetches and verifies the exact base and head commit IDs.
-3. Removes authenticated remotes and credential configuration.
-4. Lets `sbx create shell --clone` copy the checkout into an isolated writable sandbox filesystem.
+3. Lets `sbx create shell --clone` copy the checkout into an isolated writable sandbox filesystem.
+4. Removes authenticated remotes and credential configuration inside the sandbox before exposing any tools.
 5. Deletes host staging data when the scoped run ends.
 
 ## Sandbox policy

@@ -422,6 +422,54 @@ describe("agent job worker", () => {
       )
     }))
 
+  it.effect("preserves cancellation requested while review activity is being persisted", () =>
+    Effect.gen(function*() {
+      const started = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const executor: AgentJobTaskExecutorService = {
+        taskTags: ["pr-review"],
+        execute: (_claim, onActivity = () => Effect.void) =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(finish)),
+            Effect.andThen(onActivity({
+              _tag: "completed",
+              outcome: "success",
+              sessionRef: null
+            })),
+            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+          )
+      }
+      return yield* withTaskExecutor(
+        executor,
+        Effect.gen(function*() {
+          const jobs = yield* AgentJobRepository
+          yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+          yield* setupFoundation
+          yield* enqueueReview
+          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          yield* Deferred.await(started)
+          yield* jobs.requestCancellation({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            requestedAt: STARTED_AT
+          })
+          yield* Deferred.succeed(finish, undefined)
+
+          const result = yield* Fiber.join(fiber)
+          const events = yield* replay
+          assert.deepStrictEqual(result, {
+            _tag: "completed",
+            jobId: JOB_ID,
+            outcome: "cancelled"
+          })
+          assert.deepStrictEqual(
+            events.events.map(({ eventKind }) => eventKind),
+            ["user-message", "job-queued", "cancel-requested", "job-completed"]
+          )
+        })
+      )
+    }))
+
   it.effect("renews a long review lease so another worker cannot duplicate the claim", () => {
     let executionCount = 0
     return Effect.gen(function*() {

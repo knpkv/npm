@@ -25,6 +25,11 @@ interface FakeResponse {
   readonly stdout?: string
 }
 
+interface FakeResponseRule {
+  readonly matches: (command: ChildProcess.StandardCommand) => boolean
+  readonly response: FakeResponse
+}
+
 const makeHandle = (
   response: FakeResponse
 ): ChildProcessSpawner.ChildProcessHandle =>
@@ -46,7 +51,7 @@ const makeHandle = (
 
 const fakeSbxLayer = (
   calls: Array<ChildProcess.StandardCommand>,
-  commandResponses: Array<FakeResponse> = [],
+  responseRules: ReadonlyArray<FakeResponseRule> = [],
   listedSandboxes = SANDBOX_NAME
 ) =>
   Layer.succeed(
@@ -60,12 +65,18 @@ const fakeSbxLayer = (
       assert.strictEqual(unknownCommand.command, "sbx")
       const args = unknownCommand.args
       const shellCommand = args.at(-1)
-      const response = args[0] === "ls"
+      const matched = responseRules.find(({ matches }) => matches(unknownCommand))
+      const response = matched !== undefined
+        ? matched.response
+        : args[0] === "ls"
         ? { stdout: `${listedSandboxes}\n` }
         : args[0] === "exec" &&
             shellCommand?.startsWith("for remote in $(git remote)") !== true
-        ? commandResponses.shift() ?? {}
+        ? undefined
         : {}
+      if (response === undefined) {
+        return Effect.die(`unmatched fake sbx command: ${unknownCommand.args.join(" ")}`)
+      }
       return Effect.succeed(makeHandle(response))
     })
   )
@@ -79,14 +90,14 @@ const sourceLayer = Layer.succeed(
 
 const testLayer = (
   calls: Array<ChildProcess.StandardCommand>,
-  commandResponses: Array<FakeResponse> = [],
+  responseRules: ReadonlyArray<FakeResponseRule> = [],
   listedSandboxes = SANDBOX_NAME
 ) =>
   prReviewSandboxSessionsLayer({
     executable: "sbx",
     template: "review-template"
   }).pipe(
-    Layer.provide(fakeSbxLayer(calls, commandResponses, listedSandboxes)),
+    Layer.provide(fakeSbxLayer(calls, responseRules, listedSandboxes)),
     Layer.provide(sourceLayer)
   )
 
@@ -110,15 +121,17 @@ describe("PrReviewSandboxSessions", () => {
           const listed = yield* session.listFiles(".")
           const tested = yield* session.runCommand("pnpm test")
           const large = yield* session.runCommand("emit-large")
+          const read = yield* session.readFile("README.md", 4, 10)
           const page = yield* large.stdout.artifactId === null
             ? Effect.die("expected retained output")
             : session.pageArtifact(large.stdout.artifactId, 0, 8)
           const unsafe = yield* session.readFile("../secret").pipe(Effect.result)
-          return { large, listed, page, tested, unsafe }
+          return { large, listed, page, read, tested, unsafe }
         }))
 
       assert.strictEqual(observed.listed.stdout.text, "packages\n")
       assert.strictEqual(observed.tested.stdout.text, "tests passed\n")
+      assert.strictEqual(observed.read.stdout.text, "bounded\n")
       assert.isTrue(observed.large.stdout.truncated)
       assert.strictEqual(observed.page, "🙂🙂🙂🙂")
       assert.isTrue(Result.isFailure(observed.unsafe))
@@ -156,12 +169,28 @@ describe("PrReviewSandboxSessions", () => {
         assert.include(command.args, "-i")
       }
       assert.isFalse(calls.some(({ command }) => command === "docker"))
+      assert.isTrue(
+        calls.some(({ args }) => args.at(-1) === "test -f 'README.md' && tail -c +5 -- 'README.md' | head -c 10")
+      )
       assert.isTrue(calls.some(({ args }) => args[0] === "rm" && args[1] === "--force" && args[2] === SANDBOX_NAME))
     }).pipe(
       Effect.provide(testLayer(calls, [
-        { stdout: "packages\n" },
-        { stdout: "tests passed\n" },
-        { stdout: largeOutput }
+        {
+          matches: ({ args }) => args.at(-1) === "find '.' -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort",
+          response: { stdout: "packages\n" }
+        },
+        {
+          matches: ({ args }) => args.at(-1) === "pnpm test",
+          response: { stdout: "tests passed\n" }
+        },
+        {
+          matches: ({ args }) => args.at(-1) === "emit-large",
+          response: { stdout: largeOutput }
+        },
+        {
+          matches: ({ args }) => args.at(-1) === "test -f 'README.md' && tail -c +5 -- 'README.md' | head -c 10",
+          response: { stdout: "bounded\n" }
+        }
       ]))
     )
   })
@@ -185,6 +214,57 @@ describe("PrReviewSandboxSessions", () => {
         [],
         "unrelated\ncc-pr-review-b\ncc-pr-review-a"
       ))
+    )
+  })
+
+  it.effect("assigns distinct retained-artifact identities to overlapping commands", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const largeOutput = "x".repeat(40_000)
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const outputs = yield* sessions.withSession(
+        request,
+        (session) =>
+          Effect.all(
+            [session.runCommand("emit-large-a"), session.runCommand("emit-large-b")],
+            { concurrency: "unbounded" }
+          )
+      )
+      const artifactIds = outputs.map(({ stdout }) => stdout.artifactId)
+      assert.isTrue(artifactIds.every((artifactId) => artifactId !== null))
+      assert.strictEqual(new Set(artifactIds).size, 2)
+    }).pipe(
+      Effect.provide(testLayer(calls, [
+        {
+          matches: ({ args }) => args.at(-1) === "emit-large-a",
+          response: { stdout: largeOutput }
+        },
+        {
+          matches: ({ args }) => args.at(-1) === "emit-large-b",
+          response: { stdout: largeOutput }
+        }
+      ]))
+    )
+  })
+
+  it.effect("force-removes a partially created sandbox when sbx create fails", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const failed = yield* sessions.withSession(request, () => Effect.void).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(failed))
+      assert.isTrue(
+        calls.some(({ args }) =>
+          args[0] === "rm" &&
+          args[1] === "--force" &&
+          args[2] === SANDBOX_NAME
+        )
+      )
+    }).pipe(
+      Effect.provide(testLayer(calls, [{
+        matches: ({ args }) => args[0] === "create",
+        response: { exitCode: 1 }
+      }]))
     )
   })
 })

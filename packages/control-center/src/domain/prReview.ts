@@ -201,7 +201,7 @@ export const PrReviewCompletion = Schema.Union([
     status: Schema.Literal("unable-to-conclude"),
     reason: boundedMultiline(4_000, "PrReviewUnableToConcludeReason")
   })
-])
+]).annotate({ identifier: "PrReviewCompletion" })
 
 /** Decoded review completion state. */
 export type PrReviewCompletion = typeof PrReviewCompletion.Type

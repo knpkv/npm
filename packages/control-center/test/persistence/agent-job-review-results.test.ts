@@ -15,7 +15,8 @@ import {
   AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
-  AgentThreadEventPageSize
+  AgentThreadEventPageSize,
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
@@ -270,6 +271,52 @@ describe("agent job review results", () => {
           completedAt: T2
         })
         assert.deepStrictEqual((yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })).report, report)
+      })
+    ))
+
+  it.effect("projects the newest bounded review activity in chronological order", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        for (
+          let index = 1;
+          index <= MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE + 2;
+          index += 1
+        ) {
+          yield* jobs.appendEvent({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: LEASE_TOKEN,
+            event: {
+              _tag: "output",
+              channel: "progress",
+              text: `progress-${String(index)}`
+            },
+            occurredAt: T2
+          })
+        }
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.isTrue(latest.value.activity.truncated)
+          assert.strictEqual(
+            latest.value.activity.events.length,
+            MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+          )
+          assert.strictEqual(latest.value.activity.events[0], "progress-3")
+          assert.strictEqual(
+            latest.value.activity.events.at(-1),
+            `progress-${String(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE + 2)}`
+          )
+        }
       })
     ))
 

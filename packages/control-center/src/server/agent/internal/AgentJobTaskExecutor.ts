@@ -11,7 +11,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as Stream from "effect/Stream"
 
-import type { AgentJobTaskTag, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
+import type {
+  AgentJobInputError,
+  AgentJobTaskTag,
+  ClaimedAgentJob
+} from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { PrReviewTaskExecutor } from "./PrReviewTaskExecutor.js"
 
@@ -31,8 +35,8 @@ export interface AgentJobTaskExecutorService {
   readonly taskTags: ReadonlyArray<AgentJobTaskTag>
   readonly execute: (
     claim: ClaimedAgentJob,
-    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
-  ) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError>
+    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+  ) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError>
 }
 
 /** Internal dependency-injection seam for deterministic task execution tests. */
@@ -48,8 +52,8 @@ export const agentJobTaskExecutorLayer = (
 const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
   reviews: PrReviewTaskExecutor["Service"],
   claim: ClaimedAgentJob,
-  onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
-): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError> {
+  onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError> {
   if (claim.context.task._tag !== "pr-review") {
     return yield* new AgentProviderError({
       providerId: claim.providerId,

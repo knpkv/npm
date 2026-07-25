@@ -9,12 +9,15 @@ import * as Path from "effect/Path"
 import * as PlatformError from "effect/PlatformError"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 
 import { classifyControlCenterCliArguments } from "../../src/server/cliArguments.js"
 import {
   claimFreshControlCenterDataRoot,
   decodeControlCenterDataPaths,
-  prepareControlCenterDataRoot
+  optionalNonBlankConfigurationValue,
+  prepareControlCenterDataRoot,
+  PrReviewTimingConfiguration
 } from "../../src/server/cliConfiguration.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistenceConfigError } from "../../src/server/persistence/errors.js"
@@ -101,6 +104,27 @@ const withWriteAll = (
 })
 
 describe("Control Center CLI", () => {
+  it("rejects a review budget longer than its sbx lifetime and defaults blank optional values", () => {
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
+          budgetMillis: 1_201,
+          maximumSandboxDurationMillis: 1_200
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isSuccess(
+        Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
+          budgetMillis: 1_200,
+          maximumSandboxDurationMillis: 1_200
+        })
+      )
+    )
+    assert.isUndefined(optionalNonBlankConfigurationValue("  "))
+    assert.strictEqual(optionalNonBlankConfigurationValue("/opt/bin/sbx"), "/opt/bin/sbx")
+  })
+
   it("accepts exactly the serve, recovery, and offline backup argument shapes", () => {
     assert.deepStrictEqual(classifyControlCenterCliArguments([]), { _tag: "serve" })
     assert.deepStrictEqual(classifyControlCenterCliArguments(["recover-owner"]), { _tag: "recover-owner" })

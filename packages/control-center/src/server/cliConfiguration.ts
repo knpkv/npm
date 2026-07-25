@@ -6,6 +6,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
+import * as Schema from "effect/Schema"
 
 import {
   boundDataRootMarkerContent as boundMarkerContent,
@@ -33,6 +34,26 @@ import { PersistenceConfigError } from "./persistence/errors.js"
 /** Validated filesystem paths derived from the untrusted data-root environment value. */
 export { decodeControlCenterDataPaths }
 export type { ControlCenterDataPaths }
+
+const PrReviewDurationMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 1_800_000 })
+)
+
+/** Cross-field timing contract for one Review Agent Profile and its sbx lifetime. */
+export const PrReviewTimingConfiguration = Schema.Struct({
+  budgetMillis: PrReviewDurationMillis,
+  maximumSandboxDurationMillis: PrReviewDurationMillis
+}).check(
+  Schema.makeFilter(
+    ({ budgetMillis, maximumSandboxDurationMillis }) => budgetMillis <= maximumSandboxDurationMillis,
+    { expected: "a review budget no greater than the sbx session duration" }
+  )
+)
+
+/** Treat blank optional executable/template configuration as absent. */
+export const optionalNonBlankConfigurationValue = (
+  value: string
+): string | undefined => value.trim().length === 0 ? undefined : value
 
 const DATA_ROOT_OWNER_PROBE_PREFIX = ".control-center-owner-"
 const SQLITE_HEADER = Uint8Array.from([

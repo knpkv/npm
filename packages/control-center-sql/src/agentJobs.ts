@@ -288,7 +288,13 @@ export const renderLatestAgentReviewQuery = (
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
         Query.eq(agentJobs.subjectRevision, input.subjectRevision),
-        Query.like(agentJobs.taskContextJson, `${input.taskContextPrefix}%`)
+        Query.eq(
+          Query.cast(
+            Fn.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),
+            Sqlite.Type.custom("text")
+          ),
+          Query.cast(input.taskContextPrefix, Sqlite.Type.custom("text"))
+        )
       )
     ),
     Query.orderBy(agentJobs.createdAt, "desc"),

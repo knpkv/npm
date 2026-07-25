@@ -21,7 +21,9 @@ import { TerminalRecovery, terminalRecoveryLayer } from "./auth/TerminalRecovery
 import { classifyControlCenterCliArguments } from "./cliArguments.js"
 import {
   decodeControlCenterDataPaths,
+  optionalNonBlankConfigurationValue,
   prepareControlCenterDataRoot,
+  PrReviewTimingConfiguration,
   resolvePreparedControlCenterDataRoot
 } from "./cliConfiguration.js"
 import { ControlCenterObservabilityLive } from "./observability.js"
@@ -195,12 +197,18 @@ const program = Effect.scoped(
           reason: "pr-review-provider-unavailable"
         })
       }
-      const prReviewBudgetMillis = yield* Schema.decodeUnknownEffect(
-        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 }))
-      )(configured.prReviewBudgetMillis)
-      const prReviewMaximumDurationMillis = yield* Schema.decodeUnknownEffect(
-        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 }))
-      )(configured.prReviewMaximumDurationMillis)
+      const prReviewTiming = yield* Schema.decodeUnknownEffect(
+        PrReviewTimingConfiguration
+      )({
+        budgetMillis: configured.prReviewBudgetMillis,
+        maximumSandboxDurationMillis: configured.prReviewMaximumDurationMillis
+      })
+      const sbxExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewSbxExecutable
+      )
+      const sbxTemplate = optionalNonBlankConfigurationValue(
+        configured.prReviewSbxTemplate
+      )
       const allowedHosts = commaSeparated(configured.allowedHosts)
       const allowedOrigins = commaSeparated(configured.allowedOrigins)
       const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -238,13 +246,11 @@ const program = Effect.scoped(
             ? {
               workspaceId: DEFAULT_WORKSPACE_ID,
               workspaceRoot: path.join(dataPaths.dataRoot, "pr-review-workspaces"),
-              sbxExecutable: configured.prReviewSbxExecutable,
-              ...(configured.prReviewSbxTemplate.length === 0
-                ? {}
-                : { sbxTemplate: configured.prReviewSbxTemplate }),
-              reviewBudgetMillis: prReviewBudgetMillis,
+              ...(sbxExecutable === undefined ? {} : { sbxExecutable }),
+              ...(sbxTemplate === undefined ? {} : { sbxTemplate }),
+              reviewBudgetMillis: prReviewTiming.budgetMillis,
               leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
-              maximumSandboxDurationMillis: prReviewMaximumDurationMillis
+              maximumSandboxDurationMillis: prReviewTiming.maximumSandboxDurationMillis
             }
             : null,
           releaseAgent: agentCwd === null && openAiCompatible === undefined

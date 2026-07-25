@@ -937,7 +937,11 @@ describe("Control Center closed runtime", () => {
             if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
               return sandboxOutput(`@@ -0,0 +42 @@\n+${evidenceExcerpt}\n`)
             }
-            if (command.startsWith("sed -n '42,42p' <")) {
+            if (
+              command.startsWith(
+                `git show '${subject.headRevision}:${evidencePath}' | sed -n '42,42p'`
+              )
+            ) {
               return sandboxOutput(`${evidenceExcerpt}\n`)
             }
             return command.startsWith("git show ")

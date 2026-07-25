@@ -210,18 +210,26 @@ const makeAgentJobWorker = Effect.gen(function*() {
           })
         ),
         Effect.asVoid,
-        Effect.mapError(() =>
-          new AgentProviderError({
-            providerId: claim.providerId,
-            phase: "execution",
-            message: "Review activity persistence failed.",
-            retryable: false
-          })
+        Effect.mapError((failure) =>
+          isCancellationRequested(failure)
+            ? failure
+            : new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "execution",
+              message: "Review activity persistence failed.",
+              retryable: false
+            })
         )
       )
     const selected = yield* taskExecutor.execute(claim, onReviewActivity).pipe(Effect.result)
     if (Result.isFailure(selected)) {
-      return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
+      if (isCancellationRequested(selected.failure)) {
+        return yield* cancelClaim(claim)
+      }
+      if (isAgentRuntimeFailure(selected.failure)) {
+        return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
+      }
+      return yield* Effect.fail(selected.failure)
     }
     if (selected.success._tag !== claim.context.task._tag) {
       return yield* failClaim(

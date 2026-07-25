@@ -50,6 +50,7 @@ import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./intern
 const DISPATCH_CANDIDATE_LIMIT = 32
 const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 const SHA_256_PREFIX = "sha256:"
+const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const PersistedDigest = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
@@ -1151,7 +1152,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               job.state !== "running" ||
               job.task._tag !== "pr-review" ||
               job.subjectRevision !== job.task.subject.headRevision ||
-              !Schema.toEquivalence(PrReviewSubject)(job.task.subject, report.subject)
+              !PrReviewSubjectEquivalence(job.task.subject, report.subject)
             ) {
               return yield* new AgentJobInputError({
                 workspaceId: request.workspaceId,
@@ -1348,14 +1349,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.taskContextJson,
         row.success.taskContextDigest
       )
-      if (
-        task._tag !== "pr-review" ||
-        task.subject.providerId !== request.subject.providerId ||
-        task.subject.repository !== request.subject.repository ||
-        task.subject.pullRequestId !== request.subject.pullRequestId ||
-        task.subject.baseRevision !== request.subject.baseRevision ||
-        task.subject.headRevision !== request.subject.headRevision
-      ) {
+      if (task._tag !== "pr-review" || !PrReviewSubjectEquivalence(task.subject, request.subject)) {
         return yield* persistedRecordError(
           request.workspaceId,
           "agent-review",
@@ -1379,12 +1373,16 @@ const makeAgentJobRepository = Effect.gen(function*() {
         WHERE workspace_id = ${request.workspaceId}
           AND job_id = ${row.success.jobId}
           AND event_kind = 'progress'
-        ORDER BY event_sequence ASC
+        ORDER BY event_sequence DESC
         LIMIT ${MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE + 1}`.pipe(
         mapPersistenceOperation("agent-job.latest-review-activity")
       )
       const activity = new Array<string>()
-      for (const unknownRow of activityRows.slice(0, MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)) {
+      for (
+        const unknownRow of activityRows
+          .slice(0, MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)
+          .reverse()
+      ) {
         const decodedRow = Schema.decodeUnknownResult(ThreadEventRow)(unknownRow)
         if (Result.isFailure(decodedRow)) {
           return yield* persistedRecordError(

@@ -216,7 +216,8 @@ interface SessionObservation {
 
 const makeSessionLayer = (
   observation: SessionObservation,
-  diff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
+  diff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`,
+  sourceExcerpt = EVIDENCE_EXCERPT
 ) => {
   const session: PrReviewSandboxSession = {
     attemptId: "0123456789ab",
@@ -241,8 +242,8 @@ const makeSessionLayer = (
         if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
           return output(diff)
         }
-        if (command.startsWith("sed -n '42,42p' <")) {
-          return output(`${EVIDENCE_EXCERPT}\n`)
+        if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
+          return output(`${sourceExcerpt}\n`)
         }
         return command.startsWith("git show ")
           ? output("# Review instructions\n")
@@ -270,7 +271,8 @@ const runExecutor = <Success, Failure>(
   script: ReturnType<typeof completeScript>,
   observation: SessionObservation,
   use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>,
-  diff?: string
+  diff?: string,
+  sourceExcerpt?: string
 ) => {
   const fake = makeDeterministicLanguageModel(script)
   return Effect.gen(function*() {
@@ -299,7 +301,7 @@ const runExecutor = <Success, Failure>(
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
-          Layer.provide(makeSessionLayer(observation, diff))
+          Layer.provide(makeSessionLayer(observation, diff, sourceExcerpt))
         )
       )
     )
@@ -349,7 +351,11 @@ describe("PR review task executor", () => {
           assert.isTrue(
             observation.commands.some((command) => command.startsWith("git -c core.quotePath=false diff --unified=0"))
           )
-          assert.isTrue(observation.commands.some((command) => command.startsWith("sed -n '42,42p' <")))
+          assert.isTrue(
+            observation.commands.some((command) =>
+              command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)
+            )
+          )
           assert.strictEqual(observation.requests.length, 1)
           assert.strictEqual(fake.requests.length, 4)
           assert.isTrue(activity.some((event) => event._tag === "output" && event.channel === "progress"))
@@ -359,7 +365,84 @@ describe("PR review task executor", () => {
     )
   })
 
-  it.effect("rejects schema-valid evidence that is not on an immutable added line", () => {
+  it.effect("drops unverifiable suggestions while retaining a durable report and live activity", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const activity = new Array<AgentRuntimeEvent>()
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(
+          claim,
+          (event) =>
+            Effect.sync(() => {
+              activity.push(event)
+            })
+        )
+      }),
+      "@@ -43 +43 @@\n-const unsafe = false\n+const safe = true\n"
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(result.suggestions, [])
+          assert.isTrue(
+            activity.some((event) =>
+              event._tag === "output" &&
+              event.channel === "progress" &&
+              event.text.startsWith("Rejected unverifiable suggestion")
+            )
+          )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("deduplicates validated suggestions by their host-derived identity", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const activity = new Array<AgentRuntimeEvent>()
+    return runExecutor(
+      completeScript({
+        schemaVersion: 2,
+        completion: { status: "complete" },
+        suggestions: [suggestion, suggestion]
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(
+          claim,
+          (event) =>
+            Effect.sync(() => {
+              activity.push(event)
+            })
+        )
+      })
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.strictEqual(result.suggestions.length, 1)
+          assert.isTrue(
+            activity.some((event) =>
+              event._tag === "output" &&
+              event.channel === "progress" &&
+              event.text.startsWith("Dropped duplicate validated suggestion")
+            )
+          )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("reads evidence from the immutable head and drops excerpt mismatches", () => {
     const observation: SessionObservation = {
       commands: [],
       operations: [],
@@ -369,19 +452,87 @@ describe("PR review task executor", () => {
       completeScript(),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim).pipe(Effect.result)
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
       }),
-      "@@ -43 +43 @@\n-const unsafe = false\n+const safe = true\n"
+      undefined,
+      "const modelPatchedThis = true"
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(result.suggestions, [])
+          assert.isTrue(
+            observation.commands.some((command) => command.includes(`${HEAD_REVISION}:${EVIDENCE_PATH}`))
+          )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("rejects execution when the frozen profile differs from the live catalog", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const mismatchedClaim: ClaimedAgentJob = {
+      ...claim,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: {
+            ...REVIEW_PROFILE,
+            budgetMillis: REVIEW_PROFILE.budgetMillis - 1
+          }
+        }
+      }
+    }
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(mismatchedClaim).pipe(Effect.result)
+      })
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          assert.deepStrictEqual(observation.requests, [])
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("rejects assistant output before unbounded accumulation", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 2,
+        completion: { status: "complete" },
+        suggestions: Array.from({ length: 80 }, () => suggestion)
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim).pipe(Effect.result)
+      })
     ).pipe(
       Effect.tap(({ result }) =>
         Effect.sync(() => {
           assert.isTrue(Result.isFailure(result))
           if (Result.isFailure(result)) {
-            assert.strictEqual(result.failure.phase, "protocol")
-            assert.strictEqual(
-              result.failure.message,
-              "Suggestion evidence did not target an added line in the immutable diff."
-            )
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(
+                result.failure.message,
+                "PR review provider output exceeded the structured result limit."
+              )
+            }
           }
         })
       ),
