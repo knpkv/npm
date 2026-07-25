@@ -24,3 +24,25 @@ export {
   type PrReviewSandboxRunnerOptions,
   type PrReviewSandboxRunnerService
 } from "./internal/PrReviewSandboxRunner.js"
+export {
+  PrReviewCommandArtifactId,
+  type PrReviewSandboxCommandResult,
+  type PrReviewSandboxLiveContainer,
+  type PrReviewSandboxOutput,
+  type PrReviewSandboxSession,
+  PrReviewSandboxSessionError,
+  type PrReviewSandboxSessionOptions,
+  type PrReviewSandboxSessionRequest,
+  PrReviewSandboxSessions,
+  prReviewSandboxSessionsLayer,
+  PrReviewSandboxTools,
+  prReviewSandboxToolsLayer,
+  ReviewApplyPatch,
+  ReviewListFiles,
+  ReviewPageArtifact,
+  ReviewReadDiff,
+  ReviewReadFile,
+  ReviewRunCommand,
+  ReviewSearchArtifact,
+  ReviewSearchFiles
+} from "./internal/PrReviewSandboxSession.js"

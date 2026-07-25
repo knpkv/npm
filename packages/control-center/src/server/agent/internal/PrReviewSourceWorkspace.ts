@@ -546,6 +546,30 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
                     if (!successful(actualHead) || decodedLine(actualHead.stdout) !== request.headRevision) {
                       return yield* sourceError("revision-mismatch")
                     }
+                    const remoteRemoved = yield* runGit(
+                      ["-C", stagedSource, "remote", "remove", "origin"],
+                      stagedSource
+                    )
+                    if (!successful(remoteRemoved)) {
+                      return yield* sourceError("source-rejected")
+                    }
+                    const authorityConfiguration = yield* runGit(
+                      [
+                        "-C",
+                        stagedSource,
+                        "config",
+                        "--local",
+                        "--get-regexp",
+                        "^(credential\\.|http\\..*\\.extraheader$|remote\\.)"
+                      ],
+                      stagedSource
+                    )
+                    if (
+                      successful(authorityConfiguration) ||
+                      authorityConfiguration.stdout.byteLength !== 0
+                    ) {
+                      return yield* sourceError("source-rejected")
+                    }
                     yield* fileSystem.rename(stagedSource, sourceRoot).pipe(
                       Effect.mapError(() => sourceError("source-unavailable"))
                     )

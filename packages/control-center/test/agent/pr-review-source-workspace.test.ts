@@ -145,6 +145,9 @@ describe("PR review source workspace", () => {
         yield* runGit(["-C", repository, "add", "--", "review.ts"])
         yield* runGit(["-C", repository, "commit", "--quiet", "-m", "head"])
         const headRevision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
+        yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 3\n")
+        yield* runGit(["-C", repository, "add", "--", "review.ts"])
+        yield* runGit(["-C", repository, "commit", "--quiet", "-m", "branch moved after enqueue"])
 
         const resolver = Layer.succeed(
           PrReviewSourceResolver,
@@ -176,15 +179,26 @@ describe("PR review source workspace", () => {
               Effect.gen(function*() {
                 assert.strictEqual(sourceRoot, materializedRoot)
                 assert.isTrue(yield* fileSystem.exists(path.join(sourceRoot, "review.ts")))
-                return yield* runGit(["-C", sourceRoot, "rev-parse", "HEAD"])
+                const remotes = yield* runGit(["-C", sourceRoot, "remote"])
+                assert.strictEqual(remotes, "")
+                const configuration = yield* fileSystem.readFileString(
+                  path.join(sourceRoot, ".git", "config")
+                )
+                assert.notInclude(configuration, repository)
+                assert.notInclude(configuration.toLowerCase(), "credential")
+                return {
+                  content: yield* fileSystem.readFileString(path.join(sourceRoot, "review.ts")),
+                  revision: yield* runGit(["-C", sourceRoot, "rev-parse", "HEAD"])
+                }
               })
           )
         }).pipe(Effect.provide(sources))
 
         assert.strictEqual(
-          Schema.decodeSync(Schema.String.check(Schema.isNonEmpty()))(observed),
+          Schema.decodeSync(Schema.String.check(Schema.isNonEmpty()))(observed.revision),
           headRevision
         )
+        assert.strictEqual(observed.content, "export const value = 2\n")
         assert.isFalse(yield* fileSystem.exists(materializedRoot))
       })
     ).pipe(Effect.provide(NodeServices.layer)))

@@ -158,6 +158,17 @@ Reuse the existing exact CodeCommit source and Docker mechanisms while replacing
 
 CodeCommit Core and Control Center targeted sandbox tests, checks, lint, build, docs, and changesets pass.
 
+### Implemented shape
+
+The session is additive until PR 4 switches durable orchestration away from
+the pre-stable one-shot runner. `PrReviewSandboxSessions` owns exact-source
+handoff, the named-volume/container scope, typed sandbox tools, bounded local
+artifacts, timeout cleanup, and label reconciliation. The exact-source broker
+now removes authenticated remotes and authority-bearing local Git
+configuration before handoff. The Docker integration test pulls a trusted
+digest-pinned runner when Docker is available and proves the policy against a
+local Git fixture without AWS or agent-provider credentials.
+
 ## PR 3 — Replace the review domain and persistence model
 
 ### Goal
