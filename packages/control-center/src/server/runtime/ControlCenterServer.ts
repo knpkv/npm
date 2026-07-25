@@ -12,10 +12,10 @@ import type { ServeError } from "effect/unstable/http/HttpServerError"
 import { type AgentJobWorkerOptions, prReviewAgentJobWorkerLayer } from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
 import {
-  type PrReviewSandboxError,
-  PrReviewSandboxRunner,
-  prReviewSandboxRunnerLayer
-} from "../agent/internal/PrReviewSandboxRunner.js"
+  type PrReviewSandboxSessionError,
+  PrReviewSandboxSessions,
+  prReviewSandboxSessionsLayer
+} from "../agent/internal/PrReviewSandboxSession.js"
 import {
   codeCommitPrReviewSourceResolverLayer,
   type PrReviewSourceError,
@@ -119,8 +119,9 @@ type ControlCenterCoreApplicationServices =
 export interface ControlCenterPrReviewWorkerOptions {
   readonly workspaceId: PrReviewWorkerStartupOptions["workspaceId"]
   readonly workspaceRoot: string
-  readonly image: string
-  readonly analyzerCommand: ReadonlyArray<string>
+  readonly sbxExecutable?: string
+  readonly sbxTemplate?: string
+  readonly reviewBudgetMillis?: number
   readonly leaseOwner: AgentLeaseOwner
   readonly leaseDuration?: Duration.Input
   readonly idlePollInterval?: Duration.Input
@@ -132,7 +133,7 @@ export interface ControlCenterPrReviewWorkerOptions {
   /** Deterministic composition seam; production omits it. @internal */
   readonly sourceWorkspace?: PrReviewSourceWorkspace["Service"]
   /** Deterministic composition seam; production omits it. @internal */
-  readonly sandboxRunner?: PrReviewSandboxRunner["Service"]
+  readonly sandboxSessions?: PrReviewSandboxSessions["Service"]
 }
 
 /** Runtime construction settings after security and persistence decoding. */
@@ -175,7 +176,7 @@ export type ControlCenterServerError<ApplicationError = never> =
   | GovernedActionExecutionStartupError
   | PersistenceLayerError
   | PrReviewWorkerConfigurationError
-  | PrReviewSandboxError
+  | PrReviewSandboxSessionError
   | PrReviewSourceError
   | ReleaseSynchronizationStartupError
   | SecretStoreError
@@ -320,7 +321,12 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           : { openAiCompatible: options.releaseAgent.openAiCompatible }),
         ...(options.prReviewWorker === undefined || options.prReviewWorker === null
           ? {}
-          : { prReviewEnabled: true })
+          : {
+            prReviewEnabled: true,
+            ...(options.prReviewWorker.reviewBudgetMillis === undefined
+              ? {}
+              : { prReviewBudgetMillis: options.prReviewWorker.reviewBudgetMillis })
+          })
       }
   )
   const releaseAgentJobs = releaseAgentJobsLayer.pipe(
@@ -367,16 +373,15 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           )
         )
         : Layer.succeed(PrReviewSourceWorkspace, configured.sourceWorkspace)
-      const sandbox = configured.sandboxRunner === undefined
-        ? prReviewSandboxRunnerLayer({
-          workspaceRoot: configured.workspaceRoot,
-          image: configured.image,
-          analyzerCommand: configured.analyzerCommand,
+      const sandboxes = configured.sandboxSessions === undefined
+        ? prReviewSandboxSessionsLayer({
+          ...(configured.sbxExecutable === undefined ? {} : { executable: configured.sbxExecutable }),
+          ...(configured.sbxTemplate === undefined ? {} : { template: configured.sbxTemplate }),
           ...(configured.maximumSandboxDurationMillis === undefined
             ? {}
-            : { maximumDurationMillis: configured.maximumSandboxDurationMillis })
-        })
-        : Layer.succeed(PrReviewSandboxRunner, configured.sandboxRunner)
+            : { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
+        }).pipe(Layer.provide(sourceWorkspace))
+        : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
       const repository = AgentJobRepository.layer.pipe(Layer.provide(database))
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,
@@ -384,8 +389,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       }
       const worker = prReviewAgentJobWorkerLayer(workerOptions).pipe(
         Layer.provide(providerRegistry),
-        Layer.provide(sandbox),
-        Layer.provide(sourceWorkspace),
+        Layer.provide(sandboxes),
         Layer.provide(repository)
       )
       return prReviewWorkerStartupLayer({
@@ -399,7 +403,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
         ...(configured.runOnceBeforeSupervision === undefined
           ? {}
           : { runOnceBeforeSupervision: configured.runOnceBeforeSupervision })
-      }).pipe(Layer.provide(worker))
+      }).pipe(
+        Layer.provide(worker),
+        Layer.provide(sandboxes)
+      )
     })()
   const runtimeServices = Layer.mergeAll(
     apiBindConfiguration,

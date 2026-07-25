@@ -2,6 +2,7 @@
 import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 
+import { ReviewAgentProfile } from "../../../api/agent.js"
 import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
 import { PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
@@ -78,7 +79,8 @@ const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 
 /** Read-only review work bound to one immutable pull request head. */
 const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
-  subject: PrReviewSubject
+  subject: PrReviewSubject,
+  reviewProfile: ReviewAgentProfile
 })
 
 /** Durable task context used to select an internal task executor. */
@@ -215,12 +217,20 @@ export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 /** Newest durable lifecycle state for one exact immutable review subject. */
 export const LatestAgentReviewRecord = Schema.Struct({
   jobId: JobId,
+  threadId: AgentThreadId,
   providerId: AgentProviderId,
   model: AgentModel,
   state: AgentJobState,
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
-  report: Schema.NullOr(PrReviewReport)
+  report: Schema.NullOr(PrReviewReport),
+  reviewProfile: ReviewAgentProfile,
+  activity: Schema.Struct({
+    events: Schema.Array(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES))
+    ).check(Schema.isMaxLength(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)),
+    truncated: Schema.Boolean
+  })
 }).check(
   Schema.makeFilter(
     ({ report, state }) => (state === "succeeded") === (report !== null),

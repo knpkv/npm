@@ -111,29 +111,40 @@ identifiers, and `available` / `not-configured` health. The enqueue contract acc
 `read-only` safe profile. OpenAI-compatible generation has an interruptible two-minute deadline; tests
 may inject a shorter deadline without using host timers.
 
-Immutable CodeCommit review execution is a separate opt-in worker. It currently requires the
-prompt-only OpenAI-compatible provider, Docker, `git`, the AWS CLI credential helper, and an enabled
-CodeCommit connection whose repository matches the review subject. The analyzer image must be pinned
-by digest, and its command is a JSON array rather than a shell fragment:
+Immutable CodeCommit review execution is a separate opt-in worker. It requires an OpenAI-compatible
+Effect AI provider, the `sbx` CLI, `git`, the AWS CLI credential helper, and an enabled CodeCommit
+connection whose repository matches the review subject. Review commands run only inside a disposable
+sbx shell sandbox with network access denied:
 
 ```sh
 CONTROL_CENTER_AGENT_OPENAI_API_URL=http://127.0.0.1:11434/v1 \
 CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
-CONTROL_CENTER_PR_REVIEW_IMAGE=registry.example/control-center-review@sha256:<64-lowercase-hex> \
-CONTROL_CENTER_PR_REVIEW_ANALYZER_COMMAND='["/opt/control-center/bin/analyze","--format","json-v1"]' \
+CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
+CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
+CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE=review-template \
 pnpm --filter @knpkv/control-center start
 ```
 
-When both review variables are absent, the worker is disabled and no provider advertises
-`pr-review`. Supplying only one variable, or enabling review without an OpenAI-compatible provider,
-fails startup. For each durable claim the worker resolves exactly one enabled CodeCommit connection,
-clones into a private data-root workspace, verifies the full base and head object IDs, checks out the
-head detached, enforces source byte and entry bounds, and removes the checkout after the networkless
-read-only analyzer sandbox exits. Startup removes only worker-owned crash leftovers. While a review is
-running, the worker renews its durable lease and observes cancellation; cancellation interrupts the
-scoped checkout, sandbox, and model work before durably completing the job as cancelled.
-`CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` controls the sandbox deadline and defaults to
-120,000 milliseconds.
+When `CONTROL_CENTER_PR_REVIEW_SBX_ENABLED` is false or absent, the worker is disabled and no provider
+advertises `pr-review`. Enabling it without an OpenAI-compatible provider fails startup.
+`CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE` defaults to `sbx`; the template is optional. For each durable
+claim the worker resolves exactly one enabled CodeCommit connection, clones the exact head into a
+private data-root workspace, and hands that checkout to one named sbx sandbox. It then denies all
+sandbox network access, strips Git remotes and credential helpers, and verifies the full head object ID
+before exposing the typed review tools. Startup removes only `cc-pr-review-*` crash leftovers. While a
+review is running, the worker renews its durable lease and observes cancellation; cancellation
+interrupts the scoped checkout, sandbox, and model work before durably completing the job as cancelled.
+`CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS` and
+`CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` both default to 1,200,000 milliseconds. The maximum
+session duration should be at least the selected Review Agent Profile budget.
+
+The launch dialog shows the exact head, selected Review Agent Profile, budget, blocked-network policy,
+and sbx runtime before enqueue. The selected model explores the complete project exclusively through
+the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match added
+lines are retained; investigation remains live activity. Control Center derives Changes Required,
+Non-blocking Suggestions, No Issues Found, or Unable to Conclude from the validated report. The model
+does not author that outcome, and there is no suggestion-count cap beyond the existing durable event
+byte envelope.
 
 Durable enqueue requests must explicitly select the provider, one catalog model, and the `read-only`
 profile. The selection is validated fail-closed before enqueue and persisted in the existing job

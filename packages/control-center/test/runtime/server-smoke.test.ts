@@ -20,7 +20,12 @@ import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { createServer } from "node:net"
 
-import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import { makeControlCenterApiClient } from "../../src/api/client.js"
 import { PairingCode } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
@@ -37,7 +42,11 @@ import {
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import type { PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { PrReviewSandboxRunner } from "../../src/server/agent/internal/PrReviewSandboxRunner.js"
+import {
+  type PrReviewSandboxCommandResult,
+  type PrReviewSandboxSession,
+  PrReviewSandboxSessions
+} from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
@@ -750,16 +759,69 @@ describe("Control Center closed runtime", () => {
         baseRevision: "1".repeat(40),
         headRevision: "2".repeat(40)
       } satisfies PrReviewSubject
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
+      const evidencePath = "packages/control-center/src/review.ts"
+      const evidenceExcerpt = "const unsafe = true"
       const output = JSON.stringify({
-        schemaVersion: 1,
-        subject,
-        recommendation: "no-material-findings",
-        summary: "The immutable head has no material findings.",
-        findings: []
+        schemaVersion: 2,
+        completion: { status: "complete" },
+        suggestions: [{
+          severity: "P2",
+          problem: "Unsafe review behavior is enabled.",
+          impact: "The production path can accept unsafe state.",
+          evidence: {
+            path: evidencePath,
+            startLine: 42,
+            endLine: 42,
+            excerpt: evidenceExcerpt
+          },
+          recommendation: "Use the validated safe configuration.",
+          confidence: {
+            level: "high",
+            reason: "The exact added line enables the unsafe state."
+          }
+        }]
       })
       let providerCalls = 0
       const providerClient = HttpClient.make((request) => {
         providerCalls += 1
+        const toolCalls = [
+          {
+            id: "list-project",
+            type: "function",
+            function: {
+              name: "ReviewListFiles",
+              arguments: JSON.stringify({ path: "." })
+            }
+          },
+          {
+            id: "read-instructions",
+            type: "function",
+            function: {
+              name: "ReviewRunCommand",
+              arguments: JSON.stringify({
+                command: `git show ${subject.baseRevision}:AGENTS.md`
+              })
+            }
+          },
+          {
+            id: "inspect-diff",
+            type: "function",
+            function: {
+              name: "ReviewRunCommand",
+              arguments: JSON.stringify({
+                command: `git diff --stat ${subject.baseRevision} ${subject.headRevision}`
+              })
+            }
+          }
+        ]
+        const toolCall = toolCalls[providerCalls - 1]
         return Effect.succeed(
           HttpClientResponse.fromWeb(
             request,
@@ -771,8 +833,10 @@ describe("Control Center closed runtime", () => {
                 created: 1,
                 choices: [{
                   index: 0,
-                  finish_reason: "stop",
-                  message: { role: "assistant", content: output }
+                  finish_reason: toolCall === undefined ? "stop" : "tool_calls",
+                  message: toolCall === undefined
+                    ? { role: "assistant", content: output }
+                    : { role: "assistant", content: null, tool_calls: [toolCall] }
                 }],
                 usage: {
                   prompt_tokens: 8,
@@ -815,7 +879,7 @@ describe("Control Center closed runtime", () => {
           prompt: "Review the immutable pull request.",
           contextFingerprint: AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`),
           subjectRevision: subject.headRevision,
-          task: { _tag: "pr-review", subject },
+          task: { _tag: "pr-review", subject, reviewProfile },
           createdAt: FIXTURE_TIME
         })
       }).pipe(
@@ -827,22 +891,75 @@ describe("Control Center closed runtime", () => {
 
       let sourceUses = 0
       let sandboxCalls = 0
+      const sandboxOperations = new Array<string>()
       const sourceWorkspace = PrReviewSourceWorkspace.of({
         withSource: (_request, use) => {
           sourceUses += 1
           return use("/deterministic-review-source")
         }
       })
-      const sandboxRunner = PrReviewSandboxRunner.of({
-        run: () => {
-          sandboxCalls += 1
-          return Effect.succeed({
-            schemaVersion: 1,
-            headRevision: subject.headRevision,
-            tool: { name: "eslint", version: "10.7.0" },
-            findings: []
-          })
+      const sandboxOutput = (
+        stdout = ""
+      ): PrReviewSandboxCommandResult => ({
+        exitCode: 0,
+        stderr: {
+          artifactId: null,
+          byteLength: 0,
+          text: "",
+          truncated: false
+        },
+        stdout: {
+          artifactId: null,
+          byteLength: new TextEncoder().encode(stdout).byteLength,
+          text: stdout,
+          truncated: false
         }
+      })
+      const sandboxSession: PrReviewSandboxSession = {
+        attemptId: "0123456789ab",
+        baseRevision: subject.baseRevision,
+        headRevision: subject.headRevision,
+        jobId,
+        listFiles: () =>
+          Effect.sync(() => {
+            sandboxOperations.push("listFiles")
+            return sandboxOutput("AGENTS.md\npackages\n")
+          }),
+        readFile: () =>
+          Effect.sync(() => {
+            sandboxOperations.push("readFile")
+            return sandboxOutput("# Review instructions\n")
+          }),
+        searchFiles: () => Effect.succeed(sandboxOutput()),
+        runCommand: (command) =>
+          Effect.sync(() => {
+            sandboxOperations.push(command)
+            if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+              return sandboxOutput(`@@ -0,0 +42 @@\n+${evidenceExcerpt}\n`)
+            }
+            if (
+              command.startsWith(
+                `git show '${subject.headRevision}:${evidencePath}' | sed -n '42,42p'`
+              )
+            ) {
+              return sandboxOutput(`${evidenceExcerpt}\n`)
+            }
+            return command.startsWith("git show ")
+              ? sandboxOutput("# Review instructions\n")
+              : sandboxOutput("1 file changed\n")
+          }),
+        applyPatch: () => Effect.succeed(sandboxOutput()),
+        readDiff: () => Effect.succeed(sandboxOutput()),
+        pageArtifact: () => Effect.succeed(""),
+        searchArtifact: () => Effect.succeed([]),
+        close: Effect.void
+      }
+      const sandboxSessions = PrReviewSandboxSessions.of({
+        withSession: (_request, use) => {
+          sandboxCalls += 1
+          return use(sandboxSession)
+        },
+        reconcile: () => Effect.succeed({ removedSandboxes: [] })
       })
       const invalidRuntime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
@@ -853,12 +970,10 @@ describe("Control Center closed runtime", () => {
         prReviewWorker: {
           workspaceId: WORKSPACE_ID,
           workspaceRoot: path.join(dataRoot, "review-workspaces"),
-          image: `example.invalid/review@sha256:${"a".repeat(64)}`,
-          analyzerCommand: ["review-analyzer"],
           leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
           runOnceBeforeSupervision: true,
           sourceWorkspace,
-          sandboxRunner
+          sandboxSessions
         }
       })).pipe(Effect.result)
       assert.isTrue(Result.isFailure(invalidRuntime))
@@ -897,12 +1012,10 @@ describe("Control Center closed runtime", () => {
         prReviewWorker: {
           workspaceId: WORKSPACE_ID,
           workspaceRoot: path.join(dataRoot, "review-workspaces"),
-          image: `example.invalid/review@sha256:${"a".repeat(64)}`,
-          analyzerCommand: ["review-analyzer"],
           leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
           runOnceBeforeSupervision: true,
           sourceWorkspace,
-          sandboxRunner
+          sandboxSessions
         }
       }))
       const persistence = Context.get(runtime, Persistence)
@@ -913,11 +1026,20 @@ describe("Control Center closed runtime", () => {
 
       assert.isTrue(Option.isSome(latest))
       if (Option.isSome(latest)) {
-        assert.strictEqual(latest.value.report?.recommendation, "no-material-findings")
+        assert.strictEqual(latest.value.report?.suggestions[0]?.problem, "Unsafe review behavior is enabled.")
+        assert.match(
+          latest.value.report?.suggestions[0]?.suggestionId ?? "",
+          /^sha256:[0-9a-f]{64}$/u
+        )
       }
-      assert.strictEqual(sourceUses, 1)
+      assert.strictEqual(sourceUses, 0)
       assert.strictEqual(sandboxCalls, 1)
-      assert.strictEqual(providerCalls, 1)
+      assert.strictEqual(providerCalls, 4)
+      assert.deepStrictEqual(sandboxOperations.slice(0, 3), [
+        "listFiles",
+        `git show ${subject.baseRevision}:AGENTS.md`,
+        `git diff --stat ${subject.baseRevision} ${subject.headRevision}`
+      ])
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped

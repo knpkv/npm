@@ -11,7 +11,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import type * as Stream from "effect/Stream"
 
-import type { AgentJobTaskTag, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
+import type {
+  AgentJobInputError,
+  AgentJobTaskTag,
+  ClaimedAgentJob
+} from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import { PrReviewTaskExecutor } from "./PrReviewTaskExecutor.js"
 
@@ -29,7 +33,10 @@ export type AgentJobTaskExecution =
 /** Server-owned task executor contract hidden behind the durable worker. */
 export interface AgentJobTaskExecutorService {
   readonly taskTags: ReadonlyArray<AgentJobTaskTag>
-  readonly execute: (claim: ClaimedAgentJob) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError>
+  readonly execute: (
+    claim: ClaimedAgentJob,
+    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+  ) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError>
 }
 
 /** Internal dependency-injection seam for deterministic task execution tests. */
@@ -44,8 +51,9 @@ export const agentJobTaskExecutorLayer = (
 
 const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
   reviews: PrReviewTaskExecutor["Service"],
-  claim: ClaimedAgentJob
-): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError> {
+  claim: ClaimedAgentJob,
+  onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
+): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError | AgentJobInputError> {
   if (claim.context.task._tag !== "pr-review") {
     return yield* new AgentProviderError({
       providerId: claim.providerId,
@@ -56,7 +64,7 @@ const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
   }
   return {
     _tag: "pr-review",
-    report: yield* reviews.execute(claim)
+    report: yield* reviews.execute(claim, onActivity)
   }
 })
 
@@ -129,9 +137,9 @@ export const reviewEnabledTaskExecutorLayer: Layer.Layer<
     const runtimes = yield* AgentRuntimeRegistry
     return AgentJobTaskExecutor.of({
       taskTags: ["release-chat", "pr-review"],
-      execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim) {
+      execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim, onActivity) {
         if (claim.context.task._tag === "pr-review") {
-          return yield* executeReview(reviews, claim)
+          return yield* executeReview(reviews, claim, onActivity)
         }
         const selected = yield* runtimes.select({
           providerId: claim.providerId,
@@ -175,7 +183,7 @@ export const prReviewOnlyTaskExecutorLayer: Layer.Layer<
     const reviews = yield* PrReviewTaskExecutor
     return AgentJobTaskExecutor.of({
       taskTags: ["pr-review"],
-      execute: (claim) => executeReview(reviews, claim)
+      execute: (claim, onActivity) => executeReview(reviews, claim, onActivity)
     })
   })
 )

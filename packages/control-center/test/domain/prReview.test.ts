@@ -2,22 +2,23 @@ import { assert, describe, it } from "@effect/vitest"
 import { Result, Schema } from "effect"
 
 import {
-  MAXIMUM_PR_REVIEW_FINDINGS,
+  derivePrReviewOutcome,
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
-  PrReviewFinding,
+  PrReviewPrevention,
   PrReviewReport,
-  PrReviewSubject
+  PrReviewSubject,
+  PrReviewSuggestion
 } from "../../src/domain/prReview.js"
 
 const subject = Schema.decodeUnknownSync(PrReviewSubject)({
   providerId: "codecommit",
   repository: "control-center",
-  pullRequestId: "212",
+  pullRequestId: "276",
   baseRevision: "1".repeat(40),
   headRevision: "2".repeat(40)
 })
 
-const prevention = {
+const prevention = Schema.decodeUnknownSync(PrReviewPrevention)({
   summary: "Protect active-lease review completion.",
   enforcement: "test",
   existingRuleOrConfig: "agent job repository integration suite",
@@ -27,37 +28,62 @@ const prevention = {
   invalidFixture: "completeReview({ leaseToken: staleLease })",
   validFixture: "completeReview({ leaseToken: activeLease })",
   boundary: "Only durable PR-review jobs are covered; provider and sandbox contracts stay separate."
-}
+})
 
-const finding = Schema.decodeUnknownSync(PrReviewFinding)({
-  findingId: "finding-1",
-  severity: "high",
-  path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
-  startLine: 42,
-  endLine: 45,
-  title: "Review output must cross a typed boundary",
-  detail: "Decode the complete report before committing any model-authored result.",
+const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  suggestionId: `sha256:${"1".repeat(64)}`,
+  severity: "P2",
+  problem: "Review output must cross a typed boundary.",
+  impact: "Malformed review output could otherwise enter durable state.",
+  evidence: {
+    path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+    startLine: 42,
+    endLine: 45,
+    excerpt: "const report = decodeReviewOutput(output)"
+  },
+  recommendation: "Decode the complete report before committing any model-authored result.",
+  confidence: {
+    level: "high",
+    reason: "The persistence boundary is directly observable."
+  },
   prevention
 })
 
 const report = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 1,
+  schemaVersion: 2,
   subject,
-  recommendation: "changes-recommended",
-  summary: "One durable review finding.",
-  findings: [finding]
+  completion: { status: "complete" },
+  suggestions: [suggestion]
 })
 
 describe("PR review domain", () => {
-  it("decodes a bounded report while keeping agent recommendation distinct from human disposition", () => {
-    const decoded = Schema.decodeUnknownSync(PrReviewReport)(report)
-
-    assert.strictEqual(decoded.recommendation, "changes-recommended")
-    assert.isFalse(Schema.is(PrReviewReport)({ ...report, recommendation: "approve" }))
-    assert.isFalse(Schema.is(PrReviewReport)({ ...report, recommendation: "request-changes" }))
+  it("derives the browser outcome instead of accepting a model-authored verdict", () => {
+    assert.strictEqual(derivePrReviewOutcome(report), "changes-required")
+    assert.strictEqual(
+      derivePrReviewOutcome({
+        ...report,
+        suggestions: [{ ...suggestion, severity: "P4" }]
+      }),
+      "non-blocking-suggestions"
+    )
+    assert.strictEqual(derivePrReviewOutcome({ ...report, suggestions: [] }), "no-issues-found")
+    assert.strictEqual(
+      derivePrReviewOutcome({
+        ...report,
+        completion: { status: "unable-to-conclude", reason: "Build dependency unavailable." },
+        suggestions: []
+      }),
+      "unable-to-conclude"
+    )
+    assert.isFalse(
+      "verdict" in Schema.decodeUnknownSync(PrReviewReport)({
+        ...report,
+        verdict: "approve"
+      })
+    )
   })
 
-  it("rejects traversal, absolute, backslash, and control-character finding paths", () => {
+  it("rejects traversal, absolute, backslash, and control-character evidence paths", () => {
     for (
       const path of [
         "../secrets.env",
@@ -72,7 +98,10 @@ describe("PR review domain", () => {
         Result.isFailure(
           Schema.decodeUnknownResult(PrReviewReport)({
             ...report,
-            findings: [{ ...finding, path }]
+            suggestions: [{
+              ...suggestion,
+              evidence: { ...suggestion.evidence, path }
+            }]
           })
         ),
         path
@@ -80,108 +109,80 @@ describe("PR review domain", () => {
     }
   })
 
-  it("rejects duplicate finding identifiers", () => {
+  it("rejects duplicate host-derived suggestion identifiers", () => {
     assert.isTrue(
       Result.isFailure(
         Schema.decodeUnknownResult(PrReviewReport)({
           ...report,
-          findings: [finding, { ...finding, title: "A second finding with the same identity" }]
+          suggestions: [
+            suggestion,
+            { ...suggestion, problem: "A second suggestion with the same identity." }
+          ]
         })
       )
     )
   })
 
-  it("retains at most the bounded number of findings", () => {
-    const findings = Array.from({ length: MAXIMUM_PR_REVIEW_FINDINGS }, (_, index) => ({
-      ...finding,
-      findingId: `finding-${String(index)}`
+  it("has no suggestion-count cap below the durable byte envelope", () => {
+    const suggestions = Array.from({ length: 13 }, (_, index) => ({
+      ...suggestion,
+      suggestionId: `sha256:${index.toString(16).padStart(64, "0")}`,
+      problem: `Problem ${String(index)}`
     }))
-    const bounded = { ...report, findings }
+    const many = { ...report, suggestions }
 
-    assert.isAtMost(
-      new TextEncoder().encode(JSON.stringify(bounded)).byteLength,
+    assert.isBelow(
+      new TextEncoder().encode(JSON.stringify(many)).byteLength,
       MAXIMUM_PR_REVIEW_REPORT_BYTES
     )
-    assert.isTrue(Schema.is(PrReviewReport)(bounded))
-    assert.isFalse(
-      Schema.is(PrReviewReport)({
-        ...report,
-        findings: [...findings, { ...finding, findingId: "finding-overflow" }]
-      })
-    )
+    assert.isTrue(Schema.is(PrReviewReport)(many))
   })
 
-  it("rejects reports whose encoded form exceeds the durable report bound", () => {
+  it("rejects only the aggregate durable-byte overflow", () => {
     const oversized = {
       ...report,
-      findings: Array.from({ length: MAXIMUM_PR_REVIEW_FINDINGS }, (_, index) => ({
-        ...finding,
-        findingId: `finding-${String(index)}`,
-        detail: "d".repeat(4_000),
-        prevention: {
-          ...prevention,
-          invalidFixture: `invalid-${String(index)}-${"x".repeat(7_900)}`,
-          validFixture: `valid-${String(index)}-${"y".repeat(7_900)}`
-        }
+      suggestions: Array.from({ length: 16 }, (_, index) => ({
+        ...suggestion,
+        suggestionId: `sha256:${index.toString(16).padStart(64, "0")}`,
+        impact: `${String(index)}-${"x".repeat(3_900)}`
       }))
     }
 
-    assert.isAbove(new TextEncoder().encode(JSON.stringify(oversized)).byteLength, MAXIMUM_PR_REVIEW_REPORT_BYTES)
+    assert.isAbove(
+      new TextEncoder().encode(JSON.stringify(oversized)).byteLength,
+      MAXIMUM_PR_REVIEW_REPORT_BYTES
+    )
     assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(PrReviewReport)(oversized)))
   })
 
-  it("rejects prevention proposals without distinct reject and allow fixtures", () => {
-    const missingAllow = {
+  it("retains independently validated suggestions while deriving an inconclusive outcome", () => {
+    const incomplete = Schema.decodeUnknownSync(PrReviewReport)({
       ...report,
-      findings: [
-        {
-          ...finding,
-          prevention: {
-            ...prevention,
-            validFixture: undefined
-          }
-        }
-      ]
-    }
-    const identicalFixtures = {
-      ...report,
-      findings: [
-        {
-          ...finding,
-          prevention: {
-            ...prevention,
-            validFixture: prevention.invalidFixture
-          }
-        }
-      ]
-    }
-
-    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(PrReviewReport)(missingAllow)))
-    assert.isTrue(Result.isFailure(Schema.decodeUnknownResult(PrReviewReport)(identicalFixtures)))
+      completion: {
+        status: "unable-to-conclude",
+        reason: "Build dependency unavailable."
+      }
+    })
+    assert.strictEqual(incomplete.suggestions.length, 1)
+    assert.strictEqual(derivePrReviewOutcome(incomplete), "unable-to-conclude")
   })
 
-  it("accepts the exact documented prevention enforcement vocabulary", () => {
+  it("requires implementation-ready prevention fixtures when enforcement is proposed", () => {
+    assert.isFalse(
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
+        prevention: { ...prevention, validFixture: "completeReview({ leaseToken: staleLease })" }
+      })
+    )
     assert.isTrue(
-      Schema.is(PrReviewFinding)({
-        ...finding,
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
         prevention: { ...prevention, enforcement: "ESLint" }
       })
     )
-    assert.isTrue(
-      Schema.is(PrReviewFinding)({
-        ...finding,
-        prevention: { ...prevention, enforcement: "ast-grep" }
-      })
-    )
     assert.isFalse(
-      Schema.is(PrReviewFinding)({
-        ...finding,
-        prevention: { ...prevention, enforcement: "ESlint" }
-      })
-    )
-    assert.isFalse(
-      Schema.is(PrReviewFinding)({
-        ...finding,
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
         prevention: { ...prevention, enforcement: "eslint" }
       })
     )

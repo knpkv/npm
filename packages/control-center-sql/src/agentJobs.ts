@@ -34,8 +34,7 @@ export interface AgentThreadReplayQueryInput {
 /** Exact immutable review subject used to recover its newest durable job. */
 export interface LatestAgentReviewQueryInput {
   readonly subjectRevision: string
-  readonly taskContextDigest: string
-  readonly taskContextJson: string
+  readonly taskContextPrefix: string
   readonly workspaceId: string
 }
 
@@ -275,19 +274,27 @@ export const renderLatestAgentReviewQuery = (
 ): RenderedSql => {
   const plan = Query.select({
     jobId: agentJobs.jobId,
+    threadId: agentJobs.threadId,
     providerId: agentJobs.providerId,
     model: agentJobs.model,
     state: agentJobs.state,
     createdAt: agentJobs.createdAt,
-    terminalAt: agentJobs.terminalAt
+    terminalAt: agentJobs.terminalAt,
+    taskContextJson: agentJobs.taskContextJson,
+    taskContextDigest: agentJobs.taskContextDigest
   }).pipe(
     Query.from(agentJobs),
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
         Query.eq(agentJobs.subjectRevision, input.subjectRevision),
-        Query.eq(agentJobs.taskContextJson, input.taskContextJson),
-        Query.eq(agentJobs.taskContextDigest, input.taskContextDigest)
+        Query.eq(
+          Query.cast(
+            Fn.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),
+            Sqlite.Type.custom("text")
+          ),
+          Query.cast(input.taskContextPrefix, Sqlite.Type.custom("text"))
+        )
       )
     ),
     Query.orderBy(agentJobs.createdAt, "desc"),

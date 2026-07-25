@@ -5,7 +5,12 @@ import { DateTime, Effect, Ref, Result, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as TestClock from "effect/testing/TestClock"
 
-import { AgentModelId, DurableAgentProviderId, ReleaseAgentThreadCursor } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  ReleaseAgentThreadCursor,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import {
   AgentThreadId,
   JobId,
@@ -98,6 +103,13 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
 
 const reviewTask = {
   _tag: "pr-review",
+  reviewProfile: {
+    profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+    label: "Full-project review",
+    budgetMillis: 1_200_000,
+    networkAccess: "blocked",
+    sandbox: "sbx"
+  },
   subject: {
     providerId: "codecommit",
     repository: "control-center",

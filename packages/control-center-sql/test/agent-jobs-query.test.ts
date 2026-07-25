@@ -88,22 +88,26 @@ describe("durable agent job queries", () => {
   })
 
   it("renders a bounded newest-job lookup for one exact immutable review subject", () => {
+    const taskContextPrefix = "task_%prefix"
     const rendered = renderLatestAgentReviewQuery({
       workspaceId: "workspace-secret",
       subjectRevision: "head-secret",
-      taskContextJson: "task-json",
-      taskContextDigest: "task-digest"
+      taskContextPrefix
     })
 
     expect(rendered.params).toEqual([
       "workspace-secret",
       "head-secret",
-      "task-json",
-      "task-digest",
+      1,
+      taskContextPrefix.length,
+      taskContextPrefix,
       1
     ])
     expect(rendered.sql).toContain(
-      "where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"subject_revision\" = ?) and (\"agent_jobs\".\"task_context_json\" = ?) and (\"agent_jobs\".\"task_context_digest\" = ?))"
+      "where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"subject_revision\" = ?) and (cast(substr(\"agent_jobs\".\"task_context_json\", ?, ?) as text) = cast(? as text)))"
+    )
+    expect(rendered.sql).toContain(
+      "\"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\""
     )
     expect(rendered.sql).toContain(
       "order by \"agent_jobs\".\"created_at\" desc, \"agent_jobs\".\"job_id\" desc limit ?"

@@ -29,7 +29,9 @@ export {
   ReleaseAgentThreadEventLimitFromString,
   ReleaseAgentThreadPage,
   ReleaseAgentTurnRequest,
-  ReleaseAgentTurnResponse
+  ReleaseAgentTurnResponse,
+  ReviewAgentProfile,
+  ReviewAgentProfileId
 } from "./agent.js"
 export {
   type ControlCenterApiClient,

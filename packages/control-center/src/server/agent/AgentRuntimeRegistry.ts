@@ -28,7 +28,8 @@ import {
   type AgentProviderCapability,
   type AgentProviderCatalog,
   type AgentProviderCatalogEntry,
-  DurableAgentProviderId
+  DurableAgentProviderId,
+  ReviewAgentProfileId
 } from "../../api/agent.js"
 
 const CODEX_PROVIDER_ID = AgentProviderId.make("codex")
@@ -38,6 +39,7 @@ const CODEX_DEFAULT_MODEL = AgentModelId.make("configured-default")
 const CLAUDE_DEFAULT_MODEL = AgentModelId.make("default")
 const MINIMUM_OPENAI_GENERATION_TIMEOUT = Duration.millis(1)
 const MAXIMUM_OPENAI_GENERATION_TIMEOUT = Duration.minutes(2)
+const DEFAULT_PR_REVIEW_BUDGET_MILLIS = 1_200_000
 /** Persisted provider selection presented to the server-owned registry. */
 export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
@@ -65,6 +67,8 @@ export interface SelectedAgentRuntime {
    * backward-compatible for release-chat-only test registries.
    */
   readonly filesystemAccess?: "none" | "configured-workspace"
+  /** Effect AI service used only by the typed Review Sandbox tool loop. */
+  readonly languageModel?: LanguageModel.Service
 }
 
 /** Local Codex registration. Commands and environment remain inside the adapter package. */
@@ -96,12 +100,15 @@ export interface AgentProviderRegistryOptions {
   readonly openAiCompatible?: OpenAiCompatibleAgentProviderOptions
   /** Advertise prompt-only immutable review only when its worker is attached. */
   readonly prReviewEnabled?: boolean
+  /** Visible wall-clock budget fixed by the selected Review Agent Profile. */
+  readonly prReviewBudgetMillis?: number
 }
 
 interface ConfiguredProvider {
   readonly providerId: AgentProviderId
   readonly catalog: AgentProviderCatalogEntry
   readonly runtime: AgentRuntimeService | null
+  readonly languageModel?: LanguageModel.Service
 }
 
 interface GeneratedText {
@@ -124,12 +131,24 @@ const unavailableCatalogEntry = (
 const availableCatalogEntry = (
   providerId: "codex" | "claude" | "openai-compatible",
   model: AgentModelId,
-  capabilities: AgentProviderCatalogEntry["capabilities"] = ["release-chat"]
+  capabilities: AgentProviderCatalogEntry["capabilities"] = ["release-chat"],
+  reviewBudgetMillis?: number
 ): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
   models: [model],
   capabilities,
-  health: "available"
+  health: "available",
+  ...(reviewBudgetMillis === undefined
+    ? {}
+    : {
+      reviewProfile: {
+        profileId: ReviewAgentProfileId.make(`${providerId}:${model}:sbx`),
+        label: `Full-project review · ${providerId} · ${model}`,
+        budgetMillis: reviewBudgetMillis,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
+    })
 })
 
 const providerFailure = (providerId: AgentProviderId): AgentProviderError =>
@@ -242,6 +261,7 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
         ? Effect.succeed({
           model,
           runtime: provider.runtime,
+          ...(provider.languageModel === undefined ? {} : { languageModel: provider.languageModel }),
           filesystemAccess: provider.providerId === OPENAI_COMPATIBLE_PROVIDER_ID
             ? "none"
             : "configured-workspace"
@@ -319,7 +339,17 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
       maximum: MAXIMUM_OPENAI_GENERATION_TIMEOUT
     }
   )
-  const openAi = openAiConfigured === undefined
+  const prReviewBudgetMillis = options.prReviewBudgetMillis ?? DEFAULT_PR_REVIEW_BUDGET_MILLIS
+  const openAiLanguageModel = openAiConfigured === undefined
+    ? undefined
+    : yield* OpenAiLanguageModel.make({ model: openAiConfigured.model }).pipe(
+      Effect.provide(OpenAiClient.layer({
+        apiUrl: openAiConfigured.apiUrl,
+        ...(openAiConfigured.apiKey === undefined ? {} : { apiKey: openAiConfigured.apiKey })
+      })),
+      Effect.provideService(HttpClient.HttpClient, httpClient)
+    )
+  const openAi = openAiConfigured === undefined || openAiLanguageModel === undefined
     ? {
       providerId: OPENAI_COMPATIBLE_PROVIDER_ID,
       catalog: unavailableCatalogEntry("openai-compatible"),
@@ -332,18 +362,14 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
         openAiConfigured.model,
         options.prReviewEnabled === true
           ? ["release-chat", "pr-review"]
-          : ["release-chat"]
+          : ["release-chat"],
+        options.prReviewEnabled === true ? prReviewBudgetMillis : undefined
       ),
+      languageModel: openAiLanguageModel,
       runtime: makeLanguageModelRuntime(
         OPENAI_COMPATIBLE_PROVIDER_ID,
-        ({ model, prompt }) =>
-          LanguageModel.generateText({ prompt }).pipe(
-            Effect.provide(OpenAiLanguageModel.model(model)),
-            Effect.provide(OpenAiClient.layer({
-              apiUrl: openAiConfigured.apiUrl,
-              ...(openAiConfigured.apiKey === undefined ? {} : { apiKey: openAiConfigured.apiKey })
-            })),
-            Effect.provideService(HttpClient.HttpClient, httpClient),
+        ({ prompt }) =>
+          openAiLanguageModel.generateText({ prompt }).pipe(
             Effect.timeoutOrElse({
               duration: openAiGenerationTimeout,
               orElse: () => Effect.fail(timeoutFailure(OPENAI_COMPATIBLE_PROVIDER_ID))

@@ -1,15 +1,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { AgentProviderError, makeAgentRuntime } from "@knpkv/ai-runtime"
+import { AgentProviderError, makeAgentRuntime, makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
 import { DateTime, Duration, Effect, Option, Ref, Result, Schema, Stream } from "effect"
+import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
-import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
+import {
+  AgentModelId,
+  DurableAgentProviderId,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
 import { AgentThreadId, EntityId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
-import { DeliveryGraphInspection, PullRequestReviews } from "../../src/server/api/ApplicationServices.js"
+import {
+  ApplicationInvalidRequest,
+  DeliveryGraphInspection,
+  PullRequestReviews
+} from "../../src/server/api/ApplicationServices.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
@@ -29,6 +39,18 @@ const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-00
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000405")
 const MODEL = AgentModelId.make("review-model")
 const PROVIDER_ID = DurableAgentProviderId.make("openai-compatible")
+const REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+  label: "Full-project review · openai-compatible · review-model",
+  budgetMillis: 1_200_000,
+  networkAccess: "blocked",
+  sandbox: "sbx"
+}
+const LANGUAGE_MODEL = Effect.runSync(
+  LanguageModel.LanguageModel.pipe(
+    Effect.provide(makeDeterministicLanguageModel([]).layer)
+  )
+)
 const LEASE_OWNER = AgentLeaseOwner.make("review-test-worker")
 const LEASE_TOKEN = AgentLeaseToken.make("1".repeat(64))
 const STARTED_AT = "2026-07-24T15:00:00.000Z"
@@ -132,12 +154,18 @@ const registry = AgentRuntimeRegistry.of({
         providerId: PROVIDER_ID,
         models: [MODEL],
         capabilities: ["release-chat", "pr-review"],
-        health: "available"
+        health: "available",
+        reviewProfile: REVIEW_PROFILE
       }]
     }),
   select: ({ access, model, providerId }) =>
     access === "read-only" && model === MODEL && providerId === "openai-compatible"
-      ? Effect.succeed({ model: MODEL, runtime, filesystemAccess: "none" })
+      ? Effect.succeed({
+        model: MODEL,
+        runtime,
+        filesystemAccess: "none",
+        languageModel: LANGUAGE_MODEL
+      })
       : Effect.fail(
         new AgentProviderError({
           providerId,
@@ -244,7 +272,8 @@ describe("pull request reviews", () => {
           request: {
             providerId: PROVIDER_ID,
             model: MODEL,
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
           }
         })
         assert.strictEqual(accepted._tag, "pending")
@@ -265,6 +294,7 @@ describe("pull request reviews", () => {
         ) {
           assert.deepStrictEqual(persisted.task, {
             _tag: "pr-review",
+            reviewProfile: REVIEW_PROFILE,
             subject: {
               providerId: "codecommit",
               repository: "control-center",
@@ -289,13 +319,35 @@ describe("pull request reviews", () => {
             request: {
               providerId: PROVIDER_ID,
               model: MODEL,
-              profile: "read-only"
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
             }
           }).pipe(Effect.result)
           assert.isTrue(result._tag === "Failure")
           assert.isNull(yield* Ref.get(enqueueInput))
         }),
       localRegistry
+    ))
+
+  it.effect("rejects a Review Agent Profile other than the catalog selection", () =>
+    withService((service, enqueueInput) =>
+      Effect.gen(function*() {
+        const result = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: ReviewAgentProfileId.make("openai-compatible:other-model:sbx")
+          }
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, ApplicationInvalidRequest)
+        }
+        assert.isNull(yield* Ref.get(enqueueInput))
+      })
     ))
 
   it.effect("rejects direct review enqueue when the provider has no review worker opt-in", () =>
@@ -308,7 +360,8 @@ describe("pull request reviews", () => {
             request: {
               providerId: PROVIDER_ID,
               model: MODEL,
-              profile: "read-only"
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
             }
           }).pipe(Effect.result)
           assert.isTrue(Result.isFailure(result))
@@ -320,12 +373,15 @@ describe("pull request reviews", () => {
   it.effect("recovers an active exact-subject review before selecting its provider", () => {
     const active = Schema.decodeSync(LatestAgentReviewRecord)({
       jobId: "01890f6f-6d6a-7cc0-98d2-000000000406",
+      threadId: THREAD_ID,
       providerId: "openai-compatible",
       model: "review-model",
       state: "queued",
       createdAt: STARTED_AT,
       terminalAt: null,
-      report: null
+      report: null,
+      reviewProfile: REVIEW_PROFILE,
+      activity: { events: [], truncated: false }
     })
     return withService(
       (service, enqueueInput) =>
@@ -336,7 +392,8 @@ describe("pull request reviews", () => {
             request: {
               providerId: PROVIDER_ID,
               model: MODEL,
-              profile: "read-only"
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
             }
           })
           assert.strictEqual(recovered.jobId, active.jobId)
@@ -358,7 +415,8 @@ describe("pull request reviews", () => {
             request: {
               providerId: PROVIDER_ID,
               model: MODEL,
-              profile: "read-only"
+              profile: "read-only",
+              reviewProfileId: REVIEW_PROFILE.profileId
             }
           })
         const active = yield* Effect.all([enqueue(), enqueue()], {

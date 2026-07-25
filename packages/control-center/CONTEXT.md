@@ -53,7 +53,7 @@ The explicit provider configuration used by an Exploratory Review Run, including
 _Avoid_: Model, agent name, implicit fallback
 
 **Agent Tool Loop**:
-The provider-neutral execution module in `@knpkv/ai-runtime` that uses an Effect AI LanguageModel to select typed tools, executes those tools through the Review Sandbox module, feeds bounded results back to the model, and returns schema-validated output. Provider CLIs receive tool results but never direct host or Docker access.
+The provider-neutral execution module in `@knpkv/ai-runtime` that uses an Effect AI LanguageModel to select typed tools, executes those tools through the Review Sandbox module, feeds bounded results back to the model, and returns schema-validated output. Providers receive tool results but never direct host or sbx control access.
 _Avoid_: Native CLI tools, shell agent, prompt loop
 
 **Review Instruction Set**:
@@ -61,15 +61,15 @@ The effective instructions for an Exploratory Review Run. Local review policy ha
 _Avoid_: Prompt, head instructions, repository policy
 
 **Review Runner**:
-The trusted, locally selected container image used to create Review Sandboxes, pinned by immutable digest. A pull request cannot change the runner that evaluates it; the Local Operator must separately accept a proposed image before it affects later runs.
-_Avoid_: Repository Dockerfile, latest image, agent image
+The trusted local `sbx` executable and optional sandbox template used to create Review Sandboxes. A pull request cannot change the runner or template that evaluates it; the Local Operator configures them outside the reviewed checkout.
+_Avoid_: Repository Dockerfile, raw Docker container, agent image
 
 **Review Checkout Broker**:
-The trusted host-side component that reuses the connected CodeCommit profile to fetch and verify the exact base and head commits, removes authenticated remotes and credential configuration, copies the resulting checkout into an isolated writable Docker volume, and deletes host staging data after handoff.
+The trusted host-side component that reuses the connected CodeCommit profile to fetch and verify the exact base and head commits. The Review Sandbox clones that exact checkout into its isolated sbx filesystem, removes authenticated remotes and credential configuration, and deletes host staging data when the scoped run ends.
 _Avoid_: Git clone in the sandbox, repository mount, AWS credentials
 
 **Review Sandbox**:
-An ephemeral, unprivileged Docker environment containing a writable checkout of the exact reviewed revision. Within that boundary the agent may autonomously inspect files, run commands and tests, build, and create temporary changes without per-command approval. The host checkout, Docker socket, and host credentials are never mounted writable or exposed, and sandbox changes are never propagated automatically. Outbound network access is disabled unless the run receives an explicit Sandbox Network Grant. Activity is observable and the run remains cancellable.
+An ephemeral sbx microVM containing a writable clone of the exact reviewed revision. Within that boundary the agent may autonomously inspect files, run commands and tests, build, and create temporary changes without per-command approval. Host credentials and authority-bearing Git configuration are absent, and sandbox changes are never propagated automatically. Outbound network access is denied for the run. Activity is observable and the run remains cancellable.
 _Avoid_: Workspace, host checkout, development container
 
 **Review Budget**:

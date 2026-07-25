@@ -18,16 +18,8 @@ export {
   type SelectedAgentRuntime
 } from "./AgentRuntimeRegistry.js"
 export {
-  PrReviewSandboxError,
-  PrReviewSandboxRunner,
-  prReviewSandboxRunnerLayer,
-  type PrReviewSandboxRunnerOptions,
-  type PrReviewSandboxRunnerService
-} from "./internal/PrReviewSandboxRunner.js"
-export {
   PrReviewCommandArtifactId,
   type PrReviewSandboxCommandResult,
-  type PrReviewSandboxLiveContainer,
   type PrReviewSandboxOutput,
   type PrReviewSandboxReconciliation,
   type PrReviewSandboxSession,

@@ -21,7 +21,11 @@ import {
 } from "../../api/agent.js"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import { type EntityId, JobId, type ReleaseId, type WorkspaceId } from "../../domain/identifiers.js"
-import { PrReviewSubject, type PrReviewSubject as PrReviewSubjectType } from "../../domain/prReview.js"
+import {
+  derivePrReviewOutcome,
+  PrReviewSubject,
+  type PrReviewSubject as PrReviewSubjectType
+} from "../../domain/prReview.js"
 import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
 import {
   ApplicationInvalidRequest,
@@ -33,7 +37,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { AgentJobPrompt, type LatestAgentReviewRecord } from "../persistence/repositories/agentJobModels.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 
-const REVIEW_PROMPT = "Review the exact immutable pull request using only the bounded sandbox evidence."
+const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
 
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
@@ -106,6 +110,8 @@ const presentLatest = Effect.fn("PullRequestReviews.presentLatest")(function*(
   const common = {
     subject: target.subject,
     ...identity,
+    reviewProfile: record.reviewProfile,
+    activity: record.activity,
     jobId: record.jobId,
     requestedAt: record.createdAt
   }
@@ -119,7 +125,8 @@ const presentLatest = Effect.fn("PullRequestReviews.presentLatest")(function*(
       return new PullRequestReviewCompleted({
         ...common,
         completedAt: record.terminalAt,
-        report: record.report
+        report: record.report,
+        outcome: derivePrReviewOutcome(record.report)
       })
     case "failed":
     case "cancelled":
@@ -198,7 +205,19 @@ const makePullRequestReviews = Effect.gen(function*() {
         access: input.request.profile,
         capability: "pr-review"
       }).pipe(Effect.mapError(unavailable))
-      if (selected.filesystemAccess !== "none") return yield* unavailable()
+      const catalog = yield* runtimes.catalog()
+      const reviewProfile = catalog.providers.find(
+        (provider) =>
+          String(provider.providerId) === String(providerId) &&
+          provider.reviewProfile?.profileId === input.request.reviewProfileId
+      )?.reviewProfile
+      if (reviewProfile === undefined) {
+        return yield* new ApplicationInvalidRequest()
+      }
+      if (
+        selected.filesystemAccess !== "none" ||
+        selected.languageModel === undefined
+      ) return yield* unavailable()
 
       const jobId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
@@ -223,7 +242,11 @@ const makePullRequestReviews = Effect.gen(function*() {
           prompt,
           contextFingerprint,
           subjectRevision: target.subject.headRevision,
-          task: { _tag: "pr-review", subject: target.subject },
+          task: {
+            _tag: "pr-review",
+            subject: target.subject,
+            reviewProfile
+          },
           createdAt
         }).pipe(
           Effect.mapError(mapPersistenceWriteError),
@@ -239,6 +262,8 @@ const makePullRequestReviews = Effect.gen(function*() {
           jobId,
           providerId: input.request.providerId,
           model: input.request.model,
+          reviewProfile,
+          activity: { events: [], truncated: false },
           requestedAt: createdAt,
           state: "queued"
         })

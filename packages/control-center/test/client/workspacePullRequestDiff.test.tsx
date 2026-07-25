@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import * as Schema from "effect/Schema"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -12,6 +13,7 @@ import {
 } from "../../src/api/diff.js"
 import { PluginConnectionId } from "../../src/domain/identifiers.js"
 import { PluginRelativePathV1 } from "../../src/domain/plugins/events.js"
+import { PrReviewSuggestion } from "../../src/domain/prReview.js"
 import { Revision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import {
   browserWorkspacePullRequestDiffTransport,
@@ -45,6 +47,23 @@ const scope = {
 }
 const fileAnchor = DiffFileAnchor.make("sha256:12a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a1d")
 const unauthorizedReadKinds: ReadonlyArray<"inventory" | "content"> = ["inventory", "content"]
+const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  suggestionId: `sha256:${"1".repeat(64)}`,
+  severity: "P2",
+  problem: "The answer changed without updating its invariant.",
+  impact: "Callers can observe an unsupported value.",
+  evidence: {
+    path: "src/file.ts",
+    startLine: 1,
+    endLine: 1,
+    excerpt: "export const answer = 43"
+  },
+  recommendation: "Update the invariant or retain the supported answer.",
+  confidence: {
+    level: "high",
+    reason: "The exact added line contains the unsupported value."
+  }
+})
 
 describe("WorkspacePullRequestDiff", () => {
   it.each(unauthorizedReadKinds)(
@@ -297,7 +316,9 @@ describe("WorkspacePullRequestDiff", () => {
     roots.push(root)
 
     await act(async () => {
-      root.render(<WorkspacePullRequestDiff heading="PR 184" scope={scope} transport={transport} />)
+      root.render(
+        <WorkspacePullRequestDiff heading="PR 184" scope={scope} suggestions={[suggestion]} transport={transport} />
+      )
     })
     await act(async () => {
       await Promise.resolve()
@@ -309,6 +330,36 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
     expect(host.textContent).toContain("answer = 42")
     expect(host.textContent).toContain("answer = 43")
+    expect(host.textContent).toContain("P2 · The answer changed without updating its invariant.")
+    expect(host.textContent).toContain("Impact:")
+    expect(host.textContent).toContain("Recommendation:")
+    expect(host.querySelector("[aria-label='P2 review suggestion with high confidence']")).not.toBeNull()
     expect(host.querySelectorAll("[data-control-center-diff-layout]")).toHaveLength(0)
+  })
+
+  it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: []
+      }),
+      content: () => Promise.reject(new Error("no inventory entry"))
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff heading="PR 184" scope={scope} suggestions={[suggestion]} transport={transport} />
+      )
+      await Promise.resolve()
+    })
+
+    expect(host.querySelector("[role='status']")?.textContent).toContain(
+      "1 validated review suggestion is not attached"
+    )
+    expect(host.textContent).toContain("P2 · The answer changed without updating its invariant.")
   })
 })

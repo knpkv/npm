@@ -15,7 +15,8 @@ import {
   AgentModelId,
   DurableAgentProviderId,
   PullRequestReviewNotStarted,
-  PullRequestReviewState
+  PullRequestReviewState,
+  ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import { RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
 import { PrReviewSubject } from "../../src/domain/prReview.js"
@@ -659,7 +660,14 @@ const pullRequestReviewState = {
   action: "idle",
   provider: {
     providerId: DurableAgentProviderId.make("openai-compatible"),
-    model: AgentModelId.make("review-model")
+    model: AgentModelId.make("review-model"),
+    reviewProfile: {
+      profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+      label: "Full-project review · openai-compatible · review-model",
+      budgetMillis: 1_200_000,
+      networkAccess: "blocked",
+      sandbox: "sbx"
+    }
   },
   review: new PullRequestReviewNotStarted({ subject: pullRequestReviewSubject })
 } satisfies PullRequestReviewControllerState
@@ -672,22 +680,32 @@ const completedPullRequestReviewState = {
     jobId: "01890f6f-6d6a-7cc0-98d2-000000000099",
     providerId: "openai-compatible",
     model: "review-model",
+    reviewProfile: pullRequestReviewState.provider.reviewProfile,
+    activity: { events: [], truncated: false },
     requestedAt: "2026-07-14T10:00:00.000Z",
     completedAt: "2026-07-14T10:01:00.000Z",
+    outcome: "changes-required",
     report: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       subject: pullRequestReviewSubject,
-      recommendation: "changes-recommended",
-      summary: "One exact-head finding needs a person to decide.",
-      findings: [
+      completion: { status: "complete" },
+      suggestions: [
         {
-          findingId: "finding-1",
-          severity: "high",
-          path: "src/capture.ts",
-          startLine: 42,
-          endLine: 42,
-          title: "Retry can duplicate capture",
-          detail: "The retry path does not reuse the original idempotency key.",
+          suggestionId: `sha256:${"1".repeat(64)}`,
+          severity: "P2",
+          problem: "Retry can duplicate capture",
+          impact: "The retry path does not reuse the original idempotency key.",
+          evidence: {
+            path: "src/capture.ts",
+            startLine: 42,
+            endLine: 42,
+            excerpt: "return capture({ idempotencyKey: freshKey })"
+          },
+          recommendation: "Reuse the original idempotency key for retry attempts.",
+          confidence: {
+            level: "high",
+            reason: "The added retry branch supplies a newly generated key."
+          },
           prevention: {
             summary: "Add a focused retry contract test.",
             enforcement: "test",
@@ -1323,6 +1341,18 @@ describe("canonical workspace entity", () => {
     )
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
+    expect(host.textContent).toContain("Launch full-project review")
+    expect(host.textContent).toContain(pullRequestReviewSubject.headRevision)
+    expect(host.textContent).toContain("Full-project review · openai-compatible · review-model")
+    expect(host.textContent).toContain("20 minutes")
+    expect(host.textContent).toContain("Blocked")
+    expect(host.textContent).toContain("sbx")
+    expect(onReviewStart).not.toHaveBeenCalled()
+    const startButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Start review"
+    )
+    if (startButton === undefined) throw new Error("Expected review confirmation")
+    await act(async () => startButton.click())
     expect(onReviewStart).toHaveBeenCalledOnce()
     expect(onAskAgent).not.toHaveBeenCalled()
   })
@@ -1335,7 +1365,7 @@ describe("canonical workspace entity", () => {
       completedPullRequestReviewState
     )
 
-    expect(host.textContent).toContain("Changes recommended")
+    expect(host.textContent).toContain("Changes Required")
     expect(host.textContent).toContain("Retry can duplicate capture")
     expect(host.textContent).toContain("src/capture.ts:42")
     expect(host.textContent).toContain("Prevention proposal · separate review required")
