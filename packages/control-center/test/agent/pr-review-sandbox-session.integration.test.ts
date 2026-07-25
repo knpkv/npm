@@ -23,6 +23,7 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082")
 const ATTEMPT_ID = "89abcdef0123"
 const CONTAINER_NAME = `cc-pr-review-session-${JOB_ID}-${ATTEMPT_ID}`
 const VOLUME_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
+const IMAGE_FIXTURE_CONTAINER = `cc-pr-review-image-fixture-${ATTEMPT_ID}`
 const IMAGE = "alpine/git@sha256:c0280cf9572316299b08544065d3bf35db65043d5e3963982ec50647d2746e26"
 
 const commandEnvironment: Readonly<Record<string, string>> = {
@@ -102,6 +103,81 @@ describe("PrReviewSandboxSessions Docker integration", () => {
           }
           const pulled = yield* run("docker", ["image", "pull", IMAGE])
           assert.strictEqual(pulled.exitCode, 0, pulled.stderr)
+          yield* run("docker", [
+            "container",
+            "rm",
+            "--force",
+            IMAGE_FIXTURE_CONTAINER
+          ])
+          const imageFixture = yield* run("docker", [
+            "container",
+            "run",
+            "--detach",
+            "--name",
+            IMAGE_FIXTURE_CONTAINER,
+            "--entrypoint",
+            "/bin/sh",
+            IMAGE,
+            "-c",
+            "while :; do sleep 3600; done"
+          ])
+          assert.strictEqual(
+            imageFixture.exitCode,
+            ChildProcessSpawner.ExitCode(0),
+            imageFixture.stderr
+          )
+          yield* Effect.addFinalizer(() =>
+            run("docker", [
+              "container",
+              "rm",
+              "--force",
+              IMAGE_FIXTURE_CONTAINER
+            ]).pipe(Effect.ignore)
+          )
+          const imageWorkspace = yield* run("docker", [
+            "container",
+            "exec",
+            IMAGE_FIXTURE_CONTAINER,
+            "/bin/sh",
+            "-c",
+            "mkdir -p /workspace && printf image-only > /workspace/image-only.txt"
+          ])
+          assert.strictEqual(
+            imageWorkspace.exitCode,
+            ChildProcessSpawner.ExitCode(0),
+            imageWorkspace.stderr
+          )
+          const committed = yield* run("docker", [
+            "container",
+            "commit",
+            IMAGE_FIXTURE_CONTAINER
+          ])
+          assert.strictEqual(
+            committed.exitCode,
+            ChildProcessSpawner.ExitCode(0),
+            committed.stderr
+          )
+          const runnerImage = committed.stdout.trim()
+          assert.match(runnerImage, /^sha256:[a-f0-9]{64}$/u)
+          yield* Effect.addFinalizer(() =>
+            run("docker", [
+              "image",
+              "rm",
+              "--force",
+              runnerImage
+            ]).pipe(Effect.ignore)
+          )
+          const removedImageFixture = yield* run("docker", [
+            "container",
+            "rm",
+            "--force",
+            IMAGE_FIXTURE_CONTAINER
+          ])
+          assert.strictEqual(
+            removedImageFixture.exitCode,
+            ChildProcessSpawner.ExitCode(0),
+            removedImageFixture.stderr
+          )
 
           const fileSystem = yield* FileSystem.FileSystem
           const path = yield* Path.Path
@@ -138,6 +214,9 @@ describe("PrReviewSandboxSessions Docker integration", () => {
               },
               (session) =>
                 Effect.gen(function*() {
+                  const unchanged = yield* session.readDiff()
+                  assert.strictEqual(unchanged.exitCode, 0)
+                  assert.strictEqual(unchanged.stdout.text, "")
                   const environment = yield* session.runCommand(
                     "test -w . && test ! -e /var/run/docker.sock && " +
                       "test -z \"$(git remote)\" && " +
@@ -151,6 +230,12 @@ describe("PrReviewSandboxSessions Docker integration", () => {
                   )
                   assert.strictEqual(environment.exitCode, 0)
                   assert.strictEqual(environment.stdout.text, "writable\n")
+                  const imageOnly = yield* session.readFile(
+                    "image-only.txt",
+                    0,
+                    128
+                  )
+                  assert.notStrictEqual(imageOnly.exitCode, 0)
                   const read = yield* session.readFile("review.ts", 7, 5)
                   assert.strictEqual(read.exitCode, 0)
                   assert.strictEqual(read.stdout.text, "const")
@@ -175,6 +260,30 @@ describe("PrReviewSandboxSessions Docker integration", () => {
                     sentinel.stdout.text,
                     "export const value = 1\n"
                   )
+                  const emptyFixtures = yield* session.runCommand(
+                    "mkdir empty-dir && : > empty.txt"
+                  )
+                  assert.strictEqual(emptyFixtures.exitCode, 0)
+                  const emptyFile = yield* session.readFile(
+                    "empty.txt",
+                    0,
+                    128
+                  )
+                  assert.strictEqual(emptyFile.exitCode, 0)
+                  assert.strictEqual(emptyFile.stdout.text, "")
+                  const emptyDirectory = yield* session.listFiles("empty-dir")
+                  assert.strictEqual(emptyDirectory.exitCode, 0)
+                  assert.strictEqual(emptyDirectory.stdout.text, "")
+                  const missingFile = yield* session.readFile(
+                    "missing.txt",
+                    0,
+                    128
+                  )
+                  assert.notStrictEqual(missingFile.exitCode, 0)
+                  const missingDirectory = yield* session.listFiles(
+                    "missing-directory"
+                  )
+                  assert.notStrictEqual(missingDirectory.exitCode, 0)
 
                   const patch = yield* session.applyPatch(
                     [
@@ -184,12 +293,37 @@ describe("PrReviewSandboxSessions Docker integration", () => {
                       "@@ -1 +1 @@",
                       "-export const value = 1",
                       "+export const value = 2",
+                      "diff --git a/new.txt b/new.txt",
+                      "new file mode 100644",
+                      "--- /dev/null",
+                      "+++ b/new.txt",
+                      "@@ -0,0 +1 @@",
+                      "+created",
                       ""
                     ].join("\n")
                   )
                   assert.strictEqual(patch.exitCode, 0)
+                  const staged = yield* session.runCommand(
+                    "git add -- review.ts"
+                  )
+                  assert.strictEqual(staged.exitCode, 0)
                   const diff = yield* session.readDiff()
                   assert.include(diff.stdout.text, "+export const value = 2")
+                  assert.include(diff.stdout.text, "diff --git a/new.txt b/new.txt")
+                  assert.include(diff.stdout.text, "+created")
+
+                  const smallArtifact = yield* session.runCommand(
+                    "dd if=/dev/zero of=small-artifact bs=4096 count=1 status=none"
+                  )
+                  assert.strictEqual(smallArtifact.exitCode, 0)
+                  const overflow = yield* session.runCommand(
+                    "dd if=/dev/zero of=workspace-overflow bs=1048576 count=16 status=none"
+                  )
+                  assert.notStrictEqual(overflow.exitCode, 0)
+                  const removedOverflow = yield* session.runCommand(
+                    "rm -f workspace-overflow small-artifact"
+                  )
+                  assert.strictEqual(removedOverflow.exitCode, 0)
 
                   const inspected = yield* run("docker", [
                     "container",
@@ -221,7 +355,10 @@ describe("PrReviewSandboxSessions Docker integration", () => {
             )
           }).pipe(
             Effect.provide(
-              prReviewSandboxSessionsLayer({ image: IMAGE }).pipe(
+              prReviewSandboxSessionsLayer({
+                image: runnerImage,
+                maximumWorkspaceBytes: 8 * 1_024 * 1_024
+              }).pipe(
                 Layer.provide(sourceLayer(sourceRoot))
               )
             ),

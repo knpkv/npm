@@ -28,6 +28,9 @@ const DEFAULT_COMMAND_TIMEOUT_MILLIS = 120_000
 const MAXIMUM_COMMAND_TIMEOUT_MILLIS = 1_200_000
 const DEFAULT_SESSION_TIMEOUT_MILLIS = 1_200_000
 const MAXIMUM_SESSION_TIMEOUT_MILLIS = 1_800_000
+const DEFAULT_MAXIMUM_WORKSPACE_BYTES = 1_024 * 1_024 * 1_024
+const MINIMUM_WORKSPACE_BYTES = 1 * 1_024 * 1_024
+const MAXIMUM_WORKSPACE_BYTES = 16 * 1_024 * 1_024 * 1_024
 const MAXIMUM_CONTROL_OUTPUT_BYTES = 8_192
 const MAXIMUM_COMMAND_OUTPUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_VISIBLE_OUTPUT_BYTES = 32 * 1_024
@@ -55,7 +58,7 @@ const DigestPinnedImage = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isMaxLength(512),
   Schema.isPattern(
-    /^(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@sha256:[a-f0-9]{64}$/u,
+    /^(?:(?:[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?\/)?(?:[a-z0-9]+(?:[._-][a-z0-9]+)*\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[A-Za-z0-9_][A-Za-z0-9._-]{0,127})?@)?sha256:[a-f0-9]{64}$/u,
     { expected: "an OCI image reference pinned by a sha256 digest" }
   )
 )
@@ -102,6 +105,12 @@ const PositiveLimit = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: M
 const CommandTimeoutMillis = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAXIMUM_COMMAND_TIMEOUT_MILLIS })
 )
+const WorkspaceBytes = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MINIMUM_WORKSPACE_BYTES,
+    maximum: MAXIMUM_WORKSPACE_BYTES
+  })
+)
 const PatchText = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.makeFilter(
@@ -136,7 +145,8 @@ const SessionOptions = Schema.Struct({
     Schema.Int.check(
       Schema.isBetween({ minimum: 1, maximum: MAXIMUM_SESSION_TIMEOUT_MILLIS })
     )
-  )
+  ),
+  maximumWorkspaceBytes: Schema.optionalKey(WorkspaceBytes)
 })
 
 /** Exact review identity used to acquire a disposable writable session. */
@@ -149,6 +159,7 @@ export interface PrReviewSandboxSessionOptions {
   readonly image: string
   readonly maximumCommandDurationMillis?: number
   readonly maximumSessionDurationMillis?: number
+  readonly maximumWorkspaceBytes?: number
 }
 
 /** Stable redacted session failures; host paths, commands, output, and credentials are omitted. */
@@ -240,6 +251,7 @@ export interface PrReviewSandboxLiveContainer {
 export interface PrReviewSandboxReconciliation {
   readonly liveSessions: ReadonlyArray<PrReviewSandboxLiveContainer>
   readonly removedInitializerContainers: ReadonlyArray<string>
+  readonly removedNonRunningSessionContainers: ReadonlyArray<string>
   readonly removedOrphanVolumes: ReadonlyArray<string>
 }
 
@@ -287,6 +299,10 @@ interface LabeledResource {
   readonly name: string
 }
 
+interface LabeledContainerResource extends LabeledResource {
+  readonly state: string
+}
+
 const labeledResource = (line: string): LabeledResource | null => {
   const [name, kind, unknownJobId, attemptId, ...rest] = line.split("\t")
   return name !== undefined &&
@@ -301,6 +317,28 @@ const labeledResource = (line: string): LabeledResource | null => {
       jobId: unknownJobId,
       kind,
       name
+    }
+    : null
+}
+
+const labeledContainerResource = (
+  line: string
+): LabeledContainerResource | null => {
+  const [name, kind, unknownJobId, attemptId, state, ...rest] = line.split("\t")
+  return name !== undefined &&
+      kind !== undefined &&
+      unknownJobId !== undefined &&
+      attemptId !== undefined &&
+      state !== undefined &&
+      rest.length === 0 &&
+      Schema.is(JobId)(unknownJobId) &&
+      Schema.is(SandboxAttemptId)(attemptId)
+    ? {
+      attemptId,
+      jobId: unknownJobId,
+      kind,
+      name,
+      state
     }
     : null
 }
@@ -447,7 +485,7 @@ const labels = (
   `${CONTAINER_ATTEMPT_LABEL}=${attemptId}`
 ]
 
-const volumeMount = (name: string): string => `type=volume,src=${name},dst=${CONTAINER_SOURCE}`
+const volumeMount = (name: string): string => `type=volume,src=${name},dst=${CONTAINER_SOURCE},volume-nocopy`
 
 const createInitializerArguments = (
   name: string,
@@ -488,7 +526,7 @@ const createInitializerArguments = (
   "/bin/sh",
   image,
   "-c",
-  `chown -R ${CONTAINER_UID_GID} ${CONTAINER_SOURCE}`
+  "while :; do sleep 3600; done"
 ]
 
 const createSessionArguments = (
@@ -677,6 +715,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const maximumCommandDurationMillis = options.maximumCommandDurationMillis ?? DEFAULT_COMMAND_TIMEOUT_MILLIS
   const maximumSessionDurationMillis = options.maximumSessionDurationMillis ?? DEFAULT_SESSION_TIMEOUT_MILLIS
+  const maximumWorkspaceBytes = options.maximumWorkspaceBytes ?? DEFAULT_MAXIMUM_WORKSPACE_BYTES
 
   const withSession = Effect.fn(
     "PrReviewSandboxSessions.withSession"
@@ -701,6 +740,14 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
             "volume",
             "create",
             ...labels("volume", request.jobId, request.attemptId),
+            "--driver",
+            "local",
+            "--opt",
+            "type=tmpfs",
+            "--opt",
+            "device=tmpfs",
+            "--opt",
+            `o=size=${maximumWorkspaceBytes}`,
             volume
           ]).pipe(
             Effect.flatMap((created) =>
@@ -710,234 +757,168 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
             )
           ),
           () =>
-            Effect.gen(function*() {
-              yield* Effect.acquireUseRelease(
-                executeControl(
-                  spawner,
-                  createInitializerArguments(
-                    initName,
-                    volume,
-                    request.jobId,
-                    request.attemptId,
-                    options.image
+            Effect.acquireUseRelease(
+              executeControl(
+                spawner,
+                createInitializerArguments(
+                  initName,
+                  volume,
+                  request.jobId,
+                  request.attemptId,
+                  options.image
+                )
+              ).pipe(
+                Effect.flatMap((created) =>
+                  successful(created)
+                    ? Effect.succeed(initName)
+                    : Effect.fail(sessionError("sandbox-unavailable"))
+                )
+              ),
+              () =>
+                Effect.gen(function*() {
+                  const initializerStarted = yield* executeControlWithin(
+                    spawner,
+                    ["container", "start", initName],
+                    SOURCE_HANDOFF_TIMEOUT
                   )
-                ).pipe(
-                  Effect.flatMap((created) =>
-                    successful(created)
-                      ? Effect.succeed(initName)
-                      : Effect.fail(sessionError("sandbox-unavailable"))
+                  if (!successful(initializerStarted)) {
+                    return yield* sessionError("sandbox-unavailable")
+                  }
+                  const copied = yield* executeControlWithin(
+                    spawner,
+                    [
+                      "container",
+                      "cp",
+                      "--archive",
+                      `${sourceRoot}/.`,
+                      `${initName}:${CONTAINER_SOURCE}`
+                    ],
+                    SOURCE_HANDOFF_TIMEOUT
                   )
-                ),
-                () =>
-                  Effect.gen(function*() {
-                    const copied = yield* executeControlWithin(
+                  if (!successful(copied)) {
+                    return yield* sessionError("sandbox-unavailable")
+                  }
+                  const initialized = yield* executeControlWithin(
+                    spawner,
+                    [
+                      "container",
+                      "exec",
+                      initName,
+                      "chown",
+                      "-R",
+                      CONTAINER_UID_GID,
+                      CONTAINER_SOURCE
+                    ],
+                    SOURCE_HANDOFF_TIMEOUT
+                  )
+                  if (!successful(initialized)) {
+                    return yield* sessionError("sandbox-unavailable")
+                  }
+
+                  yield* fileSystem.remove(sourceRoot, {
+                    force: true,
+                    recursive: true
+                  }).pipe(
+                    Effect.mapError(() => sessionError("cleanup-failed"))
+                  )
+
+                  return yield* Effect.acquireUseRelease(
+                    executeControl(
                       spawner,
-                      [
-                        "container",
-                        "cp",
-                        "--archive",
-                        `${sourceRoot}/.`,
-                        `${initName}:${CONTAINER_SOURCE}`
-                      ],
-                      SOURCE_HANDOFF_TIMEOUT
-                    )
-                    if (!successful(copied)) {
-                      return yield* sessionError("sandbox-unavailable")
-                    }
-                    const initialized = yield* executeControlWithin(
-                      spawner,
-                      [
-                        "container",
-                        "start",
-                        "--attach",
-                        initName
-                      ],
-                      SOURCE_HANDOFF_TIMEOUT
-                    )
-                    if (!successful(initialized)) {
-                      return yield* sessionError("sandbox-unavailable")
-                    }
-                  }),
-                () => removeContainer(spawner, initName)
-              )
-
-              yield* fileSystem.remove(sourceRoot, {
-                force: true,
-                recursive: true
-              }).pipe(
-                Effect.mapError(() => sessionError("cleanup-failed"))
-              )
-
-              return yield* Effect.acquireUseRelease(
-                executeControl(
-                  spawner,
-                  createSessionArguments(
-                    name,
-                    volume,
-                    request.jobId,
-                    request.attemptId,
-                    options.image
-                  )
-                ).pipe(
-                  Effect.flatMap((created) =>
-                    successful(created)
-                      ? Effect.succeed(name)
-                      : Effect.fail(sessionError("sandbox-unavailable"))
-                  )
-                ),
-                () =>
-                  Effect.gen(function*() {
-                    const started = yield* executeControl(
-                      spawner,
-                      ["container", "start", name]
-                    )
-                    if (!successful(started)) {
-                      return yield* sessionError("sandbox-unavailable")
-                    }
-
-                    const closed = yield* Ref.make(false)
-                    const artifacts = yield* Ref.make(
-                      new Map<PrReviewCommandArtifactId, RetainedArtifact>()
-                    )
-                    const artifactSequence = yield* Ref.make(0)
-
-                    const close = Ref.getAndSet(closed, true).pipe(
-                      Effect.flatMap((wasClosed) =>
-                        wasClosed
-                          ? Effect.void
-                          : removeContainer(spawner, name).pipe(
-                            Effect.andThen(removeVolume(spawner, volume))
-                          )
+                      createSessionArguments(
+                        name,
+                        volume,
+                        request.jobId,
+                        request.attemptId,
+                        options.image
                       )
-                    )
-
-                    const executeContained = Effect.fn(
-                      "PrReviewSandboxSession.executeContained"
-                    )(function*(
-                      commandText: string,
-                      durationMillis: number,
-                      input?: Uint8Array
-                    ) {
-                      if (yield* Ref.get(closed)) {
-                        return yield* sessionError("session-closed")
-                      }
-                      const result = yield* execute(
-                        spawner,
-                        [
-                          "container",
-                          "exec",
-                          ...(input === undefined ? [] : ["--interactive"]),
-                          "--workdir",
-                          CONTAINER_SOURCE,
-                          name,
-                          "env",
-                          "-i",
-                          "HOME=/tmp",
-                          "LANG=C",
-                          "LC_ALL=C",
-                          "PATH=/usr/local/bin:/usr/bin:/bin",
-                          "/bin/sh",
-                          "-lc",
-                          commandText
-                        ],
-                        MAXIMUM_COMMAND_OUTPUT_BYTES,
-                        Duration.millis(durationMillis),
-                        input
-                      ).pipe(
-                        Effect.tapError((error) =>
-                          error.reason === "command-timeout"
-                            ? close
-                            : Effect.void
+                    ).pipe(
+                      Effect.flatMap((created) =>
+                        successful(created)
+                          ? Effect.succeed(name)
+                          : Effect.fail(sessionError("sandbox-unavailable"))
+                      )
+                    ),
+                    () =>
+                      Effect.gen(function*() {
+                        const started = yield* executeControl(
+                          spawner,
+                          ["container", "start", name]
                         )
-                      )
-                      return result
-                    })
+                        if (!successful(started)) {
+                          return yield* sessionError("sandbox-unavailable")
+                        }
+                        yield* removeContainer(spawner, initName)
 
-                    const runContainedCommand = Effect.fn(
-                      "PrReviewSandboxSession.runContainedCommand"
-                    )(function*(
-                      commandText: string,
-                      durationMillis: number,
-                      input?: Uint8Array
-                    ) {
-                      const result = yield* executeContained(
-                        commandText,
-                        durationMillis,
-                        input
-                      )
-                      return {
-                        exitCode: result.exitCode,
-                        stderr: yield* makeOutput(
-                          artifacts,
-                          artifactSequence,
-                          result.stderr
-                        ),
-                        stdout: yield* makeOutput(
-                          artifacts,
-                          artifactSequence,
-                          result.stdout
+                        const closed = yield* Ref.make(false)
+                        const artifacts = yield* Ref.make(
+                          new Map<PrReviewCommandArtifactId, RetainedArtifact>()
                         )
-                      } satisfies PrReviewSandboxCommandResult
-                    })
+                        const artifactSequence = yield* Ref.make(0)
 
-                    const runCommand = Effect.fn(
-                      "PrReviewSandboxSession.runCommand"
-                    )(function*(
-                      unknownCommand: string,
-                      unknownDuration = maximumCommandDurationMillis
-                    ) {
-                      const commandText = yield* Schema.decodeUnknownEffect(
-                        CommandText
-                      )(unknownCommand).pipe(
-                        Effect.mapError(() => sessionError("invalid-request"))
-                      )
-                      const durationMillis = yield* Schema.decodeUnknownEffect(
-                        CommandTimeoutMillis
-                      )(unknownDuration).pipe(
-                        Effect.mapError(() => sessionError("invalid-request"))
-                      )
-                      return yield* runContainedCommand(
-                        commandText,
-                        Math.min(
-                          durationMillis,
-                          maximumCommandDurationMillis
+                        const close = Ref.getAndSet(closed, true).pipe(
+                          Effect.flatMap((wasClosed) =>
+                            wasClosed
+                              ? Effect.void
+                              : removeContainer(spawner, name).pipe(
+                                Effect.andThen(removeVolume(spawner, volume))
+                              )
+                          )
                         )
-                      )
-                    })
 
-                    const safePath = Effect.fn(
-                      "PrReviewSandboxSession.safePath"
-                    )(function*(unknownPath: string) {
-                      return yield* Schema.decodeUnknownEffect(
-                        RelativeSandboxPath
-                      )(unknownPath).pipe(
-                        Effect.mapError(() => sessionError("invalid-request"))
-                      )
-                    })
+                        const executeContained = Effect.fn(
+                          "PrReviewSandboxSession.executeContained"
+                        )(function*(
+                          commandText: string,
+                          durationMillis: number,
+                          input?: Uint8Array
+                        ) {
+                          if (yield* Ref.get(closed)) {
+                            return yield* sessionError("session-closed")
+                          }
+                          const result = yield* execute(
+                            spawner,
+                            [
+                              "container",
+                              "exec",
+                              ...(input === undefined ? [] : ["--interactive"]),
+                              "--workdir",
+                              CONTAINER_SOURCE,
+                              name,
+                              "env",
+                              "-i",
+                              "HOME=/tmp",
+                              "LANG=C",
+                              "LC_ALL=C",
+                              "PATH=/usr/local/bin:/usr/bin:/bin",
+                              "/bin/sh",
+                              "-lc",
+                              commandText
+                            ],
+                            MAXIMUM_COMMAND_OUTPUT_BYTES,
+                            Duration.millis(durationMillis),
+                            input
+                          ).pipe(
+                            Effect.tapError((error) =>
+                              error.reason === "command-timeout"
+                                ? close
+                                : Effect.void
+                            )
+                          )
+                          return result
+                        })
 
-                    const session: PrReviewSandboxSession = {
-                      attemptId: request.attemptId,
-                      baseRevision: request.baseRevision,
-                      headRevision: request.headRevision,
-                      jobId: request.jobId,
-                      runCommand,
-                      readFile: (unknownPath, offset = 0, limit = 32_768) =>
-                        Effect.gen(function*() {
-                          const path = yield* safePath(unknownPath)
-                          const decodedOffset = yield* Schema.decodeUnknownEffect(
-                            PositiveOffset
-                          )(offset).pipe(
-                            Effect.mapError(() => sessionError("invalid-request"))
-                          )
-                          const decodedLimit = yield* Schema.decodeUnknownEffect(
-                            PositiveLimit
-                          )(limit).pipe(
-                            Effect.mapError(() => sessionError("invalid-request"))
-                          )
-                          const windowOffset = Math.max(0, decodedOffset - 3)
+                        const runContainedCommand = Effect.fn(
+                          "PrReviewSandboxSession.runContainedCommand"
+                        )(function*(
+                          commandText: string,
+                          durationMillis: number,
+                          input?: Uint8Array
+                        ) {
                           const result = yield* executeContained(
-                            `tail -c +${windowOffset + 1} -- ${shellQuote(path)} | head -c ${decodedLimit + 6}`,
-                            maximumCommandDurationMillis
+                            commandText,
+                            durationMillis,
+                            input
                           )
                           return {
                             exitCode: result.exitCode,
@@ -949,133 +930,214 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                             stdout: yield* makeOutput(
                               artifacts,
                               artifactSequence,
-                              alignUtf8Page(
-                                result.stdout,
-                                decodedOffset,
-                                windowOffset,
-                                decodedLimit
-                              )
+                              result.stdout
                             )
                           } satisfies PrReviewSandboxCommandResult
-                        }),
-                      listFiles: (unknownPath = ".") =>
-                        Effect.gen(function*() {
-                          const path = yield* safePath(unknownPath)
-                          const operand = path === "." ? "." : `./${path}`
-                          return yield* runCommand(
-                            `find ${shellQuote(operand)} -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort`
-                          )
-                        }),
-                      searchFiles: (unknownQuery, unknownPath = ".") =>
-                        Effect.gen(function*() {
-                          const query = yield* Schema.decodeUnknownEffect(
-                            SearchText
-                          )(unknownQuery).pipe(
+                        })
+
+                        const runCommand = Effect.fn(
+                          "PrReviewSandboxSession.runCommand"
+                        )(function*(
+                          unknownCommand: string,
+                          unknownDuration = maximumCommandDurationMillis
+                        ) {
+                          const commandText = yield* Schema.decodeUnknownEffect(
+                            CommandText
+                          )(unknownCommand).pipe(
                             Effect.mapError(() => sessionError("invalid-request"))
                           )
-                          const path = yield* safePath(unknownPath)
-                          return yield* runCommand(
-                            `grep -RInF --exclude-dir=.git -- ${shellQuote(query)} ${shellQuote(path)}`
-                          )
-                        }),
-                      applyPatch: (unknownPatch) =>
-                        Effect.gen(function*() {
-                          const patch = yield* Schema.decodeUnknownEffect(
-                            PatchText
-                          )(unknownPatch).pipe(
+                          const durationMillis = yield* Schema.decodeUnknownEffect(
+                            CommandTimeoutMillis
+                          )(unknownDuration).pipe(
                             Effect.mapError(() => sessionError("invalid-request"))
                           )
                           return yield* runContainedCommand(
-                            "git apply --whitespace=nowarn --",
-                            maximumCommandDurationMillis,
-                            textEncoder.encode(patch)
+                            commandText,
+                            Math.min(
+                              durationMillis,
+                              maximumCommandDurationMillis
+                            )
                           )
-                        }),
-                      readDiff: () =>
-                        runCommand(
-                          "git -c core.quotePath=false diff --no-ext-diff --no-textconv --no-color -- ."
-                        ),
-                      pageArtifact: (
-                        artifactId,
-                        unknownOffset,
-                        unknownLimit
-                      ) =>
-                        Effect.gen(function*() {
-                          if (yield* Ref.get(closed)) {
-                            return yield* sessionError("session-closed")
-                          }
-                          const offset = yield* Schema.decodeUnknownEffect(
-                            PositiveOffset
-                          )(unknownOffset).pipe(
-                            Effect.mapError(() => sessionError("invalid-request"))
-                          )
-                          const limit = yield* Schema.decodeUnknownEffect(
-                            PositiveLimit
-                          )(unknownLimit).pipe(
-                            Effect.mapError(() => sessionError("invalid-request"))
-                          )
-                          const artifact = (yield* Ref.get(artifacts)).get(
-                            artifactId
-                          )
-                          if (artifact === undefined) {
-                            return yield* sessionError("artifact-unavailable")
-                          }
-                          return artifact.text.slice(offset, offset + limit)
-                        }),
-                      searchArtifact: (artifactId, unknownQuery) =>
-                        Effect.gen(function*() {
-                          if (yield* Ref.get(closed)) {
-                            return yield* sessionError("session-closed")
-                          }
-                          const query = yield* Schema.decodeUnknownEffect(
-                            SearchText
-                          )(unknownQuery).pipe(
-                            Effect.mapError(() => sessionError("invalid-request"))
-                          )
-                          const artifact = (yield* Ref.get(artifacts)).get(
-                            artifactId
-                          )
-                          if (artifact === undefined) {
-                            return yield* sessionError("artifact-unavailable")
-                          }
-                          const matches = new Array<number>()
-                          for (
-                            let offset = artifact.text.indexOf(query);
-                            offset !== -1 && matches.length < 100;
-                            offset = artifact.text.indexOf(query, offset + 1)
-                          ) {
-                            matches.push(offset)
-                          }
-                          return matches
-                        }),
-                      close
-                    }
+                        })
 
-                    const verified = yield* runCommand(
-                      "test \"$(git rev-parse --verify HEAD)\" = " +
-                        shellQuote(request.headRevision) +
-                        " && test -z \"$(git remote)\" && " +
-                        "authority_keys=$(git config --local --name-only --get-regexp '.*') && " +
-                        "! printf '%s\\n' \"$authority_keys\" | " +
-                        "LC_ALL=C tr '[:upper:]' '[:lower:]' | grep -E " +
-                        shellQuote(PR_REVIEW_AUTHORITY_CONFIG_PATTERN)
-                    )
-                    if (verified.exitCode !== 0) {
-                      return yield* sessionError("source-unavailable")
-                    }
+                        const safePath = Effect.fn(
+                          "PrReviewSandboxSession.safePath"
+                        )(function*(unknownPath: string) {
+                          return yield* Schema.decodeUnknownEffect(
+                            RelativeSandboxPath
+                          )(unknownPath).pipe(
+                            Effect.mapError(() => sessionError("invalid-request"))
+                          )
+                        })
 
-                    return yield* use(session).pipe(
-                      Effect.timeoutOrElse({
-                        duration: Duration.millis(
-                          maximumSessionDurationMillis
-                        ),
-                        orElse: () => Effect.fail(sessionError("sandbox-timeout"))
-                      })
-                    )
-                  }),
-                () => removeContainer(spawner, name)
-              )
-            }),
+                        const session: PrReviewSandboxSession = {
+                          attemptId: request.attemptId,
+                          baseRevision: request.baseRevision,
+                          headRevision: request.headRevision,
+                          jobId: request.jobId,
+                          runCommand,
+                          readFile: (unknownPath, offset = 0, limit = 32_768) =>
+                            Effect.gen(function*() {
+                              const path = yield* safePath(unknownPath)
+                              const decodedOffset = yield* Schema.decodeUnknownEffect(
+                                PositiveOffset
+                              )(offset).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const decodedLimit = yield* Schema.decodeUnknownEffect(
+                                PositiveLimit
+                              )(limit).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const windowOffset = Math.max(0, decodedOffset - 3)
+                              const windowLimit = decodedLimit + 6
+                              const result = yield* executeContained(
+                                `dd if=${shellQuote(path)} bs=1 skip=${windowOffset} count=${windowLimit} status=none`,
+                                maximumCommandDurationMillis
+                              )
+                              return {
+                                exitCode: result.exitCode,
+                                stderr: yield* makeOutput(
+                                  artifacts,
+                                  artifactSequence,
+                                  result.stderr
+                                ),
+                                stdout: yield* makeOutput(
+                                  artifacts,
+                                  artifactSequence,
+                                  alignUtf8Page(
+                                    result.stdout,
+                                    decodedOffset,
+                                    windowOffset,
+                                    decodedLimit
+                                  )
+                                )
+                              } satisfies PrReviewSandboxCommandResult
+                            }),
+                          listFiles: (unknownPath = ".") =>
+                            Effect.gen(function*() {
+                              const path = yield* safePath(unknownPath)
+                              const operand = path === "." ? "." : `./${path}`
+                              return yield* runCommand(
+                                "list_file=$(mktemp /tmp/review-list.XXXXXX) && " +
+                                  "trap 'rm -f \"$list_file\"' EXIT HUP INT TERM && " +
+                                  `find ${shellQuote(operand)} -mindepth 1 -maxdepth 1 -print > "$list_file" && ` +
+                                  "LC_ALL=C sort \"$list_file\""
+                              )
+                            }),
+                          searchFiles: (unknownQuery, unknownPath = ".") =>
+                            Effect.gen(function*() {
+                              const query = yield* Schema.decodeUnknownEffect(
+                                SearchText
+                              )(unknownQuery).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const path = yield* safePath(unknownPath)
+                              return yield* runCommand(
+                                `grep -RInF --exclude-dir=.git -- ${shellQuote(query)} ${shellQuote(path)}`
+                              )
+                            }),
+                          applyPatch: (unknownPatch) =>
+                            Effect.gen(function*() {
+                              const patch = yield* Schema.decodeUnknownEffect(
+                                PatchText
+                              )(unknownPatch).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              return yield* runContainedCommand(
+                                "git apply --whitespace=nowarn --",
+                                maximumCommandDurationMillis,
+                                textEncoder.encode(patch)
+                              )
+                            }),
+                          readDiff: () =>
+                            runCommand(
+                              "git add --intent-to-add -- . && " +
+                                "git -c core.quotePath=false diff --no-ext-diff --no-textconv --no-color HEAD -- ."
+                            ),
+                          pageArtifact: (
+                            artifactId,
+                            unknownOffset,
+                            unknownLimit
+                          ) =>
+                            Effect.gen(function*() {
+                              if (yield* Ref.get(closed)) {
+                                return yield* sessionError("session-closed")
+                              }
+                              const offset = yield* Schema.decodeUnknownEffect(
+                                PositiveOffset
+                              )(unknownOffset).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const limit = yield* Schema.decodeUnknownEffect(
+                                PositiveLimit
+                              )(unknownLimit).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const artifact = (yield* Ref.get(artifacts)).get(
+                                artifactId
+                              )
+                              if (artifact === undefined) {
+                                return yield* sessionError("artifact-unavailable")
+                              }
+                              return artifact.text.slice(offset, offset + limit)
+                            }),
+                          searchArtifact: (artifactId, unknownQuery) =>
+                            Effect.gen(function*() {
+                              if (yield* Ref.get(closed)) {
+                                return yield* sessionError("session-closed")
+                              }
+                              const query = yield* Schema.decodeUnknownEffect(
+                                SearchText
+                              )(unknownQuery).pipe(
+                                Effect.mapError(() => sessionError("invalid-request"))
+                              )
+                              const artifact = (yield* Ref.get(artifacts)).get(
+                                artifactId
+                              )
+                              if (artifact === undefined) {
+                                return yield* sessionError("artifact-unavailable")
+                              }
+                              const matches = new Array<number>()
+                              for (
+                                let offset = artifact.text.indexOf(query);
+                                offset !== -1 && matches.length < 100;
+                                offset = artifact.text.indexOf(query, offset + 1)
+                              ) {
+                                matches.push(offset)
+                              }
+                              return matches
+                            }),
+                          close
+                        }
+
+                        const verified = yield* runCommand(
+                          "test \"$(git rev-parse --verify HEAD)\" = " +
+                            shellQuote(request.headRevision) +
+                            " && test -z \"$(git remote)\" && " +
+                            "authority_keys=$(git config --local --name-only --get-regexp '.*') && " +
+                            "! printf '%s\\n' \"$authority_keys\" | " +
+                            "LC_ALL=C tr '[:upper:]' '[:lower:]' | grep -E " +
+                            shellQuote(PR_REVIEW_AUTHORITY_CONFIG_PATTERN)
+                        )
+                        if (verified.exitCode !== 0) {
+                          return yield* sessionError("source-unavailable")
+                        }
+
+                        return yield* use(session).pipe(
+                          Effect.timeoutOrElse({
+                            duration: Duration.millis(
+                              maximumSessionDurationMillis
+                            ),
+                            orElse: () => Effect.fail(sessionError("sandbox-timeout"))
+                          })
+                        )
+                      }),
+                    () => removeContainer(spawner, name)
+                  )
+                }),
+              () => removeContainer(spawner, initName)
+            ),
           () => removeVolume(spawner, volume)
         )
     ).pipe(
@@ -1100,7 +1162,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       `label=${CONTAINER_JOB_LABEL}`,
       "--format",
       `{{.Names}}\t{{.Label "${CONTAINER_KIND_LABEL}"}}\t{{.Label "${CONTAINER_JOB_LABEL}"}}\t` +
-      `{{.Label "${CONTAINER_ATTEMPT_LABEL}"}}`
+      `{{.Label "${CONTAINER_ATTEMPT_LABEL}"}}\t{{.State}}`
     ])
     const listedVolumes = yield* executeControl(spawner, [
       "volume",
@@ -1127,10 +1189,11 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     )
     const liveSessions = new Array<PrReviewSandboxLiveContainer>()
     const initializerContainers = new Array<LabeledResource>()
+    const nonRunningSessionContainers = new Array<LabeledContainerResource>()
     const protectedVolumeKeys = new Set<string>()
     for (const line of containerText.split("\n")) {
       if (line.length === 0) continue
-      const resource = labeledResource(line)
+      const resource = labeledContainerResource(line)
       if (resource === null) continue
       if (resource.kind === "session") {
         if (
@@ -1139,14 +1202,18 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
             resource.attemptId
           )
         ) {
-          protectedVolumeKeys.add(
-            resourceKey(resource.jobId, resource.attemptId)
-          )
-          liveSessions.push({
-            attemptId: resource.attemptId,
-            containerName: resource.name,
-            jobId: resource.jobId
-          })
+          if (resource.state === "running") {
+            protectedVolumeKeys.add(
+              resourceKey(resource.jobId, resource.attemptId)
+            )
+            liveSessions.push({
+              attemptId: resource.attemptId,
+              containerName: resource.name,
+              jobId: resource.jobId
+            })
+          } else {
+            nonRunningSessionContainers.push(resource)
+          }
         }
       } else if (
         resource.kind === "initializer" &&
@@ -1181,6 +1248,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     for (const initializer of initializerContainers) {
       yield* removeContainer(spawner, initializer.name)
     }
+    for (const session of nonRunningSessionContainers) {
+      yield* removeContainer(spawner, session.name)
+    }
     for (const volume of orphanVolumes) {
       yield* removeVolume(spawner, volume.name)
     }
@@ -1189,12 +1259,16 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const removedInitializerContainers = initializerContainers
       .map(({ name }) => name)
       .sort()
+    const removedNonRunningSessionContainers = nonRunningSessionContainers
+      .map(({ name }) => name)
+      .sort()
     const removedOrphanVolumes = orphanVolumes
       .map(({ name }) => name)
       .sort()
     return {
       liveSessions,
       removedInitializerContainers,
+      removedNonRunningSessionContainers,
       removedOrphanVolumes
     } satisfies PrReviewSandboxReconciliation
   })

@@ -19,6 +19,7 @@ const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000072")
 const ATTEMPT_ID = "0123456789ab"
 const ORPHAN_ATTEMPT_ID = "fedcba987654"
+const STOPPED_ATTEMPT_ID = "abcdefabcdef"
 const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const IMAGE = `registry.example.invalid/control-center/review-runner@sha256:${"a".repeat(64)}`
@@ -27,6 +28,8 @@ const INITIALIZER_NAME = `cc-pr-review-init-${JOB_ID}-${ATTEMPT_ID}`
 const VOLUME_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
 const ORPHAN_INITIALIZER_NAME = `cc-pr-review-init-${JOB_ID}-${ORPHAN_ATTEMPT_ID}`
 const ORPHAN_VOLUME_NAME = `cc-pr-review-${JOB_ID}-${ORPHAN_ATTEMPT_ID}`
+const STOPPED_CONTAINER_NAME = `cc-pr-review-session-${JOB_ID}-${STOPPED_ATTEMPT_ID}`
+const STOPPED_VOLUME_NAME = `cc-pr-review-${JOB_ID}-${STOPPED_ATTEMPT_ID}`
 const encoder = new TextEncoder()
 
 interface FakeResponse {
@@ -130,6 +133,12 @@ const fakeDockerLayer = (
         options.failCopy === true
       ) {
         response = { exitCode: 1, stderr: "copy failed\n" }
+      } else if (
+        args[0] === "container" &&
+        args[1] === "exec" &&
+        args[2]?.startsWith("cc-pr-review-init-") === true
+      ) {
+        response = {}
       } else if (
         args[0] === "container" &&
         args[1] === "exec" &&
@@ -329,7 +338,11 @@ describe("PrReviewSandboxSessions", () => {
         assert.include(sessionCreate.args, "none")
         assert.include(
           sessionCreate.args,
-          `type=volume,src=${VOLUME_NAME},dst=/workspace`
+          `type=volume,src=${VOLUME_NAME},dst=/workspace,volume-nocopy`
+        )
+        assert.include(
+          initializerCreate.args,
+          `type=volume,src=${VOLUME_NAME},dst=/workspace,volume-nocopy`
         )
         assert.notInclude(sessionCreate.args.join(" "), "type=bind")
         assert.notInclude(sessionCreate.args.join(" "), sourceRoot)
@@ -345,8 +358,9 @@ describe("PrReviewSandboxSessions", () => {
         assert.isTrue(
           toolExecs.some(
             ({ args }) =>
-              args.at(-1) ===
-                "find '.' -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort"
+              args.at(-1)?.includes(
+                "find '.' -mindepth 1 -maxdepth 1 -print"
+              ) === true
           )
         )
         assert.isFalse(
@@ -372,6 +386,12 @@ describe("PrReviewSandboxSessions", () => {
         assert.include(
           volumeCreate?.args ?? [],
           "dev.knpkv.control-center.pr-review.kind=volume"
+        )
+        assert.include(volumeCreate?.args ?? [], "type=tmpfs")
+        assert.include(volumeCreate?.args ?? [], "device=tmpfs")
+        assert.include(
+          volumeCreate?.args ?? [],
+          `o=size=${1_024 * 1_024 * 1_024}`
         )
         for (const child of calls) {
           assert.strictEqual(child.command, "docker")
@@ -871,7 +891,11 @@ describe("PrReviewSandboxSessions", () => {
           jobId: JOB_ID
         }],
         removedInitializerContainers: [ORPHAN_INITIALIZER_NAME],
-        removedOrphanVolumes: [ORPHAN_VOLUME_NAME]
+        removedNonRunningSessionContainers: [STOPPED_CONTAINER_NAME],
+        removedOrphanVolumes: [
+          STOPPED_VOLUME_NAME,
+          ORPHAN_VOLUME_NAME
+        ]
       })
       assert.isTrue(
         calls.some(
@@ -879,6 +903,22 @@ describe("PrReviewSandboxSessions", () => {
             args[0] === "container" &&
             args[1] === "rm" &&
             args.at(-1) === ORPHAN_INITIALIZER_NAME
+        )
+      )
+      assert.isTrue(
+        calls.some(
+          ({ args }) =>
+            args[0] === "container" &&
+            args[1] === "rm" &&
+            args.at(-1) === STOPPED_CONTAINER_NAME
+        )
+      )
+      assert.isTrue(
+        calls.some(
+          ({ args }) =>
+            args[0] === "volume" &&
+            args[1] === "rm" &&
+            args.at(-1) === STOPPED_VOLUME_NAME
         )
       )
       assert.isTrue(
@@ -901,12 +941,14 @@ describe("PrReviewSandboxSessions", () => {
         prReviewSandboxSessionsLayer({ image: IMAGE }).pipe(
           Layer.provide(fakeDockerLayer(calls, {
             reconcileContainerOutput: [
-              `${CONTAINER_NAME}\tsession\t${JOB_ID}\t${ATTEMPT_ID}`,
-              `${ORPHAN_INITIALIZER_NAME}\tinitializer\t${JOB_ID}\t${ORPHAN_ATTEMPT_ID}`,
+              `${CONTAINER_NAME}\tsession\t${JOB_ID}\t${ATTEMPT_ID}\trunning`,
+              `${STOPPED_CONTAINER_NAME}\tsession\t${JOB_ID}\t${STOPPED_ATTEMPT_ID}\texited`,
+              `${ORPHAN_INITIALIZER_NAME}\tinitializer\t${JOB_ID}\t${ORPHAN_ATTEMPT_ID}\trunning`,
               "malformed-resource"
             ].join("\n"),
             reconcileVolumeOutput: [
               `${VOLUME_NAME}\tvolume\t${JOB_ID}\t${ATTEMPT_ID}`,
+              `${STOPPED_VOLUME_NAME}\tvolume\t${JOB_ID}\t${STOPPED_ATTEMPT_ID}`,
               `${ORPHAN_VOLUME_NAME}\tvolume\t${JOB_ID}\t${ORPHAN_ATTEMPT_ID}`,
               "malformed-resource"
             ].join("\n")

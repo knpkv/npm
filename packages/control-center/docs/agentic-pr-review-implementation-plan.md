@@ -165,7 +165,9 @@ the pre-stable one-shot runner. `PrReviewSandboxSessions` owns exact-source
 handoff, the named-volume/container scope, typed sandbox tools, bounded local
 artifacts with deterministic oldest-first eviction, terminal command-timeout
 cleanup, and label reconciliation that removes orphaned initializers and
-volumes. The exact-source broker
+volumes. The workspace uses a size-capped named `tmpfs` volume with image
+copy-up disabled, and reconciliation retains only exact running sessions. The
+exact-source broker
 now removes authenticated remotes and authority-bearing local Git
 configuration before handoff. The Docker integration test pulls a trusted
 digest-pinned runner when Docker is available and proves the policy against a

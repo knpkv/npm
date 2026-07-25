@@ -239,10 +239,11 @@ The source broker checks out the immutable queued head, verifies it again after
 fetch, removes the authenticated `origin` and local credential-bearing Git
 configuration, and only then hands the tree to Docker. Handoff uses
 `docker container cp` through a short-lived, network-disabled initializer into
-a named volume; the host staging directory is deleted before the non-root
-review container starts accepting commands. The initializer may change
-ownership inside that volume but cannot inspect a host mount, use the Docker
-socket, publish a port, or access a network.
+a size-capped named `tmpfs` volume with image copy-up disabled; the host staging
+directory is deleted before the non-root review container starts accepting
+commands. The initializer stays mounted until the review container takes over
+the volume, may change ownership inside it, but cannot inspect a host mount, use
+the Docker socket, publish a port, or access a network.
 
 The review container runs as UID/GID `65532`, with a read-only root filesystem,
 an isolated writable `/workspace` volume, a bounded private `/tmp`, dropped
@@ -259,7 +260,9 @@ module. Command output is bounded before it reaches the model; larger accepted
 output receives a session-local opaque artifact ID. A session retains at most
 64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
 pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
-host or Docker access.
+host or Docker access. File reads and listings preserve missing-path failures,
+and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
+changes.
 
 Executable repository instructions come only from the trusted base revision. Instruction changes in the PR are untrusted content under review.
 
@@ -285,7 +288,8 @@ returning its typed failure, and model-requested timeouts cannot exceed the
 locally configured command cap. Label reconciliation accepts only exact
 job/attempt-derived resource identities, ignores malformed daemon output, and
 removes orphaned initializer containers and named volumes while preserving the
-volume belonging to an exact live session.
+volume belonging to an exact running session. Exact stopped, exited, or dead
+session containers and their now-orphaned volumes are removed.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 
