@@ -48,11 +48,14 @@ const runProcess = (
         stdin: "ignore",
         stdout: "pipe"
       })
-      const [exitCode, stderr, stdout] = yield* Effect.all([
-        handle.exitCode,
-        handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
-        handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
-      ])
+      const [exitCode, stderr, stdout] = yield* Effect.all(
+        [
+          handle.exitCode,
+          handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+          handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
+        ],
+        { concurrency: "unbounded" }
+      )
       return { exitCode, stderr, stdout }
     })
   )
@@ -99,6 +102,23 @@ const acquireNetworkProbe = Effect.acquireRelease(
   }),
   ({ server }) => Effect.sync(() => server.close())
 )
+
+it.effect("drains high-volume child output while awaiting exit", () =>
+  Effect.gen(function*() {
+    const executablePath = yield* Config.string("PATH")
+    const result = yield* runProcess(
+      "sh",
+      [
+        "-c",
+        "head -c 262144 /dev/zero; head -c 262144 /dev/zero >&2"
+      ],
+      gitEnvironment(executablePath)
+    )
+
+    assert.strictEqual(result.exitCode, ChildProcessSpawner.ExitCode(0))
+    assert.lengthOf(result.stdout, 262_144)
+    assert.lengthOf(result.stderr, 262_144)
+  }).pipe(Effect.provide(NodeServices.layer)))
 
 it.effect("runs the review session through the installed sbx runtime", () =>
   Effect.scoped(
