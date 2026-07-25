@@ -109,10 +109,7 @@ describe("DiffCodeView worker failover", () => {
     const auditAnnotation = annotation("audit-finding", "audit", "Audit finding")
     const renderView = (releaseAnnotation: RlyDiffCodeAnnotation) => (
       <DiffWorkerProvider workerFactory={workerFactory}>
-        <DiffCodeView
-          annotations={[releaseAnnotation, auditAnnotation]}
-          initialItems={[initialItem, auditItem]}
-        />
+        <DiffCodeView annotations={[releaseAnnotation, auditAnnotation]} initialItems={[initialItem, auditItem]} />
       </DiffWorkerProvider>
     )
 
