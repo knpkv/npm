@@ -63,9 +63,11 @@ export const COMPONENT_REGISTRY_METADATA = {
   ], ["confirm", "overlay"]),
   DiffCodeView: registryMetadata("Render a complete, virtualized before-and-after code review", [
     "annotated",
+    "buffered",
     "dismissed",
     "draft",
     "resolved",
+    "split",
     "stacked",
     "stale",
     "strict"

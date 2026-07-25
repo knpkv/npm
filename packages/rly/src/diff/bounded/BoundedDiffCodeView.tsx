@@ -194,13 +194,14 @@ const focusBoundedLine = (
   lineNumber: number,
   side: "additions" | "deletions"
 ): void => {
-  const line = [...(root?.querySelectorAll<HTMLElement>("[data-rly-diff-line]") ?? [])].find(
-    (candidate) =>
-      candidate.dataset.rlyDiffItem === itemId &&
-      ((candidate.dataset.rlyDiffLine === String(lineNumber) && candidate.dataset.rlyDiffLineSide === side) ||
-        (candidate.dataset.rlyDiffLineAlternate === String(lineNumber) &&
-          candidate.dataset.rlyDiffLineSideAlternate === side))
-  )
+  const item = `[data-rly-diff-item="${CSS.escape(itemId)}"]`
+  const line =
+    root?.querySelector<HTMLElement>(
+      `${item}[data-rly-diff-line="${lineNumber}"][data-rly-diff-line-side="${side}"]`
+    ) ??
+    root?.querySelector<HTMLElement>(
+      `${item}[data-rly-diff-line-alternate="${lineNumber}"][data-rly-diff-line-side-alternate="${side}"]`
+    )
   line?.focus({ preventScroll: true })
 }
 

@@ -24,6 +24,7 @@
       var(--rly-type-code-font);
     min-block-size: 20rem;
     min-inline-size: var(--rly-space-0);
+    overflow: auto;
   }
 
   .viewer:focus-visible {

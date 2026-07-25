@@ -20,8 +20,8 @@ const pierreLine = (annotationNode: HTMLDivElement, location: RlyDiffCodeAnnotat
     root.querySelector<HTMLElement>(`[${sideContainer}] [data-line="${location.lineNumber}"]`) ??
       root.querySelector<HTMLElement>(`[data-line="${location.lineNumber}"][data-line-type="${type}"]`) ??
       root.querySelector<HTMLElement>(`[${sideContainer}] [data-alt-line="${location.lineNumber}"]`) ??
-      root.querySelector<HTMLElement>(`[data-line="${location.lineNumber}"]`) ??
-      root.querySelector<HTMLElement>(`[data-alt-line="${location.lineNumber}"]`)
+      root.querySelector<HTMLElement>(`[${sideContainer}][data-line="${location.lineNumber}"]`) ??
+      root.querySelector<HTMLElement>(`[${sideContainer}][data-alt-line="${location.lineNumber}"]`)
   )
 }
 
@@ -81,6 +81,9 @@ export const requireDiffCodeAnnotations = (annotations: ReadonlyArray<RlyDiffCod
   for (const annotation of annotations) {
     if (annotation.id.trim().length === 0 || annotation.accessibilityLabel.trim().length === 0) {
       throw new Error("Diff annotation id and accessibility label must not be blank")
+    }
+    if (annotation.location.itemId.trim().length === 0) {
+      throw new Error(`Diff annotation ${annotation.id} location item id must not be blank`)
     }
     if (!Number.isInteger(annotation.location.lineNumber) || annotation.location.lineNumber < 1) {
       throw new Error(`Diff annotation ${annotation.id} line number must be a positive integer`)

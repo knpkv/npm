@@ -11,7 +11,9 @@ import { createDiffWorkerFactory, DiffWorkerProvider } from "../../src/diff/work
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 interface RendererItemSnapshot {
-  readonly annotations?: ReadonlyArray<unknown>
+  readonly annotations?: ReadonlyArray<{
+    readonly metadata: { readonly annotation: RlyDiffCodeAnnotation }
+  }>
   readonly fileDiff?: unknown
   readonly id: string
   readonly version?: number
@@ -121,7 +123,9 @@ describe("DiffCodeView worker failover", () => {
     await act(async () => root.render(renderView(annotation("release-finding", "release", "Resolved finding"))))
     expect(rendererMounts).toHaveLength(initialMountCount)
     expect(rendererUpdates.map(({ id }) => id)).toEqual(["release"])
-    expect(JSON.stringify(rendererUpdates)).toContain("Resolved finding")
+    expect(rendererUpdates[0]?.annotations?.map(({ metadata }) => metadata.annotation.accessibilityLabel)).toEqual([
+      "Resolved finding"
+    ])
     await act(async () => root.unmount())
   })
 

@@ -113,5 +113,6 @@ describe("BoundedDiffCodeView", () => {
       host.querySelector("[data-rly-diff-item='release'][data-rly-diff-line='1'][data-rly-diff-line-side='additions']")
     )
     await act(async () => root.unmount())
+    host.remove()
   })
 })

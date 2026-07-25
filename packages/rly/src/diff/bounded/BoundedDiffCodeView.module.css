@@ -107,8 +107,8 @@
   border-block: 1px solid var(--rly-color-border-1);
 }
 
-.annotationCell {
-  padding: var(--rly-space-8) !important;
+.annotationRow > .annotationCell {
+  padding: var(--rly-space-8);
 }
 
 .annotation {

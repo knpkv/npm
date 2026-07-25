@@ -169,7 +169,11 @@ const longStateItem = {
   },
   before: {
     contents: Array.from({ length: 120 }, (_, index) =>
-      index === 59 ? "export const releaseReady = false" : `export const auditLine${index + 1} = ${index + 1}`
+      index === 59
+        ? "export const releaseReady = false"
+        : index % 10 === 9
+          ? `export const auditLine${index + 1} = "stale"`
+          : `export const auditLine${index + 1} = ${index + 1}`
     ).join("\n"),
     name: "src/long-release-audit.ts"
   },
@@ -235,7 +239,7 @@ const StatePreservationHarness = (): ReactElement => {
       {
         accessibilityLabel: `${resolved ? "Resolved" : "Draft"} release readiness annotation`,
         id: "stateful-release-finding",
-        location: { itemId: "long-release-audit", lineNumber: 60, side: "additions" },
+        location: { itemId: "long-release-audit", lineNumber: 10, side: "additions" },
         render: (context) => (
           <RichAnnotationCard
             context={context}
@@ -264,7 +268,7 @@ const StatePreservationHarness = (): ReactElement => {
           annotations={annotations}
           contextLines={2}
           initialItems={[longStateItem]}
-          selectedLines={{ id: "long-release-audit", range: { end: 60, side: "additions", start: 60 } }}
+          selectedLines={{ id: "long-release-audit", range: { end: 10, side: "additions", start: 10 } }}
           virtualization="strict"
         />
       </div>
@@ -295,9 +299,10 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const Workbench: Story = {
-  args: { initialItems: [releaseItem] },
+  args: { initialItems: [releaseItem], mode: "split", virtualization: "buffered" },
   play: async ({ canvas, canvasElement }) => {
     await expect(canvasElement.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
+    await expect(canvasElement.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
     await expect(canvasElement.querySelector("diffs-container")).not.toBeNull()
     await expect(canvas.getByText("All six linked pull requests are now approved.")).toBeVisible()
     await userEvent.click(canvas.getByRole("button", { name: "Add evidence file" }))
@@ -371,12 +376,17 @@ export const AnnotationStatePreservation: Story = {
     if (view === null || item === null || item.shadowRoot === null)
       throw new Error("Rendered diff state was unavailable")
     await waitFor(() => expect(canvas.getByText("Manifest reconciliation pending")).toBeVisible())
+    await waitFor(() =>
+      expect(item.shadowRoot?.querySelector("[data-expand-down], [data-expand-up]") ?? null).not.toBeNull()
+    )
 
     const expander = item.shadowRoot.querySelector<HTMLElement>("[data-expand-down], [data-expand-up]")
-    expander?.click()
+    if (expander === null) throw new Error("Expected a context expander in the long diff")
+    expander.click()
     const expandedLineCount = item.shadowRoot.querySelectorAll("[data-line]").length
     view.scrollTop = Math.min(80, Math.max(0, view.scrollHeight - view.clientHeight))
     const scrollTop = view.scrollTop
+    await expect(scrollTop).toBeGreaterThan(0)
     await waitFor(() =>
       expect(item.shadowRoot?.querySelectorAll("[data-selected-line]").length ?? 0).toBeGreaterThan(0)
     )
@@ -390,9 +400,10 @@ export const AnnotationStatePreservation: Story = {
     await expect(item.shadowRoot.querySelectorAll("[data-selected-line]")).toHaveLength(selectedLineCount)
 
     const annotation = canvasElement.querySelector<HTMLElement>("[data-rly-diff-annotation='stateful-release-finding']")
-    annotation?.focus()
+    if (annotation === null) throw new Error("Expected the stateful annotation")
+    annotation.focus()
     await userEvent.keyboard("{Escape}")
-    await expect(item.shadowRoot.activeElement?.getAttribute("data-line")).toBe("60")
+    await expect(item.shadowRoot.activeElement?.getAttribute("data-line")).toBe("10")
     canvasElement.dataset.diffCodeViewAnnotationStatePlayComplete = "true"
   },
   render: () => <StatePreservationHarness />

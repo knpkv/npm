@@ -188,6 +188,12 @@ export const renderDiffConsumerAssertions = (): string =>
   || !markup.includes("Agent finding · not an approval")
   || !markup.includes("Packed diff review")
   || packedDiffCodeViewProps.initialItems.length !== 1
+  || packedDiffCodeViewProps.annotations?.length !== 1
+  || packedAnnotation.render({
+    annotationId: packedAnnotation.id,
+    location: packedAnnotation.location,
+    returnFocus: () => undefined
+  }) !== "packed-annotation"
   || packedDiffExports.some((entry) => entry === undefined)
   || JSON.stringify(packedDiffExportNames) !== JSON.stringify(expectedDiffExportNames)
   || packedDiffTypeCoverage !== undefined

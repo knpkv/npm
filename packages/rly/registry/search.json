@@ -239,10 +239,12 @@
       "name": "DiffCodeView",
       "states": [
         "annotated",
+        "buffered",
         "default",
         "dismissed",
         "draft",
         "resolved",
+        "split",
         "stacked",
         "stale",
         "strict"
