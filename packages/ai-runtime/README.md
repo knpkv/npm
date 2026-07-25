@@ -20,3 +20,61 @@ const program = Effect.gen(function* () {
 ```
 
 A successfully exhausted adapter stream must end with exactly one `completed` event. `AgentProviderError` is the alternative terminal for a failed run and must occur before completion. Interrupting the stream cancels the provider execution. Provider-native session data remains server-only; consumers receive only opaque session references bound to a context fingerprint.
+
+## Structured tool loop
+
+`runToolAgent` adds a stateless multi-turn loop around any Effect AI
+`LanguageModel.Service`. The caller selects the model, supplies an already
+handled Effect AI `Toolkit`, provides structured JSON context and a final
+`Schema`, and owns every executable tool:
+
+```ts
+import { runToolAgent } from "@knpkv/ai-runtime"
+import { Effect, Schema, Stream } from "effect"
+import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
+
+const ReadFile = Tool.make("ReadFile", {
+  description: "Read one project file",
+  parameters: Schema.Struct({ path: Schema.String }),
+  success: Schema.Struct({ content: Schema.String })
+})
+const ProjectTools = Toolkit.make(ReadFile)
+const ProjectToolsLive = ProjectTools.toLayer({
+  ReadFile: ({ path }) => Effect.succeed({ content: `fixture:${path}` })
+})
+const ReviewOutput = Schema.Struct({
+  summary: Schema.String
+})
+
+const review = Effect.gen(function* () {
+  const model = yield* LanguageModel.LanguageModel
+  const toolkit = yield* ProjectTools
+  return yield* runToolAgent({
+    budget: "20 minutes",
+    context: { base: "abc", head: "def" },
+    instructions: "Review the complete project.",
+    model,
+    outputSchema: ReviewOutput,
+    toolkit
+  }).pipe(Stream.runCollect)
+}).pipe(Effect.provide(ProjectToolsLive))
+```
+
+Events expose run start, model progress, requested/completed/failed tools,
+usage, repair, validated output, and terminal outcome. Interrupting the event
+stream interrupts the active model or tool effect. A wall-clock budget fails
+with `ToolAgentTimeoutError`; reaching the default 64-step safety boundary
+emits a `max-steps` terminal event.
+
+Tool input and output validation remains owned by Effect AI schemas. One
+malformed tool call or final JSON response receives one schema-guided repair
+turn; a second malformed response fails with
+`ToolAgentInvalidResponseError` and is never coerced.
+
+Each model-visible tool result is limited to 64 KiB of UTF-8 JSON. Larger
+results require a `ToolAgentArtifactSink`; the model receives head/tail
+excerpts plus the opaque artifact ID. Add caller-owned paging and search tools
+to the same Toolkit so the model can inspect retained content without raising
+the bound. `makeToolAgentAdapter` maps the loop into the existing durable
+`AgentRuntime` contract and chunks validated final JSON across ordinary output
+events, so it adds no aggregate result-count cap.

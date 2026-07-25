@@ -49,3 +49,38 @@ const program = Effect.gen(function* () {
 ```
 
 `fake.requests` records the ordered requests so an acceptance test can prove that recovery preserved the intended release context and did not duplicate a claim.
+
+## Structured tool execution
+
+Use `runToolAgent` when a selected Effect AI model must explore through
+application-owned typed tools and return a schema-validated result. The caller
+supplies:
+
+- Explicit instructions and JSON context.
+- One `LanguageModel.Service`; the loop performs no provider fallback.
+- An Effect AI `Toolkit.WithHandler`, which owns schema decoding and typed
+  handler failures.
+- A final output `Schema`.
+- A visible wall-clock budget.
+- An optional artifact sink for complete tool results larger than 64 KiB.
+
+The returned stream is lazy and emits typed start, model-progress, tool,
+usage, repair, output-validation, and terminal events. Consumer interruption
+interrupts the active model call or tool handler. Budget expiration fails with
+`ToolAgentTimeoutError`, while the default 64-step safety boundary emits a
+`max-steps` terminal outcome.
+
+The loop gives one malformed tool call or final JSON response exactly one
+schema-guided repair turn. A second malformed response fails closed with
+`ToolAgentInvalidResponseError`; missing values are never guessed or coerced.
+
+Model-visible tool results are UTF-8 JSON bounded to 64 KiB. When a result is
+larger, the caller's `ToolAgentArtifactSink` retains the complete JSON and the
+model receives bounded head/tail excerpts, byte counts, and an opaque
+`ToolAgentArtifactId`. Put caller-owned artifact paging and search tools in the
+same Toolkit when the model needs the complete value.
+
+`makeToolAgentAdapter` projects these events into the existing
+`AgentRuntime` stream. Validated final JSON is split across bounded assistant
+output events instead of being aggregate-capped, preserving durable worker
+integration without imposing a result or suggestion-count limit.
