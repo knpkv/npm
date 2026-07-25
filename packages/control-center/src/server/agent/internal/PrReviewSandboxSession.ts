@@ -14,6 +14,7 @@ import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawne
 
 import { JobId, WorkspaceId } from "../../../domain/identifiers.js"
 import { PrReviewSourceError, type PrReviewSourceRequest, PrReviewSourceWorkspace } from "./PrReviewSourceWorkspace.js"
+import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.js"
 
 const OCI_EXECUTABLE = "docker"
 const CONTAINER_SOURCE = "/workspace"
@@ -22,6 +23,7 @@ const CONTAINER_KIND_LABEL = "dev.knpkv.control-center.pr-review.kind"
 const CONTAINER_JOB_LABEL = "dev.knpkv.control-center.pr-review.job"
 const CONTAINER_ATTEMPT_LABEL = "dev.knpkv.control-center.pr-review.attempt"
 const CONTROL_TIMEOUT = Duration.seconds(30)
+const SOURCE_HANDOFF_TIMEOUT = Duration.minutes(5)
 const DEFAULT_COMMAND_TIMEOUT_MILLIS = 120_000
 const MAXIMUM_COMMAND_TIMEOUT_MILLIS = 1_200_000
 const DEFAULT_SESSION_TIMEOUT_MILLIS = 1_200_000
@@ -31,6 +33,8 @@ const MAXIMUM_COMMAND_OUTPUT_BYTES = 16 * 1_024 * 1_024
 const MAXIMUM_VISIBLE_OUTPUT_BYTES = 32 * 1_024
 const MAXIMUM_PATCH_BYTES = 256 * 1_024
 const MAXIMUM_ARTIFACT_PAGE_BYTES = 64 * 1_024
+const MAXIMUM_RETAINED_ARTIFACT_BYTES = 64 * 1_024 * 1_024
+const MAXIMUM_RETAINED_ARTIFACTS = 64
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder("utf-8", { fatal: true })
@@ -63,6 +67,7 @@ const RelativeSandboxPath = Schema.String.check(
   Schema.makeFilter(
     (value) =>
       !value.startsWith("/") &&
+      !value.startsWith("-") &&
       !value.includes("\\") &&
       value.split("/").every((segment) => segment !== "..") &&
       Array.from(value).every((character) => {
@@ -231,6 +236,13 @@ export interface PrReviewSandboxLiveContainer {
   readonly jobId: JobId
 }
 
+/** Startup cleanup report plus the exact sessions still available for reattachment. */
+export interface PrReviewSandboxReconciliation {
+  readonly liveSessions: ReadonlyArray<PrReviewSandboxLiveContainer>
+  readonly removedInitializerContainers: ReadonlyArray<string>
+  readonly removedOrphanVolumes: ReadonlyArray<string>
+}
+
 /** Session owner. The callback is scoped to the container and named volume lifetime. */
 export class PrReviewSandboxSessions extends Context.Service<
   PrReviewSandboxSessions,
@@ -246,7 +258,7 @@ export class PrReviewSandboxSessions extends Context.Service<
       Requirements
     >
     readonly reconcile: () => Effect.Effect<
-      ReadonlyArray<PrReviewSandboxLiveContainer>,
+      PrReviewSandboxReconciliation,
       PrReviewSandboxSessionError
     >
   }
@@ -262,6 +274,41 @@ interface ByteAccumulator {
   readonly chunks: Array<Uint8Array>
   readonly length: number
 }
+
+interface RetainedArtifact {
+  readonly byteLength: number
+  readonly text: string
+}
+
+interface LabeledResource {
+  readonly attemptId: string
+  readonly jobId: JobId
+  readonly kind: string
+  readonly name: string
+}
+
+const labeledResource = (line: string): LabeledResource | null => {
+  const [name, kind, unknownJobId, attemptId, ...rest] = line.split("\t")
+  return name !== undefined &&
+      kind !== undefined &&
+      unknownJobId !== undefined &&
+      attemptId !== undefined &&
+      rest.length === 0 &&
+      Schema.is(JobId)(unknownJobId) &&
+      Schema.is(SandboxAttemptId)(attemptId)
+    ? {
+      attemptId,
+      jobId: unknownJobId,
+      kind,
+      name
+    }
+    : null
+}
+
+const resourceKey = (
+  jobId: JobId,
+  attemptId: string
+): string => `${jobId}:${attemptId}`
 
 const concatenate = ({ chunks, length }: ByteAccumulator): Uint8Array => {
   const output = new Uint8Array(length)
@@ -282,12 +329,14 @@ const collectBounded = (
       (): ByteAccumulator => ({ chunks: [], length: 0 }),
       (accumulator, chunk) => {
         const length = accumulator.length + chunk.byteLength
-        return length > maximumBytes
-          ? Effect.fail(sessionError("output-rejected"))
-          : Effect.succeed({
-            chunks: [...accumulator.chunks, Uint8Array.from(chunk)],
-            length
-          })
+        if (length > maximumBytes) {
+          return Effect.fail(sessionError("output-rejected"))
+        }
+        accumulator.chunks.push(Uint8Array.from(chunk))
+        return Effect.succeed({
+          chunks: accumulator.chunks,
+          length
+        })
       }
     ),
     Effect.map(concatenate),
@@ -343,15 +392,16 @@ const execute = Effect.fn("PrReviewSandboxSession.execute")(function*(
   )
 })
 
-const executeControl = (
+const executeControlWithin = (
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  args: ReadonlyArray<string>
+  args: ReadonlyArray<string>,
+  timeout: Duration.Input
 ): Effect.Effect<ProcessResult, PrReviewSandboxSessionError> =>
   execute(
     spawner,
     args,
     MAXIMUM_CONTROL_OUTPUT_BYTES,
-    CONTROL_TIMEOUT
+    timeout
   ).pipe(
     Effect.mapError((error) =>
       error.reason === "command-timeout"
@@ -359,6 +409,11 @@ const executeControl = (
         : error
     )
   )
+
+const executeControl = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  args: ReadonlyArray<string>
+): Effect.Effect<ProcessResult, PrReviewSandboxSessionError> => executeControlWithin(spawner, args, CONTROL_TIMEOUT)
 
 const successful = (result: ProcessResult): boolean => result.exitCode === ChildProcessSpawner.ExitCode(0)
 
@@ -483,9 +538,8 @@ const createSessionArguments = (
 ]
 
 const missingResource = (stderr: string): boolean =>
-  stderr.includes("No such container") ||
-  stderr.includes("No such volume") ||
-  stderr.includes("not found")
+  /no such (?:container|volume)/iu.test(stderr) ||
+  /(?:container|volume)[^\n]*\bnot found\b/iu.test(stderr)
 
 const removeContainer = Effect.fn("PrReviewSandboxSession.removeContainer")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -514,7 +568,7 @@ const removeVolume = Effect.fn("PrReviewSandboxSession.removeVolume")(function*(
 })
 
 const makeOutput = Effect.fn("PrReviewSandboxSession.makeOutput")(function*(
-  artifacts: Ref.Ref<Map<PrReviewCommandArtifactId, string>>,
+  artifacts: Ref.Ref<Map<PrReviewCommandArtifactId, RetainedArtifact>>,
   artifactSequence: Ref.Ref<number>,
   bytes: Uint8Array
 ) {
@@ -536,7 +590,24 @@ const makeOutput = Effect.fn("PrReviewSandboxSession.makeOutput")(function*(
   )
   yield* Ref.update(artifacts, (current) => {
     const next = new Map(current)
-    next.set(artifactId, complete)
+    next.set(artifactId, {
+      byteLength: bytes.byteLength,
+      text: complete
+    })
+    let retainedBytes = 0
+    for (const artifact of next.values()) {
+      retainedBytes += artifact.byteLength
+    }
+    while (
+      next.size > MAXIMUM_RETAINED_ARTIFACTS ||
+      retainedBytes > MAXIMUM_RETAINED_ARTIFACT_BYTES
+    ) {
+      const oldest = next.entries().next().value
+      if (oldest === undefined) break
+      const [oldestId, oldestArtifact] = oldest
+      next.delete(oldestId)
+      retainedBytes -= oldestArtifact.byteLength
+    }
     return next
   })
   const half = Math.floor(MAXIMUM_VISIBLE_OUTPUT_BYTES / 2)
@@ -566,6 +637,34 @@ const makeOutput = Effect.fn("PrReviewSandboxSession.makeOutput")(function*(
     truncated: true
   } satisfies PrReviewSandboxOutput
 })
+
+const alignUtf8Page = (
+  bytes: Uint8Array,
+  requestedOffset: number,
+  windowOffset: number,
+  requestedLimit: number
+): Uint8Array => {
+  let start = requestedOffset - windowOffset
+  while (
+    start < bytes.byteLength &&
+    (bytes[start] ?? 0) >= 0x80 &&
+    (bytes[start] ?? 0) <= 0xbf
+  ) {
+    start += 1
+  }
+  let end = Math.min(
+    bytes.byteLength,
+    requestedOffset - windowOffset + requestedLimit
+  )
+  while (
+    end < bytes.byteLength &&
+    (bytes[end] ?? 0) >= 0x80 &&
+    (bytes[end] ?? 0) <= 0xbf
+  ) {
+    end += 1
+  }
+  return bytes.slice(start, Math.max(start, end))
+}
 
 const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   unknownOptions: PrReviewSandboxSessionOptions
@@ -631,22 +730,30 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                 ),
                 () =>
                   Effect.gen(function*() {
-                    const copied = yield* executeControl(spawner, [
-                      "container",
-                      "cp",
-                      "--archive",
-                      `${sourceRoot}/.`,
-                      `${initName}:${CONTAINER_SOURCE}`
-                    ])
+                    const copied = yield* executeControlWithin(
+                      spawner,
+                      [
+                        "container",
+                        "cp",
+                        "--archive",
+                        `${sourceRoot}/.`,
+                        `${initName}:${CONTAINER_SOURCE}`
+                      ],
+                      SOURCE_HANDOFF_TIMEOUT
+                    )
                     if (!successful(copied)) {
                       return yield* sessionError("sandbox-unavailable")
                     }
-                    const initialized = yield* executeControl(spawner, [
-                      "container",
-                      "start",
-                      "--attach",
-                      initName
-                    ])
+                    const initialized = yield* executeControlWithin(
+                      spawner,
+                      [
+                        "container",
+                        "start",
+                        "--attach",
+                        initName
+                      ],
+                      SOURCE_HANDOFF_TIMEOUT
+                    )
                     if (!successful(initialized)) {
                       return yield* sessionError("sandbox-unavailable")
                     }
@@ -690,7 +797,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
 
                     const closed = yield* Ref.make(false)
                     const artifacts = yield* Ref.make(
-                      new Map<PrReviewCommandArtifactId, string>()
+                      new Map<PrReviewCommandArtifactId, RetainedArtifact>()
                     )
                     const artifactSequence = yield* Ref.make(0)
 
@@ -704,8 +811,8 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       )
                     )
 
-                    const runContainedCommand = Effect.fn(
-                      "PrReviewSandboxSession.runContainedCommand"
+                    const executeContained = Effect.fn(
+                      "PrReviewSandboxSession.executeContained"
                     )(function*(
                       commandText: string,
                       durationMillis: number,
@@ -735,6 +842,27 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                         ],
                         MAXIMUM_COMMAND_OUTPUT_BYTES,
                         Duration.millis(durationMillis),
+                        input
+                      ).pipe(
+                        Effect.tapError((error) =>
+                          error.reason === "command-timeout"
+                            ? close
+                            : Effect.void
+                        )
+                      )
+                      return result
+                    })
+
+                    const runContainedCommand = Effect.fn(
+                      "PrReviewSandboxSession.runContainedCommand"
+                    )(function*(
+                      commandText: string,
+                      durationMillis: number,
+                      input?: Uint8Array
+                    ) {
+                      const result = yield* executeContained(
+                        commandText,
+                        durationMillis,
                         input
                       )
                       return {
@@ -770,7 +898,10 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       )
                       return yield* runContainedCommand(
                         commandText,
-                        durationMillis
+                        Math.min(
+                          durationMillis,
+                          maximumCommandDurationMillis
+                        )
                       )
                     })
 
@@ -803,15 +934,36 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                           )(limit).pipe(
                             Effect.mapError(() => sessionError("invalid-request"))
                           )
-                          return yield* runCommand(
-                            `dd if=${shellQuote(path)} bs=1 skip=${decodedOffset} count=${decodedLimit} status=none`
+                          const windowOffset = Math.max(0, decodedOffset - 3)
+                          const result = yield* executeContained(
+                            `tail -c +${windowOffset + 1} -- ${shellQuote(path)} | head -c ${decodedLimit + 6}`,
+                            maximumCommandDurationMillis
                           )
+                          return {
+                            exitCode: result.exitCode,
+                            stderr: yield* makeOutput(
+                              artifacts,
+                              artifactSequence,
+                              result.stderr
+                            ),
+                            stdout: yield* makeOutput(
+                              artifacts,
+                              artifactSequence,
+                              alignUtf8Page(
+                                result.stdout,
+                                decodedOffset,
+                                windowOffset,
+                                decodedLimit
+                              )
+                            )
+                          } satisfies PrReviewSandboxCommandResult
                         }),
                       listFiles: (unknownPath = ".") =>
                         Effect.gen(function*() {
                           const path = yield* safePath(unknownPath)
+                          const operand = path === "." ? "." : `./${path}`
                           return yield* runCommand(
-                            `find ${shellQuote(path)} -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort`
+                            `find ${shellQuote(operand)} -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort`
                           )
                         }),
                       searchFiles: (unknownQuery, unknownPath = ".") =>
@@ -868,7 +1020,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                           if (artifact === undefined) {
                             return yield* sessionError("artifact-unavailable")
                           }
-                          return artifact.slice(offset, offset + limit)
+                          return artifact.text.slice(offset, offset + limit)
                         }),
                       searchArtifact: (artifactId, unknownQuery) =>
                         Effect.gen(function*() {
@@ -888,9 +1040,9 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                           }
                           const matches = new Array<number>()
                           for (
-                            let offset = artifact.indexOf(query);
+                            let offset = artifact.text.indexOf(query);
                             offset !== -1 && matches.length < 100;
-                            offset = artifact.indexOf(query, offset + 1)
+                            offset = artifact.text.indexOf(query, offset + 1)
                           ) {
                             matches.push(offset)
                           }
@@ -903,8 +1055,10 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       "test \"$(git rev-parse --verify HEAD)\" = " +
                         shellQuote(request.headRevision) +
                         " && test -z \"$(git remote)\" && " +
-                        "! git config --local --get-regexp " +
-                        shellQuote("^(credential\\.|http\\..*\\.extraheader$|remote\\.)")
+                        "authority_keys=$(git config --local --name-only --get-regexp '.*') && " +
+                        "! printf '%s\\n' \"$authority_keys\" | " +
+                        "LC_ALL=C tr '[:upper:]' '[:lower:]' | grep -E " +
+                        shellQuote(PR_REVIEW_AUTHORITY_CONFIG_PATTERN)
                     )
                     if (verified.exitCode !== 0) {
                       return yield* sessionError("source-unavailable")
@@ -938,41 +1092,111 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   const reconcile = Effect.fn(
     "PrReviewSandboxSessions.reconcile"
   )(function*() {
-    const listed = yield* executeControl(spawner, [
+    const listedContainers = yield* executeControl(spawner, [
       "container",
       "ls",
       "--all",
       "--filter",
-      `label=${CONTAINER_KIND_LABEL}=session`,
+      `label=${CONTAINER_JOB_LABEL}`,
       "--format",
-      `{{.Names}}\t{{.Label "${CONTAINER_JOB_LABEL}"}}\t{{.Label "${CONTAINER_ATTEMPT_LABEL}"}}`
+      `{{.Names}}\t{{.Label "${CONTAINER_KIND_LABEL}"}}\t{{.Label "${CONTAINER_JOB_LABEL}"}}\t` +
+      `{{.Label "${CONTAINER_ATTEMPT_LABEL}"}}`
     ])
-    if (!successful(listed)) {
+    const listedVolumes = yield* executeControl(spawner, [
+      "volume",
+      "ls",
+      "--filter",
+      `label=${CONTAINER_JOB_LABEL}`,
+      "--format",
+      `{{.Name}}\t{{.Label "${CONTAINER_KIND_LABEL}"}}\t{{.Label "${CONTAINER_JOB_LABEL}"}}\t` +
+      `{{.Label "${CONTAINER_ATTEMPT_LABEL}"}}`
+    ])
+    if (
+      !successful(listedContainers) ||
+      !successful(listedVolumes)
+    ) {
       return yield* sessionError("sandbox-unavailable")
     }
-    const text = yield* decodeUtf8(listed.stdout, "sandbox-unavailable")
-    const containers = new Array<PrReviewSandboxLiveContainer>()
-    for (const line of text.split("\n")) {
+    const containerText = yield* decodeUtf8(
+      listedContainers.stdout,
+      "sandbox-unavailable"
+    )
+    const volumeText = yield* decodeUtf8(
+      listedVolumes.stdout,
+      "sandbox-unavailable"
+    )
+    const liveSessions = new Array<PrReviewSandboxLiveContainer>()
+    const initializerContainers = new Array<LabeledResource>()
+    const protectedVolumeKeys = new Set<string>()
+    for (const line of containerText.split("\n")) {
       if (line.length === 0) continue
-      const [name, unknownJobId, attemptId, ...rest] = line.split("\t")
-      if (
-        name === undefined ||
-        unknownJobId === undefined ||
-        attemptId === undefined ||
-        rest.length > 0 ||
-        !Schema.is(JobId)(unknownJobId) ||
-        !Schema.is(SandboxAttemptId)(attemptId) ||
-        name !== containerName(unknownJobId, attemptId)
+      const resource = labeledResource(line)
+      if (resource === null) continue
+      if (resource.kind === "session") {
+        if (
+          resource.name === containerName(
+            resource.jobId,
+            resource.attemptId
+          )
+        ) {
+          protectedVolumeKeys.add(
+            resourceKey(resource.jobId, resource.attemptId)
+          )
+          liveSessions.push({
+            attemptId: resource.attemptId,
+            containerName: resource.name,
+            jobId: resource.jobId
+          })
+        }
+      } else if (
+        resource.kind === "initializer" &&
+        resource.name === initializerName(
+            resource.jobId,
+            resource.attemptId
+          )
       ) {
-        return yield* sessionError("sandbox-unavailable")
+        initializerContainers.push(resource)
       }
-      containers.push({
-        attemptId,
-        containerName: name,
-        jobId: unknownJobId
-      })
     }
-    return containers
+
+    const orphanVolumes = new Array<LabeledResource>()
+    for (const line of volumeText.split("\n")) {
+      if (line.length === 0) continue
+      const resource = labeledResource(line)
+      if (
+        resource !== null &&
+        resource.kind === "volume" &&
+        resource.name === volumeName(
+            resource.jobId,
+            resource.attemptId
+          ) &&
+        !protectedVolumeKeys.has(
+          resourceKey(resource.jobId, resource.attemptId)
+        )
+      ) {
+        orphanVolumes.push(resource)
+      }
+    }
+
+    for (const initializer of initializerContainers) {
+      yield* removeContainer(spawner, initializer.name)
+    }
+    for (const volume of orphanVolumes) {
+      yield* removeVolume(spawner, volume.name)
+    }
+
+    liveSessions.sort((left, right) => left.containerName.localeCompare(right.containerName))
+    const removedInitializerContainers = initializerContainers
+      .map(({ name }) => name)
+      .sort()
+    const removedOrphanVolumes = orphanVolumes
+      .map(({ name }) => name)
+      .sort()
+    return {
+      liveSessions,
+      removedInitializerContainers,
+      removedOrphanVolumes
+    } satisfies PrReviewSandboxReconciliation
   })
 
   return PrReviewSandboxSessions.of({ reconcile, withSession })
@@ -1101,7 +1325,7 @@ export const PrReviewSandboxTools = Toolkit.make(
 /** Bind the typed Review Sandbox tools to one live scoped session. */
 export const prReviewSandboxToolsLayer = (
   session: PrReviewSandboxSession
-) =>
+): Layer.Layer<Tool.HandlersFor<typeof PrReviewSandboxTools.tools>> =>
   PrReviewSandboxTools.toLayer({
     ReviewReadFile: ({ limit, offset, path }) => session.readFile(path, offset, limit),
     ReviewListFiles: ({ path }) => session.listFiles(path),

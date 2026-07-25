@@ -14,6 +14,7 @@ import {
   prReviewSourceWorkspaceLayer,
   PrReviewWorkspaceLeaseGuard
 } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { isPrReviewAuthorityConfigKey } from "../../src/server/agent/internal/PrReviewWorkspaceProtocol.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -69,6 +70,31 @@ const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   )
 
 describe("PR review source workspace", () => {
+  it("classifies authority-bearing Git configuration without rejecting inert local keys", () => {
+    for (
+      const invalid of [
+        "credential.helper",
+        "http.extraHeader",
+        "http.https://example.invalid.extraHeader",
+        "remote.origin.url",
+        "url.ssh://example.invalid/.insteadOf",
+        "include.path",
+        "includeIf.gitdir:~/work/.path"
+      ]
+    ) {
+      assert.isTrue(isPrReviewAuthorityConfigKey(invalid), invalid)
+    }
+    for (
+      const valid of [
+        "branch.main.merge",
+        "core.repositoryformatversion",
+        "user.name"
+      ]
+    ) {
+      assert.isFalse(isPrReviewAuthorityConfigKey(valid), valid)
+    }
+  })
+
   it.effect("resolves exactly one enabled CodeCommit connection without exposing configuration publicly", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("pr-review-source-resolver-")

@@ -29,6 +29,7 @@ export {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxLiveContainer,
   type PrReviewSandboxOutput,
+  type PrReviewSandboxReconciliation,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
   type PrReviewSandboxSessionOptions,

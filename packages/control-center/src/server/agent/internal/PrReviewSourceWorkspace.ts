@@ -18,7 +18,7 @@ import { Persistence } from "../../persistence/Persistence.js"
 import { AgentJobRepository } from "../../persistence/repositories/agentJobRepository.js"
 import type { StoredPluginConfiguration } from "../../persistence/repositories/pluginConfigurationModels.js"
 import { CodeCommitPluginConfiguration } from "../../plugins/codecommit/CodeCommitPluginDefinition.js"
-import { PR_REVIEW_SANDBOX_PREFIXES } from "./PrReviewWorkspaceProtocol.js"
+import { isPrReviewAuthorityConfigKey, PR_REVIEW_SANDBOX_PREFIXES } from "./PrReviewWorkspaceProtocol.js"
 
 const GIT_EXECUTABLE = "git"
 const STAGING_PREFIX = ".review-staging-"
@@ -270,6 +270,30 @@ const decodedLine = (bytes: Uint8Array): string | undefined => {
 }
 
 const successful = (result: ProcessResult): boolean => result.exitCode === ChildProcessSpawner.ExitCode(0)
+
+const decodedConfigurationKeys = (
+  bytes: Uint8Array
+): ReadonlyArray<string> | undefined => {
+  try {
+    const value = new TextDecoder("utf-8", { fatal: true }).decode(bytes)
+    if (value.includes("\r")) return undefined
+    const lines = value.endsWith("\n")
+      ? value.slice(0, -1).split("\n")
+      : value.split("\n")
+    return lines.every((line) => line.length > 0) ? lines : undefined
+  } catch {
+    return undefined
+  }
+}
+
+const authorityConfigurationIsClean = (
+  result: ProcessResult
+): boolean => {
+  if (!successful(result)) return false
+  const keys = decodedConfigurationKeys(result.stdout)
+  return keys !== undefined &&
+    keys.every((key) => !isPrReviewAuthorityConfigKey(key))
+}
 
 /** Private root and timeout used for bounded source materialization. */
 export interface PrReviewSourceWorkspaceOptions {
@@ -559,15 +583,13 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
                         stagedSource,
                         "config",
                         "--local",
+                        "--name-only",
                         "--get-regexp",
-                        "^(credential\\.|http\\..*\\.extraheader$|remote\\.)"
+                        ".*"
                       ],
                       stagedSource
                     )
-                    if (
-                      successful(authorityConfiguration) ||
-                      authorityConfiguration.stdout.byteLength !== 0
-                    ) {
+                    if (!authorityConfigurationIsClean(authorityConfiguration)) {
                       return yield* sourceError("source-rejected")
                     }
                     yield* fileSystem.rename(stagedSource, sourceRoot).pipe(

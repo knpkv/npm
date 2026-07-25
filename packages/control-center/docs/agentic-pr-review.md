@@ -256,8 +256,10 @@ The AI provider process remains outside Docker. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
-output receives a session-local opaque artifact ID. Provider CLIs never receive
-direct host or Docker access.
+output receives a session-local opaque artifact ID. A session retains at most
+64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
+pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
+host or Docker access.
 
 Executable repository instructions come only from the trusted base revision. Instruction changes in the PR are untrusted content under review.
 
@@ -278,8 +280,12 @@ On startup, Control Center:
 
 Session acquisition and use are scoped. Cancellation, command or session
 timeout, copy/start failure, callback failure, and normal completion all force
-container and named-volume removal. Label reconciliation accepts only exact
-job/attempt-derived container identities.
+container and named-volume removal. A command timeout closes the session before
+returning its typed failure, and model-requested timeouts cannot exceed the
+locally configured command cap. Label reconciliation accepts only exact
+job/attempt-derived resource identities, ignores malformed daemon output, and
+removes orphaned initializer containers and named volumes while preserving the
+volume belonging to an exact live session.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 

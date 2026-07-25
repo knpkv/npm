@@ -18,12 +18,15 @@ import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrRevie
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000072")
 const ATTEMPT_ID = "0123456789ab"
+const ORPHAN_ATTEMPT_ID = "fedcba987654"
 const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const IMAGE = `registry.example.invalid/control-center/review-runner@sha256:${"a".repeat(64)}`
 const CONTAINER_NAME = `cc-pr-review-session-${JOB_ID}-${ATTEMPT_ID}`
 const INITIALIZER_NAME = `cc-pr-review-init-${JOB_ID}-${ATTEMPT_ID}`
 const VOLUME_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
+const ORPHAN_INITIALIZER_NAME = `cc-pr-review-init-${JOB_ID}-${ORPHAN_ATTEMPT_ID}`
+const ORPHAN_VOLUME_NAME = `cc-pr-review-${JOB_ID}-${ORPHAN_ATTEMPT_ID}`
 const encoder = new TextEncoder()
 
 interface FakeResponse {
@@ -32,16 +35,23 @@ interface FakeResponse {
   readonly started?: Deferred.Deferred<void>
   readonly stderr?: string
   readonly stdout?: string
+  readonly stdoutBytes?: Uint8Array
 }
 
 interface FakeDockerOptions {
+  readonly cleanupFailure?: {
+    readonly resourceName: string
+    readonly stderr: string
+  }
   readonly commandResponses?: Array<FakeResponse>
   readonly failCopy?: boolean
+  readonly hangingCopy?: Deferred.Deferred<void>
   readonly hangingCommand?: {
     readonly command: string
     readonly started: Deferred.Deferred<void>
   }
-  readonly reconcileOutput?: string
+  readonly reconcileContainerOutput?: string
+  readonly reconcileVolumeOutput?: string
 }
 
 const makeHandle = (
@@ -49,7 +59,9 @@ const makeHandle = (
 ): ChildProcessSpawner.ChildProcessHandle => {
   const stdout = response.hanging === true
     ? Stream.never
-    : Stream.make(encoder.encode(response.stdout ?? ""))
+    : Stream.make(
+      response.stdoutBytes ?? encoder.encode(response.stdout ?? "")
+    )
   const stderr = response.hanging === true
     ? Stream.never
     : Stream.make(encoder.encode(response.stderr ?? ""))
@@ -88,9 +100,30 @@ const fakeDockerLayer = (
       const args = unknownCommand.args
       const shellCommand = args.at(-1)
       const hangingCommand = options.hangingCommand
+      const cleanupFailure = options.cleanupFailure
       let response: FakeResponse
       if (args[0] === "container" && args[1] === "ls") {
-        response = { stdout: options.reconcileOutput ?? "" }
+        response = { stdout: options.reconcileContainerOutput ?? "" }
+      } else if (args[0] === "volume" && args[1] === "ls") {
+        response = { stdout: options.reconcileVolumeOutput ?? "" }
+      } else if (
+        (args[1] === "rm") &&
+        cleanupFailure !== undefined &&
+        args.at(-1) === cleanupFailure.resourceName
+      ) {
+        response = {
+          exitCode: 1,
+          stderr: cleanupFailure.stderr
+        }
+      } else if (
+        args[0] === "container" &&
+        args[1] === "cp" &&
+        options.hangingCopy !== undefined
+      ) {
+        response = {
+          hanging: true,
+          started: options.hangingCopy
+        }
       } else if (
         args[0] === "container" &&
         args[1] === "cp" &&
@@ -185,6 +218,9 @@ describe("PrReviewSandboxSessions", () => {
             Effect.gen(function*() {
               const read = yield* session.readFile("review.ts", 0, 128)
               const listed = yield* session.listFiles(".")
+              const unsafeList = yield* session.listFiles("-delete").pipe(
+                Effect.result
+              )
               const searched = yield* session.searchFiles("value", ".")
               const command = yield* session.runCommand("pnpm test")
               const large = yield* session.runCommand("emit-large")
@@ -205,6 +241,10 @@ describe("PrReviewSandboxSessions", () => {
               const diff = yield* session.readDiff()
               assert.strictEqual(read.stdout.text, "export const value = 2\n")
               assert.include(listed.stdout.text, "review.ts")
+              assert.isTrue(Result.isFailure(unsafeList))
+              if (Result.isFailure(unsafeList)) {
+                assert.strictEqual(unsafeList.failure.reason, "invalid-request")
+              }
               assert.include(searched.stdout.text, "review.ts:1")
               assert.strictEqual(command.exitCode, 0)
               assert.strictEqual(command.stdout.text, "tests passed\n")
@@ -302,6 +342,16 @@ describe("PrReviewSandboxSessions", () => {
           ({ args }) => args[0] === "container" && args[1] === "exec"
         )
         assert.isAbove(toolExecs.length, 1)
+        assert.isTrue(
+          toolExecs.some(
+            ({ args }) =>
+              args.at(-1) ===
+                "find '.' -mindepth 1 -maxdepth 1 -print | LC_ALL=C sort"
+          )
+        )
+        assert.isFalse(
+          toolExecs.some(({ args }) => args.join(" ").includes("-delete"))
+        )
         const patchExecs = toolExecs.filter(
           ({ args }) => args.at(-1) === "git apply --whitespace=nowarn --"
         )
@@ -406,7 +456,60 @@ describe("PrReviewSandboxSessions", () => {
       })
     ).pipe(Effect.provide(NodeFileSystem.layer)))
 
-  it.effect("times out a command and destroys its container and volume", () =>
+  it.effect("gives full-source handoff its own timeout and cleans after expiry", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "pr-review-session-copy-timeout-"
+        })
+        const copyStarted = yield* Deferred.make<void>()
+        const calls: Array<ChildProcess.StandardCommand> = []
+        const fiber = yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(
+            request,
+            () => Effect.die("session callback must not run")
+          )
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              hangingCopy: copyStarted
+            })
+          ),
+          Effect.result,
+          Effect.forkScoped
+        )
+        yield* Deferred.await(copyStarted)
+        yield* TestClock.adjust("31 seconds")
+        assert.isUndefined(fiber.pollUnsafe())
+        yield* TestClock.adjust("5 minutes")
+        const result = yield* Fiber.join(fiber)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, PrReviewSandboxSessionError)
+          assert.strictEqual(result.failure.reason, "sandbox-timeout")
+        }
+        assert.isTrue(
+          calls.some(
+            ({ args }) =>
+              args[0] === "container" &&
+              args[1] === "rm" &&
+              args.at(-1) === INITIALIZER_NAME
+          )
+        )
+        assert.isTrue(
+          calls.some(
+            ({ args }) =>
+              args[0] === "volume" &&
+              args[1] === "rm" &&
+              args.at(-1) === VOLUME_NAME
+          )
+        )
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("caps command timeouts and closes the session before returning", () =>
     Effect.scoped(
       Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
@@ -419,7 +522,68 @@ describe("PrReviewSandboxSessions", () => {
           const sessions = yield* PrReviewSandboxSessions
           return yield* sessions.withSession(
             request,
-            (session) => session.runCommand("sleep forever")
+            (session) =>
+              Effect.gen(function*() {
+                assert.strictEqual(
+                  (yield* session.runCommand("echo quick", 5)).exitCode,
+                  0
+                )
+                assert.strictEqual(
+                  (yield* session.runCommand("echo default")).exitCode,
+                  0
+                )
+                const timedOut = yield* session.runCommand(
+                  "sleep forever",
+                  1_000
+                ).pipe(Effect.result)
+                assert.isTrue(Result.isFailure(timedOut))
+                if (Result.isFailure(timedOut)) {
+                  assert.instanceOf(
+                    timedOut.failure,
+                    PrReviewSandboxSessionError
+                  )
+                  assert.strictEqual(
+                    timedOut.failure.reason,
+                    "command-timeout"
+                  )
+                }
+                assert.isTrue(
+                  calls.some(
+                    ({ args }) =>
+                      args[0] === "container" &&
+                      args[1] === "rm" &&
+                      args.at(-1) === CONTAINER_NAME
+                  )
+                )
+                assert.isTrue(
+                  calls.some(
+                    ({ args }) =>
+                      args[0] === "volume" &&
+                      args[1] === "rm" &&
+                      args.at(-1) === VOLUME_NAME
+                  )
+                )
+                const afterTimeout = yield* session.runCommand(
+                  "echo unavailable"
+                ).pipe(Effect.result)
+                assert.isTrue(Result.isFailure(afterTimeout))
+                if (Result.isFailure(afterTimeout)) {
+                  assert.strictEqual(
+                    afterTimeout.failure.reason,
+                    "session-closed"
+                  )
+                }
+                const readAfterTimeout = yield* session.readFile(
+                  "review.ts"
+                ).pipe(Effect.result)
+                assert.isTrue(Result.isFailure(readAfterTimeout))
+                if (Result.isFailure(readAfterTimeout)) {
+                  assert.strictEqual(
+                    readAfterTimeout.failure.reason,
+                    "session-closed"
+                  )
+                }
+              })
           )
         }).pipe(
           Effect.provide(
@@ -441,11 +605,7 @@ describe("PrReviewSandboxSessions", () => {
         yield* Deferred.await(started)
         yield* TestClock.adjust("20 millis")
         const result = yield* Fiber.join(fiber)
-        assert.isTrue(Result.isFailure(result))
-        if (Result.isFailure(result)) {
-          assert.instanceOf(result.failure, PrReviewSandboxSessionError)
-          assert.strictEqual(result.failure.reason, "command-timeout")
-        }
+        assert.isTrue(Result.isSuccess(result))
         assert.isTrue(
           calls.some(
             ({ args }) =>
@@ -460,6 +620,82 @@ describe("PrReviewSandboxSessions", () => {
               args[0] === "volume" &&
               args[1] === "rm" &&
               args.at(-1) === VOLUME_NAME
+          )
+        )
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("rejects pathological per-command output at the hard byte cap", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectory({
+          prefix: "pr-review-session-output-cap-"
+        })
+        const calls: Array<ChildProcess.StandardCommand> = []
+        yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, (session) =>
+            Effect.gen(function*() {
+              const rejected = yield* session.runCommand(
+                "emit-pathological-output"
+              ).pipe(Effect.result)
+              assert.isTrue(Result.isFailure(rejected))
+              if (Result.isFailure(rejected)) {
+                assert.strictEqual(
+                  rejected.failure.reason,
+                  "output-rejected"
+                )
+              }
+            }))
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              commandResponses: [{
+                stdoutBytes: new Uint8Array(16 * 1_024 * 1_024 + 1)
+              }]
+            })
+          )
+        )
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("preserves complete UTF-8 characters at read page boundaries", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectory({
+          prefix: "pr-review-session-utf8-page-"
+        })
+        const calls: Array<ChildProcess.StandardCommand> = []
+        yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, (session) =>
+            Effect.gen(function*() {
+              const splitCharacter = yield* session.readFile(
+                "review.ts",
+                0,
+                3
+              )
+              const ascii = yield* session.readFile("review.ts", 0, 3)
+              const exactCharacter = yield* session.readFile(
+                "review.ts",
+                0,
+                4
+              )
+              assert.strictEqual(splitCharacter.stdout.text, "ab🙂")
+              assert.strictEqual(ascii.stdout.text, "asc")
+              assert.strictEqual(exactCharacter.stdout.text, "🙂")
+            }))
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              commandResponses: [
+                { stdout: "ab🙂cd" },
+                { stdout: "ascii" },
+                { stdout: "🙂x" }
+              ]
+            })
           )
         )
       })
@@ -507,7 +743,117 @@ describe("PrReviewSandboxSessions", () => {
       })
     ).pipe(Effect.provide(NodeFileSystem.layer)))
 
-  it.effect("reconciles exact labeled live session identities", () => {
+  it.effect("evicts oldest retained artifacts within the session budget", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectory({
+          prefix: "pr-review-session-artifact-budget-"
+        })
+        const calls: Array<ChildProcess.StandardCommand> = []
+        const output = "x".repeat(40_000)
+        yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, (session) =>
+            Effect.gen(function*() {
+              const ids = new Array<PrReviewCommandArtifactId>()
+              for (let index = 0; index < 65; index += 1) {
+                const result = yield* session.runCommand(`emit-${index}`)
+                if (result.stdout.artifactId === null) {
+                  return yield* Effect.die("expected retained artifact")
+                }
+                ids.push(result.stdout.artifactId)
+              }
+              const first = ids[0]
+              const last = ids.at(-1)
+              if (first === undefined || last === undefined) {
+                return yield* Effect.die("expected artifact identities")
+              }
+              const evicted = yield* session.pageArtifact(
+                first,
+                0,
+                1
+              ).pipe(Effect.result)
+              assert.isTrue(Result.isFailure(evicted))
+              if (Result.isFailure(evicted)) {
+                assert.strictEqual(
+                  evicted.failure.reason,
+                  "artifact-unavailable"
+                )
+              }
+              assert.strictEqual(
+                yield* session.pageArtifact(last, 0, 1),
+                "x"
+              )
+            }))
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              commandResponses: Array.from(
+                { length: 65 },
+                () => ({ stdout: output })
+              )
+            })
+          )
+        )
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("does not hide unrelated cleanup errors as missing resources", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectory({
+          prefix: "pr-review-session-cleanup-error-"
+        })
+        const calls: Array<ChildProcess.StandardCommand> = []
+        const result = yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, () => Effect.void)
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              cleanupFailure: {
+                resourceName: CONTAINER_NAME,
+                stderr: "authorization plugin not found\n"
+              }
+            })
+          ),
+          Effect.result
+        )
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, PrReviewSandboxSessionError)
+          assert.strictEqual(result.failure.reason, "cleanup-failed")
+        }
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("tolerates Docker's exact missing-resource cleanup response", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const sourceRoot = yield* fileSystem.makeTempDirectory({
+          prefix: "pr-review-session-cleanup-missing-"
+        })
+        const calls: Array<ChildProcess.StandardCommand> = []
+        yield* Effect.gen(function*() {
+          const sessions = yield* PrReviewSandboxSessions
+          return yield* sessions.withSession(request, () => Effect.void)
+        }).pipe(
+          Effect.provide(
+            sessionsLayer(sourceRoot, calls, {
+              cleanupFailure: {
+                resourceName: CONTAINER_NAME,
+                stderr: `Error response from daemon: No such container: ${CONTAINER_NAME}\n`
+              }
+            })
+          )
+        )
+      })
+    ).pipe(Effect.provide(NodeFileSystem.layer)))
+
+  it.effect("reconciles sessions and removes exact orphaned resources", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const source = Layer.succeed(
       PrReviewSourceWorkspace,
@@ -517,17 +863,53 @@ describe("PrReviewSandboxSessions", () => {
     )
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
-      const live = yield* sessions.reconcile()
-      assert.deepStrictEqual(live, [{
-        attemptId: ATTEMPT_ID,
-        containerName: CONTAINER_NAME,
-        jobId: JOB_ID
-      }])
+      const reconciled = yield* sessions.reconcile()
+      assert.deepStrictEqual(reconciled, {
+        liveSessions: [{
+          attemptId: ATTEMPT_ID,
+          containerName: CONTAINER_NAME,
+          jobId: JOB_ID
+        }],
+        removedInitializerContainers: [ORPHAN_INITIALIZER_NAME],
+        removedOrphanVolumes: [ORPHAN_VOLUME_NAME]
+      })
+      assert.isTrue(
+        calls.some(
+          ({ args }) =>
+            args[0] === "container" &&
+            args[1] === "rm" &&
+            args.at(-1) === ORPHAN_INITIALIZER_NAME
+        )
+      )
+      assert.isTrue(
+        calls.some(
+          ({ args }) =>
+            args[0] === "volume" &&
+            args[1] === "rm" &&
+            args.at(-1) === ORPHAN_VOLUME_NAME
+        )
+      )
+      assert.isFalse(
+        calls.some(
+          ({ args }) =>
+            args[1] === "rm" &&
+            args.at(-1) === VOLUME_NAME
+        )
+      )
     }).pipe(
       Effect.provide(
         prReviewSandboxSessionsLayer({ image: IMAGE }).pipe(
           Layer.provide(fakeDockerLayer(calls, {
-            reconcileOutput: `${CONTAINER_NAME}\t${JOB_ID}\t${ATTEMPT_ID}\n`
+            reconcileContainerOutput: [
+              `${CONTAINER_NAME}\tsession\t${JOB_ID}\t${ATTEMPT_ID}`,
+              `${ORPHAN_INITIALIZER_NAME}\tinitializer\t${JOB_ID}\t${ORPHAN_ATTEMPT_ID}`,
+              "malformed-resource"
+            ].join("\n"),
+            reconcileVolumeOutput: [
+              `${VOLUME_NAME}\tvolume\t${JOB_ID}\t${ATTEMPT_ID}`,
+              `${ORPHAN_VOLUME_NAME}\tvolume\t${JOB_ID}\t${ORPHAN_ATTEMPT_ID}`,
+              "malformed-resource"
+            ].join("\n")
           })),
           Layer.provide(source),
           Layer.provide(NodeFileSystem.layer)

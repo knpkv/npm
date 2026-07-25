@@ -16,6 +16,7 @@ import {
   prReviewSandboxSessionsLayer
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "../../src/server/agent/internal/PrReviewWorkspaceProtocol.js"
 
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000081")
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082")
@@ -140,13 +141,40 @@ describe("PrReviewSandboxSessions Docker integration", () => {
                   const environment = yield* session.runCommand(
                     "test -w . && test ! -e /var/run/docker.sock && " +
                       "test -z \"$(git remote)\" && " +
-                      "! git config --local --get-regexp " +
-                      "'^(credential\\.|http\\..*\\.extraheader$|remote\\.)' && " +
+                      "authority_keys=$(git config --local --name-only --get-regexp '.*') && " +
+                      "! printf '%s\\n' \"$authority_keys\" | " +
+                      "LC_ALL=C tr '[:upper:]' '[:lower:]' | grep -E '" +
+                      PR_REVIEW_AUTHORITY_CONFIG_PATTERN +
+                      "' && " +
                       "! env | grep -E '^(AWS|CODEX|ANTHROPIC|OPENAI|GITHUB)_' && " +
                       "printf 'writable\\n' > sandbox-created.txt && cat sandbox-created.txt"
                   )
                   assert.strictEqual(environment.exitCode, 0)
                   assert.strictEqual(environment.stdout.text, "writable\n")
+                  const read = yield* session.readFile("review.ts", 7, 5)
+                  assert.strictEqual(read.exitCode, 0)
+                  assert.strictEqual(read.stdout.text, "const")
+                  const unsafeList = yield* session.listFiles(
+                    "-delete"
+                  ).pipe(Effect.result)
+                  assert.isTrue(Result.isFailure(unsafeList))
+                  if (Result.isFailure(unsafeList)) {
+                    assert.strictEqual(
+                      unsafeList.failure.reason,
+                      "invalid-request"
+                    )
+                  }
+                  const listed = yield* session.listFiles(".")
+                  assert.include(listed.stdout.text, "./review.ts")
+                  const sentinel = yield* session.readFile(
+                    "review.ts",
+                    0,
+                    128
+                  )
+                  assert.strictEqual(
+                    sentinel.stdout.text,
+                    "export const value = 1\n"
+                  )
 
                   const patch = yield* session.applyPatch(
                     [

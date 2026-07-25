@@ -163,7 +163,9 @@ CodeCommit Core and Control Center targeted sandbox tests, checks, lint, build, 
 The session is additive until PR 4 switches durable orchestration away from
 the pre-stable one-shot runner. `PrReviewSandboxSessions` owns exact-source
 handoff, the named-volume/container scope, typed sandbox tools, bounded local
-artifacts, timeout cleanup, and label reconciliation. The exact-source broker
+artifacts with deterministic oldest-first eviction, terminal command-timeout
+cleanup, and label reconciliation that removes orphaned initializers and
+volumes. The exact-source broker
 now removes authenticated remotes and authority-bearing local Git
 configuration before handoff. The Docker integration test pulls a trusted
 digest-pinned runner when Docker is available and proves the policy against a
