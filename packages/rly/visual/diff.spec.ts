@@ -45,6 +45,51 @@ test("keeps the real stacked and wrapped renderer inside 320 pixels", async ({ p
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-stacked-320.png") })
 })
 
+test("renders rich application annotations in light and dark virtualized presentations", async ({ page }, testInfo) => {
+  await page.setViewportSize({ height: 1_200, width: 1_440 })
+  await page.goto(story("diff-diffcodeview--rich-annotations").replace("theme:dark", "theme:light"))
+  await expect(page.locator("[data-diff-code-view-rich-annotations-play-complete='true']")).toBeAttached()
+  await expect(page.locator("[data-rly-diff-annotation]")).toHaveCount(5)
+  await expect(page.locator("[data-annotation-status='dismissed']")).toBeVisible()
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("diff-rich-annotations-light.png")
+  })
+
+  await page.goto(story("diff-diffcodeview--rich-annotations-dark"))
+  await expect(page.locator("[data-diff-code-view-rich-annotations-dark-play-complete='true']")).toBeAttached()
+  await expect(page.locator("[data-rly-diff-mode='stacked']")).toBeAttached()
+  await expect(page.locator("[data-rly-diff-annotation]")).toHaveCount(5)
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("diff-rich-annotations-dark.png")
+  })
+})
+
+test("preserves virtualized state across annotation replacement", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1_200 })
+  await page.goto(story("diff-diffcodeview--annotation-state-preservation"))
+  await expect(page.locator("[data-diff-code-view-annotation-state-play-complete='true']")).toBeAttached()
+  await expect(page.locator("[data-annotation-status='resolved']")).toBeVisible()
+})
+
+test("keeps rich annotations in the synchronous bounded fallback", async ({ page }, testInfo) => {
+  await page.setViewportSize({ height: 1_200, width: 1_440 })
+  await page.goto(story("diff-boundeddiffcodeview--rich-annotations"))
+  await expect(page.locator("[data-bounded-diff-rich-annotations-play-complete='true']")).toBeAttached()
+  await expect(page.locator("[data-rly-diff-annotation]")).toHaveCount(5)
+  await expectNoHorizontalOverflow(page)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("diff-bounded-rich-annotations.png")
+  })
+})
+
 test("keeps the six-file bird-eye review, people, and stale evidence visible", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_200, width: 1_440 })
   await page.goto(story("diff-diffworkbench--bird-eye-review"))

@@ -16,6 +16,8 @@ export const renderDiffConsumerImports = (): string =>
   createDiffWorkerFactory,
   normalizeDiffWorkerPoolSize,
   type RlyDiffCodeAnnotation,
+  type RlyDiffCodeAnnotationLocation,
+  type RlyDiffCodeAnnotationRenderContext,
   type RlyDiffCodeItem,
   type RlyDiffCodeScrollTarget,
   type RlyDiffCodeSelection,
@@ -81,7 +83,19 @@ const packedDiffCodeItem: RlyDiffCodeItem = {
   id: packedDiffFile.id,
   version: 1
 }
+const packedAnnotationLocation: RlyDiffCodeAnnotationLocation = {
+  itemId: packedDiffFile.id,
+  lineNumber: 1,
+  side: "additions"
+}
+const packedAnnotation: RlyDiffCodeAnnotation = {
+  accessibilityLabel: "Packed revision annotation",
+  id: "packed-annotation",
+  location: packedAnnotationLocation,
+  render: ({ annotationId }: RlyDiffCodeAnnotationRenderContext) => annotationId
+}
 const packedDiffCodeViewProps: RlyDiffCodeViewProps = {
+  annotations: [packedAnnotation],
   initialItems: [packedDiffCodeItem],
   mode: "split",
   virtualization: "buffered",
@@ -95,6 +109,8 @@ type PackedDiffPublicTypes = readonly [
   DiffWorkbenchProps,
   DiffWorkerProviderProps,
   RlyDiffCodeAnnotation,
+  RlyDiffCodeAnnotationLocation,
+  RlyDiffCodeAnnotationRenderContext,
   RlyDiffCodeItem,
   RlyDiffCodeScrollTarget,
   RlyDiffCodeSelection,
@@ -172,6 +188,12 @@ export const renderDiffConsumerAssertions = (): string =>
   || !markup.includes("Agent finding · not an approval")
   || !markup.includes("Packed diff review")
   || packedDiffCodeViewProps.initialItems.length !== 1
+  || packedDiffCodeViewProps.annotations?.length !== 1
+  || packedAnnotation.render({
+    annotationId: packedAnnotation.id,
+    location: packedAnnotation.location,
+    returnFocus: () => undefined
+  }) !== "packed-annotation"
   || packedDiffExports.some((entry) => entry === undefined)
   || JSON.stringify(packedDiffExportNames) !== JSON.stringify(expectedDiffExportNames)
   || packedDiffTypeCoverage !== undefined

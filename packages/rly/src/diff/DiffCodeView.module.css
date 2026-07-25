@@ -24,6 +24,7 @@
       var(--rly-type-code-font);
     min-block-size: 20rem;
     min-inline-size: var(--rly-space-0);
+    overflow: auto;
   }
 
   .viewer:focus-visible {
@@ -38,6 +39,11 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .annotation:focus-visible {
+    outline: var(--rly-space-2) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-space-2) * -1);
   }
 
   .empty,

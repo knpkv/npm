@@ -5,19 +5,22 @@ import { createRoot } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type * as PierreReact from "@pierre/diffs/react"
 import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
-import type { RlyDiffCodeItem, RlyDiffCodeViewHandle } from "../../src/diff/types.js"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle } from "../../src/diff/types.js"
 import { createDiffWorkerFactory, DiffWorkerProvider } from "../../src/diff/worker-pool.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 interface RendererItemSnapshot {
-  readonly annotations?: ReadonlyArray<unknown>
+  readonly annotations?: ReadonlyArray<{
+    readonly metadata: { readonly annotation: RlyDiffCodeAnnotation }
+  }>
   readonly fileDiff?: unknown
   readonly id: string
   readonly version?: number
 }
 
 const rendererMounts = vi.hoisted((): Array<ReadonlyArray<RendererItemSnapshot>> => [])
+const rendererUpdates = vi.hoisted((): Array<RendererItemSnapshot> => [])
 const workerStats = vi.hoisted(
   (): {
     emit: ((stats: { readonly workersFailed: boolean }) => void) | undefined
@@ -43,7 +46,10 @@ vi.mock("@pierre/diffs/react", async (importOriginal) => {
         getItem: () => undefined,
         scrollTo: () => undefined,
         setOptions: () => undefined,
-        updateItem: () => true
+        updateItem: (item: RendererItemSnapshot) => {
+          rendererUpdates.push(item)
+          return true
+        }
       }))
       return <output data-renderer-items={JSON.stringify(mountedItems)} />
     })
@@ -79,11 +85,50 @@ const initialItem = {
 afterEach(() => {
   document.body.replaceChildren()
   rendererMounts.length = 0
+  rendererUpdates.length = 0
   workerStats.emit = undefined
   vi.unstubAllGlobals()
 })
 
 describe("DiffCodeView worker failover", () => {
+  it("updates only the item whose immutable annotation set changed without remounting", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    vi.stubGlobal("Worker", FakeWorker)
+    const workerFactory = createDiffWorkerFactory({ workerUrl: "/diff-worker.js" })
+    const auditItem = {
+      after: { contents: "export const audit = true\n", name: "src/audit.ts" },
+      before: { contents: "export const audit = false\n", name: "src/audit.ts" },
+      id: "audit"
+    } satisfies RlyDiffCodeItem
+    const annotation = (id: string, itemId: string, label: string): RlyDiffCodeAnnotation => ({
+      accessibilityLabel: label,
+      id,
+      location: { itemId, lineNumber: 1, side: "additions" },
+      render: () => label
+    })
+    const auditAnnotation = annotation("audit-finding", "audit", "Audit finding")
+    const renderView = (releaseAnnotation: RlyDiffCodeAnnotation) => (
+      <DiffWorkerProvider workerFactory={workerFactory}>
+        <DiffCodeView annotations={[releaseAnnotation, auditAnnotation]} initialItems={[initialItem, auditItem]} />
+      </DiffWorkerProvider>
+    )
+
+    await act(async () => root.render(renderView(annotation("release-finding", "release", "Draft finding"))))
+    const initialMountCount = rendererMounts.length
+    expect(initialMountCount).toBeGreaterThan(0)
+    expect(rendererUpdates).toHaveLength(0)
+
+    await act(async () => root.render(renderView(annotation("release-finding", "release", "Resolved finding"))))
+    expect(rendererMounts).toHaveLength(initialMountCount)
+    expect(rendererUpdates.map(({ id }) => id)).toEqual(["release"])
+    expect(rendererUpdates[0]?.annotations?.map(({ metadata }) => metadata.annotation.accessibilityLabel)).toEqual([
+      "Resolved finding"
+    ])
+    await act(async () => root.unmount())
+  })
+
   it("rehydrates imperative items, versions, and current annotations on the fallback renderer", async () => {
     const host = document.createElement("div")
     document.body.append(host)
@@ -95,7 +140,14 @@ describe("DiffCodeView worker failover", () => {
       <DiffWorkerProvider workerFactory={workerFactory}>
         <DiffCodeView
           ref={rendererRef}
-          annotations={[{ id: "finding", itemId: "release", lineNumber: 1, message, side: "additions" }]}
+          annotations={[
+            {
+              accessibilityLabel: message,
+              id: "finding",
+              location: { itemId: "release", lineNumber: 1, side: "additions" },
+              render: () => message
+            }
+          ]}
           initialItems={[initialItem]}
         />
       </DiffWorkerProvider>

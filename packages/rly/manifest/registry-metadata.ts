@@ -62,9 +62,16 @@ export const COMPONENT_REGISTRY_METADATA = {
     "open"
   ], ["confirm", "overlay"]),
   DiffCodeView: registryMetadata("Render a complete, virtualized before-and-after code review", [
+    "annotated",
+    "buffered",
+    "dismissed",
+    "draft",
+    "resolved",
+    "split",
     "stacked",
+    "stale",
     "strict"
-  ], ["compare", "review"]),
+  ], ["annotate", "compare", "review"]),
   DiffFileTree: registryMetadata("Navigate the complete file inventory of a code change", [
     "added",
     "binary",

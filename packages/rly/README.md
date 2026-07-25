@@ -342,13 +342,38 @@ Applications that supply their own bounded viewer can import
 before/after text, split or stacked layout, wrapping, context, selection,
 annotations, and virtualization controls. Its imperative handle adds or
 versions items and scrolls to files or lines without resetting the viewer.
+Annotations use Rly-owned stable identities and line locations; their visual
+content is rendered by the application, so review-domain fields never enter the
+renderer contract. Replacing the annotation array updates only affected files
+and retains renderer identity, expanded context, selected lines, and scroll
+position.
 
 ```tsx
-import { DiffCodeView, DiffWorkerProvider } from "@knpkv/rly/diff"
+import { DiffCodeView, DiffWorkerProvider, type RlyDiffCodeAnnotation } from "@knpkv/rly/diff"
+
+const annotations: ReadonlyArray<RlyDiffCodeAnnotation> = [
+  {
+    accessibilityLabel: "High-confidence draft release finding",
+    id: "release-ready-finding",
+    location: {
+      itemId: "release-gate",
+      lineNumber: 1,
+      side: "additions"
+    },
+    render: ({ returnFocus }) => (
+      <article>
+        <strong>High · 96% confidence · draft</strong>
+        <p>The signed manifest still names the previous revision.</p>
+        <button onClick={returnFocus}>Return to line</button>
+      </article>
+    )
+  }
+]
 
 export const PullRequestDiff = () => (
   <DiffWorkerProvider poolSize={2}>
     <DiffCodeView
+      annotations={annotations}
       initialItems={[
         {
           id: "release-gate",
@@ -361,6 +386,14 @@ export const PullRequestDiff = () => (
   </DiffWorkerProvider>
 )
 ```
+
+Every annotation wrapper is keyboard reachable. Pressing Escape, or invoking
+the supplied `returnFocus`, focuses the exact anchored line without scrolling
+it away. The same annotation contract is supported by split, stacked,
+virtualized, worker-fallback, and `@knpkv/rly/diff/bounded` synchronous
+presentations. Applications own severity, confidence, draft or resolution
+state, stale and dismissed history, replacement links, evidence content, and
+all commands.
 
 The provider owns a bounded module-worker pool. If creation or execution fails,
 the same complete `CodeView` remounts synchronously and announces the fallback;
