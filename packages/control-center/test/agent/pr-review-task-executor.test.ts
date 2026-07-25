@@ -413,7 +413,16 @@ describe("PR review task executor", () => {
       completeScript({
         schemaVersion: 2,
         completion: { status: "complete" },
-        suggestions: [suggestion, suggestion]
+        suggestions: [
+          suggestion,
+          {
+            ...suggestion,
+            confidence: {
+              ...suggestion.confidence,
+              reason: "A second model pass reached the same finding independently."
+            }
+          }
+        ]
       }),
       observation,
       Effect.gen(function*() {
