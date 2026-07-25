@@ -475,6 +475,63 @@ describe("governed action writer", () => {
       assert.strictEqual(record.headTransition.transitionId, PROPOSAL_TRANSITION_ID)
     })))
 
+  it.effect("quarantines a malformed action identity found through idempotency lookup", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const quarantine = yield* QuarantineRepository
+      const { sql } = yield* Database
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      yield* repository.commit(makeProposalInput(envelope))
+
+      yield* sql`DROP TRIGGER governed_action_head_exact_update`
+      yield* sql`DROP TRIGGER governed_action_identity_immutable`
+      yield* sql`PRAGMA foreign_keys = OFF`
+      yield* sql`UPDATE governed_actions
+        SET action_id = 'not-an-action-id'
+        WHERE workspace_id = ${envelope.workspaceId}
+          AND action_id = ${envelope.actionId}`
+      yield* sql`PRAGMA foreign_keys = ON`
+
+      const corrupted = yield* repository.readByIdempotencyKey({
+        workspaceId: envelope.workspaceId,
+        pluginConnectionId: envelope.pluginConnectionId,
+        idempotencyKey: envelope.idempotencyKey
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(corrupted))
+      if (Result.isFailure(corrupted)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(corrupted.failure))
+        if (Schema.is(PersistedRecordError)(corrupted.failure)) {
+          assert.strictEqual(
+            corrupted.failure.diagnosticCode,
+            "governed-action-schema-invalid"
+          )
+        }
+      }
+      const quarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(quarantined, 1)
+      assert.deepInclude(quarantined[0], {
+        recordKind: "governed-action",
+        recordKey: envelope.pluginConnectionId,
+        schemaVersion: 1,
+        diagnosticCode: "governed-action-schema-invalid",
+        diagnosticSummary: "Stored governed action failed schema validation.",
+        occurrenceCount: 1
+      })
+
+      const missing = yield* repository.readByIdempotencyKey({
+        workspaceId: envelope.workspaceId,
+        pluginConnectionId: envelope.pluginConnectionId,
+        idempotencyKey: "governed-action:missing"
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) {
+        assert.isTrue(Schema.is(PersistenceErrors.RecordNotFoundError)(missing.failure))
+      }
+      assert.lengthOf(yield* quarantine.list(envelope.workspaceId), 1)
+    })))
+
   it.effect("lets the caller roll back a transaction-local lifecycle commit", () =>
     withWriter(Effect.gen(function*() {
       yield* seedAuthorityRoots()

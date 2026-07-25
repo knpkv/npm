@@ -109,7 +109,7 @@ export const decodeGovernedActionIdempotencyRows = Effect.fn(
       new PersistedRecordError({
         workspaceId: request.workspaceId,
         recordKind: "governed-action",
-        recordKey: request.idempotencyKey,
+        recordKey: request.pluginConnectionId,
         diagnosticCode: "governed-action-schema-invalid"
       })
     )
@@ -495,7 +495,14 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     "GovernedActionReader.readByIdempotencyKey"
   )(function*(request: GovernedActionIdempotencyReadInput) {
     const rows = yield* run(renderGovernedActionIdempotencyQuery(request))
-    const actionId = yield* decodeGovernedActionIdempotencyRows(request, rows)
+    const actionId = yield* decodeGovernedActionIdempotencyRows(request, rows).pipe(
+      Effect.catchIf(
+        (failure): failure is PersistedRecordError =>
+          Schema.is(PersistedRecordError)(failure) &&
+          failure.diagnosticCode === "governed-action-schema-invalid",
+        (failure) => Effect.fail(failure).pipe(captureMalformedGovernedActionRow(rows[0]))
+      )
+    )
     return yield* read({ workspaceId: request.workspaceId, actionId })
   })
 
