@@ -60,6 +60,18 @@ const commentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "0".repeat(64)
 })
 
+const inlineCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "comment",
+  target: commentAction.target,
+  content: "Preserve the authorization binding.",
+  clientRequestToken: "2".repeat(64),
+  location: {
+    filePath: "src/authorization.ts",
+    filePosition: 42,
+    relativeFileVersion: "AFTER"
+  }
+})
+
 const baseReadClient = (
   overrides: Partial<CodeCommitReadClientService> = {}
 ): CodeCommitReadClientService => ({
@@ -119,6 +131,15 @@ const runWithClients = <A, E>(
   )
 
 describe("CodeCommitReviewClient", () => {
+  it("retains an exact inline location when decoding a comment action", () => {
+    assert.property(inlineCommentAction, "location")
+    if ("location" in inlineCommentAction) {
+      assert.strictEqual(inlineCommentAction.location.filePath, "src/authorization.ts")
+      assert.strictEqual(inlineCommentAction.location.filePosition, 42)
+      assert.strictEqual(inlineCommentAction.location.relativeFileVersion, "AFTER")
+    }
+  })
+
   it.effect("blocks a stale immutable revision before any provider mutation", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)

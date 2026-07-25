@@ -84,7 +84,10 @@ export const CodeCommitReviewProviderLive = Layer.effect(
             beforeCommitId: action.target.destinationCommit,
             afterCommitId: action.target.sourceCommit,
             content: action.content,
-            clientRequestToken: action.clientRequestToken
+            clientRequestToken: action.clientRequestToken,
+            ...(action._tag === "comment" && action.location !== undefined
+              ? { location: action.location }
+              : {})
           })
         )),
       updateApprovalState: (action) =>

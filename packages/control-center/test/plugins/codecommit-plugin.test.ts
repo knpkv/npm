@@ -200,6 +200,21 @@ const requestChangesProposal = Schema.decodeUnknownSync(ProposePluginActionReque
   evidenceIds: ["review-finding-1"]
 })
 
+const inlineCommentProposal = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+  actionKind: "comment",
+  target: { entityType: "pull-request", vendorImmutableId: "17" },
+  expectedRevision: "revision-17",
+  payload: {
+    content: "Preserve the authorization binding.",
+    location: {
+      filePath: "src/authorization.ts",
+      filePosition: 42,
+      relativeFileVersion: "AFTER"
+    }
+  },
+  evidenceIds: ["review-suggestion-1"]
+})
+
 const authorizeProposal = (
   proposal: PluginActionProposalV1,
   idempotencyKey = "governed-action-1"
@@ -1345,6 +1360,49 @@ describe("CodeCommitPlugin", () => {
       assert.strictEqual(action?._tag, "request-changes")
       assert.strictEqual(action?.target.revisionId, "revision-17")
       assert.strictEqual(action?.target.sourceCommit, "head-commit-17")
+    }))
+
+  it.effect("preserves an inline location from proposal through authorized dispatch", () =>
+    Effect.gen(function*() {
+      const executed = yield* Ref.make<ReviewClient.CodeCommitReviewAction | null>(null)
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(inlineCommentProposal)
+          yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+          return proposal
+        }),
+        baseReviewClient({
+          execute: (action) =>
+            Ref.set(executed, action).pipe(
+              Effect.as(
+                new ReviewClient.CodeCommitReviewReceipt({
+                  operationId: "comment:inline-42",
+                  summary: "Inline comment posted"
+                })
+              )
+            )
+        })
+      )
+
+      assert.deepInclude(result.request.payload, {
+        _tag: "comment",
+        location: {
+          filePath: "src/authorization.ts",
+          filePosition: 42,
+          relativeFileVersion: "AFTER"
+        }
+      })
+      const action = yield* Ref.get(executed)
+      assert.strictEqual(action?._tag, "comment")
+      assert.property(action, "location")
+      if (action?._tag === "comment" && action.location !== undefined) {
+        assert.strictEqual(action.location.filePath, "src/authorization.ts")
+        assert.strictEqual(action.location.filePosition, 42)
+        assert.strictEqual(action.location.relativeFileVersion, "AFTER")
+      }
     }))
 
   it.effect("blocks stale actions before the executor can call the review mutation", () =>
