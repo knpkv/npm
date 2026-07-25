@@ -208,6 +208,7 @@ describe("PrReviewSandboxSessions", () => {
         calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
         ["cc-pr-review-a", "cc-pr-review-b"]
       )
+      assert.strictEqual(calls.filter(({ args }) => args[0] === "ls").length, 1)
     }).pipe(
       Effect.provide(testLayer(
         calls,
