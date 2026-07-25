@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { BoundedDiffCodeView } from "../../src/diff/bounded/BoundedDiffCodeView.js"
-import type { RlyDiffCodeItem } from "../../src/diff/types.js"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../../src/diff/types.js"
 
 const item = {
   after: { contents: "const ready = true\nship()\n", name: "src/release.ts" },
@@ -61,14 +61,15 @@ describe("BoundedDiffCodeView", () => {
   })
 
   it("renders application-owned annotations in both layouts", () => {
-    const annotation = {
+    const annotation: RlyDiffCodeAnnotation = {
       accessibilityLabel: "High confidence release finding",
       id: "release-finding",
-      location: { itemId: "release", lineNumber: 1, side: "additions" as const },
+      location: { itemId: "release", lineNumber: 1, side: "additions" },
       render: () => <article>High · 96% · draft finding</article>
     }
+    const modes: ReadonlyArray<"split" | "stacked"> = ["split", "stacked"]
 
-    for (const mode of ["split", "stacked"] as const) {
+    for (const mode of modes) {
       const html = renderToStaticMarkup(
         <BoundedDiffCodeView annotations={[annotation]} initialItems={[item]} mode={mode} />
       )

@@ -22,6 +22,16 @@ export type {
 
 type BoundedDiffMode = "split" | "stacked"
 
+interface BoundedAnnotationLocation {
+  readonly lineNumber: number
+  readonly side: "additions" | "deletions"
+}
+
+const boundedAnnotationLocation = (
+  lineNumber: number,
+  side: BoundedAnnotationLocation["side"]
+): BoundedAnnotationLocation => ({ lineNumber, side })
+
 interface DiffLine {
   readonly content: string
   readonly number: number
@@ -285,9 +295,9 @@ const unifiedAnnotationRows = (
   row: Extract<UnifiedRow, { readonly kind: "addition" | "context" | "deletion" }>,
   root: () => HTMLDivElement | null
 ): ReadonlyArray<ReactElement> => {
-  const locations = [
-    ...(row.deletionNumber === undefined ? [] : [{ lineNumber: row.deletionNumber, side: "deletions" as const }]),
-    ...(row.additionNumber === undefined ? [] : [{ lineNumber: row.additionNumber, side: "additions" as const }])
+  const locations: ReadonlyArray<BoundedAnnotationLocation> = [
+    ...(row.deletionNumber === undefined ? [] : [boundedAnnotationLocation(row.deletionNumber, "deletions")]),
+    ...(row.additionNumber === undefined ? [] : [boundedAnnotationLocation(row.additionNumber, "additions")])
   ]
   return locations.flatMap(({ lineNumber, side }) =>
     annotationsAt(annotations, itemId, lineNumber, side).map((annotation) => (
