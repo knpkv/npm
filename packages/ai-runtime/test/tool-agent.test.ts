@@ -5,6 +5,7 @@ import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as Tool from "effect/unstable/ai/Tool"
 import * as Toolkit from "effect/unstable/ai/Toolkit"
+import { vi } from "vitest"
 
 import {
   AgentContextFingerprint,
@@ -100,6 +101,7 @@ const successfulOptions = (
 
 describe("runToolAgent", () => {
   it.effect("runs multiple model turns through schema-decoded tools and validates final output", () => {
+    let artifactInvocations = 0
     const fake = makeDeterministicLanguageModel([
       {
         _tag: "response",
@@ -122,7 +124,16 @@ describe("runToolAgent", () => {
     return Effect.gen(function*() {
       const model = yield* LanguageModel.LanguageModel
       const toolkit = yield* InspectionTools
-      const events = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(Stream.runCollect)
+      const events = yield* runToolAgent({
+        ...successfulOptions(model, toolkit),
+        artifactSink: {
+          persist: () =>
+            Effect.sync(() => {
+              artifactInvocations += 1
+              return ToolAgentArtifactId.make("unexpected-small-artifact")
+            })
+        }
+      }).pipe(Stream.runCollect)
       const ordered = Array.from(events)
 
       expect(ordered.map((event) => event._tag)).toEqual([
@@ -140,6 +151,7 @@ describe("runToolAgent", () => {
       })
       expect(fake.requests).toHaveLength(2)
       expect(fake.requests[1]?.prompt.content.some((message) => message.role === "tool")).toBe(true)
+      expect(artifactInvocations).toBe(0)
     }).pipe(
       Effect.provide(Layer.mergeAll(
         fake.layer,
@@ -924,10 +936,16 @@ describe("runToolAgent", () => {
 
   it.effect("bounds encoded excerpts containing escapes, controls, and multibyte text", () => {
     const artifactId = ToolAgentArtifactId.make("artifact-escaped")
+    let retained = ""
     const artifactSink: ToolAgentArtifactSink = {
-      persist: () => Effect.succeed(artifactId)
+      persist: (content) =>
+        Effect.sync(() => {
+          retained = content
+          return artifactId
+        })
     }
     const heavyContent = "\"\\\n\u0000🙂".repeat(20_000)
+    const encodeSpy = vi.spyOn(TextEncoder.prototype, "encode")
     const LargeEscapedResult = Tool.make("LargeEscapedResult", {
       success: Schema.Struct({ content: Schema.String })
     })
@@ -962,6 +980,9 @@ describe("runToolAgent", () => {
       expect(completed).toMatchObject({
         result: { artifactId, truncated: true }
       })
+      expect(
+        encodeSpy.mock.calls.filter(([value]) => value === retained)
+      ).toHaveLength(1)
       if (completed?._tag === "tool-completed") {
         const encoded = yield* Schema.encodeUnknownEffect(
           Schema.fromJsonString(Schema.Json)
@@ -987,7 +1008,8 @@ describe("runToolAgent", () => {
         EscapedTools.toLayer({
           LargeEscapedResult: () => Effect.succeed({ content: heavyContent })
         })
-      ))
+      )),
+      Effect.ensuring(Effect.sync(() => encodeSpy.mockRestore()))
     )
   })
 

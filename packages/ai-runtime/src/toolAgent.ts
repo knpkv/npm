@@ -264,11 +264,10 @@ const initialPrompt = Effect.fn("ToolAgent.initialPrompt")(function*(
 })
 
 const truncatedMaterial = (
-  encoded: string,
+  bytes: Uint8Array,
   artifactId: ToolAgentArtifactId,
   excerptBytes: number
 ): ToolAgentResultMaterial => {
-  const bytes = textEncoder.encode(encoded)
   let headEnd = Math.min(excerptBytes, bytes.byteLength)
   while (
     headEnd > 0 &&
@@ -290,10 +289,7 @@ const truncatedMaterial = (
     artifactId,
     byteLength: bytes.byteLength,
     head,
-    omittedBytes: Math.max(
-      0,
-      bytes.byteLength - textEncoder.encode(head).byteLength - textEncoder.encode(tail).byteLength
-    ),
+    omittedBytes: Math.max(0, tailStart - headEnd),
     tail,
     truncated: true
   }
@@ -307,20 +303,20 @@ const truncatedMaterial = (
 
 const truncateJson = Effect.fn("ToolAgent.truncateJson")(function*(
   toolName: string,
-  encoded: string,
+  bytes: Uint8Array,
   artifactId: ToolAgentArtifactId
 ) {
-  const byteLength = textEncoder.encode(encoded).byteLength
+  const byteLength = bytes.byteLength
   let lower = 0
   let upper = Math.min(
     Math.floor(byteLength / 2),
     Math.floor(MAXIMUM_MODEL_RESULT_EXCERPT_BYTES / 2)
   )
-  let bounded = truncatedMaterial(encoded, artifactId, 0)
+  let bounded = truncatedMaterial(bytes, artifactId, 0)
 
   while (lower <= upper) {
     const excerptBytes = Math.floor((lower + upper) / 2)
-    const candidate = truncatedMaterial(encoded, artifactId, excerptBytes)
+    const candidate = truncatedMaterial(bytes, artifactId, excerptBytes)
     const candidateEncoded = yield* encodeJsonString(candidate.modelValue).pipe(
       Effect.mapError(() =>
         new ToolAgentToolProtocolError({
@@ -359,7 +355,8 @@ const boundToolResult = Effect.fn("ToolAgent.boundToolResult")(function*<
       })
     )
   )
-  const byteLength = textEncoder.encode(encoded).byteLength
+  const bytes = textEncoder.encode(encoded)
+  const byteLength = bytes.byteLength
   if (byteLength <= MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES) {
     return {
       artifactId: null,
@@ -372,7 +369,7 @@ const boundToolResult = Effect.fn("ToolAgent.boundToolResult")(function*<
     return yield* new ToolAgentArtifactRequiredError({ byteLength, toolName })
   }
   const artifactId = yield* artifactSink.persist(encoded)
-  return yield* truncateJson(toolName, encoded, artifactId)
+  return yield* truncateJson(toolName, bytes, artifactId)
 })
 
 const boundedResponsePrompt = Effect.fn("ToolAgent.boundedResponsePrompt")(function*<
