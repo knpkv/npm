@@ -2,7 +2,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
   AgentProviderCatalog,
@@ -215,9 +215,16 @@ export const usePullRequestReview = (
   const mutationAbort = useRef<AbortController | null>(null)
   const publicationAbort = useRef<AbortController | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
-  latestScope.current = sessionKey === null || headRevision === null
-    ? null
-    : { baseRevision, entityId, headRevision, sessionKey }
+  const scope = useMemo(
+    () =>
+      sessionKey === null || headRevision === null
+        ? null
+        : { baseRevision, entityId, headRevision, sessionKey },
+    [baseRevision, entityId, headRevision, sessionKey]
+  )
+  useEffect(() => {
+    latestScope.current = scope
+  }, [scope])
 
   useEffect(() => {
     if (sessionKey === null || headRevision === null) {
@@ -425,9 +432,6 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, publication, state, transport])
 
-  const scope = sessionKey === null || headRevision === null
-    ? null
-    : { baseRevision, entityId, headRevision, sessionKey }
   const currentState: PullRequestReviewControllerState = scope === null
     ? { _tag: "idle" }
     : sameScope(state, scope)
