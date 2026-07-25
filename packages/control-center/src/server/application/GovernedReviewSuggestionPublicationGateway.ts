@@ -4,6 +4,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -75,6 +76,12 @@ export const reviewPublicationActionCanAdvance = (
   state === "unknown" ||
   state === "cancel-requested" ||
   state === "cancel-requested-unknown"
+
+/** Exact immutable proposal request required before an idempotent publication can be recovered. */
+export const reviewPublicationProposalRequestMatches = (
+  existing: typeof ProposePluginActionRequestV1.Type,
+  prepared: typeof ProposePluginActionRequestV1.Type
+): boolean => Equal.equals(existing, prepared)
 
 const makeGateway = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -300,7 +307,10 @@ const makeGateway = Effect.gen(function*() {
       if (
         envelope.targetEntityId !== command.target.entityId ||
         envelope.proposal.payloadDigest !== prepared.proposal.payloadDigest ||
-        envelope.proposal.request.expectedRevision !== prepared.proposal.request.expectedRevision ||
+        !reviewPublicationProposalRequestMatches(
+          envelope.proposal.request,
+          prepared.proposal.request
+        ) ||
         Number(envelope.pluginConnectionRevision) !== Number(prepared.connectionRecord.revision) ||
         envelope.pluginConnectionAuthorityDigest !== prepared.runtimeAuthorityToken ||
         envelope.origin._tag !== "human" ||

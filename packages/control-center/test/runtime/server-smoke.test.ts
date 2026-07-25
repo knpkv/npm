@@ -75,13 +75,14 @@ import {
 } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginRuntimeAuthoritySource } from "../../src/server/plugins/internal/PluginRuntimeAuthoritySource.js"
+import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
 import {
   GovernedActionExecutionStartup,
-  governedActionExecutionStartupLayer
+  governedActionExecutionStartupFromRegistryLayer
 } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -573,6 +574,13 @@ describe("Control Center closed runtime", () => {
       const currentRuntimeAuthority = yield* seedAuthorizedRuntimeAction(persistenceConfig)
       const pluginConnections = yield* makeFakeConnectionMap
       const governedRuntime = yield* makeFakePluginRuntime(governedScenario)
+      const governedPluginRuntimes = {
+        layer: () =>
+          Layer.merge(
+            governedRuntime.layer,
+            Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
+          )
+      }
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,
@@ -589,13 +597,7 @@ describe("Control Center closed runtime", () => {
         },
         governedActionExecution: {
           workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
+          pluginRuntimes: governedPluginRuntimes
         },
         releaseAgent: { cwd: staticRoot, enabledProviders: ["codex"] }
       }))
@@ -607,16 +609,10 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
       assert.isTrue(Option.isNone(governedExecution))
       const internalWorker = yield* Layer.build(
-        governedActionExecutionStartupLayer({
-          workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
-        }).pipe(
+        governedActionExecutionStartupFromRegistryLayer(WORKSPACE_ID).pipe(
+          Layer.provide(
+            Layer.succeed(PluginRuntimeRegistry, governedPluginRuntimes)
+          ),
           Layer.provide(databaseLayer(persistenceConfig)),
           Layer.provide(ServerLifecycle.layer)
         )

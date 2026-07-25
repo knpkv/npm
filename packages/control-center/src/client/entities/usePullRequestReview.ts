@@ -213,6 +213,11 @@ export const usePullRequestReview = (
   const [state, setState] = useState<PullRequestReviewControllerState>({ _tag: "idle" })
   const [publication, setPublication] = useState<PullRequestReviewPublicationState>({ _tag: "idle" })
   const mutationAbort = useRef<AbortController | null>(null)
+  const publicationAbort = useRef<AbortController | null>(null)
+  const latestScope = useRef<PullRequestReviewScope | null>(null)
+  latestScope.current = sessionKey === null || headRevision === null
+    ? null
+    : { baseRevision, entityId, headRevision, sessionKey }
 
   useEffect(() => {
     if (sessionKey === null || headRevision === null) {
@@ -281,12 +286,25 @@ export const usePullRequestReview = (
     return () => abort.abort()
   }, [state])
 
-  useEffect(() => () => mutationAbort.current?.abort(), [])
+  useEffect(
+    () => () => {
+      mutationAbort.current?.abort()
+      publicationAbort.current?.abort()
+    },
+    []
+  )
   useEffect(() => {
     mutationAbort.current?.abort()
     mutationAbort.current = null
+    publicationAbort.current?.abort()
+    publicationAbort.current = null
     setPublication({ _tag: "idle" })
-  }, [baseRevision, entityId, headRevision, sessionKey])
+  }, [entityId, sessionKey])
+  useEffect(() => {
+    mutationAbort.current?.abort()
+    mutationAbort.current = null
+    setPublication((current) => current._tag === "publishing" ? current : { _tag: "idle" })
+  }, [baseRevision, headRevision])
 
   const start = useCallback(() => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
@@ -372,9 +390,9 @@ export const usePullRequestReview = (
       jobId: preview.jobId,
       suggestionId: preview.suggestionId
     }
-    mutationAbort.current?.abort()
+    publicationAbort.current?.abort()
     const abort = new AbortController()
-    mutationAbort.current = abort
+    publicationAbort.current = abort
     setPublication({ _tag: "publishing", preview })
     transport.publishSuggestion(
       entityId,
@@ -390,8 +408,9 @@ export const usePullRequestReview = (
               preview.suggestionRevision.reviewedHead
             ? {
               _tag: "published",
-              headSuperseded: published.suggestionRevision.reviewedHead !==
-                current.headRevision,
+              headSuperseded: latestScope.current === null ||
+                published.subject.baseRevision !== latestScope.current.baseRevision ||
+                published.subject.headRevision !== latestScope.current.headRevision,
               preview,
               publication: published
             }
@@ -419,6 +438,8 @@ export const usePullRequestReview = (
     cancelPublication: useCallback(() => {
       mutationAbort.current?.abort()
       mutationAbort.current = null
+      publicationAbort.current?.abort()
+      publicationAbort.current = null
       setPublication({ _tag: "idle" })
     }, []),
     previewPublication,

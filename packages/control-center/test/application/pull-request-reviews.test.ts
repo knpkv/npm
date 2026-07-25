@@ -7,6 +7,7 @@ import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
   ReviewSuggestionPublicationAuthorityBinding,
@@ -25,7 +26,11 @@ import {
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { PluginProviderOperationId, type PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
+import {
+  PluginProviderOperationId,
+  type PluginProviderReceiptV1,
+  ProposePluginActionRequestV1
+} from "../../src/domain/plugins/actions.js"
 import { PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
@@ -38,6 +43,7 @@ import {
 } from "../../src/server/api/ApplicationServices.js"
 import {
   reviewPublicationActionCanAdvance,
+  reviewPublicationProposalRequestMatches,
   reviewPublicationSessionIsAuthorized
 } from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
@@ -216,6 +222,23 @@ const completedReview = Schema.decodeSync(LatestAgentReviewRecord)({
   reviewProfile: REVIEW_PROFILE,
   activity: { events: [], truncated: false }
 })
+
+const completedReviewWithSuggestion = (
+  overrides: Partial<typeof reviewReport.suggestions[number]>
+) => {
+  const encoded = Schema.encodeSync(LatestAgentReviewRecord)(completedReview)
+  const report = Schema.decodeUnknownSync(PrReviewReport)({
+    ...reviewReport,
+    suggestions: [{
+      ...reviewReport.suggestions[0],
+      ...overrides
+    }]
+  })
+  return Schema.decodeSync(LatestAgentReviewRecord)({
+    ...encoded,
+    report: Schema.encodeSync(PrReviewReport)(report)
+  })
+}
 
 const graphInspection = DeliveryGraphInspection.of({
   workspaceEntity: ({ entityId, workspaceId }) =>
@@ -403,6 +426,31 @@ describe("pull request reviews", () => {
     assert.isTrue(reviewPublicationActionCanAdvance("cancel-requested-unknown"))
     assert.isFalse(reviewPublicationActionCanAdvance("succeeded"))
     assert.isFalse(reviewPublicationActionCanAdvance("failed"))
+  })
+
+  it("recovers publication only for the exact immutable review evidence", () => {
+    const request = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+      actionKind: "comment",
+      target: {
+        entityType: "pull-request",
+        vendorImmutableId: "212"
+      },
+      expectedRevision: "source-7",
+      payload: { content: "Publish this review suggestion." },
+      evidenceIds: [`pr-review:${REVIEW_JOB_ID}:${SUGGESTION_ID}`]
+    })
+    const differentReview = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+      ...request,
+      evidenceIds: [
+        `pr-review:01890f6f-6d6a-7cc0-98d2-000000000099:${SUGGESTION_ID}`
+      ]
+    })
+    const exactReplay = Schema.decodeUnknownSync(ProposePluginActionRequestV1)(
+      Schema.encodeSync(ProposePluginActionRequestV1)(request)
+    )
+
+    assert.isTrue(reviewPublicationProposalRequestMatches(request, exactReplay))
+    assert.isFalse(reviewPublicationProposalRequestMatches(request, differentReview))
   })
 
   it.effect("rejects publication when provider authority rotates after preview", () =>
@@ -718,6 +766,59 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview)
+    ))
+
+  it.effect("bounds every generated editable draft before adding the provider footer", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.strictEqual(
+            preview.editableContent.length,
+            preview.editableContentMaximumLength
+          )
+          assert.strictEqual(
+            preview.finalContent.length,
+            MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH
+          )
+          assert.isTrue(preview.editableContent.endsWith("…"))
+        }),
+      registry,
+      Option.some(completedReviewWithSuggestion({
+        problem: "p".repeat(4_000),
+        recommendation: "r".repeat(8_000)
+      }))
+    ))
+
+  it.effect("never truncates through a generated suggestion fence", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.notInclude(preview.editableContent, "```suggestion")
+          assert.notInclude(preview.editableContent, "```")
+          assert.strictEqual(preview.replacement, "x".repeat(16_000))
+        }),
+      registry,
+      Option.some(completedReviewWithSuggestion({
+        problem: "Keep the concise explanation.",
+        recommendation: "Apply the replacement.",
+        replacement: { content: "x".repeat(16_000) }
+      }))
     ))
 
   it.effect("rejects agent publication before the authority-bearing gateway", () =>

@@ -263,13 +263,21 @@ const makePullRequestReviews = Effect.gen(function*() {
   })
 
   const defaultPublicationContent = Effect.fn("PullRequestReviews.defaultPublicationContent")(function*(
-    suggestion: PrReviewSuggestion
+    suggestion: PrReviewSuggestion,
+    maximumLength: number
   ) {
+    const base = `${suggestion.problem}\n\n${suggestion.recommendation}`
     const replacement = suggestion.replacement === undefined
       ? ""
       : `\n\n\`\`\`suggestion\n${suggestion.replacement.content}\n\`\`\``
+    const complete = `${base}${replacement}`
+    const bounded = complete.length <= maximumLength
+      ? complete
+      : base.length <= maximumLength
+      ? base
+      : `${base.slice(0, maximumLength - 1).trimEnd()}…`
     return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationContent)(
-      `${suggestion.problem}\n\n${suggestion.recommendation}${replacement}`
+      bounded
     ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
   })
 
@@ -382,11 +390,15 @@ const makePullRequestReviews = Effect.gen(function*() {
       const authority = yield* publications.identity(
         publicationTarget(input.workspaceId, target)
       ).pipe(Effect.mapError(mapPublicationFailure))
-      const editableContent = yield* defaultPublicationContent(selected.suggestion)
       const footer = publicationFooter(
         selected.latest.reviewProfile,
         input.publishingOperator,
         target.subject.headRevision
+      )
+      const editableContentMaximumLength = MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH - footer.length - 2
+      const editableContent = yield* defaultPublicationContent(
+        selected.suggestion,
+        editableContentMaximumLength
       )
       const finalContent = yield* publicationContent(editableContent, footer)
       return new ReviewSuggestionPublicationPreview({
@@ -404,7 +416,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           relativeFileVersion: "AFTER"
         },
         editableContent,
-        editableContentMaximumLength: MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH - footer.length - 2,
+        editableContentMaximumLength,
         finalContent,
         publicationFooter: footer,
         replacement: selected.suggestion.replacement?.content ?? null,

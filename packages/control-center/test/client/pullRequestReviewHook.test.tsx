@@ -117,6 +117,69 @@ const deferred = <Value,>() => {
   }
 }
 
+const makePublicationFixture = (reviewedHead: string) => {
+  const footer = `— ${REVIEW_PROFILE.label} · head ${HEAD_A.slice(0, 12)} · operator ${OPERATOR_ID}`
+  const editableContent = ReviewSuggestionPublicationContent.make("Authorize before mutating.")
+  const finalContent = ReviewSuggestionPublicationContent.make(`${editableContent}\n\n${footer}`)
+  const preview = new ReviewSuggestionPublicationPreview({
+    jobId: JOB_ID,
+    suggestionId: SUGGESTION_ID,
+    subject: PrReviewSubject.make({
+      providerId: "codecommit",
+      repository: "control-center",
+      pullRequestId: "212",
+      baseRevision: BASE_A,
+      headRevision: HEAD_A
+    }),
+    suggestionRevision: {
+      jobId: JOB_ID,
+      suggestionId: SUGGESTION_ID,
+      reviewedHead: HEAD_A
+    },
+    anchor: {
+      path: "src/authorization.ts",
+      line: 42,
+      relativeFileVersion: "AFTER"
+    },
+    editableContent,
+    editableContentMaximumLength: 10_100 - footer.length - 2,
+    finalContent,
+    publicationFooter: footer,
+    replacement: null,
+    connectedIdentity: {
+      accountId: "123456789012",
+      arn: "arn:aws:iam::123456789012:user/local-operator"
+    },
+    authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(`sha256:${"a".repeat(64)}`),
+    proposingAgent: REVIEW_PROFILE,
+    publishingOperator: OPERATOR_ID
+  })
+  const receipt = Schema.decodeUnknownSync(PluginProviderReceiptV1)({
+    providerOperationId: PluginProviderOperationId.make("comment-42"),
+    status: "succeeded",
+    safeSummary: "Posted an inline pull-request comment",
+    observedAt: "2026-07-24T15:05:00.000Z"
+  })
+  const published = new PublishedReviewComment({
+    publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000604"),
+    jobId: JOB_ID,
+    suggestionId: SUGGESTION_ID,
+    subject: preview.subject,
+    suggestionRevision: {
+      ...preview.suggestionRevision,
+      reviewedHead
+    },
+    anchor: preview.anchor,
+    content: finalContent,
+    connectedIdentity: preview.connectedIdentity,
+    proposingAgent: REVIEW_PROFILE,
+    publishingOperator: OPERATOR_ID,
+    receipt,
+    publishedAt: receipt.observedAt
+  })
+  return { preview, published }
+}
+
 let mountedRoot: Root | undefined
 const ignoreSessionExpired = (): void => undefined
 
@@ -207,65 +270,7 @@ const PublicationHarness = ({
 
 describe("usePullRequestReview", () => {
   it("gates publication, quarantines a mismatched receipt, and resets on scope change", async () => {
-    const footer = `— ${REVIEW_PROFILE.label} · head ${HEAD_A.slice(0, 12)} · operator ${OPERATOR_ID}`
-    const editableContent = ReviewSuggestionPublicationContent.make("Authorize before mutating.")
-    const finalContent = ReviewSuggestionPublicationContent.make(`${editableContent}\n\n${footer}`)
-    const preview = new ReviewSuggestionPublicationPreview({
-      jobId: JOB_ID,
-      suggestionId: SUGGESTION_ID,
-      subject: PrReviewSubject.make({
-        providerId: "codecommit",
-        repository: "control-center",
-        pullRequestId: "212",
-        baseRevision: BASE_A,
-        headRevision: HEAD_A
-      }),
-      suggestionRevision: {
-        jobId: JOB_ID,
-        suggestionId: SUGGESTION_ID,
-        reviewedHead: HEAD_A
-      },
-      anchor: {
-        path: "src/authorization.ts",
-        line: 42,
-        relativeFileVersion: "AFTER"
-      },
-      editableContent,
-      editableContentMaximumLength: 10_100 - footer.length - 2,
-      finalContent,
-      publicationFooter: footer,
-      replacement: null,
-      connectedIdentity: {
-        accountId: "123456789012",
-        arn: "arn:aws:iam::123456789012:user/local-operator"
-      },
-      authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(`sha256:${"a".repeat(64)}`),
-      proposingAgent: REVIEW_PROFILE,
-      publishingOperator: OPERATOR_ID
-    })
-    const receipt = Schema.decodeUnknownSync(PluginProviderReceiptV1)({
-      providerOperationId: PluginProviderOperationId.make("comment-42"),
-      status: "succeeded",
-      safeSummary: "Posted an inline pull-request comment",
-      observedAt: "2026-07-24T15:05:00.000Z"
-    })
-    const published = new PublishedReviewComment({
-      publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000604"),
-      jobId: JOB_ID,
-      suggestionId: SUGGESTION_ID,
-      subject: preview.subject,
-      suggestionRevision: {
-        ...preview.suggestionRevision,
-        reviewedHead: HEAD_B
-      },
-      anchor: preview.anchor,
-      content: finalContent,
-      connectedIdentity: preview.connectedIdentity,
-      proposingAgent: REVIEW_PROFILE,
-      publishingOperator: OPERATOR_ID,
-      receipt,
-      publishedAt: receipt.observedAt
-    })
+    const { preview, published } = makePublicationFixture(HEAD_B)
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
       load: vi.fn((_entityId, _signal) => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
@@ -300,6 +305,32 @@ describe("usePullRequestReview", () => {
 
     await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
     expect(host.querySelector("[data-publication]")?.textContent).toBe("idle")
+  })
+
+  it("retains an in-flight publication receipt across source revision refresh", async () => {
+    const { preview, published } = makePublicationFixture(HEAD_A)
+    const publication = deferred<PublishedReviewComment>()
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn((_entityId, _signal) => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      previewPublication: vi.fn(() => Promise.resolve(preview)),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: vi.fn(() => publication.promise)
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_A} transport={transport} />))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("publishing")
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("publishing")
+
+    await act(async () => publication.resolve(published))
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
   })
 
   it("never presents a prior immutable head while the refreshed head loads", async () => {
