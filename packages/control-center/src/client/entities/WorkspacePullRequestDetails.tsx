@@ -1,13 +1,15 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
-import type { ReactElement, ReactNode } from "react"
+import { type ReactElement, type ReactNode, lazy, Suspense } from "react"
 
+import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
-import { PullRequestReviewPanel } from "./PullRequestReviewPanel.js"
-import type { PullRequestReviewControllerState } from "./usePullRequestReview.js"
+import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
+
+const PullRequestReviewPanel = lazy(() => import("./PullRequestReviewPanel.js"))
 
 const Section = ({
   children,
@@ -47,21 +49,29 @@ const People = ({ empty, people }: { readonly empty: string; readonly people: Re
 /** Render the exact CodeCommit revision as a compact review document. */
 export const WorkspacePullRequestDetails = ({
   approvers,
+  onReviewPublicationCancel,
+  onReviewPublicationPreview,
   onReviewRetry,
   onReviewStart,
+  onReviewSuggestionPublish,
   onSessionExpired,
   pullRequest,
   reviewCanEnqueue,
+  reviewPublication,
   reviewState,
   reviewers,
   sessionKey
 }: {
   readonly approvers: ReadonlyArray<RlyPerson>
   readonly onSessionExpired: (sessionKey: string) => void
+  readonly onReviewPublicationCancel: () => void
+  readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
   readonly onReviewRetry: () => void
+  readonly onReviewSuggestionPublish: (finalContent: string) => void
   readonly onReviewStart: () => void
   readonly pullRequest: WorkspacePullRequestPresentation
   readonly reviewCanEnqueue: boolean
+  readonly reviewPublication: PullRequestReviewPublicationState
   readonly reviewState: PullRequestReviewControllerState
   readonly reviewers: ReadonlyArray<RlyPerson>
   readonly sessionKey: string | null
@@ -160,12 +170,18 @@ export const WorkspacePullRequestDetails = ({
         </div>
         <div>
           <small>Relay recommendation</small>
-          <PullRequestReviewPanel
-            canEnqueue={reviewCanEnqueue}
-            onRetry={onReviewRetry}
-            onStart={onReviewStart}
-            state={reviewState}
-          />
+          <Suspense fallback={<span>Loading review tools…</span>}>
+            <PullRequestReviewPanel
+              canEnqueue={reviewCanEnqueue}
+              onCancelPublication={onReviewPublicationCancel}
+              onPreviewPublication={onReviewPublicationPreview}
+              onPublishSuggestion={onReviewSuggestionPublish}
+              onRetry={onReviewRetry}
+              onStart={onReviewStart}
+              publication={reviewPublication}
+              state={reviewState}
+            />
+          </Suspense>
         </div>
       </div>
     </Section>

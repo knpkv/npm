@@ -4,7 +4,15 @@ import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useRef, useState } from "react"
 
-import type { AgentProviderCatalog, AgentProviderCatalogEntry, PullRequestReviewState } from "../../api/agent.js"
+import type {
+  AgentProviderCatalog,
+  AgentProviderCatalogEntry,
+  PublishedReviewComment,
+  PullRequestReviewState,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionPublicationSelection
+} from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
@@ -35,6 +43,31 @@ export type PullRequestReviewControllerState =
     readonly review: PullRequestReviewState
   } & PullRequestReviewScope)
 
+export type PullRequestReviewPublicationState =
+  | { readonly _tag: "idle" }
+  | {
+    readonly _tag: "previewing"
+    readonly selection: ReviewSuggestionPublicationSelection
+  }
+  | {
+    readonly _tag: "preview"
+    readonly preview: ReviewSuggestionPublicationPreview
+  }
+  | {
+    readonly _tag: "publishing"
+    readonly preview: ReviewSuggestionPublicationPreview
+  }
+  | {
+    readonly _tag: "published"
+    readonly preview: ReviewSuggestionPublicationPreview
+    readonly publication: PublishedReviewComment
+  }
+  | {
+    readonly _tag: "failed"
+    readonly preview: ReviewSuggestionPublicationPreview | null
+    readonly selection: ReviewSuggestionPublicationSelection
+  }
+
 /** Browser boundary for immutable pull-request review reads and mutations. */
 export interface PullRequestReviewTransport {
   readonly enqueue: (
@@ -43,7 +76,18 @@ export interface PullRequestReviewTransport {
     signal: AbortSignal
   ) => Promise<PullRequestReviewState>
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
+  readonly previewPublication: (
+    entityId: EntityId,
+    selection: ReviewSuggestionPublicationSelection,
+    signal: AbortSignal
+  ) => Promise<ReviewSuggestionPublicationPreview>
   readonly providers: (signal: AbortSignal) => Promise<AgentProviderCatalog>
+  readonly publishSuggestion: (
+    entityId: EntityId,
+    selection: ReviewSuggestionPublicationSelection,
+    finalContent: ReviewSuggestionPublicationContent,
+    signal: AbortSignal
+  ) => Promise<PublishedReviewComment>
 }
 
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
@@ -89,11 +133,32 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
+  previewPublication: (entityId, selection, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, ...selection }
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   providers: (signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
         return yield* client.agent.providers()
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  publishSuggestion: (entityId, selection, finalContent, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: { ...selection, finalContent }
+        })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     )
@@ -129,12 +194,17 @@ export const usePullRequestReview = (
   onSessionExpired: (sessionKey: string) => void,
   transport: PullRequestReviewTransport = browserPullRequestReviewTransport
 ): {
+  readonly cancelPublication: () => void
+  readonly previewPublication: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly publication: PullRequestReviewPublicationState
+  readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
   readonly retry: () => void
   readonly start: () => void
   readonly state: PullRequestReviewControllerState
 } => {
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<PullRequestReviewControllerState>({ _tag: "idle" })
+  const [publication, setPublication] = useState<PullRequestReviewPublicationState>({ _tag: "idle" })
   const mutationAbort = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -205,6 +275,11 @@ export const usePullRequestReview = (
   }, [state])
 
   useEffect(() => () => mutationAbort.current?.abort(), [])
+  useEffect(() => {
+    mutationAbort.current?.abort()
+    mutationAbort.current = null
+    setPublication({ _tag: "idle" })
+  }, [baseRevision, entityId, headRevision, sessionKey])
 
   const start = useCallback(() => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
@@ -246,6 +321,71 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, state, transport])
 
+  const previewPublication = useCallback((selection: ReviewSuggestionPublicationSelection) => {
+    if (
+      state._tag !== "ready" ||
+      state.review._tag !== "completed" ||
+      state.review.jobId !== selection.jobId ||
+      !state.review.report.suggestions.some(
+        ({ suggestionId }) => suggestionId === selection.suggestionId
+      )
+    ) return
+    const current = state
+    mutationAbort.current?.abort()
+    const abort = new AbortController()
+    mutationAbort.current = abort
+    setPublication({ _tag: "previewing", selection })
+    transport.previewPublication(entityId, selection, abort.signal).then(
+      (preview) => {
+        if (abort.signal.aborted) return
+        setPublication(
+          preview.subject.headRevision === current.headRevision
+            ? { _tag: "preview", preview }
+            : { _tag: "failed", preview: null, selection }
+        )
+      },
+      (failure) => {
+        if (abort.signal.aborted) return
+        if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
+        setPublication({ _tag: "failed", preview: null, selection })
+      }
+    )
+  }, [entityId, onSessionExpired, state, transport])
+
+  const publishSuggestion = useCallback((finalContent: ReviewSuggestionPublicationContent) => {
+    if (state._tag !== "ready") return
+    const preview = publication._tag === "preview"
+      ? publication.preview
+      : publication._tag === "failed"
+      ? publication.preview
+      : null
+    if (preview === null) return
+    const current = state
+    const selection = {
+      jobId: preview.jobId,
+      suggestionId: preview.suggestionId
+    }
+    mutationAbort.current?.abort()
+    const abort = new AbortController()
+    mutationAbort.current = abort
+    setPublication({ _tag: "publishing", preview })
+    transport.publishSuggestion(entityId, selection, finalContent, abort.signal).then(
+      (published) => {
+        if (abort.signal.aborted) return
+        setPublication(
+          published.suggestionRevision.reviewedHead === current.headRevision
+            ? { _tag: "published", preview, publication: published }
+            : { _tag: "failed", preview, selection }
+        )
+      },
+      (failure) => {
+        if (abort.signal.aborted) return
+        if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
+        setPublication({ _tag: "failed", preview, selection })
+      }
+    )
+  }, [entityId, onSessionExpired, publication, state, transport])
+
   const scope = sessionKey === null || headRevision === null
     ? null
     : { baseRevision, entityId, headRevision, sessionKey }
@@ -256,6 +396,14 @@ export const usePullRequestReview = (
     : { _tag: "loading", ...scope }
 
   return {
+    cancelPublication: useCallback(() => {
+      mutationAbort.current?.abort()
+      mutationAbort.current = null
+      setPublication({ _tag: "idle" })
+    }, []),
+    previewPublication,
+    publication,
+    publishSuggestion,
     retry: useCallback(() => setRequestRevision((revision) => revision + 1), []),
     start,
     state: currentState

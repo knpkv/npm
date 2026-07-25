@@ -38,6 +38,7 @@ import type {
 import { controlCenterApiLayerWithLifecycle } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
+import { governedReviewSuggestionPublicationGatewayLayer } from "../application/GovernedReviewSuggestionPublicationGateway.js"
 import {
   authorizedSharesLayer,
   completeDiffReadsLayer,
@@ -56,6 +57,7 @@ import {
   timelineExportAuditsLayer,
   timelineReadsLayer
 } from "../application/index.js"
+import { reviewSuggestionPublicationGatewayUnavailableLayer } from "../application/ReviewSuggestionPublicationGateway.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
 import {
   StaticAssetStore,
@@ -83,11 +85,15 @@ import {
 } from "./Bootstrap.js"
 import { databaseDrainLayer } from "./DatabaseDrain.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
-import { firstPartyPluginConnectionMapLayer } from "./FirstPartyPluginRuntime.js"
+import { firstPartyPluginConnectionMapLayer, firstPartyPluginRuntimeRegistryLayer } from "./FirstPartyPluginRuntime.js"
 import {
-  governedActionExecutionServerLayer,
+  GovernedActionExecutionStartup,
   type GovernedActionExecutionStartupError,
-  type GovernedActionExecutionStartupOptions
+  governedActionExecutionStartupFromRegistryLayer,
+  governedActionExecutionStartupLayer,
+  type GovernedActionExecutionStartupOptions,
+  governedActionPolicyBindingSourceLayer,
+  governedActionSubmissionLayer
 } from "./GovernedActionExecutionStartup.js"
 import {
   type DirectTlsServerError,
@@ -153,7 +159,12 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly releaseAgent?: ReleaseAgentRuntimeOptions | null
   /** Opt-in immutable PR-review source, sandbox, and durable worker composition. */
   readonly prReviewWorker?: ControlCenterPrReviewWorkerOptions | null
-  readonly governedActionExecution?: GovernedActionExecutionStartupOptions | null
+  readonly governedActionExecution?:
+    | (
+      & Pick<GovernedActionExecutionStartupOptions, "workspaceId">
+      & { readonly pluginRuntimes?: GovernedActionExecutionStartupOptions["pluginRuntimes"] }
+    )
+    | null
   readonly applicationServices?: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
@@ -258,6 +269,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const authentication = authLayerFromDatabase.pipe(Layer.provide(database))
   const apiBindConfiguration = ApiBindConfiguration.layer(options.bindConfig)
   const staticAssets = StaticAssetStore.layer(options.staticAssets)
+  const configuredPluginConnections = options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ??
+    null
+  const firstPartyPluginRuntime = options.firstPartyPluginRuntime ?? false
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
@@ -271,8 +285,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     | Persistence
     | SecretStore
   > = options.applicationServices ?? liveApplicationServices(
-    options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ?? null,
-    options.firstPartyPluginRuntime ?? false,
+    configuredPluginConnections,
+    firstPartyPluginRuntime,
     options.bindConfig.publicOrigin
   )
   const domainEventWakeups = DomainEventWakeups.layer
@@ -333,8 +347,37 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(providerRegistry),
     Layer.provide(persistence)
   )
+  const governedActionConfiguration = options.governedActionExecution ?? null
+  const governedActionStartupBase = governedActionConfiguration === null
+    ? governedActionExecutionStartupLayer(null)
+    : governedActionConfiguration.pluginRuntimes === undefined
+    ? governedActionExecutionStartupFromRegistryLayer(governedActionConfiguration.workspaceId).pipe(
+      Layer.provide(firstPartyPluginRuntimeRegistryLayer)
+    )
+    : governedActionExecutionStartupLayer({
+      workspaceId: governedActionConfiguration.workspaceId,
+      pluginRuntimes: governedActionConfiguration.pluginRuntimes
+    })
+  const governedActionStartup = governedActionStartupBase.pipe(Layer.provide(database))
+  const governedActionSubmission = governedActionSubmissionLayer.pipe(
+    Layer.provide(governedActionStartup)
+  )
+  const publicationConnections = configuredPluginConnections === null
+    ? firstPartyPluginRuntime
+      ? firstPartyPluginConnectionMapLayer.pipe(Layer.provide(database))
+      : null
+    : Layer.succeed(PluginConnectionMap, configuredPluginConnections)
+  const reviewSuggestionPublications = governedActionConfiguration === null || publicationConnections === null
+    ? reviewSuggestionPublicationGatewayUnavailableLayer
+    : governedReviewSuggestionPublicationGatewayLayer.pipe(
+      Layer.provide(governedActionSubmission),
+      Layer.provide(governedActionPolicyBindingSourceLayer),
+      Layer.provide(publicationConnections),
+      Layer.provide(persistence)
+    )
   const pullRequestReviews = pullRequestReviewsLayer.pipe(
     Layer.provide(providerRegistry),
+    Layer.provide(reviewSuggestionPublications),
     Layer.provide(persistence),
     Layer.provide(applicationServices)
   )
@@ -343,9 +386,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provideMerge(domainEventWakeups)
   )
-  const governedActionExecution = governedActionExecutionServerLayer(
-    options.governedActionExecution ?? null
-  ).pipe(Layer.provide(database))
+  const governedActionExecution = Layer.effectDiscard(GovernedActionExecutionStartup).pipe(
+    Layer.provide(governedActionStartup)
+  )
   const prReviewWorker = options.prReviewWorker === undefined || options.prReviewWorker === null
     ? Layer.empty
     : options.releaseAgent?.openAiCompatible === undefined

@@ -36,6 +36,7 @@ import {
   type DiffInventoryPageRequestV1,
   type DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
+  PluginActionActorIdentityV1,
   type PluginActionDispatchResultV1,
   PluginActionPreflightV1,
   PluginActionProposalV1,
@@ -887,6 +888,17 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       })
     }
   })
+  const actionActorIdentity = yield* Schema.decodeUnknownEffect(PluginActionActorIdentityV1)({
+    providerId: "codecommit",
+    providerAccountId: runtimeIdentity.accountId,
+    principal: runtimeIdentity.arn
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "codecommit-runtime-identity-invalid"
+      })
+    )
+  )
   const probeRepository = readClient.listPullRequestsPage({
     account,
     repositoryName: configuration.repositoryName,
@@ -1275,6 +1287,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const connection: PluginConnectionV1 = {
     descriptor,
+    actionActorIdentity: Effect.succeed(actionActorIdentity),
     discover,
     health,
     sync,

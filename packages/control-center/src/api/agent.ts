@@ -2,8 +2,9 @@ import { MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
-import { EntityId, EventCursor, JobId, ReleaseId } from "../domain/identifiers.js"
-import { PrReviewOutcome, PrReviewReport, PrReviewSubject } from "../domain/prReview.js"
+import { EntityId, EventCursor, GovernedActionId, JobId, PersonId, ReleaseId } from "../domain/identifiers.js"
+import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
+import { PrReviewOutcome, PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../domain/prReview.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -407,6 +408,83 @@ export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
 /** Decoded accepted durable review job. */
 export type EnqueuePullRequestReviewResponse = typeof EnqueuePullRequestReviewResponse.Type
 
+/** Editable CodeCommit comment content bounded by the provider contract. */
+export const ReviewSuggestionPublicationContent = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(10_100)
+)
+
+/** Decoded final review-comment content. */
+export type ReviewSuggestionPublicationContent = typeof ReviewSuggestionPublicationContent.Type
+
+/** Exact completed review suggestion selected for publication. */
+export const ReviewSuggestionPublicationSelection = Schema.Struct({
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId
+})
+
+/** Decoded review-suggestion publication selection. */
+export type ReviewSuggestionPublicationSelection = typeof ReviewSuggestionPublicationSelection.Type
+
+/** Connected AWS principal that will author the CodeCommit comment. */
+export const AwsReviewPublicationIdentity = Schema.Struct({
+  accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(64)),
+  arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(2_048))
+})
+
+/** Decoded browser-safe AWS publication identity. */
+export type AwsReviewPublicationIdentity = typeof AwsReviewPublicationIdentity.Type
+
+/** Read-only preview shown before the operator grants publication authority. */
+export class ReviewSuggestionPublicationPreview
+  extends Schema.Class<ReviewSuggestionPublicationPreview>("ReviewSuggestionPublicationPreview")({
+    ...ReviewSuggestionPublicationSelection.fields,
+    subject: PrReviewSubject,
+    suggestionRevision: Schema.Struct({
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId,
+      reviewedHead: PrReviewSubject.fields.headRevision
+    }),
+    anchor: Schema.Struct({
+      path: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+      line: Schema.Int.check(Schema.isGreaterThan(0)),
+      relativeFileVersion: Schema.Literal("AFTER")
+    }),
+    finalContent: ReviewSuggestionPublicationContent,
+    replacement: Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_000))
+    ),
+    connectedIdentity: AwsReviewPublicationIdentity,
+    proposingAgent: ReviewAgentProfile,
+    publishingOperator: PersonId
+  })
+{}
+
+/** Explicit operator confirmation containing the final editable snapshot. */
+export const PublishReviewSuggestionRequest = Schema.Struct({
+  ...ReviewSuggestionPublicationSelection.fields,
+  finalContent: ReviewSuggestionPublicationContent
+})
+
+/** Decoded explicit review-suggestion publication confirmation. */
+export type PublishReviewSuggestionRequest = typeof PublishReviewSuggestionRequest.Type
+
+/** Durable local snapshot of one successfully published CodeCommit comment. */
+export class PublishedReviewComment extends Schema.Class<PublishedReviewComment>("PublishedReviewComment")({
+  publicationId: GovernedActionId,
+  ...ReviewSuggestionPublicationSelection.fields,
+  subject: PrReviewSubject,
+  suggestionRevision: ReviewSuggestionPublicationPreview.fields.suggestionRevision,
+  anchor: ReviewSuggestionPublicationPreview.fields.anchor,
+  content: ReviewSuggestionPublicationContent,
+  connectedIdentity: AwsReviewPublicationIdentity,
+  proposingAgent: ReviewAgentProfile,
+  publishingOperator: PersonId,
+  receipt: PluginProviderReceiptV1,
+  publishedAt: UtcTimestamp
+}) {}
+
 /** Ordered, bounded release-thread replay page. */
 export const ReleaseAgentThreadPage = Schema.Struct({
   releaseId: ReleaseId,
@@ -525,6 +603,50 @@ const enqueuePullRequestReview = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const previewReviewSuggestionPublication = HttpApiEndpoint.get(
+  "previewReviewSuggestionPublication",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    success: ReviewSuggestionPublicationPreview,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
+const publishReviewSuggestion = HttpApiEndpoint.post(
+  "publishReviewSuggestion",
+  "/pull-requests/:entityId/review-comments",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    payload: PublishReviewSuggestionRequest,
+    success: PublishedReviewComment,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 /** Authenticated release-aware synchronous and durable agent contract. */
 export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(providers)
@@ -533,5 +655,7 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(replayThread)
   .add(pullRequestReview)
   .add(enqueuePullRequestReview)
+  .add(previewReviewSuggestionPublication)
+  .add(publishReviewSuggestion)
   .prefix("/api/v1/agent")
 {}

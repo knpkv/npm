@@ -12,19 +12,29 @@ import * as Schema from "effect/Schema"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  PublishedReviewComment,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   type PullRequestReviewState,
-  PullRequestReviewUnavailable
+  PullRequestReviewUnavailable,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview
 } from "../../api/agent.js"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
-import { type EntityId, JobId, type ReleaseId, type WorkspaceId } from "../../domain/identifiers.js"
+import {
+  type EntityId,
+  JobId,
+  type PluginConnectionId,
+  type ReleaseId,
+  type WorkspaceId
+} from "../../domain/identifiers.js"
 import {
   derivePrReviewOutcome,
   PrReviewSubject,
-  type PrReviewSubject as PrReviewSubjectType
+  type PrReviewSubject as PrReviewSubjectType,
+  type PrReviewSuggestion
 } from "../../domain/prReview.js"
 import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
 import {
@@ -36,6 +46,10 @@ import {
 import { Persistence } from "../persistence/Persistence.js"
 import { AgentJobPrompt, type LatestAgentReviewRecord } from "../persistence/repositories/agentJobModels.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
+import {
+  ReviewSuggestionPublicationGateway,
+  type ReviewSuggestionPublicationTarget
+} from "./ReviewSuggestionPublicationGateway.js"
 
 const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
 
@@ -46,7 +60,10 @@ const ReviewContextIdentity = Schema.Struct({
 })
 
 class AvailableReviewTarget extends Data.TaggedClass("available")<{
+  readonly entityId: EntityId
+  readonly pluginConnectionId: PluginConnectionId
   readonly releaseId: ReleaseId
+  readonly sourceRevision: string
   readonly subject: PrReviewSubjectType
 }> {}
 
@@ -83,7 +100,13 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
     baseRevision: details.baseRevision,
     headRevision: details.headRevision
   }).pipe(Effect.mapError(unavailable))
-  return new AvailableReviewTarget({ releaseId, subject })
+  return new AvailableReviewTarget({
+    entityId: inspection.entity.projection.entityId,
+    pluginConnectionId: inspection.source.pluginConnectionId,
+    releaseId,
+    sourceRevision: inspection.source.revision,
+    subject
+  })
 })
 
 const decodeJobIdentity = Effect.fn("PullRequestReviews.decodeJobIdentity")(function*(
@@ -144,6 +167,7 @@ const makePullRequestReviews = Effect.gen(function*() {
   const inspection = yield* DeliveryGraphInspection
   const persistence = yield* Persistence
   const runtimes = yield* AgentRuntimeRegistry
+  const publications = yield* ReviewSuggestionPublicationGateway
 
   const inspectTarget = Effect.fn("PullRequestReviews.inspectTarget")(function*(input: {
     readonly workspaceId: WorkspaceId
@@ -180,6 +204,58 @@ const makePullRequestReviews = Effect.gen(function*() {
       `sha256:${Encoding.encodeHex(digest)}`
     ).pipe(Effect.mapError(unavailable))
   })
+
+  const selectedSuggestion = Effect.fn("PullRequestReviews.selectedSuggestion")(function*(
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget,
+    jobId: JobId,
+    suggestionId: string
+  ) {
+    const latest = yield* currentFor(workspaceId, target)
+    if (latest._tag !== "completed" || latest.jobId !== jobId) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    const suggestion = latest.report.suggestions.find(
+      (candidate) => candidate.suggestionId === suggestionId
+    )
+    if (suggestion === undefined) return yield* new ApplicationInvalidRequest()
+    return { latest, suggestion }
+  })
+
+  const publicationTarget = (
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget
+  ): ReviewSuggestionPublicationTarget => ({
+    workspaceId,
+    entityId: target.entityId,
+    pluginConnectionId: target.pluginConnectionId,
+    sourceRevision: target.sourceRevision,
+    subject: target.subject
+  })
+
+  const publicationContent = Effect.fn("PullRequestReviews.publicationContent")(function*(
+    content: string,
+    profile: typeof ReviewSuggestionPublicationPreview.Type["proposingAgent"],
+    publishingOperator: typeof ReviewSuggestionPublicationPreview.Type["publishingOperator"],
+    headRevision: string
+  ) {
+    return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationContent)(
+      `${content}\n\n— ${profile.label} · head ${headRevision.slice(0, 12)} · operator ${publishingOperator}`
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+  })
+
+  const defaultPublicationContent = Effect.fn("PullRequestReviews.defaultPublicationContent")(function*(
+    suggestion: PrReviewSuggestion
+  ) {
+    const replacement = suggestion.replacement === undefined
+      ? ""
+      : `\n\n\`\`\`suggestion\n${suggestion.replacement.content}\n\`\`\``
+    return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationContent)(
+      `${suggestion.problem}\n\n${suggestion.recommendation}${replacement}`
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+  })
+
+  const mapPublicationFailure = () => new ApplicationServiceUnavailable({ retryAt: null })
 
   return PullRequestReviews.of({
     current: Effect.fn("PullRequestReviews.current")(function*(input) {
@@ -270,6 +346,90 @@ const makePullRequestReviews = Effect.gen(function*() {
       })).pipe(
         Effect.mapError((error) => error._tag === "PersistenceOperationError" ? unavailable() : error)
       )
+    }),
+    previewPublication: Effect.fn("PullRequestReviews.previewPublication")(function*(input) {
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const selected = yield* selectedSuggestion(
+        input.workspaceId,
+        target,
+        input.jobId,
+        input.suggestionId
+      )
+      const connectedIdentity = yield* publications.identity(
+        publicationTarget(input.workspaceId, target)
+      ).pipe(Effect.mapError(mapPublicationFailure))
+      const finalContent = yield* defaultPublicationContent(selected.suggestion)
+      return new ReviewSuggestionPublicationPreview({
+        jobId: input.jobId,
+        suggestionId: selected.suggestion.suggestionId,
+        subject: target.subject,
+        suggestionRevision: {
+          jobId: input.jobId,
+          suggestionId: selected.suggestion.suggestionId,
+          reviewedHead: target.subject.headRevision
+        },
+        anchor: {
+          path: selected.suggestion.evidence.path,
+          line: selected.suggestion.evidence.startLine,
+          relativeFileVersion: "AFTER"
+        },
+        finalContent,
+        replacement: selected.suggestion.replacement?.content ?? null,
+        connectedIdentity,
+        proposingAgent: selected.latest.reviewProfile,
+        publishingOperator: input.publishingOperator
+      })
+    }),
+    publishSuggestion: Effect.fn("PullRequestReviews.publishSuggestion")(function*(input) {
+      if (input.session.actor._tag !== "human") return yield* new ApplicationInvalidRequest()
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const selected = yield* selectedSuggestion(
+        input.workspaceId,
+        target,
+        input.request.jobId,
+        input.request.suggestionId
+      )
+      const connectedIdentity = yield* publications.identity(
+        publicationTarget(input.workspaceId, target)
+      ).pipe(Effect.mapError(mapPublicationFailure))
+      const publishedContent = yield* publicationContent(
+        input.request.finalContent,
+        selected.latest.reviewProfile,
+        input.session.actor.personId,
+        target.subject.headRevision
+      )
+      const result = yield* publications.publish({
+        target: publicationTarget(input.workspaceId, target),
+        jobId: input.request.jobId,
+        suggestion: selected.suggestion,
+        finalContent: publishedContent,
+        proposingAgent: selected.latest.reviewProfile,
+        session: input.session
+      }).pipe(Effect.mapError(mapPublicationFailure))
+      return new PublishedReviewComment({
+        publicationId: result.publicationId,
+        jobId: input.request.jobId,
+        suggestionId: selected.suggestion.suggestionId,
+        subject: target.subject,
+        suggestionRevision: {
+          jobId: input.request.jobId,
+          suggestionId: selected.suggestion.suggestionId,
+          reviewedHead: target.subject.headRevision
+        },
+        anchor: {
+          path: selected.suggestion.evidence.path,
+          line: selected.suggestion.evidence.startLine,
+          relativeFileVersion: "AFTER"
+        },
+        content: publishedContent,
+        connectedIdentity,
+        proposingAgent: selected.latest.reviewProfile,
+        publishingOperator: input.session.actor.personId,
+        receipt: result.receipt,
+        publishedAt: result.publishedAt
+      })
     })
   })
 })
@@ -278,5 +438,9 @@ const makePullRequestReviews = Effect.gen(function*() {
 export const pullRequestReviewsLayer: Layer.Layer<
   PullRequestReviews,
   never,
-  AgentRuntimeRegistry | Crypto.Crypto | DeliveryGraphInspection | Persistence
+  | AgentRuntimeRegistry
+  | Crypto.Crypto
+  | DeliveryGraphInspection
+  | Persistence
+  | ReviewSuggestionPublicationGateway
 > = Layer.effect(PullRequestReviews, makePullRequestReviews)

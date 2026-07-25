@@ -90,7 +90,9 @@ describe("usePullRequestReview", () => {
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
       load: vi.fn(() => requests.shift() ?? Promise.reject(new Error("Unexpected review read"))),
-      providers: () => Promise.reject(new Error("Unexpected provider read"))
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
     } satisfies PullRequestReviewTransport
     const host = document.createElement("div")
     document.body.append(host)
@@ -119,7 +121,9 @@ describe("usePullRequestReview", () => {
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
       load: vi.fn(() => requests.shift() ?? Promise.reject(new Error("Unexpected review read"))),
-      providers: () => Promise.reject(new Error("Unexpected provider read"))
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
     } satisfies PullRequestReviewTransport
     const host = document.createElement("div")
     document.body.append(host)
@@ -162,7 +166,9 @@ describe("usePullRequestReview", () => {
       const transport = {
         enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
         load: vi.fn(() => Promise.resolve(reviewFor(responseBase, responseHead))),
-        providers: () => Promise.reject(new Error("Unexpected provider read"))
+        previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+        providers: () => Promise.reject(new Error("Unexpected provider read")),
+        publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
       } satisfies PullRequestReviewTransport
       const host = document.createElement("div")
       document.body.append(host)

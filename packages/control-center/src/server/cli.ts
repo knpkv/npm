@@ -236,6 +236,9 @@ const program = Effect.scoped(
         makeControlCenterServer({
           bindConfig,
           firstPartyPluginRuntime: true,
+          governedActionExecution: {
+            workspaceId: DEFAULT_WORKSPACE_ID
+          },
           bootstrap: {
             owner: { _tag: "human", personId: DEFAULT_OWNER_ID },
             workspaceId: DEFAULT_WORKSPACE_ID,

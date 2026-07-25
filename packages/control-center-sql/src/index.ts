@@ -32,6 +32,7 @@ export {
   type UpdateFollowedResourceQueryInput
 } from "./followedResources.js"
 export { type GovernedActionRecoveryQueryInput, renderGovernedActionRecoveryQuery } from "./governedActionRecovery.js"
+export { type GovernedActionIdempotencyQueryInput, renderGovernedActionIdempotencyQuery } from "./governedActions.js"
 export {
   type BindPluginConnectionQueryInput,
   type CreatePluginConnectionQueryInput,

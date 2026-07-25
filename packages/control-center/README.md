@@ -146,6 +146,17 @@ Non-blocking Suggestions, No Issues Found, or Unable to Conclude from the valida
 does not author that outcome, and there is no suggestion-count cap beyond the existing durable event
 byte envelope.
 
+To exercise the installed `sbx` runtime against the current checkout without provider credentials or
+remote writes, run:
+
+```sh
+pnpm --filter @knpkv/control-center test:sbx:real
+```
+
+The opt-in smoke creates a private clone, denies its network, verifies its exact revision, proves the
+clone is writable, and removes the sandbox on exit. The default test suite keeps using deterministic
+process doubles.
+
 Durable enqueue requests must explicitly select the provider, one catalog model, and the `read-only`
 profile. The selection is validated fail-closed before enqueue and persisted in the existing job
 `provider_id`, `model`, and `access` fields. The provider receives a bounded frozen projection containing

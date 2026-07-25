@@ -13,10 +13,13 @@ import type {
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
+  PublishedReviewComment,
+  PublishReviewSuggestionRequest,
   PullRequestReviewState,
   ReleaseAgentThreadCursor,
   ReleaseAgentThreadPage,
-  ReleaseAgentTurnResponse
+  ReleaseAgentTurnResponse,
+  ReviewSuggestionPublicationPreview
 } from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
@@ -89,6 +92,7 @@ import type { RelationshipRepairProposal } from "../../domain/relationshipRepair
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import type { SessionSummary } from "../auth/models.js"
 
 /** An authenticated resource does not exist within the caller's workspace. */
 export class ApplicationResourceNotFound extends Schema.TaggedErrorClass<ApplicationResourceNotFound>()(
@@ -518,6 +522,25 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly request: EnqueuePullRequestReviewRequest
   }) => Effect.Effect<
     EnqueuePullRequestReviewResponse,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly previewPublication: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: PublishReviewSuggestionRequest["jobId"]
+    readonly suggestionId: PublishReviewSuggestionRequest["suggestionId"]
+    readonly publishingOperator: Extract<Actor, { readonly _tag: "human" }>["personId"]
+  }) => Effect.Effect<
+    ReviewSuggestionPublicationPreview,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly publishSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly request: PublishReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    PublishedReviewComment,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/PullRequestReviews") {}

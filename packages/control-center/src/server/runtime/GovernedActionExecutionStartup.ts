@@ -4,6 +4,11 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
+import {
+  GovernedActionPolicyBindingSource,
+  GovernedActionSubmission,
+  GovernedActionSubmissionUnavailable
+} from "../governance/GovernedActionSubmission.js"
 import { governedActionExecutionStoreLayer } from "../governance/internal/execution-store/live.js"
 import { makeGovernedActionRecoveryClaimExpiry } from "../governance/internal/execution-store/recovery-claim-expiry.js"
 import {
@@ -14,7 +19,8 @@ import {
 import type { GovernedActionExecutionStoreError } from "../governance/internal/GovernedActionExecutionStore.js"
 import {
   type GovernedActionPolicyCatalogInvalid,
-  GovernedActionPolicyEvaluator
+  GovernedActionPolicyEvaluator,
+  makeBuiltInGovernedActionPolicyDefinition
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPluginExecutorMap.js"
@@ -79,6 +85,32 @@ export class GovernedActionExecutionStartup extends Context.Service<
   GovernedActionExecutionStartupState
 >()("@knpkv/control-center/server/runtime/GovernedActionExecutionStartup") {}
 
+const submissionUnavailable = () => new GovernedActionSubmissionUnavailable()
+
+/** Keep provider execution private while accepting only a durable action identity. */
+export const governedActionSubmissionLayer = Layer.effect(
+  GovernedActionSubmission,
+  Effect.map(GovernedActionExecutionStartup, (execution) =>
+    GovernedActionSubmission.of({
+      advance: (reference) =>
+        execution._tag === "ready"
+          ? execution.advance(reference).pipe(
+            Effect.asVoid,
+            Effect.catch(() => Effect.fail(submissionUnavailable()))
+          )
+          : Effect.fail(submissionUnavailable())
+    }))
+)
+
+/** Expose only the immutable server-owned policy binding to proposal constructors. */
+export const governedActionPolicyBindingSourceLayer = Layer.effect(
+  GovernedActionPolicyBindingSource,
+  makeBuiltInGovernedActionPolicyDefinition().pipe(
+    Effect.map(({ binding }) => ({ current: Effect.succeed(binding) })),
+    Effect.catch(() => Effect.fail(submissionUnavailable()))
+  )
+)
+
 const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
   const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
   const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
@@ -107,6 +139,17 @@ export const governedActionExecutionStartupLayer = (
   options === null
     ? Layer.succeed(GovernedActionExecutionStartup, { _tag: "disabled" })
     : readyLayer(options)
+
+/** Resolve the internal plugin registry at server composition time. */
+export const governedActionExecutionStartupFromRegistryLayer = (
+  workspaceId: WorkspaceId
+) =>
+  Layer.unwrap(
+    Effect.map(
+      PluginRuntimeRegistry,
+      (pluginRuntimes) => governedActionExecutionStartupLayer({ workspaceId, pluginRuntimes })
+    )
+  )
 
 /** Acquire the private worker for server lifetime without returning its capability. */
 export const governedActionExecutionServerLayer = (

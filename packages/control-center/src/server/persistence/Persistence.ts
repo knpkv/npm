@@ -255,7 +255,14 @@ const makePersistence = Effect.gen(function*() {
       commit: (...args: Parameters<GovernedActionRepositoryService["commit"]>) =>
         publicOperation("governed-action.commit", governedActions.commit(...args)),
       read: (...args: Parameters<GovernedActionRepositoryService["read"]>) =>
-        publicOperation("governed-action.read", governedActions.read(...args))
+        publicOperation("governed-action.read", governedActions.read(...args)),
+      readByIdempotencyKey: (
+        ...args: Parameters<GovernedActionRepositoryService["readByIdempotencyKey"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-by-idempotency-key",
+          governedActions.readByIdempotencyKey(...args)
+        )
     },
     people: {
       createPerson: (...args: Parameters<PeopleRepositoryService["createPerson"]>) =>

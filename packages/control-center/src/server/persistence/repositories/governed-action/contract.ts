@@ -17,6 +17,7 @@ import {
   DomainEventId,
   GovernedActionId,
   GovernedActionTransitionId,
+  PluginConnectionId,
   WorkspaceId
 } from "../../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
@@ -199,6 +200,16 @@ export const GovernedActionReadInput = Schema.Struct({
 
 /** Decoded governed-action lookup. */
 export type GovernedActionReadInput = typeof GovernedActionReadInput.Type
+
+/** Workspace/connection-scoped lookup for a previously submitted idempotent action. */
+export const GovernedActionIdempotencyReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  idempotencyKey: GovernedActionEnvelopeV1.fields.idempotencyKey
+})
+
+/** Decoded governed-action idempotency lookup. */
+export type GovernedActionIdempotencyReadInput = typeof GovernedActionIdempotencyReadInput.Type
 
 /** Trusted governed action reconstructed from its immutable ordered history. */
 export const GovernedActionRecord = Schema.Struct({

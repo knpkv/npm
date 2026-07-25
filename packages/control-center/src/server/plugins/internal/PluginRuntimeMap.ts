@@ -9,7 +9,7 @@ import { PluginConnection } from "../PluginConnection.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
 import { PluginConnectionMap } from "../PluginConnectionMap.js"
 import type { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
-import type { PluginRuntimeAuthority } from "./PluginRuntimeAuthority.js"
+import { PluginRuntimeAuthority } from "./PluginRuntimeAuthority.js"
 import { PluginRuntimeRegistry } from "./PluginRuntimeRegistry.js"
 
 /** Value-equality cache key preventing connection-ID aliasing across workspaces. */
@@ -38,12 +38,16 @@ export class PluginRuntimeMap extends LayerMap.Service<PluginRuntimeMap>()(
 /** Public read-only projection over the internal shared runtime cache. */
 export const PluginConnectionMapLive = Layer.effect(
   PluginConnectionMap,
-  Effect.map(PluginRuntimeMap, (runtimeMap) => ({
-    contextEffect: (scope: PluginRuntimeScope) =>
-      Effect.map(
-        runtimeMap.contextEffect(pluginRuntimeKey(scope)),
-        (context) => Context.make(PluginConnection, Context.get(context, PluginConnection))
-      ),
-    invalidate: (scope: PluginRuntimeScope) => runtimeMap.invalidate(pluginRuntimeKey(scope))
-  }))
+  Effect.map(PluginRuntimeMap, (runtimeMap) => {
+    const proposalContextEffect = (scope: PluginRuntimeScope) =>
+      Effect.map(runtimeMap.contextEffect(pluginRuntimeKey(scope)), (context) => ({
+        context: Context.make(PluginConnection, Context.get(context, PluginConnection)),
+        runtimeAuthorityToken: Context.get(context, PluginRuntimeAuthority)
+      }))
+    return {
+      contextEffect: (scope: PluginRuntimeScope) => Effect.map(proposalContextEffect(scope), ({ context }) => context),
+      proposalContextEffect,
+      invalidate: (scope: PluginRuntimeScope) => runtimeMap.invalidate(pluginRuntimeKey(scope))
+    }
+  })
 )

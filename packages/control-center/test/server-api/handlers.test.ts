@@ -9,11 +9,14 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  PublishedReviewComment,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
-  ReviewAgentProfileId
+  ReviewAgentProfileId,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -45,6 +48,7 @@ import {
   EntityId,
   EventCursor,
   FollowedResourceId,
+  GovernedActionId,
   JobId,
   PluginConnectionId,
   ProviderAccountId,
@@ -55,7 +59,8 @@ import {
   ShareId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { PrReviewSubject } from "../../src/domain/prReview.js"
+import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
+import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
@@ -368,7 +373,9 @@ const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
 
 const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
   current: () => Effect.die("not used"),
-  enqueue: () => Effect.die("not used")
+  enqueue: () => Effect.die("not used"),
+  previewPublication: () => Effect.die("not used"),
+  publishSuggestion: () => Effect.die("not used")
 })
 
 const agentLayer = Layer.mergeAll(
@@ -1964,7 +1971,9 @@ describe("Control Center API handlers", () => {
                 state: "queued"
               })
             )
-          )
+          ),
+        previewPublication: () => Effect.die("not used"),
+        publishSuggestion: () => Effect.die("not used")
       })
       const handler = agentHandlersLayer.pipe(
         Layer.provide(reviews),
@@ -2007,6 +2016,123 @@ describe("Control Center API handlers", () => {
             profile: "read-only",
             reviewProfileId: reviewProfile.profileId
           }
+        }
+      ])
+    }))
+
+  it.effect("previews and publishes one exact review suggestion only through the human session", () =>
+    Effect.gen(function*() {
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000026")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000027")
+      const suggestionId = PrReviewSuggestionId.make(`sha256:${"5".repeat(64)}`)
+      const publicationId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000028")
+      const subject = PrReviewSubject.make({
+        providerId: "codecommit",
+        repository: "control-center",
+        pullRequestId: "212",
+        baseRevision: "1".repeat(40),
+        headRevision: "2".repeat(40)
+      })
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
+      const finalContent = ReviewSuggestionPublicationContent.make(
+        "Authorize before mutating.\n\n```suggestion\nyield* authorize()\nyield* mutate()\n```"
+      )
+      const preview = new ReviewSuggestionPublicationPreview({
+        jobId,
+        suggestionId,
+        subject,
+        suggestionRevision: {
+          jobId,
+          suggestionId,
+          reviewedHead: subject.headRevision
+        },
+        anchor: {
+          path: "src/authorization.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        },
+        finalContent,
+        replacement: "yield* authorize()\nyield* mutate()",
+        connectedIdentity: {
+          accountId: "123456789012",
+          arn: "arn:aws:iam::123456789012:user/local-operator"
+        },
+        proposingAgent: reviewProfile,
+        publishingOperator: sessionPersonId
+      })
+      const receipt = Schema.decodeSync(PluginProviderReceiptV1)({
+        providerOperationId: PluginProviderOperationId.make("comment-42"),
+        status: "succeeded",
+        safeSummary: "Posted an inline pull-request comment",
+        observedAt: "2026-07-14T10:01:00.000Z"
+      })
+      const published = new PublishedReviewComment({
+        publicationId,
+        jobId,
+        suggestionId,
+        subject,
+        suggestionRevision: preview.suggestionRevision,
+        anchor: preview.anchor,
+        content: finalContent,
+        connectedIdentity: preview.connectedIdentity,
+        proposingAgent: reviewProfile,
+        publishingOperator: sessionPersonId,
+        receipt,
+        publishedAt: session.lastSeenAt
+      })
+      const received = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const reviews = Layer.succeed(PullRequestReviews, {
+        current: () => Effect.die("not used"),
+        enqueue: () => Effect.die("not used"),
+        previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),
+        publishSuggestion: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(published))
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const publicationPreview = yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, jobId, suggestionId }
+        })
+        const publication = yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: { jobId, suggestionId, finalContent }
+        })
+        return { publication, publicationPreview }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.publicationPreview, preview)
+      assert.deepStrictEqual(result.publication, published)
+      assert.deepStrictEqual(yield* Ref.get(received), [
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          publishingOperator: sessionPersonId
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          request: { jobId, suggestionId, finalContent },
+          session
         }
       ])
     }))
