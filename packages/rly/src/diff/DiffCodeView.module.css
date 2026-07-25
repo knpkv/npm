@@ -40,6 +40,11 @@
     padding: var(--rly-space-8) var(--rly-space-12);
   }
 
+  .annotation:focus-visible {
+    outline: var(--rly-space-2) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-space-2) * -1);
+  }
+
   .empty,
   .fallbackNotice {
     color: var(--rly-color-text-2);

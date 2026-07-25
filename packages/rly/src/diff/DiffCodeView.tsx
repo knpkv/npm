@@ -3,6 +3,7 @@
 import { CodeView, type CodeViewHandle, type CodeViewItem, type DiffLineAnnotation } from "@pierre/diffs/react"
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
 import { cssClass } from "../internal/component.js"
+import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "./annotation.js"
 import styles from "./DiffCodeView.module.css"
 import { parseDiffFilePair, validateDiffCodeItem } from "./parse-diff.js"
 import { ensureRlyDiffThemes, RLY_DIFF_THEMES } from "./themes.js"
@@ -10,22 +11,7 @@ import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle, Rly
 import { useDiffWorkerState } from "./worker-pool.js"
 
 interface AnnotationMetadata {
-  readonly id: string
-  readonly message: string
-}
-
-const requireAnnotations = (annotations: ReadonlyArray<RlyDiffCodeAnnotation>): void => {
-  const ids = new Set<string>()
-  for (const annotation of annotations) {
-    if (annotation.id.trim().length === 0 || annotation.message.trim().length === 0) {
-      throw new Error("Diff annotation id and message must not be blank")
-    }
-    if (!Number.isInteger(annotation.lineNumber) || annotation.lineNumber < 0) {
-      throw new Error(`Diff annotation ${annotation.id} line number must be a non-negative integer`)
-    }
-    if (ids.has(annotation.id)) throw new Error(`Diff annotation id ${annotation.id} must be unique`)
-    ids.add(annotation.id)
-  }
+  readonly annotation: RlyDiffCodeAnnotation
 }
 
 const annotationsForItem = (
@@ -33,12 +19,28 @@ const annotationsForItem = (
   annotations: ReadonlyArray<RlyDiffCodeAnnotation>
 ): Array<DiffLineAnnotation<AnnotationMetadata>> =>
   annotations
-    .filter((annotation) => annotation.itemId === itemId)
+    .filter((annotation) => annotation.location.itemId === itemId)
     .map((annotation) => ({
-      lineNumber: annotation.lineNumber,
-      metadata: { id: annotation.id, message: annotation.message },
-      side: annotation.side
+      lineNumber: annotation.location.lineNumber,
+      metadata: { annotation },
+      side: annotation.location.side
     }))
+
+const annotationItemsChanged = (
+  previous: ReadonlyArray<RlyDiffCodeAnnotation>,
+  current: ReadonlyArray<RlyDiffCodeAnnotation>
+): ReadonlySet<string> => {
+  const previousById = new Map(previous.map((annotation) => [annotation.id, annotation]))
+  const currentById = new Map(current.map((annotation) => [annotation.id, annotation]))
+  const itemIds = new Set<string>()
+  for (const [id, annotation] of previousById) {
+    if (currentById.get(id) !== annotation) itemIds.add(annotation.location.itemId)
+  }
+  for (const [id, annotation] of currentById) {
+    if (previousById.get(id) !== annotation) itemIds.add(annotation.location.itemId)
+  }
+  return itemIds
+}
 
 const toRendererItem = (
   item: RlyDiffCodeItem,
@@ -67,10 +69,30 @@ const requireInitialItems = (items: ReadonlyArray<RlyDiffCodeItem>): void => {
 const joinClassNames = (className: string | undefined): string =>
   className === undefined ? cssClass(styles, "root") : `${cssClass(styles, "root")} ${className}`
 
-const keepScrollableCodeKeyboardAccessible = (node: HTMLElement, phase: "mount" | "unmount" | "update"): void => {
+const keepRenderedDiffKeyboardAccessible = (
+  node: HTMLElement,
+  phase: "mount" | "unmount" | "update",
+  scrollable: boolean
+): void => {
   if (phase === "unmount") return
-  for (const region of node.shadowRoot?.querySelectorAll<HTMLElement>("code[data-code]") ?? []) {
-    region.tabIndex = 0
+  const root = node.shadowRoot
+  node.style.setProperty("--diffs-selection-number-fg", "var(--rly-color-text-1)")
+  if (scrollable) {
+    for (const region of root?.querySelectorAll<HTMLElement>("code[data-code]") ?? []) {
+      region.tabIndex = 0
+    }
+  }
+  for (const expander of root?.querySelectorAll<HTMLElement>("[data-expand-button]") ?? []) {
+    const direction = expander.hasAttribute("data-expand-down") ? "below" : "above"
+    expander.setAttribute("aria-label", `Expand unchanged lines ${direction}`)
+    expander.tabIndex = 0
+    if (expander.hasAttribute("data-rly-diff-keyboard-expander")) continue
+    expander.setAttribute("data-rly-diff-keyboard-expander", "")
+    expander.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return
+      event.preventDefault()
+      expander.click()
+    })
   }
 }
 
@@ -92,7 +114,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
   ref
 ) {
   requireInitialItems(initialItems)
-  requireAnnotations(annotations)
+  requireDiffCodeAnnotations(annotations)
   if (!Number.isInteger(contextLines) || contextLines < 0) {
     throw new Error("Diff context lines must be a non-negative integer")
   }
@@ -101,6 +123,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
   const workerState = useDiffWorkerState()
   const rendererRef = useRef<CodeViewHandle<AnnotationMetadata>>(null)
   const annotationsRef = useRef(annotations)
+  const previousAnnotationsRef = useRef(annotations)
   annotationsRef.current = annotations
   const [sourceItems] = useState(() => new Map(initialItems.map((item) => [item.id, item])))
   const [versions] = useState(() => new Map(initialItems.map((item) => [item.id, item.version ?? 0])))
@@ -109,7 +132,11 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
   )
 
   useEffect(() => {
-    for (const item of sourceItems.values()) {
+    const changedItemIds = annotationItemsChanged(previousAnnotationsRef.current, annotations)
+    previousAnnotationsRef.current = annotations
+    for (const itemId of changedItemIds) {
+      const item = sourceItems.get(itemId)
+      if (item === undefined) continue
       const nextVersion = (versions.get(item.id) ?? item.version ?? 0) + 1
       versions.set(item.id, nextVersion)
       rendererRef.current?.updateItem(toRendererItem(item, annotations, nextVersion))
@@ -176,17 +203,13 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
           expansionLineCount: contextLines,
           hunkSeparators: "line-info-basic",
           layout: { gap: 8, paddingBottom: 8, paddingTop: 8 },
-          ...(wrap
-            ? {}
-            : { onPostRender: (node, _instance, phase) => keepScrollableCodeKeyboardAccessible(node, phase) }),
+          onPostRender: (node, _instance, phase) => keepRenderedDiffKeyboardAccessible(node, phase, !wrap),
           overflow: wrap ? "wrap" : "scroll",
           stickyHeaders: true,
           theme: RLY_DIFF_THEMES
         }}
         renderAnnotation={(annotation) => (
-          <div className={styles.annotation} data-rly-diff-annotation={annotation.metadata.id}>
-            {annotation.metadata.message}
-          </div>
+          <DiffCodeAnnotation annotation={annotation.metadata.annotation} className={cssClass(styles, "annotation")} />
         )}
         {...(selectedLines === undefined ? {} : { selectedLines })}
       />

@@ -2,4 +2,10 @@
 "use client"
 
 export { BoundedDiffCodeView } from "./BoundedDiffCodeView.js"
-export type { BoundedDiffCodeViewProps, RlyDiffCodeItem } from "./BoundedDiffCodeView.js"
+export type {
+  BoundedDiffCodeViewProps,
+  RlyDiffCodeAnnotation,
+  RlyDiffCodeAnnotationLocation,
+  RlyDiffCodeAnnotationRenderContext,
+  RlyDiffCodeItem
+} from "./BoundedDiffCodeView.js"

@@ -7,12 +7,18 @@ import {
   type Hunk,
   parseDiffFromFile
 } from "@pierre/diffs"
-import type { ReactElement, ReactNode } from "react"
+import { Fragment, type ReactElement, type ReactNode, useRef } from "react"
 import { cssClass } from "../../internal/component.js"
-import type { RlyDiffCodeItem } from "../types.js"
+import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "../annotation.js"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../types.js"
 import styles from "./BoundedDiffCodeView.module.css"
 
-export type { RlyDiffCodeItem } from "../types.js"
+export type {
+  RlyDiffCodeAnnotation,
+  RlyDiffCodeAnnotationLocation,
+  RlyDiffCodeAnnotationRenderContext,
+  RlyDiffCodeItem
+} from "../types.js"
 
 type BoundedDiffMode = "split" | "stacked"
 
@@ -46,6 +52,7 @@ type UnifiedRow =
 
 /** Props for the strict-budget, main-thread line diff renderer. */
 export interface BoundedDiffCodeViewProps {
+  readonly annotations?: ReadonlyArray<RlyDiffCodeAnnotation>
   readonly className?: string
   readonly empty?: ReactNode
   readonly initialItems: ReadonlyArray<RlyDiffCodeItem>
@@ -146,11 +153,101 @@ const unifiedRows = (diff: FileDiffMetadata): ReadonlyArray<UnifiedRow> =>
     })
   ])
 
-const code = (content: string, wrap: boolean): ReactElement => (
-  <code className={wrap ? styles.wrappedCode : styles.code}>{content.length === 0 ? " " : content}</code>
+const code = (
+  content: string,
+  itemId: string,
+  lineNumber: number,
+  side: "additions" | "deletions",
+  wrap: boolean,
+  alternate?: { readonly lineNumber: number; readonly side: "additions" | "deletions" }
+): ReactElement => (
+  <code
+    className={wrap ? styles.wrappedCode : styles.code}
+    data-rly-diff-item={itemId}
+    {...(alternate === undefined
+      ? {}
+      : {
+          "data-rly-diff-line-alternate": alternate.lineNumber,
+          "data-rly-diff-line-side-alternate": alternate.side
+        })}
+    data-rly-diff-line={lineNumber}
+    data-rly-diff-line-side={side}
+    tabIndex={-1}
+  >
+    {content.length === 0 ? " " : content}
+  </code>
 )
 
-const renderSplit = (diff: FileDiffMetadata, wrap: boolean): ReactElement => (
+const focusBoundedLine = (
+  root: HTMLDivElement | null,
+  itemId: string,
+  lineNumber: number,
+  side: "additions" | "deletions"
+): void => {
+  const line = [...(root?.querySelectorAll<HTMLElement>("[data-rly-diff-line]") ?? [])].find(
+    (candidate) =>
+      candidate.dataset.rlyDiffItem === itemId &&
+      ((candidate.dataset.rlyDiffLine === String(lineNumber) && candidate.dataset.rlyDiffLineSide === side) ||
+        (candidate.dataset.rlyDiffLineAlternate === String(lineNumber) &&
+          candidate.dataset.rlyDiffLineSideAlternate === side))
+  )
+  line?.focus({ preventScroll: true })
+}
+
+const annotationsAt = (
+  annotations: ReadonlyArray<RlyDiffCodeAnnotation>,
+  itemId: string,
+  lineNumber: number | undefined,
+  side: "additions" | "deletions"
+): ReadonlyArray<RlyDiffCodeAnnotation> =>
+  lineNumber === undefined
+    ? []
+    : annotations.filter(
+        (annotation) =>
+          annotation.location.itemId === itemId &&
+          annotation.location.lineNumber === lineNumber &&
+          annotation.location.side === side
+      )
+
+const splitAnnotationRows = (
+  annotations: ReadonlyArray<RlyDiffCodeAnnotation>,
+  itemId: string,
+  row: Extract<SplitRow, { readonly kind: "change" | "context" }>,
+  root: () => HTMLDivElement | null
+): ReadonlyArray<ReactElement> => [
+  ...annotationsAt(annotations, itemId, row.deletion?.number, "deletions").map((annotation) => (
+    <tr className={styles.annotationRow} key={annotation.id}>
+      <td className={styles.annotationCell} colSpan={2}>
+        <DiffCodeAnnotation
+          annotation={annotation}
+          className={cssClass(styles, "annotation")}
+          returnFocus={() => focusBoundedLine(root(), itemId, annotation.location.lineNumber, annotation.location.side)}
+        />
+      </td>
+      <td colSpan={2} />
+    </tr>
+  )),
+  ...annotationsAt(annotations, itemId, row.addition?.number, "additions").map((annotation) => (
+    <tr className={styles.annotationRow} key={annotation.id}>
+      <td colSpan={2} />
+      <td className={styles.annotationCell} colSpan={2}>
+        <DiffCodeAnnotation
+          annotation={annotation}
+          className={cssClass(styles, "annotation")}
+          returnFocus={() => focusBoundedLine(root(), itemId, annotation.location.lineNumber, annotation.location.side)}
+        />
+      </td>
+    </tr>
+  ))
+]
+
+const renderSplit = (
+  diff: FileDiffMetadata,
+  itemId: string,
+  annotations: ReadonlyArray<RlyDiffCodeAnnotation>,
+  root: () => HTMLDivElement | null,
+  wrap: boolean
+): ReactElement => (
   <table aria-label={`Changes in ${diff.name}`} className={styles.table}>
     <tbody>
       {splitRows(diff).map((row, index) =>
@@ -159,23 +256,61 @@ const renderSplit = (diff: FileDiffMetadata, wrap: boolean): ReactElement => (
             <td colSpan={4}>{row.label}</td>
           </tr>
         ) : (
-          <tr className={styles[row.kind]} key={`${index}:${row.deletion?.number ?? ""}:${row.addition?.number ?? ""}`}>
-            <td className={styles.lineNumber}>{row.deletion?.number}</td>
-            <td className={styles.deletionCode}>
-              {row.deletion === undefined ? null : code(row.deletion.content, wrap)}
-            </td>
-            <td className={styles.lineNumber}>{row.addition?.number}</td>
-            <td className={styles.additionCode}>
-              {row.addition === undefined ? null : code(row.addition.content, wrap)}
-            </td>
-          </tr>
+          <Fragment key={`${index}:${row.deletion?.number ?? ""}:${row.addition?.number ?? ""}`}>
+            <tr className={styles[row.kind]}>
+              <td className={styles.lineNumber}>{row.deletion?.number}</td>
+              <td className={styles.deletionCode}>
+                {row.deletion === undefined
+                  ? null
+                  : code(row.deletion.content, itemId, row.deletion.number, "deletions", wrap)}
+              </td>
+              <td className={styles.lineNumber}>{row.addition?.number}</td>
+              <td className={styles.additionCode}>
+                {row.addition === undefined
+                  ? null
+                  : code(row.addition.content, itemId, row.addition.number, "additions", wrap)}
+              </td>
+            </tr>
+            {splitAnnotationRows(annotations, itemId, row, root)}
+          </Fragment>
         )
       )}
     </tbody>
   </table>
 )
 
-const renderUnified = (diff: FileDiffMetadata, wrap: boolean): ReactElement => (
+const unifiedAnnotationRows = (
+  annotations: ReadonlyArray<RlyDiffCodeAnnotation>,
+  itemId: string,
+  row: Extract<UnifiedRow, { readonly kind: "addition" | "context" | "deletion" }>,
+  root: () => HTMLDivElement | null
+): ReadonlyArray<ReactElement> => {
+  const locations = [
+    ...(row.deletionNumber === undefined ? [] : [{ lineNumber: row.deletionNumber, side: "deletions" as const }]),
+    ...(row.additionNumber === undefined ? [] : [{ lineNumber: row.additionNumber, side: "additions" as const }])
+  ]
+  return locations.flatMap(({ lineNumber, side }) =>
+    annotationsAt(annotations, itemId, lineNumber, side).map((annotation) => (
+      <tr className={styles.annotationRow} key={annotation.id}>
+        <td className={styles.annotationCell} colSpan={4}>
+          <DiffCodeAnnotation
+            annotation={annotation}
+            className={cssClass(styles, "annotation")}
+            returnFocus={() => focusBoundedLine(root(), itemId, lineNumber, side)}
+          />
+        </td>
+      </tr>
+    ))
+  )
+}
+
+const renderUnified = (
+  diff: FileDiffMetadata,
+  itemId: string,
+  annotations: ReadonlyArray<RlyDiffCodeAnnotation>,
+  root: () => HTMLDivElement | null,
+  wrap: boolean
+): ReactElement => (
   <table aria-label={`Changes in ${diff.name}`} className={styles.table}>
     <tbody>
       {unifiedRows(diff).map((row, index) =>
@@ -184,12 +319,26 @@ const renderUnified = (diff: FileDiffMetadata, wrap: boolean): ReactElement => (
             <td colSpan={4}>{row.label}</td>
           </tr>
         ) : (
-          <tr className={styles[row.kind]} key={`${index}:${row.deletionNumber ?? ""}:${row.additionNumber ?? ""}`}>
-            <td className={styles.lineNumber}>{row.deletionNumber}</td>
-            <td className={styles.lineNumber}>{row.additionNumber}</td>
-            <td className={styles.marker}>{row.kind === "addition" ? "+" : row.kind === "deletion" ? "−" : " "}</td>
-            <td>{code(row.content, wrap)}</td>
-          </tr>
+          <Fragment key={`${index}:${row.deletionNumber ?? ""}:${row.additionNumber ?? ""}`}>
+            <tr className={styles[row.kind]}>
+              <td className={styles.lineNumber}>{row.deletionNumber}</td>
+              <td className={styles.lineNumber}>{row.additionNumber}</td>
+              <td className={styles.marker}>{row.kind === "addition" ? "+" : row.kind === "deletion" ? "−" : " "}</td>
+              <td>
+                {code(
+                  row.content,
+                  itemId,
+                  row.kind === "deletion" ? (row.deletionNumber ?? 0) : (row.additionNumber ?? 0),
+                  row.kind === "deletion" ? "deletions" : "additions",
+                  wrap,
+                  row.kind === "context" && row.deletionNumber !== undefined
+                    ? { lineNumber: row.deletionNumber, side: "deletions" }
+                    : undefined
+                )}
+              </td>
+            </tr>
+            {unifiedAnnotationRows(annotations, itemId, row, root)}
+          </Fragment>
         )
       )}
     </tbody>
@@ -203,16 +352,20 @@ const renderUnified = (diff: FileDiffMetadata, wrap: boolean): ReactElement => (
  * can be added later without changing Control Center's diff data contract.
  */
 export const BoundedDiffCodeView = ({
+  annotations = [],
   className,
   empty = "No renderable source changes.",
   initialItems,
   mode = "split",
   wrap = false
 }: BoundedDiffCodeViewProps): ReactNode => {
+  requireDiffCodeAnnotations(annotations)
+  const rootRef = useRef<HTMLDivElement>(null)
   if (initialItems.length === 0) return <p className={className}>{empty}</p>
 
   return (
     <div
+      ref={rootRef}
       className={className === undefined ? cssClass(styles, "root") : `${cssClass(styles, "root")} ${className}`}
       data-rly-diff-code-view=""
       data-rly-diff-mode={mode}
@@ -230,7 +383,9 @@ export const BoundedDiffCodeView = ({
           <section className={styles.file} key={item.id}>
             {initialItems.length > 1 ? <h3 className={styles.fileName}>{diff.name}</h3> : null}
             <div className={styles.scroller}>
-              {mode === "split" ? renderSplit(diff, wrap) : renderUnified(diff, wrap)}
+              {mode === "split"
+                ? renderSplit(diff, item.id, annotations, () => rootRef.current, wrap)
+                : renderUnified(diff, item.id, annotations, () => rootRef.current, wrap)}
             </div>
           </section>
         )

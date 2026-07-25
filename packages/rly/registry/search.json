@@ -230,6 +230,7 @@
     },
     {
       "capabilities": [
+        "annotate",
         "compare",
         "review"
       ],
@@ -237,19 +238,30 @@
       "importPath": "@knpkv/rly/diff",
       "name": "DiffCodeView",
       "states": [
+        "annotated",
         "default",
+        "dismissed",
+        "draft",
+        "resolved",
         "stacked",
+        "stale",
         "strict"
       ],
       "terms": [
+        "annotate",
+        "annotated",
         "buffered",
         "compare",
         "diff",
         "diffcodeview",
+        "dismissed",
+        "draft",
         "mode",
+        "resolved",
         "review",
         "split",
         "stacked",
+        "stale",
         "strict",
         "virtualization"
       ]

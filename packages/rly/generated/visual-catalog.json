@@ -202,6 +202,7 @@
       "storyId": "diff-diffcodeview--workbench",
       "storyIds": [
         "diff-diffcodeview--workbench",
+        "diff-diffcodeview--rich-annotations",
         "diff-diffcodeview--stacked-wrapped"
       ]
     },

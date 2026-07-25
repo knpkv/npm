@@ -17,12 +17,25 @@ export interface RlyDiffCodeItem {
 }
 
 /** One semantic annotation anchored to a rendered diff line. */
-export interface RlyDiffCodeAnnotation {
-  readonly id: string
+export interface RlyDiffCodeAnnotationLocation {
   readonly itemId: string
   readonly lineNumber: number
-  readonly message: string
   readonly side: "additions" | "deletions"
+}
+
+/** Rly-owned context supplied to an application's annotation renderer. */
+export interface RlyDiffCodeAnnotationRenderContext {
+  readonly annotationId: string
+  readonly location: RlyDiffCodeAnnotationLocation
+  returnFocus(): void
+}
+
+/** One stable annotation identity, anchor, accessible name, and application-owned presentation. */
+export interface RlyDiffCodeAnnotation {
+  readonly accessibilityLabel: string
+  readonly id: string
+  readonly location: RlyDiffCodeAnnotationLocation
+  readonly render: (context: RlyDiffCodeAnnotationRenderContext) => ReactNode
 }
 
 /** The caller-controlled selected line range for one diff item. */

@@ -847,6 +847,7 @@
         "standard": "WCAG 2.2 AA"
       },
       "capabilities": [
+        "annotate",
         "compare",
         "review"
       ],
@@ -892,10 +893,15 @@
       "purpose": "Render a complete, virtualized before-and-after code review",
       "slots": [],
       "states": [
+        "annotated",
         "buffered",
         "default",
+        "dismissed",
+        "draft",
+        "resolved",
         "split",
         "stacked",
+        "stale",
         "strict"
       ],
       "status": "experimental",

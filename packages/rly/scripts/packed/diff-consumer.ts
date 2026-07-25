@@ -16,6 +16,8 @@ export const renderDiffConsumerImports = (): string =>
   createDiffWorkerFactory,
   normalizeDiffWorkerPoolSize,
   type RlyDiffCodeAnnotation,
+  type RlyDiffCodeAnnotationLocation,
+  type RlyDiffCodeAnnotationRenderContext,
   type RlyDiffCodeItem,
   type RlyDiffCodeScrollTarget,
   type RlyDiffCodeSelection,
@@ -81,7 +83,19 @@ const packedDiffCodeItem: RlyDiffCodeItem = {
   id: packedDiffFile.id,
   version: 1
 }
+const packedAnnotationLocation: RlyDiffCodeAnnotationLocation = {
+  itemId: packedDiffFile.id,
+  lineNumber: 1,
+  side: "additions"
+}
+const packedAnnotation: RlyDiffCodeAnnotation = {
+  accessibilityLabel: "Packed revision annotation",
+  id: "packed-annotation",
+  location: packedAnnotationLocation,
+  render: ({ annotationId }: RlyDiffCodeAnnotationRenderContext) => annotationId
+}
 const packedDiffCodeViewProps: RlyDiffCodeViewProps = {
+  annotations: [packedAnnotation],
   initialItems: [packedDiffCodeItem],
   mode: "split",
   virtualization: "buffered",
@@ -95,6 +109,8 @@ type PackedDiffPublicTypes = readonly [
   DiffWorkbenchProps,
   DiffWorkerProviderProps,
   RlyDiffCodeAnnotation,
+  RlyDiffCodeAnnotationLocation,
+  RlyDiffCodeAnnotationRenderContext,
   RlyDiffCodeItem,
   RlyDiffCodeScrollTarget,
   RlyDiffCodeSelection,

@@ -21,7 +21,12 @@ describe("DiffCodeView", () => {
     const html = renderToStaticMarkup(
       <DiffCodeView
         annotations={[
-          { id: "finding-1", itemId: "release", lineNumber: 1, message: "Verify the gate", side: "additions" }
+          {
+            accessibilityLabel: "Verify the release gate",
+            id: "finding-1",
+            location: { itemId: "release", lineNumber: 1, side: "additions" },
+            render: () => "Verify the gate"
+          }
         ]}
         initialItems={[item]}
         mode="stacked"
@@ -63,11 +68,33 @@ describe("DiffCodeView", () => {
     expect(() =>
       renderToStaticMarkup(
         <DiffCodeView
-          annotations={[{ id: " ", itemId: "release", lineNumber: 1, message: "Finding", side: "additions" }]}
+          annotations={[
+            {
+              accessibilityLabel: "Finding",
+              id: " ",
+              location: { itemId: "release", lineNumber: 1, side: "additions" },
+              render: () => "Finding"
+            }
+          ]}
           initialItems={[item]}
         />
       )
     ).toThrow("annotation id")
+    expect(() =>
+      renderToStaticMarkup(
+        <DiffCodeView
+          annotations={[
+            {
+              accessibilityLabel: "Finding",
+              id: "finding",
+              location: { itemId: "release", lineNumber: 0, side: "additions" },
+              render: () => "Finding"
+            }
+          ]}
+          initialItems={[item]}
+        />
+      )
+    ).toThrow("positive integer")
     expect(() => renderToStaticMarkup(<DiffCodeView contextLines={-1} initialItems={[item]} />)).toThrow(
       "context lines"
     )

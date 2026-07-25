@@ -162,6 +162,9 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "BoundedDiffCodeView" },
         { kind: "type", name: "BoundedDiffCodeViewProps" },
+        { kind: "type", name: "RlyDiffCodeAnnotation" },
+        { kind: "type", name: "RlyDiffCodeAnnotationLocation" },
+        { kind: "type", name: "RlyDiffCodeAnnotationRenderContext" },
         { kind: "type", name: "RlyDiffCodeItem" }
       ],
       name: "BoundedDiffCodeView",
@@ -220,7 +223,10 @@ export const componentManifest = {
         { defaultValue: "buffered", name: "virtualization", values: ["buffered", "strict"] }
       ],
       visual: {
-        coverageStoryIds: ["diff-diffcodeview--stacked-wrapped"],
+        coverageStoryIds: [
+          "diff-diffcodeview--rich-annotations",
+          "diff-diffcodeview--stacked-wrapped"
+        ],
         story: "stories/diff/DiffCodeView.stories.tsx",
         storyId: "diff-diffcodeview--workbench",
         tests: ["test/diff/DiffCodeView.test.tsx"]
@@ -230,6 +236,8 @@ export const componentManifest = {
       category: "diff",
       exports: [
         { kind: "type", name: "RlyDiffCodeAnnotation" },
+        { kind: "type", name: "RlyDiffCodeAnnotationLocation" },
+        { kind: "type", name: "RlyDiffCodeAnnotationRenderContext" },
         { kind: "type", name: "RlyDiffCodeItem" },
         { kind: "type", name: "RlyDiffCodeScrollTarget" },
         { kind: "type", name: "RlyDiffCodeSelection" },
