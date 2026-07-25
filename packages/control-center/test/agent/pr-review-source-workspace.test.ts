@@ -78,6 +78,8 @@ describe("PR review source workspace", () => {
         "http.https://example.invalid.extraHeader",
         "remote.origin.url",
         "url.ssh://example.invalid/.insteadOf",
+        "url.ssh://example.invalid/.pushInsteadOf",
+        "core.sshCommand",
         "include.path",
         "includeIf.gitdir:~/work/.path"
       ]

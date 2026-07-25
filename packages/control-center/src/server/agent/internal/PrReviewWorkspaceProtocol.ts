@@ -10,7 +10,7 @@ export const PR_REVIEW_SANDBOX_PREFIXES: ReadonlyArray<string> = [
 
 /** Lowercase Git-config key classes that can redirect or authenticate repository access. */
 export const PR_REVIEW_AUTHORITY_CONFIG_PATTERN =
-  "^(credential\\.|http\\.(.*\\.)?extraheader$|remote\\.|url\\..*\\.insteadof$|include\\.path$|includeif\\..*\\.path$)"
+  "^(credential\\.|http\\.(.*\\.)?extraheader$|remote\\.|url\\..*\\.(insteadof|pushinsteadof)$|core\\.sshcommand$|include\\.path$|includeif\\..*\\.path$)"
 
 const authorityConfigurationKey = new RegExp(
   PR_REVIEW_AUTHORITY_CONFIG_PATTERN,
