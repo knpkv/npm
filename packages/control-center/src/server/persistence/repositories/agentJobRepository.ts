@@ -1,5 +1,5 @@
 /** Durable release-thread job claiming, event persistence, and replay. @module */
-import { AgentProviderError, AgentRuntimeEvent } from "@knpkv/ai-runtime"
+import { AgentProviderError, AgentRuntimeEvent, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES } from "@knpkv/ai-runtime"
 import {
   type ClaimableAgentJobState,
   renderAgentJobClaimQuery,
@@ -47,7 +47,7 @@ import {
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 
 const DISPATCH_CANDIDATE_LIMIT = 32
-const MAXIMUM_AGENT_EVENT_BYTES = 32_768
+const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 const SHA_256_PREFIX = "sha256:"
 
 const PersistedDigest = Schema.String.check(

@@ -11,10 +11,12 @@ import {
   AgentProviderId,
   AgentRunId,
   type AgentRunRequest,
+  AgentRuntimeEvent,
   makeAgentRuntime,
   makeDeterministicLanguageModel,
   makeToolAgentAdapter,
   MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
+  MAXIMUM_AGENT_RUNTIME_EVENT_BYTES,
   MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES,
   runToolAgent,
   ToolAgentArtifactId,
@@ -244,13 +246,107 @@ describe("runToolAgent", () => {
     )
   })
 
-  it.effect("returns typed tool failures to the model without defecting the run", () => {
+  it.effect("does not accept schema-valid output from an incomplete finish", () => {
+    const incomplete = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: [
+          { text: "{\"summary\":\"apparently valid\"}", type: "text" },
+          finish("length")
+        ]
+      }
+    ])
+    const complete = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          text: "{\"summary\":\"apparently valid\"}",
+          type: "text"
+        })
+      }
+    ])
+    const run = (
+      fake: ReturnType<typeof makeDeterministicLanguageModel>
+    ) =>
+      Effect.gen(function*() {
+        const model = yield* LanguageModel.LanguageModel
+        const toolkit = yield* InspectionTools
+        return yield* runToolAgent({
+          ...successfulOptions(model, toolkit),
+          maximumSteps: 1
+        }).pipe(Stream.runCollect)
+      }).pipe(
+        Effect.provide(Layer.mergeAll(
+          fake.layer,
+          inspectionLayer((path) => Effect.succeed({ content: path }))
+        ))
+      )
+
+    return Effect.gen(function*() {
+      const incompleteEvents = Array.from(yield* run(incomplete))
+      const completeEvents = Array.from(yield* run(complete))
+
+      expect(
+        incompleteEvents.some((event) => event._tag === "output-validated")
+      ).toBe(false)
+      expect(incompleteEvents.at(-1)).toMatchObject({
+        _tag: "completed",
+        outcome: "max-steps"
+      })
+      expect(completeEvents.find((event) => event._tag === "output-validated"))
+        .toMatchObject({ output: { summary: "apparently valid" } })
+      expect(completeEvents.at(-1)).toMatchObject({
+        _tag: "completed",
+        outcome: "success"
+      })
+    })
+  })
+
+  it.effect("propagates default error-mode tool failures through the typed channel", () => {
     const fake = makeDeterministicLanguageModel([
       {
         _tag: "response",
         parts: response({
           id: "failed-call",
           name: "InspectFile",
+          params: { path: "missing.ts" },
+          type: "tool-call"
+        })
+      }
+    ])
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* InspectionTools
+      const error = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(
+        Stream.runDrain,
+        Effect.flip
+      )
+
+      expect(error).toBeInstanceOf(InspectionFailure)
+      expect(error).toMatchObject({ message: "fixture read failure" })
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        inspectionLayer(() => Effect.fail(new InspectionFailure({ message: "fixture read failure" })))
+      ))
+    )
+  })
+
+  it.effect("returns explicit return-mode tool failures to the model", () => {
+    const RecoverableInspect = Tool.make("RecoverableInspect", {
+      failure: InspectionFailure,
+      failureMode: "return",
+      parameters: Schema.Struct({ path: Schema.String }),
+      success: Schema.Struct({ content: Schema.String })
+    })
+    const RecoverableTools = Toolkit.make(RecoverableInspect)
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          id: "recoverable-call",
+          name: "RecoverableInspect",
           params: { path: "missing.ts" },
           type: "tool-call"
         })
@@ -263,13 +359,16 @@ describe("runToolAgent", () => {
 
     return Effect.gen(function*() {
       const model = yield* LanguageModel.LanguageModel
-      const toolkit = yield* InspectionTools
+      const toolkit = yield* RecoverableTools
       const events = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(Stream.runCollect)
 
       expect(Array.from(events).find((event) => event._tag === "tool-failed")).toMatchObject({
-        name: "InspectFile",
+        name: "RecoverableInspect",
         result: {
-          modelValue: { error: "fixture read failure" },
+          modelValue: {
+            _tag: "InspectionFailure",
+            message: "fixture read failure"
+          },
           truncated: false
         }
       })
@@ -277,7 +376,9 @@ describe("runToolAgent", () => {
     }).pipe(
       Effect.provide(Layer.mergeAll(
         fake.layer,
-        inspectionLayer(() => Effect.fail(new InspectionFailure({ message: "fixture read failure" })))
+        RecoverableTools.toLayer({
+          RecoverableInspect: () => Effect.fail(new InspectionFailure({ message: "fixture read failure" }))
+        })
       ))
     )
   })
@@ -556,6 +657,147 @@ describe("runToolAgent", () => {
           Effect.sync(() => {
             invokedPaths.push(path)
             return { content: `local:${path}` }
+          })
+        )
+      ))
+    )
+  })
+
+  it.effect("bounds provider-executed results before replaying them", () => {
+    const artifactId = ToolAgentArtifactId.make("provider-artifact")
+    const retained: Array<string> = []
+    const artifactSink: ToolAgentArtifactSink = {
+      persist: (content) =>
+        Effect.sync(() => {
+          retained.push(content)
+          return artifactId
+        })
+    }
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response(
+          {
+            id: "provider-large",
+            name: "InspectFile",
+            params: { path: "provider.ts" },
+            providerExecuted: true,
+            type: "tool-call"
+          },
+          {
+            id: "provider-large",
+            isFailure: false,
+            name: "InspectFile",
+            preliminary: false,
+            providerExecuted: true,
+            result: { content: "\"🙂".repeat(40_000) },
+            type: "tool-result"
+          }
+        )
+      },
+      {
+        _tag: "response",
+        parts: response({ text: "{\"summary\":\"bounded provider result\"}", type: "text" })
+      }
+    ])
+    let localInvocations = 0
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* InspectionTools
+      const events = yield* runToolAgent({
+        ...successfulOptions(model, toolkit),
+        artifactSink
+      }).pipe(Stream.runCollect)
+      const replayedResult = fake.requests[1]?.prompt.content
+        .filter((message) => message.role === "tool")
+        .flatMap((message) => message.content)
+        .find((part) => part.type === "tool-result" && part.id === "provider-large")
+
+      expect(fake.requests).toHaveLength(2)
+      expect(localInvocations).toBe(0)
+      expect(retained).toHaveLength(1)
+      expect(Array.from(events).at(-1)).toMatchObject({ outcome: "success" })
+      expect(replayedResult).toMatchObject({
+        result: {
+          artifactId,
+          truncated: true
+        }
+      })
+      if (
+        replayedResult?.type === "tool-result" &&
+        Schema.is(TruncatedResultEnvelope)(replayedResult.result)
+      ) {
+        const encoded = yield* Schema.encodeUnknownEffect(
+          Schema.fromJsonString(Schema.Json)
+        )(replayedResult.result)
+        expect(new TextEncoder().encode(encoded).byteLength).toBeLessThanOrEqual(
+          MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES
+        )
+      }
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        inspectionLayer(() =>
+          Effect.sync(() => {
+            localInvocations += 1
+            return { content: "local" }
+          })
+        )
+      ))
+    )
+  })
+
+  it.effect("accepts final output accompanying provider-executed traces", () => {
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response(
+          {
+            id: "provider-final",
+            name: "InspectFile",
+            params: { path: "provider.ts" },
+            providerExecuted: true,
+            type: "tool-call"
+          },
+          {
+            id: "provider-final",
+            isFailure: false,
+            name: "InspectFile",
+            preliminary: false,
+            providerExecuted: true,
+            result: { content: "provider result" },
+            type: "tool-result"
+          },
+          { text: "{\"summary\":\"complete in one turn\"}", type: "text" }
+        )
+      }
+    ])
+    let localInvocations = 0
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* InspectionTools
+      const events = yield* runToolAgent({
+        ...successfulOptions(model, toolkit),
+        maximumSteps: 1
+      }).pipe(Stream.runCollect)
+
+      expect(fake.requests).toHaveLength(1)
+      expect(localInvocations).toBe(0)
+      expect(Array.from(events).find((event) => event._tag === "output-validated"))
+        .toMatchObject({ output: { summary: "complete in one turn" } })
+      expect(Array.from(events).at(-1)).toMatchObject({
+        outcome: "success",
+        steps: 1
+      })
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        inspectionLayer(() =>
+          Effect.sync(() => {
+            localInvocations += 1
+            return { content: "local" }
           })
         )
       ))
@@ -888,7 +1130,9 @@ describe("makeToolAgentAdapter", () => {
 
   it.effect("streams validated output through the durable runtime without an aggregate cap", () =>
     Effect.gen(function*() {
-      const summary = "x".repeat(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH * 2 + 17)
+      const summary = "ascii\"🙂".repeat(
+        Math.ceil((MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH * 2 + 17) / 8)
+      )
       const events: ReadonlyArray<ToolAgentEvent<{ readonly summary: string }>> = [
         { _tag: "run-started", budgetMillis: 1_000, maximumSteps: 4 },
         { _tag: "usage", inputTokens: 12, outputTokens: 4, step: 1 },
@@ -935,7 +1179,15 @@ describe("makeToolAgentAdapter", () => {
       ).toBe(true)
       expect(
         observed.filter((event) => event._tag === "output" && event.channel === "assistant")
-      ).toHaveLength(3)
+          .length
+      ).toBeGreaterThan(1)
+      for (const event of observed) {
+        const encodedEvent = yield* Schema.encodeUnknownEffect(
+          Schema.fromJsonString(AgentRuntimeEvent)
+        )(event)
+        expect(new TextEncoder().encode(encodedEvent).byteLength)
+          .toBeLessThanOrEqual(MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
+      }
     }))
 
   it.effect("maps budget exhaustion into the durable typed timeout failure", () =>

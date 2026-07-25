@@ -74,16 +74,23 @@ tools that are already authorized for the run.
 Tool input and output validation remains owned by Effect AI schemas. One
 malformed tool call or final JSON response receives one schema-guided repair
 turn; a second malformed response fails with
-`ToolAgentInvalidResponseError` and is never coerced.
+`ToolAgentInvalidResponseError` and is never coerced. A schema-valid final
+response is accepted only when the provider reports a complete `stop` finish
+reason; incomplete finishes use the same single repair allowance.
 
 Each model-visible tool result is limited to 64 KiB of UTF-8 JSON. Larger
 results require a `ToolAgentArtifactSink`; the model receives head/tail
 excerpts plus the opaque artifact ID. Add caller-owned paging and search tools
 to the same Toolkit so the model can inspect retained content without raising
-the bound. `makeToolAgentAdapter` maps the loop into the existing durable
-`AgentRuntime` contract and chunks validated final JSON across ordinary output
-events, so it adds no aggregate result-count cap.
+the bound. The same bound applies to results executed by a provider before they
+are replayed into its next prompt. `makeToolAgentAdapter` maps the loop into the
+existing durable `AgentRuntime` contract and chunks validated final JSON across
+ordinary output events. Each encoded event stays within the durable repository
+byte limit, with no aggregate result-count cap.
 
 Schema-valid `void` tool results use JSON `null` on the model wire. Calls marked
 as provider-executed retain their provider result in the next prompt and are
-never invoked through a local handler.
+never invoked through a local handler. Handler failures preserve Effect AI
+tool semantics: the default `error` mode fails the run in the typed error
+channel, while `failureMode: "return"` produces a model-visible failed tool
+result.

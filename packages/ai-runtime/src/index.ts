@@ -20,7 +20,8 @@ export {
   AgentRuntimeEvent,
   AgentRuntimeProtocolError,
   AgentSessionRef,
-  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
+  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
+  MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 } from "./model.js"
 export {
   type AgentAdapter,

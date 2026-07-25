@@ -7,11 +7,11 @@
  *
  * @module
  */
-import { Duration, Effect, Option, Predicate, Queue, Result, Schema, Stream } from "effect"
+import { Duration, Effect, Option, Queue, Result, Schema, Stream } from "effect"
 import type * as AiError from "effect/unstable/ai/AiError"
 import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as Prompt from "effect/unstable/ai/Prompt"
-import type * as Response from "effect/unstable/ai/Response"
+import * as Response from "effect/unstable/ai/Response"
 import type * as Tool from "effect/unstable/ai/Tool"
 import type * as Toolkit from "effect/unstable/ai/Toolkit"
 
@@ -201,11 +201,6 @@ const decodeBudget = (
     })
   )
 
-const failureDescription = (failure: unknown): string =>
-  Predicate.isError(failure) && failure.message.length > 0
-    ? failure.message
-    : "The tool failed in its typed error channel."
-
 const repairInstruction = (stage: "final-output" | "tool-call", reason: string): string =>
   [
     "Your previous response did not satisfy the required protocol.",
@@ -380,8 +375,52 @@ const boundToolResult = Effect.fn("ToolAgent.boundToolResult")(function*<
   return yield* truncateJson(toolName, encoded, artifactId)
 })
 
-const encodedToolFailure = (failure: unknown): Schema.Json => ({
-  error: failureDescription(failure)
+const boundedResponsePrompt = Effect.fn("ToolAgent.boundedResponsePrompt")(function*<
+  Error,
+  Requirements
+>(
+  content: ReadonlyArray<Response.AnyPart>,
+  artifactSink: ToolAgentArtifactSink<Error, Requirements> | undefined
+) {
+  const bounded: Array<Response.AnyPart> = []
+  for (const part of content) {
+    if (
+      part.type !== "tool-result" ||
+      !part.providerExecuted ||
+      part.preliminary
+    ) {
+      bounded.push(part)
+      continue
+    }
+    const result = part.encodedResult === undefined
+      ? null
+      : yield* decodeJson(part.encodedResult).pipe(
+        Effect.mapError(() =>
+          new ToolAgentToolProtocolError({
+            reason: "invalid-result",
+            toolName: part.name
+          })
+        )
+      )
+    const material = yield* boundToolResult(
+      part.name,
+      result,
+      artifactSink
+    )
+    bounded.push(
+      Response.makePart("tool-result", {
+        encodedResult: material.modelValue,
+        id: part.id,
+        isFailure: part.isFailure,
+        metadata: part.metadata,
+        name: part.name,
+        preliminary: false,
+        providerExecuted: true,
+        result: material.modelValue
+      })
+    )
+  }
+  return Prompt.fromResponseParts(bounded)
 })
 
 const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
@@ -397,7 +436,11 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
   emit: (event: ToolAgentEvent<Output>) => Effect.Effect<void>
 ): Effect.fn.Return<
   ExecutedToolCall,
-  AiError.AiError | ArtifactError | ToolAgentArtifactRequiredError | ToolAgentToolProtocolError,
+  | AiError.AiError
+  | ArtifactError
+  | Tool.HandlerError<Tools[keyof Tools]>
+  | ToolAgentArtifactRequiredError
+  | ToolAgentToolProtocolError,
   ArtifactRequirements | Tool.HandlerServices<Tools[keyof Tools]>
 > {
   yield* emit({
@@ -411,23 +454,7 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
     toolkit.handle(call.name, call.params).pipe(Effect.flatMap(Stream.runLast))
   )
   if (Result.isFailure(handled)) {
-    const failure = encodedToolFailure(handled.failure)
-    const material = yield* boundToolResult(call.name, failure, artifactSink)
-    yield* emit({
-      _tag: "tool-failed",
-      callId: call.id,
-      name: call.name,
-      result: material,
-      step
-    })
-    return {
-      promptPart: Prompt.makePart("tool-result", {
-        id: call.id,
-        isFailure: true,
-        name: call.name,
-        result: material.modelValue
-      })
-    }
+    return yield* Effect.fail(handled.failure)
   }
 
   const finalResult = Option.getOrUndefined(handled.success)
@@ -481,7 +508,7 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
   emit: (event: ToolAgentEvent<OutputSchema["Type"]>) => Effect.Effect<void>
 ): Effect.fn.Return<
   void,
-  ToolAgentError | ArtifactError,
+  ToolAgentError | ArtifactError | Tool.HandlerError<Tools[keyof Tools]>,
   | ArtifactRequirements
   | OutputSchema["DecodingServices"]
   | Tool.HandlerServices<Tools[keyof Tools]>
@@ -540,16 +567,19 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
       step
     })
 
-    if (response.toolCalls.length > 0) {
+    const localToolCalls = response.toolCalls.filter(
+      (call) => !call.providerExecuted
+    )
+    if (localToolCalls.length > 0) {
       if (response.text.length > 0) {
         yield* emit({ _tag: "model-progress", step, text: response.text })
       }
-      prompt = Prompt.concat(prompt, Prompt.fromResponseParts(response.content))
+      prompt = Prompt.concat(
+        prompt,
+        yield* boundedResponsePrompt(response.content, options.artifactSink)
+      )
       const toolParts: Array<Prompt.ToolResultPart> = []
-      for (const call of response.toolCalls) {
-        if (call.providerExecuted) {
-          continue
-        }
+      for (const call of localToolCalls) {
         const executed = yield* executeToolCall(
           options.toolkit,
           call,
@@ -563,6 +593,32 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
         prompt,
         Prompt.fromMessages([Prompt.makeMessage("tool", { content: toolParts })])
       )
+      continue
+    }
+    if (response.toolCalls.length > 0 && response.text.length === 0) {
+      prompt = Prompt.concat(
+        prompt,
+        yield* boundedResponsePrompt(response.content, options.artifactSink)
+      )
+      continue
+    }
+
+    if (response.finishReason !== "stop") {
+      const reason = `Model stopped before a complete final response (${response.finishReason}).`
+      const cause = new Error(reason)
+      if (repairUsed) {
+        return yield* new ToolAgentInvalidResponseError({
+          cause,
+          stage: "final-output"
+        })
+      }
+      repairUsed = true
+      yield* emit({ _tag: "repair-requested", reason, stage: "final-output", step })
+      prompt = Prompt.concat(
+        prompt,
+        yield* boundedResponsePrompt(response.content, options.artifactSink)
+      )
+      prompt = Prompt.concat(prompt, repairInstruction("final-output", reason))
       continue
     }
 
@@ -579,7 +635,10 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
       repairUsed = true
       const reason = decoded.failure.message
       yield* emit({ _tag: "repair-requested", reason, stage: "final-output", step })
-      prompt = Prompt.concat(prompt, Prompt.fromResponseParts(response.content))
+      prompt = Prompt.concat(
+        prompt,
+        yield* boundedResponsePrompt(response.content, options.artifactSink)
+      )
       prompt = Prompt.concat(prompt, repairInstruction("final-output", reason))
       continue
     }
@@ -605,7 +664,7 @@ export const runToolAgent = <
   options: ToolAgentRunOptions<Tools, OutputSchema, ArtifactError, ArtifactRequirements>
 ): Stream.Stream<
   ToolAgentEvent<OutputSchema["Type"]>,
-  ToolAgentError | ArtifactError,
+  ToolAgentError | ArtifactError | Tool.HandlerError<Tools[keyof Tools]>,
   | ArtifactRequirements
   | OutputSchema["DecodingServices"]
   | Tool.HandlerServices<Tools[keyof Tools]>

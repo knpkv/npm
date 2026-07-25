@@ -10,7 +10,8 @@ import {
   AgentProviderError,
   type AgentRunRequest,
   type AgentRuntimeEvent,
-  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
+  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
+  MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 } from "./model.js"
 import type { AgentAdapter } from "./runtime.js"
 import {
@@ -30,6 +31,7 @@ const isInvalidResponse = Schema.is(ToolAgentInvalidResponseError)
 const isToolProtocolError = Schema.is(ToolAgentToolProtocolError)
 const isArtifactRequired = Schema.is(ToolAgentArtifactRequiredError)
 const isAgentProviderError = Schema.is(AgentProviderError)
+const textEncoder = new TextEncoder()
 
 const boundedMessage = (message: string): string => {
   const trimmed = message.trim()
@@ -104,23 +106,84 @@ const normalizeFailure = (
   })
 }
 
-const chunks = (text: string): ReadonlyArray<string> => {
-  const output: Array<string> = []
-  for (let offset = 0; offset < text.length; offset += MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH) {
-    output.push(text.slice(offset, offset + MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
-  }
-  return output
+const codePointBoundary = (text: string, offset: number): number => {
+  if (offset <= 0 || offset >= text.length) return offset
+  const previous = text.charCodeAt(offset - 1)
+  const next = text.charCodeAt(offset)
+  return previous >= 0xd800 &&
+      previous <= 0xdbff &&
+      next >= 0xdc00 &&
+      next <= 0xdfff
+    ? offset - 1
+    : offset
 }
 
-const outputEvents = (
+const outputEvents = Effect.fn("ToolAgentAdapter.outputEvents")(function*(
+  providerId: AgentRunRequest["providerId"],
   channel: "assistant" | "progress",
   text: string
-): ReadonlyArray<AgentRuntimeEvent> =>
-  chunks(text).map((chunk) => ({
-    _tag: "output",
-    channel,
-    text: chunk
-  }))
+) {
+  const output: Array<AgentRuntimeEvent> = []
+  let offset = 0
+  while (offset < text.length) {
+    let lower = offset + 1
+    let upper = Math.min(
+      text.length,
+      offset + MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
+    )
+    let best = offset
+    while (lower <= upper) {
+      const probe = Math.floor((lower + upper) / 2)
+      const midpoint = codePointBoundary(
+        text,
+        probe
+      )
+      if (midpoint <= offset) {
+        lower = probe + 1
+        continue
+      }
+      const event: AgentRuntimeEvent = {
+        _tag: "output",
+        channel,
+        text: text.slice(offset, midpoint)
+      }
+      const encoded = yield* encodeJsonString(event).pipe(
+        Effect.mapError(() =>
+          new AgentProviderError({
+            message: "Tool-agent output could not be encoded for durable persistence.",
+            phase: "protocol",
+            providerId,
+            retryable: false
+          })
+        )
+      )
+      if (
+        textEncoder.encode(encoded).byteLength <=
+          MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
+      ) {
+        best = midpoint
+        lower = probe + 1
+      } else {
+        upper = probe - 1
+      }
+    }
+    if (best === offset) {
+      return yield* new AgentProviderError({
+        message: "One tool-agent output code point exceeds the durable event limit.",
+        phase: "protocol",
+        providerId,
+        retryable: false
+      })
+    }
+    output.push({
+      _tag: "output",
+      channel,
+      text: text.slice(offset, best)
+    })
+    offset = best
+  }
+  return output
+})
 
 const isAvailableUsage = (value: number | null): value is number =>
   value !== null && Number.isSafeInteger(value) && value >= 0
@@ -133,18 +196,27 @@ const mapEvent = Effect.fn("ToolAgentAdapter.mapEvent")(function*<Output>(
     case "run-started":
       return [{ _tag: "started", providerRunRef: null, sessionRef: null }]
     case "model-progress":
-      return outputEvents("progress", event.text)
+      return yield* outputEvents(providerId, "progress", event.text)
     case "tool-requested":
-      return outputEvents("progress", `Tool requested: ${event.name} (${event.callId}).`)
+      return yield* outputEvents(
+        providerId,
+        "progress",
+        `Tool requested: ${event.name} (${event.callId}).`
+      )
     case "tool-completed":
-      return outputEvents(
+      return yield* outputEvents(
+        providerId,
         "progress",
         event.result.truncated
           ? `Tool completed: ${event.name}; full result retained as ${event.result.artifactId}.`
           : `Tool completed: ${event.name}.`
       )
     case "tool-failed":
-      return outputEvents("progress", `Tool failed: ${event.name} (${event.callId}).`)
+      return yield* outputEvents(
+        providerId,
+        "progress",
+        `Tool failed: ${event.name} (${event.callId}).`
+      )
     case "usage":
       if (
         !isAvailableUsage(event.inputTokens) ||
@@ -158,7 +230,8 @@ const mapEvent = Effect.fn("ToolAgentAdapter.mapEvent")(function*<Output>(
         outputTokens: event.outputTokens
       }]
     case "repair-requested":
-      return outputEvents(
+      return yield* outputEvents(
+        providerId,
         "progress",
         `Protocol repair requested for ${event.stage}: ${event.reason}`
       )
@@ -173,7 +246,7 @@ const mapEvent = Effect.fn("ToolAgentAdapter.mapEvent")(function*<Output>(
           })
         )
       )
-      return outputEvents("assistant", encoded)
+      return yield* outputEvents(providerId, "assistant", encoded)
     }
     case "completed":
       return [{
