@@ -133,7 +133,7 @@ A new agent assessment of a Review Suggestion against its immutable reviewed rev
 _Avoid_: Retry, approval, spellcheck
 
 **Suggestion Reconciliation**:
-The ID-based comparison performed by a re-review against prior suggestions. For each stable suggestion ID, the agent must report still-present with updated anchor and evidence, resolved with validation evidence, or reopened with materially new evidence; distinct root causes receive new IDs. Control Center validates every referenced ID and preserves prior revisions.
+The ID-based comparison performed by a re-review against prior suggestions. The agent reports distinct root causes as new with new IDs; for each prior stable suggestion ID, it reports still-present with updated anchor and evidence, resolved with validation evidence, or reopened with materially new evidence. Control Center validates every referenced ID and preserves prior revisions.
 _Avoid_: Line matching, replacement, report diff
 
 **Stale Review Suggestion**:

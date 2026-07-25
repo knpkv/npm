@@ -13,12 +13,22 @@ import {
   MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
 } from "./model.js"
 import type { AgentAdapter } from "./runtime.js"
-import { ToolAgentConfigurationError, type ToolAgentEvent, ToolAgentTimeoutError } from "./toolAgent.js"
+import {
+  ToolAgentArtifactRequiredError,
+  ToolAgentConfigurationError,
+  type ToolAgentEvent,
+  ToolAgentInvalidResponseError,
+  ToolAgentTimeoutError,
+  ToolAgentToolProtocolError
+} from "./toolAgent.js"
 
 const JsonString = Schema.fromJsonString(Schema.Json)
 const encodeJsonString = Schema.encodeUnknownEffect(JsonString)
 const isTimeout = Schema.is(ToolAgentTimeoutError)
 const isConfigurationError = Schema.is(ToolAgentConfigurationError)
+const isInvalidResponse = Schema.is(ToolAgentInvalidResponseError)
+const isToolProtocolError = Schema.is(ToolAgentToolProtocolError)
+const isArtifactRequired = Schema.is(ToolAgentArtifactRequiredError)
 const isAgentProviderError = Schema.is(AgentProviderError)
 
 const boundedMessage = (message: string): string => {
@@ -40,8 +50,39 @@ const normalizeFailure = (
     })
   }
   if (isConfigurationError(failure)) {
+    const tool = failure.toolName === undefined ? "" : ` for ${failure.toolName}`
     return new AgentProviderError({
-      message: `Structured tool-agent configuration is invalid: ${failure.reason}.`,
+      message: boundedMessage(
+        `Structured tool-agent configuration${tool} is invalid: ${failure.reason}.`
+      ),
+      phase: "configuration",
+      providerId: request.providerId,
+      retryable: false
+    })
+  }
+  if (isInvalidResponse(failure)) {
+    return new AgentProviderError({
+      message: `Structured tool-agent response was invalid at ${failure.stage}.`,
+      phase: "protocol",
+      providerId: request.providerId,
+      retryable: false
+    })
+  }
+  if (isToolProtocolError(failure)) {
+    return new AgentProviderError({
+      message: boundedMessage(
+        `Tool ${failure.toolName} violated the result protocol: ${failure.reason}.`
+      ),
+      phase: "protocol",
+      providerId: request.providerId,
+      retryable: false
+    })
+  }
+  if (isArtifactRequired(failure)) {
+    return new AgentProviderError({
+      message: boundedMessage(
+        `Tool ${failure.toolName} produced ${failure.byteLength} bytes without an artifact sink.`
+      ),
       phase: "configuration",
       providerId: request.providerId,
       retryable: false

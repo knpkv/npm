@@ -25,6 +25,8 @@ const textDecoder = new TextDecoder()
 const JsonString = Schema.fromJsonString(Schema.Json)
 const encodeJsonString = Schema.encodeUnknownEffect(JsonString)
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json)
+const isUtf8ContinuationByte = (byte: number | undefined): boolean =>
+  byte !== undefined && (byte & 0b1100_0000) === 0b1000_0000
 
 /** Opaque caller-owned reference to a retained complete tool result. */
 export const ToolAgentArtifactId = Schema.String.check(
@@ -272,8 +274,23 @@ const truncatedMaterial = (
   excerptBytes: number
 ): ToolAgentResultMaterial => {
   const bytes = textEncoder.encode(encoded)
-  const head = textDecoder.decode(bytes.slice(0, excerptBytes))
-  const tail = textDecoder.decode(bytes.slice(Math.max(0, bytes.byteLength - excerptBytes)))
+  let headEnd = Math.min(excerptBytes, bytes.byteLength)
+  while (
+    headEnd > 0 &&
+    headEnd < bytes.byteLength &&
+    isUtf8ContinuationByte(bytes[headEnd])
+  ) {
+    headEnd -= 1
+  }
+  let tailStart = Math.max(0, bytes.byteLength - excerptBytes)
+  while (
+    tailStart < bytes.byteLength &&
+    isUtf8ContinuationByte(bytes[tailStart])
+  ) {
+    tailStart += 1
+  }
+  const head = textDecoder.decode(bytes.slice(0, headEnd))
+  const tail = textDecoder.decode(bytes.slice(tailStart))
   const modelValue = {
     artifactId,
     byteLength: bytes.byteLength,

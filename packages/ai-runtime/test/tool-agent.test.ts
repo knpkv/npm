@@ -18,6 +18,7 @@ import {
   MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES,
   runToolAgent,
   ToolAgentArtifactId,
+  ToolAgentArtifactRequiredError,
   type ToolAgentArtifactSink,
   ToolAgentConfigurationError,
   type ToolAgentEvent,
@@ -27,6 +28,14 @@ import {
 } from "../src/index.js"
 
 const Output = Schema.Struct({ summary: Schema.String })
+const TruncatedResultEnvelope = Schema.Struct({
+  artifactId: ToolAgentArtifactId,
+  byteLength: Schema.Int,
+  head: Schema.String,
+  omittedBytes: Schema.Int,
+  tail: Schema.String,
+  truncated: Schema.Literal(true)
+})
 const context = { project: "fixture" }
 
 const usage = {
@@ -718,6 +727,17 @@ describe("runToolAgent", () => {
         expect(new TextEncoder().encode(encoded).byteLength).toBeLessThanOrEqual(
           MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES
         )
+        expect(Schema.is(TruncatedResultEnvelope)(completed.result.modelValue)).toBe(true)
+        if (Schema.is(TruncatedResultEnvelope)(completed.result.modelValue)) {
+          const envelope = completed.result.modelValue
+          expect(envelope.head).not.toContain("\uFFFD")
+          expect(envelope.tail).not.toContain("\uFFFD")
+          expect(envelope.omittedBytes).toBe(
+            envelope.byteLength -
+              new TextEncoder().encode(envelope.head).byteLength -
+              new TextEncoder().encode(envelope.tail).byteLength
+          )
+        }
       }
     }).pipe(
       Effect.provide(Layer.mergeAll(
@@ -960,5 +980,65 @@ describe("makeToolAgentAdapter", () => {
         { _tag: "usage", inputTokens: 0, outputTokens: 0 },
         { _tag: "usage", inputTokens: 12, outputTokens: 4 }
       ])
+    }))
+
+  it.effect("preserves tool-loop diagnostics in durable provider failures", () =>
+    Effect.gen(function*() {
+      const fixtures = [
+        {
+          failure: new ToolAgentConfigurationError({
+            reason: "tool-approval-not-supported",
+            toolName: "WriteFile"
+          }),
+          expected: {
+            message: expect.stringContaining("WriteFile"),
+            phase: "configuration"
+          }
+        },
+        {
+          failure: new ToolAgentInvalidResponseError({
+            cause: new Error("invalid response"),
+            stage: "final-output"
+          }),
+          expected: {
+            message: expect.stringContaining("final-output"),
+            phase: "protocol"
+          }
+        },
+        {
+          failure: new ToolAgentToolProtocolError({
+            reason: "invalid-result",
+            toolName: "InspectFile"
+          }),
+          expected: {
+            message: expect.stringContaining("InspectFile"),
+            phase: "protocol"
+          }
+        },
+        {
+          failure: new ToolAgentArtifactRequiredError({
+            byteLength: 80_000,
+            toolName: "LargeResult"
+          }),
+          expected: {
+            message: expect.stringContaining("80000"),
+            phase: "configuration"
+          }
+        }
+      ]
+
+      for (const fixture of fixtures) {
+        const runtime = makeAgentRuntime(
+          makeToolAgentAdapter(() => Stream.fail(fixture.failure))
+        )
+        const error = yield* runtime.run(request).pipe(Stream.runDrain, Effect.flip)
+
+        expect(error).toMatchObject({
+          _tag: "AgentProviderError",
+          providerId: request.providerId,
+          retryable: false,
+          ...fixture.expected
+        })
+      }
     }))
 })
