@@ -7,7 +7,7 @@ Plan against `origin/main` at `da998ad90` or a newer main revision, not the curr
 - Durable provider-neutral `@knpkv/ai-runtime`.
 - Local Codex and Claude Effect AI adapters.
 - Durable agent jobs, leases, cancellation, events, worker startup, and persisted review reports.
-- Exact CodeCommit source acquisition and a hardened bounded review container.
+- Exact CodeCommit source acquisition and a hardened bounded sbx sandbox.
 - CodeCommit review-action preflight, idempotency markers, receipts, and reconciliation.
 - Complete pull-request diff reads and a basic review panel.
 - Rly/Pierre complete diff rendering and workbench primitives.
@@ -56,7 +56,7 @@ Add a stateless tool-loop module behind the existing provider-neutral runtime se
 - Allow the caller to provide artifact paging and search tools.
 - Feed schema errors back to the model once; fail the second invalid response.
 - Provide an adapter that exposes the tool loop through the existing `AgentRuntimeService`, preserving durable-job integration.
-- Keep thread persistence, Docker, review vocabulary, and provider selection outside this package.
+- Keep thread persistence, sbx lifecycle policy, review vocabulary, and provider selection outside this package.
 
 ### Likely paths
 
@@ -90,20 +90,16 @@ Add a stateless tool-loop module behind the existing provider-neutral runtime se
 
 ### Goal
 
-Reuse the existing exact CodeCommit source and Docker mechanisms while replacing static-analyzer-only execution with an ephemeral writable project session controlled through typed tools.
+Reuse the existing exact CodeCommit source boundary while replacing static-analyzer-only execution with an ephemeral writable sbx project session controlled through typed tools.
 
-### Changes in `@knpkv/codecommit-core`
+### Changes in the CodeCommit boundary
 
-- Extract reusable low-level mechanisms from the interactive SandboxService:
-  - Authenticated host checkout.
-  - Exact commit verification.
-  - Container create/inspect/exec/stop/remove.
-  - Label-based reconciliation.
-- Keep interactive code-server sandbox policy behavior unchanged.
+- Reuse authenticated host checkout and exact commit verification.
+- Keep any interactive code-server sandbox policy behavior unchanged and separate.
 - Extend exact checkout inputs to require both expected base and head commit IDs.
-- Strip authenticated remotes and credential configuration before handoff.
-- Copy the verified checkout into an isolated Docker volume instead of bind-mounting the host staging directory.
-- Delete staging data after successful handoff and on every failure path.
+- Clone the verified checkout into an isolated sbx filesystem.
+- Strip authenticated remotes and credential configuration inside sbx before exposing tools.
+- Delete staging data and the sandbox on every terminal path.
 
 ### Changes in Control Center
 
@@ -115,44 +111,37 @@ Reuse the existing exact CodeCommit source and Docker mechanisms while replacing
   - Read temporary `git diff`.
   - Page/search retained command artifacts.
   - Close and destroy.
-- Preserve existing hardening:
-  - Digest-pinned runner image.
-  - Non-root user.
-  - No network by default.
-  - No Docker socket.
-  - No host mounts or exposed ports.
+- Apply sbx hardening:
+  - Trusted local `sbx` executable and optional template.
+  - Network denied for the run.
   - No inherited environment or credentials.
   - Bounded output and process duration.
-  - Container labels and startup reconciliation.
-- Add explicit unauthenticated endpoint allowlists without introducing credential injection.
+  - Prefix-scoped startup reconciliation.
 - Load executable repository instructions from the base revision only.
 - Remove the two-minute/one-shot analyzer assumption; accept the per-run Review Budget.
-- Destroy the container and Docker volume when the run terminates.
+- Destroy the sbx sandbox when the run terminates.
 
 ### Likely paths
 
 - `packages/codecommit-core/src/CheckoutService/*`
-- `packages/codecommit-core/src/SandboxService/DockerService.ts`
-- `packages/codecommit-core/src/SandboxService/SandboxService.ts`
 - `packages/codecommit-core/test/CheckoutService.test.ts`
 - `packages/control-center/src/server/agent/internal/PrReviewSourceWorkspace.ts`
-- `packages/control-center/src/server/agent/internal/PrReviewSandboxRunner.ts`
+- `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`
 - `packages/control-center/src/server/agent/internal/PrReviewWorkspaceProtocol.ts`
 - `packages/control-center/test/agent/pr-review-source-workspace.test.ts`
-- `packages/control-center/test/agent/pr-review-sandbox-runner.test.ts`
+- `packages/control-center/test/agent/pr-review-sandbox-session.test.ts`
 
 ### Tests
 
 - Local fixture repository produces exact base/head checkout.
 - Branch movement after enqueue cannot change the reviewed head.
-- Credentials and authenticated remotes are absent inside Docker.
-- Host staging path is not mounted in the container.
-- Workspace is writable inside the volume.
-- Network, Docker socket, host paths, and environment inheritance remain blocked.
+- Credentials and authenticated remotes are absent inside sbx.
+- Workspace is writable inside the cloned sandbox filesystem.
+- Network and environment inheritance remain blocked.
 - Commands, tests, temporary edits, and diff inspection work.
 - Cancellation and timeout kill child processes and clean resources.
-- Restart reconciliation finds labeled live containers.
-- Failure paths delete staging directories and volumes.
+- Restart reconciliation removes only stale `cc-pr-review-*` sandboxes.
+- Failure paths delete staging directories and sandboxes.
 
 ### Exit gate
 
@@ -160,18 +149,13 @@ CodeCommit Core and Control Center targeted sandbox tests, checks, lint, build, 
 
 ### Implemented shape
 
-The session is additive until PR 4 switches durable orchestration away from
-the pre-stable one-shot runner. `PrReviewSandboxSessions` owns exact-source
-handoff, the named-volume/container scope, typed sandbox tools, bounded local
-artifacts with deterministic oldest-first eviction, terminal command-timeout
-cleanup, and label reconciliation that removes orphaned initializers and
-volumes. The workspace uses a size-capped named `tmpfs` volume with image
-copy-up disabled, and reconciliation retains only exact running sessions. The
-exact-source broker
-now removes authenticated remotes and authority-bearing local Git
-configuration before handoff. The Docker integration test pulls a trusted
-digest-pinned runner when Docker is available and proves the policy against a
-local Git fixture without AWS or agent-provider credentials.
+`PrReviewSandboxSessions` owns exact-source handoff, the named sbx scope, typed
+sandbox tools, bounded local artifacts with deterministic oldest-first
+eviction, command and session timeouts, and prefix-scoped reconciliation.
+Control Center creates a cloned shell sandbox, denies all network access,
+removes authenticated remotes and authority-bearing local Git configuration,
+and verifies the exact head before exposing tools. Command-policy tests prove
+the sbx invocation shape without requiring provider credentials.
 
 ## PR 3 — Replace the review domain and persistence model
 
@@ -504,7 +488,7 @@ Finish operational behavior and prove the complete local workflow.
   - Sanitized activity/evidence for 30 days.
   - Raw command artifacts for 7 days.
   - Immediate sandbox/staging deletion.
-- Reattach to labeled live review containers on startup.
+- Reconcile stale `cc-pr-review-*` sbx sandboxes on startup.
 - Mark missing executions interrupted with partial evidence.
 - Add metadata-only OpenTelemetry spans and metrics:
   - Opaque run/PR IDs.
@@ -534,7 +518,7 @@ Finish operational behavior and prove the complete local workflow.
 - Retention boundaries with controlled clock.
 - Startup reattach and interrupted fallback.
 - No content-bearing telemetry attributes or events.
-- Real Docker fixture end-to-end.
+- Opt-in real sbx fixture end-to-end.
 - Browser launch-to-publication flow with fake provider and fake CodeCommit adapter.
 - Stale-head/re-review reconciliation flow.
 - Opt-in local authenticated Codex run.
@@ -556,7 +540,7 @@ Finish operational behavior and prove the complete local workflow.
 - Automatic CodeCommit comments, approvals, or request-changes.
 - Applying Suggested Replacement patches to a branch.
 - Credentials inside Review Sandboxes.
-- Privileged containers, nested Docker, or host Docker socket access.
+- Raw Docker review execution or provider access to sbx control.
 - Multi-user collaboration and real-time conflict resolution.
 - Migration of previous review records.
 - Compatibility with the old capped report schema.

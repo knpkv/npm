@@ -29,7 +29,10 @@ export type AgentJobTaskExecution =
 /** Server-owned task executor contract hidden behind the durable worker. */
 export interface AgentJobTaskExecutorService {
   readonly taskTags: ReadonlyArray<AgentJobTaskTag>
-  readonly execute: (claim: ClaimedAgentJob) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError>
+  readonly execute: (
+    claim: ClaimedAgentJob,
+    onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
+  ) => Effect.Effect<AgentJobTaskExecution, AgentRuntimeError>
 }
 
 /** Internal dependency-injection seam for deterministic task execution tests. */
@@ -44,7 +47,8 @@ export const agentJobTaskExecutorLayer = (
 
 const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
   reviews: PrReviewTaskExecutor["Service"],
-  claim: ClaimedAgentJob
+  claim: ClaimedAgentJob,
+  onActivity?: (event: AgentRuntimeEvent) => Effect.Effect<void, AgentRuntimeError>
 ): Effect.fn.Return<AgentJobTaskExecution, AgentRuntimeError> {
   if (claim.context.task._tag !== "pr-review") {
     return yield* new AgentProviderError({
@@ -56,7 +60,7 @@ const executeReview = Effect.fn("AgentJobTaskExecutor.executeReview")(function*(
   }
   return {
     _tag: "pr-review",
-    report: yield* reviews.execute(claim)
+    report: yield* reviews.execute(claim, onActivity)
   }
 })
 
@@ -129,9 +133,9 @@ export const reviewEnabledTaskExecutorLayer: Layer.Layer<
     const runtimes = yield* AgentRuntimeRegistry
     return AgentJobTaskExecutor.of({
       taskTags: ["release-chat", "pr-review"],
-      execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim) {
+      execute: Effect.fn("AgentJobTaskExecutor.execute")(function*(claim, onActivity) {
         if (claim.context.task._tag === "pr-review") {
-          return yield* executeReview(reviews, claim)
+          return yield* executeReview(reviews, claim, onActivity)
         }
         const selected = yield* runtimes.select({
           providerId: claim.providerId,
@@ -175,7 +179,7 @@ export const prReviewOnlyTaskExecutorLayer: Layer.Layer<
     const reviews = yield* PrReviewTaskExecutor
     return AgentJobTaskExecutor.of({
       taskTags: ["pr-review"],
-      execute: (claim) => executeReview(reviews, claim)
+      execute: (claim, onActivity) => executeReview(reviews, claim, onActivity)
     })
   })
 )

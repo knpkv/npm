@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { EntityId, EventCursor, JobId, ReleaseId } from "../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject } from "../domain/prReview.js"
+import { PrReviewOutcome, PrReviewReport, PrReviewSubject } from "../domain/prReview.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -76,6 +76,29 @@ export const AgentSafeProfile = Schema.Literal("read-only")
 /** Decoded safe execution profile. */
 export type AgentSafeProfile = typeof AgentSafeProfile.Type
 
+/** Stable server-owned profile selected before an immutable review starts. */
+export const ReviewAgentProfileId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(500),
+  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u)
+).pipe(Schema.brand("ReviewAgentProfileId"))
+
+/** Decoded Review Agent Profile identity. */
+export type ReviewAgentProfileId = typeof ReviewAgentProfileId.Type
+
+/** Browser-safe Review Agent Profile metadata. */
+export const ReviewAgentProfile = Schema.Struct({
+  profileId: ReviewAgentProfileId,
+  label: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  budgetMillis: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 })),
+  networkAccess: Schema.Literal("blocked"),
+  sandbox: Schema.Literal("sbx")
+})
+
+/** Decoded browser-safe Review Agent Profile metadata. */
+export type ReviewAgentProfile = typeof ReviewAgentProfile.Type
+
 /** Redacted provider health; configuration and transport diagnostics remain server-only. */
 export const AgentProviderHealth = Schema.Literals(["available", "not-configured"])
 
@@ -102,7 +125,8 @@ export const AgentProviderCatalogEntry = Schema.Struct({
     Schema.isMaxLength(AgentProviderCapability.literals.length),
     Schema.isUnique()
   ),
-  health: AgentProviderHealth
+  health: AgentProviderHealth,
+  reviewProfile: Schema.optionalKey(ReviewAgentProfile)
 })
 
 /** Decoded browser-safe provider catalog entry. */
@@ -302,7 +326,8 @@ export type EnqueueReleaseAgentJobResponse = typeof EnqueueReleaseAgentJobRespon
 export const EnqueuePullRequestReviewRequest = Schema.Struct({
   providerId: DurableAgentProviderId,
   model: AgentModelId,
-  profile: AgentSafeProfile
+  profile: AgentSafeProfile,
+  reviewProfileId: ReviewAgentProfileId
 })
 
 /** Decoded immutable pull-request review enqueue request. */
@@ -317,6 +342,13 @@ const pullRequestReviewJob = {
   jobId: JobId,
   providerId: DurableAgentProviderId,
   model: AgentModelId,
+  reviewProfile: ReviewAgentProfile,
+  activity: Schema.Struct({
+    events: Schema.Array(
+      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH))
+    ).check(Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)),
+    truncated: Schema.Boolean
+  }),
   requestedAt: UtcTimestamp
 }
 
@@ -346,7 +378,8 @@ export class PullRequestReviewPending extends Schema.TaggedClass<PullRequestRevi
 export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestReviewCompleted>()("completed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
-  report: PrReviewReport
+  report: PrReviewReport,
+  outcome: PrReviewOutcome
 }) {}
 
 /** Durable exact-head review stopped without publishing a recommendation. */

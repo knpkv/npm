@@ -11,7 +11,9 @@ import {
   DurableAgentProviderId,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
-  ReleaseAgentThreadCursor
+  ReleaseAgentThreadCursor,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -1936,6 +1938,13 @@ describe("Control Center API handlers", () => {
         headRevision: "2".repeat(40)
       })
       const received = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const reviewProfile: ReviewAgentProfile = {
+        profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
+        label: "Full-project review · openai-compatible · review-model",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      }
       const reviews = Layer.succeed(PullRequestReviews, {
         current: (input) =>
           Ref.update(received, (items) => [...items, input]).pipe(
@@ -1949,6 +1958,8 @@ describe("Control Center API handlers", () => {
                 jobId,
                 providerId: input.request.providerId,
                 model: input.request.model,
+                reviewProfile,
+                activity: { events: [], truncated: false },
                 requestedAt: session.lastSeenAt,
                 state: "queued"
               })
@@ -1971,7 +1982,8 @@ describe("Control Center API handlers", () => {
           payload: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: reviewProfile.profileId
           }
         })
         return { accepted, current }
@@ -1992,7 +2004,8 @@ describe("Control Center API handlers", () => {
           request: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: reviewProfile.profileId
           }
         }
       ])

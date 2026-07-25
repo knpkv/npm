@@ -192,6 +192,11 @@ export const WorkspacePullRequestDetails = ({
       <WorkspacePullRequestDiff
         heading={`Pull request ${pullRequest.headRevision.slice(0, 12)}`}
         onSessionExpired={onSessionExpired}
+        suggestions={
+          reviewState._tag === "ready" && reviewState.review._tag === "completed"
+            ? reviewState.review.report.suggestions
+            : []
+        }
         scope={pullRequest.diffScope}
         sessionKey={sessionKey}
       />

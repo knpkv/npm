@@ -91,19 +91,20 @@ describe("durable agent job queries", () => {
     const rendered = renderLatestAgentReviewQuery({
       workspaceId: "workspace-secret",
       subjectRevision: "head-secret",
-      taskContextJson: "task-json",
-      taskContextDigest: "task-digest"
+      taskContextPrefix: "task-prefix"
     })
 
     expect(rendered.params).toEqual([
       "workspace-secret",
       "head-secret",
-      "task-json",
-      "task-digest",
+      "task-prefix%",
       1
     ])
     expect(rendered.sql).toContain(
-      "where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"subject_revision\" = ?) and (\"agent_jobs\".\"task_context_json\" = ?) and (\"agent_jobs\".\"task_context_digest\" = ?))"
+      "where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"subject_revision\" = ?) and (\"agent_jobs\".\"task_context_json\" like ?))"
+    )
+    expect(rendered.sql).toContain(
+      "\"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\""
     )
     expect(rendered.sql).toContain(
       "order by \"agent_jobs\".\"created_at\" desc, \"agent_jobs\".\"job_id\" desc limit ?"

@@ -7,7 +7,7 @@ import {
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
-import type { RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
@@ -17,6 +17,7 @@ import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
+import type { PrReviewSuggestion } from "../../domain/prReview.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 
 const BoundedDiffCodeView = lazy(async () => {
@@ -146,12 +147,14 @@ export const WorkspacePullRequestDiff = ({
   onSessionExpired = ignoreSessionExpiration,
   scope,
   sessionKey = null,
+  suggestions = [],
   transport = browserWorkspacePullRequestDiffTransport
 }: {
   readonly heading: string
   readonly onSessionExpired?: (sessionKey: string) => void
   readonly scope: WorkspacePullRequestDiffScope
   readonly sessionKey?: string | null
+  readonly suggestions?: ReadonlyArray<PrReviewSuggestion>
   readonly transport?: WorkspacePullRequestDiffTransport
 }): ReactElement => {
   const [inventoryState, setInventoryState] = useState<InventoryLoadState>({ _tag: "loading" })
@@ -296,11 +299,66 @@ export const WorkspacePullRequestDiff = ({
           ],
     [scope.revision, selectedEntry, selectedText]
   )
+  const annotations = useMemo<ReadonlyArray<RlyDiffCodeAnnotation>>(
+    () =>
+      suggestions.flatMap((suggestion) => {
+        const entry = entries.find(({ path }) => String(path) === String(suggestion.evidence.path))
+        if (entry === undefined) return []
+        const annotation: RlyDiffCodeAnnotation = {
+          accessibilityLabel: `${suggestion.severity} review suggestion with ${suggestion.confidence.level} confidence`,
+          id: suggestion.suggestionId,
+          location: {
+            itemId: entry.anchor,
+            lineNumber: suggestion.evidence.startLine,
+            side: "additions"
+          },
+          render: ({ returnFocus }) => (
+            <article>
+              <strong>
+                {suggestion.severity} · {suggestion.confidence.level} confidence
+              </strong>
+              <p>{suggestion.problem}</p>
+              <p>
+                <strong>Impact:</strong> {suggestion.impact}
+              </p>
+              <pre>{suggestion.evidence.excerpt}</pre>
+              <p>
+                <strong>Recommendation:</strong> {suggestion.recommendation}
+              </p>
+              <p>{suggestion.confidence.reason}</p>
+              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.content}</pre>}
+              <button onClick={returnFocus} type="button">
+                Return to line
+              </button>
+            </article>
+          )
+        }
+        return [annotation]
+      }),
+    [entries, suggestions]
+  )
+  const findings = useMemo(
+    () =>
+      suggestions.map((suggestion) => ({
+        id: suggestion.suggestionId,
+        content: (
+          <>
+            <strong>
+              {suggestion.severity} · {suggestion.problem}
+            </strong>
+            <p>
+              {suggestion.evidence.path}:{suggestion.evidence.startLine}
+            </p>
+          </>
+        )
+      })),
+    [suggestions]
+  )
 
   return (
     <DiffWorkbench
-      emptyFindings="No review findings are attached to this revision."
-      findings={[]}
+      emptyFindings="No validated review suggestions are attached to this revision."
+      findings={findings}
       header={
         <DiffHeader
           findingFilter="all"
@@ -355,6 +413,7 @@ export const WorkspacePullRequestDiff = ({
         ) : (
           <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
             <BoundedDiffCodeView
+              annotations={annotations}
               key={selectedEntry.anchor}
               initialItems={selectedCodeItems}
               mode={layout}

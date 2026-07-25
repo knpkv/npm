@@ -2,7 +2,7 @@
 
 ## Outcome
 
-Control Center replaces its pre-stable bounded pull-request analyzer with a local, full-project review agent. The agent explores an exact CodeCommit pull-request revision in an ephemeral Docker sandbox, runs commands and tests autonomously, and returns only structured Review Suggestions and Review Notes.
+Control Center replaces its pre-stable bounded pull-request analyzer with a local, full-project review agent. The agent explores an exact CodeCommit pull-request revision in an ephemeral sbx sandbox, runs commands and tests autonomously, and returns only structured Review Suggestions.
 
 The agent never changes the branch or CodeCommit. The Local Operator may edit, revalidate, dismiss, or explicitly publish a suggestion as a CodeCommit comment.
 
@@ -184,7 +184,7 @@ It does not own:
 
 - Review concepts.
 - Conversation persistence.
-- Docker.
+- sbx lifecycle policy.
 - CodeCommit.
 - Provider selection.
 
@@ -207,60 +207,52 @@ Control Center owns:
 
 A run receives a bounded Review Context Snapshot rather than the whole thread: current revision, suggestion summaries, relevant recent operator messages, and prior limitations. Full history is available through a lookup tool. Targeted revalidation receives the selected suggestion's complete history.
 
-### CodeCommit and Docker reuse
+### CodeCommit checkout and sbx isolation
 
-`@knpkv/codecommit-core` retains profile discovery, authentication, exact checkout, comment operations, and low-level Docker lifecycle mechanisms.
-
-The interactive code-server sandbox and hardened Review Sandbox remain separate policies over shared mechanisms.
+The CodeCommit integration retains profile discovery, authentication, exact checkout, and comment operations. Control Center owns the hardened Review Sandbox as an sbx-only policy.
 
 A Review Checkout Broker:
 
 1. Uses the connected CodeCommit profile on the host.
 2. Fetches and verifies the exact base and head commit IDs.
 3. Removes authenticated remotes and credential configuration.
-4. Copies the checkout into an isolated writable Docker volume.
-5. Deletes host staging data after handoff.
+4. Lets `sbx create shell --clone` copy the checkout into an isolated writable sandbox filesystem.
+5. Deletes host staging data when the scoped run ends.
 
 ## Sandbox policy
 
-The Review Runner image is selected locally and pinned by digest. A PR cannot change the image evaluating itself.
+The local `sbx` executable and optional template are selected outside the reviewed repository. A PR cannot change the runner evaluating itself.
 
 The Review Sandbox is:
 
-- Ephemeral and unprivileged.
-- Writable inside its isolated Docker volume.
-- Free of host mounts, host credentials, and Docker socket access.
-- Network-disabled by default.
-- Not exposed through a host port.
+- Ephemeral and isolated in an sbx microVM.
+- Writable inside its cloned sandbox filesystem.
+- Free of host credentials and authority-bearing Git configuration.
+- Network-disabled for the complete run.
 - Autonomous inside its fixed policy: no command confirmations.
-- Destroyed with its volume when the run ends.
+- Destroyed when the run ends.
 
-The source broker checks out the immutable queued head, verifies it again after
-fetch, removes the authenticated `origin` and local credential-bearing Git
-configuration, and only then hands the tree to Docker. Handoff uses
-`docker container cp` through a short-lived, network-disabled initializer into
-a size-capped named `tmpfs` volume with image copy-up disabled; the host staging
-directory is deleted before the non-root review container starts accepting
-commands. The initializer stays mounted until the review container takes over
-the volume, may change ownership inside it, but cannot inspect a host mount, use
-the Docker socket, publish a port, or access a network.
+The source broker checks out the immutable queued head and verifies it after
+fetch. Control Center creates a named shell sandbox from that source with
+`sbx create shell --clone`, immediately applies `sbx policy deny network`, then
+executes a credential-free initialization command inside the sandbox. That
+command removes Git remotes and credential helpers and verifies the exact head
+again before any Review Sandbox tool can run.
 
-The review container runs as UID/GID `65532`, with a read-only root filesystem,
-an isolated writable `/workspace` volume, a bounded private `/tmp`, dropped
-capabilities, `no-new-privileges`, no default network, no published ports, and
-no inherited host environment. Every host-side Docker invocation also uses a
-fixed credential-free environment and disables shell interpretation.
+Every contained command uses `sbx exec` with an explicit work directory and a
+fixed minimal environment. Host environment inheritance and shell
+interpretation of sbx control arguments are disabled.
 
-The Local Operator may explicitly allowlist unauthenticated outbound endpoints for a run. Credentials are never injected. Tests requiring secrets, privileged execution, or nested containers are skipped and reported as limitations.
+Credentials are never injected. Tests requiring secrets or unavailable system capabilities are skipped and reported as limitations.
 
-The AI provider process remains outside Docker. The provider-neutral tool loop
+The AI provider process remains outside sbx. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
 output receives a session-local opaque artifact ID. A session retains at most
 64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
 pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
-host or Docker access. File reads and listings preserve missing-path failures,
+host or sbx control access. File reads and listings preserve missing-path failures,
 and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
 changes.
 
@@ -276,20 +268,16 @@ Run statuses are preparing, running, completed, cancelled, interrupted, failed, 
 
 On startup, Control Center:
 
-- Reattaches to labeled live review containers.
-- Marks a run interrupted if its execution no longer exists.
-- Preserves partial evidence.
-- Offers restart as a new immutable run rather than simulating provider-session recovery.
+- Removes stale `cc-pr-review-*` sbx sandboxes.
+- Recovers durable queued or lease-expired review jobs through the worker.
+- Starts a fresh sandbox for a recovered attempt rather than simulating provider-session recovery.
 
 Session acquisition and use are scoped. Cancellation, command or session
 timeout, copy/start failure, callback failure, and normal completion all force
-container and named-volume removal. A command timeout closes the session before
+sbx sandbox removal. A command timeout fails the session before
 returning its typed failure, and model-requested timeouts cannot exceed the
-locally configured command cap. Label reconciliation accepts only exact
-job/attempt-derived resource identities, ignores malformed daemon output, and
-removes orphaned initializer containers and named volumes while preserving the
-volume belonging to an exact running session. Exact stopped, exited, or dead
-session containers and their now-orphaned volumes are removed.
+locally configured command cap. Startup reconciliation lists sbx sandboxes and
+removes only names with the `cc-pr-review-` prefix.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 
@@ -298,7 +286,7 @@ Malformed tool arguments or final output receive one schema-guided repair attemp
 - Thread messages, suggestions, notes, lifecycle events, and publication links: retained until manually deleted.
 - Sanitized command timeline and evidence excerpts: retained for 30 days.
 - Raw command output: retained for 7 days.
-- Host staging checkout, sandbox filesystem, and Docker volume: deleted immediately after the run.
+- Host staging checkout and sbx sandbox filesystem: deleted immediately after the run.
 
 No migration or backward compatibility is required for the previous pre-stable review model.
 
@@ -320,7 +308,7 @@ Prompts, source, command output, model output, replacement patches, and credenti
 
 - Pure suggestion lifecycle and reconciliation state-machine tests.
 - Scripted fake-model tests for `@knpkv/ai-runtime`: tool calls, schema repair, output bounds, cancellation, and timeout.
-- Real Docker integration test over a local fixture repository without AWS or provider credentials.
+- sbx command-policy tests and an opt-in real sbx integration test when the CLI is available.
 - CodeCommit adapter contract tests for exact-head checkout and comment publication.
 - Browser flow: launch, live activity, inline suggestion, edit, revalidation, publication preview, staleness, and re-review.
 - Opt-in real Codex smoke test using the locally authenticated CLI.
@@ -329,8 +317,8 @@ Prompts, source, command output, model output, replacement patches, and credenti
 
 1. Replace the review domain schema and state machines.
 2. Deepen `@knpkv/ai-runtime` with the stateless tool-loop module and fake-model tests.
-3. Refactor reusable checkout and Docker mechanisms in `@knpkv/codecommit-core`.
-4. Add hardened Review Sandbox policy and Docker integration tests.
+3. Reuse the exact CodeCommit checkout boundary.
+4. Add the hardened sbx Review Sandbox policy and command/integration tests.
 5. Implement Review Thread orchestration, persistence, retention, recovery, and metadata-only telemetry.
 6. Extend `@knpkv/rly/diff` for application-rendered inline annotations.
 7. Build the integrated PR review workspace and launch/publication popups.

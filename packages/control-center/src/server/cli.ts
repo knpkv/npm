@@ -62,12 +62,14 @@ const serverConfiguration = Config.all({
   agentOpenAiModel: Config.string("CONTROL_CENTER_AGENT_OPENAI_MODEL").pipe(Config.withDefault("")),
   agentCwd: Config.string("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
   agentProviders: Config.string("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
-  prReviewAnalyzerCommand: Config.string("CONTROL_CENTER_PR_REVIEW_ANALYZER_COMMAND").pipe(
-    Config.withDefault("")
+  prReviewSbxEnabled: Config.boolean("CONTROL_CENTER_PR_REVIEW_SBX_ENABLED").pipe(Config.withDefault(false)),
+  prReviewSbxExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE").pipe(Config.withDefault("sbx")),
+  prReviewSbxTemplate: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE").pipe(Config.withDefault("")),
+  prReviewBudgetMillis: Config.int("CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS").pipe(
+    Config.withDefault(1_200_000)
   ),
-  prReviewImage: Config.string("CONTROL_CENTER_PR_REVIEW_IMAGE").pipe(Config.withDefault("")),
   prReviewMaximumDurationMillis: Config.int("CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS").pipe(
-    Config.withDefault(120_000)
+    Config.withDefault(1_200_000)
   ),
   allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
   allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
@@ -99,7 +101,7 @@ class ControlCenterCliUsageError extends Schema.TaggedErrorClass<ControlCenterCl
 class ControlCenterCliConfigurationError extends Schema.TaggedErrorClass<
   ControlCenterCliConfigurationError
 >()("ControlCenterCliConfigurationError", {
-  reason: Schema.Literals(["incomplete-pr-review-configuration", "pr-review-provider-unavailable"])
+  reason: Schema.Literal("pr-review-provider-unavailable")
 }) {}
 
 const program = Effect.scoped(
@@ -188,25 +190,17 @@ const program = Effect.scoped(
             : { apiKey: configured.agentOpenAiApiKey })
         }
         : undefined
-      const hasPrReviewImage = configured.prReviewImage.length > 0
-      const hasPrReviewAnalyzer = configured.prReviewAnalyzerCommand.length > 0
-      if (hasPrReviewImage !== hasPrReviewAnalyzer) {
-        return yield* new ControlCenterCliConfigurationError({
-          reason: "incomplete-pr-review-configuration"
-        })
-      }
-      if (hasPrReviewImage && openAiCompatible === undefined) {
+      if (configured.prReviewSbxEnabled && openAiCompatible === undefined) {
         return yield* new ControlCenterCliConfigurationError({
           reason: "pr-review-provider-unavailable"
         })
       }
-      const prReviewAnalyzerCommand = hasPrReviewAnalyzer
-        ? yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(
-            Schema.Array(Schema.String).check(Schema.isMinLength(1), Schema.isMaxLength(32))
-          )
-        )(configured.prReviewAnalyzerCommand)
-        : null
+      const prReviewBudgetMillis = yield* Schema.decodeUnknownEffect(
+        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 }))
+      )(configured.prReviewBudgetMillis)
+      const prReviewMaximumDurationMillis = yield* Schema.decodeUnknownEffect(
+        Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 }))
+      )(configured.prReviewMaximumDurationMillis)
       const allowedHosts = commaSeparated(configured.allowedHosts)
       const allowedOrigins = commaSeparated(configured.allowedOrigins)
       const trustedProxyAddresses = commaSeparated(configured.trustedProxyAddresses)
@@ -240,14 +234,17 @@ const program = Effect.scoped(
             workspaceName: WorkspaceName.make("Control Center")
           },
           persistenceConfig: dataPaths.persistenceConfig,
-          prReviewWorker: hasPrReviewImage && prReviewAnalyzerCommand !== null
+          prReviewWorker: configured.prReviewSbxEnabled
             ? {
               workspaceId: DEFAULT_WORKSPACE_ID,
               workspaceRoot: path.join(dataPaths.dataRoot, "pr-review-workspaces"),
-              image: configured.prReviewImage,
-              analyzerCommand: prReviewAnalyzerCommand,
+              sbxExecutable: configured.prReviewSbxExecutable,
+              ...(configured.prReviewSbxTemplate.length === 0
+                ? {}
+                : { sbxTemplate: configured.prReviewSbxTemplate }),
+              reviewBudgetMillis: prReviewBudgetMillis,
               leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
-              maximumSandboxDurationMillis: configured.prReviewMaximumDurationMillis
+              maximumSandboxDurationMillis: prReviewMaximumDurationMillis
             }
             : null,
           releaseAgent: agentCwd === null && openAiCompatible === undefined

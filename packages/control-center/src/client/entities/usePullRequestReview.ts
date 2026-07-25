@@ -14,6 +14,7 @@ const POLL_INTERVAL = Duration.seconds(2)
 interface ReviewProviderSelection {
   readonly model: AgentProviderCatalogEntry["models"][number]
   readonly providerId: AgentProviderCatalogEntry["providerId"]
+  readonly reviewProfile: NonNullable<AgentProviderCatalogEntry["reviewProfile"]>
 }
 
 interface PullRequestReviewScope {
@@ -53,9 +54,10 @@ const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelectio
     if (
       provider.health === "available" &&
       provider.capabilities.includes("pr-review") &&
+      provider.reviewProfile !== undefined &&
       model !== undefined
     ) {
-      return { providerId: provider.providerId, model }
+      return { providerId: provider.providerId, model, reviewProfile: provider.reviewProfile }
     }
   }
   return null
@@ -72,7 +74,8 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
           payload: {
             providerId: provider.providerId,
             model: provider.model,
-            profile: "read-only"
+            profile: "read-only",
+            reviewProfileId: provider.reviewProfile.profileId
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),

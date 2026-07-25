@@ -3,6 +3,7 @@ import { Deferred, Effect, Layer } from "effect"
 
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { AgentJobWorker, type AgentJobWorkerRunResult } from "../../src/server/agent/AgentJobWorker.js"
+import { PrReviewSandboxSessions } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
   PrReviewWorkerRunning,
   PrReviewWorkerStartup,
@@ -24,12 +25,19 @@ describe("PR review worker startup", () => {
             Effect.tap(() => Effect.sync(() => assert.strictEqual(workspaceId, WORKSPACE_ID)))
           )
       })
+      const sandboxes = PrReviewSandboxSessions.of({
+        withSession: () => Effect.die("not used"),
+        reconcile: () => Effect.succeed({ removedSandboxes: [] })
+      })
       const startup = prReviewWorkerStartupLayer({
         workspaceId: WORKSPACE_ID,
         idlePollInterval: "1 hour"
       }).pipe(
-        Layer.provide(Layer.succeed(AgentJobWorker, worker)),
-        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+        Layer.provide(Layer.mergeAll(
+          Layer.succeed(AgentJobWorker, worker),
+          Layer.succeed(PrReviewSandboxSessions, sandboxes),
+          Layer.succeed(ServerLifecycle, lifecycle)
+        ))
       )
 
       const running = yield* Effect.gen(function*() {

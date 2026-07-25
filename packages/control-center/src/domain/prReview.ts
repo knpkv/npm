@@ -1,8 +1,5 @@
-/** Bounded, provider-neutral pull-request review result contracts. @module */
+/** Evidence-anchored pull-request review suggestion contracts. @module */
 import * as Schema from "effect/Schema"
-
-/** Maximum number of findings retained in one durable review report. */
-export const MAXIMUM_PR_REVIEW_FINDINGS = 12
 
 /** Maximum UTF-8 JSON size retained inside the existing durable event envelope. */
 export const MAXIMUM_PR_REVIEW_REPORT_BYTES = 32_768
@@ -77,7 +74,7 @@ export const PrReviewSubject = Schema.Struct({
 /** Decoded immutable pull request review subject. */
 export type PrReviewSubject = typeof PrReviewSubject.Type
 
-/** Static or behavioral enforcement layer proposed by one finding. */
+/** Static or behavioral enforcement layer proposed by one suggestion. */
 export const PrReviewPreventionEnforcement = Schema.Literals([
   "ast-grep",
   "ESLint",
@@ -117,59 +114,97 @@ export const PrReviewPrevention = Schema.Union([PreventionProposal, NoPrevention
 /** Decoded PR-review prevention note. */
 export type PrReviewPrevention = typeof PrReviewPrevention.Type
 
-/** Stable model-authored identity within one review report. */
-export const PrReviewFindingId = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u, {
-    expected: "a domain-safe finding identifier"
+/** Stable host-derived suggestion identity within one immutable review. */
+export const PrReviewSuggestionId = Schema.String.check(
+  Schema.isPattern(/^sha256:[a-f0-9]{64}$/u, {
+    expected: "a sha256 suggestion identity"
   })
-).pipe(Schema.brand("PrReviewFindingId"))
+).pipe(Schema.brand("PrReviewSuggestionId"))
 
-/** Decoded PR-review finding identity. */
-export type PrReviewFindingId = typeof PrReviewFindingId.Type
+/** Decoded PR-review suggestion identity. */
+export type PrReviewSuggestionId = typeof PrReviewSuggestionId.Type
 
 const PrReviewLine = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }))
 
-/** One bounded, file-specific finding awaiting stable diff-anchor resolution. */
-export const PrReviewFinding = Schema.Struct({
-  findingId: PrReviewFindingId,
-  severity: Schema.Literals(["critical", "high", "medium", "low", "info"]),
+/** Exact source evidence which must be verified against an added diff line. */
+export const PrReviewSuggestionEvidence = Schema.Struct({
   path: PrReviewPath,
   startLine: PrReviewLine,
   endLine: PrReviewLine,
-  title: boundedSingleLine(500, "PrReviewFindingTitle"),
-  detail: boundedMultiline(4_000, "PrReviewFindingDetail"),
-  prevention: PrReviewPrevention
+  excerpt: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(8_000),
+    Schema.makeFilter(hasNoUnsafeMultilineControlCharacters, {
+      expected: "source evidence without unsafe control characters"
+    })
+  )
 })
   .check(
     Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
-      expected: "a finding end line at or after its start line"
+      expected: "an evidence end line at or after its start line"
     })
   )
-  .annotate({ identifier: "PrReviewFinding" })
+  .annotate({ identifier: "PrReviewSuggestionEvidence" })
 
-/** Decoded PR-review finding. */
-export type PrReviewFinding = typeof PrReviewFinding.Type
+/** Decoded PR-review suggestion evidence. */
+export type PrReviewSuggestionEvidence = typeof PrReviewSuggestionEvidence.Type
 
-/**
- * Model-authored recommendation vocabulary.
- *
- * These values intentionally cannot encode the human `approve` or
- * `request-changes` disposition.
- */
-export const PrReviewAgentRecommendation = Schema.Literals([
-  "no-material-findings",
-  "changes-recommended",
-  "unable-to-conclude"
+/** Optional exact replacement for the evidence range. */
+export const PrReviewReplacement = Schema.Struct({
+  content: boundedMultiline(16_000, "PrReviewReplacementContent")
+}).annotate({ identifier: "PrReviewReplacement" })
+
+/** Decoded PR-review replacement. */
+export type PrReviewReplacement = typeof PrReviewReplacement.Type
+
+/** Confidence is explicit and always accompanied by model reasoning. */
+export const PrReviewConfidence = Schema.Struct({
+  level: Schema.Literals(["low", "medium", "high"]),
+  reason: boundedMultiline(2_000, "PrReviewConfidenceReason")
+}).annotate({ identifier: "PrReviewConfidence" })
+
+/** Decoded PR-review confidence. */
+export type PrReviewConfidence = typeof PrReviewConfidence.Type
+
+const prReviewSuggestionDraftFields = {
+  severity: Schema.Literals(["P1", "P2", "P3", "P4"]),
+  problem: boundedMultiline(4_000, "PrReviewSuggestionProblem"),
+  impact: boundedMultiline(4_000, "PrReviewSuggestionImpact"),
+  evidence: PrReviewSuggestionEvidence,
+  recommendation: boundedMultiline(8_000, "PrReviewSuggestionRecommendation"),
+  confidence: PrReviewConfidence,
+  prevention: Schema.optionalKey(PrReviewPrevention),
+  replacement: Schema.optionalKey(PrReviewReplacement)
+}
+
+/** Model output for one suggestion before immutable identity is derived. */
+export const PrReviewSuggestionDraft = Schema.Struct(
+  prReviewSuggestionDraftFields
+).annotate({ identifier: "PrReviewSuggestionDraft" })
+
+/** Decoded model-authored suggestion awaiting evidence verification. */
+export type PrReviewSuggestionDraft = typeof PrReviewSuggestionDraft.Type
+
+/** One schema-valid and evidence-verified suggestion. */
+export const PrReviewSuggestion = Schema.Struct({
+  suggestionId: PrReviewSuggestionId,
+  ...prReviewSuggestionDraftFields
+}).annotate({ identifier: "PrReviewSuggestion" })
+
+/** Decoded PR-review suggestion. */
+export type PrReviewSuggestion = typeof PrReviewSuggestion.Type
+
+/** Epistemic completion state; this is not an approval or overall model verdict. */
+export const PrReviewCompletion = Schema.Union([
+  Schema.Struct({ status: Schema.Literal("complete") }),
+  Schema.Struct({
+    status: Schema.Literal("unable-to-conclude"),
+    reason: boundedMultiline(4_000, "PrReviewUnableToConcludeReason")
+  })
 ])
 
-/** Decoded model-authored PR recommendation. */
-export type PrReviewAgentRecommendation = typeof PrReviewAgentRecommendation.Type
-
-/** Separate human authority vocabulary, not accepted in an agent report. */
-export const PrReviewHumanDisposition = Schema.Literals(["approve", "request-changes"])
-
-/** Decoded human PR-review disposition. */
-export type PrReviewHumanDisposition = typeof PrReviewHumanDisposition.Type
+/** Decoded review completion state. */
+export type PrReviewCompletion = typeof PrReviewCompletion.Type
 
 const hasMaximumReportBytes = Schema.makeFilter(
   (value: unknown) => {
@@ -179,17 +214,21 @@ const hasMaximumReportBytes = Schema.makeFilter(
   { expected: `JSON encoded as at most ${MAXIMUM_PR_REVIEW_REPORT_BYTES} UTF-8 bytes` }
 )
 
-/** Complete sanitized result produced for one exact immutable PR subject. */
+/**
+ * Complete sanitized result for one immutable PR subject.
+ *
+ * Suggestions have no count cap. The durable event byte envelope remains the
+ * only aggregate storage bound.
+ */
 export const PrReviewReport = Schema.Struct({
-  schemaVersion: Schema.Literal(1),
+  schemaVersion: Schema.Literal(2),
   subject: PrReviewSubject,
-  recommendation: PrReviewAgentRecommendation,
-  summary: boundedMultiline(4_000, "PrReviewSummary"),
-  findings: Schema.Array(PrReviewFinding).check(
-    Schema.isMaxLength(MAXIMUM_PR_REVIEW_FINDINGS),
-    Schema.makeFilter((findings) => new Set(findings.map(({ findingId }) => findingId)).size === findings.length, {
-      expected: "unique PR review finding identifiers"
-    })
+  completion: PrReviewCompletion,
+  suggestions: Schema.Array(PrReviewSuggestion).check(
+    Schema.makeFilter(
+      (suggestions) => new Set(suggestions.map(({ suggestionId }) => suggestionId)).size === suggestions.length,
+      { expected: "unique PR review suggestion identifiers" }
+    )
   )
 })
   .check(hasMaximumReportBytes)
@@ -197,3 +236,23 @@ export const PrReviewReport = Schema.Struct({
 
 /** Decoded complete PR-review report. */
 export type PrReviewReport = typeof PrReviewReport.Type
+
+/** Outcome derived by Control Center, never authored by the model. */
+export const PrReviewOutcome = Schema.Literals([
+  "changes-required",
+  "non-blocking-suggestions",
+  "no-issues-found",
+  "unable-to-conclude"
+])
+
+/** Decoded derived PR-review outcome. */
+export type PrReviewOutcome = typeof PrReviewOutcome.Type
+
+/** Derive the browser verdict from validated durable suggestions. */
+export const derivePrReviewOutcome = (report: PrReviewReport): PrReviewOutcome => {
+  if (report.completion.status === "unable-to-conclude") return "unable-to-conclude"
+  if (report.suggestions.some(({ severity }) => severity === "P1" || severity === "P2")) {
+    return "changes-required"
+  }
+  return report.suggestions.length > 0 ? "non-blocking-suggestions" : "no-issues-found"
+}

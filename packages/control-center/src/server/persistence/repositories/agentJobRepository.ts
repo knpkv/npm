@@ -42,7 +42,8 @@ import {
   EnqueueAgentJobInput,
   LatestAgentReviewInput,
   LatestAgentReviewRecord,
-  MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
+  MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 
@@ -104,11 +105,14 @@ const JobRow = Schema.Struct({
 
 const LatestReviewRow = Schema.Struct({
   jobId: JobId,
+  threadId: AgentThreadId,
   providerId: EnqueueAgentJobInput.fields.providerId,
   model: EnqueueAgentJobInput.fields.model,
   state: AgentJobState,
   createdAt: UtcTimestamp,
-  terminalAt: Schema.NullOr(UtcTimestamp)
+  terminalAt: Schema.NullOr(UtcTimestamp),
+  taskContextJson: Schema.String,
+  taskContextDigest: PersistedDigest
 })
 
 const DispatchCandidateRow = Schema.Struct({
@@ -1022,14 +1026,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
               leaseToken: request.leaseToken,
               observedAt: request.occurredAt
             })
-            if (
-              job.task._tag === "pr-review" &&
+            const allowedReviewActivity = request.event._tag === "started" ||
+              request.event._tag === "usage" ||
+              (request.event._tag === "output" && request.event.channel === "progress") ||
               (
-                job.state !== "cancel-requested" ||
-                request.event._tag !== "completed" ||
-                request.event.outcome !== "cancelled"
+                job.state === "cancel-requested" &&
+                request.event._tag === "completed" &&
+                request.event.outcome === "cancelled"
               )
-            ) {
+            if (job.task._tag === "pr-review" && !allowedReviewActivity) {
               return yield* new AgentJobInputError({
                 workspaceId: request.workspaceId,
                 jobId: request.jobId,
@@ -1309,15 +1314,20 @@ const makeAgentJobRepository = Effect.gen(function*() {
 
     latestReview: Effect.fn("AgentJobRepository.latestReview")(function*(input) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewInput))(input)
-      const taskContext = yield* encodePayload(AgentJobTask, {
-        _tag: "pr-review",
-        subject: request.subject
-      })
+      const subjectJson = yield* Schema.encodeUnknownEffect(
+        Schema.fromJsonString(PrReviewSubject)
+      )(request.subject).pipe(
+        Effect.mapError(() =>
+          new PersistenceOperationError({
+            operation: "agent-job.latest-review-subject"
+          })
+        )
+      )
+      const taskContextPrefix = `{"_tag":"pr-review","subject":${subjectJson},"reviewProfile":`
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
         subjectRevision: request.subject.headRevision,
-        taskContextJson: taskContext.json,
-        taskContextDigest: taskContext.digest
+        taskContextPrefix
       })
       const rows = yield* sql
         .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
@@ -1332,15 +1342,82 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-review-latest-schema-invalid"
         )
       }
+      const task = yield* decodeTaskContext(
+        request.workspaceId,
+        row.success.jobId,
+        row.success.taskContextJson,
+        row.success.taskContextDigest
+      )
+      if (
+        task._tag !== "pr-review" ||
+        task.subject.providerId !== request.subject.providerId ||
+        task.subject.repository !== request.subject.repository ||
+        task.subject.pullRequestId !== request.subject.pullRequestId ||
+        task.subject.baseRevision !== request.subject.baseRevision ||
+        task.subject.headRevision !== request.subject.headRevision
+      ) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review",
+          request.subject.pullRequestId,
+          "agent-review-subject-mismatch"
+        )
+      }
       const report = row.success.state === "succeeded"
         ? (yield* readReviewResult({
           workspaceId: request.workspaceId,
           jobId: row.success.jobId
         })).report
         : null
+      const activityRows = yield* sql<Record<string, unknown>>`SELECT
+        workspace_id AS workspaceId, thread_id AS threadId,
+        event_sequence AS eventSequence, job_id AS jobId,
+        attempt_sequence AS attemptSequence, event_kind AS eventKind,
+        payload_json AS payloadJson, payload_digest AS payloadDigest,
+        payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+        FROM agent_thread_events
+        WHERE workspace_id = ${request.workspaceId}
+          AND job_id = ${row.success.jobId}
+          AND event_kind = 'progress'
+        ORDER BY event_sequence ASC
+        LIMIT ${MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE + 1}`.pipe(
+        mapPersistenceOperation("agent-job.latest-review-activity")
+      )
+      const activity = new Array<string>()
+      for (const unknownRow of activityRows.slice(0, MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)) {
+        const decodedRow = Schema.decodeUnknownResult(ThreadEventRow)(unknownRow)
+        if (Result.isFailure(decodedRow)) {
+          return yield* persistedRecordError(
+            request.workspaceId,
+            "agent-review",
+            request.subject.pullRequestId,
+            "agent-review-activity-schema-invalid"
+          )
+        }
+        const payload = yield* decodeEventPayload(request.workspaceId, decodedRow.success)
+        const decodedEvent = Schema.decodeUnknownResult(AgentRuntimeEvent)(payload)
+        if (
+          Result.isFailure(decodedEvent) ||
+          decodedEvent.success._tag !== "output" ||
+          decodedEvent.success.channel !== "progress"
+        ) {
+          return yield* persistedRecordError(
+            request.workspaceId,
+            "agent-review",
+            request.subject.pullRequestId,
+            "agent-review-activity-payload-invalid"
+          )
+        }
+        activity.push(decodedEvent.success.text)
+      }
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
-        report
+        report,
+        reviewProfile: task.reviewProfile,
+        activity: {
+          events: activity,
+          truncated: activityRows.length > MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+        }
       })
       return Option.some(record)
     }),

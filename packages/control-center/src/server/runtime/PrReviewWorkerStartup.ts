@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
+import { PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const DEFAULT_IDLE_POLL_INTERVAL = Duration.seconds(1)
@@ -38,6 +39,8 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
 ) {
   const lifecycle = yield* ServerLifecycle
   const worker = yield* AgentJobWorker
+  const sandboxes = yield* PrReviewSandboxSessions
+  yield* sandboxes.reconcile().pipe(Effect.orDie)
   const idlePollInterval = Duration.fromInputUnsafe(
     options.idlePollInterval ?? DEFAULT_IDLE_POLL_INTERVAL
   )
@@ -79,5 +82,5 @@ export const prReviewWorkerStartupLayer = (
 ): Layer.Layer<
   PrReviewWorkerStartup,
   never,
-  AgentJobWorker | ServerLifecycle
+  AgentJobWorker | PrReviewSandboxSessions | ServerLifecycle
 > => Layer.effect(PrReviewWorkerStartup, makeStartup(options))

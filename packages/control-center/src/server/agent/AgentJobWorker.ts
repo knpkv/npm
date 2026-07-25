@@ -34,8 +34,7 @@ import {
   releaseChatTaskExecutorLayer,
   reviewEnabledTaskExecutorLayer
 } from "./internal/AgentJobTaskExecutor.js"
-import type { PrReviewSandboxRunner } from "./internal/PrReviewSandboxRunner.js"
-import type { PrReviewSourceWorkspace } from "./internal/PrReviewSourceWorkspace.js"
+import type { PrReviewSandboxSessions } from "./internal/PrReviewSandboxSession.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
 
 /** Worker lease policy fixed when the server composes the module. */
@@ -198,7 +197,29 @@ const makeAgentJobWorker = Effect.gen(function*() {
       return yield* cancelClaim(claim)
     }
 
-    const selected = yield* taskExecutor.execute(claim).pipe(Effect.result)
+    const onReviewActivity = (event: AgentRuntimeEvent) =>
+      DateTime.now.pipe(
+        Effect.flatMap((occurredAt) =>
+          jobs.appendEvent({
+            workspaceId: claim.workspaceId,
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken,
+            event,
+            occurredAt
+          })
+        ),
+        Effect.asVoid,
+        Effect.mapError(() =>
+          new AgentProviderError({
+            providerId: claim.providerId,
+            phase: "execution",
+            message: "Review activity persistence failed.",
+            retryable: false
+          })
+        )
+      )
+    const selected = yield* taskExecutor.execute(claim, onReviewActivity).pipe(Effect.result)
     if (Result.isFailure(selected)) {
       return yield* failClaim(claim, normalizeRuntimeFailure(claim.providerId, selected.failure))
     }
@@ -377,7 +398,7 @@ export const agentJobWorkerWithPrReviewLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner | PrReviewSourceWorkspace
+  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxSessions
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
@@ -393,7 +414,7 @@ export const prReviewAgentJobWorkerLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxRunner | PrReviewSourceWorkspace
+  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxSessions
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
