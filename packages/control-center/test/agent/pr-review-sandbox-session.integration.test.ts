@@ -158,7 +158,6 @@ describe("PrReviewSandboxSessions Docker integration", () => {
             committed.stderr
           )
           const runnerImage = committed.stdout.trim()
-          assert.match(runnerImage, /^sha256:[a-f0-9]{64}$/u)
           yield* Effect.addFinalizer(() =>
             run("docker", [
               "image",
@@ -167,6 +166,7 @@ describe("PrReviewSandboxSessions Docker integration", () => {
               runnerImage
             ]).pipe(Effect.ignore)
           )
+          assert.match(runnerImage, /^sha256:[a-f0-9]{64}$/u)
           const removedImageFixture = yield* run("docker", [
             "container",
             "rm",
