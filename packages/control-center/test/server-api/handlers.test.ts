@@ -15,6 +15,7 @@ import {
   ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
+  ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
@@ -2072,6 +2073,9 @@ describe("Control Center API handlers", () => {
           accountId: "123456789012",
           arn: "arn:aws:iam::123456789012:user/local-operator"
         },
+        authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+          `sha256:${"a".repeat(64)}`
+        ),
         proposingAgent: reviewProfile,
         publishingOperator: sessionPersonId
       })
@@ -2117,7 +2121,12 @@ describe("Control Center API handlers", () => {
         })
         const publication = yield* client.agent.publishReviewSuggestion({
           params: { entityId },
-          payload: { jobId, suggestionId, finalContent }
+          payload: {
+            jobId,
+            suggestionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          }
         })
         return { publication, publicationPreview }
       }).pipe(Effect.provide([
@@ -2142,7 +2151,12 @@ describe("Control Center API handlers", () => {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         return yield* client.agent.publishReviewSuggestion({
           params: { entityId },
-          payload: { jobId, suggestionId, finalContent }
+          payload: {
+            jobId,
+            suggestionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          }
         }).pipe(Effect.result)
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
@@ -2168,7 +2182,12 @@ describe("Control Center API handlers", () => {
         {
           workspaceId: session.workspaceId,
           entityId,
-          request: { jobId, suggestionId, finalContent },
+          request: {
+            jobId,
+            suggestionId,
+            finalContent,
+            authorityBinding: preview.authorityBinding
+          },
           session
         }
       ])

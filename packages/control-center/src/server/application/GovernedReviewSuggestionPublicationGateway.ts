@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 
+import { ReviewSuggestionPublicationAuthorityBinding } from "../../api/agent.js"
 import {
   GovernedActionAuthorizationV1,
   GovernedActionCommandId,
@@ -65,6 +66,16 @@ export const reviewPublicationSessionIsAuthorized = (
   DateTime.Order(checkedAt, session.idleExpiresAt) < 0 &&
   DateTime.Order(checkedAt, session.absoluteExpiresAt) < 0
 
+/** Pure retry classifier; execution inspection decides whether recovery is currently eligible. */
+export const reviewPublicationActionCanAdvance = (
+  state: GovernedActionRecord["head"]["state"]
+): boolean =>
+  state === "authorized" ||
+  state === "started" ||
+  state === "unknown" ||
+  state === "cancel-requested" ||
+  state === "cancel-requested-unknown"
+
 const makeGateway = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const connections = yield* PluginConnectionMap
@@ -89,18 +100,26 @@ const makeGateway = Effect.gen(function*() {
     }))
 
   const identity = Effect.fn("ReviewSuggestionPublicationGateway.identity")(function*(target) {
-    return yield* withProposalLease(target, (connection) =>
-      connection.actionActorIdentity === undefined
-        ? Effect.fail(
-          new ReviewSuggestionPublicationGatewayError({ reason: "identity-unavailable" })
-        )
-        : connection.actionActorIdentity.pipe(
-          Effect.map((actor) => ({
-            accountId: actor.providerAccountId,
-            arn: actor.principal
-          })),
-          mapFailure
-        ))
+    return yield* withProposalLease(
+      target,
+      (connection, runtimeAuthorityToken) =>
+        connection.actionActorIdentity === undefined
+          ? Effect.fail(
+            new ReviewSuggestionPublicationGatewayError({ reason: "identity-unavailable" })
+          )
+          : connection.actionActorIdentity.pipe(
+            Effect.map((actor) => ({
+              connectedIdentity: {
+                accountId: actor.providerAccountId,
+                arn: actor.principal
+              },
+              authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+                runtimeAuthorityToken
+              )
+            })),
+            mapFailure
+          )
+    )
   })
 
   const publish = Effect.fn("ReviewSuggestionPublicationGateway.publish")(function*(command) {
@@ -117,6 +136,15 @@ const makeGateway = Effect.gen(function*() {
       command.target,
       (connection, runtimeAuthorityToken) =>
         Effect.gen(function*() {
+          if (runtimeAuthorityToken !== command.authorityBinding) {
+            return yield* conflict()
+          }
+          if (connection.actionActorIdentity === undefined) {
+            return yield* new ReviewSuggestionPublicationGatewayError({
+              reason: "identity-unavailable"
+            })
+          }
+          const actor = yield* connection.actionActorIdentity.pipe(mapFailure)
           const connectionRecord = yield* persistence.pluginConnections.get(
             command.target.workspaceId,
             command.target.pluginConnectionId
@@ -152,6 +180,10 @@ const makeGateway = Effect.gen(function*() {
             capability,
             connectionRecord,
             descriptor: connection.descriptor.descriptor,
+            connectedIdentity: {
+              accountId: actor.providerAccountId,
+              arn: actor.principal
+            },
             proposal,
             runtimeAuthorityToken
           }
@@ -170,7 +202,8 @@ const makeGateway = Effect.gen(function*() {
         ? Effect.succeed({
           publicationId: record.envelope.actionId,
           receipt: record.head.lineage.receipt,
-          publishedAt: record.head.lineage.receipt.observedAt
+          publishedAt: record.head.lineage.receipt.observedAt,
+          connectedIdentity: prepared.connectedIdentity
         })
         : Effect.fail(unavailable())
     const authorize = Effect.fn(
@@ -276,7 +309,7 @@ const makeGateway = Effect.gen(function*() {
       if (record.head.state === "succeeded") return yield* publishedResult(record)
       if (record.head.state === "proposed") {
         yield* authorize(envelope, record.headTransition.transitionId)
-      } else if (record.head.state !== "authorized") {
+      } else if (!reviewPublicationActionCanAdvance(record.head.state)) {
         return yield* unavailable()
       }
       return yield* advanceAndRead(envelope.actionId)

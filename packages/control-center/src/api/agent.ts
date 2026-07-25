@@ -438,6 +438,16 @@ export const AwsReviewPublicationIdentity = Schema.Struct({
 /** Decoded browser-safe AWS publication identity. */
 export type AwsReviewPublicationIdentity = typeof AwsReviewPublicationIdentity.Type
 
+/** Opaque digest binding operator confirmation to one exact provider runtime generation. */
+export const ReviewSuggestionPublicationAuthorityBinding = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, {
+    expected: "a lowercase SHA-256 runtime authority digest"
+  })
+).pipe(Schema.brand("ReviewSuggestionPublicationAuthorityBinding"))
+
+/** Decoded immutable provider-generation binding. */
+export type ReviewSuggestionPublicationAuthorityBinding = typeof ReviewSuggestionPublicationAuthorityBinding.Type
+
 /** Read-only preview shown before the operator grants publication authority. */
 export class ReviewSuggestionPublicationPreview
   extends Schema.Class<ReviewSuggestionPublicationPreview>("ReviewSuggestionPublicationPreview")({
@@ -465,6 +475,7 @@ export class ReviewSuggestionPublicationPreview
       Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(16_000))
     ),
     connectedIdentity: AwsReviewPublicationIdentity,
+    authorityBinding: ReviewSuggestionPublicationAuthorityBinding,
     proposingAgent: ReviewAgentProfile,
     publishingOperator: PersonId
   })
@@ -473,7 +484,8 @@ export class ReviewSuggestionPublicationPreview
 /** Explicit operator confirmation containing the final editable snapshot. */
 export const PublishReviewSuggestionRequest = Schema.Struct({
   ...ReviewSuggestionPublicationSelection.fields,
-  finalContent: ReviewSuggestionPublicationContent
+  finalContent: ReviewSuggestionPublicationContent,
+  authorityBinding: ReviewSuggestionPublicationAuthorityBinding
 })
 
 /** Decoded explicit review-suggestion publication confirmation. */

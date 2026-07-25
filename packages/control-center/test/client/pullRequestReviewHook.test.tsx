@@ -11,6 +11,7 @@ import {
   PullRequestReviewState,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
+  ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
@@ -236,6 +237,7 @@ describe("usePullRequestReview", () => {
         accountId: "123456789012",
         arn: "arn:aws:iam::123456789012:user/local-operator"
       },
+      authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(`sha256:${"a".repeat(64)}`),
       proposingAgent: REVIEW_PROFILE,
       publishingOperator: OPERATOR_ID
     })
@@ -285,6 +287,13 @@ describe("usePullRequestReview", () => {
     expect(host.querySelector("[data-publication]")?.textContent).toBe("preview")
 
     await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
+    expect(transport.publishSuggestion).toHaveBeenCalledWith(
+      ENTITY_ID,
+      { jobId: JOB_ID, suggestionId: SUGGESTION_ID },
+      ReviewSuggestionPublicationContent.make("Confirmed content."),
+      preview.authorityBinding,
+      expect.any(AbortSignal)
+    )
     expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
 
     await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))

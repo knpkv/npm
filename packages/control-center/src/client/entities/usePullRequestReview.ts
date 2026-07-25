@@ -87,6 +87,7 @@ export interface PullRequestReviewTransport {
     entityId: EntityId,
     selection: ReviewSuggestionPublicationSelection,
     finalContent: ReviewSuggestionPublicationContent,
+    authorityBinding: ReviewSuggestionPublicationPreview["authorityBinding"],
     signal: AbortSignal
   ) => Promise<PublishedReviewComment>
 }
@@ -152,13 +153,13 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  publishSuggestion: (entityId, selection, finalContent, signal) =>
+  publishSuggestion: (entityId, selection, finalContent, authorityBinding, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
         return yield* client.agent.publishReviewSuggestion({
           params: { entityId },
-          payload: { ...selection, finalContent }
+          payload: { ...selection, finalContent, authorityBinding }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -370,7 +371,13 @@ export const usePullRequestReview = (
     const abort = new AbortController()
     mutationAbort.current = abort
     setPublication({ _tag: "publishing", preview })
-    transport.publishSuggestion(entityId, selection, finalContent, abort.signal).then(
+    transport.publishSuggestion(
+      entityId,
+      selection,
+      finalContent,
+      preview.authorityBinding,
+      abort.signal
+    ).then(
       (published) => {
         if (abort.signal.aborted) return
         setPublication({

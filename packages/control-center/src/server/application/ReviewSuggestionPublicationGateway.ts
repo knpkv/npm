@@ -8,6 +8,7 @@ import type {
   AwsReviewPublicationIdentity,
   PublishedReviewComment,
   ReviewAgentProfile,
+  ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent
 } from "../../api/agent.js"
 import type { EntityId, JobId, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
@@ -42,6 +43,7 @@ export interface PublishReviewSuggestionCommand {
   readonly jobId: JobId
   readonly suggestion: PrReviewSuggestion
   readonly finalContent: ReviewSuggestionPublicationContent
+  readonly authorityBinding: ReviewSuggestionPublicationAuthorityBinding
   readonly proposingAgent: ReviewAgentProfile
   readonly session: SessionSummary
 }
@@ -51,6 +53,12 @@ export interface ReviewSuggestionPublicationReceipt {
   readonly publicationId: PublishedReviewComment["publicationId"]
   readonly receipt: PublishedReviewComment["receipt"]
   readonly publishedAt: PublishedReviewComment["publishedAt"]
+  readonly connectedIdentity: AwsReviewPublicationIdentity
+}
+
+export interface ReviewSuggestionPublicationAuthority {
+  readonly connectedIdentity: AwsReviewPublicationIdentity
+  readonly authorityBinding: ReviewSuggestionPublicationAuthorityBinding
 }
 
 /** No agent-facing service provides this authority-bearing boundary. */
@@ -59,7 +67,7 @@ export class ReviewSuggestionPublicationGateway extends Context.Service<
   {
     readonly identity: (
       target: ReviewSuggestionPublicationTarget
-    ) => Effect.Effect<AwsReviewPublicationIdentity, ReviewSuggestionPublicationGatewayError>
+    ) => Effect.Effect<ReviewSuggestionPublicationAuthority, ReviewSuggestionPublicationGatewayError>
     readonly publish: (
       command: PublishReviewSuggestionCommand
     ) => Effect.Effect<ReviewSuggestionPublicationReceipt, ReviewSuggestionPublicationGatewayError>

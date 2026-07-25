@@ -9,6 +9,7 @@ import {
   DurableAgentProviderId,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
+  ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent
 } from "../../src/api/agent.js"
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -35,11 +36,15 @@ import {
   DeliveryGraphInspection,
   PullRequestReviews
 } from "../../src/server/api/ApplicationServices.js"
-import { reviewPublicationSessionIsAuthorized } from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
+import {
+  reviewPublicationActionCanAdvance,
+  reviewPublicationSessionIsAuthorized
+} from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import {
   type PublishReviewSuggestionCommand,
-  ReviewSuggestionPublicationGateway
+  ReviewSuggestionPublicationGateway,
+  ReviewSuggestionPublicationGatewayError
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
@@ -86,6 +91,9 @@ const AGENT_ID = AgentId.make("01890f6f-6d6a-7cc0-98d2-00000000040a")
 const IDLE_EXPIRES_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-24T16:00:00.000Z")
 const ABSOLUTE_EXPIRES_AT = Schema.decodeUnknownSync(UtcTimestamp)("2026-08-24T15:00:00.000Z")
 const STARTED_TIMESTAMP = Schema.decodeUnknownSync(UtcTimestamp)(STARTED_AT)
+const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
+  `sha256:${"a".repeat(64)}`
+)
 
 const release = Schema.decodeSync(Release)({
   id: RELEASE_ID,
@@ -287,7 +295,8 @@ const withService = <Success, Failure>(
   use: (
     service: PullRequestReviews["Service"],
     enqueueInput: Ref.Ref<unknown>,
-    publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>
+    publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>,
+    publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none()
@@ -298,6 +307,7 @@ const withService = <Success, Failure>(
       const persistence = yield* Persistence
       const enqueueInput = yield* Ref.make<unknown>(null)
       const publicationCommands = yield* Ref.make<ReadonlyArray<PublishReviewSuggestionCommand>>([])
+      const publicationAuthority = yield* Ref.make(AUTHORITY_BINDING)
       const testPersistence = Persistence.of({
         ...persistence,
         agentJobs: {
@@ -308,12 +318,25 @@ const withService = <Success, Failure>(
       })
       const publicationGateway = ReviewSuggestionPublicationGateway.of({
         identity: () =>
-          Effect.succeed({
-            accountId: "123456789012",
-            arn: "arn:aws:iam::123456789012:user/local-operator"
-          }),
+          Ref.get(publicationAuthority).pipe(Effect.map((authorityBinding) => ({
+            connectedIdentity: {
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/local-operator"
+            },
+            authorityBinding
+          }))),
         publish: (command) =>
-          Ref.update(publicationCommands, (commands) => [...commands, command]).pipe(
+          Ref.get(publicationAuthority).pipe(
+            Effect.filterOrFail(
+              (authorityBinding) => authorityBinding === command.authorityBinding,
+              () =>
+                new ReviewSuggestionPublicationGatewayError({
+                  reason: "publication-conflict"
+                })
+            ),
+            Effect.andThen(
+              Ref.update(publicationCommands, (commands) => [...commands, command])
+            ),
             Effect.as({
               publicationId: PUBLICATION_ID,
               receipt: {
@@ -322,7 +345,11 @@ const withService = <Success, Failure>(
                 safeSummary: "CodeCommit review comment posted",
                 observedAt: PUBLISHED_TIMESTAMP
               } satisfies PluginProviderReceiptV1,
-              publishedAt: PUBLISHED_TIMESTAMP
+              publishedAt: PUBLISHED_TIMESTAMP,
+              connectedIdentity: {
+                accountId: "123456789012",
+                arn: "arn:aws:iam::123456789012:user/local-operator"
+              }
             })
           )
       })
@@ -333,7 +360,12 @@ const withService = <Success, Failure>(
         Effect.provideService(AgentRuntimeRegistry, selectedRegistry),
         Effect.provideService(ReviewSuggestionPublicationGateway, publicationGateway)
       )
-      return yield* use(service, enqueueInput, publicationCommands)
+      return yield* use(
+        service,
+        enqueueInput,
+        publicationCommands,
+        publicationAuthority
+      )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -363,6 +395,66 @@ const withRealService = <Success, Failure>(
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("pull request reviews", () => {
+  it("advances only dispatchable or recoverable publication states", () => {
+    assert.isTrue(reviewPublicationActionCanAdvance("authorized"))
+    assert.isTrue(reviewPublicationActionCanAdvance("started"))
+    assert.isTrue(reviewPublicationActionCanAdvance("unknown"))
+    assert.isTrue(reviewPublicationActionCanAdvance("cancel-requested"))
+    assert.isTrue(reviewPublicationActionCanAdvance("cancel-requested-unknown"))
+    assert.isFalse(reviewPublicationActionCanAdvance("succeeded"))
+    assert.isFalse(reviewPublicationActionCanAdvance("failed"))
+  })
+
+  it.effect("rejects publication when provider authority rotates after preview", () =>
+    withService(
+      (service, _enqueueInput, publicationCommands, publicationAuthority) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+          yield* Ref.set(
+            publicationAuthority,
+            ReviewSuggestionPublicationAuthorityBinding.make(
+              `sha256:${"b".repeat(64)}`
+            )
+          )
+
+          const result = yield* service.publishSuggestion({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              finalContent: preview.finalContent,
+              authorityBinding: preview.authorityBinding
+            },
+            session: {
+              sessionId: SESSION_ID,
+              workspaceId: WORKSPACE_ID,
+              actor: { _tag: "human", personId: OPERATOR_ID },
+              permission: "workspace-owner",
+              createdAt: STARTED_TIMESTAMP,
+              lastSeenAt: STARTED_TIMESTAMP,
+              idleExpiresAt: IDLE_EXPIRES_AT,
+              absoluteExpiresAt: ABSOLUTE_EXPIRES_AT,
+              revokedAt: null
+            }
+          }).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.isTrue(Schema.is(ApplicationInvalidRequest)(result.failure))
+          }
+          assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
+        }),
+      registry,
+      Option.some(completedReview)
+    ))
+
   it("rejects non-owner, expired, revoked, and cross-workspace publication sessions", () => {
     const checkedAt = Schema.decodeUnknownSync(UtcTimestamp)(
       "2026-07-24T15:30:00.000Z"
@@ -596,7 +688,8 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
-              finalContent: editedContent
+              finalContent: editedContent,
+              authorityBinding: preview.authorityBinding
             },
             session: {
               sessionId: SESSION_ID,
@@ -620,6 +713,7 @@ describe("pull request reviews", () => {
           assert.strictEqual(commands[0]?.target.sourceRevision, "source-7")
           assert.strictEqual(commands[0]?.suggestion.suggestionId, SUGGESTION_ID)
           assert.strictEqual(commands[0]?.session.actor._tag, "human")
+          assert.strictEqual(commands[0]?.authorityBinding, AUTHORITY_BINDING)
           assert.include(commands[0]?.finalContent ?? "", REVIEW_PROFILE.label)
         }),
       registry,
@@ -636,7 +730,8 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
-              finalContent: ReviewSuggestionPublicationContent.make("Post this comment.")
+              finalContent: ReviewSuggestionPublicationContent.make("Post this comment."),
+              authorityBinding: AUTHORITY_BINDING
             },
             session: {
               sessionId: SESSION_ID,

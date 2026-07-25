@@ -12,6 +12,7 @@ import {
   PullRequestReviewState,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
+  ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
@@ -69,6 +70,7 @@ const PREVIEW = new ReviewSuggestionPublicationPreview({
     accountId: "123456789012",
     arn: "arn:aws:iam::123456789012:user/local-operator"
   },
+  authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(`sha256:${"a".repeat(64)}`),
   proposingAgent: REVIEW_PROFILE,
   publishingOperator: OPERATOR_ID
 })

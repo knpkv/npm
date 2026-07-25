@@ -379,7 +379,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.jobId,
         input.suggestionId
       )
-      const connectedIdentity = yield* publications.identity(
+      const authority = yield* publications.identity(
         publicationTarget(input.workspaceId, target)
       ).pipe(Effect.mapError(mapPublicationFailure))
       const editableContent = yield* defaultPublicationContent(selected.suggestion)
@@ -408,7 +408,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         finalContent,
         publicationFooter: footer,
         replacement: selected.suggestion.replacement?.content ?? null,
-        connectedIdentity,
+        connectedIdentity: authority.connectedIdentity,
+        authorityBinding: authority.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
         publishingOperator: input.publishingOperator
       })
@@ -423,9 +424,6 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.request.jobId,
         input.request.suggestionId
       )
-      const connectedIdentity = yield* publications.identity(
-        publicationTarget(input.workspaceId, target)
-      ).pipe(Effect.mapError(mapPublicationFailure))
       const footer = publicationFooter(
         selected.latest.reviewProfile,
         input.session.actor.personId,
@@ -440,6 +438,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         jobId: input.request.jobId,
         suggestion: selected.suggestion,
         finalContent: publishedContent,
+        authorityBinding: input.request.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
         session: input.session
       }).pipe(Effect.mapError(mapPublicationFailure))
@@ -459,7 +458,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           relativeFileVersion: "AFTER"
         },
         content: publishedContent,
-        connectedIdentity,
+        connectedIdentity: result.connectedIdentity,
         proposingAgent: selected.latest.reviewProfile,
         publishingOperator: input.session.actor.personId,
         receipt: result.receipt,
