@@ -14,6 +14,7 @@ import {
   prReviewSourceWorkspaceLayer,
   PrReviewWorkspaceLeaseGuard
 } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { isPrReviewAuthorityConfigKey } from "../../src/server/agent/internal/PrReviewWorkspaceProtocol.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
@@ -69,6 +70,33 @@ const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   )
 
 describe("PR review source workspace", () => {
+  it("classifies authority-bearing Git configuration without rejecting inert local keys", () => {
+    for (
+      const invalid of [
+        "credential.helper",
+        "http.extraHeader",
+        "http.https://example.invalid.extraHeader",
+        "remote.origin.url",
+        "url.ssh://example.invalid/.insteadOf",
+        "url.ssh://example.invalid/.pushInsteadOf",
+        "core.sshCommand",
+        "include.path",
+        "includeIf.gitdir:~/work/.path"
+      ]
+    ) {
+      assert.isTrue(isPrReviewAuthorityConfigKey(invalid), invalid)
+    }
+    for (
+      const valid of [
+        "branch.main.merge",
+        "core.repositoryformatversion",
+        "user.name"
+      ]
+    ) {
+      assert.isFalse(isPrReviewAuthorityConfigKey(valid), valid)
+    }
+  })
+
   it.effect("resolves exactly one enabled CodeCommit connection without exposing configuration publicly", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("pr-review-source-resolver-")
@@ -145,6 +173,9 @@ describe("PR review source workspace", () => {
         yield* runGit(["-C", repository, "add", "--", "review.ts"])
         yield* runGit(["-C", repository, "commit", "--quiet", "-m", "head"])
         const headRevision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
+        yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 3\n")
+        yield* runGit(["-C", repository, "add", "--", "review.ts"])
+        yield* runGit(["-C", repository, "commit", "--quiet", "-m", "branch moved after enqueue"])
 
         const resolver = Layer.succeed(
           PrReviewSourceResolver,
@@ -176,15 +207,26 @@ describe("PR review source workspace", () => {
               Effect.gen(function*() {
                 assert.strictEqual(sourceRoot, materializedRoot)
                 assert.isTrue(yield* fileSystem.exists(path.join(sourceRoot, "review.ts")))
-                return yield* runGit(["-C", sourceRoot, "rev-parse", "HEAD"])
+                const remotes = yield* runGit(["-C", sourceRoot, "remote"])
+                assert.strictEqual(remotes, "")
+                const configuration = yield* fileSystem.readFileString(
+                  path.join(sourceRoot, ".git", "config")
+                )
+                assert.notInclude(configuration, repository)
+                assert.notInclude(configuration.toLowerCase(), "credential")
+                return {
+                  content: yield* fileSystem.readFileString(path.join(sourceRoot, "review.ts")),
+                  revision: yield* runGit(["-C", sourceRoot, "rev-parse", "HEAD"])
+                }
               })
           )
         }).pipe(Effect.provide(sources))
 
         assert.strictEqual(
-          Schema.decodeSync(Schema.String.check(Schema.isNonEmpty()))(observed),
+          Schema.decodeSync(Schema.String.check(Schema.isNonEmpty()))(observed.revision),
           headRevision
         )
+        assert.strictEqual(observed.content, "export const value = 2\n")
         assert.isFalse(yield* fileSystem.exists(materializedRoot))
       })
     ).pipe(Effect.provide(NodeServices.layer)))

@@ -235,9 +235,34 @@ The Review Sandbox is:
 - Autonomous inside its fixed policy: no command confirmations.
 - Destroyed with its volume when the run ends.
 
+The source broker checks out the immutable queued head, verifies it again after
+fetch, removes the authenticated `origin` and local credential-bearing Git
+configuration, and only then hands the tree to Docker. Handoff uses
+`docker container cp` through a short-lived, network-disabled initializer into
+a size-capped named `tmpfs` volume with image copy-up disabled; the host staging
+directory is deleted before the non-root review container starts accepting
+commands. The initializer stays mounted until the review container takes over
+the volume, may change ownership inside it, but cannot inspect a host mount, use
+the Docker socket, publish a port, or access a network.
+
+The review container runs as UID/GID `65532`, with a read-only root filesystem,
+an isolated writable `/workspace` volume, a bounded private `/tmp`, dropped
+capabilities, `no-new-privileges`, no default network, no published ports, and
+no inherited host environment. Every host-side Docker invocation also uses a
+fixed credential-free environment and disables shell interpretation.
+
 The Local Operator may explicitly allowlist unauthenticated outbound endpoints for a run. Credentials are never injected. Tests requiring secrets, privileged execution, or nested containers are skipped and reported as limitations.
 
-The AI provider process remains outside Docker. The provider-neutral tool loop executes typed read, search, shell, temporary-edit, and diff operations through the Review Sandbox module. Provider CLIs never receive direct host or Docker access.
+The AI provider process remains outside Docker. The provider-neutral tool loop
+executes typed file read/list/search, arbitrary shell command, temporary patch,
+diff, artifact-page, and artifact-search operations through the Review Sandbox
+module. Command output is bounded before it reaches the model; larger accepted
+output receives a session-local opaque artifact ID. A session retains at most
+64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
+pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
+host or Docker access. File reads and listings preserve missing-path failures,
+and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
+changes.
 
 Executable repository instructions come only from the trusted base revision. Instruction changes in the PR are untrusted content under review.
 
@@ -255,6 +280,16 @@ On startup, Control Center:
 - Marks a run interrupted if its execution no longer exists.
 - Preserves partial evidence.
 - Offers restart as a new immutable run rather than simulating provider-session recovery.
+
+Session acquisition and use are scoped. Cancellation, command or session
+timeout, copy/start failure, callback failure, and normal completion all force
+container and named-volume removal. A command timeout closes the session before
+returning its typed failure, and model-requested timeouts cannot exceed the
+locally configured command cap. Label reconciliation accepts only exact
+job/attempt-derived resource identities, ignores malformed daemon output, and
+removes orphaned initializer containers and named volumes while preserving the
+volume belonging to an exact running session. Exact stopped, exited, or dead
+session containers and their now-orphaned volumes are removed.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 
