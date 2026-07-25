@@ -81,10 +81,8 @@ const outputEvents = (
     text: chunk
   }))
 
-const safeUsage = (value: number | null): number =>
-  value === null || !Number.isFinite(value)
-    ? 0
-    : Math.max(0, Math.trunc(value))
+const isAvailableUsage = (value: number | null): value is number =>
+  value !== null && Number.isSafeInteger(value) && value >= 0
 
 const mapEvent = Effect.fn("ToolAgentAdapter.mapEvent")(function*<Output>(
   providerId: AgentRunRequest["providerId"],
@@ -107,10 +105,16 @@ const mapEvent = Effect.fn("ToolAgentAdapter.mapEvent")(function*<Output>(
     case "tool-failed":
       return outputEvents("progress", `Tool failed: ${event.name} (${event.callId}).`)
     case "usage":
+      if (
+        !isAvailableUsage(event.inputTokens) ||
+        !isAvailableUsage(event.outputTokens)
+      ) {
+        return []
+      }
       return [{
         _tag: "usage",
-        inputTokens: safeUsage(event.inputTokens),
-        outputTokens: safeUsage(event.outputTokens)
+        inputTokens: event.inputTokens,
+        outputTokens: event.outputTokens
       }]
     case "repair-requested":
       return outputEvents(

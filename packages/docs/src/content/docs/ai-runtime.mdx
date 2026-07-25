@@ -70,6 +70,11 @@ interrupts the active model call or tool handler. Budget expiration fails with
 `ToolAgentTimeoutError`, while the default 64-step safety boundary emits a
 `max-steps` terminal outcome.
 
+This stateless interface has no approval-response exchange. A Toolkit with a
+static or dynamic `needsApproval` policy fails configuration before the model
+or a handler runs. Resolve approval in an outer workflow, or pass only tools
+that are already authorized for the run.
+
 The loop gives one malformed tool call or final JSON response exactly one
 schema-guided repair turn. A second malformed response fails closed with
 `ToolAgentInvalidResponseError`; missing values are never guessed or coerced.
@@ -80,7 +85,13 @@ model receives bounded head/tail excerpts, byte counts, and an opaque
 `ToolAgentArtifactId`. Put caller-owned artifact paging and search tools in the
 same Toolkit when the model needs the complete value.
 
+Schema-valid `void` tool results are represented as JSON `null`. A tool call
+marked as provider-executed keeps the provider's result in the next prompt and
+does not invoke the corresponding local handler.
+
 `makeToolAgentAdapter` projects these events into the existing
 `AgentRuntime` stream. Validated final JSON is split across bounded assistant
 output events instead of being aggregate-capped, preserving durable worker
-integration without imposing a result or suggestion-count limit.
+integration without imposing a result or suggestion-count limit. Usage is
+persisted only when both token totals are finite, non-negative safe integers;
+unknown or partial totals are omitted rather than recorded as zero.

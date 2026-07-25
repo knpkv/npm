@@ -22,7 +22,8 @@ import {
   ToolAgentConfigurationError,
   type ToolAgentEvent,
   ToolAgentInvalidResponseError,
-  ToolAgentTimeoutError
+  ToolAgentTimeoutError,
+  ToolAgentToolProtocolError
 } from "../src/index.js"
 
 const Output = Schema.Struct({ summary: Schema.String })
@@ -272,6 +273,286 @@ describe("runToolAgent", () => {
     )
   })
 
+  it.effect("represents a schema-valid void tool result as JSON null", () => {
+    const Notify = Tool.make("Notify", {
+      description: "Record a notification without returning a payload"
+    })
+    const NotificationTools = Toolkit.make(Notify)
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          id: "notify-call",
+          name: "Notify",
+          params: {},
+          type: "tool-call"
+        })
+      },
+      {
+        _tag: "response",
+        parts: response({ text: "{\"summary\":\"notified\"}", type: "text" })
+      }
+    ])
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* NotificationTools
+      const events = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(Stream.runCollect)
+      const completed = Array.from(events).find(
+        (event) => event._tag === "tool-completed"
+      )
+
+      expect(completed).toMatchObject({
+        result: {
+          modelValue: null,
+          truncated: false
+        }
+      })
+      const secondPrompt = fake.requests[1]?.prompt.content
+      expect(
+        secondPrompt?.some(
+          (message) =>
+            message.role === "tool" &&
+            message.content.some(
+              (part) => part.type === "tool-result" && part.result === null
+            )
+        )
+      ).toBe(true)
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        NotificationTools.toLayer({
+          Notify: () => Effect.succeed(undefined)
+        })
+      ))
+    )
+  })
+
+  it.effect("rejects a schema-valid result whose encoded form is not JSON", () => {
+    const NonJson = Tool.make("NonJson", {
+      success: Schema.Unknown
+    })
+    const NonJsonTools = Toolkit.make(NonJson)
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          id: "non-json-call",
+          name: "NonJson",
+          params: {},
+          type: "tool-call"
+        })
+      }
+    ])
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* NonJsonTools
+      const error = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(
+        Stream.runDrain,
+        Effect.flip
+      )
+
+      expect(error).toBeInstanceOf(ToolAgentToolProtocolError)
+      expect(error).toMatchObject({
+        reason: "invalid-result",
+        toolName: "NonJson"
+      })
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        NonJsonTools.toLayer({
+          NonJson: () => Effect.succeed(BigInt(1))
+        })
+      ))
+    )
+  })
+
+  it.effect("rejects static and dynamic approval policies before model or handler execution", () => {
+    const StaticApproval = Tool.make("StaticApproval", {
+      needsApproval: true
+    })
+    const DynamicApproval = Tool.make("DynamicApproval", {
+      needsApproval: () => true
+    })
+    const PreAuthorized = Tool.make("PreAuthorized", {
+      needsApproval: false
+    })
+    const StaticTools = Toolkit.make(StaticApproval)
+    const DynamicTools = Toolkit.make(DynamicApproval)
+    const PreAuthorizedTools = Toolkit.make(PreAuthorized)
+    const staticFake = makeDeterministicLanguageModel([])
+    const dynamicFake = makeDeterministicLanguageModel([])
+    const authorizedFake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          id: "authorized-call",
+          name: "PreAuthorized",
+          params: {},
+          type: "tool-call"
+        })
+      },
+      {
+        _tag: "response",
+        parts: response({ text: "{\"summary\":\"authorized\"}", type: "text" })
+      }
+    ])
+    let staticInvocations = 0
+    let dynamicInvocations = 0
+    let authorizedInvocations = 0
+
+    const staticRun = Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* StaticTools
+      return yield* runToolAgent(successfulOptions(model, toolkit)).pipe(
+        Stream.runDrain,
+        Effect.flip
+      )
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        staticFake.layer,
+        StaticTools.toLayer({
+          StaticApproval: () =>
+            Effect.sync(() => {
+              staticInvocations += 1
+            })
+        })
+      ))
+    )
+    const dynamicRun = Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* DynamicTools
+      return yield* runToolAgent(successfulOptions(model, toolkit)).pipe(
+        Stream.runDrain,
+        Effect.flip
+      )
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        dynamicFake.layer,
+        DynamicTools.toLayer({
+          DynamicApproval: () =>
+            Effect.sync(() => {
+              dynamicInvocations += 1
+            })
+        })
+      ))
+    )
+    const authorizedRun = Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* PreAuthorizedTools
+      return yield* runToolAgent(successfulOptions(model, toolkit)).pipe(Stream.runCollect)
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        authorizedFake.layer,
+        PreAuthorizedTools.toLayer({
+          PreAuthorized: () =>
+            Effect.sync(() => {
+              authorizedInvocations += 1
+            })
+        })
+      ))
+    )
+
+    return Effect.gen(function*() {
+      const staticError = yield* staticRun
+      const dynamicError = yield* dynamicRun
+      const authorizedEvents = yield* authorizedRun
+
+      expect(staticError).toMatchObject({
+        _tag: "ToolAgentConfigurationError",
+        reason: "tool-approval-not-supported",
+        toolName: "StaticApproval"
+      })
+      expect(dynamicError).toMatchObject({
+        _tag: "ToolAgentConfigurationError",
+        reason: "tool-approval-not-supported",
+        toolName: "DynamicApproval"
+      })
+      expect(staticInvocations).toBe(0)
+      expect(dynamicInvocations).toBe(0)
+      expect(staticFake.requests).toHaveLength(0)
+      expect(dynamicFake.requests).toHaveLength(0)
+      expect(authorizedInvocations).toBe(1)
+      expect(Array.from(authorizedEvents).at(-1)).toMatchObject({
+        _tag: "completed",
+        outcome: "success"
+      })
+    })
+  })
+
+  it.effect("preserves provider-executed results without reinvoking their local handler", () => {
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response(
+          {
+            id: "provider-call",
+            name: "InspectFile",
+            params: { path: "provider.ts" },
+            providerExecuted: true,
+            type: "tool-call"
+          },
+          {
+            id: "provider-call",
+            isFailure: false,
+            name: "InspectFile",
+            preliminary: false,
+            providerExecuted: true,
+            result: { content: "provider result" },
+            type: "tool-result"
+          },
+          {
+            id: "local-call",
+            name: "InspectFile",
+            params: { path: "local.ts" },
+            providerExecuted: false,
+            type: "tool-call"
+          }
+        )
+      },
+      {
+        _tag: "response",
+        parts: response({ text: "{\"summary\":\"mixed tools\"}", type: "text" })
+      }
+    ])
+    const invokedPaths: Array<string> = []
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* InspectionTools
+      const events = yield* runToolAgent(successfulOptions(model, toolkit)).pipe(Stream.runCollect)
+
+      expect(invokedPaths).toEqual(["local.ts"])
+      expect(
+        Array.from(events).filter((event) => event._tag === "tool-requested")
+      ).toHaveLength(1)
+      expect(
+        fake.requests[1]?.prompt.content.some(
+          (message) =>
+            message.role === "tool" &&
+            message.content.some(
+              (part) =>
+                part.type === "tool-result" &&
+                part.id === "provider-call" &&
+                Schema.is(Schema.Struct({ content: Schema.String }))(part.result) &&
+                part.result.content === "provider result"
+            )
+        )
+      ).toBe(true)
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        inspectionLayer((path) =>
+          Effect.sync(() => {
+            invokedPaths.push(path)
+            return { content: `local:${path}` }
+          })
+        )
+      ))
+    )
+  })
+
   it.effect("bounds large results and lets caller-provided tools page and search the artifact", () => {
     const artifactId = ToolAgentArtifactId.make("artifact-1")
     const artifacts = new Map<string, string>()
@@ -388,6 +669,64 @@ describe("runToolAgent", () => {
         result: { modelValue: { found: true } }
       })
     }).pipe(Effect.provide(Layer.mergeAll(fake.layer, artifactToolsLayer)))
+  })
+
+  it.effect("bounds encoded excerpts containing escapes, controls, and multibyte text", () => {
+    const artifactId = ToolAgentArtifactId.make("artifact-escaped")
+    const artifactSink: ToolAgentArtifactSink = {
+      persist: () => Effect.succeed(artifactId)
+    }
+    const heavyContent = "\"\\\n\u0000🙂".repeat(20_000)
+    const LargeEscapedResult = Tool.make("LargeEscapedResult", {
+      success: Schema.Struct({ content: Schema.String })
+    })
+    const EscapedTools = Toolkit.make(LargeEscapedResult)
+    const fake = makeDeterministicLanguageModel([
+      {
+        _tag: "response",
+        parts: response({
+          id: "escaped-call",
+          name: "LargeEscapedResult",
+          params: {},
+          type: "tool-call"
+        })
+      },
+      {
+        _tag: "response",
+        parts: response({ text: "{\"summary\":\"bounded\"}", type: "text" })
+      }
+    ])
+
+    return Effect.gen(function*() {
+      const model = yield* LanguageModel.LanguageModel
+      const toolkit = yield* EscapedTools
+      const events = yield* runToolAgent({
+        ...successfulOptions(model, toolkit),
+        artifactSink
+      }).pipe(Stream.runCollect)
+      const completed = Array.from(events).find(
+        (event) => event._tag === "tool-completed"
+      )
+
+      expect(completed).toMatchObject({
+        result: { artifactId, truncated: true }
+      })
+      if (completed?._tag === "tool-completed") {
+        const encoded = yield* Schema.encodeUnknownEffect(
+          Schema.fromJsonString(Schema.Json)
+        )(completed.result.modelValue)
+        expect(new TextEncoder().encode(encoded).byteLength).toBeLessThanOrEqual(
+          MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES
+        )
+      }
+    }).pipe(
+      Effect.provide(Layer.mergeAll(
+        fake.layer,
+        EscapedTools.toLayer({
+          LargeEscapedResult: () => Effect.succeed({ content: heavyContent })
+        })
+      ))
+    )
   })
 
   it.effect("emits a terminal max-steps outcome without inventing final output", () => {
@@ -592,5 +931,34 @@ describe("makeToolAgentAdapter", () => {
         providerId: request.providerId,
         retryable: true
       })
+    }))
+
+  it.effect("omits unavailable usage while preserving genuine zero and positive totals", () =>
+    Effect.gen(function*() {
+      const events: ReadonlyArray<ToolAgentEvent<{ readonly summary: string }>> = [
+        { _tag: "run-started", budgetMillis: 1_000, maximumSteps: 4 },
+        { _tag: "usage", inputTokens: null, outputTokens: 1, step: 1 },
+        { _tag: "usage", inputTokens: 1, outputTokens: null, step: 1 },
+        { _tag: "usage", inputTokens: -1, outputTokens: 1, step: 1 },
+        { _tag: "usage", inputTokens: 1, outputTokens: -1, step: 1 },
+        { _tag: "usage", inputTokens: Number.POSITIVE_INFINITY, outputTokens: 1, step: 1 },
+        { _tag: "usage", inputTokens: 1, outputTokens: Number.NaN, step: 1 },
+        { _tag: "usage", inputTokens: Number.MAX_SAFE_INTEGER + 1, outputTokens: 1, step: 1 },
+        { _tag: "usage", inputTokens: 1, outputTokens: Number.MAX_SAFE_INTEGER + 1, step: 1 },
+        { _tag: "usage", inputTokens: 0, outputTokens: 0, step: 1 },
+        { _tag: "usage", inputTokens: 12, outputTokens: 4, step: 1 },
+        { _tag: "completed", outcome: "success", steps: 1 }
+      ]
+      const runtime = makeAgentRuntime(
+        makeToolAgentAdapter(() => Stream.fromIterable(events))
+      )
+      const observed = Array.from(
+        yield* runtime.run(request).pipe(Stream.runCollect)
+      )
+
+      expect(observed.filter((event) => event._tag === "usage")).toEqual([
+        { _tag: "usage", inputTokens: 0, outputTokens: 0 },
+        { _tag: "usage", inputTokens: 12, outputTokens: 4 }
+      ])
     }))
 })

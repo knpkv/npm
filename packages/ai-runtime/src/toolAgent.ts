@@ -18,7 +18,7 @@ import type * as Toolkit from "effect/unstable/ai/Toolkit"
 /** Maximum UTF-8 bytes from one tool result exposed directly to the model. */
 export const MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES = 64 * 1024
 
-const MODEL_RESULT_EXCERPT_BYTES = MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES - 4 * 1024
+const MAXIMUM_MODEL_RESULT_EXCERPT_BYTES = MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES - 4 * 1024
 const DEFAULT_MAXIMUM_TOOL_AGENT_STEPS = 64
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder()
@@ -111,9 +111,11 @@ export class ToolAgentConfigurationError extends Schema.TaggedErrorClass<ToolAge
       "empty-instructions",
       "invalid-budget",
       "invalid-maximum-steps",
-      "invalid-output-schema"
+      "invalid-output-schema",
+      "tool-approval-not-supported"
     ]),
-    cause: Schema.optionalKey(Schema.Defect())
+    cause: Schema.optionalKey(Schema.Defect()),
+    toolName: Schema.optionalKey(Schema.String)
   }
 ) {}
 
@@ -264,12 +266,12 @@ const initialPrompt = Effect.fn("ToolAgent.initialPrompt")(function*(
   ])
 })
 
-const truncateJson = (
+const truncatedMaterial = (
   encoded: string,
-  artifactId: ToolAgentArtifactId
+  artifactId: ToolAgentArtifactId,
+  excerptBytes: number
 ): ToolAgentResultMaterial => {
   const bytes = textEncoder.encode(encoded)
-  const excerptBytes = Math.floor(MODEL_RESULT_EXCERPT_BYTES / 2)
   const head = textDecoder.decode(bytes.slice(0, excerptBytes))
   const tail = textDecoder.decode(bytes.slice(Math.max(0, bytes.byteLength - excerptBytes)))
   const modelValue = {
@@ -290,6 +292,44 @@ const truncateJson = (
     truncated: true
   }
 }
+
+const truncateJson = Effect.fn("ToolAgent.truncateJson")(function*(
+  toolName: string,
+  encoded: string,
+  artifactId: ToolAgentArtifactId
+) {
+  const byteLength = textEncoder.encode(encoded).byteLength
+  let lower = 0
+  let upper = Math.min(
+    Math.floor(byteLength / 2),
+    Math.floor(MAXIMUM_MODEL_RESULT_EXCERPT_BYTES / 2)
+  )
+  let bounded = truncatedMaterial(encoded, artifactId, 0)
+
+  while (lower <= upper) {
+    const excerptBytes = Math.floor((lower + upper) / 2)
+    const candidate = truncatedMaterial(encoded, artifactId, excerptBytes)
+    const candidateEncoded = yield* encodeJsonString(candidate.modelValue).pipe(
+      Effect.mapError(() =>
+        new ToolAgentToolProtocolError({
+          reason: "invalid-result",
+          toolName
+        })
+      )
+    )
+    if (
+      textEncoder.encode(candidateEncoded).byteLength <=
+        MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES
+    ) {
+      bounded = candidate
+      lower = excerptBytes + 1
+    } else {
+      upper = excerptBytes - 1
+    }
+  }
+
+  return bounded
+})
 
 const boundToolResult = Effect.fn("ToolAgent.boundToolResult")(function*<
   Error,
@@ -320,7 +360,7 @@ const boundToolResult = Effect.fn("ToolAgent.boundToolResult")(function*<
     return yield* new ToolAgentArtifactRequiredError({ byteLength, toolName })
   }
   const artifactId = yield* artifactSink.persist(encoded)
-  return truncateJson(encoded, artifactId)
+  return yield* truncateJson(toolName, encoded, artifactId)
 })
 
 const encodedToolFailure = (failure: unknown): Schema.Json => ({
@@ -380,14 +420,16 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
       toolName: call.name
     })
   }
-  const result = yield* decodeJson(finalResult.encodedResult).pipe(
-    Effect.mapError(() =>
-      new ToolAgentToolProtocolError({
-        reason: "invalid-result",
-        toolName: call.name
-      })
+  const result = finalResult.encodedResult === undefined
+    ? null
+    : yield* decodeJson(finalResult.encodedResult).pipe(
+      Effect.mapError(() =>
+        new ToolAgentToolProtocolError({
+          reason: "invalid-result",
+          toolName: call.name
+        })
+      )
     )
-  )
   const material = yield* boundToolResult(call.name, result, artifactSink)
   yield* emit({
     _tag: finalResult.isFailure ? "tool-failed" : "tool-completed",
@@ -435,6 +477,14 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
   if (!Number.isSafeInteger(maximumSteps) || maximumSteps <= 0) {
     return yield* new ToolAgentConfigurationError({ reason: "invalid-maximum-steps" })
   }
+  for (const tool of Object.values(options.toolkit.tools)) {
+    if (tool.needsApproval !== undefined && tool.needsApproval !== false) {
+      return yield* new ToolAgentConfigurationError({
+        reason: "tool-approval-not-supported",
+        toolName: tool.name
+      })
+    }
+  }
 
   yield* emit({ _tag: "run-started", budgetMillis, maximumSteps })
 
@@ -480,6 +530,9 @@ const runLoop = Effect.fn("ToolAgent.runLoop")(function*<
       prompt = Prompt.concat(prompt, Prompt.fromResponseParts(response.content))
       const toolParts: Array<Prompt.ToolResultPart> = []
       for (const call of response.toolCalls) {
+        if (call.providerExecuted) {
+          continue
+        }
         const executed = yield* executeToolCall(
           options.toolkit,
           call,

@@ -66,6 +66,11 @@ stream interrupts the active model or tool effect. A wall-clock budget fails
 with `ToolAgentTimeoutError`; reaching the default 64-step safety boundary
 emits a `max-steps` terminal event.
 
+The stateless loop has no user-approval exchange. Toolkits containing a static
+or dynamic `needsApproval` policy fail configuration before the model or any
+handler runs; callers must resolve approval in an outer workflow or supply only
+tools that are already authorized for the run.
+
 Tool input and output validation remains owned by Effect AI schemas. One
 malformed tool call or final JSON response receives one schema-guided repair
 turn; a second malformed response fails with
@@ -78,3 +83,7 @@ to the same Toolkit so the model can inspect retained content without raising
 the bound. `makeToolAgentAdapter` maps the loop into the existing durable
 `AgentRuntime` contract and chunks validated final JSON across ordinary output
 events, so it adds no aggregate result-count cap.
+
+Schema-valid `void` tool results use JSON `null` on the model wire. Calls marked
+as provider-executed retain their provider result in the next prompt and are
+never invoked through a local handler.
