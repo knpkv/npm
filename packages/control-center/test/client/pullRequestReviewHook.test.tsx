@@ -659,6 +659,51 @@ describe("usePullRequestReview", () => {
     expect(target.current?.historyLoaded).toBe(true)
   })
 
+  it("keeps the newer of two equal-generation replacement tails", () => {
+    const signal = new AbortController().signal
+    const target: { current: PullRequestReviewThread | null } = {
+      current: {
+        events: [threadEvent(1)],
+        hasEarlier: false,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(1),
+        replayGeneration: 0
+      }
+    }
+
+    installNewestThread(
+      target,
+      {
+        events: [threadEvent(200)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(200),
+        replayGeneration: 1,
+        replacesRetainedWindow: true
+      },
+      signal
+    )
+    installNewestThread(
+      target,
+      {
+        events: [threadEvent(100)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(100),
+        replayGeneration: 1,
+        replacesRetainedWindow: true
+      },
+      signal
+    )
+
+    expect(target.current?.events.map(({ eventSequence }) => eventSequence)).toEqual([200])
+    expect(target.current).toMatchObject({
+      hasEarlier: true,
+      nextCursor: ReleaseAgentThreadCursor.make(200),
+      replayGeneration: 1
+    })
+  })
+
   it("lets authoritative history clear an optimistic same-boundary cursor", () => {
     const optimistic = {
       events: [threadEvent(1)],

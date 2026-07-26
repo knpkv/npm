@@ -109,9 +109,18 @@ export const installNewestThread = (
     if (candidateGeneration < retainedGeneration) return target.current ?? candidate
     const { replacesRetainedWindow: _replacesRetainedWindow, ...retainedCandidate } = candidate
     const versionedCandidate = { ...retainedCandidate, replayGeneration: candidateGeneration }
+    if (
+      candidate.replacesRetainedWindow === true &&
+      candidateGeneration === retainedGeneration &&
+      target.current !== null &&
+      candidate.nextCursor < target.current.nextCursor
+    ) return target.current
     target.current = target.current === null ||
-        candidate.replacesRetainedWindow === true ||
-        candidateGeneration > retainedGeneration
+        candidateGeneration > retainedGeneration ||
+        (
+          candidate.replacesRetainedWindow === true &&
+          candidate.nextCursor > target.current.nextCursor
+        )
       ? versionedCandidate
       : mergePullRequestReviewThreads(target.current, retainedCandidate)
   }
