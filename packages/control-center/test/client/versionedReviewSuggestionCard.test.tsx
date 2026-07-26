@@ -288,6 +288,44 @@ describe("VersionedReviewSuggestionCard", () => {
     expect(document.body.textContent).toContain("Reject mutation before authorization")
   })
 
+  it("keeps a cross-field-invalid complete edit in the dialog", async () => {
+    const protectedSuggestion = PrReviewSuggestion.make({
+      ...SUGGESTION,
+      prevention: {
+        summary: "Reject mutation before authorization",
+        enforcement: "test",
+        existingRuleOrConfig: "authorization-order.test.ts",
+        recurrenceEvidence: "The ordering defect reached review.",
+        targetFile: PrReviewPath.make("test/authorization-order.test.ts"),
+        sourcePaths: [PrReviewPath.make("src")],
+        matcherOrInvariant: "Authorization completes before mutation.",
+        invalidFixture: "mutate(); authorize()",
+        validFixture: "authorize(); mutate()",
+        boundary: "Runtime ordering remains behavioral."
+      }
+    })
+    const original = revisionPage(1, protectedSuggestion.title, "validated", protectedSuggestion)
+    const edit = vi.fn(() => Promise.resolve(original.current))
+    await renderCard({
+      load: () => Promise.resolve(original),
+      edit
+    })
+    await click("Edit")
+    const severity = document.querySelector<HTMLSelectElement>("select")
+    if (severity === null) throw new Error("Severity editor missing")
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set
+      setter?.call(severity, "P3")
+      severity.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await click("Save revision")
+
+    expect(edit).not.toHaveBeenCalled()
+    expect(document.querySelector("[role=alert]")?.textContent).toContain(
+      "Advanced fields are not a valid complete suggestion"
+    )
+  })
+
   it("preserves the operator draft when a concurrent revision wins", async () => {
     const original = revisionPage(1, SUGGESTION.title)
     const winner = revisionPage(2, "Another edit won")

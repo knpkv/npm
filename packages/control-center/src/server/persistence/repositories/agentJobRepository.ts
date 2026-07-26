@@ -1092,6 +1092,66 @@ const makeAgentJobRepository = Effect.gen(function*() {
     })
   })
 
+  const readOriginalReviewResult = Effect.fn(
+    "AgentJobRepository.readOriginalReviewResult"
+  )(function*(input: typeof AgentReviewResultInput.Type) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(AgentReviewResultInput)
+    )(input)
+    const rows = yield* sql<Record<string, unknown>>`SELECT
+      workspace_id AS workspaceId, thread_id AS threadId,
+      event_sequence AS eventSequence, job_id AS jobId,
+      attempt_sequence AS attemptSequence, event_kind AS eventKind,
+      payload_json AS payloadJson, payload_digest AS payloadDigest,
+      payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+      FROM agent_thread_events
+      WHERE workspace_id = ${request.workspaceId}
+        AND job_id = ${request.jobId}
+        AND event_kind = 'review-report'`.pipe(
+      mapPersistenceOperation("agent-job.original-review-result")
+    )
+    if (rows.length === 0) {
+      return yield* new RecordNotFoundError({
+        workspaceId: request.workspaceId,
+        recordKind: "agent-review-result",
+        recordKey: request.jobId
+      })
+    }
+    const row = Schema.decodeUnknownResult(ThreadEventRow)(rows[0])
+    if (
+      rows.length !== 1 ||
+      Result.isFailure(row) ||
+      row.success.attemptSequence === null
+    ) {
+      return yield* persistedRecordError(
+        request.workspaceId,
+        "agent-review-result",
+        request.jobId,
+        "agent-review-original-result-schema-invalid"
+      )
+    }
+    const report = Schema.decodeUnknownResult(
+      PrReviewReport
+    )(yield* decodeEventPayload(request.workspaceId, row.success))
+    if (Result.isFailure(report)) {
+      return yield* persistedRecordError(
+        request.workspaceId,
+        "agent-review-result",
+        request.jobId,
+        "agent-review-original-result-payload-invalid"
+      )
+    }
+    return yield* Schema.decodeUnknownEffect(
+      Schema.toType(AgentReviewResultRecord)
+    )({
+      workspaceId: request.workspaceId,
+      jobId: request.jobId,
+      attemptSequence: row.success.attemptSequence,
+      report: report.success,
+      completedAt: row.success.occurredAt
+    })
+  })
+
   const decodeThreadEventRows = Effect.fn("AgentJobRepository.decodeThreadEventRows")(function*(
     workspaceId: typeof WorkspaceId.Type,
     threadId: typeof AgentThreadId.Type,
@@ -1224,7 +1284,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     database,
     bytesFromText,
     digestBytes,
-    readReviewResult,
+    readReviewResult: readOriginalReviewResult,
     getJob,
     appendThreadEvent: (options) => appendThreadEvent(options)
   })

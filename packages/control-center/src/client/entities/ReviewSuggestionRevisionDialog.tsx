@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema"
 import { type ReactElement, useEffect, useMemo, useState } from "react"
 
 import { PrReviewSuggestion } from "../../domain/prReview.js"
-import type { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../domain/prReviewRevision.js"
+import { PrReviewSuggestionEdit, type PrReviewSuggestionRevisionPage } from "../../domain/prReviewRevision.js"
 import {
   ReviewSuggestionRevisionHistory,
   reviewSuggestionRevisionAuthorLabel,
@@ -102,7 +102,7 @@ export const ReviewSuggestionRevisionDialog = ({
       return
     }
     setAdvancedError(false)
-    onSave({
+    const edit = Schema.decodeUnknownResult(PrReviewSuggestionEdit)({
       title: draft.title,
       severity: draft.severity,
       problem: draft.problem,
@@ -111,6 +111,11 @@ export const ReviewSuggestionRevisionDialog = ({
       confidence: draft.confidence,
       ...decoded.success
     })
+    if (Result.isFailure(edit)) {
+      setAdvancedError(true)
+      return
+    }
+    onSave(edit.success)
   }
 
   return (

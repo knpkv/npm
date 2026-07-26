@@ -1430,6 +1430,66 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("keeps original revision state immutable when a later revision is published", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "Publish only this exact second revision"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T3
+        })
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: edited.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T4
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: edited.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T4
+        })
+
+        const history = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(history.current.revisionId, edited.revisionId)
+        assert.strictEqual(history.current.suggestion.state, "draft")
+        assert.strictEqual(history.revisions[0]?.revisionId, original.revisionId)
+        assert.strictEqual(history.revisions[0]?.suggestion.state, "draft")
+      })
+    ))
+
   it.effect("reserves aggregate bytes for the longest lifecycle projection", () =>
     withRepository(
       Effect.gen(function*() {

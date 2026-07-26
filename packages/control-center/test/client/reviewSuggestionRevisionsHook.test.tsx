@@ -209,6 +209,38 @@ describe("useReviewSuggestionRevisions", () => {
     }
   })
 
+  it("retains an accepted revision when its follow-up refresh fails", async () => {
+    const original = revision(1)
+    const accepted = revision(2, EDIT.title)
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(page(original))
+      .mockRejectedValueOnce(new Error("Refresh unavailable"))
+      .mockResolvedValueOnce(page(accepted, [original]))
+    const edit = vi.fn(() => Promise.resolve(accepted))
+    const latest: { current: ReviewSuggestionRevisionState } = {
+      current: { _tag: "idle" }
+    }
+    await mount(scope(), { load, edit }, (state) => {
+      latest.current = state
+    })
+    await act(async () => undefined)
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-save]")?.click())
+    await act(async () => undefined)
+
+    expect(latest.current._tag).toBe("failed")
+    if (latest.current._tag === "failed") {
+      expect(latest.current.draft).toBeNull()
+      expect(latest.current.page?.current.revisionId).toBe(accepted.revisionId)
+    }
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-retry]")?.click())
+    await act(async () => undefined)
+
+    expect(edit).toHaveBeenCalledOnce()
+    expect(load).toHaveBeenCalledTimes(3)
+    expect(latest.current._tag).toBe("ready")
+  })
+
   it("retains the local draft and reloads the winner after a conflict", async () => {
     const original = revision(1)
     const winner = new PrReviewSuggestionRevision({

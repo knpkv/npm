@@ -132,6 +132,28 @@ const mergePages = (
   }
 }
 
+const pageWithAcceptedRevision = (
+  retained: ReviewSuggestionRevisionPage,
+  accepted: ReviewSuggestionRevisionPage["current"]
+): ReviewSuggestionRevisionPage => ({
+  current: accepted,
+  revisions: [retained.current, ...retained.revisions]
+    .filter(({ revisionId }) => revisionId !== accepted.revisionId)
+    .sort((left, right) => right.sequence - left.sequence),
+  hasMore: retained.hasMore,
+  nextBeforeSequence: retained.nextBeforeSequence
+})
+
+type SaveOutcome =
+  | { readonly _tag: "accepted-refresh-failed"; readonly page: ReviewSuggestionRevisionPage }
+  | { readonly _tag: "conflict"; readonly page: ReviewSuggestionRevisionPage }
+  | { readonly _tag: "refreshed"; readonly page: ReviewSuggestionRevisionPage }
+
+const saveOutcome = (
+  _tag: SaveOutcome["_tag"],
+  page: ReviewSuggestionRevisionPage
+): SaveOutcome => ({ _tag, page })
+
 const conflictFailure = Predicate.isTagged("ConflictApiError")
 
 /** Scope-safe browser controller for one stable suggestion's immutable revisions. */
@@ -207,7 +229,13 @@ export const useReviewSuggestionRevisions = (
       expectedSequence: retained.current.sequence,
       edit: draft
     }, abort.signal).then(
-      () => transport.load(current, null, abort.signal),
+      (accepted) => {
+        const acceptedPage = pageWithAcceptedRevision(retained, accepted)
+        return transport.load(current, null, abort.signal).then(
+          (page) => saveOutcome("refreshed", page),
+          () => saveOutcome("accepted-refresh-failed", acceptedPage)
+        )
+      },
       (failure: unknown) => {
         if (!conflictFailure(failure)) throw failure
         return transport.load(current, null, abort.signal).then((page) => {
@@ -215,13 +243,13 @@ export const useReviewSuggestionRevisions = (
             abort.signal.aborted ||
             latestScope.current === null ||
             !sameScope(latestScope.current, current)
-          ) return page
+          ) return saveOutcome("conflict", page)
           setState({ _tag: "conflict", draft, page })
-          return page
+          return saveOutcome("conflict", page)
         })
       }
     ).then(
-      (page) => {
+      (outcome) => {
         if (
           abort.signal.aborted ||
           latestScope.current === null ||
@@ -230,7 +258,9 @@ export const useReviewSuggestionRevisions = (
         setState((latest) =>
           latest._tag === "conflict"
             ? latest
-            : { _tag: "ready", page }
+            : outcome._tag === "accepted-refresh-failed"
+            ? { _tag: "failed", draft: null, page: outcome.page }
+            : { _tag: "ready", page: outcome.page }
         )
       },
       () => {
