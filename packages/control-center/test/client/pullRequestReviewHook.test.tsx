@@ -903,52 +903,44 @@ describe("usePullRequestReview", () => {
       nextCursor: ReleaseAgentThreadCursor.make(1)
     }
     const transport = {
-      loadThread: vi.fn((_entityId, cursor, _signal, direction = "after") => {
-        if (direction === "before" && cursor === 131) {
-          return Promise.resolve(
-            PullRequestReviewThreadPage.make({
+      loadThread: vi.fn<PullRequestReviewTransport["loadThread"]>(
+        async (_entityId, cursor, _signal, direction = "after") => {
+          if (direction === "before" && cursor === 131) {
+            return PullRequestReviewThreadPage.make({
               events: [threadEvent(130)],
               hasMore: true,
               nextCursor: ReleaseAgentThreadCursor.make(130)
             })
-          )
-        }
-        if (direction === "before" && cursor === 130) {
-          return Promise.resolve(
-            PullRequestReviewThreadPage.make({
+          }
+          if (direction === "before" && cursor === 130) {
+            return PullRequestReviewThreadPage.make({
               events: Array.from({ length: 128 }, (_, index) => threadEvent(index + 2)),
               hasMore: true,
               nextCursor: ReleaseAgentThreadCursor.make(2)
             })
-          )
-        }
-        if (direction === "before" && cursor === 2) {
-          return Promise.resolve(
-            PullRequestReviewThreadPage.make({
+          }
+          if (direction === "before" && cursor === 2) {
+            return PullRequestReviewThreadPage.make({
               events: [threadEvent(1)],
               hasMore: false,
               nextCursor: ReleaseAgentThreadCursor.make(1)
             })
-          )
-        }
-        if (cursor === null) {
-          return Promise.resolve(
-            PullRequestReviewThreadPage.make({
+          }
+          if (cursor === null) {
+            return PullRequestReviewThreadPage.make({
               events: [threadEvent(131)],
               hasEarlier: true,
               hasMore: false,
               nextCursor: ReleaseAgentThreadCursor.make(131)
             })
-          )
-        }
-        return Promise.resolve(
-          PullRequestReviewThreadPage.make({
+          }
+          return PullRequestReviewThreadPage.make({
             events: [threadEvent(cursor + 1)],
             hasMore: true,
             nextCursor: ReleaseAgentThreadCursor.make(cursor + 1)
           })
-        )
-      })
+        }
+      )
     }
 
     let thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, previous)
