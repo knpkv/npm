@@ -530,12 +530,29 @@ describe("ServicesPage connection tests", () => {
         }
       ]
     })
+    const test = vi.fn<ConnectionTestTransport["test"]>(() =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(PluginConnectionTestResult)({
+          _tag: "healthy",
+          pluginConnectionId: repositoryConnectionId,
+          providerId: "codecommit",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          latencyMilliseconds: 24,
+          identity: {
+            kind: "account",
+            label: "AWS account",
+            displayName: "Production account",
+            providerImmutableId: "123456789012"
+          }
+        })
+      )
+    )
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       setEnabled: vi.fn(),
-      test: vi.fn()
+      test
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
@@ -564,6 +581,22 @@ describe("ServicesPage connection tests", () => {
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )
+
+    const repositoryResource = resources.find(({ textContent }) => textContent?.includes("eu-west-1:payments"))
+    const pipelineResource = resources.find(({ textContent }) => textContent?.includes("payments-release"))
+    expect(repositoryResource).toBeDefined()
+    expect(pipelineResource?.open).toBe(false)
+    if (repositoryResource === undefined) throw new Error("Expected the repository resource")
+    repositoryResource.open = true
+    const testButton = [...repositoryResource.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Test"
+    )
+    await act(async () => testButton?.click())
+
+    expect(test).toHaveBeenCalledWith(repositoryConnectionId, expect.any(AbortSignal))
+    expect(repositoryResource.open).toBe(true)
+    expect(repositoryResource.textContent).toContain("Connection healthy")
+    expect(pipelineResource?.open).toBe(false)
   })
 
   it("pins account-card Confluence setup to the owning Atlassian site", async () => {

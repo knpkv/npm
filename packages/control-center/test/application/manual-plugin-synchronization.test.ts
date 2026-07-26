@@ -365,6 +365,43 @@ describe("manual plugin synchronization", () => {
       )
     })))
 
+  it.effect("rejects an already-disabled connection before recording a sync attempt", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const current = yield* persistence.pluginConnections.get(WORKSPACE_ID, fixture.pluginConnectionId)
+      yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, fixture.pluginConnectionId, {
+        displayName: current.displayName,
+        isEnabled: false,
+        expectedRevision: current.revision,
+        updatedAt: SYNCHRONIZED_AT
+      })
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () => Stream.succeed(pageFor(fixture))
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+
+      const rejected = yield* synchronization.synchronize({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
+      assert.lengthOf(
+        yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        ),
+        0
+      )
+    })))
+
   it.effect("rejects synchronization for a historical Jira runtime without sync capability", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))

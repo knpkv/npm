@@ -39,6 +39,16 @@ describe("Button", () => {
     expect(button?.getAttribute("aria-label")).toBe("Continue")
   })
 
+  it("preserves an externally labelled accessible name while loading", () => {
+    const button = render(
+      <Button aria-labelledby="external-label" loading>
+        Continue
+      </Button>
+    )
+    expect(button?.getAttribute("aria-labelledby")).toBe("external-label")
+    expect(button?.hasAttribute("aria-label")).toBe(false)
+  })
+
   it("forwards its native ref and suppresses activation while loading", () => {
     const host = document.createElement("div")
     const root = createRoot(host)

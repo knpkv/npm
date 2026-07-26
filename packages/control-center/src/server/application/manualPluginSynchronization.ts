@@ -457,21 +457,15 @@ export const makeManualPluginSynchronization = Effect.fn(
     )
   })
 
-  const synchronizeBound = Effect.fn("ManualPluginSynchronization.synchronizeBound")(function*(
+  const synchronizeAttempt = Effect.fn("ManualPluginSynchronization.synchronizeAttempt")(function*(
     input: {
       readonly workspaceId: WorkspaceId
       readonly pluginConnectionId: PluginConnectionId
     },
     bound: BoundManualSync,
-    attempt: PluginSyncAttemptRecord
+    attempt: PluginSyncAttemptRecord,
+    authority: PluginSynchronizationAuthority
   ) {
-    const captured = yield* capturePluginSynchronizationAuthority(
-      persistence,
-      bound.workspaceId,
-      bound.pluginConnectionId
-    ).pipe(Effect.mapError(mapPersistenceRead))
-    const { authority, connection: connectionRecord } = captured
-    if (!connectionRecord.isEnabled) return yield* new ApplicationInvalidRequest()
     const synchronized = yield* Effect.result(Effect.scoped(
       Effect.flatMap(
         connections.contextEffect({
@@ -533,6 +527,35 @@ export const makeManualPluginSynchronization = Effect.fn(
     return yield* readState(input)
   })
 
+  const synchronizeBound = Effect.fn("ManualPluginSynchronization.synchronizeBound")(function*(
+    input: {
+      readonly workspaceId: WorkspaceId
+      readonly pluginConnectionId: PluginConnectionId
+    },
+    claim: SynchronizationClaim
+  ) {
+    const captured = yield* capturePluginSynchronizationAuthority(
+      persistence,
+      claim.workspaceId,
+      claim.pluginConnectionId
+    ).pipe(Effect.mapError(mapPersistenceRead))
+    if (!captured.connection.isEnabled) return yield* new ApplicationInvalidRequest()
+    return yield* Effect.acquireUseRelease(
+      Effect.gen(function*() {
+        const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+        return yield* persistence.pluginRuntime.beginSyncAttempt(
+          claim.workspaceId,
+          claim.pluginConnectionId,
+          claim.providerId,
+          claim.streamKey,
+          startedAt
+        ).pipe(Effect.mapError(() => unavailable()))
+      }),
+      (attempt) => synchronizeAttempt(input, claim, attempt, captured.authority),
+      (attempt) => releaseSynchronizationAttempt({ attempt, claim })
+    )
+  })
+
   const synchronize = Effect.fn("ManualPluginSynchronization.synchronize")(function*(input: {
     readonly workspaceId: WorkspaceId
     readonly pluginConnectionId: PluginConnectionId
@@ -540,21 +563,7 @@ export const makeManualPluginSynchronization = Effect.fn(
     const bound = yield* bind(input)
     return yield* Effect.acquireUseRelease(
       claimSynchronization(bound),
-      (claim) =>
-        Effect.acquireUseRelease(
-          Effect.gen(function*() {
-            const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-            return yield* persistence.pluginRuntime.beginSyncAttempt(
-              bound.workspaceId,
-              bound.pluginConnectionId,
-              bound.providerId,
-              bound.streamKey,
-              startedAt
-            ).pipe(Effect.mapError(() => unavailable()))
-          }),
-          (attempt) => synchronizeBound(input, bound, attempt),
-          (attempt) => releaseSynchronizationAttempt({ attempt, claim })
-        ),
+      (claim) => synchronizeBound(input, claim),
       releaseSynchronizationClaim
     ).pipe(
       Effect.tapCause((cause) =>
