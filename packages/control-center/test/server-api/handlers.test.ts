@@ -2318,7 +2318,8 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const publicationPreview = yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, jobId, suggestionId, revisionId }
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
         })
         const publication = yield* client.agent.publishReviewSuggestion({
           params: { entityId },

@@ -43,11 +43,12 @@ import {
   PrReviewReport,
   PrReviewSubject,
   type PrReviewSubject as PrReviewSubjectType,
-  type PrReviewSuggestion,
+  PrReviewSuggestion,
   PrReviewSuggestionId
 } from "../../domain/prReview.js"
 import {
   PrReviewSuggestionOperatorAuthor,
+  PrReviewSuggestionRevision,
   PrReviewSuggestionRevisionPageSize,
   type PrReviewSuggestionRevisionSequence
 } from "../../domain/prReviewRevision.js"
@@ -455,7 +456,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       jobId,
       suggestionId
     )
-    const current = (yield* mapPersistenceRead(
+    const persisted = (yield* mapPersistenceRead(
       persistence.agentJobs.reviewSuggestionRevisions({
         workspaceId,
         jobId,
@@ -465,12 +466,21 @@ const makePullRequestReviews = Effect.gen(function*() {
       })
     )).current
     if (
-      current.sourceJobId !== jobId ||
-      !PrReviewSubjectEquivalence(current.subject, target.subject)
+      persisted.sourceJobId !== jobId ||
+      !PrReviewSubjectEquivalence(persisted.subject, target.subject)
     ) {
       return yield* new ApplicationInvalidRequest()
     }
-    return { latest: selected.latest, revision: current }
+    const revision = persisted.suggestion.state === selected.suggestion.state
+      ? persisted
+      : new PrReviewSuggestionRevision({
+        ...persisted,
+        suggestion: PrReviewSuggestion.make({
+          ...persisted.suggestion,
+          state: selected.suggestion.state
+        })
+      })
+    return { latest: selected.latest, revision }
   })
 
   const revisionHistory = Effect.fn(
@@ -488,7 +498,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     | ApplicationResourceNotFound
     | ApplicationServiceUnavailable
   > {
-    yield* currentSuggestionRevision(
+    const selected = yield* currentSuggestionRevision(
       workspaceId,
       target,
       jobId,
@@ -503,7 +513,10 @@ const makePullRequestReviews = Effect.gen(function*() {
         limit
       })
     )
-    return page
+    return {
+      ...page,
+      current: selected.revision
+    }
   })
 
   const publicationTarget = (
@@ -865,7 +878,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       if (target._tag !== "available") {
         return yield* new ApplicationInvalidRequest()
       }
-      yield* revisionHistory(
+      const page = yield* revisionHistory(
         input.workspaceId,
         target,
         input.jobId,
@@ -873,6 +886,9 @@ const makePullRequestReviews = Effect.gen(function*() {
         null,
         PrReviewSuggestionRevisionPageSize.make(1)
       )
+      if (page.current.suggestion.state !== "draft") {
+        return yield* new ApplicationInvalidRequest()
+      }
       return yield* persistence.agentJobs.appendReviewSuggestionRevision({
         workspaceId: input.workspaceId,
         jobId: input.jobId,

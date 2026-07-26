@@ -38,7 +38,7 @@ export interface PullRequestReviewScope {
 /** Browser selection resolved to an exact revision before publication preview. */
 export type ReviewSuggestionPublicationTarget = Pick<
   ReviewSuggestionPublicationSelection,
-  "jobId" | "suggestionId"
+  "jobId" | "revisionId" | "suggestionId"
 >
 
 export type PullRequestReviewControllerState =

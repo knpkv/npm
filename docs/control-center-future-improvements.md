@@ -33,6 +33,7 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Review-suggestion revisions
 
+- Add a browser-backed edit/conflict/history/publication journey and Storybook state matrix, including keyboard focus and reduced-motion coverage. The MVP has focused component coverage, but not a Playwright journey for this surface.
 - Add explicit durable `suggestion-edit` and `suggestion-revalidation` task intents beneath the existing `pr-review` worker route. The task—not prompt text—must bind the source job, stable suggestion, selected revision, and exact immutable head.
 - Give targeted `sbx` runs the selected revision plus its complete bounded immutable history. Split structured output into edit, validated revalidation, and unable-to-conclude protocols; decode and re-anchor all output on the host.
 - Fold a successful targeted result and the terminal job transition through one durable repository transaction. Agent edits must append `requires-revalidation`; successful revalidation must append a new `validated` revision. Failed, cancelled, inconclusive, or superseded runs append no revision.

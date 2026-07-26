@@ -51,9 +51,16 @@ export const VersionedReviewSuggestionCard = ({
   const controller = useReviewSuggestionRevisions(scope, revisionTransport)
   const [dialogMode, setDialogMode] = useState<"edit" | "history">("history")
   const [dialogOpen, setDialogOpen] = useState(false)
-  const available =
+  const page =
     controller.state._tag === "ready" || controller.state._tag === "saving" || controller.state._tag === "conflict"
-  const page = available ? controller.state.page : null
+      ? controller.state.page
+      : controller.state._tag === "failed"
+        ? controller.state.page
+        : null
+  const preservedDraft =
+    controller.state._tag === "saving" || controller.state._tag === "conflict" || controller.state._tag === "failed"
+      ? controller.state.draft
+      : null
   const current = page?.current
   const presentedSuggestion = current?.suggestion ?? suggestion
   const validationBlocked = current?.validation._tag === "requires-revalidation"
@@ -108,7 +115,13 @@ export const VersionedReviewSuggestionCard = ({
             </div>
           )
         }
-        onPreviewPublication={onPreviewPublication}
+        onPreviewPublication={(selection) => {
+          if (current === undefined) return
+          onPreviewPublication({
+            ...selection,
+            revisionId: current.revisionId
+          })
+        }}
         {...(publicationBlockedReason === undefined ? {} : { publicationBlockedReason })}
         suggestion={presentedSuggestion}
       />
@@ -122,6 +135,7 @@ export const VersionedReviewSuggestionCard = ({
           onSave={controller.save}
           open={dialogOpen}
           page={page}
+          preservedDraft={preservedDraft}
           saving={controller.state._tag === "saving"}
         />
       )}

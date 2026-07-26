@@ -339,6 +339,7 @@ const PublicationHarness = ({
         onClick={() =>
           controller.previewPublication({
             jobId: JOB_ID,
+            revisionId: REVIEW_REVISION_ID,
             suggestionId: SUGGESTION_ID
           })
         }
@@ -348,6 +349,7 @@ const PublicationHarness = ({
         onClick={() =>
           controller.previewPublication({
             jobId: JOB_ID,
+            revisionId: REVIEW_REVISION_ID,
             suggestionId: WRONG_SUGGESTION_ID
           })
         }
@@ -1318,7 +1320,7 @@ describe("usePullRequestReview", () => {
     await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
     expect(transport.previewPublication).toHaveBeenCalledWith(
       ENTITY_ID,
-      { jobId: JOB_ID, suggestionId: SUGGESTION_ID },
+      { jobId: JOB_ID, revisionId: REVIEW_REVISION_ID, suggestionId: SUGGESTION_ID },
       expect.any(AbortSignal)
     )
     expect(host.querySelector("[data-publication]")?.textContent).toBe("preview")

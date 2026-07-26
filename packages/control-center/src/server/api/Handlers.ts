@@ -1087,7 +1087,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
-        .handle("previewReviewSuggestionPublication", ({ params }) =>
+        .handle("previewReviewSuggestionPublication", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
             if (session.actor._tag !== "human") {
@@ -1099,7 +1099,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               entityId: params.entityId,
               jobId: params.jobId,
               suggestionId: params.suggestionId,
-              revisionId: params.revisionId,
+              revisionId: query.revisionId,
               publishingOperator: session.actor.personId
             }).pipe(Effect.catchTags({
               ApplicationInvalidRequest: mapApplicationInvalidRequest,

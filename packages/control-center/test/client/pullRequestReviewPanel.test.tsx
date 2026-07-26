@@ -53,6 +53,7 @@ const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
 const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"9".repeat(64)}`)
 const FILE_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"6".repeat(64)}`)
+const FILE_REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"8".repeat(64)}`)
 const ANCHOR_PATH = PrReviewPath.make("src/authorization.ts")
 const ANCHOR_LINE = 42
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000703")
@@ -1004,6 +1005,7 @@ describe("PullRequestReviewPanel", () => {
     await act(async () => publish.click())
     expect(onPreview).toHaveBeenCalledWith({
       jobId: JOB_ID,
+      revisionId: FILE_REVIEW_REVISION_ID,
       suggestionId: FILE_SUGGESTION_ID
     })
   })
@@ -1040,7 +1042,11 @@ describe("PullRequestReviewPanel", () => {
       postComment.focus()
       postComment.click()
     })
-    expect(onPreview).toHaveBeenCalledWith({ jobId: JOB_ID, suggestionId: SUGGESTION_ID })
+    expect(onPreview).toHaveBeenCalledWith({
+      jobId: JOB_ID,
+      revisionId: REVIEW_REVISION_ID,
+      suggestionId: SUGGESTION_ID
+    })
     expect(onPublish).not.toHaveBeenCalled()
 
     await render({ _tag: "preview", preview: PREVIEW })

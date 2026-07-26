@@ -444,7 +444,7 @@ describe("ControlCenterApi contract", () => {
         [
           "previewReviewSuggestionPublication",
           "GET",
-          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions/:revisionId/publication-preview"
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
         ],
         ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"]
       ]

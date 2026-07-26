@@ -41,7 +41,7 @@ import {
   type PluginProviderReceiptV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
-import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewReport, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import {
   PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
@@ -489,7 +489,10 @@ const withService = <Success, Failure>(
                 predecessorRevisionId: null,
                 sourceJobId: selected.value.jobId,
                 subject: selected.value.report.subject,
-                suggestion,
+                suggestion: PrReviewSuggestion.make({
+                  ...suggestion,
+                  state: "draft"
+                }),
                 validation: new PrReviewSuggestionValidated({
                   reviewedHead: selected.value.report.subject.headRevision,
                   validatingJobId: selected.value.jobId,
@@ -1191,6 +1194,38 @@ describe("pull request reviews", () => {
             })
             assert.strictEqual(replay.publicationId, PUBLICATION_ID)
             assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+
+            const history = yield* service.revisions({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              beforeSequence: null,
+              limit: PrReviewSuggestionRevisionPageSize.make(1)
+            })
+            assert.strictEqual(history.current.suggestion.state, "published")
+            const editAfterPublication = yield* service.editSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              request: {
+                expectedRevisionId: history.current.revisionId,
+                expectedSequence: history.current.sequence,
+                edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+                  ...history.current.suggestion,
+                  title: "Published suggestions cannot be edited"
+                })
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            assert.isTrue(Result.isFailure(editAfterPublication))
+            if (Result.isFailure(editAfterPublication)) {
+              assert.instanceOf(
+                editAfterPublication.failure,
+                ApplicationInvalidRequest
+              )
+            }
 
             const changed = yield* service.publishSuggestion({
               workspaceId: WORKSPACE_ID,

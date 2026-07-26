@@ -1,15 +1,15 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
-import * as DateTime from "effect/DateTime"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { type ReactElement, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactElement, useEffect, useMemo, useState } from "react"
 
 import { PrReviewSuggestion } from "../../domain/prReview.js"
-import type {
-  PrReviewSuggestionEdit,
-  PrReviewSuggestionRevision,
-  PrReviewSuggestionRevisionPage
-} from "../../domain/prReviewRevision.js"
+import type { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../domain/prReviewRevision.js"
+import {
+  ReviewSuggestionRevisionHistory,
+  reviewSuggestionRevisionAuthorLabel,
+  reviewSuggestionRevisionValidationLabel
+} from "./ReviewSuggestionRevisionHistory.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const AdvancedSuggestionFields = Schema.Struct({
@@ -40,7 +40,7 @@ const editableSuggestion = (suggestion: PrReviewSuggestion): PrReviewSuggestionE
   anchor: suggestion.anchor
 })
 
-const advancedJson = (suggestion: PrReviewSuggestion): string =>
+const advancedJson = (suggestion: PrReviewSuggestionEdit): string =>
   Schema.encodeSync(AdvancedSuggestionFieldsJson)({
     anchor: suggestion.anchor,
     evidence: suggestion.evidence,
@@ -48,60 +48,6 @@ const advancedJson = (suggestion: PrReviewSuggestion): string =>
     ...(suggestion.prevention === undefined ? {} : { prevention: suggestion.prevention }),
     ...(suggestion.replacement === undefined ? {} : { replacement: suggestion.replacement })
   })
-
-const authorLabel = (revision: PrReviewSuggestionRevision): string =>
-  revision.author._tag === "operator"
-    ? "You"
-    : `${revision.author.providerId}${revision.author.model === null ? "" : ` · ${revision.author.model}`}`
-
-const validationLabel = (revision: PrReviewSuggestionRevision): string =>
-  revision.validation._tag === "validated" ? "Validated" : "Needs revalidation"
-
-const RevisionHistory = ({
-  loadEarlier,
-  page
-}: {
-  readonly loadEarlier: () => void
-  readonly page: PrReviewSuggestionRevisionPage
-}): ReactElement => (
-  <div className={styles.revisionHistory}>
-    <ol>
-      {page.revisions.map((revision) => (
-        <li key={revision.revisionId}>
-          <header>
-            <strong>Revision {String(revision.sequence)}</strong>
-            <span>
-              {validationLabel(revision)} · {authorLabel(revision)}
-            </span>
-          </header>
-          <time dateTime={DateTime.formatIso(revision.createdAt)}>
-            {DateTime.formatLocal(revision.createdAt, {
-              dateStyle: "medium",
-              timeStyle: "short"
-            })}
-          </time>
-          <details>
-            <summary>{revision.suggestion.title}</summary>
-            <Text>{revision.suggestion.problem}</Text>
-            <dl>
-              <dt>Impact</dt>
-              <dd>{revision.suggestion.impact}</dd>
-              <dt>Recommendation</dt>
-              <dd>{revision.suggestion.recommendation}</dd>
-              <dt>Evidence</dt>
-              <dd>
-                <code>
-                  {revision.suggestion.evidence.path}:{String(revision.suggestion.evidence.startLine)}
-                </code>
-              </dd>
-            </dl>
-          </details>
-        </li>
-      ))}
-    </ol>
-    {page.hasMore ? <Button onClick={loadEarlier}>Load earlier revisions</Button> : null}
-  </div>
-)
 
 /** Edit or inspect one immutable suggestion revision without leaving the diff. */
 export const ReviewSuggestionRevisionDialog = ({
@@ -113,6 +59,7 @@ export const ReviewSuggestionRevisionDialog = ({
   onSave,
   open,
   page,
+  preservedDraft,
   saving
 }: {
   readonly canEdit: boolean
@@ -123,21 +70,25 @@ export const ReviewSuggestionRevisionDialog = ({
   readonly onSave: (edit: PrReviewSuggestionEdit) => void
   readonly open: boolean
   readonly page: PrReviewSuggestionRevisionPage
+  readonly preservedDraft: PrReviewSuggestionEdit | null
   readonly saving: boolean
 }): ReactElement => {
   const current = page.current
   const [draft, setDraft] = useState(() => editableSuggestion(current.suggestion))
   const [advanced, setAdvanced] = useState(() => advancedJson(current.suggestion))
   const [advancedError, setAdvancedError] = useState(false)
-  const titleRef = useRef<HTMLInputElement>(null)
   useEffect(() => {
     if (!open) return
-    setDraft(editableSuggestion(current.suggestion))
-    setAdvanced(advancedJson(current.suggestion))
+    const nextDraft = preservedDraft ?? editableSuggestion(current.suggestion)
+    setDraft(nextDraft)
+    setAdvanced(advancedJson(nextDraft))
     setAdvancedError(false)
-  }, [current.revisionId, current.suggestion, open])
+  }, [current.revisionId, current.suggestion, open, preservedDraft])
   const description = useMemo(
-    () => `Revision ${String(current.sequence)} · ${validationLabel(current)} · ${authorLabel(current)}`,
+    () =>
+      `Revision ${String(current.sequence)} · ${reviewSuggestionRevisionValidationLabel(
+        current
+      )} · ${reviewSuggestionRevisionAuthorLabel(current)}`,
     [current]
   )
   const save = (): void => {
@@ -162,7 +113,7 @@ export const ReviewSuggestionRevisionDialog = ({
         title={mode === "edit" ? "Edit review suggestion" : "Revision history"}
       >
         {mode === "history" ? (
-          <RevisionHistory loadEarlier={loadEarlier} page={page} />
+          <ReviewSuggestionRevisionHistory loadEarlier={loadEarlier} page={page} />
         ) : (
           <form
             className={styles.revisionEditor}
@@ -177,7 +128,6 @@ export const ReviewSuggestionRevisionDialog = ({
                 <input
                   maxLength={500}
                   onChange={(event) => setDraft({ ...draft, title: event.currentTarget.value })}
-                  ref={titleRef}
                   required
                   value={draft.title}
                 />

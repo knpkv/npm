@@ -889,12 +889,14 @@ const editReviewSuggestion = HttpApiEndpoint.post(
 
 const previewReviewSuggestionPublication = HttpApiEndpoint.get(
   "previewReviewSuggestionPublication",
-  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions/:revisionId/publication-preview",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
   {
     params: Schema.Struct({
       entityId: EntityId,
       jobId: JobId,
-      suggestionId: PrReviewSuggestionId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    query: Schema.Struct({
       revisionId: PrReviewSuggestionRevisionId
     }),
     success: ReviewSuggestionPublicationPreview,

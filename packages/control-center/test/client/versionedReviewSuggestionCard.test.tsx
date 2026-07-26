@@ -58,7 +58,8 @@ const SUGGESTION = PrReviewSuggestion.make({
 const revisionPage = (
   sequence: 1 | 2,
   title: string,
-  validation: "requires-revalidation" | "validated" = "validated"
+  validation: "requires-revalidation" | "validated" = "validated",
+  suggestion = SUGGESTION
 ) => {
   const revisionId = PrReviewSuggestionRevisionId.make(`sha256:${String(sequence).repeat(64)}`)
   const originalId = PrReviewSuggestionRevisionId.make(`sha256:${"1".repeat(64)}`)
@@ -68,7 +69,7 @@ const revisionPage = (
     predecessorRevisionId: sequence === 1 ? null : originalId,
     sourceJobId: JOB_ID,
     subject: SUBJECT,
-    suggestion: { ...SUGGESTION, title },
+    suggestion: { ...suggestion, title },
     validation:
       validation === "validated"
         ? {
@@ -105,7 +106,10 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const renderCard = async (transport: ReviewSuggestionRevisionTransport): Promise<HTMLDivElement> => {
+const renderCard = async (
+  transport: ReviewSuggestionRevisionTransport,
+  onPreviewPublication = () => undefined
+): Promise<HTMLDivElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
@@ -117,7 +121,7 @@ const renderCard = async (transport: ReviewSuggestionRevisionTransport): Promise
           entityId={ENTITY_ID}
           isPreviewing={false}
           jobId={JOB_ID}
-          onPreviewPublication={() => undefined}
+          onPreviewPublication={onPreviewPublication}
           revisionTransport={transport}
           sessionKey="session-a"
           suggestion={SUGGESTION}
@@ -177,8 +181,55 @@ describe("VersionedReviewSuggestionCard", () => {
     )
   })
 
+  it("previews the exact revision displayed on the card", async () => {
+    const original = revisionPage(1, SUGGESTION.title)
+    const onPreviewPublication = vi.fn()
+    await renderCard(
+      {
+        load: () => Promise.resolve(original),
+        edit: () => Promise.reject(new Error("Unexpected edit"))
+      },
+      onPreviewPublication
+    )
+    await click("Post comment")
+
+    expect(onPreviewPublication).toHaveBeenCalledWith({
+      jobId: JOB_ID,
+      revisionId: original.current.revisionId,
+      suggestionId: SUGGESTION_ID
+    })
+  })
+
   it("shows immutable history and blocks an unvalidated technical revision", async () => {
-    const unvalidated = revisionPage(2, "Changed technical claim", "requires-revalidation")
+    const completeSuggestion = PrReviewSuggestion.make({
+      ...SUGGESTION,
+      relatedLocations: [
+        {
+          path: PrReviewPath.make("src/policy.ts"),
+          startLine: 7,
+          endLine: 9,
+          label: "Shared authorization policy"
+        }
+      ],
+      replacement: {
+        reviewedHead: SUBJECT.headRevision,
+        unifiedDiff: "--- a/src/authorization.ts\n+++ b/src/authorization.ts\n@@ -42,1 +42,1 @@\n-old\n+new",
+        explanation: "Move authorization first."
+      },
+      prevention: {
+        summary: "Reject mutation before authorization",
+        enforcement: "test",
+        existingRuleOrConfig: "authorization-order.test.ts",
+        recurrenceEvidence: "The ordering defect reached review.",
+        targetFile: PrReviewPath.make("test/authorization-order.test.ts"),
+        sourcePaths: [PrReviewPath.make("src")],
+        matcherOrInvariant: "Authorization completes before mutation.",
+        invalidFixture: "mutate(); authorize()",
+        validFixture: "authorize(); mutate()",
+        boundary: "Runtime ordering remains behavioral."
+      }
+    })
+    const unvalidated = revisionPage(2, "Changed technical claim", "requires-revalidation", completeSuggestion)
     const host = await renderCard({
       load: () => Promise.resolve(unvalidated),
       edit: () => Promise.reject(new Error("Unexpected edit"))
@@ -192,5 +243,33 @@ describe("VersionedReviewSuggestionCard", () => {
     await click("History")
     expect(document.body.textContent).toContain("Revision history")
     expect(document.body.textContent).toContain("Changed technical claim")
+    expect(document.body.textContent).toContain("The execution order is explicit.")
+    expect(document.body.textContent).toContain("yield* mutate()")
+    expect(document.body.textContent).toContain("Shared authorization policy")
+    expect(document.body.textContent).toContain("Move authorization first.")
+    expect(document.body.textContent).toContain("Reject mutation before authorization")
+  })
+
+  it("preserves the operator draft when a concurrent revision wins", async () => {
+    const original = revisionPage(1, SUGGESTION.title)
+    const winner = revisionPage(2, "Another edit won")
+    const transport: ReviewSuggestionRevisionTransport = {
+      load: vi.fn().mockResolvedValueOnce(original).mockResolvedValueOnce(winner),
+      edit: () => Promise.reject({ _tag: "ConflictApiError" })
+    }
+    await renderCard(transport)
+    await click("Edit")
+    const title = document.querySelector<HTMLInputElement>("input")
+    if (title === null) throw new Error("Title editor missing")
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+      setter?.call(title, "Keep my local edit")
+      title.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    await click("Save revision")
+    await act(async () => undefined)
+
+    expect(document.querySelector<HTMLInputElement>("input")?.value).toBe("Keep my local edit")
+    expect(document.body.textContent).toContain("A newer revision won")
   })
 })

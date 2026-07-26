@@ -175,11 +175,14 @@ export const useReviewSuggestionRevisions = (
   }, [requestRevision, scope, transport])
 
   const save = useCallback((draft: PrReviewSuggestionEdit): void => {
-    if (scope === null || (state._tag !== "ready" && state._tag !== "conflict")) {
-      return
-    }
+    if (scope === null) return
+    const retained = state._tag === "ready" || state._tag === "conflict"
+      ? state.page
+      : state._tag === "failed"
+      ? state.page
+      : null
+    if (retained === null) return
     const current = scope
-    const retained = state.page
     activeAbort.current?.abort()
     const abort = new AbortController()
     activeAbort.current = abort
