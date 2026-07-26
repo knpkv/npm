@@ -5,7 +5,9 @@ import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -18,17 +20,31 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
+import { ReviewAgentProfile, ReviewAgentProfileId, ReviewSuggestionPublicationContent } from "../../src/api/agent.js"
 import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
-import { EntityId, GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PluginConnectionId,
+  SessionId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import { PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
+import {
+  ReviewSuggestionPublicationGateway,
+  type ReviewSuggestionPublicationTarget
+} from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
 import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
-import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
@@ -1377,6 +1393,9 @@ describe("first-party plugin runtime", () => {
       const discoveredProfiles = yield* Ref.make<Array<string>>([])
       const changedFileProfiles = yield* Ref.make<Array<string>>([])
       const providerMutations = yield* Ref.make(0)
+      const pauseProposalRead = yield* Ref.make(false)
+      const proposalReadStarted = yield* Deferred.make<void>()
+      const resumeProposalRead = yield* Deferred.make<void>()
       const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
         pullRequestId: "17",
         revisionId: "revision-17",
@@ -1426,7 +1445,17 @@ describe("first-party plugin runtime", () => {
             })
           ),
         streamPullRequests: () => Stream.make(pullRequest),
-        getPullRequest: () => Effect.succeed(pullRequest),
+        getPullRequest: () =>
+          Ref.get(pauseProposalRead).pipe(
+            Effect.flatMap((pause) =>
+              pause
+                ? Deferred.succeed(proposalReadStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(resumeProposalRead)),
+                  Effect.as(pullRequest)
+                )
+                : Effect.succeed(pullRequest)
+            )
+          ),
         getChangedFilesPage: ({ account }) =>
           Ref.update(changedFileProfiles, (profiles) => [...profiles, account.profile]).pipe(
             Effect.as(
@@ -1522,7 +1551,8 @@ describe("first-party plugin runtime", () => {
             composition.applicationServices,
             composition.firstPartyRuntime.connections,
             composition.firstPartyGovernedActionStartup,
-            composition.firstPartyGovernedActionExecutors
+            composition.firstPartyGovernedActionExecutors,
+            composition.reviewSuggestionPublications
           ).pipe(Layer.provide(composition.lifecycle))
         )
         const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
@@ -1614,6 +1644,97 @@ describe("first-party plugin runtime", () => {
           discoveredProfiles: ["production", "rotated"],
           changedFileProfiles: ["production", "production", "rotated"]
         })
+
+        const publicationGateway = Context.get(composed, ReviewSuggestionPublicationGateway)
+        const publicationTarget = {
+          workspaceId: WORKSPACE_ID,
+          entityId,
+          pluginConnectionId: CONNECTION_ID,
+          sourceRevision: "revision-17",
+          subject: {
+            providerId: "codecommit",
+            repository: "payments-api",
+            pullRequestId: "17",
+            baseRevision: "live-base",
+            headRevision: "live-head"
+          }
+        } satisfies ReviewSuggestionPublicationTarget
+        const publicationIdentity = yield* publicationGateway.identity(publicationTarget)
+        const suggestion = Schema.decodeSync(PrReviewSuggestion)({
+          suggestionId: PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`),
+          severity: "P2",
+          problem: "The shared runtime can rotate before publication commits.",
+          impact: "A stale action would become permanently unexecutable.",
+          evidence: {
+            path: "src/runtime.ts",
+            startLine: 1,
+            endLine: 1,
+            excerpt: "export const runtime = shared"
+          },
+          recommendation: "Revalidate authority in the same transaction as the durable commit.",
+          confidence: {
+            level: "high",
+            reason: "The deterministic barrier crosses the administration invalidation boundary."
+          }
+        })
+        const proposingAgent = Schema.decodeSync(ReviewAgentProfile)({
+          profileId: ReviewAgentProfileId.make("codex:test-sbx"),
+          label: "Codex test review",
+          budgetMillis: 60_000,
+          networkAccess: "blocked",
+          sandbox: "sbx"
+        })
+        yield* Ref.set(pauseProposalRead, true)
+        const publication = yield* Effect.forkScoped(
+          publicationGateway.publish({
+            target: publicationTarget,
+            jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000088"),
+            suggestion,
+            finalContent: ReviewSuggestionPublicationContent.make(
+              "Revalidate authority before committing this review comment."
+            ),
+            authorityBinding: publicationIdentity.authorityBinding,
+            proposingAgent,
+            session: {
+              sessionId: SessionId.make("01890f6f-6d6a-7cc0-98d2-000000000089"),
+              workspaceId: WORKSPACE_ID,
+              actor: {
+                _tag: "human",
+                personId: PersonId.make("01890f6f-6d6a-7cc0-98d2-00000000008a")
+              },
+              permission: "workspace-owner",
+              createdAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T09:00:00.000Z"),
+              lastSeenAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z"),
+              idleExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T11:00:00.000Z"),
+              absoluteExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-08-18T10:00:00.000Z"),
+              revokedAt: null
+            }
+          }).pipe(Effect.result)
+        )
+        yield* Deferred.await(proposalReadStarted)
+        const racePatch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
+          expectedRevision: 2,
+          values: [
+            { _tag: "text", key: "profile", value: "race-rotated" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments-api" }
+          ]
+        })
+        const raceUpdated = yield* administration.patchConfiguration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CONNECTION_ID,
+          patch: racePatch
+        })
+        assert.strictEqual(raceUpdated.revision, 3)
+        yield* Ref.set(pauseProposalRead, false)
+        yield* Deferred.succeed(resumeProposalRead, undefined)
+        const publicationResult = yield* Fiber.join(publication)
+        assert.isTrue(publicationResult._tag === "Failure")
+        const { sql } = yield* Database
+        const staleActions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM governed_actions WHERE workspace_id = ${WORKSPACE_ID}`
+        assert.strictEqual(staleActions[0]?.count, 0)
+        assert.strictEqual(yield* Ref.get(providerMutations), 0)
 
         yield* TestClock.setTime(DateTime.toEpochMillis(
           Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")

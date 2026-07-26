@@ -14,6 +14,7 @@ import {
   type DiffContentRangeRequestV2,
   type DiffContentRangeV1,
   type NegotiatedPluginDescriptorV1,
+  PluginActionActorIdentityV1,
   type PluginCapabilityId,
   PluginDiscoveryV1
 } from "../../domain/plugins/index.js"
@@ -217,6 +218,23 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
 
   const connection: PluginConnectionV1 = {
     descriptor,
+    ...(services.connection.actionActorIdentity === undefined
+      ? {}
+      : {
+        actionActorIdentity: retryPluginOperation({
+          operation: services.connection.actionActorIdentity,
+          safety: "safe-read"
+        }).pipe(
+          Effect.flatMap((value) =>
+            decodeBoundary(
+              "action-actor-identity",
+              "output",
+              PluginActionActorIdentityV1,
+              value
+            )
+          )
+        )
+      }),
     discover: retryPluginOperation({
       operation: services.connection.discover,
       safety: "safe-read"

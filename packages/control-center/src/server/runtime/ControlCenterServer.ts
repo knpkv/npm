@@ -99,6 +99,7 @@ import {
   governedActionExecutionStartupLayer,
   type GovernedActionExecutionStartupOptions,
   governedActionPolicyBindingSourceLayer,
+  governedActionProposalAuthorityLiveLayer,
   governedActionSubmissionLayer
 } from "./GovernedActionExecutionStartup.js"
 import {
@@ -362,6 +363,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence)
   )
   const governedActionConfiguration = options.governedActionExecution ?? null
+  const governedActionExecutionReady = governedActionConfiguration !== null &&
+    (governedActionConfiguration.pluginRuntimes !== undefined || firstPartyPluginRuntime)
   const firstPartyGovernedActionRuntime = governedActionConfiguration !== null &&
       governedActionConfiguration.pluginRuntimes === undefined &&
       firstPartyPluginRuntime
@@ -398,11 +401,12 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       ? firstPartyRuntime!.connections.pipe(Layer.provide(database))
       : null
     : Layer.succeed(PluginConnectionMap, configuredPluginConnections)
-  const reviewSuggestionPublications = governedActionConfiguration === null || publicationConnections === null
+  const reviewSuggestionPublications = !governedActionExecutionReady || publicationConnections === null
     ? reviewSuggestionPublicationGatewayUnavailableLayer
     : governedReviewSuggestionPublicationGatewayLayer.pipe(
       Layer.provide(governedActionSubmission),
       Layer.provide(governedActionPolicyBindingSourceLayer),
+      Layer.provide(governedActionProposalAuthorityLiveLayer.pipe(Layer.provide(database))),
       Layer.provide(publicationConnections),
       Layer.provide(persistence)
     )
@@ -515,6 +519,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     firstPartyRuntime,
     governedActionStartup,
     lifecycle,
+    reviewSuggestionPublications,
     runtimeServices
   }
 }

@@ -31,7 +31,11 @@ import { ProposePluginActionRequestV1 } from "../../domain/plugins/actions.js"
 import { Revision } from "../../domain/sourceRevision.js"
 import type { SessionSummary } from "../auth/models.js"
 import { digestGovernedActionEvidenceSet, makeGovernedActionEnvelope } from "../governance/governedActionDigests.js"
-import { GovernedActionPolicyBindingSource, GovernedActionSubmission } from "../governance/GovernedActionSubmission.js"
+import {
+  GovernedActionPolicyBindingSource,
+  GovernedActionProposalAuthority,
+  GovernedActionSubmission
+} from "../governance/GovernedActionSubmission.js"
 import { Persistence } from "../persistence/Persistence.js"
 import {
   GovernedActionCommitInput,
@@ -87,6 +91,7 @@ const makeGateway = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const connections = yield* PluginConnectionMap
   const persistence = yield* Persistence
+  const proposalAuthority = yield* GovernedActionProposalAuthority
   const policies = yield* GovernedActionPolicyBindingSource
   const submission = yield* GovernedActionSubmission
 
@@ -213,8 +218,8 @@ const makeGateway = Effect.gen(function*() {
           connectedIdentity: prepared.connectedIdentity
         })
         : Effect.fail(unavailable())
-    const authorize = Effect.fn(
-      "ReviewSuggestionPublicationGateway.authorize"
+    const prepareAuthorization = Effect.fn(
+      "ReviewSuggestionPublicationGateway.prepareAuthorization"
     )(function*(
       envelope: GovernedActionEnvelopeV1,
       expectedHeadTransitionId: GovernedActionTransitionId
@@ -259,7 +264,7 @@ const makeGateway = Effect.gen(function*() {
         authorizedAt,
         expiresAt
       })
-      yield* persistence.governedActions.commit(GovernedActionCommitInput.make({
+      return GovernedActionCommitInput.make({
         envelope,
         expectedHeadTransitionId,
         transitionId: authorizationTransitionId,
@@ -273,8 +278,22 @@ const makeGateway = Effect.gen(function*() {
         correlationId: null,
         companion: { _tag: "authorization", authorization },
         auditEventId: authorizationAuditId
-      })).pipe(mapFailure)
+      })
     })
+    const commitWhileAuthorityIsCurrent = <Success, Failure, Requirements>(
+      effect: Effect.Effect<Success, Failure, Requirements>
+    ) =>
+      proposalAuthority.transactCurrent(
+        {
+          workspaceId: command.target.workspaceId,
+          pluginConnectionId: command.target.pluginConnectionId,
+          runtimeAuthorityToken: prepared.runtimeAuthorityToken
+        },
+        () => effect
+      ).pipe(
+        Effect.catchTag("GovernedActionSubmissionUnavailable", () => conflict()),
+        mapFailure
+      )
     const advanceAndRead = Effect.fn(
       "ReviewSuggestionPublicationGateway.advanceAndRead"
     )(function*(actionId: GovernedActionId) {
@@ -318,7 +337,13 @@ const makeGateway = Effect.gen(function*() {
       ) return yield* conflict()
       if (record.head.state === "succeeded") return yield* publishedResult(record)
       if (record.head.state === "proposed") {
-        yield* authorize(envelope, record.headTransition.transitionId)
+        const authorization = yield* prepareAuthorization(
+          envelope,
+          record.headTransition.transitionId
+        )
+        yield* commitWhileAuthorityIsCurrent(
+          persistence.governedActions.commit(authorization)
+        )
       } else if (!reviewPublicationActionCanAdvance(record.head.state)) {
         return yield* unavailable()
       }
@@ -376,7 +401,7 @@ const makeGateway = Effect.gen(function*() {
     const envelope = (yield* makeGovernedActionEnvelope(material).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)
     )).envelope
-    yield* persistence.governedActions.commit(GovernedActionCommitInput.make({
+    const proposalCommit = GovernedActionCommitInput.make({
       envelope,
       expectedHeadTransitionId: null,
       transitionId: proposalTransitionId,
@@ -388,8 +413,14 @@ const makeGateway = Effect.gen(function*() {
       correlationId: null,
       companion: { _tag: "none" },
       auditEventId: proposalAuditId
-    })).pipe(mapFailure)
-    yield* authorize(envelope, proposalTransitionId)
+    })
+    const authorizationCommit = yield* prepareAuthorization(envelope, proposalTransitionId)
+    yield* commitWhileAuthorityIsCurrent(
+      Effect.gen(function*() {
+        yield* persistence.governedActions.commit(proposalCommit)
+        yield* persistence.governedActions.commit(authorizationCommit)
+      })
+    )
     return yield* advanceAndRead(actionId)
   })
 

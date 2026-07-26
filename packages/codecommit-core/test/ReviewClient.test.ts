@@ -236,6 +236,31 @@ describe("CodeCommitReviewClient", () => {
       if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
     }))
 
+  it.effect("classifies an invalid inline position as a terminal conflict", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          postComment: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "postCommentForPullRequest",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "InvalidFilePositionException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(inlineCommentAction).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+    }))
+
   it.effect("classifies the maximum-approval rejection as a terminal conflict", () =>
     Effect.gen(function*() {
       const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({

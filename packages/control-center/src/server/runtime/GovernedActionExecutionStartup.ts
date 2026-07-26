@@ -2,10 +2,12 @@ import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import {
   GovernedActionPolicyBindingSource,
+  GovernedActionProposalAuthority,
   GovernedActionSubmission,
   GovernedActionSubmissionUnavailable
 } from "../governance/GovernedActionSubmission.js"
@@ -24,7 +26,9 @@ import {
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPluginExecutorMap.js"
+import { PluginRuntimeAuthorityToken } from "../plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { PluginRuntimeAuthoritySource } from "../plugins/internal/PluginRuntimeAuthoritySource.js"
 import { PluginRuntimeMap } from "../plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/internal/PluginRuntimeRegistry.js"
 import { type ServerDraining, ServerLifecycle } from "./ServerLifecycle.js"
@@ -116,6 +120,50 @@ export const governedActionPolicyBindingSourceLayer = Layer.effect(
     Effect.map(({ binding }) => ({ current: Effect.succeed(binding) })),
     Effect.catch(() => Effect.fail(submissionUnavailable()))
   )
+)
+
+/** Verify a proposal's exact runtime generation in the same transaction as its durable writes. */
+export const governedActionProposalAuthorityLayer = Layer.effect(
+  GovernedActionProposalAuthority,
+  Effect.map(PluginRuntimeAuthoritySource, (authority) =>
+    GovernedActionProposalAuthority.of({
+      transactCurrent: (input, use) =>
+        Schema.decodeUnknownEffect(PluginRuntimeAuthorityToken)(
+          input.runtimeAuthorityToken
+        ).pipe(
+          Effect.mapError(() => submissionUnavailable()),
+          Effect.flatMap((runtimeAuthorityToken) =>
+            authority.transactCurrent(
+              {
+                scope: {
+                  workspaceId: input.workspaceId,
+                  pluginConnectionId: input.pluginConnectionId
+                },
+                runtimeAuthorityToken
+              },
+              use
+            ).pipe(
+              Effect.catchTag(
+                "PluginRuntimeAuthorityUnavailable",
+                () => Effect.fail(submissionUnavailable())
+              ),
+              Effect.catchTag(
+                "PersistedRecordError",
+                () => Effect.fail(submissionUnavailable())
+              ),
+              Effect.catchTag(
+                "PersistenceOperationError",
+                () => Effect.fail(submissionUnavailable())
+              )
+            )
+          )
+        )
+    }))
+)
+
+/** Complete live proposal-authority boundary for server composition. */
+export const governedActionProposalAuthorityLiveLayer = governedActionProposalAuthorityLayer.pipe(
+  Layer.provide(pluginRuntimeAuthoritySourceLayer)
 )
 
 const readyLayersFromRuntimeMap = (workspaceId: WorkspaceId) => {

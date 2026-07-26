@@ -1405,6 +1405,33 @@ describe("CodeCommitPlugin", () => {
       }
     }))
 
+  it.effect("records an invalid inline location as a terminal failed receipt", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClient(
+        baseReadClient(),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(inlineCommentProposal)
+          return yield* executor.executeAuthorizedAction(authorizeProposal(proposal))
+        }),
+        baseReviewClient({
+          execute: () =>
+            Effect.fail(
+              new Errors.AwsApiError({
+                operation: "postPullRequestComment",
+                profile: Schema.decodeUnknownSync(Domain.AwsProfileName)(configuration.profile),
+                region: Schema.decodeUnknownSync(Domain.AwsRegion)(configuration.region),
+                cause: { _tag: "InvalidFilePositionException" }
+              })
+            )
+        })
+      )
+
+      assert.strictEqual(result._tag, "confirmed")
+      if (result._tag === "confirmed") assert.strictEqual(result.receipt.status, "failed")
+    }))
+
   it.effect("blocks stale actions before the executor can call the review mutation", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)

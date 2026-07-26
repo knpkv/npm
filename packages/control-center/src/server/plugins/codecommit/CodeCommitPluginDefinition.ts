@@ -299,7 +299,12 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
     case "AwsApiError":
       return causeHasTag(error.cause, [
         "IdempotencyParameterMismatchException",
+        "InvalidFileLocationException",
+        "InvalidFilePositionException",
+        "InvalidPathException",
+        "InvalidRelativeFileVersionEnumException",
         "MaximumNumberOfApprovalsExceededException",
+        "PathDoesNotExistException",
         "PullRequestCannotBeApprovedByAuthorException"
       ])
   }
