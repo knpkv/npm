@@ -172,7 +172,8 @@ export const PullRequestReviewPanel = ({
         readonly summary: string
       } => item.summary !== null
     )
-  const visibleThreadEvents = state.thread?.historyLoaded ? presentedThreadEvents : presentedThreadEvents.slice(-12)
+  const completeThreadVisible = state.thread !== undefined && (state.thread.historyLoaded || !state.thread.hasEarlier)
+  const visibleThreadEvents = completeThreadVisible ? presentedThreadEvents : presentedThreadEvents.slice(-12)
   const threadSurface = (
     <section aria-label="Review thread" className={styles.reviewThread}>
       <header>
@@ -196,7 +197,7 @@ export const PullRequestReviewPanel = ({
               ? "Retry earlier activity"
               : "Load earlier activity"}
         </Button>
-      ) : state.thread?.historyLoaded ? (
+      ) : state.thread !== undefined ? (
         <Text tone="secondary" variant="meta">
           Beginning of review thread
         </Text>

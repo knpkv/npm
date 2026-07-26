@@ -481,6 +481,54 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Beginning of review thread")
   })
 
+  it("shows a complete initial history while keeping truncated histories compact", async () => {
+    const seed = REVIEW_THREAD.events[0]
+    if (seed?._tag !== "operator-message") throw new Error("Expected operator-message fixture")
+    const events = Array.from({ length: 13 }, (_, index) => ({
+      ...seed,
+      eventSequence: ReleaseAgentThreadCursor.make(index + 1),
+      prompt: `Review request ${String(index + 1)}`
+    }))
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (hasEarlier: boolean, historyLoaded: boolean) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onLoadEarlier={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{
+            ...REVIEW_STATE,
+            thread: {
+              events,
+              hasEarlier,
+              historyLoaded,
+              nextCursor: ReleaseAgentThreadCursor.make(13)
+            }
+          }}
+        />
+      )
+    const visibleEvents = () => host.querySelectorAll('[aria-label="Review thread"] ol li')
+
+    await act(async () => render(false, false))
+    expect(visibleEvents()).toHaveLength(13)
+    expect(host.textContent).toContain("Review request 1")
+    expect(host.textContent).toContain("Beginning of review thread")
+
+    await act(async () => render(true, false))
+    expect(visibleEvents()).toHaveLength(12)
+    expect([...visibleEvents()].some(({ textContent }) => textContent === "Local Operator · Review request 1")).toBe(
+      false
+    )
+    expect(host.textContent).toContain("Load earlier activity")
+  })
+
   it("retains a targeted request when enqueue fails", async () => {
     const host = document.createElement("div")
     document.body.append(host)
