@@ -804,6 +804,21 @@ test("launches an exact-head review and presents its durable findings", async ({
   })
 
   await page.goto(canonicalEntityPath)
+  const evidenceLayout = await page.locator("[data-rly-evidence-stamp]").evaluate((stamp) => {
+    const source = stamp.querySelector<HTMLElement>("[data-rly-evidence-source]")
+    const freshness = stamp.querySelector<HTMLElement>("[data-rly-evidence-freshness]")
+    if (source === null || freshness === null) throw new Error("Evidence concepts did not render")
+    const sourceRect = source.getBoundingClientRect()
+    return {
+      noHorizontalOverflow: stamp.scrollWidth <= stamp.clientWidth,
+      sourceWidth: sourceRect.width
+    }
+  })
+  expect(evidenceLayout).toMatchObject({
+    noHorizontalOverflow: true
+  })
+  expect(evidenceLayout.sourceWidth).toBeGreaterThanOrEqual(12 * 16)
+
   const reviewTrigger = page.getByRole("button", { name: "Review exact head" })
   await expect(reviewTrigger).toBeVisible()
   await reviewTrigger.focus()
