@@ -256,16 +256,26 @@ const providerCall = <Value, Error>(
 
 const nullableChangelogValueKeys = new Set(["from", "fromString", "to", "toString"])
 
-const omitNullableChangelogValues = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(omitNullableChangelogValues)
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key, field]) => field !== null || !nullableChangelogValueKeys.has(key))
-        .map(([key, field]) => [key, omitNullableChangelogValues(field)])
+const omitNullableChangelogItemValues = (item: Schema.Json): Schema.Json =>
+  item !== null && !Array.isArray(item) && typeof item === "object"
+    ? Object.fromEntries(
+      Object.entries(item).filter(([key, field]) => field !== null || !nullableChangelogValueKeys.has(key))
     )
+    : item
+
+const omitNullableChangelogValues = (response: Schema.Json): Schema.Json => {
+  if (response === null || Array.isArray(response) || typeof response !== "object" || !Array.isArray(response.values)) {
+    return response
   }
-  return value
+  return {
+    ...response,
+    values: response.values.map((history) => {
+      if (history === null || Array.isArray(history) || typeof history !== "object" || !Array.isArray(history.items)) {
+        return history
+      }
+      return { ...history, items: history.items.map(omitNullableChangelogItemValues) }
+    })
+  }
 }
 
 const getChangelogs = (

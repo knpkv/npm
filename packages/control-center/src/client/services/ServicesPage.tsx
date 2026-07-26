@@ -1039,9 +1039,7 @@ export const ServicesPage = ({
                 ({ followedResourceId }) => followedResourceId !== null && groupedResourceIds.has(followedResourceId)
               )
               const standaloneConnections = configured.filter(
-                ({ followedResourceId, isEnabled }) =>
-                  (followedResourceId === null || !groupedResourceIds.has(followedResourceId)) &&
-                  (isEnabled || !hasGroupedResource)
+                ({ followedResourceId }) => followedResourceId === null || !groupedResourceIds.has(followedResourceId)
               )
               const missingAtlassianIntent = missingAtlassianProductsIntent(
                 connectionsState.overview.connections,

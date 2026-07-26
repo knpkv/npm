@@ -741,13 +741,24 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Verified identity · cloud-2")
     expect(host.textContent).toContain("Project · project-payments")
     expect(host.textContent).toContain("Space · space-payments")
-    expect(host.textContent).not.toContain("Old Confluence setup")
-    expect(host.textContent).not.toContain("Second old Confluence setup")
+    expect(host.textContent).toContain("Old Confluence setup")
+    expect(host.textContent).toContain("Second old Confluence setup")
     expect(host.textContent).not.toContain("Configure jira.")
     expect(host.textContent).not.toContain("Configure confluence.")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add Jira project", "Add Confluence space"])
     )
+    for (const displayName of ["Old Confluence setup", "Second old Confluence setup"]) {
+      const standaloneCard = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+        textContent?.includes(displayName)
+      )
+      expect(standaloneCard).toBeDefined()
+      expect(
+        [...(standaloneCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].some(
+          ({ textContent }) => textContent === "Enable service"
+        )
+      ).toBe(true)
+    }
 
     const addConfluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Add Confluence space")

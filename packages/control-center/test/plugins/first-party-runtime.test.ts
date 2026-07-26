@@ -981,6 +981,7 @@ describe("first-party plugin runtime", () => {
       const profiles = [
         oauthProfile("valid-profile", now + 60_000),
         oauthProfile("expired-profile", now - 1),
+        oauthProfile("legacy-spaced-name-profile", now + 60_000, " Avery Bell"),
         oauthProfile("long-name-profile", now + 60_000, longUserName),
         oauthProfile("supplementary-name-profile", now + 60_000, supplementaryUserName),
         oauthProfile("exact-boundary-profile", now + 60_000, exactBoundaryUserName)
@@ -1016,6 +1017,7 @@ describe("first-party plugin runtime", () => {
           readonly profileId:
             | "valid-profile"
             | "expired-profile"
+            | "legacy-spaced-name-profile"
             | "long-name-profile"
             | "supplementary-name-profile"
             | "exact-boundary-profile"
@@ -1024,6 +1026,13 @@ describe("first-party plugin runtime", () => {
         }> = [
           { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
           { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "Avery Bell",
+            providerId: "confluence",
+            profileId: "legacy-spaced-name-profile",
+            siteId: "cloud-1"
+          },
           {
             expectedDiagnosticCode: null,
             expectedDisplayName: longUserName.slice(0, 200),

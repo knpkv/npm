@@ -157,6 +157,45 @@ describe("JiraReadProvider", () => {
     )
   })
 
+  it.effect("rejects nullable changelog-like keys outside changelog items", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getChangelogs("10033", {
+        startAt: 0,
+        maxResults: 50
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
+    }).pipe(
+      Effect.provide(
+        jiraClientLayer(
+          {
+            self: "https://acme.atlassian.net/rest/api/3/issue/10033/changelog",
+            maxResults: 50,
+            startAt: 0,
+            total: 1,
+            isLast: true,
+            values: [
+              {
+                id: "1",
+                created: "2026-07-26T12:00:00.000Z",
+                historyMetadata: { extraData: { from: null } },
+                items: []
+              }
+            ]
+          },
+          requests
+        )
+      )
+    )
+  })
+
   it.effect("loads one exact Jira comment for reply validation", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

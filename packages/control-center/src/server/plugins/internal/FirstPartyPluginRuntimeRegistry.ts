@@ -787,7 +787,7 @@ const MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH = 200
 
 const boundedConfluenceUserName = (value: string): string => {
   let bounded = ""
-  for (const codePoint of value) {
+  for (const codePoint of value.trim()) {
     if (bounded.length + codePoint.length > MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH) break
     bounded += codePoint
   }
@@ -924,7 +924,7 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     configuration.siteBaseUrl.origin,
     configuration.siteId
   )
-  const configurationInput = {
+  const configurationWithCachedIdentity = {
     ...storedConfigurationInput,
     ...(authentication.verifiedUser === null
       ? {}
@@ -936,6 +936,11 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
         }
       })
   }
+  const configurationInput = Option.isSome(
+    Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)
+  )
+    ? configurationWithCachedIdentity
+    : storedConfigurationInput
   const apiClient = ConfluenceApiClient.layer.pipe(
     Layer.provide(Layer.succeed(ConfluenceApiConfig, {
       baseUrl: configuration.siteBaseUrl.origin,
