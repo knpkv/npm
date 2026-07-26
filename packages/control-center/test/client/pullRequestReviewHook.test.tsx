@@ -24,6 +24,7 @@ import {
 } from "../../src/api/agent.js"
 import {
   continuePullRequestReviewThread,
+  loadEarlierPullRequestReviewThread,
   MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
   MAXIMUM_REVIEW_THREAD_PAGE_READS
 } from "../../src/client/entities/pullRequestReviewThreadReplay.js"
@@ -379,6 +380,71 @@ describe("usePullRequestReview", () => {
     expect(thread.events[0]?.eventSequence).toBe(ReleaseAgentThreadCursor.make(129))
     expect(thread.events.at(-1)?.eventSequence).toBe(ReleaseAgentThreadCursor.make(384))
     expect(thread.nextCursor).toBe(ReleaseAgentThreadCursor.make(384))
+  })
+
+  it("prepends one explicit backward page while preserving the live cursor", async () => {
+    const previous = {
+      events: [threadEvent(129), threadEvent(130)],
+      hasEarlier: true,
+      historyLoaded: false,
+      nextCursor: ReleaseAgentThreadCursor.make(130)
+    }
+    const page = PullRequestReviewThreadPage.make({
+      events: [threadEvent(127), threadEvent(128)],
+      hasMore: true,
+      nextCursor: ReleaseAgentThreadCursor.make(127)
+    })
+    const transport = {
+      loadThread: vi.fn(() => Promise.resolve(page))
+    }
+
+    const thread = await loadEarlierPullRequestReviewThread(
+      transport,
+      ENTITY_ID,
+      new AbortController().signal,
+      previous
+    )
+
+    expect(transport.loadThread).toHaveBeenCalledWith(
+      ENTITY_ID,
+      ReleaseAgentThreadCursor.make(129),
+      expect.any(AbortSignal),
+      "before"
+    )
+    expect(thread.events.map(({ eventSequence }) => eventSequence)).toEqual([
+      ReleaseAgentThreadCursor.make(127),
+      ReleaseAgentThreadCursor.make(128),
+      ReleaseAgentThreadCursor.make(129),
+      ReleaseAgentThreadCursor.make(130)
+    ])
+    expect(thread).toMatchObject({
+      hasEarlier: true,
+      historyLoaded: true,
+      nextCursor: ReleaseAgentThreadCursor.make(130)
+    })
+  })
+
+  it("rejects a backward page that does not retreat from the requested cursor", async () => {
+    const previous = {
+      events: [threadEvent(129)],
+      hasEarlier: true,
+      historyLoaded: false,
+      nextCursor: ReleaseAgentThreadCursor.make(129)
+    }
+    const transport = {
+      loadThread: () =>
+        Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events: [threadEvent(129)],
+            hasMore: false,
+            nextCursor: ReleaseAgentThreadCursor.make(129)
+          })
+        )
+    }
+
+    await expect(
+      loadEarlierPullRequestReviewThread(transport, ENTITY_ID, new AbortController().signal, previous)
+    ).rejects.toThrow("history cursor did not retreat")
   })
 
   it("follows advancing cursors until the durable review thread reaches its tail", async () => {

@@ -11,7 +11,11 @@ import type {
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
-import type { PullRequestReviewTransport } from "./usePullRequestReview.js"
+import type {
+  PullRequestReviewControllerState,
+  PullRequestReviewScope,
+  PullRequestReviewTransport
+} from "./usePullRequestReview.js"
 
 export const MAXIMUM_REVIEW_THREAD_PAGE_READS = 128
 export const MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS = 256
@@ -19,13 +23,16 @@ export const MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS = 256
 interface PullRequestReviewThreadPageTransport {
   readonly loadThread: (
     entityId: EntityId,
-    after: ReleaseAgentThreadCursor | null,
-    signal: AbortSignal
+    cursor: ReleaseAgentThreadCursor | null,
+    signal: AbortSignal,
+    direction?: "after" | "before"
   ) => Promise<PullRequestReviewThreadPage>
 }
 
 export interface PullRequestReviewThread {
   readonly events: ReadonlyArray<PullRequestReviewThreadEvent>
+  readonly hasEarlier: boolean
+  readonly historyLoaded: boolean
   readonly nextCursor: ReleaseAgentThreadCursor
 }
 
@@ -72,13 +79,17 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  loadThread: (entityId, after, signal) =>
+  loadThread: (entityId, cursor, signal, direction = "after") =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
         return yield* client.agent.pullRequestReviewThread({
           params: { entityId },
-          query: after === null ? {} : { after }
+          query: cursor === null
+            ? {}
+            : direction === "before"
+            ? { before: cursor }
+            : { after: cursor }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -126,7 +137,14 @@ export const loadCompletePullRequestReviewThread = async (
   for (let pageRead = 0; pageRead < MAXIMUM_REVIEW_THREAD_PAGE_READS; pageRead++) {
     const page = await transport.loadThread(entityId, after, signal)
     for (const event of page.events) events.push(event)
-    if (!page.hasMore) return { events, nextCursor: page.nextCursor }
+    if (!page.hasMore) {
+      return {
+        events,
+        hasEarlier: false,
+        historyLoaded: false,
+        nextCursor: page.nextCursor
+      }
+    }
     if (after !== null && page.nextCursor <= after) {
       throw new Error("Pull-request review thread cursor did not advance")
     }
@@ -136,7 +154,12 @@ export const loadCompletePullRequestReviewThread = async (
   if (tail.hasMore || (after !== null && tail.nextCursor <= after)) {
     throw new Error("Pull-request review thread tail fallback was not usable")
   }
-  return { events: [...tail.events], nextCursor: tail.nextCursor }
+  return {
+    events: [...tail.events],
+    hasEarlier: false,
+    historyLoaded: false,
+    nextCursor: tail.nextCursor
+  }
 }
 
 /** Continue one previously loaded thread without replaying its durable prefix. */
@@ -156,9 +179,100 @@ export const continuePullRequestReviewThread = async (
     ? update.events
     : [...previous.events, ...update.events]
   return {
-    events: events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS),
+    events: previous?.historyLoaded
+      ? events
+      : events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS),
+    hasEarlier: previous?.hasEarlier ?? events.length > 0,
+    historyLoaded: previous?.historyLoaded ?? false,
     nextCursor: update.nextCursor
   }
+}
+
+/** Prepend one explicit bounded history page without disturbing live replay. */
+export const loadEarlierPullRequestReviewThread = async (
+  transport: PullRequestReviewThreadPageTransport,
+  entityId: EntityId,
+  signal: AbortSignal,
+  previous: PullRequestReviewThread
+): Promise<PullRequestReviewThread> => {
+  const before = previous.events[0]?.eventSequence
+  if (!previous.hasEarlier || before === undefined) return previous
+  const page = await transport.loadThread(entityId, before, signal, "before")
+  const invalidEvent = page.events.some(
+    (event, index, events) =>
+      event.eventSequence >= before ||
+      (index > 0 && event.eventSequence <= events[index - 1]!.eventSequence)
+  )
+  if (
+    invalidEvent ||
+    (page.events.length > 0 && page.nextCursor >= before) ||
+    (page.hasMore && page.events.length === 0)
+  ) {
+    throw new Error("Pull-request review history cursor did not retreat")
+  }
+  return {
+    events: [...page.events, ...previous.events],
+    hasEarlier: page.hasMore,
+    historyLoaded: true,
+    nextCursor: previous.nextCursor
+  }
+}
+
+type ReadyPullRequestReviewState = Extract<
+  PullRequestReviewControllerState,
+  { readonly _tag: "ready" }
+>
+
+const sameReviewScope = (
+  left: PullRequestReviewScope,
+  right: PullRequestReviewScope
+): boolean =>
+  left.baseRevision === right.baseRevision &&
+  left.entityId === right.entityId &&
+  left.headRevision === right.headRevision &&
+  left.sessionKey === right.sessionKey
+
+/** Apply one dynamic history read without growing the default entity-route chunk. */
+export const loadEarlierPullRequestReviewThreadIntoState = (
+  transport: PullRequestReviewThreadPageTransport,
+  current: ReadyPullRequestReviewState,
+  currentThread: PullRequestReviewThread,
+  signal: AbortSignal,
+  latestScope: { current: PullRequestReviewScope | null },
+  latestThread: PullRequestReviewThreadRef,
+  setState: (
+    update: (state: PullRequestReviewControllerState) => PullRequestReviewControllerState
+  ) => void
+): void => {
+  loadEarlierPullRequestReviewThread(
+    transport,
+    current.entityId,
+    signal,
+    currentThread
+  ).then(
+    (thread) => {
+      if (
+        signal.aborted ||
+        latestScope.current === null ||
+        !sameReviewScope(latestScope.current, current)
+      ) return
+      latestThread.current = thread
+      setState((latest) =>
+        latest._tag === "ready" && sameReviewScope(latest, current)
+          ? { ...latest, historyAction: "idle", thread }
+          : latest
+      )
+    },
+    (failure) => {
+      if (signal.aborted) return
+      Effect.runFork(Effect.logError("Pull-request review history load failed", failure))
+      setState((latest) =>
+        latest._tag === "ready" && sameReviewScope(latest, current)
+          ? { ...latest, historyAction: "failed" }
+          : latest
+      )
+    }
+  )
 }
 
 /** Load one coherent review snapshot and close a pending-to-terminal tail race. */

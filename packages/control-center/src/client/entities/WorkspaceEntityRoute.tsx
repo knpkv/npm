@@ -11,7 +11,7 @@ import {
   type RlyCollaboratorCategory
 } from "@knpkv/rly/patterns"
 import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useEffect, useRef, useState } from "react"
+import { type ReactElement, lazy, Suspense, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
 
 import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
@@ -33,13 +33,18 @@ import { WorkspaceClockifyTimeEntryDetails } from "./WorkspaceClockifyTimeEntryD
 import { WorkspaceConfluencePageDetails } from "./WorkspaceConfluencePageDetails.js"
 import { WorkspaceIssueDetails } from "./WorkspaceIssueDetails.js"
 import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionDetails.js"
-import { WorkspacePullRequestDetails } from "./WorkspacePullRequestDetails.js"
 import {
   usePullRequestReview,
   type PullRequestReviewControllerState,
   type PullRequestReviewPublicationState
 } from "./usePullRequestReview.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
+
+const WorkspacePullRequestDetails = lazy(() =>
+  import("./WorkspacePullRequestDetails.js").then((module) => ({
+    default: module.WorkspacePullRequestDetails
+  }))
+)
 
 const originLabel = (href: string, workspaceId: WorkspaceIdType): string => {
   const pathname = href.split(/[?#]/u, 1)[0] ?? ""
@@ -256,6 +261,7 @@ const EntityContent = ({
   presentation,
   retry,
   reviewCanEnqueue,
+  reviewLoadEarlier,
   reviewPublication,
   reviewPublicationCancel,
   reviewPublicationPreview,
@@ -271,6 +277,7 @@ const EntityContent = ({
   readonly reviewCanEnqueue: boolean
   readonly reviewPublication: PullRequestReviewPublicationState
   readonly reviewPublicationCancel: () => void
+  readonly reviewLoadEarlier: () => void
   readonly reviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
   readonly reviewRetry: () => void
   readonly reviewSuggestionPublish: (finalContent: string) => void
@@ -304,21 +311,24 @@ const EntityContent = ({
       <WorkspacePipelineExecutionDetails pipeline={presentation.pipelineExecution} />
     )}
     {presentation.pullRequest === null ? null : (
-      <WorkspacePullRequestDetails
-        approvers={presentation.collaborators.approvers}
-        onSessionExpired={onSessionExpired}
-        onReviewPublicationCancel={reviewPublicationCancel}
-        onReviewPublicationPreview={reviewPublicationPreview}
-        onReviewRetry={reviewRetry}
-        onReviewSuggestionPublish={reviewSuggestionPublish}
-        onReviewStart={reviewStart}
-        pullRequest={presentation.pullRequest}
-        reviewCanEnqueue={reviewCanEnqueue}
-        reviewPublication={reviewPublication}
-        reviewState={reviewState}
-        reviewers={presentation.collaborators.reviewers}
-        sessionKey={sessionKey}
-      />
+      <Suspense fallback={<Skeleton decorative={false} height="20rem" label="Loading pull request" variant="block" />}>
+        <WorkspacePullRequestDetails
+          approvers={presentation.collaborators.approvers}
+          onSessionExpired={onSessionExpired}
+          onReviewLoadEarlier={reviewLoadEarlier}
+          onReviewPublicationCancel={reviewPublicationCancel}
+          onReviewPublicationPreview={reviewPublicationPreview}
+          onReviewRetry={reviewRetry}
+          onReviewSuggestionPublish={reviewSuggestionPublish}
+          onReviewStart={reviewStart}
+          pullRequest={presentation.pullRequest}
+          reviewCanEnqueue={reviewCanEnqueue}
+          reviewPublication={reviewPublication}
+          reviewState={reviewState}
+          reviewers={presentation.collaborators.reviewers}
+          sessionKey={sessionKey}
+        />
+      </Suspense>
     )}
     <DeliveryPath presentation={presentation} />
   </div>
@@ -332,6 +342,7 @@ interface WorkspaceEntityViewProps {
   readonly originState: WorkspaceEntityOrigin["state"]
   readonly retry: () => void
   readonly reviewCanEnqueue?: boolean
+  readonly reviewLoadEarlier?: () => void
   readonly reviewPublication?: PullRequestReviewPublicationState
   readonly reviewPublicationCancel?: () => void
   readonly reviewPublicationPreview?: (selection: ReviewSuggestionPublicationSelection) => void
@@ -356,6 +367,7 @@ export const WorkspaceEntityView = ({
   originState,
   retry,
   reviewCanEnqueue = false,
+  reviewLoadEarlier = ignoreAction,
   reviewPublication = { _tag: "idle" },
   reviewPublicationCancel = ignoreAction,
   reviewPublicationPreview = ignoreAction,
@@ -435,6 +447,7 @@ export const WorkspaceEntityView = ({
             reviewCanEnqueue={reviewCanEnqueue}
             reviewPublication={reviewPublication}
             reviewPublicationCancel={reviewPublicationCancel}
+            reviewLoadEarlier={reviewLoadEarlier}
             reviewPublicationPreview={reviewPublicationPreview}
             reviewRetry={reviewRetry}
             reviewSuggestionPublish={reviewSuggestionPublish}
@@ -530,6 +543,7 @@ const ConnectedWorkspaceEntity = ({
       reviewCanEnqueue={reviewCanEnqueue}
       reviewPublication={reviewController.publication}
       reviewPublicationCancel={reviewController.cancelPublication}
+      reviewLoadEarlier={reviewController.loadEarlier}
       reviewPublicationPreview={reviewController.previewPublication}
       reviewRetry={reviewController.retry}
       reviewSuggestionPublish={reviewController.publishSuggestion}

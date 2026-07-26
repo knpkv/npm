@@ -658,6 +658,7 @@ const pullRequestReviewState = {
   headRevision: pullRequestReviewSubject.headRevision,
   sessionKey: "session-a",
   action: "idle",
+  historyAction: "idle",
   provider: {
     providerId: DurableAgentProviderId.make("openai-compatible"),
     model: AgentModelId.make("review-model"),
@@ -1325,6 +1326,12 @@ describe("canonical workspace entity", () => {
     const onAskAgent = vi.fn()
     const onReviewStart = vi.fn()
     const host = await renderView(onAskAgent, pullRequestState, onReviewStart)
+    await act(async () => {
+      await Promise.all([
+        import("../../src/client/entities/PullRequestReviewPanel.js"),
+        import("../../src/client/entities/WorkspacePullRequestDetails.js")
+      ])
+    })
 
     expect(host.textContent).toContain("feature/capture")
     expect(host.textContent).toContain("a5d8c9e4f013bdf17c2e6765579e2770f63e7b19")

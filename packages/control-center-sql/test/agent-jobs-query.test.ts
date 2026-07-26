@@ -5,6 +5,7 @@ import {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
   renderAgentReviewThreadHistoryQuery,
+  renderAgentThreadBeforeQuery,
   renderAgentThreadReplayQuery,
   renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
@@ -94,6 +95,23 @@ describe("durable agent job queries", () => {
       sql:
         "select \"agent_thread_events\".\"workspace_id\" as \"workspaceId\", \"agent_thread_events\".\"thread_id\" as \"threadId\", \"agent_thread_events\".\"event_sequence\" as \"eventSequence\", \"agent_thread_events\".\"job_id\" as \"jobId\", \"agent_thread_events\".\"attempt_sequence\" as \"attemptSequence\", \"agent_thread_events\".\"event_kind\" as \"eventKind\", \"agent_thread_events\".\"payload_json\" as \"payloadJson\", \"agent_thread_events\".\"payload_digest\" as \"payloadDigest\", \"agent_thread_events\".\"payload_byte_length\" as \"payloadByteLength\", \"agent_jobs\".\"task_context_json\" as \"taskContextJson\", \"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\", \"agent_thread_events\".\"occurred_at\" as \"occurredAt\" from \"agent_thread_events\" inner join \"agent_jobs\" on ((\"agent_jobs\".\"workspace_id\" = \"agent_thread_events\".\"workspace_id\") and (\"agent_jobs\".\"job_id\" = \"agent_thread_events\".\"job_id\")) where ((\"agent_thread_events\".\"workspace_id\" = ?) and (\"agent_thread_events\".\"thread_id\" = ?) and (\"agent_thread_events\".\"event_sequence\" > ?)) order by \"agent_thread_events\".\"event_sequence\" asc limit ?"
     })
+  })
+
+  it("renders the newest bounded history page before the exclusive cursor", () => {
+    const rendered = renderAgentThreadBeforeQuery({
+      beforeSequence: 42,
+      limit: 16,
+      threadId: "thread-secret",
+      workspaceId: "workspace-secret"
+    })
+
+    expect(rendered.params).toEqual(["workspace-secret", "thread-secret", 42, 16])
+    expect(rendered.sql).toContain(
+      "\"agent_thread_events\".\"event_sequence\" < ?"
+    )
+    expect(rendered.sql).toContain(
+      "order by \"agent_thread_events\".\"event_sequence\" desc limit ?"
+    )
   })
 
   it("fences review history before the current immutable job", () => {

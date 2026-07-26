@@ -509,12 +509,54 @@ const makePullRequestReviews = Effect.gen(function*() {
         return PullRequestReviewThreadPage.make({
           events: [],
           hasMore: false,
-          nextCursor: input.after ?? ReleaseAgentThreadCursor.make(0)
+          nextCursor: input.before ?? input.after ?? ReleaseAgentThreadCursor.make(0)
         })
       }
       const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(
         input.limit
       ).pipe(Effect.mapError(unavailable))
+      if (input.before !== undefined && input.before !== null) {
+        const before = yield* Schema.decodeUnknownEffect(AgentEventCursor)(
+          input.before
+        ).pipe(Effect.mapError(unavailable))
+        const page = yield* mapPersistenceRead(
+          persistence.agentJobs.reviewThreadBefore({
+            workspaceId: input.workspaceId,
+            pluginConnectionId: target.pluginConnectionId,
+            subject: target.subject,
+            before,
+            limit
+          }).pipe(
+            Effect.catchTag(
+              "RecordNotFoundError",
+              () => Effect.succeed({ events: [], nextCursor: before })
+            )
+          )
+        )
+        const hasMore = page.events.length === limit &&
+          (yield* mapPersistenceRead(
+              persistence.agentJobs.reviewThreadBefore({
+                workspaceId: input.workspaceId,
+                pluginConnectionId: target.pluginConnectionId,
+                subject: target.subject,
+                before: page.nextCursor,
+                limit: AgentThreadEventPageSize.make(1)
+              }).pipe(
+                Effect.catchTag(
+                  "RecordNotFoundError",
+                  () => Effect.succeed({ events: [], nextCursor: page.nextCursor })
+                )
+              )
+            )).events.length > 0
+        const events = yield* Effect.forEach(page.events, mapReviewThreadEvent)
+        return yield* Schema.decodeUnknownEffect(
+          Schema.toType(PullRequestReviewThreadPage)
+        )({
+          events,
+          hasMore,
+          nextCursor: page.nextCursor
+        }).pipe(Effect.mapError(unavailable))
+      }
       if (input.after === null) {
         const tail = yield* mapPersistenceRead(
           persistence.agentJobs.reviewThreadTail({

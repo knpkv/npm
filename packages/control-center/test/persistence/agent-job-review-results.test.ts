@@ -427,6 +427,18 @@ describe("agent job review results", () => {
           ]
         )
         assert.strictEqual(tail.nextCursor, AgentEventCursor.make(6))
+        const earlier = yield* jobs.reviewThreadBefore({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: advancedSubject,
+          before: AgentEventCursor.make(5),
+          limit: AgentThreadEventPageSize.make(2)
+        })
+        assert.deepStrictEqual(
+          earlier.events.map(({ eventSequence }) => eventSequence),
+          [AgentEventCursor.make(3), AgentEventCursor.make(4)]
+        )
+        assert.strictEqual(earlier.nextCursor, AgentEventCursor.make(3))
       })
     ))
 

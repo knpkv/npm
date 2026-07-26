@@ -84,6 +84,7 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
 export const PullRequestReviewPanel = ({
   canEnqueue,
   onCancelPublication,
+  onLoadEarlier = () => undefined,
   onPreviewPublication,
   onPublishSuggestion,
   onRetry,
@@ -93,6 +94,7 @@ export const PullRequestReviewPanel = ({
 }: {
   readonly canEnqueue: boolean
   readonly onCancelPublication: () => void
+  readonly onLoadEarlier?: () => void
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationSelection) => void
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
@@ -160,7 +162,7 @@ export const PullRequestReviewPanel = ({
 
   const review = state.review
   const threadEvents = state.thread?.events ?? []
-  const visibleThreadEvents = threadEvents
+  const presentedThreadEvents = threadEvents
     .map((event) => ({ event, summary: threadEventSummary(event) }))
     .filter(
       (
@@ -170,7 +172,7 @@ export const PullRequestReviewPanel = ({
         readonly summary: string
       } => item.summary !== null
     )
-    .slice(-12)
+  const visibleThreadEvents = state.thread?.historyLoaded ? presentedThreadEvents : presentedThreadEvents.slice(-12)
   const threadSurface = (
     <section aria-label="Review thread" className={styles.reviewThread}>
       <header>
@@ -186,6 +188,19 @@ export const PullRequestReviewPanel = ({
           ))}
         </ol>
       )}
+      {state.thread?.hasEarlier ? (
+        <Button disabled={state.historyAction === "loading"} onClick={onLoadEarlier}>
+          {state.historyAction === "loading"
+            ? "Loading earlier activity…"
+            : state.historyAction === "failed"
+              ? "Retry earlier activity"
+              : "Load earlier activity"}
+        </Button>
+      ) : state.thread?.historyLoaded ? (
+        <Text tone="secondary" variant="meta">
+          Beginning of review thread
+        </Text>
+      ) : null}
       {canEnqueue && state.provider !== null && review._tag !== "pending" && review._tag !== "unavailable" ? (
         <div className={styles.reviewThreadComposer}>
           <label htmlFor="review-thread-request">Ask Relay about this pull request</label>

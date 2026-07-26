@@ -110,6 +110,7 @@ const REVIEW_STATE = {
   headRevision: SUBJECT.headRevision,
   sessionKey: "session-a",
   action: "idle",
+  historyAction: "idle",
   provider: {
     providerId: DurableAgentProviderId.make("openai-compatible"),
     model: AgentModelId.make("review-model"),
@@ -273,7 +274,7 @@ const PENDING_REVIEW = new PullRequestReviewPending({
   state: "queued"
 })
 
-const REVIEW_THREAD = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
+const REVIEW_THREAD_PAGE = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
   events: [
     {
       _tag: "operator-message",
@@ -297,6 +298,12 @@ const REVIEW_THREAD = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
   hasMore: false,
   nextCursor: ReleaseAgentThreadCursor.make(2)
 })
+const REVIEW_THREAD = {
+  events: REVIEW_THREAD_PAGE.events,
+  hasEarlier: true,
+  historyLoaded: false,
+  nextCursor: REVIEW_THREAD_PAGE.nextCursor
+}
 const REFRESHED_NOT_STARTED_STATE = {
   ...REVIEW_STATE,
   baseRevision: "3".repeat(40),
@@ -419,6 +426,56 @@ describe("PullRequestReviewPanel", () => {
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
   })
 
+  it("loads earlier durable activity explicitly and marks the beginning", async () => {
+    const onLoadEarlier = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (state: PullRequestReviewControllerState) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onLoadEarlier={onLoadEarlier}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+
+    await act(async () => render({ ...REVIEW_STATE, thread: REVIEW_THREAD }))
+    const loadEarlier = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Load earlier activity"
+    )
+    if (loadEarlier === undefined) throw new Error("Expected earlier activity action")
+    await act(async () => loadEarlier.click())
+    expect(onLoadEarlier).toHaveBeenCalledOnce()
+
+    await act(async () =>
+      render({
+        ...REVIEW_STATE,
+        historyAction: "loading",
+        thread: REVIEW_THREAD
+      })
+    )
+    expect(host.textContent).toContain("Loading earlier activity…")
+
+    await act(async () =>
+      render({
+        ...REVIEW_STATE,
+        thread: {
+          ...REVIEW_THREAD,
+          hasEarlier: false,
+          historyLoaded: true
+        }
+      })
+    )
+    expect(host.textContent).toContain("Beginning of review thread")
+  })
+
   it("retains a targeted request when enqueue fails", async () => {
     const host = document.createElement("div")
     document.body.append(host)
@@ -490,6 +547,8 @@ describe("PullRequestReviewPanel", () => {
         ...REVIEW_STATE,
         thread: {
           events: [...REVIEW_THREAD.events, ...REVIEW_THREAD.events],
+          hasEarlier: true,
+          historyLoaded: false,
           nextCursor: ReleaseAgentThreadCursor.make(2)
         }
       })

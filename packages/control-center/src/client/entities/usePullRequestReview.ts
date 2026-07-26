@@ -28,7 +28,7 @@ interface ReviewProviderSelection {
   readonly reviewProfile: NonNullable<AgentProviderCatalogEntry["reviewProfile"]>
 }
 
-interface PullRequestReviewScope {
+export interface PullRequestReviewScope {
   readonly baseRevision: string | null
   readonly entityId: EntityId
   readonly headRevision: string
@@ -42,6 +42,7 @@ export type PullRequestReviewControllerState =
   | ({
     readonly _tag: "ready"
     readonly action: "idle" | "starting" | "failed"
+    readonly historyAction: "idle" | "loading" | "failed"
     readonly provider: ReviewProviderSelection | null
     readonly review: PullRequestReviewState
     readonly thread?: PullRequestReviewThread
@@ -89,8 +90,9 @@ export interface PullRequestReviewTransport {
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
   readonly loadThread: (
     entityId: EntityId,
-    after: ReleaseAgentThreadCursor | null,
-    signal: AbortSignal
+    cursor: ReleaseAgentThreadCursor | null,
+    signal: AbortSignal,
+    direction?: "after" | "before"
   ) => Promise<PullRequestReviewThreadPage>
   readonly previewPublication: (
     entityId: EntityId,
@@ -164,6 +166,7 @@ export const usePullRequestReview = (
   transport: PullRequestReviewTransport = browserPullRequestReviewTransport
 ): {
   readonly cancelPublication: () => void
+  readonly loadEarlier: () => void
   readonly previewPublication: (selection: ReviewSuggestionPublicationSelection) => void
   readonly publication: PullRequestReviewPublicationState
   readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
@@ -174,6 +177,7 @@ export const usePullRequestReview = (
   const [requestRevision, setRequestRevision] = useState(0)
   const [state, setState] = useState<PullRequestReviewControllerState>({ _tag: "idle" })
   const [publication, setPublication] = useState<PullRequestReviewPublicationState>({ _tag: "idle" })
+  const historyAbort = useRef<AbortController | null>(null)
   const mutationAbort = useRef<AbortController | null>(null)
   const publicationAbort = useRef<AbortController | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
@@ -218,6 +222,7 @@ export const usePullRequestReview = (
                 _tag: "ready",
                 ...scope,
                 action: "idle",
+                historyAction: "idle",
                 provider: eligibleProvider(catalog),
                 review,
                 thread
@@ -268,12 +273,15 @@ export const usePullRequestReview = (
 
   useEffect(
     () => () => {
+      historyAbort.current?.abort()
       mutationAbort.current?.abort()
       publicationAbort.current?.abort()
     },
     []
   )
   useEffect(() => {
+    historyAbort.current?.abort()
+    historyAbort.current = null
     mutationAbort.current?.abort()
     mutationAbort.current = null
     publicationAbort.current?.abort()
@@ -316,6 +324,33 @@ export const usePullRequestReview = (
       () => undefined
     )
   }, [transport])
+
+  const loadEarlier = useCallback(() => {
+    if (
+      state._tag !== "ready" ||
+      state.historyAction === "loading" ||
+      state.thread === undefined ||
+      !state.thread.hasEarlier
+    ) return
+    const current = state
+    const currentThread = state.thread
+    historyAbort.current?.abort()
+    const abort = new AbortController()
+    historyAbort.current = abort
+    setState({ ...current, historyAction: "loading" })
+    pullRequestReviewBrowser.then(
+      ({ loadEarlierPullRequestReviewThreadIntoState }) =>
+        loadEarlierPullRequestReviewThreadIntoState(
+          transport,
+          current,
+          currentThread,
+          abort.signal,
+          latestScope,
+          latestThread,
+          setState
+        )
+    )
+  }, [state, transport])
 
   const start = useCallback((prompt?: DurableAgentPrompt) => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
@@ -478,6 +513,7 @@ export const usePullRequestReview = (
       publicationAbort.current = null
       setPublication({ _tag: "idle" })
     }, []),
+    loadEarlier,
     previewPublication,
     publication,
     publishSuggestion,

@@ -1019,6 +1019,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               workspaceId: session.workspaceId,
               entityId: params.entityId,
               after: query.after ?? null,
+              before: query.before ?? null,
               limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
             }).pipe(Effect.catchTags({
               ApplicationResourceNotFound: mapApplicationNotFound,

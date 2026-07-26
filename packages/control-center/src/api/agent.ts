@@ -714,15 +714,23 @@ const pullRequestReview = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const PullRequestReviewThreadQuery = Schema.Struct({
+  after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  before: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
+}).check(
+  Schema.makeFilter(
+    ({ after, before }) => after === undefined || before === undefined,
+    { expected: "at most one pull-request review thread cursor" }
+  )
+)
+
 const pullRequestReviewThread = HttpApiEndpoint.get(
   "pullRequestReviewThread",
   "/pull-requests/:entityId/review-thread/events",
   {
     params: Schema.Struct({ entityId: EntityId }),
-    query: Schema.Struct({
-      after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
-      limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
-    }),
+    query: PullRequestReviewThreadQuery,
     success: PullRequestReviewThreadPage,
     error: [
       UnauthorizedApiError,

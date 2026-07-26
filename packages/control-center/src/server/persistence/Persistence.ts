@@ -215,6 +215,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
       reviewThreadAfter: (...args: Parameters<AgentJobRepositoryService["reviewThreadAfter"]>) =>
         publicOperation("agent-job.review-thread-after", agentJobs.reviewThreadAfter(...args)),
+      reviewThreadBefore: (...args: Parameters<AgentJobRepositoryService["reviewThreadBefore"]>) =>
+        publicOperation("agent-job.review-thread-before", agentJobs.reviewThreadBefore(...args)),
       reviewThreadTail: (...args: Parameters<AgentJobRepositoryService["reviewThreadTail"]>) =>
         publicOperation("agent-job.review-thread-tail", agentJobs.reviewThreadTail(...args)),
       reviewResult: (...args: Parameters<AgentJobRepositoryService["reviewResult"]>) =>
