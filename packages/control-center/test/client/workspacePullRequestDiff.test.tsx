@@ -171,6 +171,34 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("Keep one invariant per file")
     expect(host.textContent).not.toContain("Document the compatibility break")
     expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff
+          heading="PR 184"
+          scope={scope}
+          suggestions={[suggestion, fileSuggestion, changesSuggestion]}
+          transport={transport}
+        />
+      )
+    })
+    expect(host.textContent).toContain("Keep one invariant per file")
+    expect(host.textContent).not.toContain("Keep the supported invariant")
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff
+          heading="PR 185"
+          scope={{ ...scope, revision: Revision.make("revision-10") }}
+          suggestions={[suggestion]}
+          transport={transport}
+        />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    expect(host.textContent).toContain("Keep the supported invariant")
+    expect(host.querySelector("[aria-label='Filter suggestions by resolved state']")).toBeNull()
   })
 
   it.each(unauthorizedReadKinds)(

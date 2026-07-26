@@ -267,12 +267,22 @@ const makePullRequestReviews = Effect.gen(function*() {
     maximumLength: number
   ) {
     const base = `${suggestion.problem}\n\n${suggestion.recommendation}`
+    const relatedLocations = suggestion.relatedLocations.length === 0
+      ? ""
+      : `\n\nRelated locations:\n${
+        suggestion.relatedLocations
+          .map(({ endLine, path, startLine }) => `- ${path}:${String(startLine)}-${String(endLine)}`)
+          .join("\n")
+      }`
     const replacement = suggestion.replacement === undefined
       ? ""
       : `\n\n${suggestion.replacement.explanation}\n\n\`\`\`diff\n${suggestion.replacement.unifiedDiff}\n\`\`\``
-    const complete = `${base}${replacement}`
+    const withoutReplacement = `${base}${relatedLocations}`
+    const complete = `${withoutReplacement}${replacement}`
     const bounded = complete.length <= maximumLength
       ? complete
+      : withoutReplacement.length <= maximumLength
+      ? withoutReplacement
       : base.length <= maximumLength
       ? base
       : `${base.slice(0, maximumLength - 1).trimEnd()}…`

@@ -146,11 +146,22 @@ const REVIEW_STATE = {
           replacement: {
             reviewedHead: SUBJECT.headRevision,
             unifiedDiff: [
+              "diff --git a/src/authorization.ts b/src/authorization.ts",
+              "index 1111111..2222222 100644",
               "--- a/src/authorization.ts",
               "+++ b/src/authorization.ts",
               "@@ -42,1 +42,2 @@",
+              "-yield* mutate()",
               "+yield* authorize()",
-              " yield* mutate()"
+              "+yield* mutate()",
+              "diff --git a/src/literal.ts b/src/literal.ts",
+              "index 3333333..4444444 100644",
+              "--- a/src/literal.ts",
+              "+++ b/src/literal.ts",
+              "@@ -50,1 +51,1 @@",
+              "---- literal source",
+              "++++ literal source",
+              "\\ No newline at end of file"
             ].join("\n"),
             explanation: "Authorize before the mutation."
           },
@@ -161,9 +172,9 @@ const REVIEW_STATE = {
         },
         {
           suggestionId: FILE_SUGGESTION_ID,
-          state: "draft",
+          state: "resolved",
           title: "Centralize the authorization policy",
-          severity: "P3",
+          severity: "P1",
           problem: "The file repeats the same policy branch.",
           impact: "Future changes can drift.",
           evidence: {
@@ -186,6 +197,17 @@ const REVIEW_STATE = {
               label: "Same policy branch"
             }
           ],
+          replacement: {
+            reviewedHead: SUBJECT.headRevision,
+            unifiedDiff: [
+              "--- a/src/authorization.ts",
+              "+++ b/src/authorization.ts",
+              "@@ -50,1 +50,1 @@",
+              "-yield* authorizeAgain()",
+              "+yield* authorizeShared()"
+            ].join("\n"),
+            explanation: "Use the shared authorization helper."
+          },
           confidence: {
             level: "medium",
             reason: "The duplicate branches are directly visible."
@@ -260,6 +282,17 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("src/handler.ts:18")
     expect(host.textContent).toContain("Suggested replacement")
     expect(host.textContent).toContain("Authorize before the mutation.")
+    expect(host.textContent).toContain("Draft · high confidence")
+    expect(host.textContent).toContain("Resolved · medium confidence")
+    const replacements = host.querySelectorAll<HTMLElement>("[aria-label='Suggested replacement']")
+    expect(replacements).toHaveLength(2)
+    expect(replacements[0]?.textContent).not.toContain("diff --git")
+    expect(replacements[0]?.textContent).not.toContain("index 1111111")
+    expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("yield* mutate()")
+    expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("--- literal source")
+    expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("yield* authorize()")
+    expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("+++ literal source")
+    expect(replacements[1]?.textContent).toContain("yield* authorizeShared()")
     expect(host.textContent).toContain("Review Notes")
     expect(host.textContent).toContain("Never publishable")
     expect(host.textContent).toContain("Retry behavior needs a provider reproduction")

@@ -214,7 +214,13 @@ export type PrReviewSuggestionAnchor = typeof PrReviewSuggestionAnchor.Type
 export const PrReviewRelatedLocation = Schema.Struct({
   ...PrReviewLocation.fields,
   label: boundedSingleLine(500, "PrReviewRelatedLocationLabel")
-}).annotate({ identifier: "PrReviewRelatedLocation" })
+})
+  .check(
+    Schema.makeFilter(({ endLine, startLine }) => startLine <= endLine, {
+      expected: "a related-location end line at or after its start line"
+    })
+  )
+  .annotate({ identifier: "PrReviewRelatedLocation" })
 
 /** Decoded related suggestion location. */
 export type PrReviewRelatedLocation = typeof PrReviewRelatedLocation.Type
@@ -279,8 +285,10 @@ export const PrReviewSuggestionDraft = Schema.Struct({
     Schema.makeFilter(
       ({ anchor, confidence, evidence }) =>
         confidence.level !== "low" &&
-        (anchor._tag !== "line" || (anchor.path === evidence.path && anchor.line === evidence.startLine)),
-      { expected: "a medium/high-confidence suggestion whose line anchor matches its exact evidence" }
+        (anchor._tag === "changes" ||
+          (anchor.path === evidence.path &&
+            (anchor._tag === "file" || anchor.line === evidence.startLine))),
+      { expected: "a medium/high-confidence suggestion whose file or line anchor matches its exact evidence" }
     ),
     Schema.makeFilter(
       ({ prevention, severity }) =>
@@ -307,8 +315,10 @@ export const PrReviewSuggestion = Schema.Struct({
     Schema.makeFilter(
       ({ anchor, confidence, evidence }) =>
         confidence.level !== "low" &&
-        (anchor._tag !== "line" || (anchor.path === evidence.path && anchor.line === evidence.startLine)),
-      { expected: "a medium/high-confidence suggestion whose line anchor matches its exact evidence" }
+        (anchor._tag === "changes" ||
+          (anchor.path === evidence.path &&
+            (anchor._tag === "file" || anchor.line === evidence.startLine))),
+      { expected: "a medium/high-confidence suggestion whose file or line anchor matches its exact evidence" }
     ),
     Schema.makeFilter(
       ({ prevention, severity }) =>

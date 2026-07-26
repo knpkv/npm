@@ -8,9 +8,10 @@ import {
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
-import { Effect, Layer, Result, Schema, Stream } from "effect"
+import { Config, Effect, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
 
 import {
   AgentModelId,
@@ -154,12 +155,15 @@ const response = (
   }
 ]
 
-const completeScript = (report: unknown = {
-  schemaVersion: 3,
-  completion: { status: "complete" },
-  suggestions: [suggestion],
-  notes: []
-}): DeterministicLanguageModelScript => [
+const completeScript = (
+  report: unknown = {
+    schemaVersion: 3,
+    completion: { status: "complete" },
+    suggestions: [suggestion],
+    notes: []
+  },
+  reviewSubject: PrReviewSubject = subject
+): DeterministicLanguageModelScript => [
   {
     _tag: "response",
     parts: response({
@@ -174,7 +178,7 @@ const completeScript = (report: unknown = {
     parts: response({
       id: "read-instructions",
       name: "ReviewRunCommand",
-      params: { command: `git show ${subject.baseRevision}:AGENTS.md` },
+      params: { command: `git show ${reviewSubject.baseRevision}:AGENTS.md` },
       type: "tool-call"
     })
   },
@@ -184,7 +188,7 @@ const completeScript = (report: unknown = {
       id: "inspect-diff",
       name: "ReviewRunCommand",
       params: {
-        command: `git diff --stat ${subject.baseRevision} ${subject.headRevision}`
+        command: `git diff --stat ${reviewSubject.baseRevision} ${reviewSubject.headRevision}`
       },
       type: "tool-call"
     })
@@ -217,10 +221,95 @@ const output = (
   }
 })
 
+const runShellCommand = (
+  cwd: string,
+  command: string
+): Effect.Effect<PrReviewSandboxCommandResult, never> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const executablePath = yield* Config.string("PATH")
+      const handle = yield* ChildProcess.make("sh", ["-c", command], {
+        cwd,
+        env: {
+          GIT_CONFIG_GLOBAL: "/dev/null",
+          GIT_CONFIG_NOSYSTEM: "1",
+          HOME: "/nonexistent",
+          LANG: "C",
+          LC_ALL: "C",
+          PATH: executablePath
+        },
+        extendEnv: false,
+        stderr: "pipe",
+        stdin: "ignore",
+        stdout: "pipe"
+      })
+      const [exitCode, stderr, stdout] = yield* Effect.all([
+        handle.exitCode,
+        handle.stderr.pipe(Stream.decodeText(), Stream.mkString),
+        handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
+      ], { concurrency: "unbounded" })
+      return {
+        exitCode: Number(exitCode),
+        stderr: {
+          artifactId: null,
+          byteLength: new TextEncoder().encode(stderr).byteLength,
+          text: stderr,
+          truncated: false
+        },
+        stdout: {
+          artifactId: null,
+          byteLength: new TextEncoder().encode(stdout).byteLength,
+          text: stdout,
+          truncated: false
+        }
+      }
+    })
+  ).pipe(
+    Effect.orDie,
+    Effect.provide(NodeServices.layer)
+  )
+
 interface SessionObservation {
   readonly commands: Array<string>
   readonly operations: Array<string>
   readonly requests: Array<unknown>
+}
+
+const makeRealGitSessionLayer = (
+  observation: SessionObservation,
+  cwd: string,
+  baseRevision: string,
+  headRevision: string
+) => {
+  const session: PrReviewSandboxSession = {
+    attemptId: "0123456789ab",
+    baseRevision,
+    headRevision,
+    jobId: JOB_ID,
+    listFiles: () => Effect.succeed(output("AGENTS.md\npackages\n")),
+    readFile: () => Effect.succeed(output("# Review instructions\n")),
+    searchFiles: () => Effect.succeed(output()),
+    runCommand: (command) =>
+      Effect.sync(() => {
+        observation.operations.push("runCommand")
+        observation.commands.push(command)
+      }).pipe(Effect.andThen(runShellCommand(cwd, command))),
+    applyPatch: () => Effect.succeed(output()),
+    readDiff: () => runShellCommand(cwd, `git diff '${baseRevision}' '${headRevision}'`),
+    pageArtifact: () => Effect.succeed(""),
+    searchArtifact: () => Effect.succeed([]),
+    close: Effect.void
+  }
+  return Layer.succeed(
+    PrReviewSandboxSessions,
+    PrReviewSandboxSessions.of({
+      withSession: (request, use) =>
+        Effect.sync(() => {
+          observation.requests.push(request)
+        }).pipe(Effect.andThen(use(session))),
+      reconcile: () => Effect.succeed({ removedSandboxes: [] })
+    })
+  )
 }
 
 const makeSessionLayer = (
@@ -254,8 +343,11 @@ const makeSessionLayer = (
         if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
           return output(`${sourceExcerpt}\n`)
         }
-        if (command.startsWith("printf ")) {
-          return command.startsWith("printf '%s\\n' ")
+        if (command.includes("git apply --check")) {
+          return command.includes("GIT_INDEX_FILE=") &&
+              command.includes(`git read-tree '${HEAD_REVISION}'`) &&
+              command.includes("printf '%s\\n' ") &&
+              command.includes("git apply --check --cached")
             ? output()
             : output("", 1)
         }
@@ -286,7 +378,8 @@ const runExecutor = <Success, Failure>(
   observation: SessionObservation,
   use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>,
   diff?: string,
-  sourceExcerpt?: string
+  sourceExcerpt?: string,
+  sessionLayer?: Layer.Layer<PrReviewSandboxSessions>
 ) => {
   const fake = makeDeterministicLanguageModel(script)
   return Effect.gen(function*() {
@@ -315,7 +408,7 @@ const runExecutor = <Success, Failure>(
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
-          Layer.provide(makeSessionLayer(observation, diff, sourceExcerpt))
+          Layer.provide(sessionLayer ?? makeSessionLayer(observation, diff, sourceExcerpt))
         )
       )
     )
@@ -394,7 +487,11 @@ describe("PR review task executor", () => {
           assert.strictEqual(result.suggestions[0]?.relatedLocations.length, 1)
           assert.strictEqual(result.suggestions[0]?.replacement?.reviewedHead, HEAD_REVISION)
           assert.isTrue(
-            observation.commands.some((command) => command.startsWith("printf '%s\\n' "))
+            observation.commands.some((command) =>
+              command.includes(`git read-tree '${HEAD_REVISION}'`) &&
+              command.includes("printf '%s\\n' ") &&
+              command.includes("git apply --check --cached")
+            )
           )
           assert.match(result.notes[0]?.noteId ?? "", /^sha256:[0-9a-f]{64}$/u)
           assert.strictEqual(result.notes[0]?.reason, "low-confidence")
@@ -403,6 +500,122 @@ describe("PR review task executor", () => {
       Effect.asVoid
     )
   })
+
+  it.effect("checks trimmed replacement patches against the immutable head with real Git", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-replacement-" })
+      const sourcePath = path.join(root, EVIDENCE_PATH)
+      yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
+      yield* fileSystem.writeFileString(path.join(root, "AGENTS.md"), "# Review instructions\n")
+      const source = (unsafe: string) =>
+        `${Array.from({ length: 41 }, (_, index) => `// line ${String(index + 1)}`).join("\n")}\n` +
+        `const unsafe = ${unsafe}\n`
+      yield* fileSystem.writeFileString(sourcePath, source("false"))
+
+      const initialize = yield* runShellCommand(
+        root,
+        "git init --quiet && git add -- AGENTS.md packages/control-center/src/review.ts && " +
+          "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m base"
+      )
+      assert.strictEqual(initialize.exitCode, 0, initialize.stderr.text)
+      const topLevel = yield* runShellCommand(root, "git rev-parse --show-toplevel")
+      assert.strictEqual(topLevel.exitCode, 0, topLevel.stderr.text)
+      assert.strictEqual(topLevel.stdout.text.trim(), root)
+      const base = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(base.exitCode, 0, base.stderr.text)
+      const baseRevision = base.stdout.text.trim()
+
+      yield* fileSystem.writeFileString(sourcePath, source("true"))
+      const commitHead = yield* runShellCommand(
+        root,
+        "git add -- packages/control-center/src/review.ts && " +
+          "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m head"
+      )
+      assert.strictEqual(commitHead.exitCode, 0, commitHead.stderr.text)
+      const head = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(head.exitCode, 0, head.stderr.text)
+      const headRevision = head.stdout.text.trim()
+
+      yield* fileSystem.writeFileString(sourcePath, source("mutated"))
+      const reviewSubject = { ...subject, baseRevision, headRevision }
+      const actualClaim = {
+        ...claim,
+        context: {
+          ...claim.context,
+          subjectRevision: headRevision,
+          task: {
+            ...claim.context.task,
+            subject: reviewSubject
+          }
+        }
+      } satisfies ClaimedAgentJob
+      const observation: SessionObservation = {
+        commands: [],
+        operations: [],
+        requests: []
+      }
+      const sessionLayer = makeRealGitSessionLayer(
+        observation,
+        root,
+        baseRevision,
+        headRevision
+      )
+      const replacement = {
+        reviewedHead: headRevision,
+        unifiedDiff: [
+          `--- a/${EVIDENCE_PATH}`,
+          `+++ b/${EVIDENCE_PATH}`,
+          "@@ -42,1 +42,1 @@",
+          `-${EVIDENCE_EXCERPT}`,
+          "+const unsafe = false"
+        ].join("\n"),
+        explanation: "Use the validated value."
+      }
+      const execute = (draft: unknown) =>
+        runExecutor(
+          completeScript({
+            schemaVersion: 3,
+            completion: { status: "complete" },
+            suggestions: [draft],
+            notes: []
+          }, reviewSubject),
+          observation,
+          Effect.gen(function*() {
+            return yield* (yield* PrReviewTaskExecutor).execute(actualClaim)
+          }),
+          undefined,
+          undefined,
+          sessionLayer
+        )
+
+      const valid = yield* execute({ ...suggestion, replacement })
+      assert.strictEqual(valid.result.suggestions.length, 1)
+      assert.strictEqual(valid.result.suggestions[0]?.replacement?.reviewedHead, headRevision)
+
+      const malformed = yield* execute({
+        ...suggestion,
+        replacement: {
+          ...replacement,
+          unifiedDiff: [
+            `--- a/${EVIDENCE_PATH}`,
+            `+++ b/${EVIDENCE_PATH}`,
+            "@@ -42,1 +42,1 @@",
+            `-${EVIDENCE_EXCERPT}`,
+            "not-a-unified-diff-record"
+          ].join("\n")
+        }
+      })
+      assert.deepStrictEqual(malformed.result.suggestions, [])
+
+      const withoutReplacement = yield* execute(suggestion)
+      assert.strictEqual(withoutReplacement.result.suggestions.length, 1)
+      assert.include(yield* fileSystem.readFileString(sourcePath), "const unsafe = mutated")
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("drives full-project exploration through sandbox tools and publishes only anchored suggestions", () => {
     const observation: SessionObservation = {

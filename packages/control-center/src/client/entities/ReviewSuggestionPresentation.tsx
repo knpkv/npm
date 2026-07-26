@@ -22,20 +22,44 @@ const replacementSides = (
   readonly after: string
   readonly before: string
 } => {
-  const content = unifiedDiff
-    .split("\n")
-    .filter((line) => !line.startsWith("--- ") && !line.startsWith("+++ ") && !line.startsWith("@@ "))
+  const before = new Array<string>()
+  const after = new Array<string>()
+  let oldLinesRemaining = 0
+  let newLinesRemaining = 0
+  for (const line of unifiedDiff.split("\n")) {
+    const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/u.exec(line)
+    if (hunk !== null) {
+      oldLinesRemaining = Number(hunk[1] ?? "1")
+      newLinesRemaining = Number(hunk[2] ?? "1")
+      continue
+    }
+    if ((oldLinesRemaining === 0 && newLinesRemaining === 0) || line === "\\ No newline at end of file") continue
+    if (line.startsWith("-") && oldLinesRemaining > 0) {
+      before.push(line.slice(1))
+      oldLinesRemaining -= 1
+      continue
+    }
+    if (line.startsWith("+") && newLinesRemaining > 0) {
+      after.push(line.slice(1))
+      newLinesRemaining -= 1
+      continue
+    }
+    if (line.startsWith(" ") && oldLinesRemaining > 0 && newLinesRemaining > 0) {
+      const content = line.slice(1)
+      before.push(content)
+      after.push(content)
+      oldLinesRemaining -= 1
+      newLinesRemaining -= 1
+    }
+  }
   return {
-    before: content
-      .filter((line) => !line.startsWith("+"))
-      .map((line) => line.slice(1))
-      .join("\n"),
-    after: content
-      .filter((line) => !line.startsWith("-"))
-      .map((line) => line.slice(1))
-      .join("\n")
+    before: before.join("\n"),
+    after: after.join("\n")
   }
 }
+
+const suggestionStateLabel = (state: PrReviewSuggestion["state"]): string =>
+  `${state.slice(0, 1).toUpperCase()}${state.slice(1)}`
 
 /** Present one publishable, evidence-backed suggestion without owning its lifecycle. */
 export const ReviewSuggestionCard = ({
@@ -64,7 +88,9 @@ export const ReviewSuggestionCard = ({
           <small>{anchorLabel(suggestion)}</small>
           <strong>{suggestion.title}</strong>
         </span>
-        <span className={styles.confidence}>{suggestion.confidence.level} confidence</span>
+        <span className={styles.confidence}>
+          {suggestionStateLabel(suggestion.state)} · {suggestion.confidence.level} confidence
+        </span>
       </header>
 
       <Text>{suggestion.problem}</Text>

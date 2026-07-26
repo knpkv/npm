@@ -200,7 +200,11 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   }
   if (suggestion.replacement !== undefined) {
     const replacementCheck = yield* session.runCommand(
-      `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | git apply --check --recount -`
+      `replacement_index=$(mktemp) && rm -f "$replacement_index" && ` +
+        `trap 'rm -f "$replacement_index"' EXIT && ` +
+        `GIT_INDEX_FILE="$replacement_index" git read-tree ${shellQuote(session.headRevision)} && ` +
+        `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | ` +
+        `GIT_INDEX_FILE="$replacement_index" git apply --check --cached --recount -`
     ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
     if (replacementCheck.exitCode !== 0) {
       return yield* providerFailure(

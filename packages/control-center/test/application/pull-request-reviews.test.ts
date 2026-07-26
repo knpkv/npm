@@ -31,7 +31,7 @@ import {
   type PluginProviderReceiptV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
-import { PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -738,6 +738,7 @@ describe("pull request reviews", () => {
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
           assert.include(preview.replacement ?? "", "@@ -42,1 +42,2 @@")
           assert.include(preview.finalContent, "```diff")
+          assert.notInclude(preview.editableContent, "Related locations:")
           assert.include(preview.finalContent, preview.publicationFooter)
           assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
 
@@ -785,6 +786,41 @@ describe("pull request reviews", () => {
       Option.some(completedReview)
     ))
 
+  it.effect("includes every grouped related location in default publication content", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.include(preview.editableContent, "Related locations:")
+          assert.include(preview.editableContent, "src/handler.ts:18-18")
+          assert.include(preview.editableContent, "src/policy.ts:30-34")
+        }),
+      registry,
+      Option.some(completedReviewWithSuggestion({
+        relatedLocations: [
+          {
+            path: PrReviewPath.make("src/handler.ts"),
+            startLine: 18,
+            endLine: 18,
+            label: "Same policy branch"
+          },
+          {
+            path: PrReviewPath.make("src/policy.ts"),
+            startLine: 30,
+            endLine: 34,
+            label: "Shared policy implementation"
+          }
+        ]
+      }))
+    ))
+
   it.effect("bounds every generated editable draft before adding the provider footer", () =>
     withService(
       (service) =>
@@ -828,12 +864,19 @@ describe("pull request reviews", () => {
 
           assert.notInclude(preview.editableContent, "```suggestion")
           assert.notInclude(preview.editableContent, "```")
+          assert.include(preview.editableContent, "src/handler.ts:18-18")
           assert.include(preview.replacement ?? "", "x".repeat(15_800))
         }),
       registry,
       Option.some(completedReviewWithSuggestion({
         problem: "Keep the concise explanation.",
         recommendation: "Apply the replacement.",
+        relatedLocations: [{
+          path: PrReviewPath.make("src/handler.ts"),
+          startLine: 18,
+          endLine: 18,
+          label: "Same policy branch"
+        }],
         replacement: {
           reviewedHead: reviewReport.subject.headRevision,
           unifiedDiff: `--- a/src/authorization.ts\n+++ b/src/authorization.ts\n@@ -42,1 +42,1 @@\n-${

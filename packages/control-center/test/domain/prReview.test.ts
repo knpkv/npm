@@ -6,6 +6,7 @@ import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewNote,
   PrReviewPrevention,
+  PrReviewRelatedLocation,
   PrReviewReport,
   PrReviewSubject,
   PrReviewSuggestion
@@ -77,6 +78,47 @@ describe("PR review domain", () => {
         })
       )
     )
+  })
+
+  it("keeps file anchors on their exact evidence path while allowing whole-change grouping", () => {
+    assert.isFalse(
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
+        anchor: {
+          _tag: "file",
+          path: "packages/control-center/src/server/agent/OtherFile.ts",
+          line: 1
+        }
+      })
+    )
+    assert.isTrue(
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
+        anchor: {
+          _tag: "file",
+          path: suggestion.evidence.path,
+          line: 1
+        }
+      })
+    )
+    assert.isTrue(
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
+        anchor: { _tag: "changes" }
+      })
+    )
+  })
+
+  it("rejects reversed related-location ranges while retaining equal and increasing ranges", () => {
+    const location = {
+      path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+      startLine: 10,
+      endLine: 10,
+      label: "Same root cause"
+    }
+    assert.isTrue(Schema.is(PrReviewRelatedLocation)(location))
+    assert.isTrue(Schema.is(PrReviewRelatedLocation)({ ...location, endLine: 12 }))
+    assert.isFalse(Schema.is(PrReviewRelatedLocation)({ ...location, endLine: 9 }))
   })
 
   it("retains suggestion scope, grouped locations, exact replacement patches, and non-publishable notes", () => {

@@ -173,6 +173,10 @@ export const WorkspacePullRequestDiff = ({
   const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
 
   useEffect(() => {
+    setSuggestionStateFilter("all")
+  }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId])
+
+  useEffect(() => {
     const abort = new AbortController()
     setInventoryState({ _tag: "loading" })
     setSelectedFileId(undefined)
