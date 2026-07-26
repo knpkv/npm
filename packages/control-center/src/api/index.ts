@@ -12,6 +12,8 @@ export {
   AgentSafeProfile,
   AwsReviewPublicationIdentity,
   DurableAgentProviderId,
+  EditReviewSuggestionRequest,
+  EditReviewSuggestionResponse,
   EnqueuePullRequestReviewRequest,
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
@@ -40,7 +42,10 @@ export {
   ReviewAgentProfileId,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview,
-  ReviewSuggestionPublicationSelection
+  ReviewSuggestionPublicationSelection,
+  ReviewSuggestionRevisionPage,
+  ReviewSuggestionRevisionPageSizeFromString,
+  ReviewSuggestionRevisionSequenceFromString
 } from "./agent.js"
 export {
   type ControlCenterApiClient,

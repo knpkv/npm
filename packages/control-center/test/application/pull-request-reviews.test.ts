@@ -41,11 +41,13 @@ import {
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPageSize } from "../../src/domain/prReviewRevision.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
+  ApplicationConflict,
   ApplicationInvalidRequest,
   ApplicationServiceUnavailable,
   DeliveryGraphInspection,
@@ -1629,6 +1631,150 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview)
+    ))
+
+  it.effect("reads and immutably edits the exact current review suggestion", () =>
+    withRealService((service, persistence) =>
+      Effect.gen(function*() {
+        const accepted = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        })
+        const claimedAt = yield* DateTime.now
+        const claim = yield* persistence.agentJobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: LEASE_TOKEN,
+          claimedAt,
+          leaseExpiresAt: DateTime.addDuration(claimedAt, Duration.minutes(1))
+        })
+        assert.isTrue(Option.isSome(claim))
+        if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+        yield* persistence.agentJobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: accepted.jobId,
+          attemptSequence: claim.value.attemptSequence,
+          leaseToken: claim.value.leaseToken,
+          report: reviewReport,
+          completedAt: yield* DateTime.now
+        })
+
+        const originalPage = yield* service.revisions({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(originalPage.current.sequence, 1)
+        const originalEdit = Schema.decodeUnknownSync(
+          PrReviewSuggestionEdit
+        )(reviewReport.suggestions[0])
+        const renamed = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: originalPage.current.revisionId,
+            expectedSequence: originalPage.current.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Authorize before any durable mutation"
+            }
+          },
+          session: HUMAN_SESSION
+        })
+        assert.strictEqual(renamed.sequence, 2)
+        assert.strictEqual(renamed.validation._tag, "validated")
+
+        const stale = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: originalPage.current.revisionId,
+            expectedSequence: originalPage.current.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Stale edit"
+            }
+          },
+          session: HUMAN_SESSION
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(stale))
+        if (Result.isFailure(stale)) {
+          assert.instanceOf(stale.failure, ApplicationConflict)
+        }
+
+        const technical = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: renamed.revisionId,
+            expectedSequence: renamed.sequence,
+            edit: {
+              ...originalEdit,
+              title: renamed.suggestion.title,
+              problem: "The mutation executes before authority is established."
+            }
+          },
+          session: HUMAN_SESSION
+        })
+        assert.strictEqual(technical.sequence, 3)
+        assert.strictEqual(
+          technical.validation._tag,
+          "requires-revalidation"
+        )
+
+        const denied = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: technical.revisionId,
+            expectedSequence: technical.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Approver edit"
+            }
+          },
+          session: {
+            ...HUMAN_SESSION,
+            permission: "workspace-approver"
+          }
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(denied))
+        if (Result.isFailure(denied)) {
+          assert.instanceOf(denied.failure, ApplicationInvalidRequest)
+        }
+
+        const history = yield* service.revisions({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(history.current.revisionId, technical.revisionId)
+        assert.deepStrictEqual(
+          history.revisions.map(({ sequence }) => sequence),
+          [2, 1]
+        )
+      })
     ))
 
   it.effect("atomically reuses one active exact-head review and permits a retry after terminal failure", () =>

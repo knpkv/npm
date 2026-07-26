@@ -25,7 +25,8 @@ import {
   PullRequestReviewUnavailable,
   ReleaseAgentThreadCursor,
   ReviewSuggestionPublicationContent,
-  ReviewSuggestionPublicationPreview
+  ReviewSuggestionPublicationPreview,
+  type ReviewSuggestionRevisionPage
 } from "../../api/agent.js"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import {
@@ -44,8 +45,14 @@ import {
   type PrReviewSuggestion,
   PrReviewSuggestionId
 } from "../../domain/prReview.js"
+import {
+  PrReviewSuggestionOperatorAuthor,
+  PrReviewSuggestionRevisionPageSize,
+  type PrReviewSuggestionRevisionSequence
+} from "../../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
+import type { ApplicationResourceNotFound } from "../api/ApplicationServices.js"
 import {
   ApplicationInvalidRequest,
   ApplicationServiceUnavailable,
@@ -72,6 +79,7 @@ import {
 
 const DEFAULT_REVIEW_REQUEST = "Review this pull request."
 const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
+const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
@@ -428,6 +436,45 @@ const makePullRequestReviews = Effect.gen(function*() {
     return { latest: review, suggestion }
   })
 
+  const revisionHistory = Effect.fn(
+    "PullRequestReviews.revisionHistory"
+  )(function*(
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget,
+    jobId: JobId,
+    suggestionId: typeof PrReviewSuggestionId.Type,
+    beforeSequence: PrReviewSuggestionRevisionSequence | null,
+    limit: PrReviewSuggestionRevisionPageSize
+  ): Effect.fn.Return<
+    ReviewSuggestionRevisionPage,
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  > {
+    yield* selectedSuggestion(
+      workspaceId,
+      target,
+      jobId,
+      suggestionId
+    )
+    const page = yield* mapPersistenceRead(
+      persistence.agentJobs.reviewSuggestionRevisions({
+        workspaceId,
+        jobId,
+        suggestionId,
+        beforeSequence,
+        limit
+      })
+    )
+    if (
+      page.current.sourceJobId !== jobId ||
+      !PrReviewSubjectEquivalence(page.current.subject, target.subject)
+    ) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return page
+  })
+
   const publicationTarget = (
     workspaceId: WorkspaceId,
     target: AvailableReviewTarget
@@ -758,6 +805,55 @@ const makePullRequestReviews = Effect.gen(function*() {
       })).pipe(
         Effect.mapError((error) => error._tag === "PersistenceOperationError" ? unavailable() : error)
       )
+    }),
+    revisions: Effect.fn("PullRequestReviews.revisions")(function*(input) {
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") {
+        return yield* new ApplicationInvalidRequest()
+      }
+      return yield* revisionHistory(
+        input.workspaceId,
+        target,
+        input.jobId,
+        input.suggestionId,
+        input.beforeSequence,
+        input.limit
+      )
+    }),
+    editSuggestion: Effect.fn(
+      "PullRequestReviews.editSuggestion"
+    )(function*(input) {
+      if (
+        input.session.workspaceId !== input.workspaceId ||
+        input.session.actor._tag !== "human" ||
+        input.session.permission !== "workspace-owner"
+      ) {
+        return yield* new ApplicationInvalidRequest()
+      }
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") {
+        return yield* new ApplicationInvalidRequest()
+      }
+      yield* revisionHistory(
+        input.workspaceId,
+        target,
+        input.jobId,
+        input.suggestionId,
+        null,
+        PrReviewSuggestionRevisionPageSize.make(1)
+      )
+      return yield* persistence.agentJobs.appendReviewSuggestionRevision({
+        workspaceId: input.workspaceId,
+        jobId: input.jobId,
+        suggestionId: input.suggestionId,
+        expectedRevisionId: input.request.expectedRevisionId,
+        expectedSequence: input.request.expectedSequence,
+        edit: input.request.edit,
+        author: PrReviewSuggestionOperatorAuthor.make({
+          personId: input.session.actor.personId
+        }),
+        createdAt: yield* DateTime.now
+      }).pipe(Effect.mapError(mapPersistenceWriteError))
     }),
     previewPublication: Effect.fn("PullRequestReviews.previewPublication")(function*(input) {
       const target = yield* inspectTarget(input)

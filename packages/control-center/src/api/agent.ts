@@ -20,9 +20,16 @@ import {
   PrReviewSuggestion,
   PrReviewSuggestionId
 } from "../domain/prReview.js"
-import { PrReviewSuggestionRevisionSequence } from "../domain/prReviewRevision.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
+  ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
   NotFoundApiError,
@@ -554,6 +561,38 @@ export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
 /** Decoded accepted durable review job. */
 export type EnqueuePullRequestReviewResponse = typeof EnqueuePullRequestReviewResponse.Type
 
+/** Complete compare-and-append payload for one manually edited suggestion. */
+export const EditReviewSuggestionRequest = Schema.Struct({
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  edit: PrReviewSuggestionEdit
+})
+
+/** Decoded manual suggestion edit. */
+export type EditReviewSuggestionRequest = typeof EditReviewSuggestionRequest.Type
+
+/** Browser-safe immutable suggestion revision returned after an edit. */
+export const EditReviewSuggestionResponse = PrReviewSuggestionRevision
+
+/** Decoded manual suggestion-edit result. */
+export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.Type
+
+/** Canonical positive revision cursor decoded from an HTTP query string. */
+export const ReviewSuggestionRevisionSequenceFromString = CanonicalNonNegativeIntegerFromString.pipe(
+  Schema.decodeTo(PrReviewSuggestionRevisionSequence)
+)
+
+/** Canonical bounded revision page size decoded from an HTTP query string. */
+export const ReviewSuggestionRevisionPageSizeFromString = CanonicalNonNegativeIntegerFromString.pipe(
+  Schema.decodeTo(PrReviewSuggestionRevisionPageSize)
+)
+
+/** Browser-safe bounded revision history. */
+export const ReviewSuggestionRevisionPage = PrReviewSuggestionRevisionPage
+
+/** Decoded bounded revision history. */
+export type ReviewSuggestionRevisionPage = typeof ReviewSuggestionRevisionPage.Type
+
 /** Editable CodeCommit comment content bounded by the provider contract. */
 export const MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH = 10_100
 
@@ -791,6 +830,59 @@ const enqueuePullRequestReview = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const reviewSuggestionRevisions = HttpApiEndpoint.get(
+  "reviewSuggestionRevisions",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    query: Schema.Struct({
+      before: Schema.optionalKey(ReviewSuggestionRevisionSequenceFromString),
+      limit: Schema.optionalKey(ReviewSuggestionRevisionPageSizeFromString)
+    }),
+    success: ReviewSuggestionRevisionPage,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
+const editReviewSuggestion = HttpApiEndpoint.post(
+  "editReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: EditReviewSuggestionRequest,
+    success: EditReviewSuggestionResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const previewReviewSuggestionPublication = HttpApiEndpoint.get(
   "previewReviewSuggestionPublication",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
@@ -844,6 +936,8 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(pullRequestReview)
   .add(pullRequestReviewThread)
   .add(enqueuePullRequestReview)
+  .add(reviewSuggestionRevisions)
+  .add(editReviewSuggestion)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)
   .prefix("/api/v1/agent")

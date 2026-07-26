@@ -14,6 +14,7 @@ import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
+import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
@@ -62,6 +63,7 @@ const currentSessionToken = (request: { readonly cookies: Readonly<Record<string
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
 const INITIAL_AGENT_THREAD_CURSOR = ReleaseAgentThreadCursor.make(0)
 const DEFAULT_AGENT_THREAD_EVENT_LIMIT = 128
+const DEFAULT_REVIEW_SUGGESTION_REVISION_LIMIT = PrReviewSuggestionRevisionPageSize.make(20)
 
 const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
   session.permission === "workspace-owner" || session.permission === "workspace-approver"
@@ -1040,6 +1042,46 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               entityId: params.entityId,
               request: payload
             }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("reviewSuggestionRevisions", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            return yield* reviews.revisions({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              jobId: params.jobId,
+              suggestionId: params.suggestionId,
+              beforeSequence: query.before ?? null,
+              limit: query.limit ?? DEFAULT_REVIEW_SUGGESTION_REVISION_LIMIT
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("editReviewSuggestion", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (
+              session.actor._tag !== "human" ||
+              session.permission !== "workspace-owner"
+            ) {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* reviews.editSuggestion({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              jobId: params.jobId,
+              suggestionId: params.suggestionId,
+              request: payload,
+              session
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
               ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
