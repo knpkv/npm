@@ -39,7 +39,7 @@ import {
   PrReviewTaskExecutor,
   prReviewTaskExecutorLayer
 } from "../../src/server/agent/internal/PrReviewTaskExecutor.js"
-import { PrReviewThreadHistory } from "../../src/server/agent/internal/PrReviewThreadHistory.js"
+import { makeBoundedPage, PrReviewThreadHistory } from "../../src/server/agent/internal/PrReviewThreadHistory.js"
 import {
   AgentAttemptSequence,
   AgentEventCursor,
@@ -500,6 +500,7 @@ describe("PR review task executor", () => {
       attemptSequence: null,
       eventKind,
       payload: { prompt: `Prior review request ${String(index + 1)}` },
+      payloadElided: false,
       occurredAt: Schema.decodeSync(UtcTimestamp)("2026-07-24T09:00:00.000Z")
     }))
     const historyLayer = Layer.succeed(
@@ -551,6 +552,27 @@ describe("PR review task executor", () => {
       )
     )
   })
+
+  it.effect("advances past a pathological oversized history event with explicit elision", () =>
+    Effect.gen(function*() {
+      const event = Schema.decodeUnknownSync(AgentThreadEvent)({
+        workspaceId: WORKSPACE_ID,
+        threadId: THREAD_ID,
+        eventSequence: 1,
+        jobId: JOB_ID,
+        attemptSequence: null,
+        eventKind: "assistant-output",
+        payload: { text: "x".repeat(64 * 1_024) },
+        occurredAt: "2026-07-24T09:00:00.000Z"
+      })
+      const page = yield* makeBoundedPage([event], AgentEventCursor.make(0))
+      assert.strictEqual(page.events.length, 1)
+      assert.strictEqual(page.events[0]?.eventSequence, AgentEventCursor.make(1))
+      assert.isTrue(page.events[0]?.payloadElided)
+      assert.isNull(page.events[0]?.payload)
+      assert.isFalse(page.hasMore)
+      assert.strictEqual(page.nextCursor, AgentEventCursor.make(1))
+    }))
 
   it.effect("reserves durable report space for host-authored metadata", () => {
     const note = (index: number) => ({

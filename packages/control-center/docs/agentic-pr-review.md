@@ -248,11 +248,14 @@ Full durable history remains outside the initial model context. The agent may
 call `ReviewReadThreadHistory` with cursor zero and then follow `nextCursor`
 while `hasMore` is true. Each call packs up to 128 complete prior events into a
 page below the model-visible tool envelope; exceptionally large events reduce
-the count without truncating event content. The persistence query is fenced
-before the current job's first event; fabricated cursors cannot read the current
-run or concurrently appended future activity. Retained command artifacts remain
-behind a separate explicit lookup boundary. Targeted revalidation receives the
-selected suggestion's complete history.
+the count without truncating event content. Normal durable writes keep one event
+below 32 KiB. If corrupt or legacy storage bypasses that invariant, the reader
+advances with `payloadElided: true` and a null payload instead of permanently
+blocking the cursor. The persistence query is fenced before the current job's
+first event; fabricated cursors cannot read the current run or concurrently
+appended future activity. Retained command artifacts remain behind a separate
+explicit lookup boundary. Targeted revalidation receives the selected
+suggestion's complete history.
 
 ### CodeCommit checkout and sbx isolation
 

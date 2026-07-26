@@ -28,6 +28,7 @@ const ReviewThreadHistoryEvent = Schema.Struct({
   attemptSequence: AgentThreadEvent.fields.attemptSequence,
   eventKind: AgentThreadEvent.fields.eventKind,
   payload: Schema.Json,
+  payloadElided: Schema.Boolean,
   occurredAt: AgentThreadEvent.fields.occurredAt
 })
 
@@ -77,6 +78,7 @@ const presentHistoryEvent = Effect.fn("PrReviewThreadHistory.presentHistoryEvent
     attemptSequence: event.attemptSequence,
     eventKind: event.eventKind,
     payload,
+    payloadElided: false,
     occurredAt: event.occurredAt
   }
 })
@@ -93,7 +95,8 @@ const encodedPageByteLength = Effect.fn("PrReviewThreadHistory.encodedPageByteLe
   return bytes.byteLength
 })
 
-const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage")(function*(
+/** @internal Build a progressing model-visible page even if persisted bounds were bypassed. */
+export const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage")(function*(
   events: ReadonlyArray<AgentThreadEvent>,
   after: typeof AgentEventCursor.Type
 ) {
@@ -107,7 +110,11 @@ const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage")(funct
     }
     if ((yield* encodedPageByteLength(candidate)) > MAXIMUM_REVIEW_HISTORY_PAGE_BYTES) {
       if (presented.length === 0) {
-        return yield* unavailable()
+        presented.push({
+          ...next,
+          payload: null,
+          payloadElided: true
+        })
       }
       break
     }
