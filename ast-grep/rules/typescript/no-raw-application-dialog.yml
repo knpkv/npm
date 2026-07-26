@@ -6,8 +6,33 @@ severity: error
 message: "Control Center dialogs must use the shared rly Dialog primitive"
 
 rule:
-  kind: jsx_opening_element
-  regex: '\b(?:role="dialog"|aria-modal="true")'
+  any:
+    - all:
+        - kind: jsx_attribute
+        - has:
+            kind: property_identifier
+            regex: "^role$"
+        - has:
+            stopBy: end
+            kind: string_fragment
+            regex: "^dialog$"
+    - all:
+        - kind: jsx_attribute
+        - has:
+            kind: property_identifier
+            regex: "^aria-modal$"
+        - any:
+            - has:
+                stopBy: end
+                kind: string_fragment
+                regex: "^true$"
+            - has:
+                stopBy: end
+                kind: "true"
+    - pattern:
+        context: "<div aria-modal />"
+        selector: jsx_attribute
+        strictness: ast
 
 files:
   - "packages/control-center/src/client/**/*.tsx"

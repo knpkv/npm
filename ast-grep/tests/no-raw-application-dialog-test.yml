@@ -6,6 +6,12 @@ valid:
     </Dialog.Root>
   - |
     <div role="status">Review complete</div>
+  - |
+    <div role={dialogRole} aria-modal={isModal}>
+      Dynamic third-party wrapper
+    </div>
+  - |
+    <div aria-modal={false}>Non-modal content</div>
 invalid:
   - |
     <div aria-modal="true" role="dialog">
@@ -15,3 +21,23 @@ invalid:
     <section aria-modal="true">
       Review
     </section>
+  - |
+    <div role='dialog'>Review</div>
+  - |
+    <div role={"dialog"}>Review</div>
+  - |
+    <div role={'dialog'}>Review</div>
+  - |
+    <aside aria-modal={"true"}>Review</aside>
+  - |
+    <aside aria-modal={'true'}>Review</aside>
+  - |
+    <aside aria-modal={true}>Review</aside>
+  - |
+    <div aria-modal>Review</div>
+  - |
+    <div role={`dialog`}>Review</div>
+  - |
+    <div aria-modal={`true`}>Review</div>
+  - |
+    <div role={"dialog" as const}>Review</div>
