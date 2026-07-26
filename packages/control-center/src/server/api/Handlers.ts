@@ -1015,10 +1015,14 @@ export const agentHandlersLayer = HttpApiBuilder.group(
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
+            if (query.after !== undefined && query.before !== undefined) {
+              return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+            }
             return yield* reviews.thread({
               workspaceId: session.workspaceId,
               entityId: params.entityId,
               after: query.after ?? null,
+              before: query.before ?? null,
               limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
             }).pipe(Effect.catchTags({
               ApplicationResourceNotFound: mapApplicationNotFound,

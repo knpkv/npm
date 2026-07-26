@@ -239,10 +239,13 @@ Center measures the complete encoded task and queued event; if necessary, it
 drops the oldest prior summaries, then the oldest requests, until both fit the
 32 KiB durable envelope and marks the snapshot truncated. A queued review that
 is cancelled before its first claim is frozen as cancelled, while non-terminal
-queued or running work remains unknown. The browser follows the explicit
-cursor-paged API to the thread tail, rejects non-advancing cursors, and fails
-closed at its bounded replay budget. A targeted operator request creates
-another immutable run without changing CodeCommit.
+queued or running work remains unknown. The browser opens at a bounded thread
+tail and retains at most 256 events during normal live replay. Earlier activity
+is fetched only when the operator selects `Load earlier activity`; each
+backward page uses an exclusive cursor, is prepended chronologically, and
+preserves the independent live-tail cursor. Both replay directions reject
+non-advancing cursors. A targeted operator request creates another immutable
+run without changing CodeCommit.
 
 Full durable history remains outside the initial model context. The agent may
 call `ReviewReadThreadHistory` with cursor zero and then follow `nextCursor`

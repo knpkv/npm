@@ -49,6 +49,7 @@ const People = ({ empty, people }: { readonly empty: string; readonly people: Re
 /** Render the exact CodeCommit revision as a compact review document. */
 export const WorkspacePullRequestDetails = ({
   approvers,
+  onReviewLoadEarlier,
   onReviewPublicationCancel,
   onReviewPublicationPreview,
   onReviewRetry,
@@ -65,6 +66,7 @@ export const WorkspacePullRequestDetails = ({
   readonly approvers: ReadonlyArray<RlyPerson>
   readonly onSessionExpired: (sessionKey: string) => void
   readonly onReviewPublicationCancel: () => void
+  readonly onReviewLoadEarlier: () => void
   readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
   readonly onReviewRetry: () => void
   readonly onReviewSuggestionPublish: (finalContent: string) => void
@@ -174,6 +176,7 @@ export const WorkspacePullRequestDetails = ({
             <PullRequestReviewPanel
               canEnqueue={reviewCanEnqueue}
               onCancelPublication={onReviewPublicationCancel}
+              onLoadEarlier={onReviewLoadEarlier}
               onPreviewPublication={onReviewPublicationPreview}
               onPublishSuggestion={onReviewSuggestionPublish}
               onRetry={onReviewRetry}

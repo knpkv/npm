@@ -540,6 +540,10 @@
   padding-inline-start: var(--rly-space-12);
 }
 
+.reviewThread > button {
+  justify-self: start;
+}
+
 .reviewThreadComposer {
   display: grid;
   gap: var(--rly-space-8);

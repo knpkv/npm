@@ -2007,6 +2007,18 @@ describe("Control Center API handlers", () => {
           params: { entityId },
           query: { after: ReleaseAgentThreadCursor.make(0), limit: 12 }
         })
+        const earlierThread = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: { before: ReleaseAgentThreadCursor.make(2), limit: 1 }
+        })
+        const conflictingCursors = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: {
+            after: ReleaseAgentThreadCursor.make(1),
+            before: ReleaseAgentThreadCursor.make(2),
+            limit: 1
+          }
+        }).pipe(Effect.result)
         const accepted = yield* client.agent.enqueuePullRequestReview({
           params: { entityId },
           payload: {
@@ -2017,7 +2029,7 @@ describe("Control Center API handlers", () => {
             prompt: "Re-check transaction ownership."
           }
         })
-        return { accepted, current, thread }
+        return { accepted, conflictingCursors, current, earlierThread, thread }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2027,14 +2039,27 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
+      assert.isTrue(Result.isFailure(result.conflictingCursors))
+      if (Result.isFailure(result.conflictingCursors)) {
+        assert.strictEqual(result.conflictingCursors.failure._tag, "InvalidRequestApiError")
+      }
       assert.strictEqual(result.thread.events[0]?._tag, "operator-message")
+      assert.strictEqual(result.earlierThread.events[0]?._tag, "operator-message")
       assert.deepStrictEqual(yield* Ref.get(received), [
         { workspaceId: session.workspaceId, entityId },
         {
           workspaceId: session.workspaceId,
           entityId,
           after: ReleaseAgentThreadCursor.make(0),
+          before: null,
           limit: 12
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          after: null,
+          before: ReleaseAgentThreadCursor.make(2),
+          limit: 1
         },
         {
           workspaceId: session.workspaceId,

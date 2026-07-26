@@ -31,6 +31,14 @@ export interface AgentThreadReplayQueryInput {
   readonly workspaceId: string
 }
 
+/** Cursor input for the newest immutable events before an exclusive boundary. */
+export interface AgentThreadBeforeQueryInput {
+  readonly beforeSequence: number
+  readonly limit: number
+  readonly threadId: string
+  readonly workspaceId: string
+}
+
 /** Cursor input for history that must precede one immutable review job. */
 export interface AgentReviewThreadHistoryQueryInput {
   readonly afterSequence: number
@@ -303,6 +311,31 @@ export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput)
       )
     ),
     Query.orderBy(agentThreadEvents.eventSequence),
+    Query.limit(input.limit)
+  )
+  const rendered = renderer.render(plan)
+  return { params: rendered.params, sql: rendered.sql }
+}
+
+/** Render one backward cursor page; callers restore chronological order. */
+export const renderAgentThreadBeforeQuery = (input: AgentThreadBeforeQueryInput): RenderedSql => {
+  const plan = Query.select(threadEventReplayProjection).pipe(
+    Query.from(agentThreadEvents),
+    Query.innerJoin(
+      agentJobs,
+      Query.and(
+        Query.eq(agentJobs.workspaceId, agentThreadEvents.workspaceId),
+        Query.eq(agentJobs.jobId, agentThreadEvents.jobId)
+      )
+    ),
+    Query.where(
+      Query.and(
+        Query.eq(agentThreadEvents.workspaceId, input.workspaceId),
+        Query.eq(agentThreadEvents.threadId, input.threadId),
+        Query.lt(agentThreadEvents.eventSequence, input.beforeSequence)
+      )
+    ),
+    Query.orderBy(agentThreadEvents.eventSequence, "desc"),
     Query.limit(input.limit)
   )
   const rendered = renderer.render(plan)

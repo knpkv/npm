@@ -6,6 +6,7 @@ import {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
   renderAgentReviewThreadHistoryQuery,
+  renderAgentThreadBeforeQuery,
   renderAgentThreadReplayQuery,
   renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
@@ -52,6 +53,7 @@ import {
   AgentReviewResultInput,
   AgentReviewResultRecord,
   AgentReviewThreadAfterInput,
+  AgentReviewThreadBeforeInput,
   AgentReviewThreadHistoryInput,
   AgentReviewThreadTailInput,
   AgentThreadEvent,
@@ -1143,6 +1145,32 @@ const makeAgentJobRepository = Effect.gen(function*() {
     return {
       events,
       nextCursor: events.at(-1)?.eventSequence ?? after
+    }
+  })
+
+  const threadEventsBefore = Effect.fn("AgentJobRepository.threadEventsBefore")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    threadId: typeof AgentThreadId.Type,
+    before: typeof AgentEventCursor.Type,
+    limit: typeof AgentThreadEventPageSize.Type
+  ) {
+    const history = renderAgentThreadBeforeQuery({
+      workspaceId,
+      threadId,
+      beforeSequence: before,
+      limit
+    })
+    const rows = yield* sql
+      .unsafe<Record<string, unknown>>(history.sql, [...history.params])
+      .pipe(mapPersistenceOperation("agent-job.thread-before"))
+    const events = yield* decodeThreadEventRows(
+      workspaceId,
+      threadId,
+      [...rows].reverse()
+    )
+    return {
+      events,
+      nextCursor: events[0]?.eventSequence ?? before
     }
   })
 
@@ -2270,6 +2298,38 @@ const makeAgentJobRepository = Effect.gen(function*() {
         request.workspaceId,
         thread.value.threadId,
         request.after,
+        request.limit
+      )
+    }),
+
+    reviewThreadBefore: Effect.fn("AgentJobRepository.reviewThreadBefore")(function*(
+      input: typeof AgentReviewThreadBeforeInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(AgentReviewThreadBeforeInput)
+      )(input)
+      const subjectKey = yield* reviewThreadSubjectKey(
+        request.pluginConnectionId,
+        request.subject
+      )
+      const thread = yield* findThread(
+        request.workspaceId,
+        "pr-review",
+        subjectKey
+      ).pipe(mapPersistenceOperation("agent-job.find-review-thread"))
+      if (Option.isNone(thread)) {
+        return yield* new RecordNotFoundError({
+          workspaceId: request.workspaceId,
+          recordKind: "agent-review-thread",
+          recordKey: request.subject.pullRequestId
+            .slice(0, MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH)
+            .trimEnd()
+        })
+      }
+      return yield* threadEventsBefore(
+        request.workspaceId,
+        thread.value.threadId,
+        request.before,
         request.limit
       )
     }),

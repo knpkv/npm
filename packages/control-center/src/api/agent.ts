@@ -1,4 +1,5 @@
 import { AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
@@ -508,10 +509,17 @@ export const PullRequestReviewThreadEvent = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type PullRequestReviewThreadEvent = typeof PullRequestReviewThreadEvent.Type
 
-/** One explicit cursor page from the stable pull-request review thread. */
+/**
+ * One explicit cursor page from the stable pull-request review thread.
+ * `hasMore` follows the requested cursor direction; `hasEarlier` reports a truncated tail.
+ */
 export const PullRequestReviewThreadPage = Schema.Struct({
   events: Schema.Array(PullRequestReviewThreadEvent).check(
     Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)
+  ),
+  hasEarlier: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false))
   ),
   hasMore: Schema.Boolean,
   nextCursor: ReleaseAgentThreadCursor
@@ -714,17 +722,21 @@ const pullRequestReview = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const PullRequestReviewThreadQuery = Schema.Struct({
+  after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  before: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+  limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
+})
+
 const pullRequestReviewThread = HttpApiEndpoint.get(
   "pullRequestReviewThread",
   "/pull-requests/:entityId/review-thread/events",
   {
     params: Schema.Struct({ entityId: EntityId }),
-    query: Schema.Struct({
-      after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
-      limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
-    }),
+    query: PullRequestReviewThreadQuery,
     success: PullRequestReviewThreadPage,
     error: [
+      InvalidRequestApiError,
       UnauthorizedApiError,
       ForbiddenApiError,
       NotFoundApiError,

@@ -357,6 +357,15 @@ export const AgentReviewThreadAfterInput = Schema.Struct({
 })
 export type AgentReviewThreadAfterInput = typeof AgentReviewThreadAfterInput.Type
 
+export const AgentReviewThreadBeforeInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewThreadSubject,
+  before: AgentEventCursor,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadBeforeInput = typeof AgentReviewThreadBeforeInput.Type
+
 /** Cursor-bounded prior history fenced before one immutable review job. */
 export const AgentReviewThreadHistoryInput = Schema.Struct({
   workspaceId: WorkspaceId,

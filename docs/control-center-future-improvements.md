@@ -29,4 +29,4 @@ This file records deliberate follow-up work that is outside the current narrow d
 ## Pull-request review threads
 
 - Persist large command artifacts under the documented retention policy and expose explicit page/search tools across recovered runs. Current sbx command artifacts are deliberately session-local and disappear with the sandbox.
-- Add browser pagination or virtualization beyond the first bounded thread page, and keep prior history visible when a synchronized pull request temporarily lacks the release or exact revision data required to launch a new review.
+- Virtualize very long browser review threads after several explicitly loaded backward pages. The current browser keeps prior history visible across pull-request heads and temporary launch ineligibility, but intentionally renders the expanded in-memory history without virtualization.

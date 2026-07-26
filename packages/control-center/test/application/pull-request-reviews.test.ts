@@ -1684,6 +1684,44 @@ describe("pull request reviews", () => {
           secondPresented.events.map(({ _tag }) => _tag),
           ["run-queued"]
         )
+        const boundedTail = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: null,
+          before: null,
+          limit: 1
+        })
+        assert.deepStrictEqual(
+          boundedTail.events.map(({ _tag }) => _tag),
+          ["run-queued"]
+        )
+        assert.isTrue(boundedTail.hasEarlier)
+        assert.isFalse(boundedTail.hasMore)
+        const completeTail = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: null,
+          before: null,
+          limit: 2
+        })
+        assert.isFalse(completeTail.hasEarlier)
+        assert.isFalse(completeTail.hasMore)
+        const earlierPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: null,
+          before: secondPresented.nextCursor,
+          limit: 1
+        })
+        assert.deepStrictEqual(
+          earlierPresented.events.map(({ _tag }) => _tag),
+          ["operator-message"]
+        )
+        assert.isFalse(earlierPresented.hasMore)
+        assert.strictEqual(
+          earlierPresented.nextCursor,
+          ReleaseAgentThreadCursor.make(1)
+        )
 
         const claimedAt = yield* DateTime.now
         const claim = yield* persistence.agentJobs.claimNext({
