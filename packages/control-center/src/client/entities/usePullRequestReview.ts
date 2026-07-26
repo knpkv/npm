@@ -170,6 +170,29 @@ export const observePullRequestReviewHistoryLoad = (
   })
 }
 
+/** Publish the shared merged replay, not an older async caller snapshot. */
+export const publishNewestPullRequestReviewThread = (
+  candidate: PullRequestReviewThread,
+  signal: AbortSignal,
+  current: PullRequestReviewScope,
+  latestScope: { readonly current: PullRequestReviewScope | null },
+  latestThread: { readonly current: PullRequestReviewThread | null },
+  setState: (
+    update: (state: PullRequestReviewControllerState) => PullRequestReviewControllerState
+  ) => void
+): void => {
+  if (
+    signal.aborted ||
+    latestScope.current === null ||
+    !sameReviewScope(latestScope.current, current)
+  ) return
+  setState((latest) =>
+    latest._tag === "ready" && sameReviewScope(latest, current)
+      ? { ...latest, thread: latestThread.current ?? candidate }
+      : latest
+  )
+}
+
 const matchesScope = (
   review: PullRequestReviewState,
   scope: PullRequestReviewScope
@@ -335,15 +358,13 @@ export const usePullRequestReview = (
         )
     ).then(
       (thread) => {
-        if (
-          signal.aborted ||
-          latestScope.current === null ||
-          !sameReviewScope(latestScope.current, refreshScope)
-        ) return
-        setState((latest) =>
-          latest._tag === "ready" && sameReviewScope(latest, refreshScope)
-            ? { ...latest, thread }
-            : latest
+        publishNewestPullRequestReviewThread(
+          thread,
+          signal,
+          refreshScope,
+          latestScope,
+          latestThread,
+          setState
         )
       },
       () => undefined

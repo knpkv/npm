@@ -28,10 +28,12 @@ import {
   loadEarlierPullRequestReviewThread,
   MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
   MAXIMUM_REVIEW_THREAD_PAGE_READS,
+  mergePullRequestReviewThreads,
   type PullRequestReviewThread
 } from "../../src/client/entities/pullRequestReviewThreadReplay.js"
 import {
   observePullRequestReviewHistoryLoad,
+  publishNewestPullRequestReviewThread,
   type PullRequestReviewControllerState,
   type PullRequestReviewTransport,
   usePullRequestReview
@@ -557,6 +559,80 @@ describe("usePullRequestReview", () => {
         signal
       )
     ).toThrow("conflicting duplicate events")
+  })
+
+  it("lets authoritative history clear an optimistic same-boundary cursor", () => {
+    const optimistic = {
+      events: [threadEvent(1)],
+      hasEarlier: true,
+      historyLoaded: false,
+      nextCursor: ReleaseAgentThreadCursor.make(1)
+    }
+    const authoritative = {
+      ...optimistic,
+      hasEarlier: false,
+      historyLoaded: true
+    }
+
+    expect(mergePullRequestReviewThreads(optimistic, authoritative)).toMatchObject({
+      hasEarlier: false,
+      historyLoaded: true
+    })
+    expect(
+      mergePullRequestReviewThreads(optimistic, {
+        ...optimistic,
+        hasEarlier: false
+      }).hasEarlier
+    ).toBe(true)
+  })
+
+  it("publishes merged history after an older refresh snapshot resolves", async () => {
+    const live = deferred<PullRequestReviewThread>()
+    const history = deferred<PullRequestReviewThread>()
+    const target: { current: PullRequestReviewThread | null } = { current: null }
+    const signal = new AbortController().signal
+    const liveInstall = live.promise.then((thread) => installNewestThread(target, thread, signal))
+    const historyInstall = history.promise.then((thread) => installNewestThread(target, thread, signal))
+    live.resolve({
+      events: [threadEvent(129), threadEvent(130), threadEvent(131)],
+      hasEarlier: true,
+      historyLoaded: false,
+      nextCursor: ReleaseAgentThreadCursor.make(131)
+    })
+    const refreshSnapshot = await liveInstall
+    history.resolve({
+      events: [threadEvent(127), threadEvent(128), threadEvent(129), threadEvent(130)],
+      hasEarlier: true,
+      historyLoaded: true,
+      nextCursor: ReleaseAgentThreadCursor.make(130)
+    })
+    await historyInstall
+    const current = {
+      _tag: "ready",
+      action: "idle",
+      baseRevision: BASE_A,
+      entityId: ENTITY_ID,
+      headRevision: HEAD_A,
+      historyAction: "idle",
+      provider: null,
+      review: reviewFor(BASE_A, HEAD_A),
+      sessionKey: "session-a",
+      thread: refreshSnapshot
+    } satisfies PullRequestReviewControllerState
+    let state: PullRequestReviewControllerState = current
+
+    publishNewestPullRequestReviewThread(refreshSnapshot, signal, current, { current }, target, (update) => {
+      state = update(state)
+    })
+
+    expect(state._tag === "ready" ? state.thread?.events.map(({ eventSequence }) => eventSequence) : []).toEqual([
+      ReleaseAgentThreadCursor.make(127),
+      ReleaseAgentThreadCursor.make(128),
+      ReleaseAgentThreadCursor.make(129),
+      ReleaseAgentThreadCursor.make(130),
+      ReleaseAgentThreadCursor.make(131)
+    ])
+    expect(state._tag === "ready" ? state.thread?.historyLoaded : false).toBe(true)
   })
 
   it("prepends one explicit backward page while preserving the live cursor", async () => {

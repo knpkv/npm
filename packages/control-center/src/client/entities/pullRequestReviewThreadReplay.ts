@@ -74,11 +74,18 @@ export const mergePullRequestReviewThreads = (
   const events = historyLoaded
     ? allEvents
     : allEvents.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
+  const hasEarlierAtBoundary = leftEarliestSequence !== rightEarliestSequence
+    ? boundary.hasEarlier
+    : left.historyLoaded && right.historyLoaded
+    ? left.hasEarlier && right.hasEarlier
+    : left.historyLoaded
+    ? left.hasEarlier
+    : right.historyLoaded
+    ? right.hasEarlier
+    : left.hasEarlier || right.hasEarlier
   return {
     events,
-    hasEarlier: (leftEarliestSequence === rightEarliestSequence
-      ? left.hasEarlier || right.hasEarlier
-      : boundary.hasEarlier) || events.length < allEvents.length,
+    hasEarlier: hasEarlierAtBoundary || events.length < allEvents.length,
     historyLoaded,
     nextCursor: ReleaseAgentThreadCursor.make(
       Math.max(left.nextCursor, right.nextCursor)
