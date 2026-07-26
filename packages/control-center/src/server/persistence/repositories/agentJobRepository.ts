@@ -894,13 +894,37 @@ const makeAgentJobRepository = Effect.gen(function*() {
         subjectRevision: request.subjectRevision,
         task
       }))
-      if (Result.isSuccess(taskContext) && Result.isSuccess(queuedPayload)) {
+      const attemptContext = yield* Schema.decodeUnknownEffect(
+        Schema.toType(AgentContextSnapshotRecord)
+      )({
+        workspaceId: request.workspaceId,
+        releaseId: request.releaseId,
+        subjectRevision: request.subjectRevision,
+        fingerprint: request.contextFingerprint,
+        task
+      }).pipe(
+        Effect.mapError(() =>
+          new PersistenceOperationError({
+            operation: "agent-job.encode-payload"
+          })
+        )
+      )
+      const attemptContextPayload = yield* Effect.result(
+        encodePayload(AgentContextSnapshotRecord, attemptContext)
+      )
+      if (
+        Result.isSuccess(taskContext) &&
+        Result.isSuccess(queuedPayload) &&
+        Result.isSuccess(attemptContextPayload)
+      ) {
         return { task, taskContext: taskContext.success }
       }
       const failure = Result.isFailure(taskContext)
         ? taskContext.failure
         : Result.isFailure(queuedPayload)
         ? queuedPayload.failure
+        : Result.isFailure(attemptContextPayload)
+        ? attemptContextPayload.failure
         : null
       if (failure === null || failure.operation !== "agent-job.event-too-large") {
         return yield* (failure ?? new PersistenceOperationError({

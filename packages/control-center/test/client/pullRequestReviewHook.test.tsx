@@ -23,6 +23,11 @@ import {
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
 import {
+  continuePullRequestReviewThread,
+  MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
+  MAXIMUM_REVIEW_THREAD_PAGE_READS
+} from "../../src/client/entities/pullRequestReviewThreadReplay.js"
+import {
   type PullRequestReviewTransport,
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
@@ -349,6 +354,33 @@ const ReviewThreadHarness = ({ transport }: { readonly transport: PullRequestRev
 }
 
 describe("usePullRequestReview", () => {
+  it("retains only the newest durable thread events across repeated refreshes", async () => {
+    const signal = new AbortController().signal
+    let firstSequence = 1
+    const transport = {
+      loadThread: vi.fn(() => {
+        const events = Array.from({ length: 128 }, (_, index) => threadEvent(firstSequence + index))
+        firstSequence += events.length
+        return Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events,
+            hasMore: false,
+            nextCursor: events.at(-1)?.eventSequence ?? ReleaseAgentThreadCursor.make(0)
+          })
+        )
+      })
+    }
+
+    let thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal)
+    thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+    thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+
+    expect(thread.events).toHaveLength(MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
+    expect(thread.events[0]?.eventSequence).toBe(ReleaseAgentThreadCursor.make(129))
+    expect(thread.events.at(-1)?.eventSequence).toBe(ReleaseAgentThreadCursor.make(384))
+    expect(thread.nextCursor).toBe(ReleaseAgentThreadCursor.make(384))
+  })
+
   it("follows advancing cursors until the durable review thread reaches its tail", async () => {
     const firstPage = PullRequestReviewThreadPage.make({
       events: Array.from({ length: 128 }, (_, index) => threadEvent(index + 1)),
@@ -400,7 +432,7 @@ describe("usePullRequestReview", () => {
       load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
       loadThread: vi.fn((_entityId, after) => {
         reads += 1
-        if (reads <= 128) {
+        if (reads <= MAXIMUM_REVIEW_THREAD_PAGE_READS) {
           const firstSequence = (reads - 1) * 128 + 1
           return Promise.resolve(
             PullRequestReviewThreadPage.make({
@@ -432,7 +464,7 @@ describe("usePullRequestReview", () => {
     await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
 
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
-    expect(transport.loadThread).toHaveBeenCalledTimes(129)
+    expect(transport.loadThread).toHaveBeenCalledTimes(MAXIMUM_REVIEW_THREAD_PAGE_READS + 1)
     expect(transport.loadThread).toHaveBeenLastCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
   })
 

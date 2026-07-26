@@ -13,7 +13,8 @@ import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 import type { PullRequestReviewTransport } from "./usePullRequestReview.js"
 
-const MAXIMUM_REVIEW_THREAD_PAGE_READS = 128
+export const MAXIMUM_REVIEW_THREAD_PAGE_READS = 128
+export const MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS = 256
 
 interface PullRequestReviewThreadPageTransport {
   readonly loadThread: (
@@ -151,12 +152,13 @@ export const continuePullRequestReviewThread = async (
     signal,
     previous?.nextCursor
   )
-  return previous === undefined
-    ? update
-    : {
-      events: [...previous.events, ...update.events],
-      nextCursor: update.nextCursor
-    }
+  const events = previous === undefined
+    ? update.events
+    : [...previous.events, ...update.events]
+  return {
+    events: events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS),
+    nextCursor: update.nextCursor
+  }
 }
 
 /** Load one coherent review snapshot and close a pending-to-terminal tail race. */

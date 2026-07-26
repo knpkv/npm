@@ -538,12 +538,18 @@ describe("agent job review results", () => {
         assert.isBelow(context.priorRuns.length, 4)
 
         const rows = yield* database.sql<{
+          readonly contextBytes: number
           readonly taskBytes: number
           readonly queuedBytes: number
         }>`SELECT
+          length(CAST(attempt.context_snapshot_json AS BLOB)) AS contextBytes,
           length(CAST(job.task_context_json AS BLOB)) AS taskBytes,
           event.payload_byte_length AS queuedBytes
         FROM agent_jobs job
+        INNER JOIN agent_job_attempts attempt
+          ON attempt.workspace_id = job.workspace_id
+         AND attempt.job_id = job.job_id
+         AND attempt.attempt_sequence = 1
         INNER JOIN agent_thread_events event
           ON event.workspace_id = job.workspace_id
          AND event.job_id = job.job_id
@@ -551,6 +557,7 @@ describe("agent job review results", () => {
         WHERE job.workspace_id = ${WORKSPACE_ID}
           AND job.job_id = ${followUpJobId}`
         assert.strictEqual(rows.length, 1)
+        assert.isAtMost(rows[0]!.contextBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
         assert.isAtMost(rows[0]!.taskBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
         assert.isAtMost(rows[0]!.queuedBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
       })
