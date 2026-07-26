@@ -244,8 +244,20 @@ cursor-paged API to the thread tail, rejects non-advancing cursors, and fails
 closed at its bounded replay budget. A targeted operator request creates
 another immutable run without changing CodeCommit.
 
-Full history and retained artifacts remain behind explicit lookup boundaries.
-Targeted revalidation receives the selected suggestion's complete history.
+Full durable history remains outside the initial model context. The agent may
+call `ReviewReadThreadHistory` with cursor zero and then follow `nextCursor`
+while `hasMore` is true. Each call packs up to 128 prior event projections into
+a page below the model-visible tool envelope. Durable payloads remain complete,
+but any single model-visible event above the 6 KiB projection budget advances
+with `payloadElided: true` and a null payload. This lets verbose established
+threads batch within the agent step budget instead of blocking the cursor or
+spending one model step per near-limit event. Normal durable writes keep one
+event below 32 KiB; corrupt or legacy storage that bypasses that invariant uses
+the same fail-safe projection. The persistence query is fenced before the
+current job's first event; fabricated cursors cannot read the current run or
+concurrently appended future activity. Retained command artifacts remain behind
+a separate explicit lookup boundary. Targeted revalidation receives the selected
+suggestion's complete history.
 
 ### CodeCommit checkout and sbx isolation
 
@@ -295,6 +307,10 @@ pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
 host or sbx control access. File reads and listings preserve missing-path failures,
 and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
 changes.
+
+The merged provider-neutral toolkit also exposes the durable history reader.
+Its handler is bound to the claimed workspace, thread, and job on the host and
+does not grant arbitrary thread lookup.
 
 Executable repository instructions come only from the trusted base revision. Instruction changes in the PR are untrusted content under review.
 

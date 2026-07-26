@@ -4,7 +4,7 @@ import {
   AgentContextFingerprint,
   AgentProviderId,
   type AgentRuntimeEvent,
-  type DeterministicLanguageModelScript,
+  type DeterministicLanguageModelTurn,
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
@@ -39,11 +39,14 @@ import {
   PrReviewTaskExecutor,
   prReviewTaskExecutorLayer
 } from "../../src/server/agent/internal/PrReviewTaskExecutor.js"
+import { makeBoundedPage, PrReviewThreadHistory } from "../../src/server/agent/internal/PrReviewThreadHistory.js"
 import {
   AgentAttemptSequence,
+  AgentEventCursor,
   AgentJobPrompt,
   AgentLeaseOwner,
   AgentLeaseToken,
+  AgentThreadEvent,
   type ClaimedAgentJob,
   EMPTY_PR_REVIEW_THREAD_CONTEXT,
   PrReviewThreadContextSnapshot
@@ -180,7 +183,7 @@ const completeScript = (
     notes: []
   },
   reviewSubject: PrReviewSubject = subject
-): DeterministicLanguageModelScript => [
+): ReadonlyArray<DeterministicLanguageModelTurn> => [
   {
     _tag: "response",
     parts: response({
@@ -434,7 +437,18 @@ const runExecutor = <Success, Failure>(
   use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>,
   diff?: string,
   sourceExcerpt?: string,
-  sessionLayer?: Layer.Layer<PrReviewSandboxSessions>
+  sessionLayer?: Layer.Layer<PrReviewSandboxSessions>,
+  historyLayer: Layer.Layer<PrReviewThreadHistory> = Layer.succeed(
+    PrReviewThreadHistory,
+    PrReviewThreadHistory.of({
+      page: ({ after }) =>
+        Effect.succeed({
+          events: [],
+          hasMore: false,
+          nextCursor: after
+        })
+    })
+  )
 ) => {
   const fake = makeDeterministicLanguageModel(script)
   return Effect.gen(function*() {
@@ -463,7 +477,8 @@ const runExecutor = <Success, Failure>(
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
-          Layer.provide(sessionLayer ?? makeSessionLayer(observation, diff, sourceExcerpt))
+          Layer.provide(sessionLayer ?? makeSessionLayer(observation, diff, sourceExcerpt)),
+          Layer.provide(historyLayer)
         )
       )
     )
@@ -476,6 +491,153 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("exposes more than 64 fenced history events without exhausting tool steps", () => {
+    const observedCursors = new Array<number>()
+    const eventKind = Schema.decodeSync(AgentThreadEvent.fields.eventKind)("user-message")
+    const events = Array.from({ length: 65 }, (_, index) => ({
+      eventSequence: AgentEventCursor.make(index + 1),
+      jobId: JOB_ID,
+      attemptSequence: null,
+      eventKind,
+      payload: { prompt: `Prior review request ${String(index + 1)}` },
+      payloadElided: false,
+      occurredAt: Schema.decodeSync(UtcTimestamp)("2026-07-24T09:00:00.000Z")
+    }))
+    const historyLayer = Layer.succeed(
+      PrReviewThreadHistory,
+      PrReviewThreadHistory.of({
+        page: ({ after }) =>
+          Effect.sync(() => {
+            observedCursors.push(after)
+            return {
+              events,
+              hasMore: false,
+              nextCursor: AgentEventCursor.make(65)
+            }
+          })
+      })
+    )
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const script: ReadonlyArray<DeterministicLanguageModelTurn> = [{
+      _tag: "response",
+      parts: response({
+        id: "read-thread-history",
+        name: "ReviewReadThreadHistory",
+        params: { after: 0 },
+        type: "tool-call"
+      })
+    }, ...completeScript()]
+
+    return runExecutor(
+      script,
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      undefined,
+      historyLayer
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.strictEqual(result.suggestions.length, 1)
+          assert.deepStrictEqual(observedCursors, [0])
+        })
+      )
+    )
+  })
+
+  it.effect("advances past a pathological oversized history event with explicit elision", () =>
+    Effect.gen(function*() {
+      const event = Schema.decodeUnknownSync(AgentThreadEvent)({
+        workspaceId: WORKSPACE_ID,
+        threadId: THREAD_ID,
+        eventSequence: 1,
+        jobId: JOB_ID,
+        attemptSequence: null,
+        eventKind: "assistant-output",
+        payload: { text: "x".repeat(64 * 1_024) },
+        occurredAt: "2026-07-24T09:00:00.000Z"
+      })
+      const page = yield* makeBoundedPage([event], AgentEventCursor.make(0))
+      assert.strictEqual(page.events.length, 1)
+      assert.strictEqual(page.events[0]?.eventSequence, AgentEventCursor.make(1))
+      assert.isTrue(page.events[0]?.payloadElided)
+      assert.isNull(page.events[0]?.payload)
+      assert.isFalse(page.hasMore)
+      assert.strictEqual(page.nextCursor, AgentEventCursor.make(1))
+    }))
+
+  it.effect("completes after reading 64 valid near-limit durable history events", () =>
+    Effect.gen(function*() {
+      const durableEvents = Array.from({ length: 64 }, (_, index) =>
+        Schema.decodeUnknownSync(AgentThreadEvent)({
+          workspaceId: WORKSPACE_ID,
+          threadId: THREAD_ID,
+          eventSequence: index + 1,
+          jobId: JOB_ID,
+          attemptSequence: 1,
+          eventKind: "assistant-output",
+          payload: {
+            _tag: "output",
+            channel: "assistant",
+            text: `${String(index)}:${"x".repeat(31 * 1_024)}`
+          },
+          occurredAt: "2026-07-24T09:00:00.000Z"
+        }))
+      const page = yield* makeBoundedPage(durableEvents, AgentEventCursor.make(0))
+      assert.strictEqual(page.events.length, 64)
+      assert.isTrue(page.events.every(({ payloadElided }) => payloadElided))
+      assert.isFalse(page.hasMore)
+      assert.strictEqual(page.nextCursor, AgentEventCursor.make(64))
+
+      const observedCursors = new Array<number>()
+      const historyLayer = Layer.succeed(
+        PrReviewThreadHistory,
+        PrReviewThreadHistory.of({
+          page: ({ after }) =>
+            Effect.sync(() => {
+              observedCursors.push(after)
+              return page
+            })
+        })
+      )
+      const observation: SessionObservation = {
+        commands: [],
+        operations: [],
+        requests: []
+      }
+      const script: ReadonlyArray<DeterministicLanguageModelTurn> = [{
+        _tag: "response",
+        parts: response({
+          id: "read-large-thread-history",
+          name: "ReviewReadThreadHistory",
+          params: { after: 0 },
+          type: "tool-call"
+        })
+      }, ...completeScript()]
+      const executed = yield* runExecutor(
+        script,
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute(claim)
+        }),
+        undefined,
+        undefined,
+        undefined,
+        historyLayer
+      )
+      assert.strictEqual(executed.result.suggestions.length, 1)
+      assert.deepStrictEqual(observedCursors, [0])
+    }))
+
   it.effect("reserves durable report space for host-authored metadata", () => {
     const note = (index: number) => ({
       reason: "low-confidence",

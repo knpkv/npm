@@ -8,6 +8,7 @@ export {
   type AgentJobDispatchCandidatesQueryInput,
   type AgentReviewContextEventKind,
   type AgentReviewContextEventsQueryInput,
+  type AgentReviewThreadHistoryQueryInput,
   type AgentThreadReplayQueryInput,
   type AgentThreadTailQueryInput,
   type ClaimableAgentJobState,
@@ -15,6 +16,7 @@ export {
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
+  renderAgentReviewThreadHistoryQuery,
   renderAgentThreadReplayQuery,
   renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery

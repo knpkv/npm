@@ -1,4 +1,4 @@
-import { Casing, Column, Function as Fn, Query } from "effect-qb"
+import { Casing, Column, Function as Fn, Query, Table } from "effect-qb"
 import * as Sqlite from "effect-qb/sqlite"
 
 import type { RenderedSql } from "./types.js"
@@ -26,6 +26,15 @@ export interface AgentJobClaimQueryInput {
 /** Cursor input for bounded, ordered thread replay. */
 export interface AgentThreadReplayQueryInput {
   readonly afterSequence: number
+  readonly limit: number
+  readonly threadId: string
+  readonly workspaceId: string
+}
+
+/** Cursor input for history that must precede one immutable review job. */
+export interface AgentReviewThreadHistoryQueryInput {
+  readonly afterSequence: number
+  readonly beforeJobId: string
   readonly limit: number
   readonly threadId: string
   readonly workspaceId: string
@@ -125,6 +134,7 @@ const agentThreadEvents = table("agentThreadEvents", {
   payloadByteLength: Column.int(),
   occurredAt: Column.text()
 })
+const historyBoundaryEvents = Table.alias(agentThreadEvents, "historyBoundaryEvents")
 
 const jobProjection = {
   workspaceId: agentJobs.workspaceId,
@@ -143,6 +153,21 @@ const jobProjection = {
   createdAt: agentJobs.createdAt,
   cancelRequestedAt: agentJobs.cancelRequestedAt,
   terminalAt: agentJobs.terminalAt
+}
+
+const threadEventReplayProjection = {
+  workspaceId: agentThreadEvents.workspaceId,
+  threadId: agentThreadEvents.threadId,
+  eventSequence: agentThreadEvents.eventSequence,
+  jobId: agentThreadEvents.jobId,
+  attemptSequence: agentThreadEvents.attemptSequence,
+  eventKind: agentThreadEvents.eventKind,
+  payloadJson: agentThreadEvents.payloadJson,
+  payloadDigest: agentThreadEvents.payloadDigest,
+  payloadByteLength: agentThreadEvents.payloadByteLength,
+  taskContextJson: agentJobs.taskContextJson,
+  taskContextDigest: agentJobs.taskContextDigest,
+  occurredAt: agentThreadEvents.occurredAt
 }
 
 const liveLeaseForJob = (observedAt: string) =>
@@ -261,20 +286,7 @@ export const renderAgentJobClaimQuery = (input: AgentJobClaimQueryInput): Render
 
 /** Render one cursor-bounded page of immutable thread events in replay order. */
 export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput): RenderedSql => {
-  const plan = Query.select({
-    workspaceId: agentThreadEvents.workspaceId,
-    threadId: agentThreadEvents.threadId,
-    eventSequence: agentThreadEvents.eventSequence,
-    jobId: agentThreadEvents.jobId,
-    attemptSequence: agentThreadEvents.attemptSequence,
-    eventKind: agentThreadEvents.eventKind,
-    payloadJson: agentThreadEvents.payloadJson,
-    payloadDigest: agentThreadEvents.payloadDigest,
-    payloadByteLength: agentThreadEvents.payloadByteLength,
-    taskContextJson: agentJobs.taskContextJson,
-    taskContextDigest: agentJobs.taskContextDigest,
-    occurredAt: agentThreadEvents.occurredAt
-  }).pipe(
+  const plan = Query.select(threadEventReplayProjection).pipe(
     Query.from(agentThreadEvents),
     Query.innerJoin(
       agentJobs,
@@ -297,22 +309,52 @@ export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput)
   return { params: rendered.params, sql: rendered.sql }
 }
 
+/** Render prior thread history fenced before the current immutable job. */
+export const renderAgentReviewThreadHistoryQuery = (
+  input: AgentReviewThreadHistoryQueryInput
+): RenderedSql => {
+  const boundary = Query.select({
+    eventSequence: Fn.coalesce(
+      Fn.min(historyBoundaryEvents.eventSequence),
+      input.afterSequence
+    )
+  }).pipe(
+    Query.from(historyBoundaryEvents),
+    Query.where(
+      Query.and(
+        Query.eq(historyBoundaryEvents.workspaceId, input.workspaceId),
+        Query.eq(historyBoundaryEvents.threadId, input.threadId),
+        Query.eq(historyBoundaryEvents.jobId, input.beforeJobId)
+      )
+    )
+  )
+  const plan = Query.select(threadEventReplayProjection).pipe(
+    Query.from(agentThreadEvents),
+    Query.innerJoin(
+      agentJobs,
+      Query.and(
+        Query.eq(agentJobs.workspaceId, agentThreadEvents.workspaceId),
+        Query.eq(agentJobs.jobId, agentThreadEvents.jobId)
+      )
+    ),
+    Query.where(
+      Query.and(
+        Query.eq(agentThreadEvents.workspaceId, input.workspaceId),
+        Query.eq(agentThreadEvents.threadId, input.threadId),
+        Query.gt(agentThreadEvents.eventSequence, input.afterSequence),
+        Query.lt(agentThreadEvents.eventSequence, Query.scalar(boundary))
+      )
+    ),
+    Query.orderBy(agentThreadEvents.eventSequence),
+    Query.limit(input.limit)
+  )
+  const rendered = renderer.render(plan)
+  return { params: rendered.params, sql: rendered.sql }
+}
+
 /** Render the newest bounded thread window; callers restore replay order. */
 export const renderAgentThreadTailQuery = (input: AgentThreadTailQueryInput): RenderedSql => {
-  const plan = Query.select({
-    workspaceId: agentThreadEvents.workspaceId,
-    threadId: agentThreadEvents.threadId,
-    eventSequence: agentThreadEvents.eventSequence,
-    jobId: agentThreadEvents.jobId,
-    attemptSequence: agentThreadEvents.attemptSequence,
-    eventKind: agentThreadEvents.eventKind,
-    payloadJson: agentThreadEvents.payloadJson,
-    payloadDigest: agentThreadEvents.payloadDigest,
-    payloadByteLength: agentThreadEvents.payloadByteLength,
-    taskContextJson: agentJobs.taskContextJson,
-    taskContextDigest: agentJobs.taskContextDigest,
-    occurredAt: agentThreadEvents.occurredAt
-  }).pipe(
+  const plan = Query.select(threadEventReplayProjection).pipe(
     Query.from(agentThreadEvents),
     Query.innerJoin(
       agentJobs,
