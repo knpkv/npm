@@ -20,7 +20,7 @@ import {
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { type PrReviewSubject, PrReviewSuggestionDraft } from "../../src/domain/prReview.js"
+import { PrReviewPath, type PrReviewSubject, PrReviewSuggestionDraft } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
@@ -351,7 +351,7 @@ const makeSessionLayer = (
             ? output()
             : output("", 1)
         }
-        if (command.startsWith("test \"$(git show ")) {
+        if (command.includes("| awk 'END { exit NR ==")) {
           return command.includes("missing.ts") ? output("", 1) : output()
         }
         return command.startsWith("git show ")
@@ -537,9 +537,11 @@ describe("PR review task executor", () => {
       const baseRevision = base.stdout.text.trim()
 
       yield* fileSystem.writeFileString(sourcePath, source("true"))
+      const unterminatedPath = path.join(root, "packages/control-center/src/unterminated.ts")
+      yield* fileSystem.writeFileString(unterminatedPath, "const finalLine = true")
       const commitHead = yield* runShellCommand(
         root,
-        "git add -- packages/control-center/src/review.ts && " +
+        "git add -- packages/control-center/src/review.ts packages/control-center/src/unterminated.ts && " +
           "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m head"
       )
       assert.strictEqual(commitHead.exitCode, 0, commitHead.stderr.text)
@@ -639,6 +641,30 @@ describe("PR review task executor", () => {
       const withoutReplacement = yield* execute(suggestion)
       assert.strictEqual(withoutReplacement.result.suggestions.length, 1)
       assert.include(yield* fileSystem.readFileString(sourcePath), "const unsafe = mutated")
+
+      const relatedAtUnterminatedEof = yield* execute({
+        ...suggestion,
+        relatedLocations: [{
+          path: PrReviewPath.make("packages/control-center/src/unterminated.ts"),
+          startLine: 1,
+          endLine: 1,
+          label: "Unterminated final line"
+        }, {
+          path: PrReviewPath.make("packages/control-center/src/unterminated.ts"),
+          startLine: 2,
+          endLine: 2,
+          label: "Past end of file"
+        }]
+      })
+      assert.deepStrictEqual(
+        relatedAtUnterminatedEof.result.suggestions[0]?.relatedLocations,
+        [{
+          path: PrReviewPath.make("packages/control-center/src/unterminated.ts"),
+          startLine: 1,
+          endLine: 1,
+          label: "Unterminated final line"
+        }]
+      )
     }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.scoped

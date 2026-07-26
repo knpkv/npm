@@ -156,7 +156,8 @@ no suggestion-count cap beyond the existing durable event byte envelope.
 
 Every draft suggestion scope can be explicitly published. Line and file suggestions become CodeCommit
 comments at their resolved line; whole-change suggestions become general pull-request comments without
-a file location. A successful governed publication appends an immutable lifecycle event, so reopening
+a file location. Control Center first reserves the exact confirmed content digest so competing edits
+cannot both reach the provider. A successful governed publication completes that reservation and appends an immutable lifecycle event, so reopening
 or refreshing the review keeps that suggestion `published` and cannot offer it as a new draft again.
 
 To exercise the installed `sbx` runtime against the current checkout without provider credentials or

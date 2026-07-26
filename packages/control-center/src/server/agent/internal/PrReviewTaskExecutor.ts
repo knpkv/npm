@@ -287,8 +287,9 @@ const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelat
   for (const location of suggestion.relatedLocations) {
     const expectedLines = location.endLine - location.startLine + 1
     const check = yield* session.runCommand(
-      `test "$(git show ${shellQuote(`${session.headRevision}:${location.path}`)} | ` +
-        `sed -n '${String(location.startLine)},${String(location.endLine)}p' | wc -l)" -eq ${String(expectedLines)}`
+      `git show ${shellQuote(`${session.headRevision}:${location.path}`)} | ` +
+        `sed -n '${String(location.startLine)},${String(location.endLine)}p' | ` +
+        `awk 'END { exit NR == ${String(expectedLines)} ? 0 : 1 }'`
     ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
     if (check.exitCode === 0) validated.push(location)
   }

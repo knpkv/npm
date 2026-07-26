@@ -396,9 +396,17 @@ export type PrReviewCompletion = typeof PrReviewCompletion.Type
 const hasMaximumReportBytes = Schema.makeFilter(
   (value: unknown) => {
     const serialized = JSON.stringify(value)
-    return serialized !== undefined && jsonEncoder.encode(serialized).byteLength <= MAXIMUM_PR_REVIEW_REPORT_BYTES
+    if (serialized === undefined) return false
+    const maximumLifecycleProjection = serialized.replace(
+      /"state":"(?:draft|stale|resolved|reopened)"/gu,
+      "\"state\":\"published\""
+    )
+    return jsonEncoder.encode(maximumLifecycleProjection).byteLength <= MAXIMUM_PR_REVIEW_REPORT_BYTES
   },
-  { expected: `JSON encoded as at most ${MAXIMUM_PR_REVIEW_REPORT_BYTES} UTF-8 bytes` }
+  {
+    expected:
+      `JSON encoded as at most ${MAXIMUM_PR_REVIEW_REPORT_BYTES} UTF-8 bytes after the longest lifecycle projection`
+  }
 )
 
 /**

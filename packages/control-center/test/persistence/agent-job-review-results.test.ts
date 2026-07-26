@@ -6,7 +6,7 @@ import * as TestClock from "effect/testing/TestClock"
 
 import { type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
 import { GovernedActionId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
+import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
@@ -16,7 +16,8 @@ import {
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
-  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
+  ReviewSuggestionPublicationDigest
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
@@ -34,6 +35,8 @@ const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
 const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000043")
+const CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"b".repeat(64)}`)
+const ALTERNATE_CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"c".repeat(64)}`)
 
 const subject = {
   providerId: "codecommit",
@@ -101,6 +104,35 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
   ],
   notes: []
 })
+
+const nearLimitReport = (): PrReviewReport => {
+  const suggestion = report.suggestions[0]!
+  const suggestions = Array.from({ length: 4 }, (_, index) => ({
+    ...suggestion,
+    suggestionId: `sha256:${String(index + 1).repeat(64)}`,
+    recommendation: "r".repeat(6_000)
+  }))
+  const candidate = {
+    ...report,
+    suggestions
+  }
+  const encoder = new TextEncoder()
+  const projectedBytes = () =>
+    encoder.encode(JSON.stringify({
+      ...candidate,
+      suggestions: suggestions.map((item) => ({ ...item, state: "published" }))
+    })).byteLength
+  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1 - projectedBytes()
+  for (const item of suggestions) {
+    const available = 8_000 - item.recommendation.length
+    const added = Math.min(available, remaining)
+    item.recommendation += "r".repeat(added)
+    remaining -= added
+  }
+  assert.strictEqual(remaining, 0)
+  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1)
+  return Schema.decodeUnknownSync(PrReviewReport)(candidate)
+}
 
 const setupFoundation = Effect.gen(function*() {
   const database = yield* Database
@@ -182,10 +214,18 @@ describe("agent job review results", () => {
         const suggestionId = report.suggestions[0]?.suggestionId
         if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
 
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservedAt: T3
+        })
         yield* jobs.recordReviewSuggestionPublication({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          contentDigest: CONTENT_DIGEST,
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
@@ -205,6 +245,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          contentDigest: CONTENT_DIGEST,
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
@@ -223,6 +264,130 @@ describe("agent job review results", () => {
         if (Option.isSome(latest)) {
           assert.strictEqual(latest.value.report?.suggestions[0]?.state, "published")
         }
+
+        const page = yield* jobs.threadAfter({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(
+          page.events.filter(({ eventKind }) => eventKind === "review-suggestion-published").length,
+          1
+        )
+      })
+    ))
+
+  it.effect("reserves aggregate bytes for the longest lifecycle projection", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const bounded = nearLimitReport()
+        const tooLarge = {
+          ...bounded,
+          suggestions: bounded.suggestions.map((suggestion, index) =>
+            index === 0
+              ? { ...suggestion, title: `${suggestion.title}xx` }
+              : suggestion
+          )
+        }
+        assert.isFalse(Schema.is(PrReviewReport)(tooLarge))
+
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: bounded,
+          completedAt: T2
+        })
+        const suggestionId = bounded.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservedAt: T3
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+
+        const reloaded = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.strictEqual(reloaded.report.suggestions[0]?.state, "published")
+      })
+    ))
+
+  it.effect("atomically reserves one body and idempotently records one publication", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestionId = report.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const reserve = (contentDigest: typeof ReviewSuggestionPublicationDigest.Type) =>
+          jobs.reserveReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest,
+            reservedAt: T3
+          })
+        const reservations = yield* Effect.all([
+          reserve(CONTENT_DIGEST).pipe(Effect.result),
+          reserve(ALTERNATE_CONTENT_DIGEST).pipe(Effect.result)
+        ], { concurrency: "unbounded" })
+        assert.strictEqual(
+          reservations.filter(Result.isSuccess).length,
+          1
+        )
+        const rows = yield* database.sql<{ readonly contentDigest: string }>`SELECT
+          content_digest AS contentDigest
+          FROM agent_review_suggestion_publications
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND job_id = ${JOB_ID}
+            AND suggestion_id = ${suggestionId}`
+        assert.strictEqual(rows.length, 1)
+        const winningDigest = Schema.decodeUnknownSync(ReviewSuggestionPublicationDigest)(
+          rows[0]?.contentDigest
+        )
+        const record = () =>
+          jobs.recordReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest: winningDigest,
+            publicationId: PUBLICATION_ID,
+            publishedAt: T3
+          })
+        const recordings = yield* Effect.all([
+          record().pipe(Effect.result),
+          record().pipe(Effect.result)
+        ], { concurrency: "unbounded" })
+        assert.isTrue(recordings.every(Result.isSuccess))
 
         const page = yield* jobs.threadAfter({
           workspaceId: WORKSPACE_ID,

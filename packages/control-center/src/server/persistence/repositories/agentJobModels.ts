@@ -190,11 +190,28 @@ export const CompleteAgentReviewInput = Schema.Struct({
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 
+/** Digest binding one durable publication reservation to the exact confirmed body. */
+export const ReviewSuggestionPublicationDigest = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
+).pipe(Schema.brand("ReviewSuggestionPublicationDigest"))
+export type ReviewSuggestionPublicationDigest = typeof ReviewSuggestionPublicationDigest.Type
+
+/** Atomic pre-provider reservation for one suggestion and exact confirmed body. */
+export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservedAt: UtcTimestamp
+})
+export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
+
 /** Successful governed publication to overlay onto one immutable review report. */
 export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
   publicationId: GovernedActionId,
   publishedAt: UtcTimestamp
 })

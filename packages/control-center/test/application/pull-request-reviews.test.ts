@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, makeAgentRuntime, makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
-import { DateTime, Duration, Effect, Option, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Duration, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
 import {
@@ -57,6 +57,7 @@ import { RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
+  AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
@@ -353,6 +354,8 @@ const withService = <Success, Failure>(
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
   recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
+    Effect.succeed(undefined),
+  reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined)
 ) =>
   Effect.gen(function*() {
@@ -368,7 +371,8 @@ const withService = <Success, Failure>(
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
           latestReview: () => Effect.succeed(latestReview),
-          recordReviewSuggestionPublication: recordPublication
+          recordReviewSuggestionPublication: recordPublication,
+          reserveReviewSuggestionPublication: reservePublication
         }
       })
       const publicationGateway = ReviewSuggestionPublicationGateway.of({
@@ -800,6 +804,89 @@ describe("pull request reviews", () => {
       registry,
       Option.some(completedReview)
     ))
+
+  it.effect("reserves one edited body before allowing the provider call", () =>
+    Effect.gen(function*() {
+      const reservedDigest = yield* Ref.make<null | string>(null)
+      const firstReservationEntered = yield* Deferred.make<void>()
+      const releaseFirstReservation = yield* Deferred.make<void>()
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+        Ref.modify(reservedDigest, (current): [
+          "acquired" | "conflict" | "replay",
+          null | string
+        ] =>
+          current === null
+            ? ["acquired", String(input.contentDigest)]
+            : current === input.contentDigest
+            ? ["replay", current]
+            : ["conflict", current]).pipe(
+            Effect.flatMap((outcome) =>
+              outcome === "acquired"
+                ? Deferred.succeed(firstReservationEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFirstReservation))
+                )
+                : outcome === "replay"
+                ? Effect.void
+                : new AgentJobInputError({
+                  workspaceId: input.workspaceId,
+                  jobId: input.jobId,
+                  reason: "invalid-transition"
+                })
+            ),
+            Effect.as(undefined)
+          )
+
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            const differentContent = ReviewSuggestionPublicationContent.make(
+              `A different confirmed body.\n\n${preview.publicationFooter}`
+            )
+            const first = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.forkChild({ startImmediately: true }))
+            yield* Deferred.await(firstReservationEntered)
+            const second = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: differentContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            yield* Deferred.succeed(releaseFirstReservation, undefined)
+            yield* Fiber.join(first)
+
+            assert.isTrue(Result.isFailure(second))
+            if (Result.isFailure(second)) {
+              assert.instanceOf(second.failure, ApplicationInvalidRequest)
+            }
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+          }),
+        registry,
+        Option.some(completedReview),
+        () => Effect.succeed(undefined),
+        reserve
+      )
+    }))
 
   it.effect("publishes file anchors inline and whole-change anchors without a location", () => {
     const verifyScope = (

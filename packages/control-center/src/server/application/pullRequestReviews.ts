@@ -45,7 +45,11 @@ import {
   PullRequestReviews
 } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
-import { AgentJobPrompt, type LatestAgentReviewRecord } from "../persistence/repositories/agentJobModels.js"
+import {
+  AgentJobPrompt,
+  type LatestAgentReviewRecord,
+  ReviewSuggestionPublicationDigest
+} from "../persistence/repositories/agentJobModels.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 import {
   ReviewSuggestionPublicationGateway,
@@ -262,6 +266,20 @@ const makePullRequestReviews = Effect.gen(function*() {
     return decoded
   })
 
+  const publicationContentDigest = Effect.fn(
+    "PullRequestReviews.publicationContentDigest"
+  )(function*(content: string) {
+    const bytes = yield* Effect.fromResult(
+      Encoding.decodeBase64(Encoding.encodeBase64(content))
+    ).pipe(Effect.mapError(unavailable))
+    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+      Effect.mapError(unavailable)
+    )
+    return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationDigest)(
+      `sha256:${Encoding.encodeHex(digest)}`
+    ).pipe(Effect.mapError(unavailable))
+  })
+
   const defaultPublicationContent = Effect.fn("PullRequestReviews.defaultPublicationContent")(function*(
     suggestion: PrReviewSuggestion,
     maximumLength: number
@@ -457,6 +475,23 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.request.finalContent,
         footer
       )
+      const contentDigest = yield* publicationContentDigest(publishedContent)
+      const reservedAt = yield* DateTime.now
+      yield* persistence.agentJobs.reserveReviewSuggestionPublication({
+        workspaceId: input.workspaceId,
+        jobId: input.request.jobId,
+        suggestionId: selected.suggestion.suggestionId,
+        contentDigest,
+        reservedAt
+      }).pipe(
+        Effect.mapError(mapPersistenceWriteError),
+        Effect.mapError((error) =>
+          error._tag === "ApplicationInvalidRequest" ||
+            error._tag === "ApplicationResourceNotFound"
+            ? error
+            : unavailable()
+        )
+      )
       const result = yield* publications.publish({
         target: publicationTarget(input.workspaceId, target),
         jobId: input.request.jobId,
@@ -470,6 +505,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         workspaceId: input.workspaceId,
         jobId: input.request.jobId,
         suggestionId: selected.suggestion.suggestionId,
+        contentDigest,
         publicationId: result.publicationId,
         publishedAt: result.publishedAt
       }).pipe(
