@@ -141,6 +141,7 @@ export const useReviewSuggestionRevisions = (
 ): {
   readonly loadEarlier: () => void
   readonly loadingEarlier: boolean
+  readonly resolveConflict: () => void
   readonly retry: () => void
   readonly save: (draft: PrReviewSuggestionEdit) => void
   readonly state: ReviewSuggestionRevisionState
@@ -187,8 +188,8 @@ export const useReviewSuggestionRevisions = (
   }, [requestRevision, scope, transport])
 
   const save = useCallback((draft: PrReviewSuggestionEdit): void => {
-    if (scope === null) return
-    const retained = state._tag === "ready" || state._tag === "conflict"
+    if (scope === null || state._tag === "conflict") return
+    const retained = state._tag === "ready"
       ? state.page
       : state._tag === "failed"
       ? state.page
@@ -299,6 +300,12 @@ export const useReviewSuggestionRevisions = (
   return useMemo(() => ({
     loadEarlier,
     loadingEarlier,
+    resolveConflict: () =>
+      setState((latest) =>
+        latest._tag === "conflict"
+          ? { _tag: "ready", page: latest.page }
+          : latest
+      ),
     retry: () => {
       if (state._tag === "conflict") return
       if (

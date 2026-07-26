@@ -1338,6 +1338,26 @@ describe("agent job review results", () => {
           publishedAt: T3,
           finalize: true
         })
+        const editAfterPublication = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: revision.revisionId,
+          expectedSequence: revision.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "Do not edit a finalized publication"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T4
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(editAfterPublication))
+        if (Result.isFailure(editAfterPublication)) {
+          assert.instanceOf(editAfterPublication.failure, AgentJobInputError)
+          assert.strictEqual(editAfterPublication.failure.reason, "invalid-transition")
+        }
         const reloaded = yield* jobs.reviewResult({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID
@@ -1359,6 +1379,54 @@ describe("agent job review results", () => {
           ).length,
           1
         )
+      })
+    ))
+
+  it.effect("allows an edit after a no-write publication reservation is released", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const revision = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T3
+        })
+        yield* jobs.releaseReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID
+        })
+
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: revision.revisionId,
+          expectedSequence: revision.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "Edit after releasing the no-write reservation"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(edited.sequence, 2)
       })
     ))
 

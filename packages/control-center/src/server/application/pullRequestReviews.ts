@@ -72,7 +72,7 @@ import {
   type PrReviewThreadSubject as PrReviewThreadSubjectType,
   ReviewSuggestionPublicationDigest
 } from "../persistence/repositories/agentJobModels.js"
-import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
+import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import {
   ReviewSuggestionPublicationGateway,
   type ReviewSuggestionPublicationGatewayError,
@@ -498,24 +498,44 @@ const makePullRequestReviews = Effect.gen(function*() {
     | ApplicationResourceNotFound
     | ApplicationServiceUnavailable
   > {
-    const selected = yield* currentSuggestionRevision(
+    const selected = yield* selectedSuggestion(
       workspaceId,
       target,
       jobId,
       suggestionId
     )
-    const page = yield* mapPersistenceRead(
-      persistence.agentJobs.reviewSuggestionRevisions({
-        workspaceId,
-        jobId,
-        suggestionId,
-        beforeSequence,
-        limit
-      })
+    const page = yield* persistence.agentJobs.reviewSuggestionRevisions({
+      workspaceId,
+      jobId,
+      suggestionId,
+      beforeSequence,
+      limit
+    }).pipe(
+      Effect.mapError((error) =>
+        error._tag === "AgentJobInputError"
+          ? new ApplicationInvalidRequest()
+          : mapPersistenceReadError(error)
+      )
     )
+    const persisted = page.current
+    if (
+      persisted.sourceJobId !== jobId ||
+      !PrReviewSubjectEquivalence(persisted.subject, target.subject)
+    ) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    const current = persisted.suggestion.state === selected.suggestion.state
+      ? persisted
+      : new PrReviewSuggestionRevision({
+        ...persisted,
+        suggestion: PrReviewSuggestion.make({
+          ...persisted.suggestion,
+          state: selected.suggestion.state
+        })
+      })
     return {
       ...page,
-      current: selected.revision
+      current
     }
   })
 

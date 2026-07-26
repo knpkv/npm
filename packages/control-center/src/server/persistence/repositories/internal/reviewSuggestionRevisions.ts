@@ -431,9 +431,11 @@ export const makeReviewSuggestionRevisionOperations = <
     )
     const before = request.beforeSequence ?? current.sequence
     if (before > current.sequence) {
-      return yield* operationFailure(
-        "agent-job.review-revision-cursor-invalid"
-      )
+      return yield* new AgentJobInputError({
+        workspaceId: request.workspaceId,
+        jobId: request.jobId,
+        reason: "invalid-transition"
+      })
     }
     const unknownRows = before <= 2
       ? []
@@ -558,7 +560,6 @@ export const makeReviewSuggestionRevisionOperations = <
           WHERE workspace_id = ${request.workspaceId}
             AND job_id = ${request.jobId}
             AND suggestion_id = ${request.suggestionId}
-            AND state = 'reserved'
           LIMIT 1`
         if (activePublication.length > 0) {
           return yield* new AgentJobInputError({

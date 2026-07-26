@@ -62,7 +62,8 @@ export const VersionedReviewSuggestionCard = ({
       ? controller.state.draft
       : null
   const current = page?.current
-  const presentedSuggestion = current?.suggestion ?? suggestion
+  const presentedSuggestion = current === undefined ? suggestion : { ...current.suggestion, state: suggestion.state }
+  const suggestionCanMutate = canEdit && presentedSuggestion.state === "draft"
   const validationBlocked = current?.validation._tag === "requires-revalidation"
   const publicationBlockedReason =
     controller.state._tag === "loading"
@@ -80,13 +81,13 @@ export const VersionedReviewSuggestionCard = ({
   return (
     <>
       <ReviewSuggestionCard
-        canPublish={canEdit}
+        canPublish={suggestionCanMutate}
         extraActions={
           <>
             <Button disabled={page === null} onClick={() => openDialog("history")} variant="quiet">
               History
             </Button>
-            {canEdit ? (
+            {suggestionCanMutate ? (
               <Button disabled={page === null} onClick={() => openDialog("edit")} variant="quiet">
                 Edit
               </Button>
@@ -127,12 +128,13 @@ export const VersionedReviewSuggestionCard = ({
       />
       {page === null ? null : (
         <ReviewSuggestionRevisionDialog
-          canEdit={canEdit}
+          canEdit={suggestionCanMutate}
           conflict={controller.state._tag === "conflict"}
           loadEarlier={controller.loadEarlier}
           loadingEarlier={controller.loadingEarlier}
           mode={dialogMode}
           onOpenChange={setDialogOpen}
+          onResolveConflict={controller.resolveConflict}
           onSave={controller.save}
           open={dialogOpen}
           page={page}

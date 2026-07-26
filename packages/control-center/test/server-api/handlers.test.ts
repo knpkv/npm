@@ -76,6 +76,7 @@ import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  ApplicationInvalidRequest,
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
@@ -2063,14 +2064,21 @@ describe("Control Center API handlers", () => {
             )
           ),
         revisions: (input) =>
-          Ref.update(received, (items) => [...items, input]).pipe(
-            Effect.as({
+          Effect.gen(function*() {
+            yield* Ref.update(received, (items) => [...items, input])
+            if (
+              input.beforeSequence !== null &&
+              input.beforeSequence > currentRevision.sequence
+            ) {
+              return yield* new ApplicationInvalidRequest()
+            }
+            return {
               current: currentRevision,
               revisions: [],
               hasMore: false,
               nextBeforeSequence: null
-            })
-          ),
+            }
+          }),
         editSuggestion: (input) =>
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(editedRevision)
@@ -2111,6 +2119,13 @@ describe("Control Center API handlers", () => {
             limit: PrReviewSuggestionRevisionPageSize.make(3)
           }
         })
+        const invalidRevisionCursor = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, jobId, suggestionId },
+          query: {
+            before: PrReviewSuggestionRevisionSequence.make(2),
+            limit: PrReviewSuggestionRevisionPageSize.make(3)
+          }
+        }).pipe(Effect.result)
         const edited = yield* client.agent.editReviewSuggestion({
           params: { entityId, jobId, suggestionId },
           payload: {
@@ -2138,6 +2153,7 @@ describe("Control Center API handlers", () => {
           current,
           earlierThread,
           edited,
+          invalidRevisionCursor,
           revisions,
           thread
         }
@@ -2151,6 +2167,13 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
       assert.strictEqual(result.revisions.current.revisionId, revisionId)
+      assert.isTrue(Result.isFailure(result.invalidRevisionCursor))
+      if (Result.isFailure(result.invalidRevisionCursor)) {
+        assert.strictEqual(
+          result.invalidRevisionCursor.failure._tag,
+          "InvalidRequestApiError"
+        )
+      }
       assert.strictEqual(result.edited.revisionId, editedRevisionId)
       assert.isTrue(Result.isFailure(result.conflictingCursors))
       if (Result.isFailure(result.conflictingCursors)) {
@@ -2180,6 +2203,14 @@ describe("Control Center API handlers", () => {
           jobId,
           suggestionId,
           beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(3)
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          beforeSequence: PrReviewSuggestionRevisionSequence.make(2),
           limit: PrReviewSuggestionRevisionPageSize.make(3)
         },
         {

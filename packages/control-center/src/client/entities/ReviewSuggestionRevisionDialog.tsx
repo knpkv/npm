@@ -57,6 +57,7 @@ export const ReviewSuggestionRevisionDialog = ({
   loadingEarlier,
   mode,
   onOpenChange,
+  onResolveConflict,
   onSave,
   open,
   page,
@@ -69,6 +70,7 @@ export const ReviewSuggestionRevisionDialog = ({
   readonly loadingEarlier: boolean
   readonly mode: "edit" | "history"
   readonly onOpenChange: (open: boolean) => void
+  readonly onResolveConflict: () => void
   readonly onSave: (edit: PrReviewSuggestionEdit) => void
   readonly open: boolean
   readonly page: PrReviewSuggestionRevisionPage
@@ -236,9 +238,12 @@ export const ReviewSuggestionRevisionDialog = ({
               ) : null}
             </details>
             {conflict ? (
-              <span role="alert">
-                A newer revision won. Your draft is preserved; review the latest values, then save again.
-              </span>
+              <div role="alert">
+                <span>A newer revision won. Your draft is preserved, but cannot be saved over the winner.</span>
+                <Button onClick={onResolveConflict} type="button" variant="quiet">
+                  Use latest revision
+                </Button>
+              </div>
             ) : current.validation._tag === "requires-revalidation" ? (
               <span role="status">Technical changes remain blocked from publication until revalidated.</span>
             ) : null}

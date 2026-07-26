@@ -202,6 +202,42 @@ describe("VersionedReviewSuggestionCard", () => {
     })
   })
 
+  it("removes mutation and publication controls when the parent lifecycle becomes published", async () => {
+    const original = revisionPage(1, SUGGESTION.title)
+    const transport: ReviewSuggestionRevisionTransport = {
+      load: () => Promise.resolve(original),
+      edit: () => Promise.reject(new Error("Unexpected edit"))
+    }
+    const host = await renderCard(transport)
+    await act(async () => undefined)
+    expect(host.textContent).toContain("Draft")
+    expect(host.textContent).toContain("Post comment")
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          <VersionedReviewSuggestionCard
+            canEdit
+            entityId={ENTITY_ID}
+            isPreviewing={false}
+            jobId={JOB_ID}
+            onPreviewPublication={() => undefined}
+            revisionTransport={transport}
+            sessionKey="session-a"
+            suggestion={PrReviewSuggestion.make({
+              ...SUGGESTION,
+              state: "published"
+            })}
+          />
+        </PortalProvider>
+      )
+    )
+
+    expect(host.textContent).toContain("Published")
+    expect([...host.querySelectorAll("button")].some(({ textContent }) => textContent === "Post comment")).toBe(false)
+    expect([...host.querySelectorAll("button")].some(({ textContent }) => textContent === "Edit")).toBe(false)
+    expect(host.textContent).toContain("History")
+  })
+
   it("shows immutable history and blocks an unvalidated technical revision", async () => {
     const completeSuggestion = PrReviewSuggestion.make({
       ...SUGGESTION,

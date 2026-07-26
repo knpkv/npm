@@ -156,6 +156,9 @@ const Harness = ({
       <button data-retry onClick={controller.retry}>
         Retry
       </button>
+      <button data-resolve-conflict onClick={controller.resolveConflict}>
+        Use latest
+      </button>
       <span data-state>{controller.state._tag}</span>
     </>
   )
@@ -208,13 +211,21 @@ describe("useReviewSuggestionRevisions", () => {
 
   it("retains the local draft and reloads the winner after a conflict", async () => {
     const original = revision(1)
-    const winner = revision(2, "Another edit won")
+    const winner = new PrReviewSuggestionRevision({
+      ...revision(2, "Another edit won"),
+      suggestion: PrReviewSuggestion.make({
+        ...SUGGESTION,
+        title: "Another edit won",
+        impact: "The winner changed this impact."
+      })
+    })
+    const edit = vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
     const transport: ReviewSuggestionRevisionTransport = {
       load: vi
         .fn()
         .mockResolvedValueOnce(page(original))
         .mockResolvedValueOnce(page(winner, [winner, original])),
-      edit: () => Promise.reject({ _tag: "ConflictApiError" })
+      edit
     }
     const latest: { current: ReviewSuggestionRevisionState } = {
       current: { _tag: "idle" }
@@ -230,6 +241,13 @@ describe("useReviewSuggestionRevisions", () => {
     if (latest.current._tag === "conflict") {
       expect(latest.current.draft.title).toBe(EDIT.title)
       expect(latest.current.page.current.suggestion.title).toBe("Another edit won")
+    }
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-save]")?.click())
+    expect(edit).toHaveBeenCalledOnce()
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-resolve-conflict]")?.click())
+    expect(latest.current._tag).toBe("ready")
+    if (latest.current._tag === "ready") {
+      expect(latest.current.page.current.suggestion.impact).toBe("The winner changed this impact.")
     }
   })
 
