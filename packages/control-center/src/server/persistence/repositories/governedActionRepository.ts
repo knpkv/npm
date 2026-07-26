@@ -6,6 +6,7 @@ import * as Schema from "effect/Schema"
 
 import {
   GovernedActionCommitInput,
+  GovernedActionIdempotencyReadInput,
   GovernedActionInputError,
   GovernedActionReadInput
 } from "./governed-action/contract.js"
@@ -32,7 +33,21 @@ const makeGovernedActionRepository = Effect.gen(function*() {
     return yield* transaction.transact("governed-action.read", transaction.read(request))
   })
 
-  return { commit, read }
+  const readByIdempotencyKey = Effect.fn(
+    "GovernedActionRepository.readByIdempotencyKey"
+  )(function*(input: unknown) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionIdempotencyReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-by-idempotency-key",
+      transaction.readByIdempotencyKey(request)
+    )
+  })
+
+  return { commit, read, readByIdempotencyKey }
 })
 
 /** Deep server-only repository for governed action authority, lifecycle, and audit. */

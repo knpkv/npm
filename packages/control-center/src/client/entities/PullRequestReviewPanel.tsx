@@ -1,7 +1,8 @@
 import { Button, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useState } from "react"
+import { type ReactElement, lazy, Suspense, useState } from "react"
 
-import type { PullRequestReviewControllerState } from "./usePullRequestReview.js"
+import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const unavailableMessage = (
@@ -44,21 +45,48 @@ const formatBudget = (budgetMillis: number): string => {
   return `${String(minutes)} minute${minutes === 1 ? "" : "s"}`
 }
 
+const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
+
 /** Render durable agent advice without conflating it with human disposition. */
 export const PullRequestReviewPanel = ({
   canEnqueue,
+  onCancelPublication,
+  onPreviewPublication,
+  onPublishSuggestion,
   onRetry,
   onStart,
+  publication,
   state
 }: {
   readonly canEnqueue: boolean
+  readonly onCancelPublication: () => void
+  readonly onPreviewPublication: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
   readonly onStart: () => void
+  readonly publication: PullRequestReviewPublicationState
   readonly state: PullRequestReviewControllerState
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
+  const publicationSurface =
+    publication._tag === "idle" || publication._tag === "previewing" ? null : (
+      <Suspense fallback={<span>Preparing publication surface…</span>}>
+        <ReviewSuggestionPublicationSurface
+          onCancel={onCancelPublication}
+          onPublish={onPublishSuggestion}
+          publication={publication}
+        />
+      </Suspense>
+    )
+  const withPublication = (content: ReactElement): ReactElement => (
+    <>
+      {content}
+      {publicationSurface}
+    </>
+  )
+
   if (state._tag === "idle" || state._tag === "loading") {
-    return (
+    return withPublication(
       <>
         <strong>Loading review state</strong>
         <span>Checking durable review history for this exact head.</span>
@@ -66,7 +94,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (state._tag === "failed") {
-    return (
+    return withPublication(
       <>
         <strong>Review state unavailable</strong>
         <span>The current review could not be loaded. No human decision was changed.</span>
@@ -116,7 +144,7 @@ export const PullRequestReviewPanel = ({
       </div>
     )
   if (review._tag === "unavailable") {
-    return (
+    return withPublication(
       <>
         <strong>Review unavailable</strong>
         <span>{unavailableMessage(review.reason)}</span>
@@ -130,7 +158,7 @@ export const PullRequestReviewPanel = ({
         : review.state === "running"
           ? "Reviewing exact head"
           : "Cancellation requested"
-    return (
+    return withPublication(
       <>
         <strong>{label}</strong>
         <span>
@@ -152,7 +180,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "failed") {
-    return (
+    return withPublication(
       <>
         <strong>{review.state === "cancelled" ? "Review cancelled" : "Review did not finish"}</strong>
         <span>The failed run did not change approval or publish a recommendation.</span>
@@ -168,7 +196,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "completed") {
-    return (
+    return withPublication(
       <>
         <strong>{outcomeLabel(review.outcome)}</strong>
         {review.report.completion.status === "unable-to-conclude" ? (
@@ -203,6 +231,24 @@ export const PullRequestReviewPanel = ({
                     </span>
                   </div>
                 )}
+                {canEnqueue ? (
+                  <Button
+                    disabled={
+                      publication._tag === "previewing" &&
+                      publication.selection.suggestionId === suggestion.suggestionId
+                    }
+                    onClick={() =>
+                      onPreviewPublication({
+                        jobId: review.jobId,
+                        suggestionId: suggestion.suggestionId
+                      })
+                    }
+                  >
+                    {publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
+                      ? "Preparing preview…"
+                      : "Post comment"}
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -212,7 +258,7 @@ export const PullRequestReviewPanel = ({
     )
   }
 
-  return (
+  return withPublication(
     <>
       <strong>Agent review not run</strong>
       <span>An immutable-head review produces advice, never a human approval.</span>
@@ -234,3 +280,5 @@ export const PullRequestReviewPanel = ({
     </>
   )
 }
+
+export default PullRequestReviewPanel

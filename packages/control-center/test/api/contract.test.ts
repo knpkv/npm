@@ -425,7 +425,13 @@ describe("ControlCenterApi contract", () => {
         ["enqueueJob", "POST", "/api/v1/agent/releases/:releaseId/jobs"],
         ["replayThread", "GET", "/api/v1/agent/releases/:releaseId/thread/events"],
         ["pullRequestReview", "GET", "/api/v1/agent/pull-requests/:entityId/review"],
-        ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"]
+        ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"],
+        [
+          "previewReviewSuggestionPublication",
+          "GET",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
+        ],
+        ["publishReviewSuggestion", "POST", "/api/v1/agent/pull-requests/:entityId/review-comments"]
       ]
     )
   })
@@ -538,7 +544,9 @@ describe("ControlCenterApi contract", () => {
       enqueueJob: [SessionCookieAuth.key, SessionMutationAuth.key],
       replayThread: [SessionCookieAuth.key],
       pullRequestReview: [SessionCookieAuth.key],
-      enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key]
+      enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      previewReviewSuggestionPublication: [SessionCookieAuth.key],
+      publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
 
     assert.strictEqual(SessionCookieAuth.security.sessionCookie._tag, "ApiKey")

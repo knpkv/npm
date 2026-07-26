@@ -1,7 +1,7 @@
 import * as DateTime from "effect/DateTime"
 import * as Schema from "effect/Schema"
 
-import { Revision } from "../sourceRevision.js"
+import { ProviderId, Revision } from "../sourceRevision.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
 import { PluginPayloadJson } from "./bounds.js"
 import { PluginEntityReferenceV1 } from "./events.js"
@@ -11,6 +11,16 @@ const boundedOpaque = (name: string, maximum: number) =>
 
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const SafeSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+
+/** Secret-free provider principal used to preview human-attributed mutations. */
+export const PluginActionActorIdentityV1 = Schema.Struct({
+  providerId: ProviderId,
+  providerAccountId: boundedOpaque("PluginActionProviderAccountId", 256),
+  principal: boundedOpaque("PluginActionPrincipal", 2_048)
+})
+
+/** Decoded provider actor identity. */
+export type PluginActionActorIdentityV1 = typeof PluginActionActorIdentityV1.Type
 
 /** Lowercase SHA-256 digest of a canonical governed-action payload. */
 export const PluginActionPayloadDigest = Schema.String.check(

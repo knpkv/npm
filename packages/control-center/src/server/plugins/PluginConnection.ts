@@ -12,6 +12,7 @@ import type {
   DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
   NegotiatedPluginDescriptorV1,
+  PluginActionActorIdentityV1,
   PluginActionProposalV1,
   PluginDiscoveryV1,
   PluginSyncPageV1,
@@ -41,6 +42,7 @@ export interface PluginDiffReaderV1 {
 /** Safe plugin surface available to application reads and action proposals. */
 export interface PluginConnectionV1 {
   readonly descriptor: NegotiatedPluginDescriptorV1
+  readonly actionActorIdentity?: Effect.Effect<PluginActionActorIdentityV1, PluginFailure>
   readonly discover: Effect.Effect<PluginDiscoveryV1, PluginFailure>
   readonly health: Effect.Effect<PluginHealth, PluginFailure>
   readonly sync: (

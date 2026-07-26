@@ -15,6 +15,10 @@ const ClientRequestToken = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewRevision = NonEmptyString.check(Schema.isMaxLength(64))
 const ReviewCommitId = CodeCommitCommitId.check(Schema.isMaxLength(64))
 const ReviewReference = NonEmptyString.check(Schema.isMaxLength(256))
+const ReviewFilePath = NonEmptyString.check(Schema.isMaxLength(1_024))
+const ReviewFilePosition = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
+)
 
 /** Exact provider revision against which a review action was authorized. */
 export const CodeCommitReviewTarget = Schema.Struct({
@@ -30,6 +34,15 @@ export const CodeCommitReviewTarget = Schema.Struct({
 /** Decoded immutable review target. */
 export type CodeCommitReviewTarget = typeof CodeCommitReviewTarget.Type
 
+/** Exact CodeCommit file position for one inline pull-request comment. */
+export class CodeCommitReviewLocation extends Schema.Class<CodeCommitReviewLocation>(
+  "CodeCommitReviewLocation"
+)({
+  filePath: ReviewFilePath,
+  filePosition: ReviewFilePosition,
+  relativeFileVersion: Schema.Literals(["BEFORE", "AFTER"])
+}) {}
+
 const CommentActionFields = {
   target: CodeCommitReviewTarget,
   content: BoundedText,
@@ -39,7 +52,10 @@ const CommentActionFields = {
 /** Closed set of CodeCommit review mutations supported by the owning package. */
 export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("request-review", CommentActionFields),
-  Schema.TaggedStruct("comment", CommentActionFields),
+  Schema.TaggedStruct("comment", {
+    ...CommentActionFields,
+    location: Schema.optionalKey(CodeCommitReviewLocation)
+  }),
   Schema.TaggedStruct("request-changes", CommentActionFields),
   Schema.TaggedStruct("approve", { target: CodeCommitReviewTarget }),
   Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget })

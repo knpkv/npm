@@ -79,7 +79,12 @@ const conflictReason = (cause: unknown): CodeCommitReviewConflictError["reason"]
   if (Predicate.isTagged(cause, "CommitDoesNotExistException")) return "source-commit-changed"
   if (
     Predicate.isTagged(cause, "CommentContentSizeLimitExceededException") ||
-    Predicate.isTagged(cause, "InvalidClientRequestTokenException")
+    Predicate.isTagged(cause, "InvalidClientRequestTokenException") ||
+    Predicate.isTagged(cause, "InvalidFileLocationException") ||
+    Predicate.isTagged(cause, "InvalidFilePositionException") ||
+    Predicate.isTagged(cause, "InvalidPathException") ||
+    Predicate.isTagged(cause, "PathDoesNotExistException") ||
+    Predicate.isTagged(cause, "InvalidRelativeFileVersionEnumException")
   ) return "revision-changed"
   if (
     Predicate.isTagged(cause, "ConcurrentReferenceUpdateException") ||

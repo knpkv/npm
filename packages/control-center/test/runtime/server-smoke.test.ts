@@ -30,6 +30,7 @@ import { makeControlCenterApiClient } from "../../src/api/client.js"
 import { PairingCode } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
+  EntityId,
   EnvironmentId,
   GovernedActionId,
   JobId,
@@ -48,6 +49,7 @@ import {
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   Persistence,
@@ -75,17 +77,21 @@ import {
 } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginRuntimeAuthoritySource } from "../../src/server/plugins/internal/PluginRuntimeAuthoritySource.js"
+import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
-import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
+import {
+  makeControlCenterApplicationComposition,
+  makeControlCenterServer
+} from "../../src/server/runtime/ControlCenterServer.js"
 import {
   GovernedActionExecutionStartup,
-  governedActionExecutionStartupLayer
+  governedActionExecutionStartupFromRegistryLayer
 } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { ReleaseSynchronizationStartup } from "../../src/server/runtime/ReleaseSynchronizationStartup.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
-import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
+import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
 import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
   ACTION_ID as AUTHORIZED_ACTION_ID,
@@ -322,6 +328,74 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
 })
 
 describe("Control Center closed runtime", () => {
+  it.effect("keeps review publication unavailable when governed execution has no runtime registry", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-runtime-publication-disabled-"
+      })
+      const proposalLeaseCalls = yield* Ref.make(0)
+      const fakeConnections = yield* makeFakeConnectionMap
+      const pluginConnections: PluginConnectionMapV1 = {
+        ...fakeConnections,
+        proposalContextEffect: () =>
+          Ref.update(proposalLeaseCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.die("disabled publication acquired provider authority"))
+          )
+      }
+      const composition = makeControlCenterApplicationComposition({
+        bindConfig: yield* decodeBindConfig({ port: 4173 }),
+        persistenceConfig: {
+          blobRoot: BlobRoot.make(path.join(root, "blobs")),
+          busyTimeoutMilliseconds: 5_000,
+          databaseUrl: LocalDatabaseUrl.make(`file:${path.join(root, "control-center.db")}`),
+          maxConnections: 1
+        },
+        secretRoot: SecretRoot.make(path.join(root, "secrets")),
+        staticAssets: { root },
+        pluginConnections,
+        firstPartyPluginRuntime: false,
+        governedActionExecution: { workspaceId: WORKSPACE_ID }
+      })
+      const publications = yield* Layer.build(
+        composition.reviewSuggestionPublications.pipe(
+          Layer.provide(
+            Layer.succeed(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("disabled publication used HTTP"))
+            )
+          ),
+          Layer.provide(SecretStore.layer({
+            secretRoot: SecretRoot.make(path.join(root, "secrets"))
+          })),
+          Layer.provide(ServerLifecycle.layer)
+        )
+      )
+      const result = yield* Context.get(
+        publications,
+        ReviewSuggestionPublicationGateway
+      ).identity({
+        workspaceId: WORKSPACE_ID,
+        entityId: EntityId.make("01890f6f-6d6a-7cc0-98d2-00000000007a"),
+        pluginConnectionId: PLUGIN_ID,
+        sourceRevision: "revision-1",
+        subject: {
+          providerId: "codecommit",
+          repository: "payments-api",
+          pullRequestId: "17",
+          baseRevision: "base",
+          headRevision: "head"
+        }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.reason, "publication-unavailable")
+      }
+      assert.strictEqual(yield* Ref.get(proposalLeaseCalls), 0)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("serves immutable SPA bytes and generated-client pairing plus portfolio", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -573,6 +647,13 @@ describe("Control Center closed runtime", () => {
       const currentRuntimeAuthority = yield* seedAuthorizedRuntimeAction(persistenceConfig)
       const pluginConnections = yield* makeFakeConnectionMap
       const governedRuntime = yield* makeFakePluginRuntime(governedScenario)
+      const governedPluginRuntimes = {
+        layer: () =>
+          Layer.merge(
+            governedRuntime.layer,
+            Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
+          )
+      }
       const runtime = yield* Layer.build(makeControlCenterServer({
         bindConfig,
         persistenceConfig,
@@ -589,13 +670,7 @@ describe("Control Center closed runtime", () => {
         },
         governedActionExecution: {
           workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
+          pluginRuntimes: governedPluginRuntimes
         },
         releaseAgent: { cwd: staticRoot, enabledProviders: ["codex"] }
       }))
@@ -607,16 +682,10 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(bootstrapState._tag, "pairing-issued")
       assert.isTrue(Option.isNone(governedExecution))
       const internalWorker = yield* Layer.build(
-        governedActionExecutionStartupLayer({
-          workspaceId: WORKSPACE_ID,
-          pluginRuntimes: {
-            layer: () =>
-              Layer.merge(
-                governedRuntime.layer,
-                Layer.succeed(PluginRuntimeAuthority, currentRuntimeAuthority.runtimeAuthorityToken)
-              )
-          }
-        }).pipe(
+        governedActionExecutionStartupFromRegistryLayer(WORKSPACE_ID).pipe(
+          Layer.provide(
+            Layer.succeed(PluginRuntimeRegistry, governedPluginRuntimes)
+          ),
           Layer.provide(databaseLayer(persistenceConfig)),
           Layer.provide(ServerLifecycle.layer)
         )

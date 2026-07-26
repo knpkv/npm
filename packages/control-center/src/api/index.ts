@@ -10,11 +10,14 @@ export {
   AgentProviderCatalogEntry,
   AgentProviderHealth,
   AgentSafeProfile,
+  AwsReviewPublicationIdentity,
   DurableAgentProviderId,
   EnqueuePullRequestReviewRequest,
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
   EnqueueReleaseAgentJobResponse,
+  PublishedReviewComment,
+  PublishReviewSuggestionRequest,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
   PullRequestReviewNotStarted,
@@ -31,7 +34,10 @@ export {
   ReleaseAgentTurnRequest,
   ReleaseAgentTurnResponse,
   ReviewAgentProfile,
-  ReviewAgentProfileId
+  ReviewAgentProfileId,
+  ReviewSuggestionPublicationContent,
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionPublicationSelection
 } from "./agent.js"
 export {
   type ControlCenterApiClient,

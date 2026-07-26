@@ -36,6 +36,7 @@ import {
   type DiffInventoryPageRequestV1,
   type DiffInventoryPageRequestV2,
   DiffInventoryPageV1,
+  PluginActionActorIdentityV1,
   type PluginActionDispatchResultV1,
   PluginActionPreflightV1,
   PluginActionProposalV1,
@@ -298,7 +299,12 @@ const isConfirmedReviewRejection = (error: ReviewClient.CodeCommitReviewError): 
     case "AwsApiError":
       return causeHasTag(error.cause, [
         "IdempotencyParameterMismatchException",
+        "InvalidFileLocationException",
+        "InvalidFilePositionException",
+        "InvalidPathException",
+        "InvalidRelativeFileVersionEnumException",
         "MaximumNumberOfApprovalsExceededException",
+        "PathDoesNotExistException",
         "PullRequestCannotBeApprovedByAuthorException"
       ])
   }
@@ -323,6 +329,13 @@ const unsupported = (
 
 const ReviewCommentPayload = Schema.Struct({
   content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_100))
+})
+
+const ReviewCommentLocation = Schema.Struct(ReviewClient.CodeCommitReviewLocation.fields)
+
+const InlineReviewCommentPayload = Schema.Struct({
+  ...ReviewCommentPayload.fields,
+  location: Schema.optionalKey(ReviewCommentLocation)
 })
 
 const RequestReviewPayload = Schema.Struct({
@@ -357,6 +370,7 @@ const CodeCommitActionPayload = Schema.Union([
     destinationCommit: ReviewCommitId,
     destinationReference: ReviewReference,
     content: ReviewCommentPayload.fields.content,
+    location: Schema.optionalKey(ReviewCommentLocation),
     clientRequestToken: ReviewClientRequestToken
   }),
   Schema.TaggedStruct("request-changes", {
@@ -429,7 +443,9 @@ const decodeRequestedPayload = Effect.fn("CodeCommitPlugin.decodeRequestedPayloa
 ) {
   const schema = actionKind === "request-review"
     ? RequestReviewPayload
-    : actionKind === "comment" || actionKind === "request-changes"
+    : actionKind === "comment"
+    ? InlineReviewCommentPayload
+    : actionKind === "request-changes"
     ? ReviewCommentPayload
     : EmptyPayload
   return yield* Schema.decodeUnknownEffect(Schema.toType(schema))(payload).pipe(
@@ -457,7 +473,8 @@ const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientReque
   actionKind: "comment" | "request-changes" | "request-review",
   content: string,
   pullRequest: ReadClient.CodeCommitPullRequestRevision,
-  cryptoService: Crypto.Crypto
+  cryptoService: Crypto.Crypto,
+  location?: typeof ReviewCommentLocation.Type
 ) {
   return yield* digestGovernedActionPayload({
     actionKind,
@@ -466,7 +483,8 @@ const commentClientRequestToken = Effect.fn("CodeCommitPlugin.commentClientReque
     revisionId: pullRequest.revisionId,
     sourceCommit: pullRequest.sourceCommit,
     destinationCommit: pullRequest.destinationCommit,
-    content
+    content,
+    ...(location === undefined ? {} : { location })
   }).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
     Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
@@ -496,7 +514,26 @@ const normalizeActionPayload = Effect.fn("CodeCommitPlugin.normalizeActionPayloa
         clientRequestToken: yield* commentClientRequestToken(actionKind, content, pullRequest, cryptoService)
       })
     }
-    case "comment":
+    case "comment": {
+      const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(InlineReviewCommentPayload))(requested).pipe(
+        Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
+      )
+      return yield* decodeNormalizedActionPayload({
+        _tag: actionKind,
+        sourceCommit: pullRequest.sourceCommit,
+        destinationCommit: pullRequest.destinationCommit,
+        destinationReference: pullRequest.destinationReference,
+        content: decoded.content,
+        ...(decoded.location === undefined ? {} : { location: decoded.location }),
+        clientRequestToken: yield* commentClientRequestToken(
+          actionKind,
+          decoded.content,
+          pullRequest,
+          cryptoService,
+          decoded.location
+        )
+      })
+    }
     case "request-changes": {
       const decoded = yield* Schema.decodeUnknownEffect(Schema.toType(ReviewCommentPayload))(requested).pipe(
         Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codecommit-action-payload-invalid" }))
@@ -604,13 +641,20 @@ const actionFromPayload = (
   }
   switch (payload._tag) {
     case "request-review":
-    case "comment":
     case "request-changes":
       return {
         _tag: payload._tag,
         target,
         content: payload.content,
         clientRequestToken: payload.clientRequestToken
+      }
+    case "comment":
+      return {
+        _tag: payload._tag,
+        target,
+        content: payload.content,
+        clientRequestToken: payload.clientRequestToken,
+        ...(payload.location === undefined ? {} : { location: payload.location })
       }
     case "approve":
     case "revoke-approval":
@@ -849,6 +893,17 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       })
     }
   })
+  const actionActorIdentity = yield* Schema.decodeUnknownEffect(PluginActionActorIdentityV1)({
+    providerId: "codecommit",
+    providerAccountId: runtimeIdentity.accountId,
+    principal: runtimeIdentity.arn
+  }).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "codecommit-runtime-identity-invalid"
+      })
+    )
+  )
   const probeRepository = readClient.listPullRequestsPage({
     account,
     repositoryName: configuration.repositoryName,
@@ -1237,6 +1292,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
 
   const connection: PluginConnectionV1 = {
     descriptor,
+    actionActorIdentity: Effect.succeed(actionActorIdentity),
     discover,
     health,
     sync,

@@ -1,3 +1,4 @@
+import { type RenderedSql, renderGovernedActionIdempotencyQuery } from "@knpkv/control-center-sql"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
@@ -9,6 +10,7 @@ import {
   governedActionAuthorizationMatchesTransition,
   governedActionAuthorizationMismatches
 } from "../../../../domain/governedAction/index.js"
+import { GovernedActionId } from "../../../../domain/identifiers.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../errors.js"
@@ -24,7 +26,7 @@ import {
   type GovernedActionQuarantineRecordKind,
   governedActionRecordError
 } from "./codec.js"
-import type { GovernedActionReadInput, GovernedActionRecord } from "./contract.js"
+import type { GovernedActionIdempotencyReadInput, GovernedActionReadInput, GovernedActionRecord } from "./contract.js"
 import { captureMalformedGovernedActionRow } from "./quarantine.js"
 import {
   GovernedActionAttemptRow,
@@ -78,9 +80,47 @@ const failMalformed = (
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
 
+/** @internal Decode the unique action identity returned by an idempotency lookup. */
+export const decodeGovernedActionIdempotencyRows = Effect.fn(
+  "GovernedActionReader.decodeIdempotencyRows"
+)(function*(
+  request: GovernedActionIdempotencyReadInput,
+  rows: ReadonlyArray<unknown>
+) {
+  if (rows.length === 0) {
+    return yield* new RecordNotFoundError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey
+    })
+  }
+  if (rows.length !== 1) {
+    return yield* new PersistedRecordError({
+      workspaceId: request.workspaceId,
+      recordKind: "governed-action",
+      recordKey: request.idempotencyKey,
+      diagnosticCode: "governed-action-identity-mismatch"
+    })
+  }
+  const decoded = yield* Schema.decodeUnknownEffect(
+    Schema.Struct({ actionId: GovernedActionId })
+  )(rows[0]).pipe(
+    Effect.mapError(() =>
+      new PersistedRecordError({
+        workspaceId: request.workspaceId,
+        recordKind: "governed-action",
+        recordKey: request.pluginConnectionId,
+        diagnosticCode: "governed-action-schema-invalid"
+      })
+    )
+  )
+  return decoded.actionId
+})
+
 /** Build verified governed-action aggregate reads over one transaction-local SQL client. */
 export const makeGovernedActionRead = Effect.gen(function*() {
   const { sql } = yield* Database
+  const run = (plan: RenderedSql) => sql.unsafe<Record<string, unknown>>(plan.sql, [...plan.params])
 
   const read = Effect.fn("GovernedActionReader.read")(function*(request: GovernedActionReadInput) {
     const rootRows = yield* sql<Record<string, unknown>>`SELECT
@@ -451,5 +491,20 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     } satisfies GovernedActionRecord
   })
 
-  return { read }
+  const readByIdempotencyKey = Effect.fn(
+    "GovernedActionReader.readByIdempotencyKey"
+  )(function*(request: GovernedActionIdempotencyReadInput) {
+    const rows = yield* run(renderGovernedActionIdempotencyQuery(request))
+    const actionId = yield* decodeGovernedActionIdempotencyRows(request, rows).pipe(
+      Effect.catchIf(
+        (failure): failure is PersistedRecordError =>
+          Schema.is(PersistedRecordError)(failure) &&
+          failure.diagnosticCode === "governed-action-schema-invalid",
+        (failure) => Effect.fail(failure).pipe(captureMalformedGovernedActionRow(rows[0]))
+      )
+    )
+    return yield* read({ workspaceId: request.workspaceId, actionId })
+  })
+
+  return { read, readByIdempotencyKey }
 })

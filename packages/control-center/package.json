@@ -58,6 +58,7 @@
     "test": "vitest run",
     "test:browser": "pnpm test:e2e",
     "test:e2e": "pnpm --filter @knpkv/control-center^... build && pnpm build && playwright test --config playwright.config.ts",
+    "test:sbx:real": "vitest run --config vitest.sbx.config.ts",
     "validate:boundaries": "tsx scripts/validate-boundaries.ts",
     "validate:dist": "tsx scripts/validate-dist.ts"
   },

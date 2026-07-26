@@ -5,7 +5,9 @@ import { ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -18,18 +20,33 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
+import { ReviewAgentProfile, ReviewAgentProfileId, ReviewSuggestionPublicationContent } from "../../src/api/agent.js"
 import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
-import { EntityId, GovernedActionId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PluginConnectionId,
+  SessionId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import { PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
+import {
+  ReviewSuggestionPublicationGateway,
+  type ReviewSuggestionPublicationTarget
+} from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
 import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
-import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import {
@@ -52,23 +69,24 @@ import {
   historicalCompleteDiffCodeCommitDescriptor,
   makeFirstPartyPluginRuntimeRegistry
 } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
-import { PluginRuntimeAuthority } from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
-import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
 import {
-  PluginConnectionMapLive,
-  pluginRuntimeKey,
-  PluginRuntimeMap
-} from "../../src/server/plugins/internal/PluginRuntimeMap.js"
+  PluginRuntimeAuthority,
+  PluginRuntimeAuthorityToken
+} from "../../src/server/plugins/internal/PluginRuntimeAuthority.js"
+import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { pluginRuntimeKey, PluginRuntimeMap } from "../../src/server/plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraReadPlugin.js"
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMap.js"
-import { liveApplicationServices } from "../../src/server/runtime/ControlCenterServer.js"
+import { makeControlCenterApplicationComposition } from "../../src/server/runtime/ControlCenterServer.js"
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
+import { GovernedActionExecutionStartup } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
+import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
   ACTION_ID as GOVERNED_ACTION_ID,
   CONNECTION_ID as GOVERNED_CONNECTION_ID,
@@ -1363,7 +1381,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("shares first-party diff runtime reuse and administration invalidation", () =>
+  it.effect("shares first-party proposal, diff, and executor invalidation through administration", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
       const config = yield* makePersistenceTestConfig("control-center-first-party-shared-diff-")
@@ -1374,11 +1392,13 @@ describe("first-party plugin runtime", () => {
       const runtimeAuthority = pluginRuntimeAuthoritySourceLayer
       const discoveredProfiles = yield* Ref.make<Array<string>>([])
       const changedFileProfiles = yield* Ref.make<Array<string>>([])
-      const mapBuilds = yield* Ref.make(0)
-      const invalidations = yield* Ref.make(0)
+      const providerMutations = yield* Ref.make(0)
+      const pauseProposalRead = yield* Ref.make(false)
+      const proposalReadStarted = yield* Deferred.make<void>()
+      const resumeProposalRead = yield* Deferred.make<void>()
       const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
         pullRequestId: "17",
-        revisionId: "revision-advanced",
+        revisionId: "revision-17",
         repositoryName: "payments-api",
         title: "Shared diff runtime",
         description: "Reuse one runtime until administration invalidates it.",
@@ -1425,7 +1445,17 @@ describe("first-party plugin runtime", () => {
             })
           ),
         streamPullRequests: () => Stream.make(pullRequest),
-        getPullRequest: () => Effect.succeed(pullRequest),
+        getPullRequest: () =>
+          Ref.get(pauseProposalRead).pipe(
+            Effect.flatMap((pause) =>
+              pause
+                ? Deferred.succeed(proposalReadStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(resumeProposalRead)),
+                  Effect.as(pullRequest)
+                )
+                : Effect.succeed(pullRequest)
+            )
+          ),
         getChangedFilesPage: ({ account }) =>
           Ref.update(changedFileProfiles, (profiles) => [...profiles, account.profile]).pipe(
             Effect.as(
@@ -1440,34 +1470,26 @@ describe("first-party plugin runtime", () => {
       })
       const reviewClient = Layer.succeed(ReviewClient.CodeCommitReviewClient, {
         preflight: () => Effect.succeed(pullRequest),
-        execute: () => Effect.die("unused execute"),
+        execute: () =>
+          Ref.update(providerMutations, (count) => count + 1).pipe(
+            Effect.as(
+              new ReviewClient.CodeCommitReviewReceipt({
+                operationId: "comment:shared-runtime",
+                summary: "Posted a pull-request comment"
+              })
+            )
+          ),
         reconcile: () => Effect.die("unused reconcile")
       })
       const clients = Layer.merge(readClient, reviewClient)
       const registry = makeFirstPartyPluginRuntimeRegistry(clients)
-      const baseConnections = PluginConnectionMapLive.pipe(
-        Layer.provide(PluginRuntimeMap.layer.pipe(Layer.provide(registry)))
-      )
-      const connections = Layer.effect(
-        PluginConnectionMap,
-        Effect.gen(function*() {
-          const connectionMap = yield* PluginConnectionMap
-          yield* Ref.update(mapBuilds, (count) => count + 1)
-          return PluginConnectionMap.of({
-            contextEffect: connectionMap.contextEffect,
-            invalidate: (scope) =>
-              Ref.update(invalidations, (count) => count + 1).pipe(
-                Effect.andThen(connectionMap.invalidate(scope))
-              )
-          })
-        })
-      ).pipe(
-        Layer.provide(baseConnections),
-        Layer.provide(runtimeAuthority)
-      )
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
       const dependencies = Layer.mergeAll(
         persistence,
         foundation,
+        governedActions,
+        deliveryGraph,
         runtimeAuthority,
         DomainEventWakeups.layer,
         SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
@@ -1506,6 +1528,32 @@ describe("first-party plugin runtime", () => {
           codeCommitPluginDefinition.rawDescriptor,
           0,
           CREATED_AT
+        )
+        const registryService = yield* PluginRuntimeRegistry
+        const composition = makeControlCenterApplicationComposition({
+          bindConfig: yield* decodeBindConfig({ port: 4173 }),
+          persistenceConfig: Schema.decodeUnknownSync(PersistenceConfig)(config),
+          secretRoot: SecretRoot.make(`${root}/secrets`),
+          staticAssets: { root },
+          firstPartyPluginRuntime: true,
+          firstPartyPluginRuntimes: registryService,
+          governedActionExecution: { workspaceId: GOVERNED_WORKSPACE }
+        })
+        if (
+          composition.firstPartyRuntime === null ||
+          composition.firstPartyGovernedActionStartup === null ||
+          composition.firstPartyGovernedActionExecutors === null
+        ) {
+          return yield* Effect.die("first-party governed runtime composition is unavailable")
+        }
+        const composed = yield* Layer.build(
+          Layer.mergeAll(
+            composition.applicationServices,
+            composition.firstPartyRuntime.connections,
+            composition.firstPartyGovernedActionStartup,
+            composition.firstPartyGovernedActionExecutors,
+            composition.reviewSuggestionPublications
+          ).pipe(Layer.provide(composition.lifecycle))
         )
         const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
         const observedAt = DateTime.formatIso(CREATED_AT)
@@ -1558,8 +1606,8 @@ describe("first-party plugin runtime", () => {
           relationships: []
         })
 
-        const reads = yield* CompleteDiffReads
-        const administration = yield* PluginAdministration
+        const reads = Context.get(composed, CompleteDiffReads)
+        const administration = Context.get(composed, PluginAdministration)
         const request = {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
@@ -1590,18 +1638,188 @@ describe("first-party plugin runtime", () => {
         const third = yield* reads.inventory(request)
         assert.deepStrictEqual(third, first)
         assert.deepStrictEqual({
-          mapBuilds: yield* Ref.get(mapBuilds),
-          invalidations: yield* Ref.get(invalidations),
           discoveredProfiles: yield* Ref.get(discoveredProfiles),
           changedFileProfiles: yield* Ref.get(changedFileProfiles)
         }, {
-          mapBuilds: 1,
-          invalidations: 1,
           discoveredProfiles: ["production", "rotated"],
           changedFileProfiles: ["production", "production", "rotated"]
         })
+
+        const publicationGateway = Context.get(composed, ReviewSuggestionPublicationGateway)
+        const publicationTarget = {
+          workspaceId: WORKSPACE_ID,
+          entityId,
+          pluginConnectionId: CONNECTION_ID,
+          sourceRevision: "revision-17",
+          subject: {
+            providerId: "codecommit",
+            repository: "payments-api",
+            pullRequestId: "17",
+            baseRevision: "live-base",
+            headRevision: "live-head"
+          }
+        } satisfies ReviewSuggestionPublicationTarget
+        const publicationIdentity = yield* publicationGateway.identity(publicationTarget)
+        const suggestion = Schema.decodeSync(PrReviewSuggestion)({
+          suggestionId: PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`),
+          severity: "P2",
+          problem: "The shared runtime can rotate before publication commits.",
+          impact: "A stale action would become permanently unexecutable.",
+          evidence: {
+            path: "src/runtime.ts",
+            startLine: 1,
+            endLine: 1,
+            excerpt: "export const runtime = shared"
+          },
+          recommendation: "Revalidate authority in the same transaction as the durable commit.",
+          confidence: {
+            level: "high",
+            reason: "The deterministic barrier crosses the administration invalidation boundary."
+          }
+        })
+        const proposingAgent = Schema.decodeSync(ReviewAgentProfile)({
+          profileId: ReviewAgentProfileId.make("codex:test-sbx"),
+          label: "Codex test review",
+          budgetMillis: 60_000,
+          networkAccess: "blocked",
+          sandbox: "sbx"
+        })
+        yield* Ref.set(pauseProposalRead, true)
+        const publication = yield* Effect.forkScoped(
+          publicationGateway.publish({
+            target: publicationTarget,
+            jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000088"),
+            suggestion,
+            finalContent: ReviewSuggestionPublicationContent.make(
+              "Revalidate authority before committing this review comment."
+            ),
+            authorityBinding: publicationIdentity.authorityBinding,
+            proposingAgent,
+            session: {
+              sessionId: SessionId.make("01890f6f-6d6a-7cc0-98d2-000000000089"),
+              workspaceId: WORKSPACE_ID,
+              actor: {
+                _tag: "human",
+                personId: PersonId.make("01890f6f-6d6a-7cc0-98d2-00000000008a")
+              },
+              permission: "workspace-owner",
+              createdAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T09:00:00.000Z"),
+              lastSeenAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T10:00:00.000Z"),
+              idleExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-07-18T11:00:00.000Z"),
+              absoluteExpiresAt: Schema.decodeSync(UtcTimestamp)("2026-08-18T10:00:00.000Z"),
+              revokedAt: null
+            }
+          }).pipe(Effect.result)
+        )
+        yield* Deferred.await(proposalReadStarted)
+        const racePatch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
+          expectedRevision: 2,
+          values: [
+            { _tag: "text", key: "profile", value: "race-rotated" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments-api" }
+          ]
+        })
+        const raceUpdated = yield* administration.patchConfiguration({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: CONNECTION_ID,
+          patch: racePatch
+        })
+        assert.strictEqual(raceUpdated.revision, 3)
+        yield* Ref.set(pauseProposalRead, false)
+        yield* Deferred.succeed(resumeProposalRead, undefined)
+        const publicationResult = yield* Fiber.join(publication)
+        assert.isTrue(publicationResult._tag === "Failure")
+        const { sql } = yield* Database
+        const staleActions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM governed_actions WHERE workspace_id = ${WORKSPACE_ID}`
+        assert.strictEqual(staleActions[0]?.count, 0)
+        assert.strictEqual(yield* Ref.get(providerMutations), 0)
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+        ))
+        yield* seedGovernedActionAuthorityRoots("codecommit")
+        const governedConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" },
+          { _tag: "text", key: "repositoryName", value: "payments-api" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          governedConfiguration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "codecommit",
+          codeCommitPluginDefinition.rawDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const connectionMap = Context.get(composed, PluginConnectionMap)
+        const executorMap = Context.get(composed, AuthorizedPluginExecutorMap)
+        const governedExecution = Context.get(composed, GovernedActionExecutionStartup)
+        const governedScope = {
+          workspaceId: GOVERNED_WORKSPACE,
+          pluginConnectionId: GOVERNED_CONNECTION
+        }
+        if (connectionMap.proposalContextEffect === undefined) {
+          return yield* Effect.die("production proposal projection is unavailable")
+        }
+        const authorityA = Schema.decodeSync(PluginRuntimeAuthorityToken)(
+          (yield* connectionMap.proposalContextEffect(governedScope)).runtimeAuthorityToken
+        )
+        yield* executorMap.contextEffectForAuthority(governedScope, authorityA)
+        assert.strictEqual(yield* Ref.get(providerMutations), 0)
+
+        const governedPatch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
+          expectedRevision: 1,
+          values: [
+            { _tag: "text", key: "profile", value: "rotated" },
+            { _tag: "text", key: "region", value: "eu-west-1" },
+            { _tag: "text", key: "repositoryName", value: "payments-api" }
+          ]
+        })
+        const governedUpdated = yield* administration.patchConfiguration({
+          workspaceId: GOVERNED_WORKSPACE,
+          pluginConnectionId: GOVERNED_CONNECTION,
+          patch: governedPatch
+        })
+        assert.strictEqual(governedUpdated.revision, 2)
+        const authorityB = Schema.decodeSync(PluginRuntimeAuthorityToken)(
+          (yield* connectionMap.proposalContextEffect(governedScope)).runtimeAuthorityToken
+        )
+        assert.notStrictEqual(authorityB, authorityA)
+
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authorityB,
+          seedAuthorityRoots: false,
+          variant: "codecommit"
+        })
+        yield* seedGovernedActionCurrentInputs("codecommit")
+        assert.strictEqual(governedExecution._tag, "ready")
+        if (governedExecution._tag !== "ready") {
+          return yield* Effect.die("governed execution composition is unavailable")
+        }
+        const execution = yield* governedExecution.advance({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+        const governedRecord = yield* (yield* GovernedActionRepository).read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(governedRecord.head.state, "succeeded")
+        assert.strictEqual(yield* Ref.get(providerMutations), 1)
       }).pipe(
-        Effect.provide(liveApplicationServices(null, true, "http://127.0.0.1:4173", connections)),
+        Effect.provide(registry),
         Effect.provide(dependencies)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))

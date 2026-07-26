@@ -788,6 +788,7 @@ const renderView = async (
     </MemoryRouter>
   )
   await act(async () => mountedRoot?.render(view))
+  await act(async () => vi.dynamicImportSettled())
   return host
 }
 

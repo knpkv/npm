@@ -26,13 +26,15 @@ import {
   makeGovernedActionEnvelope
 } from "../../src/server/governance/governedActionDigests.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { PersistedRecordError } from "../../src/server/persistence/errors.js"
+import * as PersistenceErrors from "../../src/server/persistence/errors.js"
 import { PERSISTED_IDEMPOTENCY_RECONCILIATION_LOCATOR } from "../../src/server/persistence/governedActionReconciliationLocator.js"
 import {
   GovernedActionCommitCompanion,
   GovernedActionCommitInput,
+  GovernedActionIdempotencyReadInput,
   GovernedActionInputError
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
+import { decodeGovernedActionIdempotencyRows } from "../../src/server/persistence/repositories/governed-action/read.js"
 import {
   makeGovernedActionTransactionWrite,
   makeGovernedActionWrite
@@ -41,6 +43,7 @@ import { GovernedActionRepository } from "../../src/server/persistence/repositor
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
+const PersistedRecordError = PersistenceErrors.PersistedRecordError
 const WORKSPACE_ID = "01890f6f-6d6a-7cc0-98d2-330000000001"
 const CONNECTION_ID = "01890f6f-6d6a-7cc0-98d2-330000000002"
 const ENTITY_ID = "01890f6f-6d6a-7cc0-98d2-330000000003"
@@ -72,6 +75,7 @@ const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
 const decodeEvidence = Schema.decodeUnknownSync(GovernedActionEvidenceReference)
 const decodeCommit = Schema.decodeUnknownSync(GovernedActionCommitInput)
+const decodeIdempotencyRead = Schema.decodeUnknownSync(GovernedActionIdempotencyReadInput)
 const decodeCommand = Schema.decodeUnknownSync(GovernedActionTransitionCommand)
 const decodeCause = Schema.decodeUnknownSync(GovernedActionTransitionCause)
 const decodeAuthorization = Schema.decodeUnknownSync(GovernedActionAuthorizationV1)
@@ -405,6 +409,129 @@ const assertInputError = (result: Result.Result<unknown, unknown>, reason: Gover
 }
 
 describe("governed action writer", () => {
+  it.effect("validates every idempotency lookup cardinality and identity branch", () =>
+    Effect.gen(function*() {
+      const request = decodeIdempotencyRead({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONNECTION_ID,
+        idempotencyKey: "governed-action:PAY-42:done:1"
+      })
+
+      const missing = yield* decodeGovernedActionIdempotencyRows(request, []).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) {
+        assert.isTrue(Schema.is(PersistenceErrors.RecordNotFoundError)(missing.failure))
+      }
+
+      const duplicate = yield* decodeGovernedActionIdempotencyRows(request, [
+        { actionId: ACTION_ID },
+        { actionId: CONFLICTING_ACTION_ID }
+      ]).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(duplicate))
+      if (Result.isFailure(duplicate)) {
+        assert.isTrue(Schema.is(PersistenceErrors.PersistedRecordError)(duplicate.failure))
+        if (Schema.is(PersistenceErrors.PersistedRecordError)(duplicate.failure)) {
+          assert.strictEqual(
+            duplicate.failure.diagnosticCode,
+            "governed-action-identity-mismatch"
+          )
+        }
+      }
+
+      const malformed = yield* decodeGovernedActionIdempotencyRows(request, [
+        { actionId: "not-an-action-id" }
+      ]).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(malformed))
+      if (Result.isFailure(malformed)) {
+        assert.isTrue(Schema.is(PersistenceErrors.PersistedRecordError)(malformed.failure))
+        if (Schema.is(PersistenceErrors.PersistedRecordError)(malformed.failure)) {
+          assert.strictEqual(
+            malformed.failure.diagnosticCode,
+            "governed-action-schema-invalid"
+          )
+        }
+      }
+
+      assert.strictEqual(
+        yield* decodeGovernedActionIdempotencyRows(request, [{ actionId: ACTION_ID }]),
+        ACTION_ID
+      )
+    }))
+
+  it.effect("reads a committed aggregate by its immutable idempotency identity", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      yield* repository.commit(makeProposalInput(envelope))
+
+      const record = yield* repository.readByIdempotencyKey({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: CONNECTION_ID,
+        idempotencyKey: envelope.idempotencyKey
+      })
+
+      assert.strictEqual(record.envelope.actionId, ACTION_ID)
+      assert.strictEqual(record.headTransition.transitionId, PROPOSAL_TRANSITION_ID)
+    })))
+
+  it.effect("quarantines a malformed action identity found through idempotency lookup", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const quarantine = yield* QuarantineRepository
+      const { sql } = yield* Database
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      yield* repository.commit(makeProposalInput(envelope))
+
+      yield* sql`DROP TRIGGER governed_action_head_exact_update`
+      yield* sql`DROP TRIGGER governed_action_identity_immutable`
+      yield* sql`PRAGMA foreign_keys = OFF`
+      yield* sql`UPDATE governed_actions
+        SET action_id = 'not-an-action-id'
+        WHERE workspace_id = ${envelope.workspaceId}
+          AND action_id = ${envelope.actionId}`
+      yield* sql`PRAGMA foreign_keys = ON`
+
+      const corrupted = yield* repository.readByIdempotencyKey({
+        workspaceId: envelope.workspaceId,
+        pluginConnectionId: envelope.pluginConnectionId,
+        idempotencyKey: envelope.idempotencyKey
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(corrupted))
+      if (Result.isFailure(corrupted)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(corrupted.failure))
+        if (Schema.is(PersistedRecordError)(corrupted.failure)) {
+          assert.strictEqual(
+            corrupted.failure.diagnosticCode,
+            "governed-action-schema-invalid"
+          )
+        }
+      }
+      const quarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(quarantined, 1)
+      assert.deepInclude(quarantined[0], {
+        recordKind: "governed-action",
+        recordKey: envelope.pluginConnectionId,
+        schemaVersion: 1,
+        diagnosticCode: "governed-action-schema-invalid",
+        diagnosticSummary: "Stored governed action failed schema validation.",
+        occurrenceCount: 1
+      })
+
+      const missing = yield* repository.readByIdempotencyKey({
+        workspaceId: envelope.workspaceId,
+        pluginConnectionId: envelope.pluginConnectionId,
+        idempotencyKey: "governed-action:missing"
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(missing))
+      if (Result.isFailure(missing)) {
+        assert.isTrue(Schema.is(PersistenceErrors.RecordNotFoundError)(missing.failure))
+      }
+      assert.lengthOf(yield* quarantine.list(envelope.workspaceId), 1)
+    })))
+
   it.effect("lets the caller roll back a transaction-local lifecycle commit", () =>
     withWriter(Effect.gen(function*() {
       yield* seedAuthorityRoots()

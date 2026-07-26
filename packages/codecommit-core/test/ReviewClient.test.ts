@@ -21,7 +21,11 @@ import { CodeCommitReadClient, type CodeCommitReadClientService } from "../src/R
 import { CodeCommitReviewConflictError } from "../src/ReviewClient/errors.js"
 import { CodeCommitReviewAction } from "../src/ReviewClient/models.js"
 import { CodeCommitReviewClient } from "../src/ReviewClient/ReviewClient.js"
-import { CodeCommitReviewProvider, type CodeCommitReviewProviderService } from "../src/ReviewClient/ReviewProvider.js"
+import {
+  CodeCommitReviewProvider,
+  type CodeCommitReviewProviderService,
+  makePostCommentForPullRequestRequest
+} from "../src/ReviewClient/ReviewProvider.js"
 
 const account = {
   profile: Schema.decodeUnknownSync(AwsProfileName)("production"),
@@ -58,6 +62,25 @@ const commentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   },
   content: "Please preserve the authorization binding.",
   clientRequestToken: "0".repeat(64)
+})
+
+const inlineCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "comment",
+  target: commentAction.target,
+  content: "Preserve the authorization binding.",
+  clientRequestToken: "2".repeat(64),
+  location: {
+    filePath: "src/authorization.ts",
+    filePosition: 42,
+    relativeFileVersion: "AFTER"
+  }
+})
+
+const plainCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+  _tag: "comment",
+  target: commentAction.target,
+  content: "Preserve the authorization binding.",
+  clientRequestToken: "3".repeat(64)
 })
 
 const baseReadClient = (
@@ -119,6 +142,27 @@ const runWithClients = <A, E>(
   )
 
 describe("CodeCommitReviewClient", () => {
+  it("retains an exact inline location when decoding a comment action", () => {
+    assert.property(inlineCommentAction, "location")
+    if ("location" in inlineCommentAction) {
+      assert.strictEqual(inlineCommentAction.location.filePath, "src/authorization.ts")
+      assert.strictEqual(inlineCommentAction.location.filePosition, 42)
+      assert.strictEqual(inlineCommentAction.location.relativeFileVersion, "AFTER")
+    }
+  })
+
+  it("maps location only for an inline comment provider request", () => {
+    const inline = makePostCommentForPullRequestRequest(inlineCommentAction)
+    const plain = makePostCommentForPullRequestRequest(plainCommentAction)
+    const reviewState = makePostCommentForPullRequestRequest(commentAction)
+
+    assert.strictEqual(inline.location.filePath, "src/authorization.ts")
+    assert.strictEqual(inline.location.filePosition, 42)
+    assert.strictEqual(inline.location.relativeFileVersion, "AFTER")
+    assert.notProperty(plain, "location")
+    assert.notProperty(reviewState, "location")
+  })
+
   it.effect("blocks a stale immutable revision before any provider mutation", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
@@ -185,6 +229,31 @@ describe("CodeCommitReviewClient", () => {
         Effect.gen(function*() {
           const client = yield* CodeCommitReviewClient
           return yield* client.execute(commentAction).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) assert.instanceOf(result.failure, CodeCommitReviewConflictError)
+    }))
+
+  it.effect("classifies an invalid inline position as a terminal conflict", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithClients(
+        baseReadClient(),
+        baseProvider({
+          postComment: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "postCommentForPullRequest",
+                profile: account.profile,
+                region: account.region,
+                cause: { _tag: "InvalidFilePositionException" }
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const client = yield* CodeCommitReviewClient
+          return yield* client.execute(inlineCommentAction).pipe(Effect.result)
         })
       )
 

@@ -2,8 +2,15 @@ import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Schema from "effect/Schema"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
+import {
+  GovernedActionPolicyBindingSource,
+  GovernedActionProposalAuthority,
+  GovernedActionSubmission,
+  GovernedActionSubmissionUnavailable
+} from "../governance/GovernedActionSubmission.js"
 import { governedActionExecutionStoreLayer } from "../governance/internal/execution-store/live.js"
 import { makeGovernedActionRecoveryClaimExpiry } from "../governance/internal/execution-store/recovery-claim-expiry.js"
 import {
@@ -14,11 +21,14 @@ import {
 import type { GovernedActionExecutionStoreError } from "../governance/internal/GovernedActionExecutionStore.js"
 import {
   type GovernedActionPolicyCatalogInvalid,
-  GovernedActionPolicyEvaluator
+  GovernedActionPolicyEvaluator,
+  makeBuiltInGovernedActionPolicyDefinition
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPluginExecutorMap.js"
+import { PluginRuntimeAuthorityToken } from "../plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
+import { PluginRuntimeAuthoritySource } from "../plugins/internal/PluginRuntimeAuthoritySource.js"
 import { PluginRuntimeMap } from "../plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/internal/PluginRuntimeRegistry.js"
 import { type ServerDraining, ServerLifecycle } from "./ServerLifecycle.js"
@@ -79,11 +89,86 @@ export class GovernedActionExecutionStartup extends Context.Service<
   GovernedActionExecutionStartupState
 >()("@knpkv/control-center/server/runtime/GovernedActionExecutionStartup") {}
 
-const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
-  const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
-  const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
-  const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
-  const store = governedActionExecutionStoreLayer(options.workspaceId).pipe(
+const submissionUnavailable = () => new GovernedActionSubmissionUnavailable()
+
+/** Keep provider execution private while accepting only a durable action identity. */
+export const governedActionSubmissionLayer = Layer.effect(
+  GovernedActionSubmission,
+  Effect.map(GovernedActionExecutionStartup, (execution) =>
+    GovernedActionSubmission.of({
+      advance: (reference) =>
+        execution._tag === "ready"
+          ? execution.advance(reference).pipe(
+            Effect.asVoid,
+            Effect.tapError((cause) =>
+              Effect.logError("Governed action submission failed", {
+                actionId: reference.actionId,
+                cause,
+                workspaceId: reference.workspaceId
+              })
+            ),
+            Effect.catch(() => Effect.fail(submissionUnavailable()))
+          )
+          : Effect.fail(submissionUnavailable())
+    }))
+)
+
+/** Expose only the immutable server-owned policy binding to proposal constructors. */
+export const governedActionPolicyBindingSourceLayer = Layer.effect(
+  GovernedActionPolicyBindingSource,
+  makeBuiltInGovernedActionPolicyDefinition().pipe(
+    Effect.map(({ binding }) => ({ current: Effect.succeed(binding) })),
+    Effect.catch(() => Effect.fail(submissionUnavailable()))
+  )
+)
+
+/** Verify a proposal's exact runtime generation in the same transaction as its durable writes. */
+export const governedActionProposalAuthorityLayer = Layer.effect(
+  GovernedActionProposalAuthority,
+  Effect.map(PluginRuntimeAuthoritySource, (authority) =>
+    GovernedActionProposalAuthority.of({
+      transactCurrent: (input, use) =>
+        Schema.decodeUnknownEffect(PluginRuntimeAuthorityToken)(
+          input.runtimeAuthorityToken
+        ).pipe(
+          Effect.mapError(() => submissionUnavailable()),
+          Effect.flatMap((runtimeAuthorityToken) =>
+            authority.transactCurrent(
+              {
+                scope: {
+                  workspaceId: input.workspaceId,
+                  pluginConnectionId: input.pluginConnectionId
+                },
+                runtimeAuthorityToken
+              },
+              use
+            ).pipe(
+              Effect.catchTag(
+                "PluginRuntimeAuthorityUnavailable",
+                () => Effect.fail(submissionUnavailable())
+              ),
+              Effect.catchTag(
+                "PersistedRecordError",
+                () => Effect.fail(submissionUnavailable())
+              ),
+              Effect.catchTag(
+                "PersistenceOperationError",
+                () => Effect.fail(submissionUnavailable())
+              )
+            )
+          )
+        )
+    }))
+)
+
+/** Complete live proposal-authority boundary for server composition. */
+export const governedActionProposalAuthorityLiveLayer = governedActionProposalAuthorityLayer.pipe(
+  Layer.provide(pluginRuntimeAuthoritySourceLayer)
+)
+
+const readyLayersFromRuntimeMap = (workspaceId: WorkspaceId) => {
+  const executors = AuthorizedPluginExecutorMap.layer
+  const store = governedActionExecutionStoreLayer(workspaceId).pipe(
     Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
     Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
     Layer.provideMerge(QuarantineRepository.layer)
@@ -92,12 +177,21 @@ const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
     Layer.provide(store),
     Layer.provide(executors)
   )
-  return Layer.merge(
-    Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
-      Layer.provide(engine)
-    ),
-    governedActionRecoveryClaimDrainLayer(options.workspaceId)
-  )
+  return {
+    executors,
+    startup: Layer.merge(
+      Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
+        Layer.provide(engine)
+      ),
+      governedActionRecoveryClaimDrainLayer(workspaceId)
+    )
+  }
+}
+
+const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
+  const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
+  const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
+  return readyLayersFromRuntimeMap(options.workspaceId).startup.pipe(Layer.provide(runtimeMap))
 }
 
 /** Install the engine only when an internal runtime registry is explicitly configured. */
@@ -107,6 +201,27 @@ export const governedActionExecutionStartupLayer = (
   options === null
     ? Layer.succeed(GovernedActionExecutionStartup, { _tag: "disabled" })
     : readyLayer(options)
+
+/** Resolve the internal plugin registry at server composition time. */
+export const governedActionExecutionStartupFromRegistryLayer = (
+  workspaceId: WorkspaceId
+) =>
+  Layer.unwrap(
+    Effect.map(
+      PluginRuntimeRegistry,
+      (pluginRuntimes) => governedActionExecutionStartupLayer({ workspaceId, pluginRuntimes })
+    )
+  )
+
+/** Resolve executors from the server-owned cache shared with proposal projections. @internal */
+export const governedActionExecutionStartupFromRuntimeMapLayer = (
+  workspaceId: WorkspaceId
+) => readyLayersFromRuntimeMap(workspaceId).startup
+
+/** Keep the exact private executor projection available to the server composition test. @internal */
+export const governedActionExecutionRuntimeFromRuntimeMapLayers = (
+  workspaceId: WorkspaceId
+) => readyLayersFromRuntimeMap(workspaceId)
 
 /** Acquire the private worker for server lifetime without returning its capability. */
 export const governedActionExecutionServerLayer = (
