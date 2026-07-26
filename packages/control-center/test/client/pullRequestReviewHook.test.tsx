@@ -601,6 +601,64 @@ describe("usePullRequestReview", () => {
     ).toThrow("conflicting duplicate events")
   })
 
+  it("rejects stale history from before a retained-window replacement", async () => {
+    const staleHistory = deferred<PullRequestReviewThread>()
+    const signal = new AbortController().signal
+    const target: { current: PullRequestReviewThread | null } = {
+      current: {
+        events: [threadEvent(1)],
+        hasEarlier: false,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(1),
+        replayGeneration: 0
+      }
+    }
+    const staleInstall = staleHistory.promise.then((thread) => installNewestThread(target, thread, signal))
+
+    installNewestThread(
+      target,
+      {
+        events: [threadEvent(131)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(131),
+        replayGeneration: 1,
+        replacesRetainedWindow: true
+      },
+      signal
+    )
+    staleHistory.resolve({
+      events: [threadEvent(1), threadEvent(2)],
+      hasEarlier: false,
+      historyLoaded: true,
+      nextCursor: ReleaseAgentThreadCursor.make(1),
+      replayGeneration: 0
+    })
+    await staleInstall
+
+    expect(target.current?.events.map(({ eventSequence }) => eventSequence)).toEqual([131])
+    expect(target.current).toMatchObject({
+      hasEarlier: true,
+      historyLoaded: false,
+      replayGeneration: 1
+    })
+
+    installNewestThread(
+      target,
+      {
+        events: [threadEvent(130), threadEvent(131)],
+        hasEarlier: true,
+        historyLoaded: true,
+        nextCursor: ReleaseAgentThreadCursor.make(131),
+        replayGeneration: 1
+      },
+      signal
+    )
+
+    expect(target.current?.events.map(({ eventSequence }) => eventSequence)).toEqual([130, 131])
+    expect(target.current?.historyLoaded).toBe(true)
+  })
+
   it("lets authoritative history clear an optimistic same-boundary cursor", () => {
     const optimistic = {
       events: [threadEvent(1)],

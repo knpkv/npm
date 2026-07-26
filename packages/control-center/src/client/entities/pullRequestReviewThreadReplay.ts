@@ -36,6 +36,8 @@ export interface PullRequestReviewThread {
   readonly hasEarlier: boolean
   readonly historyLoaded: boolean
   readonly nextCursor: ReleaseAgentThreadCursor
+  /** Monotonic window identity used to reject reads started before a tail replacement. */
+  readonly replayGeneration?: number
   /** Transient signal that a bounded tail must replace, rather than append to, an older window. */
   readonly replacesRetainedWindow?: true
 }
@@ -91,7 +93,8 @@ export const mergePullRequestReviewThreads = (
     historyLoaded,
     nextCursor: ReleaseAgentThreadCursor.make(
       Math.max(left.nextCursor, right.nextCursor)
-    )
+    ),
+    replayGeneration: Math.max(left.replayGeneration ?? 0, right.replayGeneration ?? 0)
   }
 }
 
@@ -101,9 +104,15 @@ export const installNewestThread = (
   signal: AbortSignal
 ): PullRequestReviewThread => {
   if (!signal.aborted) {
+    const retainedGeneration = target.current?.replayGeneration ?? 0
+    const candidateGeneration = candidate.replayGeneration ?? retainedGeneration
+    if (candidateGeneration < retainedGeneration) return target.current ?? candidate
     const { replacesRetainedWindow: _replacesRetainedWindow, ...retainedCandidate } = candidate
-    target.current = target.current === null || candidate.replacesRetainedWindow === true
-      ? retainedCandidate
+    const versionedCandidate = { ...retainedCandidate, replayGeneration: candidateGeneration }
+    target.current = target.current === null ||
+        candidate.replacesRetainedWindow === true ||
+        candidateGeneration > retainedGeneration
+      ? versionedCandidate
       : mergePullRequestReviewThreads(target.current, retainedCandidate)
   }
   return target.current ?? candidate
@@ -233,7 +242,12 @@ export const continuePullRequestReviewThread = async (
     signal,
     previous?.nextCursor
   )
-  if (update.replacesRetainedWindow === true) return update
+  if (update.replacesRetainedWindow === true) {
+    return {
+      ...update,
+      replayGeneration: (previous?.replayGeneration ?? 0) + 1
+    }
+  }
   const events = previous === undefined
     ? update.events
     : [...previous.events, ...update.events]
@@ -248,6 +262,7 @@ export const continuePullRequestReviewThread = async (
       retainedEvents.length < events.length,
     historyLoaded,
     nextCursor: update.nextCursor,
+    replayGeneration: previous?.replayGeneration ?? update.replayGeneration ?? 0,
     ...(previous?.replacesRetainedWindow === true ? { replacesRetainedWindow: true } : {})
   }
 }
@@ -278,7 +293,8 @@ export const loadEarlierPullRequestReviewThread = async (
     events: [...page.events, ...previous.events],
     hasEarlier: page.hasMore,
     historyLoaded: true,
-    nextCursor: previous.nextCursor
+    nextCursor: previous.nextCursor,
+    replayGeneration: previous.replayGeneration ?? 0
   }
 }
 
