@@ -546,23 +546,24 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
     const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
-    expect(resources).toHaveLength(3)
+    expect(resources).toHaveLength(2)
     expect(resources.every(({ open }) => !open)).toBe(true)
     expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
       expect.arrayContaining([
         expect.stringContaining("payments"),
-        expect.stringContaining("payments-release"),
-        expect.stringContaining("audit")
+        expect.stringContaining("payments-release")
       ])
     )
-    expect(
-      resources.filter((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))
-    ).toHaveLength(2)
-    const unconnectedResource = resources.find((resource) =>
-      resource.querySelector("summary")?.textContent?.includes("audit")
+    expect(resources.every((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))).toBe(
+      true
     )
-    expect(unconnectedResource?.querySelector("summary")?.textContent).toContain("Followed")
-    expect(unconnectedResource?.querySelector("summary")?.textContent).not.toContain("Controls")
+    const resourceRows = [...host.querySelectorAll<HTMLElement>("[data-status-tone]")]
+    expect(resourceRows).toHaveLength(3)
+    const unconnectedResource = resourceRows.find(({ textContent }) => textContent?.includes("audit"))
+    expect(unconnectedResource?.tagName).toBe("DIV")
+    expect(unconnectedResource?.textContent).toContain("Followed")
+    expect(unconnectedResource?.querySelector("summary")).toBeNull()
+    expect(unconnectedResource?.textContent).not.toContain("Controls")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )

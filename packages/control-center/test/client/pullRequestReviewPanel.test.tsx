@@ -551,6 +551,7 @@ describe("PullRequestReviewPanel", () => {
   })
 
   it("retains a targeted request without announcing the full-review failure", async () => {
+    const onStart = vi.fn()
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
@@ -562,7 +563,7 @@ describe("PullRequestReviewPanel", () => {
           onPreviewPublication={() => undefined}
           onPublishSuggestion={() => undefined}
           onRetry={() => undefined}
-          onStart={() => undefined}
+          onStart={onStart}
           publication={{ _tag: "idle" }}
           state={state}
         />
@@ -590,6 +591,34 @@ describe("PullRequestReviewPanel", () => {
     expect(alerts).toHaveLength(1)
     expect(alerts[0]?.textContent).toContain("Targeted review did not start. Your request is still here")
     expect(host.textContent).not.toContain("A new full review could not be started")
+
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Try again"
+    )
+    if (retry === undefined) throw new Error("Expected full-review retry action")
+    await act(async () => retry.click())
+    const keepReading = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Keep reading"
+    )
+    if (keepReading === undefined) throw new Error("Expected full-review dismissal")
+    await act(async () => keepReading.click())
+
+    expect(host.querySelector("[role=dialog]")).toBeNull()
+    expect(host.querySelectorAll("[role=alert]")).toHaveLength(1)
+    expect(host.querySelector("[role=alert]")?.textContent).toContain("Targeted review did not start")
+    expect(host.textContent).not.toContain("A new full review could not be started")
+
+    await act(async () => retry.click())
+    const startFullReview = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Start full review"
+    )
+    if (startFullReview === undefined) throw new Error("Expected full-review confirmation")
+    await act(async () => startFullReview.click())
+
+    expect(onStart).toHaveBeenLastCalledWith()
+    expect(host.querySelectorAll("[role=alert]")).toHaveLength(1)
+    expect(host.querySelector("[role=alert]")?.textContent).toContain("A new full review could not be started")
+    expect(host.textContent).not.toContain("Targeted review did not start")
   })
 
   it("preserves a draft within one immutable head and clears it when the reviewed head changes", async () => {

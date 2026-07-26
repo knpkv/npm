@@ -123,9 +123,12 @@ export const PullRequestReviewPanel = ({
     }
   }, [state, submittedRequest])
   const changeLaunchOpen = useCallback((open: boolean): void => {
-    if (open) setSubmittedRequest(null)
     setLaunchOpen(open)
   }, [])
+  const submitFullReview = useCallback((): void => {
+    setSubmittedRequest(null)
+    onStart()
+  }, [onStart])
   const submitTargetedReview = useCallback((): void => {
     const prompt = request.trim()
     if (prompt.length === 0 || state._tag !== "ready" || state.action === "starting") return
@@ -288,7 +291,7 @@ export const PullRequestReviewPanel = ({
             </dl>
             <div className={styles.reviewLaunchActions}>
               <Dialog.Close>Keep reading</Dialog.Close>
-              <Dialog.Close onClick={() => onStart()}>Start full review</Dialog.Close>
+              <Dialog.Close onClick={submitFullReview}>Start full review</Dialog.Close>
             </div>
           </div>
         </Dialog.Content>

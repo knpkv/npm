@@ -25,6 +25,34 @@ const resourceKind = (providerId: ProviderId): string => {
   }
 }
 
+const resourceSummaryContent = (
+  resource: ProviderAccountSummary["resources"][number],
+  status: ReturnType<typeof connectionStatus>,
+  hasControls: boolean
+): ReactElement => (
+  <>
+    <div className={styles.connectionIdentity}>
+      <ServiceMark service={resource.providerId} size="compact" />
+      <div className={styles.identity}>
+        <Text as="h3" variant="card-title">
+          {resource.displayName}
+        </Text>
+        <Text className={styles.identifier} tone="secondary" variant="meta">
+          {resourceKind(resource.providerId)} · {resource.providerImmutableId}
+        </Text>
+      </div>
+    </div>
+    <div className={styles.resourceStatus}>
+      <StateLabel label={status.label} size="compact" tone={status.tone} />
+      {hasControls ? (
+        <span className={styles.disclosure}>
+          Controls <span aria-hidden="true">›</span>
+        </span>
+      ) : null}
+    </div>
+  </>
+)
+
 /** Compact account-level view of independently actionable provider resources. */
 export const ProviderAccountCard = ({
   account,
@@ -83,6 +111,19 @@ export const ProviderAccountCard = ({
         const isTesting = testState?._tag === "testing"
         const isChanging = enablementState === "changing"
         const needsAttention = status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
+        if (connection === undefined) {
+          return (
+            <div
+              className={styles.resource}
+              data-status-tone={status.tone}
+              key={resource.followedResourceId}
+            >
+              <div className={styles.resourceSummary}>
+                {resourceSummaryContent(resource, status, false)}
+              </div>
+            </div>
+          )
+        }
         return (
           <details
             className={styles.resource}
@@ -91,60 +132,40 @@ export const ProviderAccountCard = ({
             open={needsAttention ? true : undefined}
           >
             <summary className={styles.resourceSummary}>
-              <div className={styles.connectionIdentity}>
-                <ServiceMark service={resource.providerId} size="compact" />
-                <div className={styles.identity}>
-                  <Text as="h3" variant="card-title">
-                    {resource.displayName}
-                  </Text>
-                  <Text className={styles.identifier} tone="secondary" variant="meta">
-                    {resourceKind(resource.providerId)} · {resource.providerImmutableId}
-                  </Text>
-                </div>
-              </div>
-              <div className={styles.resourceStatus}>
-                <StateLabel label={status.label} size="compact" tone={status.tone} />
-                {connection === undefined ? null : (
-                  <span className={styles.disclosure}>
-                    Controls <span aria-hidden="true">›</span>
-                  </span>
-                )}
-              </div>
+              {resourceSummaryContent(resource, status, true)}
             </summary>
-            {connection === undefined ? null : (
-              <div className={styles.resourceBody}>
-                <ConnectionTestEvidence state={testState} />
-                <ConnectionSynchronization
-                  canSynchronize={canConfigure && connection.isEnabled}
-                  onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
-                  onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
-                  state={synchronizationStates.get(connection.pluginConnectionId)}
-                />
-                <div className={styles.resourceActions}>
-                  <Button
-                    disabled={!canConfigure || isChanging || isTesting || !connection.isEnabled}
-                    loading={isTesting}
-                    onClick={() => onTest(connection.pluginConnectionId)}
-                    variant="secondary"
-                  >
-                    Test
-                  </Button>
-                  <Button
-                    disabled={!canConfigure || isChanging}
-                    loading={isChanging}
-                    onClick={() => onSetEnabled(connection.pluginConnectionId, !connection.isEnabled)}
-                    variant="quiet"
-                  >
-                    {connection.isEnabled ? "Disable" : "Enable"}
-                  </Button>
-                </div>
-                {enablementState === "request-failed" ? (
-                  <Text as="p" className={styles.setupError} role="alert" variant="body">
-                    Control Center could not change this service. Refresh and try again.
-                  </Text>
-                ) : null}
+            <div className={styles.resourceBody}>
+              <ConnectionTestEvidence state={testState} />
+              <ConnectionSynchronization
+                canSynchronize={canConfigure && connection.isEnabled}
+                onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
+                onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
+                state={synchronizationStates.get(connection.pluginConnectionId)}
+              />
+              <div className={styles.resourceActions}>
+                <Button
+                  disabled={!canConfigure || isChanging || isTesting || !connection.isEnabled}
+                  loading={isTesting}
+                  onClick={() => onTest(connection.pluginConnectionId)}
+                  variant="secondary"
+                >
+                  Test
+                </Button>
+                <Button
+                  disabled={!canConfigure || isChanging}
+                  loading={isChanging}
+                  onClick={() => onSetEnabled(connection.pluginConnectionId, !connection.isEnabled)}
+                  variant="quiet"
+                >
+                  {connection.isEnabled ? "Disable" : "Enable"}
+                </Button>
               </div>
-            )}
+              {enablementState === "request-failed" ? (
+                <Text as="p" className={styles.setupError} role="alert" variant="body">
+                  Control Center could not change this service. Refresh and try again.
+                </Text>
+              ) : null}
+            </div>
           </details>
         )
       })}

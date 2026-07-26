@@ -976,10 +976,14 @@ describe("first-party plugin runtime", () => {
       const storePath = path.join(configRoot, "atlassian", "control-center")
       yield* fileSystem.makeDirectory(storePath, { recursive: true })
       const longUserName = `Avery ${"B".repeat(195)}`
+      const supplementaryUserName = `${"A".repeat(199)}😀`
+      const exactBoundaryUserName = `${"A".repeat(199)}B`
       const profiles = [
         oauthProfile("valid-profile", now + 60_000),
         oauthProfile("expired-profile", now - 1),
-        oauthProfile("long-name-profile", now + 60_000, longUserName)
+        oauthProfile("long-name-profile", now + 60_000, longUserName),
+        oauthProfile("supplementary-name-profile", now + 60_000, supplementaryUserName),
+        oauthProfile("exact-boundary-profile", now + 60_000, exactBoundaryUserName)
       ]
       yield* fileSystem.writeFileString(
         path.join(storePath, "profiles.json"),
@@ -1009,7 +1013,12 @@ describe("first-party plugin runtime", () => {
           readonly expectedDiagnosticCode: string | null
           readonly historicalDescriptor?: boolean
           readonly expectedDisplayName?: string
-          readonly profileId: "valid-profile" | "expired-profile" | "long-name-profile"
+          readonly profileId:
+            | "valid-profile"
+            | "expired-profile"
+            | "long-name-profile"
+            | "supplementary-name-profile"
+            | "exact-boundary-profile"
           readonly providerId: "jira" | "confluence"
           readonly siteId: string
         }> = [
@@ -1020,6 +1029,20 @@ describe("first-party plugin runtime", () => {
             expectedDisplayName: longUserName.slice(0, 200),
             providerId: "confluence",
             profileId: "long-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "A".repeat(199),
+            providerId: "confluence",
+            profileId: "supplementary-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: exactBoundaryUserName,
+            providerId: "confluence",
+            profileId: "exact-boundary-profile",
             siteId: "cloud-1"
           },
           {

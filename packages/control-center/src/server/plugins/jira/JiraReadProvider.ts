@@ -254,13 +254,15 @@ const providerCall = <Value, Error>(
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> => Effect.catch(effect, (error) => mapFailure(operation, error))
 
-const omitJsonNulls = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(omitJsonNulls)
+const nullableChangelogValueKeys = new Set(["from", "fromString", "to", "toString"])
+
+const omitNullableChangelogValues = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(omitNullableChangelogValues)
   if (value !== null && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
-        .filter(([, field]) => field !== null)
-        .map(([key, field]) => [key, omitJsonNulls(field)])
+        .filter(([key, field]) => field !== null || !nullableChangelogValueKeys.has(key))
+        .map(([key, field]) => [key, omitNullableChangelogValues(field)])
     )
   }
   return value
@@ -283,7 +285,7 @@ const getChangelogs = (
     ).pipe(
       Effect.flatMap(HttpClientResponse.filterStatusOk),
       Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Json)),
-      Effect.map(omitJsonNulls),
+      Effect.map(omitNullableChangelogValues),
       Effect.flatMap(Schema.decodeUnknownEffect(JiraApi.PageBeanChangelog))
     )
   )

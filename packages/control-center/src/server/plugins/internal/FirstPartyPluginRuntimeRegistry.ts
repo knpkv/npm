@@ -785,8 +785,14 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
 
 const MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH = 200
 
-const boundedConfluenceUserName = (value: string): string =>
-  value.slice(0, MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH).trimEnd()
+const boundedConfluenceUserName = (value: string): string => {
+  let bounded = ""
+  for (const codePoint of value) {
+    if (bounded.length + codePoint.length > MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH) break
+    bounded += codePoint
+  }
+  return bounded.trimEnd()
+}
 
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
   // Pre-stability persistence is intentionally breaking: old Jira connections

@@ -125,6 +125,38 @@ describe("JiraReadProvider", () => {
     )
   })
 
+  it.effect("rejects null structural changelog fields", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const outcome = yield* provider.getChangelogs("10033", {
+        startAt: 0,
+        maxResults: 50
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) {
+        assert.strictEqual(outcome.failure._tag, "PluginMalformedResponseFailure")
+      }
+    }).pipe(
+      Effect.provide(
+        jiraClientLayer(
+          {
+            self: "https://acme.atlassian.net/rest/api/3/issue/10033/changelog",
+            maxResults: 50,
+            startAt: 0,
+            total: null,
+            isLast: true,
+            values: null
+          },
+          requests
+        )
+      )
+    )
+  })
+
   it.effect("loads one exact Jira comment for reply validation", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {
