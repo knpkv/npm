@@ -30,6 +30,7 @@ import {
   JobId,
   PersonId,
   PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   SessionId,
@@ -40,12 +41,22 @@ import {
   type PluginProviderReceiptV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
-import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewReport, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionAgentAuthor,
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence,
+  PrReviewSuggestionValidated
+} from "../../src/domain/prReviewRevision.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
+  ApplicationConflict,
   ApplicationInvalidRequest,
   ApplicationServiceUnavailable,
   DeliveryGraphInspection,
@@ -95,6 +106,9 @@ const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
   "01890f6f-6d6a-7cc0-98d2-000000000409"
 )
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"3".repeat(64)}`)
+const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(
+  `sha256:${"4".repeat(64)}`
+)
 const MODEL = AgentModelId.make("review-model")
 const PROVIDER_ID = DurableAgentProviderId.make("openai-compatible")
 const REVIEW_PROFILE: ReviewAgentProfile = {
@@ -432,12 +446,73 @@ const withService = <Success, Failure>(
       const publicationFailure = yield* Ref.make<
         null | ReviewSuggestionPublicationGatewayError["reason"]
       >(null)
+      const resolveLatestReview = latestReviewOverride ??
+        (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
         ...persistence,
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: latestReviewOverride ?? (() => Effect.succeed(latestReview)),
+          latestReview: resolveLatestReview,
+          reviewSuggestionRevisions: (input) =>
+            Effect.gen(function*() {
+              const selected = yield* resolveLatestReview({
+                workspaceId: input.workspaceId,
+                pluginConnectionId: PLUGIN_CONNECTION_ID,
+                subject: reviewReport.subject,
+                jobId: input.jobId
+              })
+              if (
+                Option.isNone(selected) ||
+                selected.value.report === null ||
+                selected.value.terminalAt === null
+              ) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: input.workspaceId,
+                  recordKind: "agent-review-suggestion",
+                  recordKey: input.suggestionId
+                })
+              }
+              const suggestion = selected.value.report.suggestions.find(
+                ({ suggestionId }) => suggestionId === input.suggestionId
+              )
+              if (suggestion === undefined) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: input.workspaceId,
+                  recordKind: "agent-review-suggestion",
+                  recordKey: input.suggestionId
+                })
+              }
+              const revision = new PrReviewSuggestionRevision({
+                revisionId: REVIEW_REVISION_ID,
+                sequence: PrReviewSuggestionRevisionSequence.make(1),
+                predecessorRevisionId: null,
+                sourceJobId: selected.value.jobId,
+                subject: selected.value.report.subject,
+                suggestion: PrReviewSuggestion.make({
+                  ...suggestion,
+                  state: "draft"
+                }),
+                validation: new PrReviewSuggestionValidated({
+                  reviewedHead: selected.value.report.subject.headRevision,
+                  validatingJobId: selected.value.jobId,
+                  sourceRevisionId: REVIEW_REVISION_ID
+                }),
+                author: new PrReviewSuggestionAgentAuthor({
+                  jobId: selected.value.jobId,
+                  providerId: AgentProviderId.make(selected.value.providerId),
+                  model: selected.value.model,
+                  runtimeMetadata: null
+                }),
+                createdAt: selected.value.terminalAt
+              })
+              return PrReviewSuggestionRevisionPage.make({
+                current: revision,
+                revisions: [revision],
+                hasMore: false,
+                nextBeforeSequence: null
+              })
+            }),
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
@@ -567,12 +642,14 @@ describe("pull request reviews", () => {
       },
       expectedRevision: "source-7",
       payload: { content: "Publish this review suggestion." },
-      evidenceIds: [`pr-review:${REVIEW_JOB_ID}:${SUGGESTION_ID}`]
+      evidenceIds: [
+        `pr-review:${REVIEW_JOB_ID}:${SUGGESTION_ID}:${REVIEW_REVISION_ID}`
+      ]
     })
     const differentReview = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
       ...request,
       evidenceIds: [
-        `pr-review:01890f6f-6d6a-7cc0-98d2-000000000099:${SUGGESTION_ID}`
+        `pr-review:01890f6f-6d6a-7cc0-98d2-000000000099:${SUGGESTION_ID}:${REVIEW_REVISION_ID}`
       ]
     })
     const exactReplay = Schema.decodeUnknownSync(ProposePluginActionRequestV1)(
@@ -622,6 +699,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
           yield* Ref.set(
@@ -637,6 +715,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: preview.finalContent,
               authorityBinding: preview.authorityBinding
             },
@@ -672,6 +751,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -896,6 +976,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -928,6 +1009,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: editedContent,
               authorityBinding: preview.authorityBinding
             },
@@ -1005,6 +1087,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const differentContent = ReviewSuggestionPublicationContent.make(
@@ -1016,6 +1099,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1028,6 +1112,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1039,6 +1124,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: differentContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1100,6 +1186,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent,
                 authorityBinding: AUTHORITY_BINDING
               },
@@ -1108,12 +1195,45 @@ describe("pull request reviews", () => {
             assert.strictEqual(replay.publicationId, PUBLICATION_ID)
             assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
 
+            const history = yield* service.revisions({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              beforeSequence: null,
+              limit: PrReviewSuggestionRevisionPageSize.make(1)
+            })
+            assert.strictEqual(history.current.suggestion.state, "published")
+            const editAfterPublication = yield* service.editSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              request: {
+                expectedRevisionId: history.current.revisionId,
+                expectedSequence: history.current.sequence,
+                edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+                  ...history.current.suggestion,
+                  title: "Published suggestions cannot be edited"
+                })
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            assert.isTrue(Result.isFailure(editAfterPublication))
+            if (Result.isFailure(editAfterPublication)) {
+              assert.instanceOf(
+                editAfterPublication.failure,
+                ApplicationInvalidRequest
+              )
+            }
+
             const changed = yield* service.publishSuggestion({
               workspaceId: WORKSPACE_ID,
               entityId: ENTITY_ID,
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: ReviewSuggestionPublicationContent.make(
                   `Changed after publication.\n\n${footer}`
                 ),
@@ -1167,6 +1287,7 @@ describe("pull request reviews", () => {
                 entityId: ENTITY_ID,
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 publishingOperator: OPERATOR_ID
               })
               const editedContent = ReviewSuggestionPublicationContent.make(
@@ -1179,6 +1300,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1193,6 +1315,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: editedContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1212,6 +1335,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1244,6 +1368,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
           yield* Ref.set(publicationFailure, "publication-conflict")
@@ -1253,6 +1378,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: preview.finalContent,
               authorityBinding: preview.authorityBinding
             },
@@ -1293,6 +1419,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             assert.deepStrictEqual(preview.anchor, anchor)
@@ -1303,6 +1430,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1374,6 +1502,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const publish = () =>
@@ -1383,6 +1512,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1460,6 +1590,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const publish = () =>
@@ -1469,6 +1600,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1501,6 +1633,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1536,6 +1669,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1565,6 +1699,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1603,6 +1738,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: ReviewSuggestionPublicationContent.make("Post this comment."),
               authorityBinding: AUTHORITY_BINDING
             },
@@ -1629,6 +1765,150 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview)
+    ))
+
+  it.effect("reads and immutably edits the exact current review suggestion", () =>
+    withRealService((service, persistence) =>
+      Effect.gen(function*() {
+        const accepted = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        })
+        const claimedAt = yield* DateTime.now
+        const claim = yield* persistence.agentJobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: LEASE_TOKEN,
+          claimedAt,
+          leaseExpiresAt: DateTime.addDuration(claimedAt, Duration.minutes(1))
+        })
+        assert.isTrue(Option.isSome(claim))
+        if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+        yield* persistence.agentJobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: accepted.jobId,
+          attemptSequence: claim.value.attemptSequence,
+          leaseToken: claim.value.leaseToken,
+          report: reviewReport,
+          completedAt: yield* DateTime.now
+        })
+
+        const originalPage = yield* service.revisions({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(originalPage.current.sequence, 1)
+        const originalEdit = Schema.decodeUnknownSync(
+          PrReviewSuggestionEdit
+        )(reviewReport.suggestions[0])
+        const renamed = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: originalPage.current.revisionId,
+            expectedSequence: originalPage.current.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Authorize before any durable mutation"
+            }
+          },
+          session: HUMAN_SESSION
+        })
+        assert.strictEqual(renamed.sequence, 2)
+        assert.strictEqual(renamed.validation._tag, "validated")
+
+        const stale = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: originalPage.current.revisionId,
+            expectedSequence: originalPage.current.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Stale edit"
+            }
+          },
+          session: HUMAN_SESSION
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(stale))
+        if (Result.isFailure(stale)) {
+          assert.instanceOf(stale.failure, ApplicationConflict)
+        }
+
+        const technical = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: renamed.revisionId,
+            expectedSequence: renamed.sequence,
+            edit: {
+              ...originalEdit,
+              title: renamed.suggestion.title,
+              problem: "The mutation executes before authority is established."
+            }
+          },
+          session: HUMAN_SESSION
+        })
+        assert.strictEqual(technical.sequence, 3)
+        assert.strictEqual(
+          technical.validation._tag,
+          "requires-revalidation"
+        )
+
+        const denied = yield* service.editSuggestion({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          request: {
+            expectedRevisionId: technical.revisionId,
+            expectedSequence: technical.sequence,
+            edit: {
+              ...originalEdit,
+              title: "Approver edit"
+            }
+          },
+          session: {
+            ...HUMAN_SESSION,
+            permission: "workspace-approver"
+          }
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(denied))
+        if (Result.isFailure(denied)) {
+          assert.instanceOf(denied.failure, ApplicationInvalidRequest)
+        }
+
+        const history = yield* service.revisions({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          jobId: accepted.jobId,
+          suggestionId: SUGGESTION_ID,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(history.current.revisionId, technical.revisionId)
+        assert.deepStrictEqual(
+          history.revisions.map(({ sequence }) => sequence),
+          [2, 1]
+        )
+      })
     ))
 
   it.effect("atomically reuses one active exact-head review and permits a retry after terminal failure", () =>

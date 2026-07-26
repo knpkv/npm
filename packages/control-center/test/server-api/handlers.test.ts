@@ -54,6 +54,7 @@ import {
   JobId,
   PluginConnectionId,
   ProviderAccountId,
+  PrReviewSuggestionRevisionId,
   RelationshipId,
   RelationshipRepairProposalId,
   RelationshipRepairReviewId,
@@ -62,11 +63,20 @@ import {
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
-import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionOperatorAuthor,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence,
+  PrReviewSuggestionValidated
+} from "../../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
+  ApplicationInvalidRequest,
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
@@ -377,6 +387,8 @@ const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
   thread: () => Effect.die("not used"),
   current: () => Effect.die("not used"),
   enqueue: () => Effect.die("not used"),
+  revisions: () => Effect.die("not used"),
+  editSuggestion: () => Effect.die("not used"),
   previewPublication: () => Effect.die("not used"),
   publishSuggestion: () => Effect.die("not used")
 })
@@ -1947,6 +1959,68 @@ describe("Control Center API handlers", () => {
         baseRevision: "1".repeat(40),
         headRevision: "2".repeat(40)
       })
+      const suggestionId = PrReviewSuggestionId.make(
+        `sha256:${"4".repeat(64)}`
+      )
+      const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+        suggestionId,
+        state: "draft",
+        title: "Decode the response",
+        severity: "P2",
+        problem: "The response is persisted before decoding.",
+        impact: "Malformed output may reach durable state.",
+        evidence: {
+          path: "src/review.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "yield* persist(response)"
+        },
+        recommendation: "Decode the response before persistence.",
+        anchor: {
+          _tag: "line",
+          path: "src/review.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        },
+        relatedLocations: [],
+        confidence: {
+          level: "high",
+          reason: "The operation order is explicit."
+        }
+      })
+      const revisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"5".repeat(64)}`
+      )
+      const currentRevision = PrReviewSuggestionRevision.make({
+        revisionId,
+        sequence: PrReviewSuggestionRevisionSequence.make(1),
+        predecessorRevisionId: null,
+        sourceJobId: jobId,
+        subject,
+        suggestion,
+        validation: PrReviewSuggestionValidated.make({
+          reviewedHead: subject.headRevision,
+          validatingJobId: jobId,
+          sourceRevisionId: revisionId
+        }),
+        author: PrReviewSuggestionOperatorAuthor.make({
+          personId: sessionPersonId
+        }),
+        createdAt: session.lastSeenAt
+      })
+      const editedRevisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"6".repeat(64)}`
+      )
+      const editedRevision = PrReviewSuggestionRevision.make({
+        ...currentRevision,
+        revisionId: editedRevisionId,
+        sequence: PrReviewSuggestionRevisionSequence.make(2),
+        predecessorRevisionId: revisionId,
+        suggestion: PrReviewSuggestion.make({
+          ...suggestion,
+          title: "Decode every response"
+        })
+      })
       const received = yield* Ref.make<ReadonlyArray<unknown>>([])
       const reviewProfile: ReviewAgentProfile = {
         profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
@@ -1989,6 +2063,26 @@ describe("Control Center API handlers", () => {
               })
             )
           ),
+        revisions: (input) =>
+          Effect.gen(function*() {
+            yield* Ref.update(received, (items) => [...items, input])
+            if (
+              input.beforeSequence !== null &&
+              input.beforeSequence > currentRevision.sequence
+            ) {
+              return yield* new ApplicationInvalidRequest()
+            }
+            return {
+              current: currentRevision,
+              revisions: [],
+              hasMore: false,
+              nextBeforeSequence: null
+            }
+          }),
+        editSuggestion: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(editedRevision)
+          ),
         previewPublication: () => Effect.die("not used"),
         publishSuggestion: () => Effect.die("not used")
       })
@@ -2019,6 +2113,30 @@ describe("Control Center API handlers", () => {
             limit: 1
           }
         }).pipe(Effect.result)
+        const revisions = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, jobId, suggestionId },
+          query: {
+            limit: PrReviewSuggestionRevisionPageSize.make(3)
+          }
+        })
+        const invalidRevisionCursor = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, jobId, suggestionId },
+          query: {
+            before: PrReviewSuggestionRevisionSequence.make(2),
+            limit: PrReviewSuggestionRevisionPageSize.make(3)
+          }
+        }).pipe(Effect.result)
+        const edited = yield* client.agent.editReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: currentRevision.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+              ...suggestion,
+              title: "Decode every response"
+            })
+          }
+        })
         const accepted = yield* client.agent.enqueuePullRequestReview({
           params: { entityId },
           payload: {
@@ -2029,7 +2147,16 @@ describe("Control Center API handlers", () => {
             prompt: "Re-check transaction ownership."
           }
         })
-        return { accepted, conflictingCursors, current, earlierThread, thread }
+        return {
+          accepted,
+          conflictingCursors,
+          current,
+          earlierThread,
+          edited,
+          invalidRevisionCursor,
+          revisions,
+          thread
+        }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2039,6 +2166,15 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
+      assert.strictEqual(result.revisions.current.revisionId, revisionId)
+      assert.isTrue(Result.isFailure(result.invalidRevisionCursor))
+      if (Result.isFailure(result.invalidRevisionCursor)) {
+        assert.strictEqual(
+          result.invalidRevisionCursor.failure._tag,
+          "InvalidRequestApiError"
+        )
+      }
+      assert.strictEqual(result.edited.revisionId, editedRevisionId)
       assert.isTrue(Result.isFailure(result.conflictingCursors))
       if (Result.isFailure(result.conflictingCursors)) {
         assert.strictEqual(result.conflictingCursors.failure._tag, "InvalidRequestApiError")
@@ -2064,6 +2200,37 @@ describe("Control Center API handlers", () => {
         {
           workspaceId: session.workspaceId,
           entityId,
+          jobId,
+          suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(3)
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          beforeSequence: PrReviewSuggestionRevisionSequence.make(2),
+          limit: PrReviewSuggestionRevisionPageSize.make(3)
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          request: {
+            expectedRevisionId: revisionId,
+            expectedSequence: currentRevision.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+              ...suggestion,
+              title: "Decode every response"
+            })
+          },
+          session
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
           request: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
@@ -2080,6 +2247,9 @@ describe("Control Center API handlers", () => {
       const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000026")
       const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000027")
       const suggestionId = PrReviewSuggestionId.make(`sha256:${"5".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"6".repeat(64)}`
+      )
       const publicationId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000028")
       const subject = PrReviewSubject.make({
         providerId: "codecommit",
@@ -2107,10 +2277,13 @@ describe("Control Center API handlers", () => {
       const preview = new ReviewSuggestionPublicationPreview({
         jobId,
         suggestionId,
+        revisionId,
         subject,
         suggestionRevision: {
           jobId,
           suggestionId,
+          revisionId,
+          sequence: PrReviewSuggestionRevisionSequence.make(1),
           reviewedHead: subject.headRevision
         },
         anchor: {
@@ -2144,6 +2317,7 @@ describe("Control Center API handlers", () => {
         publicationId,
         jobId,
         suggestionId,
+        revisionId,
         subject,
         suggestionRevision: preview.suggestionRevision,
         anchor: preview.anchor,
@@ -2159,6 +2333,8 @@ describe("Control Center API handlers", () => {
         thread: () => Effect.die("not used"),
         current: () => Effect.die("not used"),
         enqueue: () => Effect.die("not used"),
+        revisions: () => Effect.die("not used"),
+        editSuggestion: () => Effect.die("not used"),
         previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),
         publishSuggestion: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(published))
       })
@@ -2173,13 +2349,15 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const publicationPreview = yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, jobId, suggestionId }
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
         })
         const publication = yield* client.agent.publishReviewSuggestion({
           params: { entityId },
           payload: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           }
@@ -2210,6 +2388,7 @@ describe("Control Center API handlers", () => {
           payload: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           }
@@ -2233,6 +2412,7 @@ describe("Control Center API handlers", () => {
           entityId,
           jobId,
           suggestionId,
+          revisionId,
           publishingOperator: sessionPersonId
         },
         {
@@ -2241,6 +2421,7 @@ describe("Control Center API handlers", () => {
           request: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           },

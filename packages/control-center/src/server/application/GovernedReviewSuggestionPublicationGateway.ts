@@ -222,7 +222,7 @@ const makeGateway = Effect.gen(function*() {
         ...expectedLocation
       },
       evidenceIds: [
-        `pr-review:${command.jobId}:${command.suggestion.suggestionId}`
+        `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`
       ]
     }).pipe(mapFailure)
     if (
@@ -286,7 +286,7 @@ const makeGateway = Effect.gen(function*() {
               ...(location === undefined ? {} : { location })
             },
             evidenceIds: [
-              `pr-review:${command.jobId}:${command.suggestion.suggestionId}`
+              `pr-review:${command.jobId}:${command.suggestion.suggestionId}:${command.revisionId}`
             ]
           }).pipe(mapFailure)
           const proposal = yield* connection.proposeAction(proposalRequest).pipe(mapFailure)

@@ -24,23 +24,36 @@ import {
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
 import { PullRequestReviewPanel as ReviewPanel } from "../../src/client/entities/PullRequestReviewPanel.js"
+import type { ReviewSuggestionRevisionTransport } from "../../src/client/entities/useReviewSuggestionRevisions.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
-import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId
+} from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionSequence
+} from "../../src/domain/prReviewRevision.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const PullRequestReviewPanel = (props: ComponentProps<typeof ReviewPanel>): ReactElement => (
   <PortalProvider>
-    <ReviewPanel {...props} />
+    <ReviewPanel revisionTransport={REVISION_TRANSPORT} {...props} />
   </PortalProvider>
 )
 
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000701")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
+const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"9".repeat(64)}`)
 const FILE_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"6".repeat(64)}`)
+const FILE_REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"8".repeat(64)}`)
 const ANCHOR_PATH = PrReviewPath.make("src/authorization.ts")
 const ANCHOR_LINE = 42
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000703")
@@ -66,10 +79,13 @@ const FINAL_CONTENT = ReviewSuggestionPublicationContent.make(`${EDITABLE_CONTEN
 const PREVIEW = new ReviewSuggestionPublicationPreview({
   jobId: JOB_ID,
   suggestionId: SUGGESTION_ID,
+  revisionId: REVIEW_REVISION_ID,
   subject: SUBJECT,
   suggestionRevision: {
     jobId: JOB_ID,
     suggestionId: SUGGESTION_ID,
+    revisionId: REVIEW_REVISION_ID,
+    sequence: PrReviewSuggestionRevisionSequence.make(1),
     reviewedHead: SUBJECT.headRevision
   },
   anchor: {
@@ -101,6 +117,7 @@ const PUBLICATION = new PublishedReviewComment({
   publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000704"),
   jobId: JOB_ID,
   suggestionId: SUGGESTION_ID,
+  revisionId: REVIEW_REVISION_ID,
   subject: SUBJECT,
   suggestionRevision: PREVIEW.suggestionRevision,
   anchor: PREVIEW.anchor,
@@ -271,6 +288,69 @@ const REVIEW_STATE = {
     }
   })
 } satisfies PullRequestReviewControllerState
+
+const REVISION_TRANSPORT: ReviewSuggestionRevisionTransport = {
+  load: (_scope, _before, _signal) => {
+    if (REVIEW_STATE.review._tag !== "completed") {
+      return Promise.reject(new Error("Completed review fixture missing"))
+    }
+    const suggestion = REVIEW_STATE.review.report.suggestions.find(
+      ({ suggestionId }) => suggestionId === _scope.suggestionId
+    )
+    if (suggestion === undefined) return Promise.reject(new Error("Suggestion fixture missing"))
+    const revisionId = PrReviewSuggestionRevisionId.make(
+      `sha256:${suggestion.suggestionId === SUGGESTION_ID ? "9".repeat(64) : "8".repeat(64)}`
+    )
+    return Promise.resolve(
+      Schema.decodeUnknownSync(PrReviewSuggestionRevisionPage)({
+        current: {
+          revisionId,
+          sequence: 1,
+          predecessorRevisionId: null,
+          sourceJobId: JOB_ID,
+          subject: SUBJECT,
+          suggestion,
+          validation: {
+            _tag: "validated",
+            reviewedHead: SUBJECT.headRevision,
+            validatingJobId: JOB_ID,
+            sourceRevisionId: revisionId
+          },
+          author: {
+            _tag: "operator",
+            personId: OPERATOR_ID
+          },
+          createdAt: "2026-07-24T15:05:00.000Z"
+        },
+        revisions: [
+          {
+            revisionId,
+            sequence: 1,
+            predecessorRevisionId: null,
+            sourceJobId: JOB_ID,
+            subject: SUBJECT,
+            suggestion,
+            validation: {
+              _tag: "validated",
+              reviewedHead: SUBJECT.headRevision,
+              validatingJobId: JOB_ID,
+              sourceRevisionId: revisionId
+            },
+            author: {
+              _tag: "operator",
+              personId: OPERATOR_ID
+            },
+            createdAt: "2026-07-24T15:05:00.000Z"
+          }
+        ],
+        hasMore: false,
+        nextBeforeSequence: null
+      })
+    )
+  },
+  edit: () => Promise.reject(new Error("Unexpected suggestion edit"))
+}
+
 const PENDING_REVIEW = new PullRequestReviewPending({
   subject: SUBJECT,
   jobId: JOB_ID,
@@ -849,11 +929,15 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Review Notes")
     expect(host.textContent).toContain("Never publishable")
     expect(host.textContent).toContain("Retry behavior needs a provider reproduction")
+    const resolvedSuggestion = [...host.querySelectorAll("li")].find(({ textContent }) =>
+      textContent?.includes("Centralize the authorization policy")
+    )
+    expect(resolvedSuggestion).toBeDefined()
     expect(
-      [...host.querySelectorAll("li")]
-        .find(({ textContent }) => textContent?.includes("Centralize the authorization policy"))
-        ?.querySelector("button")
-    ).toBeNull()
+      [...(resolvedSuggestion?.querySelectorAll("button") ?? [])].some(
+        ({ textContent }) => textContent === "Post comment"
+      )
+    ).toBe(false)
   })
 
   it("offers publication for a draft file suggestion", async () => {
@@ -872,6 +956,27 @@ describe("PullRequestReviewPanel", () => {
         })
       }
     }
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      ...REVISION_TRANSPORT,
+      load: (...args) =>
+        REVISION_TRANSPORT.load(...args).then((page) => ({
+          ...page,
+          current: {
+            ...page.current,
+            suggestion: {
+              ...page.current.suggestion,
+              state: "draft"
+            }
+          },
+          revisions: page.revisions.map((revision) => ({
+            ...revision,
+            suggestion: {
+              ...revision.suggestion,
+              state: "draft"
+            }
+          }))
+        }))
+    }
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
@@ -886,6 +991,7 @@ describe("PullRequestReviewPanel", () => {
           onRetry={() => undefined}
           onStart={() => undefined}
           publication={{ _tag: "idle" }}
+          revisionTransport={revisionTransport}
           state={{ ...REVIEW_STATE, review: fileDraftReview }}
         />
       )
@@ -900,8 +1006,83 @@ describe("PullRequestReviewPanel", () => {
     await act(async () => publish.click())
     expect(onPreview).toHaveBeenCalledWith({
       jobId: JOB_ID,
+      revisionId: FILE_REVIEW_REVISION_ID,
       suggestionId: FILE_SUGGESTION_ID
     })
+  })
+
+  it("removes omitted optional advanced fields from an edited suggestion", async () => {
+    const originalPage = await REVISION_TRANSPORT.load(
+      {
+        entityId: ENTITY_ID,
+        jobId: JOB_ID,
+        sessionKey: "session-a",
+        suggestionId: SUGGESTION_ID
+      },
+      null,
+      new AbortController().signal
+    )
+    const edit = vi.fn((..._arguments: Parameters<ReviewSuggestionRevisionTransport["edit"]>) =>
+      Promise.resolve(originalPage.current)
+    )
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      load: () => Promise.resolve(originalPage),
+      edit
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          revisionTransport={revisionTransport}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+    await act(async () => undefined)
+    const suggestion = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+      textContent?.includes("Authorize before mutating")
+    )
+    const editButton = [...(suggestion?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent === "Edit"
+    )
+    if (editButton === undefined) throw new Error("Expected suggestion edit action")
+    await act(async () => editButton.click())
+    const advanced = host.querySelector<HTMLTextAreaElement>(
+      "[aria-label='Advanced evidence, anchor, replacement and prevention JSON']"
+    )
+    if (advanced === null) throw new Error("Expected advanced suggestion fields")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+      valueSetter.call(
+        advanced,
+        JSON.stringify({
+          anchor: originalPage.current.suggestion.anchor,
+          evidence: originalPage.current.suggestion.evidence,
+          relatedLocations: originalPage.current.suggestion.relatedLocations
+        })
+      )
+      advanced.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const save = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Save revision"
+    )
+    if (save === undefined) throw new Error("Expected revision save action")
+    await act(async () => save.click())
+
+    expect(edit).toHaveBeenCalledOnce()
+    const request = edit.mock.calls[0]?.[1]
+    expect(request?.edit).not.toHaveProperty("replacement")
+    expect(request?.edit).not.toHaveProperty("prevention")
   })
 
   it("previews an exact suggestion and requires an editable human confirmation", async () => {
@@ -936,7 +1117,11 @@ describe("PullRequestReviewPanel", () => {
       postComment.focus()
       postComment.click()
     })
-    expect(onPreview).toHaveBeenCalledWith({ jobId: JOB_ID, suggestionId: SUGGESTION_ID })
+    expect(onPreview).toHaveBeenCalledWith({
+      jobId: JOB_ID,
+      revisionId: REVIEW_REVISION_ID,
+      suggestionId: SUGGESTION_ID
+    })
     expect(onPublish).not.toHaveBeenCalled()
 
     await render({ _tag: "preview", preview: PREVIEW })

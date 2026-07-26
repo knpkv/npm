@@ -1,5 +1,5 @@
 import { Button, Text } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import type { ReactElement, ReactNode } from "react"
 
 import type { JobId } from "../../domain/identifiers.js"
 import type { PrReviewNote, PrReviewSuggestion } from "../../domain/prReview.js"
@@ -73,18 +73,24 @@ const suggestionStateLabel = (state: PrReviewSuggestion["state"]): string =>
 /** Present one publishable, evidence-backed suggestion without owning its lifecycle. */
 export const ReviewSuggestionCard = ({
   canPublish,
+  extraActions,
   isPreviewing,
   jobId,
+  metadata,
   onPreviewPublication,
+  publicationBlockedReason,
   suggestion
 }: {
   readonly canPublish: boolean
+  readonly extraActions?: ReactNode
   readonly isPreviewing: boolean
   readonly jobId: JobId
+  readonly metadata?: ReactNode
   readonly onPreviewPublication: (selection: {
     readonly jobId: JobId
     readonly suggestionId: PrReviewSuggestion["suggestionId"]
   }) => void
+  readonly publicationBlockedReason?: string
   readonly suggestion: PrReviewSuggestion
 }): ReactElement => {
   const replacement = suggestion.replacement === undefined ? null : replacementSides(suggestion.replacement.unifiedDiff)
@@ -101,6 +107,7 @@ export const ReviewSuggestionCard = ({
           {suggestionStateLabel(suggestion.state)} · {suggestion.confidence.level} confidence
         </span>
       </header>
+      {metadata}
 
       <Text>{suggestion.problem}</Text>
       <dl className={styles.suggestionDetails}>
@@ -200,19 +207,29 @@ export const ReviewSuggestionCard = ({
         </details>
       )}
 
-      {canPublish && suggestion.state === "draft" ? (
-        <Button
-          disabled={isPreviewing}
-          onClick={() =>
-            onPreviewPublication({
-              jobId,
-              suggestionId: suggestion.suggestionId
-            })
-          }
-        >
-          {isPreviewing ? "Preparing preview…" : "Post comment"}
-        </Button>
-      ) : null}
+      {extraActions === undefined && (!canPublish || suggestion.state !== "draft") ? null : (
+        <div className={styles.suggestionActions}>
+          {extraActions}
+          {canPublish && suggestion.state === "draft" ? (
+            <Button
+              disabled={isPreviewing || publicationBlockedReason !== undefined}
+              onClick={() =>
+                onPreviewPublication({
+                  jobId,
+                  suggestionId: suggestion.suggestionId
+                })
+              }
+            >
+              {isPreviewing ? "Preparing preview…" : "Post comment"}
+            </Button>
+          ) : null}
+        </div>
+      )}
+      {publicationBlockedReason === undefined ? null : (
+        <Text role="status" tone="secondary" variant="meta">
+          {publicationBlockedReason}
+        </Text>
+      )}
     </article>
   )
 }

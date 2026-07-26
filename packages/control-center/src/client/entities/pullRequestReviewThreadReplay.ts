@@ -182,7 +182,12 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
         return yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, ...selection }
+          params: {
+            entityId,
+            jobId: selection.jobId,
+            suggestionId: selection.suggestionId
+          },
+          query: { revisionId: selection.revisionId }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }

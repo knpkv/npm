@@ -9,6 +9,8 @@ import type {
   AgentPrompt,
   AgentProvider,
   AgentProviderCatalog,
+  EditReviewSuggestionRequest,
+  EditReviewSuggestionResponse,
   EnqueuePullRequestReviewRequest,
   EnqueuePullRequestReviewResponse,
   EnqueueReleaseAgentJobRequest,
@@ -20,7 +22,8 @@ import type {
   ReleaseAgentThreadCursor,
   ReleaseAgentThreadPage,
   ReleaseAgentTurnResponse,
-  ReviewSuggestionPublicationPreview
+  ReviewSuggestionPublicationPreview,
+  ReviewSuggestionRevisionPage
 } from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
@@ -80,6 +83,7 @@ import type {
   EnvironmentId,
   EventCursor,
   EvidenceId,
+  JobId,
   PersonId,
   PluginConnectionId,
   RelationshipId,
@@ -89,6 +93,11 @@ import type {
   ShareId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import type { PrReviewSuggestionId } from "../../domain/prReview.js"
+import type {
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../../domain/prReviewRevision.js"
 import type { RelationshipRepairProposal } from "../../domain/relationshipRepair.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import type { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../../domain/timeline.js"
@@ -535,11 +544,37 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     EnqueuePullRequestReviewResponse,
     ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
+  readonly revisions: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly beforeSequence: PrReviewSuggestionRevisionSequence | null
+    readonly limit: PrReviewSuggestionRevisionPageSize
+  }) => Effect.Effect<
+    ReviewSuggestionRevisionPage,
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
+  readonly editSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: EditReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    EditReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
   readonly previewPublication: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
     readonly jobId: PublishReviewSuggestionRequest["jobId"]
     readonly suggestionId: PublishReviewSuggestionRequest["suggestionId"]
+    readonly revisionId: PublishReviewSuggestionRequest["revisionId"]
     readonly publishingOperator: Extract<Actor, { readonly _tag: "human" }>["personId"]
   }) => Effect.Effect<
     ReviewSuggestionPublicationPreview,

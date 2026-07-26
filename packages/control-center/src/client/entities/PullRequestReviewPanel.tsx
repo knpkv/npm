@@ -4,11 +4,16 @@ import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, use
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   type DurableAgentPrompt,
-  type PullRequestReviewThreadEvent,
-  type ReviewSuggestionPublicationSelection
+  type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
-import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
-import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
+import { ReviewNotes } from "./ReviewSuggestionPresentation.js"
+import { VersionedReviewSuggestionCard } from "./VersionedReviewSuggestionCard.js"
+import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
+import type {
+  PullRequestReviewControllerState,
+  PullRequestReviewPublicationState,
+  ReviewSuggestionPublicationTarget
+} from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const unavailableMessage = (
@@ -67,6 +72,8 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
       return event.text
     case "review-report":
       return `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
+    case "suggestion-revised":
+      return `Suggestion revision ${String(event.sequence)} · ${event.validationState === "validated" ? "validated" : "needs revalidation"}`
     case "suggestion-published":
       return "Suggestion published to CodeCommit"
     case "run-completed":
@@ -90,16 +97,18 @@ export const PullRequestReviewPanel = ({
   onRetry,
   onStart,
   publication,
+  revisionTransport,
   state
 }: {
   readonly canEnqueue: boolean
   readonly onCancelPublication: () => void
   readonly onLoadEarlier?: () => void
-  readonly onPreviewPublication: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
   readonly onStart: (prompt?: DurableAgentPrompt) => void
   readonly publication: PullRequestReviewPublicationState
+  readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly state: PullRequestReviewControllerState
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
@@ -365,13 +374,16 @@ export const PullRequestReviewPanel = ({
           <ol className={styles.reviewFindings}>
             {review.report.suggestions.map((suggestion) => (
               <li key={suggestion.suggestionId}>
-                <ReviewSuggestionCard
-                  canPublish={canEnqueue}
+                <VersionedReviewSuggestionCard
+                  canEdit={canEnqueue}
+                  entityId={state.entityId}
                   isPreviewing={
                     publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
                   }
                   jobId={review.jobId}
                   onPreviewPublication={onPreviewPublication}
+                  {...(revisionTransport === undefined ? {} : { revisionTransport })}
+                  sessionKey={state.sessionKey}
                   suggestion={suggestion}
                 />
               </li>

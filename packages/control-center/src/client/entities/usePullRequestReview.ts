@@ -35,6 +35,12 @@ export interface PullRequestReviewScope {
   readonly sessionKey: string
 }
 
+/** Browser selection resolved to an exact revision before publication preview. */
+export type ReviewSuggestionPublicationTarget = Pick<
+  ReviewSuggestionPublicationSelection,
+  "jobId" | "revisionId" | "suggestionId"
+>
+
 export type PullRequestReviewControllerState =
   | { readonly _tag: "idle" }
   | ({ readonly _tag: "loading" } & PullRequestReviewScope)
@@ -52,7 +58,7 @@ export type PullRequestReviewPublicationState =
   | { readonly _tag: "idle" }
   | {
     readonly _tag: "previewing"
-    readonly selection: ReviewSuggestionPublicationSelection
+    readonly selection: ReviewSuggestionPublicationTarget
   }
   | {
     readonly _tag: "preview"
@@ -76,7 +82,7 @@ export type PullRequestReviewPublicationState =
   | {
     readonly _tag: "failed"
     readonly preview: ReviewSuggestionPublicationPreview | null
-    readonly selection: ReviewSuggestionPublicationSelection
+    readonly selection: ReviewSuggestionPublicationTarget
   }
 
 /** Browser boundary for immutable pull-request review reads and mutations. */
@@ -96,7 +102,7 @@ export interface PullRequestReviewTransport {
   ) => Promise<PullRequestReviewThreadPage>
   readonly previewPublication: (
     entityId: EntityId,
-    selection: ReviewSuggestionPublicationSelection,
+    selection: ReviewSuggestionPublicationTarget,
     signal: AbortSignal
   ) => Promise<ReviewSuggestionPublicationPreview>
   readonly providers: (signal: AbortSignal) => Promise<AgentProviderCatalog>
@@ -215,7 +221,7 @@ export const usePullRequestReview = (
 ): {
   readonly cancelPublication: () => void
   readonly loadEarlier: () => void
-  readonly previewPublication: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly previewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly publication: PullRequestReviewPublicationState
   readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
   readonly retry: () => void
@@ -447,7 +453,7 @@ export const usePullRequestReview = (
     )
   }, [entityId, onSessionExpired, state, transport])
 
-  const previewPublication = useCallback((selection: ReviewSuggestionPublicationSelection) => {
+  const previewPublication = useCallback((selection: ReviewSuggestionPublicationTarget) => {
     if (
       state._tag !== "ready" ||
       state.review._tag !== "completed" ||
@@ -489,7 +495,8 @@ export const usePullRequestReview = (
     const current = state
     const selection = {
       jobId: preview.jobId,
-      suggestionId: preview.suggestionId
+      suggestionId: preview.suggestionId,
+      revisionId: preview.revisionId
     }
     publicationAbort.current?.abort()
     const abort = new AbortController()
