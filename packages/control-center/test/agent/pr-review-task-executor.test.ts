@@ -43,7 +43,8 @@ import {
   AgentAttemptSequence,
   AgentLeaseOwner,
   AgentLeaseToken,
-  type ClaimedAgentJob
+  type ClaimedAgentJob,
+  EMPTY_PR_REVIEW_THREAD_CONTEXT
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
@@ -94,7 +95,12 @@ const claim = {
     releaseId: RELEASE_ID,
     subjectRevision: HEAD_REVISION,
     fingerprint: FINGERPRINT,
-    task: { _tag: "pr-review", subject, reviewProfile: REVIEW_PROFILE }
+    task: {
+      _tag: "pr-review",
+      subject,
+      reviewProfile: REVIEW_PROFILE,
+      context: EMPTY_PR_REVIEW_THREAD_CONTEXT
+    }
   },
   sessionRef: null,
   cancellationRequested: false

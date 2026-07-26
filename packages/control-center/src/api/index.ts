@@ -23,6 +23,8 @@ export {
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   PullRequestReviewState,
+  PullRequestReviewThreadEvent,
+  PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
   ReleaseAgentHistoryMessage,
   ReleaseAgentProvider,

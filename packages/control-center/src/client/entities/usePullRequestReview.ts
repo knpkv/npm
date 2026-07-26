@@ -7,8 +7,10 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import type {
   AgentProviderCatalog,
   AgentProviderCatalogEntry,
+  DurableAgentPrompt,
   PublishedReviewComment,
   PullRequestReviewState,
+  PullRequestReviewThreadPage,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection
@@ -41,6 +43,7 @@ export type PullRequestReviewControllerState =
     readonly action: "idle" | "starting" | "failed"
     readonly provider: ReviewProviderSelection | null
     readonly review: PullRequestReviewState
+    readonly thread?: PullRequestReviewThreadPage
   } & PullRequestReviewScope)
 
 export type PullRequestReviewPublicationState =
@@ -79,9 +82,14 @@ export interface PullRequestReviewTransport {
   readonly enqueue: (
     entityId: EntityId,
     provider: ReviewProviderSelection,
+    prompt: DurableAgentPrompt | undefined,
     signal: AbortSignal
   ) => Promise<PullRequestReviewState>
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
+  readonly loadThread: (
+    entityId: EntityId,
+    signal: AbortSignal
+  ) => Promise<PullRequestReviewThreadPage>
   readonly previewPublication: (
     entityId: EntityId,
     selection: ReviewSuggestionPublicationSelection,
@@ -106,7 +114,7 @@ const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelectio
       provider.health === "available" &&
       provider.capabilities.includes("pr-review") &&
       provider.reviewProfile !== undefined &&
-      model !== undefined
+      model
     ) {
       return { providerId: provider.providerId, model, reviewProfile: provider.reviewProfile }
     }
@@ -116,7 +124,7 @@ const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelectio
 
 /** Generated-client transport for the authenticated immutable-review contract. */
 export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
-  enqueue: (entityId, provider, signal) =>
+  enqueue: (entityId, provider, prompt, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
@@ -126,7 +134,8 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
             providerId: provider.providerId,
             model: provider.model,
             profile: "read-only",
-            reviewProfileId: provider.reviewProfile.profileId
+            reviewProfileId: provider.reviewProfile.profileId,
+            ...(prompt === undefined ? {} : { prompt })
           }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
@@ -137,6 +146,17 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
         return yield* client.agent.pullRequestReview({ params: { entityId } })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
+  loadThread: (entityId, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: {}
+        })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
@@ -206,7 +226,7 @@ export const usePullRequestReview = (
   readonly publication: PullRequestReviewPublicationState
   readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
   readonly retry: () => void
-  readonly start: () => void
+  readonly start: (prompt?: DurableAgentPrompt) => void
   readonly state: PullRequestReviewControllerState
 } => {
   const [requestRevision, setRequestRevision] = useState(0)
@@ -237,8 +257,12 @@ export const usePullRequestReview = (
     const providers = canEnqueue
       ? transport.providers(abort.signal)
       : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
-    Promise.all([transport.load(entityId, abort.signal), providers]).then(
-      ([review, catalog]) => {
+    Promise.all([
+      transport.load(entityId, abort.signal),
+      transport.loadThread(entityId, abort.signal),
+      providers
+    ]).then(
+      ([review, thread, catalog]) => {
         if (!abort.signal.aborted) {
           setState(
             matchesScope(review, scope)
@@ -247,7 +271,8 @@ export const usePullRequestReview = (
                 ...scope,
                 action: "idle",
                 provider: eligibleProvider(catalog),
-                review
+                review,
+                thread
               }
               : { _tag: "failed", ...scope }
           )
@@ -313,7 +338,7 @@ export const usePullRequestReview = (
     setPublication((current) => current._tag === "publishing" ? current : { _tag: "idle" })
   }, [baseRevision, headRevision])
 
-  const start = useCallback(() => {
+  const start = useCallback((prompt?: DurableAgentPrompt) => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
     const provider = state.provider
     if (provider === null) return
@@ -322,7 +347,7 @@ export const usePullRequestReview = (
     const abort = new AbortController()
     mutationAbort.current = abort
     setState({ ...current, action: "starting" })
-    transport.enqueue(entityId, provider, abort.signal).then(
+    transport.enqueue(entityId, provider, prompt, abort.signal).then(
       (review) => {
         if (abort.signal.aborted) return
         setState((latest) =>

@@ -334,7 +334,10 @@ export const EnqueuePullRequestReviewRequest = Schema.Struct({
   providerId: DurableAgentProviderId,
   model: AgentModelId,
   profile: AgentSafeProfile,
-  reviewProfileId: ReviewAgentProfileId
+  reviewProfileId: ReviewAgentProfileId,
+  prompt: Schema.optionalKey(
+    DurableAgentPrompt.check(Schema.isTrimmed(), Schema.isMaxLength(2_500))
+  )
 })
 
 /** Decoded immutable pull-request review enqueue request. */
@@ -407,6 +410,99 @@ export const PullRequestReviewState = Schema.Union([
 
 /** Decoded current pull-request review state. */
 export type PullRequestReviewState = typeof PullRequestReviewState.Type
+
+const pullRequestReviewThreadEventFields = {
+  eventSequence: ReleaseAgentThreadCursor.check(Schema.isGreaterThan(0)),
+  jobId: JobId,
+  occurredAt: UtcTimestamp
+}
+
+const PullRequestReviewOperatorMessageEvent = Schema.TaggedStruct("operator-message", {
+  ...pullRequestReviewThreadEventFields,
+  prompt: DurableAgentPrompt.check(Schema.isMaxLength(2_500))
+})
+
+const PullRequestReviewRunQueuedEvent = Schema.TaggedStruct("run-queued", {
+  ...pullRequestReviewThreadEventFields,
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  reviewProfile: ReviewAgentProfile,
+  subject: PrReviewSubject
+})
+
+const PullRequestReviewRunStartedEvent = Schema.TaggedStruct(
+  "run-started",
+  pullRequestReviewThreadEventFields
+)
+
+const PullRequestReviewProgressEvent = Schema.TaggedStruct("progress", {
+  ...pullRequestReviewThreadEventFields,
+  text: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH)
+  )
+})
+
+const PullRequestReviewUsageEvent = Schema.TaggedStruct("usage", {
+  ...pullRequestReviewThreadEventFields,
+  inputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  outputTokens: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+
+const PullRequestReviewReportEvent = Schema.TaggedStruct("review-report", {
+  ...pullRequestReviewThreadEventFields,
+  report: PrReviewReport
+})
+
+const PullRequestReviewSuggestionPublishedEvent = Schema.TaggedStruct(
+  "suggestion-published",
+  {
+    ...pullRequestReviewThreadEventFields,
+    suggestionId: PrReviewSuggestionId
+  }
+)
+
+const PullRequestReviewRunCompletedEvent = Schema.TaggedStruct("run-completed", {
+  ...pullRequestReviewThreadEventFields,
+  outcome: Schema.Literals(["success", "cancelled", "max-steps"])
+})
+
+const PullRequestReviewRunFailedEvent = Schema.TaggedStruct("run-failed", {
+  ...pullRequestReviewThreadEventFields,
+  retryable: Schema.Boolean
+})
+
+const PullRequestReviewCancellationRequestedEvent = Schema.TaggedStruct(
+  "cancellation-requested",
+  {
+    ...pullRequestReviewThreadEventFields,
+    requestedAt: UtcTimestamp
+  }
+)
+
+/** Browser-safe immutable activity in one stable pull-request review thread. */
+export const PullRequestReviewThreadEvent = Schema.Union([
+  PullRequestReviewOperatorMessageEvent,
+  PullRequestReviewRunQueuedEvent,
+  PullRequestReviewRunStartedEvent,
+  PullRequestReviewProgressEvent,
+  PullRequestReviewUsageEvent,
+  PullRequestReviewReportEvent,
+  PullRequestReviewSuggestionPublishedEvent,
+  PullRequestReviewRunCompletedEvent,
+  PullRequestReviewRunFailedEvent,
+  PullRequestReviewCancellationRequestedEvent
+]).pipe(Schema.toTaggedUnion("_tag"))
+export type PullRequestReviewThreadEvent = typeof PullRequestReviewThreadEvent.Type
+
+/** One explicit cursor page from the stable pull-request review thread. */
+export const PullRequestReviewThreadPage = Schema.Struct({
+  events: Schema.Array(PullRequestReviewThreadEvent).check(
+    Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)
+  ),
+  nextCursor: ReleaseAgentThreadCursor
+})
+export type PullRequestReviewThreadPage = typeof PullRequestReviewThreadPage.Type
 
 /** Accepted durable review job, including idempotent recovery of active work. */
 export const EnqueuePullRequestReviewResponse = PullRequestReviewPending
@@ -604,6 +700,27 @@ const pullRequestReview = HttpApiEndpoint.get(
   }
 ).middleware(SessionCookieAuth)
 
+const pullRequestReviewThread = HttpApiEndpoint.get(
+  "pullRequestReviewThread",
+  "/pull-requests/:entityId/review-thread/events",
+  {
+    params: Schema.Struct({ entityId: EntityId }),
+    query: Schema.Struct({
+      after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
+      limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
+    }),
+    success: PullRequestReviewThreadPage,
+    error: [
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+).middleware(SessionCookieAuth)
+
 const enqueuePullRequestReview = HttpApiEndpoint.post(
   "enqueuePullRequestReview",
   "/pull-requests/:entityId/reviews",
@@ -677,6 +794,7 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(enqueueJob)
   .add(replayThread)
   .add(pullRequestReview)
+  .add(pullRequestReviewThread)
   .add(enqueuePullRequestReview)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)

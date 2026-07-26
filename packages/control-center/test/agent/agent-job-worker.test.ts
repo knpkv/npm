@@ -180,7 +180,11 @@ const enqueueReview = Effect.gen(function*() {
     prompt: "Review the immutable pull request.",
     contextFingerprint: FINGERPRINT,
     subjectRevision: reviewSubject.headRevision,
-    task: { _tag: "pr-review", subject: reviewSubject, reviewProfile },
+    task: {
+      _tag: "pr-review",
+      subject: reviewSubject,
+      reviewProfile
+    },
     createdAt: STARTED_AT
   })
 })
@@ -192,7 +196,13 @@ const replay = Effect.gen(function*() {
     releaseId: RELEASE_ID,
     after: CURSOR_ZERO,
     limit: PAGE_SIZE
-  })
+  }).pipe(Effect.catchTag("RecordNotFoundError", () =>
+    jobs.reviewThreadAfter({
+      workspaceId: WORKSPACE_ID,
+      subject: reviewSubject,
+      after: CURSOR_ZERO,
+      limit: PAGE_SIZE
+    })))
 })
 
 const replayAll = Effect.gen(function*() {

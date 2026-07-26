@@ -16,6 +16,7 @@ import type {
   PublishedReviewComment,
   PublishReviewSuggestionRequest,
   PullRequestReviewState,
+  PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor,
   ReleaseAgentThreadPage,
   ReleaseAgentTurnResponse,
@@ -509,6 +510,15 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
 
 /** Server-owned orchestration for one exact immutable pull-request review. */
 export class PullRequestReviews extends Context.Service<PullRequestReviews, {
+  readonly thread: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly after: ReleaseAgentThreadCursor
+    readonly limit: number
+  }) => Effect.Effect<
+    PullRequestReviewThreadPage,
+    ApplicationResourceNotFound | ApplicationServiceUnavailable
+  >
   readonly current: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId

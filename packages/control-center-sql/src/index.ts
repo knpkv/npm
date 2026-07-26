@@ -6,11 +6,14 @@ import type { RenderedSql } from "./types.js"
 export {
   type AgentJobClaimQueryInput,
   type AgentJobDispatchCandidatesQueryInput,
+  type AgentReviewContextEventKind,
+  type AgentReviewContextEventsQueryInput,
   type AgentThreadReplayQueryInput,
   type ClaimableAgentJobState,
   type LatestAgentReviewQueryInput,
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
+  renderAgentReviewContextEventsQuery,
   renderAgentThreadReplayQuery,
   renderLatestAgentReviewQuery
 } from "./agentJobs.js"

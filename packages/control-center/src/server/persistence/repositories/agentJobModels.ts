@@ -84,11 +84,70 @@ export type AgentJobTaskTag = typeof AgentJobTaskTag.Type
 /** Existing release-scoped conversational work. */
 const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 
-/** Read-only review work bound to one immutable pull request head. */
-const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
+const PrReviewAgentJobTaskFields = {
   subject: PrReviewSubject,
   reviewProfile: ReviewAgentProfile
+}
+
+/** Read-only review request bound to one immutable pull request head. */
+const EnqueuePrReviewAgentJobTask = Schema.TaggedStruct("pr-review", PrReviewAgentJobTaskFields)
+
+const PrReviewThreadRequestSummary = Schema.Struct({
+  jobId: JobId,
+  prompt: AgentJobPrompt,
+  subjectRevision: SubjectRevision,
+  requestedAt: UtcTimestamp
 })
+
+const PrReviewThreadRunSummary = Schema.Struct({
+  jobId: JobId,
+  subject: PrReviewSubject,
+  state: Schema.Literals(["cancelled", "failed", "succeeded", "unknown"]),
+  requestedAt: UtcTimestamp,
+  suggestionTitles: Schema.Array(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+  ).check(Schema.isMaxLength(8)),
+  suggestionsTruncated: Schema.Boolean,
+  noteTitles: Schema.Array(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+  ).check(Schema.isMaxLength(8)),
+  notesTruncated: Schema.Boolean,
+  limitation: Schema.NullOr(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+  )
+})
+
+/**
+ * Small review-thread context frozen into one immutable run.
+ *
+ * Full messages and artifacts remain behind explicit paged lookup boundaries.
+ */
+export const PrReviewThreadContextSnapshot = Schema.Struct({
+  recentRequests: Schema.Array(PrReviewThreadRequestSummary).check(Schema.isMaxLength(4)),
+  priorRuns: Schema.Array(PrReviewThreadRunSummary).check(Schema.isMaxLength(4)),
+  historyTruncated: Schema.Boolean
+})
+export type PrReviewThreadContextSnapshot = typeof PrReviewThreadContextSnapshot.Type
+
+/** Empty first-run context used before a review thread has prior activity. */
+export const EMPTY_PR_REVIEW_THREAD_CONTEXT = PrReviewThreadContextSnapshot.make({
+  recentRequests: [],
+  priorRuns: [],
+  historyTruncated: false
+})
+
+/** Persisted review work with the bounded thread context selected at enqueue. */
+const PrReviewAgentJobTask = Schema.TaggedStruct("pr-review", {
+  ...PrReviewAgentJobTaskFields,
+  context: PrReviewThreadContextSnapshot
+})
+
+/** Caller-owned task request before repository context enrichment. */
+export const EnqueueAgentJobTask = Schema.Union([
+  ReleaseChatAgentJobTask,
+  EnqueuePrReviewAgentJobTask
+]).pipe(Schema.toTaggedUnion("_tag"))
+export type EnqueueAgentJobTask = typeof EnqueueAgentJobTask.Type
 
 /** Durable task context used to select an internal task executor. */
 export const AgentJobTask = Schema.Union([
@@ -120,7 +179,7 @@ export const EnqueueAgentJobInput = Schema.Struct({
   prompt: AgentJobPrompt,
   contextFingerprint: AgentContextFingerprint,
   subjectRevision: SubjectRevision,
-  task: AgentJobTask,
+  task: EnqueueAgentJobTask,
   createdAt: UtcTimestamp
 })
 export type EnqueueAgentJobInput = typeof EnqueueAgentJobInput.Type
@@ -277,6 +336,15 @@ export const LatestAgentReviewInput = Schema.Struct({
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 
+/** Cursor-bounded lookup for the durable thread behind a stable pull request. */
+export const AgentReviewThreadAfterInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  subject: PrReviewSubject,
+  after: AgentEventCursor,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadAfterInput = typeof AgentReviewThreadAfterInput.Type
+
 /** Newest durable lifecycle state for one exact immutable review subject. */
 export const LatestAgentReviewRecord = Schema.Struct({
   jobId: JobId,
@@ -309,7 +377,7 @@ export const AgentThreadEvent = Schema.Struct({
   eventSequence: AgentEventCursor.check(Schema.isGreaterThan(0)),
   jobId: JobId,
   attemptSequence: Schema.NullOr(AgentAttemptSequence),
-  task: Schema.optionalKey(AgentJobTask),
+  task: Schema.optionalKey(EnqueueAgentJobTask),
   eventKind: Schema.Literals([
     "user-message",
     "job-queued",

@@ -8,6 +8,7 @@ import {
   AgentModelId,
   DurableAgentProviderId,
   MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
+  ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
   ReviewSuggestionPublicationAuthorityBinding,
@@ -1553,7 +1554,7 @@ describe("pull request reviews", () => {
   it.effect("atomically reuses one active exact-head review and permits a retry after terminal failure", () =>
     withRealService((service, persistence) =>
       Effect.gen(function*() {
-        const enqueue = () =>
+        const enqueue = (prompt?: string) =>
           service.enqueue({
             workspaceId: WORKSPACE_ID,
             entityId: ENTITY_ID,
@@ -1561,7 +1562,8 @@ describe("pull request reviews", () => {
               providerId: PROVIDER_ID,
               model: MODEL,
               profile: "read-only",
-              reviewProfileId: REVIEW_PROFILE.profileId
+              reviewProfileId: REVIEW_PROFILE.profileId,
+              ...(prompt === undefined ? {} : { prompt })
             }
           })
         const active = yield* Effect.all([enqueue(), enqueue()], {
@@ -1569,9 +1571,9 @@ describe("pull request reviews", () => {
         })
         assert.strictEqual(active[0].jobId, active[1].jobId)
 
-        const page = yield* persistence.agentJobs.threadAfter({
+        const page = yield* persistence.agentJobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
+          subject: active[0].subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })
@@ -1579,6 +1581,28 @@ describe("pull request reviews", () => {
           "user-message",
           "job-queued"
         ])
+        const firstPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: ReleaseAgentThreadCursor.make(0),
+          limit: 1
+        })
+        assert.strictEqual(
+          firstPresented.events[0]?._tag === "operator-message"
+            ? firstPresented.events[0].prompt
+            : null,
+          "Review this pull request."
+        )
+        const secondPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: firstPresented.nextCursor,
+          limit: 1
+        })
+        assert.deepStrictEqual(
+          secondPresented.events.map(({ _tag }) => _tag),
+          ["run-queued"]
+        )
 
         const claimedAt = yield* DateTime.now
         const claim = yield* persistence.agentJobs.claimNext({
@@ -1591,6 +1615,14 @@ describe("pull request reviews", () => {
         })
         assert.isTrue(Option.isSome(claim))
         if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+        yield* persistence.agentJobs.appendEvent({
+          workspaceId: WORKSPACE_ID,
+          jobId: claim.value.jobId,
+          attemptSequence: claim.value.attemptSequence,
+          leaseToken: claim.value.leaseToken,
+          event: { _tag: "started", providerRunRef: null, sessionRef: null },
+          occurredAt: claimedAt
+        })
         const failedAt = yield* DateTime.now
         yield* persistence.agentJobs.failAttempt({
           workspaceId: WORKSPACE_ID,
@@ -1605,9 +1637,32 @@ describe("pull request reviews", () => {
           }),
           failedAt
         })
+        const failedPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: secondPresented.nextCursor,
+          limit: 128
+        })
+        assert.deepStrictEqual(
+          failedPresented.events.map(({ _tag }) => _tag),
+          ["run-started", "run-failed"]
+        )
 
-        const retry = yield* enqueue()
+        const retry = yield* enqueue("Re-check the durable transaction boundary.")
         assert.notStrictEqual(retry.jobId, active[0].jobId)
+        const retryPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: failedPresented.nextCursor,
+          limit: 2
+        })
+        assert.strictEqual(
+          retryPresented.events[0]?._tag === "operator-message"
+            ? retryPresented.events[0].prompt
+            : null,
+          "Re-check the durable transaction boundary."
+        )
+        assert.strictEqual(retryPresented.events[1]?._tag, "run-queued")
       })
     ))
 })

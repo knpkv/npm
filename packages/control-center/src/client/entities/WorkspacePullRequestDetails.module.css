@@ -505,6 +505,71 @@
   padding: var(--rly-space-16);
 }
 
+.reviewThread {
+  border-block-start: 1px solid var(--rly-color-border-1);
+  display: grid;
+  gap: var(--rly-space-16);
+  margin-block-start: var(--rly-space-24);
+  padding-block-start: var(--rly-space-20);
+}
+
+.reviewThread > header {
+  align-items: baseline;
+  display: flex;
+  gap: var(--rly-space-12);
+  justify-content: space-between;
+}
+
+.reviewThread > header > span,
+.reviewThreadEvents {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.reviewThreadEvents {
+  display: grid;
+  gap: var(--rly-space-8);
+  list-style: none;
+  margin: var(--rly-space-0);
+  padding: var(--rly-space-0);
+}
+
+.reviewThreadEvents li {
+  border-inline-start: 2px solid var(--rly-color-border-1);
+  padding-inline-start: var(--rly-space-12);
+}
+
+.reviewThreadComposer {
+  display: grid;
+  gap: var(--rly-space-8);
+}
+
+.reviewThreadComposer label {
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.reviewThreadComposer textarea {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  color: var(--rly-color-text-1);
+  font: inherit;
+  padding: var(--rly-space-12);
+  resize: vertical;
+}
+
+.reviewThreadComposer textarea:focus-visible {
+  border-color: var(--rly-color-focus);
+  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
+  outline-offset: var(--rly-space-2);
+}
+
+.reviewThreadComposer button {
+  justify-self: start;
+}
+
 .deliveryCounts {
   gap: var(--rly-space-12);
   grid-template-columns: repeat(3, minmax(var(--rly-space-0), 1fr));

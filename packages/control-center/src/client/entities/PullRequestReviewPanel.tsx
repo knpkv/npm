@@ -1,7 +1,11 @@
 import { Button, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, lazy, Suspense, useState } from "react"
+import { type ReactElement, lazy, Suspense, useEffect, useState } from "react"
 
-import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import type {
+  DurableAgentPrompt,
+  PullRequestReviewThreadEvent,
+  ReviewSuggestionPublicationSelection
+} from "../../api/agent.js"
 import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
@@ -48,6 +52,31 @@ const formatBudget = (budgetMillis: number): string => {
 
 const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
 
+const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null => {
+  switch (event._tag) {
+    case "operator-message":
+      return `Local Operator · ${event.prompt}`
+    case "run-queued":
+      return `${event.reviewProfile.label} · head ${event.subject.headRevision.slice(0, 12)}`
+    case "run-started":
+      return "Review sandbox started"
+    case "progress":
+      return event.text
+    case "review-report":
+      return `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
+    case "suggestion-published":
+      return "Suggestion published to CodeCommit"
+    case "run-completed":
+      return `Run completed · ${event.outcome}`
+    case "run-failed":
+      return event.retryable ? "Run failed · retryable" : "Run failed"
+    case "cancellation-requested":
+      return "Cancellation requested"
+    case "usage":
+      return null
+  }
+}
+
 /** Render durable agent advice without conflating it with human disposition. */
 export const PullRequestReviewPanel = ({
   canEnqueue,
@@ -64,11 +93,17 @@ export const PullRequestReviewPanel = ({
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationSelection) => void
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
-  readonly onStart: () => void
+  readonly onStart: (prompt?: DurableAgentPrompt) => void
   readonly publication: PullRequestReviewPublicationState
   readonly state: PullRequestReviewControllerState
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
+  const [request, setRequest] = useState("")
+  const requestScope = state._tag === "idle" ? null : state.entityId
+  useEffect(() => {
+    setLaunchOpen(false)
+    setRequest("")
+  }, [requestScope])
   const publicationSurface =
     publication._tag === "idle" || publication._tag === "previewing" ? null : (
       <Suspense fallback={<span>Preparing publication surface…</span>}>
@@ -105,6 +140,66 @@ export const PullRequestReviewPanel = ({
   }
 
   const review = state.review
+  const threadEvents = state.thread?.events ?? []
+  const visibleThreadEvents = threadEvents
+    .map((event) => ({ event, summary: threadEventSummary(event) }))
+    .filter(
+      (
+        item
+      ): item is {
+        readonly event: PullRequestReviewThreadEvent
+        readonly summary: string
+      } => item.summary !== null
+    )
+    .slice(-12)
+  const threadSurface = (
+    <section aria-label="Review thread" className={styles.reviewThread}>
+      <header>
+        <strong>Review thread</strong>
+        <span>{threadEvents.length === 0 ? "No runs yet" : "Durable across pull-request heads"}</span>
+      </header>
+      {visibleThreadEvents.length === 0 ? null : (
+        <ol className={styles.reviewThreadEvents}>
+          {visibleThreadEvents.map(({ event, summary }) => (
+            <li key={event.eventSequence}>
+              <span>{summary}</span>
+            </li>
+          ))}
+        </ol>
+      )}
+      {canEnqueue && state.provider !== null && review._tag !== "pending" && review._tag !== "unavailable" ? (
+        <div className={styles.reviewThreadComposer}>
+          <label htmlFor="review-thread-request">Ask Relay about this pull request</label>
+          <textarea
+            id="review-thread-request"
+            maxLength={2_500}
+            onChange={(event) => setRequest(event.currentTarget.value)}
+            placeholder="Re-check the error handling in the connection flow…"
+            rows={3}
+            value={request}
+          />
+          <Button
+            disabled={state.action === "starting" || request.trim().length === 0}
+            onClick={() => {
+              const prompt = request.trim()
+              if (prompt.length === 0) return
+              setRequest("")
+              onStart(prompt)
+            }}
+          >
+            {state.action === "starting" ? "Starting…" : "Start targeted review"}
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  )
+  const withThread = (content: ReactElement): ReactElement =>
+    withPublication(
+      <>
+        {content}
+        {threadSurface}
+      </>
+    )
   const launchDialog = (headRevision: string): ReactElement | null =>
     !launchOpen || state.provider === null ? null : (
       <div aria-labelledby="review-launch-title" role="dialog">
@@ -145,7 +240,7 @@ export const PullRequestReviewPanel = ({
       </div>
     )
   if (review._tag === "unavailable") {
-    return withPublication(
+    return withThread(
       <>
         <strong>Review unavailable</strong>
         <span>{unavailableMessage(review.reason)}</span>
@@ -159,7 +254,7 @@ export const PullRequestReviewPanel = ({
         : review.state === "running"
           ? "Reviewing exact head"
           : "Cancellation requested"
-    return withPublication(
+    return withThread(
       <>
         <strong>{label}</strong>
         <span>
@@ -181,7 +276,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "failed") {
-    return withPublication(
+    return withThread(
       <>
         <strong>{review.state === "cancelled" ? "Review cancelled" : "Review did not finish"}</strong>
         <span>The failed run did not change approval or publish a recommendation.</span>
@@ -197,7 +292,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "completed") {
-    return withPublication(
+    return withThread(
       <>
         <strong>{outcomeLabel(review.outcome)}</strong>
         {review.report.completion.status === "unable-to-conclude" ? (
@@ -228,7 +323,7 @@ export const PullRequestReviewPanel = ({
     )
   }
 
-  return withPublication(
+  return withThread(
     <>
       <strong>Agent review not run</strong>
       <span>An immutable-head review produces advice, never a human approval.</span>

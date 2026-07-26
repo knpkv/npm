@@ -36,6 +36,7 @@ const PROVIDER_ID = AgentProviderId.make("deterministic-review")
 const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
 const LEASE_OWNER = AgentLeaseOwner.make("review-worker")
 const LEASE_TOKEN = AgentLeaseToken.make("1".repeat(64))
+const SECOND_LEASE_TOKEN = AgentLeaseToken.make("2".repeat(64))
 const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
@@ -71,6 +72,12 @@ const swappedSubject = {
   ...subject,
   pullRequestId: "213",
   headRevision: "3".repeat(40)
+} satisfies PrReviewSubject
+
+const advancedSubject = {
+  ...subject,
+  baseRevision: subject.headRevision,
+  headRevision: "4".repeat(40)
 } satisfies PrReviewSubject
 
 const report = Schema.decodeUnknownSync(PrReviewReport)({
@@ -210,6 +217,88 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("keeps one PR thread across heads and freezes bounded prior-run context", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const firstClaim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: firstClaim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        const threadRows = yield* database.sql<{
+          readonly jobId: string
+          readonly threadId: string
+        }>`SELECT job_id AS jobId, thread_id AS threadId
+          FROM agent_jobs
+          WHERE workspace_id = ${WORKSPACE_ID}
+          ORDER BY job_id`
+        assert.strictEqual(threadRows.length, 2)
+        assert.strictEqual(threadRows[0]?.threadId, threadRows[1]?.threadId)
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(T3))
+        const secondClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T3,
+          leaseExpiresAt: T4
+        })
+        assert.isTrue(Option.isSome(secondClaim))
+        if (Option.isNone(secondClaim)) return yield* Effect.die("advanced review claim missing")
+        assert.strictEqual(secondClaim.value.context.task._tag, "pr-review")
+        if (secondClaim.value.context.task._tag !== "pr-review") {
+          return yield* Effect.die("advanced claim task mismatch")
+        }
+        assert.deepStrictEqual(secondClaim.value.context.task.context.recentRequests, [{
+          jobId: JOB_ID,
+          prompt: "Review the immutable pull request.",
+          subjectRevision: subject.headRevision,
+          requestedAt: T0
+        }])
+        assert.deepStrictEqual(secondClaim.value.context.task.context.priorRuns, [{
+          jobId: JOB_ID,
+          subject,
+          state: "succeeded",
+          requestedAt: T0,
+          suggestionTitles: ["Decode review output before persistence"],
+          suggestionsTruncated: false,
+          noteTitles: [],
+          notesTruncated: false,
+          limitation: null
+        }])
+        assert.isFalse(secondClaim.value.context.task.context.historyTruncated)
+
+        const firstPage = yield* jobs.reviewThreadAfter({
+          workspaceId: WORKSPACE_ID,
+          subject,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        const advancedPage = yield* jobs.reviewThreadAfter({
+          workspaceId: WORKSPACE_ID,
+          subject: advancedSubject,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(firstPage.events.length, advancedPage.events.length)
+        assert.deepStrictEqual(
+          advancedPage.events.map(({ jobId }) => jobId),
+          [JOB_ID, JOB_ID, JOB_ID, JOB_ID, SWAP_JOB_ID, SWAP_JOB_ID]
+        )
+      })
+    ))
+
   it.effect("projects a published suggestion after a durable reload", () =>
     withRepository(
       Effect.gen(function*() {
@@ -283,9 +372,9 @@ describe("agent job review results", () => {
           assert.strictEqual(latest.value.report?.suggestions[0]?.state, "published")
         }
 
-        const page = yield* jobs.threadAfter({
+        const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
+          subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })
@@ -428,9 +517,9 @@ describe("agent job review results", () => {
           publishedAt: T3
         })
 
-        const page = yield* jobs.threadAfter({
+        const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
+          subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })
@@ -547,9 +636,9 @@ describe("agent job review results", () => {
           assert.deepStrictEqual(latest.value.report, report)
         }
 
-        const page = yield* jobs.threadAfter({
+        const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
+          subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })

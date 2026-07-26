@@ -228,7 +228,16 @@ Control Center owns:
 - CodeCommit publication previews.
 - UI projections.
 
-A run receives a bounded Review Context Snapshot rather than the whole thread: current revision, suggestion summaries, relevant recent operator messages, and prior limitations. Full history is available through a lookup tool. Targeted revalidation receives the selected suggestion's complete history.
+A pull request owns one durable thread keyed by its CodeCommit provider,
+repository, and pull-request identity; changing the base or head creates a new
+immutable run in that same thread. Each run freezes a bounded Review Context
+Snapshot with up to four recent operator requests and four prior run summaries,
+including bounded suggestion and note titles plus the prior limitation. The
+browser reads the thread through an explicit cursor-paged API, and a targeted
+operator request creates another immutable run without changing CodeCommit.
+
+Full history and retained artifacts remain behind explicit lookup boundaries.
+Targeted revalidation receives the selected suggestion's complete history.
 
 ### CodeCommit checkout and sbx isolation
 

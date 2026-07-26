@@ -199,7 +199,7 @@ describe("agent job repository", () => {
             eventKind: "job-queued",
             eventSequence: AgentEventCursor.make(2),
             jobId: JOB_ID,
-            payload: { providerId: PROVIDER_ID },
+            payload: { model: "fake-model", providerId: PROVIDER_ID },
             task: { _tag: "release-chat" }
           },
           {
@@ -213,7 +213,7 @@ describe("agent job repository", () => {
             eventKind: "job-queued",
             eventSequence: AgentEventCursor.make(4),
             jobId: SECOND_JOB_ID,
-            payload: { providerId: PROVIDER_ID },
+            payload: { model: "fake-model", providerId: PROVIDER_ID },
             task: { _tag: "release-chat" }
           }
         ]

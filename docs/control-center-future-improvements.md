@@ -25,3 +25,10 @@ This file records deliberate follow-up work that is outside the current narrow d
 - Replace bounded workspace-wide reconciliation with incremental recomputation from the entities and releases affected by each committed synchronization page. The MVP deliberately skips inference when its complete bounded snapshot cannot be proven.
 - Extract explicit Jira and release links from bounded Confluence page bodies when lazy content is materialized. The MVP understands normalized link metadata and falls back to bounded page-title metadata during space synchronization.
 - Model multi-source releases explicitly instead of deriving the release graph-node identity from the first synchronized source revision. The MVP-created Jira releases have one authoritative source revision.
+
+## Pull-request review threads
+
+- Add an agent-callable, cursor-paged full-history lookup tool. The first durable-thread slice freezes bounded prior requests and run summaries into each immutable job and exposes paged history to the browser, but does not place the full transcript in model context.
+- Persist large command artifacts under the documented retention policy and expose explicit page/search tools across recovered runs. Current sbx command artifacts are deliberately session-local and disappear with the sandbox.
+- Capture the installed provider CLI name and version as sanitized run metadata. The durable thread currently records provider, model, Review Agent Profile, sandbox activity, reports, and terminal outcome but not a separately probed CLI version.
+- Add browser pagination or virtualization beyond the first bounded thread page, and keep prior history visible when a synchronized pull request temporarily lacks the release or exact revision data required to launch a new review.
