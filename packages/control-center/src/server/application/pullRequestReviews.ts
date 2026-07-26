@@ -30,6 +30,7 @@ import {
   JobId,
   type PluginConnectionId,
   type ReleaseId,
+  ReviewSuggestionPublicationReservationId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
 import {
@@ -484,12 +485,16 @@ const makePullRequestReviews = Effect.gen(function*() {
         footer
       )
       const contentDigest = yield* publicationContentDigest(publishedContent)
+      const requestedReservationId = ReviewSuggestionPublicationReservationId.make(
+        yield* cryptoService.randomUUIDv7.pipe(Effect.mapError(unavailable))
+      )
       const reservedAt = yield* DateTime.now
       const reservation = yield* persistence.agentJobs.reserveReviewSuggestionPublication({
         workspaceId: input.workspaceId,
         jobId: input.request.jobId,
         suggestionId: selected.suggestion.suggestionId,
         contentDigest,
+        reservationId: requestedReservationId,
         reservedAt
       }).pipe(
         Effect.mapError(mapPersistenceWriteError),
@@ -510,6 +515,9 @@ const makePullRequestReviews = Effect.gen(function*() {
         session: input.session
       }
       if (reservation._tag === "in-progress") return yield* unavailable()
+      const reservationId = reservation._tag === "recoverable"
+        ? reservation.reservationId
+        : requestedReservationId
       const publication = yield* (
         reservation._tag === "published" || reservation._tag === "recoverable"
           ? publications.replay({
@@ -527,7 +535,8 @@ const makePullRequestReviews = Effect.gen(function*() {
             workspaceId: input.workspaceId,
             jobId: input.request.jobId,
             suggestionId: selected.suggestion.suggestionId,
-            contentDigest
+            contentDigest,
+            reservationId
           }).pipe(
             Effect.mapError(mapPersistenceWriteError),
             Effect.ignore
@@ -542,6 +551,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           jobId: input.request.jobId,
           suggestionId: selected.suggestion.suggestionId,
           contentDigest,
+          reservationId,
           publicationId: result.publicationId,
           publishedAt: result.publishedAt,
           finalize: false
@@ -561,6 +571,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           jobId: input.request.jobId,
           suggestionId: selected.suggestion.suggestionId,
           contentDigest,
+          reservationId,
           publicationId: result.publicationId,
           publishedAt: result.publishedAt,
           finalize: true

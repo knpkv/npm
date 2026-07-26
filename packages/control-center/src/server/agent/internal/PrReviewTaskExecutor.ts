@@ -41,6 +41,7 @@ import {
 import type { AgentJobInputError, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import {
+  type PrReviewSandboxOutput,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
   PrReviewSandboxSessions,
@@ -122,6 +123,8 @@ const utf8Bytes = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 const textEncoder = new TextEncoder()
+const ARTIFACT_PAGE_CHARACTERS = 64 * 1_024
+const MAXIMUM_ARTIFACT_PAGES = 1_025
 
 const diffLineIntervals = (
   diff: string,
@@ -145,6 +148,28 @@ const rangeIsChanged = (
   startLine: number,
   endLine: number
 ): boolean => intervals.some((interval) => startLine >= interval.startLine && endLine <= interval.endLine)
+
+const completeOutputText = Effect.fn("PrReviewTaskExecutor.completeOutputText")(function*(
+  session: PrReviewSandboxSession,
+  output: PrReviewSandboxOutput
+) {
+  if (!output.truncated) return output.artifactId === null ? output.text : null
+  if (output.artifactId === null) return null
+  const pages = new Array<string>()
+  let offset = 0
+  for (let pageNumber = 0; pageNumber < MAXIMUM_ARTIFACT_PAGES; pageNumber += 1) {
+    const page = yield* session.pageArtifact(
+      output.artifactId,
+      offset,
+      ARTIFACT_PAGE_CHARACTERS
+    ).pipe(Effect.result)
+    if (Result.isFailure(page)) return null
+    pages.push(page.success)
+    if (page.success.length < ARTIFACT_PAGE_CHARACTERS) return pages.join("")
+    offset += page.success.length
+  }
+  return null
+})
 
 const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(function*(
   providerId: ClaimedAgentJob["providerId"],
@@ -344,9 +369,11 @@ const locationIsChangedInHead = Effect.fn("PrReviewTaskExecutor.locationIsChange
       `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(location.path)}`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-  if (diff.exitCode !== 0 || diff.stdout.truncated || diff.stdout.artifactId !== null) return false
+  if (diff.exitCode !== 0) return false
+  const completeDiff = yield* completeOutputText(session, diff.stdout)
+  if (completeDiff === null) return false
   return rangeIsChanged(
-    diffLineIntervals(diff.stdout.text, "head"),
+    diffLineIntervals(completeDiff, "head"),
     location.startLine,
     location.endLine
   )
@@ -354,14 +381,20 @@ const locationIsChangedInHead = Effect.fn("PrReviewTaskExecutor.locationIsChange
 
 const relatedLocationKey = (
   location: PrReviewSuggestionDraftType["relatedLocations"][number]
-): string => `${location.path}:${String(location.startLine)}:${String(location.endLine)}:${location.label}`
+): string => `${location.path}:${String(location.startLine)}:${String(location.endLine)}`
 
 const mergeRelatedLocations = (
   left: PrReviewSuggestionDraftType["relatedLocations"],
   right: PrReviewSuggestionDraftType["relatedLocations"]
 ): Array<PrReviewSuggestionDraftType["relatedLocations"][number]> => {
   const locationsByKey = new Map<string, PrReviewSuggestionDraftType["relatedLocations"][number]>()
-  for (const location of [...left, ...right]) locationsByKey.set(relatedLocationKey(location), location)
+  for (const location of [...left, ...right]) {
+    const key = relatedLocationKey(location)
+    const current = locationsByKey.get(key)
+    if (current === undefined || location.label.localeCompare(current.label) < 0) {
+      locationsByKey.set(key, location)
+    }
+  }
   return [...locationsByKey.values()].sort((first, second) =>
     relatedLocationKey(first).localeCompare(relatedLocationKey(second))
   )

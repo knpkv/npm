@@ -5,7 +5,13 @@ import { DateTime, Effect, Layer, Option, Result, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
-import { GovernedActionId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import {
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
@@ -34,7 +40,15 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:12:00.000Z")
+const T5 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:14:00.000Z")
 const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000043")
+const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000044"
+)
+const TAKEOVER_RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000045"
+)
 const CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"b".repeat(64)}`)
 const ALTERNATE_CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"c".repeat(64)}`)
 
@@ -220,6 +234,7 @@ describe("agent job review results", () => {
           jobId: JOB_ID,
           suggestionId,
           contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
           reservedAt: T3
         })
         yield* jobs.recordReviewSuggestionPublication({
@@ -227,6 +242,7 @@ describe("agent job review results", () => {
           jobId: JOB_ID,
           suggestionId,
           contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
@@ -247,6 +263,7 @@ describe("agent job review results", () => {
           jobId: JOB_ID,
           suggestionId,
           contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
@@ -312,6 +329,7 @@ describe("agent job review results", () => {
           jobId: JOB_ID,
           suggestionId,
           contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
           reservedAt: T3
         })
         yield* jobs.recordReviewSuggestionPublication({
@@ -319,6 +337,7 @@ describe("agent job review results", () => {
           jobId: JOB_ID,
           suggestionId,
           contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
@@ -355,6 +374,7 @@ describe("agent job review results", () => {
             jobId: JOB_ID,
             suggestionId,
             contentDigest,
+            reservationId: RESERVATION_ID,
             reservedAt: T3
           })
         const reservations = yield* Effect.all([
@@ -379,7 +399,8 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
-          contentDigest: winningDigest
+          contentDigest: winningDigest,
+          reservationId: RESERVATION_ID
         })
         const retryDigest = winningDigest === CONTENT_DIGEST
           ? ALTERNATE_CONTENT_DIGEST
@@ -391,6 +412,7 @@ describe("agent job review results", () => {
             jobId: JOB_ID,
             suggestionId,
             contentDigest: retryDigest,
+            reservationId: RESERVATION_ID,
             publicationId: PUBLICATION_ID,
             publishedAt: T3
           })
@@ -416,6 +438,60 @@ describe("agent job review results", () => {
           page.events.filter(({ eventKind }) => eventKind === "review-suggestion-published").length,
           1
         )
+      })
+    ))
+
+  it.effect("keeps a live publication reservation exclusive and recovers it after expiry", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestionId = report.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const reserveAt = (reservedAt: typeof UtcTimestamp.Type) =>
+          jobs.reserveReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest: CONTENT_DIGEST,
+            reservationId: reservedAt === T5 ? TAKEOVER_RESERVATION_ID : RESERVATION_ID,
+            reservedAt
+          })
+
+        assert.deepStrictEqual(yield* reserveAt(T3), { _tag: "acquired" })
+        assert.deepStrictEqual(yield* reserveAt(T4), { _tag: "in-progress" })
+        assert.deepStrictEqual(yield* reserveAt(T5), { _tag: "acquired" })
+        const staleOwner = yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: false
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(staleOwner))
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: TAKEOVER_RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: false
+        })
       })
     ))
 

@@ -3,7 +3,14 @@ import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessi
 import * as Schema from "effect/Schema"
 
 import { ReviewAgentProfile } from "../../../api/agent.js"
-import { AgentThreadId, GovernedActionId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import {
+  AgentThreadId,
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
 import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
@@ -202,6 +209,7 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId,
   reservedAt: UtcTimestamp
 })
 export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
@@ -212,7 +220,8 @@ export const ReviewSuggestionPublicationReservation = Schema.Union([
   Schema.TaggedStruct("in-progress", {}),
   Schema.TaggedStruct("recoverable", {
     publicationId: GovernedActionId,
-    publishedAt: UtcTimestamp
+    publishedAt: UtcTimestamp,
+    reservationId: ReviewSuggestionPublicationReservationId
   }),
   Schema.TaggedStruct("published", {
     publicationId: GovernedActionId,
@@ -226,7 +235,8 @@ export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
-  contentDigest: ReviewSuggestionPublicationDigest
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId
 })
 export type ReleaseReviewSuggestionPublicationInput = typeof ReleaseReviewSuggestionPublicationInput.Type
 
@@ -236,6 +246,7 @@ export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId,
   publicationId: GovernedActionId,
   publishedAt: UtcTimestamp,
   finalize: Schema.optionalKey(Schema.Boolean)

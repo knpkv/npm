@@ -29,6 +29,7 @@ import {
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
+  PrReviewCommandArtifactId,
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
@@ -322,10 +323,24 @@ const makeSessionLayer = (
   observation: SessionObservation,
   diff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`,
   sourceExcerpt = EVIDENCE_EXCERPT,
-  replacementFailure?: typeof PrReviewSandboxSessionError.Type
+  replacementFailure?: typeof PrReviewSandboxSessionError.Type,
+  retainedDiff?: string
 ) => {
+  const retainedArtifactId = PrReviewCommandArtifactId.make("review-artifact-1")
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
     if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+      if (retainedDiff !== undefined && command.includes("paged.ts")) {
+        return {
+          exitCode: 0,
+          stderr: output().stderr,
+          stdout: {
+            artifactId: retainedArtifactId,
+            byteLength: new TextEncoder().encode(retainedDiff).byteLength,
+            text: retainedDiff.slice(0, 16),
+            truncated: true
+          }
+        }
+      }
       return command.includes("missing.ts") || command.includes("deleted.ts")
         ? output()
         : output(diff)
@@ -379,7 +394,7 @@ const makeSessionLayer = (
       ),
     applyPatch: () => Effect.succeed(output()),
     readDiff: () => Effect.succeed(output(diff)),
-    pageArtifact: () => Effect.succeed(""),
+    pageArtifact: (_artifactId, offset, limit) => Effect.succeed(retainedDiff?.slice(offset, offset + limit) ?? ""),
     searchArtifact: () => Effect.succeed([]),
     close: Effect.void
   }
@@ -1051,7 +1066,10 @@ describe("PR review task executor", () => {
           { ...suggestion, relatedLocations: [firstLocation] },
           {
             ...suggestion,
-            relatedLocations: [secondLocation, firstLocation],
+            relatedLocations: [
+              secondLocation,
+              { ...firstLocation, label: "Alternate occurrence" }
+            ],
             confidence: {
               ...suggestion.confidence,
               reason: "A second model pass reached the same finding independently."
@@ -1080,7 +1098,7 @@ describe("PR review task executor", () => {
         Effect.sync(() => {
           assert.strictEqual(result.suggestions.length, 2)
           assert.deepStrictEqual(result.suggestions[0]?.relatedLocations, [
-            firstLocation,
+            { ...firstLocation, label: "Alternate occurrence" },
             secondLocation
           ])
           assert.isTrue(
@@ -1090,6 +1108,49 @@ describe("PR review task executor", () => {
               event.text.startsWith("Merged duplicate validated suggestion")
             )
           )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("validates related locations from the complete retained diff artifact", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const retainedDiff = `${"x".repeat(32 * 1_024)}\n@@ -0,0 +80 @@\n+const paged = true\n`
+    const pagedLocation = {
+      path: PrReviewPath.make("packages/control-center/test/paged.ts"),
+      startLine: 80,
+      endLine: 80,
+      label: "Changed beyond the visible prefix"
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [{ ...suggestion, relatedLocations: [pagedLocation] }],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        retainedDiff
+      )
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(result.suggestions[0]?.relatedLocations, [pagedLocation])
         })
       ),
       Effect.asVoid

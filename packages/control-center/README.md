@@ -158,10 +158,13 @@ no suggestion-count cap beyond the existing durable event byte envelope.
 Every draft suggestion scope can be explicitly published. Line and file suggestions become CodeCommit
 comments at their resolved line; whole-change suggestions become general pull-request comments without
 a file location. Control Center first reserves the exact confirmed content digest so competing edits
-cannot both reach the provider. A successful governed publication completes that reservation and appends an immutable lifecycle event, so reopening
+cannot both reach the provider. Each attempt owns its reservation with a unique durable identifier.
+Live same-content joiners remain in progress; a null-handle reservation may be atomically taken over
+after ten minutes, while the stale owner remains unable to release or complete it. The successor
+re-enters the governed idempotent publication path, which prevents a second provider write when the
+first attempt's outcome was ambiguous. A successful governed publication completes that reservation and appends an immutable lifecycle event, so reopening
 or refreshing the review keeps that suggestion `published` and cannot offer it as a new draft again.
-Confirmed provider no-write outcomes release the reservation for an edited retry; unknown outcomes
-retain the original digest for idempotent recovery. Multi-region replacement previews keep explicit
+Confirmed provider no-write outcomes release the reservation for an edited retry. Multi-region replacement previews keep explicit
 file/hunk boundaries, and provider output reserves durable-envelope space for host-added review metadata.
 Completed same-content retries replay the durable governed receipt without another provider call, and
 deletion-only file anchors retain their base-side CodeCommit position.

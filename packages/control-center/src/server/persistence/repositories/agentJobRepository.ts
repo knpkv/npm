@@ -18,7 +18,14 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import { AgentThreadId, GovernedActionId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import {
+  AgentThreadId,
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -55,6 +62,7 @@ import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./intern
 const DISPATCH_CANDIDATE_LIMIT = 32
 const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 const SHA_256_PREFIX = "sha256:"
+const REVIEW_SUGGESTION_PUBLICATION_RESERVATION_LIFETIME_MINUTES = 10
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const PersistedDigest = Schema.String.check(
@@ -95,6 +103,8 @@ const ReviewSuggestionPublicationRow = Schema.Struct({
   contentDigest: ReviewSuggestionPublicationDigest,
   state: Schema.Literals(["reserved", "published"]),
   publicationId: Schema.NullOr(GovernedActionId),
+  reservationAcquiredAt: UtcTimestamp,
+  reservationId: ReviewSuggestionPublicationReservationId,
   reservedAt: UtcTimestamp,
   publishedAt: Schema.NullOr(UtcTimestamp)
 })
@@ -1312,7 +1322,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
         Effect.gen(function*() {
           const existingRows = yield* sql<Record<string, unknown>>`SELECT
             content_digest AS contentDigest, state,
-            publication_id AS publicationId, reserved_at AS reservedAt,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
             published_at AS publishedAt
             FROM agent_review_suggestion_publications
             WHERE workspace_id = ${request.workspaceId}
@@ -1341,9 +1352,31 @@ const makeAgentJobRepository = Effect.gen(function*() {
               ? ReviewSuggestionPublicationReservation.make({
                 _tag: "recoverable",
                 publicationId: existing.publicationId,
-                publishedAt: existing.publishedAt
+                publishedAt: existing.publishedAt,
+                reservationId: existing.reservationId
               })
-              : ReviewSuggestionPublicationReservation.make({ _tag: "in-progress" })
+              : yield* Effect.gen(function*() {
+                const recoveryEligibleAt = DateTime.add(existing.reservationAcquiredAt, {
+                  minutes: REVIEW_SUGGESTION_PUBLICATION_RESERVATION_LIFETIME_MINUTES
+                })
+                if (DateTime.Order(request.reservedAt, recoveryEligibleAt) < 0) {
+                  return ReviewSuggestionPublicationReservation.make({ _tag: "in-progress" })
+                }
+                yield* sql`UPDATE agent_review_suggestion_publications
+                  SET reservation_id = ${request.reservationId},
+                      reservation_acquired_at = ${encodeTimestamp(request.reservedAt)}
+                  WHERE workspace_id = ${request.workspaceId}
+                    AND job_id = ${request.jobId}
+                    AND suggestion_id = ${request.suggestionId}
+                    AND content_digest = ${request.contentDigest}
+                    AND state = 'reserved'
+                    AND publication_id IS NULL
+                    AND reservation_id = ${existing.reservationId}
+                    AND reservation_acquired_at = ${encodeTimestamp(existing.reservationAcquiredAt)}`
+                return ReviewSuggestionPublicationReservation.make({
+                  _tag: (yield* readChanges(sql)) === 1 ? "acquired" : "in-progress"
+                })
+              })
           }
           const review = yield* readReviewResult({
             workspaceId: request.workspaceId,
@@ -1361,16 +1394,19 @@ const makeAgentJobRepository = Effect.gen(function*() {
           }
           const inserted = yield* sql<Record<string, unknown>>`INSERT INTO agent_review_suggestion_publications (
             workspace_id, job_id, suggestion_id, content_digest, state,
-            publication_id, reserved_at, published_at
+            publication_id, reservation_id, reservation_acquired_at,
+            reserved_at, published_at
           ) VALUES (
             ${request.workspaceId}, ${request.jobId}, ${request.suggestionId},
             ${request.contentDigest}, 'reserved', NULL,
+            ${request.reservationId}, ${encodeTimestamp(request.reservedAt)},
             ${encodeTimestamp(request.reservedAt)}, NULL
           ) ON CONFLICT DO NOTHING
           RETURNING suggestion_id AS suggestionId`
           const rows = yield* sql<Record<string, unknown>>`SELECT
             content_digest AS contentDigest, state,
-            publication_id AS publicationId, reserved_at AS reservedAt,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
             published_at AS publishedAt
             FROM agent_review_suggestion_publications
             WHERE workspace_id = ${request.workspaceId}
@@ -1400,7 +1436,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
             ? ReviewSuggestionPublicationReservation.make({
               _tag: "recoverable",
               publicationId: row.success.publicationId,
-              publishedAt: row.success.publishedAt
+              publishedAt: row.success.publishedAt,
+              reservationId: row.success.reservationId
             })
             : ReviewSuggestionPublicationReservation.make({
               _tag: inserted.length === 1 ? "acquired" : "in-progress"
@@ -1421,7 +1458,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
           AND suggestion_id = ${request.suggestionId}
           AND content_digest = ${request.contentDigest}
           AND state = 'reserved'
-          AND publication_id IS NULL`.pipe(
+          AND publication_id IS NULL
+          AND reservation_id = ${request.reservationId}`.pipe(
         mapPersistenceOperation("agent-job.release-review-suggestion-publication")
       )
     }),
@@ -1437,7 +1475,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
           const job = yield* getJob(request.workspaceId, request.jobId)
           const publicationRows = yield* sql<Record<string, unknown>>`SELECT
             content_digest AS contentDigest, state,
-            publication_id AS publicationId, reserved_at AS reservedAt,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
             published_at AS publishedAt
             FROM agent_review_suggestion_publications
             WHERE workspace_id = ${request.workspaceId}
@@ -1480,6 +1519,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 AND suggestion_id = ${request.suggestionId}
                 AND content_digest = ${request.contentDigest}
                 AND state = 'reserved'
+                AND reservation_id = ${request.reservationId}
                 AND (
                   publication_id IS NULL OR publication_id = ${request.publicationId}
                 )`
@@ -1525,6 +1565,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
               AND suggestion_id = ${request.suggestionId}
               AND content_digest = ${request.contentDigest}
               AND state = 'reserved'
+              AND reservation_id = ${request.reservationId}
               AND (
                 publication_id IS NULL OR publication_id = ${request.publicationId}
               )`
