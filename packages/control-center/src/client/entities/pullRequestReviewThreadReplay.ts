@@ -194,7 +194,7 @@ export const loadCompletePullRequestReviewThread = async (
     if (!page.hasMore) {
       return {
         events,
-        hasEarlier: false,
+        hasEarlier: page.hasEarlier,
         historyLoaded: false,
         nextCursor: page.nextCursor
       }
@@ -210,7 +210,7 @@ export const loadCompletePullRequestReviewThread = async (
   }
   return {
     events: [...tail.events],
-    hasEarlier: false,
+    hasEarlier: tail.hasEarlier,
     historyLoaded: false,
     nextCursor: tail.nextCursor
   }
@@ -238,9 +238,9 @@ export const continuePullRequestReviewThread = async (
     : events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
   return {
     events: retainedEvents,
-    hasEarlier: previous === undefined
-      ? retainedEvents.length < events.length
-      : previous.hasEarlier || retainedEvents.length < events.length,
+    hasEarlier: (previous?.hasEarlier ?? false) ||
+      update.hasEarlier ||
+      retainedEvents.length < events.length,
     historyLoaded,
     nextCursor: update.nextCursor
   }

@@ -25,6 +25,7 @@ import {
 import {
   continuePullRequestReviewThread,
   installNewestThread,
+  loadCompletePullRequestReviewThread,
   loadEarlierPullRequestReviewThread,
   MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
   MAXIMUM_REVIEW_THREAD_PAGE_READS,
@@ -456,6 +457,27 @@ describe("usePullRequestReview", () => {
     const thread = await continuePullRequestReviewThread(transport, ENTITY_ID, new AbortController().signal)
 
     expect(thread.hasEarlier).toBe(false)
+  })
+
+  it("opens a bounded tail with earlier history without walking its cursor forward", async () => {
+    const transport = {
+      loadThread: vi.fn(() =>
+        Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events: [threadEvent(129)],
+            hasEarlier: true,
+            hasMore: false,
+            nextCursor: ReleaseAgentThreadCursor.make(129)
+          })
+        )
+      )
+    }
+
+    const thread = await loadCompletePullRequestReviewThread(transport, ENTITY_ID, new AbortController().signal)
+
+    expect(thread.hasEarlier).toBe(true)
+    expect(transport.loadThread).toHaveBeenCalledOnce()
+    expect(transport.loadThread).toHaveBeenCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
   })
 
   it("makes a rejected lazy history boundary retryable", async () => {

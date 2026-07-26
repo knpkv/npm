@@ -508,6 +508,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       if (target === null) {
         return PullRequestReviewThreadPage.make({
           events: [],
+          hasEarlier: false,
           hasMore: false,
           nextCursor: input.before ?? input.after ?? ReleaseAgentThreadCursor.make(0)
         })
@@ -553,6 +554,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           Schema.toType(PullRequestReviewThreadPage)
         )({
           events,
+          hasEarlier: false,
           hasMore,
           nextCursor: page.nextCursor
         }).pipe(Effect.mapError(unavailable))
@@ -575,11 +577,29 @@ const makePullRequestReviews = Effect.gen(function*() {
             )
           )
         )
+        const oldestTailSequence = tail.events[0]?.eventSequence
+        const hasEarlier = tail.events.length === limit &&
+          oldestTailSequence !== undefined &&
+          (yield* mapPersistenceRead(
+              persistence.agentJobs.reviewThreadBefore({
+                workspaceId: input.workspaceId,
+                pluginConnectionId: target.pluginConnectionId,
+                subject: target.subject,
+                before: oldestTailSequence,
+                limit: AgentThreadEventPageSize.make(1)
+              }).pipe(
+                Effect.catchTag(
+                  "RecordNotFoundError",
+                  () => Effect.succeed({ events: [], nextCursor: oldestTailSequence })
+                )
+              )
+            )).events.length > 0
         const events = yield* Effect.forEach(tail.events, mapReviewThreadEvent)
         return yield* Schema.decodeUnknownEffect(
           Schema.toType(PullRequestReviewThreadPage)
         )({
           events,
+          hasEarlier,
           hasMore: false,
           nextCursor: tail.nextCursor
         }).pipe(Effect.mapError(unavailable))
@@ -621,6 +641,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         Schema.toType(PullRequestReviewThreadPage)
       )({
         events,
+        hasEarlier: false,
         hasMore,
         nextCursor: page.nextCursor
       }).pipe(Effect.mapError(unavailable))

@@ -1684,6 +1684,28 @@ describe("pull request reviews", () => {
           secondPresented.events.map(({ _tag }) => _tag),
           ["run-queued"]
         )
+        const boundedTail = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: null,
+          before: null,
+          limit: 1
+        })
+        assert.deepStrictEqual(
+          boundedTail.events.map(({ _tag }) => _tag),
+          ["run-queued"]
+        )
+        assert.isTrue(boundedTail.hasEarlier)
+        assert.isFalse(boundedTail.hasMore)
+        const completeTail = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: null,
+          before: null,
+          limit: 2
+        })
+        assert.isFalse(completeTail.hasEarlier)
+        assert.isFalse(completeTail.hasMore)
         const earlierPresented = yield* service.thread({
           workspaceId: WORKSPACE_ID,
           entityId: ENTITY_ID,
