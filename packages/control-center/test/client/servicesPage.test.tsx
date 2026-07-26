@@ -494,7 +494,13 @@ describe("ServicesPage connection tests", () => {
           providerId: "codepipeline",
           displayName: "Payments pipeline",
           isEnabled: true,
-          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          health: {
+            _tag: "degraded",
+            checkedAt: "2026-07-14T10:00:00.000Z",
+            failureClass: "outage",
+            retryAt: null,
+            safeMessage: "Pipeline history is temporarily unavailable."
+          },
           updatedAt: "2026-07-14T10:00:00.000Z"
         }
       ],
@@ -564,7 +570,10 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("payments-release")
     const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
     expect(resources).toHaveLength(2)
-    expect(resources.every(({ open }) => !open)).toBe(true)
+    const repositoryResource = resources.find(({ textContent }) => textContent?.includes("eu-west-1:payments"))
+    const pipelineResource = resources.find(({ textContent }) => textContent?.includes("payments-release"))
+    expect(repositoryResource?.open).toBe(false)
+    expect(pipelineResource?.open).toBe(true)
     expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
       expect.arrayContaining([expect.stringContaining("payments"), expect.stringContaining("payments-release")])
     )
@@ -582,9 +591,8 @@ describe("ServicesPage connection tests", () => {
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )
 
-    const repositoryResource = resources.find(({ textContent }) => textContent?.includes("eu-west-1:payments"))
-    const pipelineResource = resources.find(({ textContent }) => textContent?.includes("payments-release"))
     expect(repositoryResource).toBeDefined()
+    pipelineResource?.removeAttribute("open")
     expect(pipelineResource?.open).toBe(false)
     if (repositoryResource === undefined) throw new Error("Expected the repository resource")
     repositoryResource.open = true
