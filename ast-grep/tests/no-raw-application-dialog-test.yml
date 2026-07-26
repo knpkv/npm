@@ -7,6 +7,8 @@ valid:
   - |
     <div role="status">Review complete</div>
   - |
+    <div role="alert">Review failed</div>
+  - |
     <div role={dialogRole} aria-modal={isModal}>
       Dynamic third-party wrapper
     </div>
@@ -21,6 +23,12 @@ valid:
       Non-modal content
     </div>
 invalid:
+  - |
+    <dialog>Confirm</dialog>
+  - |
+    <dialog />
+  - |
+    <dialog open aria-label="Confirm">Confirm</dialog>
   - |
     <div aria-modal="true" role="dialog">
       Review
@@ -47,5 +55,13 @@ invalid:
     <div aria-modal>Review</div>
   - |
     <div role={`dialog`}>Review</div>
+  - |
+    <section role="alertdialog">Confirm</section>
+  - |
+    <section role={"alertdialog"}>Confirm</section>
+  - |
+    <section role={"alertdialog" as const}>Confirm</section>
+  - |
+    <section role={`alertdialog`}>Confirm</section>
   - |
     <div aria-modal={`true`}>Review</div>

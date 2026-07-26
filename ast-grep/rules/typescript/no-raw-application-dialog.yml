@@ -8,6 +8,14 @@ message: "Control Center dialogs must use the shared rly Dialog primitive"
 rule:
   any:
     - pattern:
+        context: "<dialog $$$ATTRIBUTES />"
+        selector: jsx_self_closing_element
+        strictness: ast
+    - pattern:
+        context: "<dialog $$$ATTRIBUTES>$$$CHILDREN</dialog>"
+        selector: jsx_element
+        strictness: ast
+    - pattern:
         context: '<div role="dialog" />'
         selector: jsx_attribute
         strictness: ast
@@ -21,6 +29,22 @@ rule:
         strictness: ast
     - pattern:
         context: "<div role={`dialog`} />"
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div role="alertdialog" />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div role={"alertdialog"} />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div role={"alertdialog" as const} />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: "<div role={`alertdialog`} />"
         selector: jsx_attribute
         strictness: ast
     - pattern:

@@ -506,9 +506,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     workspaceId: WorkspaceId,
     pluginConnectionId: PluginConnectionId,
     streamKey: PluginStreamKey,
-    completedAt: UtcTimestamp
+    completedAt: UtcTimestamp,
+    attemptSequence?: number
   ) {
-    const attempts = yield* openSyncAttempts(workspaceId, pluginConnectionId, streamKey)
+    const openAttempts = yield* openSyncAttempts(workspaceId, pluginConnectionId, streamKey)
+    const attempts = attemptSequence === undefined
+      ? openAttempts
+      : openAttempts.filter((attempt) => attempt.attemptSequence === attemptSequence)
     const endingRevision = yield* currentStreamRevision(workspaceId, pluginConnectionId, streamKey)
     for (const attempt of attempts) {
       yield* sql`INSERT INTO plugin_sync_attempt_completions (
@@ -527,11 +531,18 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
     pluginConnectionId: PluginConnectionId,
     providerId: typeof ProviderId.Type,
     streamKey: PluginStreamKey,
-    completedAt: UtcTimestamp
+    completedAt: UtcTimestamp,
+    attemptSequence?: number
   ) {
     return yield* database.transaction(Effect.gen(function*() {
       yield* verifyProvider(workspaceId, pluginConnectionId, providerId)
-      return yield* reconcileOpenSyncAttempts(workspaceId, pluginConnectionId, streamKey, completedAt)
+      return yield* reconcileOpenSyncAttempts(
+        workspaceId,
+        pluginConnectionId,
+        streamKey,
+        completedAt,
+        attemptSequence
+      )
     })).pipe(mapPersistenceOperation("plugin-runtime.reconcile-sync-attempts"))
   })
 

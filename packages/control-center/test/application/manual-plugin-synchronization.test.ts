@@ -1420,6 +1420,79 @@ describe("manual plugin synchronization", () => {
       })
     ))
 
+  it.effect("keeps a successor attempt open when an expired owner releases", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+      const providerCalls = yield* Ref.make(0)
+      const firstProviderEntered = yield* Deferred.make<void>()
+      const secondProviderEntered = yield* Deferred.make<void>()
+      const releaseFirstProvider = yield* Deferred.make<void>()
+      const releaseSecondProvider = yield* Deferred.make<void>()
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.fromEffect(
+            Ref.getAndUpdate(providerCalls, (current) => current + 1).pipe(
+              Effect.flatMap((call) =>
+                call === 0
+                  ? Deferred.succeed(firstProviderEntered, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseFirstProvider))
+                  )
+                  : Deferred.succeed(secondProviderEntered, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseSecondProvider))
+                  )
+              ),
+              Effect.as(pageFor(fixture))
+            )
+          )
+      }])
+      const firstOwner = yield* makeManualPluginSynchronization(connections, drivers)
+      const successor = yield* makeManualPluginSynchronization(connections, drivers)
+      const input = {
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: fixture.pluginConnectionId
+      }
+
+      const firstFiber = yield* firstOwner.synchronize(input).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(firstProviderEntered)
+      yield* TestClock.adjust("16 minutes")
+      const successorFiber = yield* successor.synchronize(input).pipe(
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(secondProviderEntered)
+
+      const interruptFiber = yield* Fiber.interrupt(firstFiber).pipe(Effect.forkChild())
+      yield* Effect.yieldNow
+      yield* Deferred.succeed(releaseFirstProvider, undefined)
+      yield* Fiber.join(interruptFiber)
+
+      const attemptsAfterOldRelease = yield* persistence.pluginRuntime.listSyncAttempts(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.lengthOf(attemptsAfterOldRelease, 2)
+      assert.strictEqual(attemptsAfterOldRelease[0]?.outcome, "interrupted")
+      assert.isNull(attemptsAfterOldRelease[1]?.outcome)
+
+      yield* Deferred.succeed(releaseSecondProvider, undefined)
+      const completed = yield* Fiber.join(successorFiber)
+      assert.strictEqual(completed.result, "synchronized")
+      const completedAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        streamKey
+      )
+      assert.strictEqual(completedAttempts[1]?.outcome, "synchronized")
+      assert.strictEqual(yield* Ref.get(providerCalls), 2)
+    })))
+
   it.effect("keeps cross-instance state reads observational while rejecting cross-instance overlap", () =>
     withApplication(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))

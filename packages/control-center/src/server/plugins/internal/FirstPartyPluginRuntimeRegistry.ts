@@ -783,6 +783,11 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   }
 })
 
+const MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH = 200
+
+const boundedConfluenceUserName = (value: string): string =>
+  value.slice(0, MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH).trimEnd()
+
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
   // Pre-stability persistence is intentionally breaking: old Jira connections
   // have neither a verified cloud ID nor an immutable project scope. Recreate
@@ -915,7 +920,15 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   )
   const configurationInput = {
     ...storedConfigurationInput,
-    ...(authentication.verifiedUser === null ? {} : { oauthVerifiedUser: authentication.verifiedUser })
+    ...(authentication.verifiedUser === null
+      ? {}
+      : {
+        oauthVerifiedUser: {
+          ...authentication.verifiedUser,
+          displayName: boundedConfluenceUserName(authentication.verifiedUser.displayName),
+          publicName: boundedConfluenceUserName(authentication.verifiedUser.publicName)
+        }
+      })
   }
   const apiClient = ConfluenceApiClient.layer.pipe(
     Layer.provide(Layer.succeed(ConfluenceApiConfig, {

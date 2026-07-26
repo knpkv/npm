@@ -275,22 +275,31 @@ export const makeManualPluginSynchronization = Effect.fn(
     return { ...input, providerId: connection.providerId, driver: driver.value, streamKey }
   })
 
-  const releaseSynchronization = Effect.fn(
-    "ManualPluginSynchronization.releaseSynchronization"
-  )(function*(claim: SynchronizationClaim) {
+  const releaseSynchronizationAttempt = Effect.fn(
+    "ManualPluginSynchronization.releaseSynchronizationAttempt"
+  )(function*(input: {
+    readonly attempt: PluginSyncAttemptRecord
+    readonly claim: SynchronizationClaim
+  }) {
     const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
     yield* persistence.pluginRuntime.reconcileSyncAttempts(
-      claim.workspaceId,
-      claim.pluginConnectionId,
-      claim.providerId,
-      claim.streamKey,
-      completedAt
+      input.claim.workspaceId,
+      input.claim.pluginConnectionId,
+      input.claim.providerId,
+      input.claim.streamKey,
+      completedAt,
+      input.attempt.attemptSequence
     ).pipe(
       Effect.ignore({
         log: "Error",
         message: "Could not reconcile an incomplete manual synchronization attempt"
       })
     )
+  })
+
+  const releaseSynchronizationClaim = Effect.fn(
+    "ManualPluginSynchronization.releaseSynchronizationClaim"
+  )(function*(claim: SynchronizationClaim) {
     yield* persistence.pluginRuntime.releaseSyncClaim(
       claim.workspaceId,
       claim.pluginConnectionId,
@@ -453,7 +462,8 @@ export const makeManualPluginSynchronization = Effect.fn(
       readonly workspaceId: WorkspaceId
       readonly pluginConnectionId: PluginConnectionId
     },
-    bound: BoundManualSync
+    bound: BoundManualSync,
+    attempt: PluginSyncAttemptRecord
   ) {
     const captured = yield* capturePluginSynchronizationAuthority(
       persistence,
@@ -462,14 +472,6 @@ export const makeManualPluginSynchronization = Effect.fn(
     ).pipe(Effect.mapError(mapPersistenceRead))
     const { authority, connection: connectionRecord } = captured
     if (!connectionRecord.isEnabled) return yield* new ApplicationInvalidRequest()
-    const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
-    const attempt = yield* persistence.pluginRuntime.beginSyncAttempt(
-      bound.workspaceId,
-      bound.pluginConnectionId,
-      bound.providerId,
-      bound.streamKey,
-      startedAt
-    ).pipe(Effect.mapError(() => unavailable()))
     const synchronized = yield* Effect.result(Effect.scoped(
       Effect.flatMap(
         connections.contextEffect({
@@ -538,8 +540,22 @@ export const makeManualPluginSynchronization = Effect.fn(
     const bound = yield* bind(input)
     return yield* Effect.acquireUseRelease(
       claimSynchronization(bound),
-      () => synchronizeBound(input, bound),
-      releaseSynchronization
+      (claim) =>
+        Effect.acquireUseRelease(
+          Effect.gen(function*() {
+            const startedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+            return yield* persistence.pluginRuntime.beginSyncAttempt(
+              bound.workspaceId,
+              bound.pluginConnectionId,
+              bound.providerId,
+              bound.streamKey,
+              startedAt
+            ).pipe(Effect.mapError(() => unavailable()))
+          }),
+          (attempt) => synchronizeBound(input, bound, attempt),
+          (attempt) => releaseSynchronizationAttempt({ attempt, claim })
+        ),
+      releaseSynchronizationClaim
     ).pipe(
       Effect.tapCause((cause) =>
         Effect.logError("Manual plugin synchronization orchestration failed", cause).pipe(
