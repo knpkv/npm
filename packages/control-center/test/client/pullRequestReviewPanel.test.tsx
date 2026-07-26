@@ -25,9 +25,16 @@ import {
 } from "../../src/api/agent.js"
 import { PullRequestReviewPanel as ReviewPanel } from "../../src/client/entities/PullRequestReviewPanel.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
-import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId
+} from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewSuggestionRevisionSequence } from "../../src/domain/prReviewRevision.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -40,6 +47,7 @@ const PullRequestReviewPanel = (props: ComponentProps<typeof ReviewPanel>): Reac
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000701")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
+const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"9".repeat(64)}`)
 const FILE_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"6".repeat(64)}`)
 const ANCHOR_PATH = PrReviewPath.make("src/authorization.ts")
 const ANCHOR_LINE = 42
@@ -66,10 +74,13 @@ const FINAL_CONTENT = ReviewSuggestionPublicationContent.make(`${EDITABLE_CONTEN
 const PREVIEW = new ReviewSuggestionPublicationPreview({
   jobId: JOB_ID,
   suggestionId: SUGGESTION_ID,
+  revisionId: REVIEW_REVISION_ID,
   subject: SUBJECT,
   suggestionRevision: {
     jobId: JOB_ID,
     suggestionId: SUGGESTION_ID,
+    revisionId: REVIEW_REVISION_ID,
+    sequence: PrReviewSuggestionRevisionSequence.make(1),
     reviewedHead: SUBJECT.headRevision
   },
   anchor: {
@@ -101,6 +112,7 @@ const PUBLICATION = new PublishedReviewComment({
   publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000704"),
   jobId: JOB_ID,
   suggestionId: SUGGESTION_ID,
+  revisionId: REVIEW_REVISION_ID,
   subject: SUBJECT,
   suggestionRevision: PREVIEW.suggestionRevision,
   anchor: PREVIEW.anchor,

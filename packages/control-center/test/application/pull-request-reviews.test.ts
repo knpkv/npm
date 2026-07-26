@@ -30,6 +30,7 @@ import {
   JobId,
   PersonId,
   PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   SessionId,
@@ -41,7 +42,15 @@ import {
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
-import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPageSize } from "../../src/domain/prReviewRevision.js"
+import {
+  PrReviewSuggestionAgentAuthor,
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevision,
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence,
+  PrReviewSuggestionValidated
+} from "../../src/domain/prReviewRevision.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
@@ -97,6 +106,9 @@ const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
   "01890f6f-6d6a-7cc0-98d2-000000000409"
 )
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"3".repeat(64)}`)
+const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(
+  `sha256:${"4".repeat(64)}`
+)
 const MODEL = AgentModelId.make("review-model")
 const PROVIDER_ID = DurableAgentProviderId.make("openai-compatible")
 const REVIEW_PROFILE: ReviewAgentProfile = {
@@ -434,12 +446,70 @@ const withService = <Success, Failure>(
       const publicationFailure = yield* Ref.make<
         null | ReviewSuggestionPublicationGatewayError["reason"]
       >(null)
+      const resolveLatestReview = latestReviewOverride ??
+        (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
         ...persistence,
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: latestReviewOverride ?? (() => Effect.succeed(latestReview)),
+          latestReview: resolveLatestReview,
+          reviewSuggestionRevisions: (input) =>
+            Effect.gen(function*() {
+              const selected = yield* resolveLatestReview({
+                workspaceId: input.workspaceId,
+                pluginConnectionId: PLUGIN_CONNECTION_ID,
+                subject: reviewReport.subject,
+                jobId: input.jobId
+              })
+              if (
+                Option.isNone(selected) ||
+                selected.value.report === null ||
+                selected.value.terminalAt === null
+              ) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: input.workspaceId,
+                  recordKind: "agent-review-suggestion",
+                  recordKey: input.suggestionId
+                })
+              }
+              const suggestion = selected.value.report.suggestions.find(
+                ({ suggestionId }) => suggestionId === input.suggestionId
+              )
+              if (suggestion === undefined) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: input.workspaceId,
+                  recordKind: "agent-review-suggestion",
+                  recordKey: input.suggestionId
+                })
+              }
+              const revision = new PrReviewSuggestionRevision({
+                revisionId: REVIEW_REVISION_ID,
+                sequence: PrReviewSuggestionRevisionSequence.make(1),
+                predecessorRevisionId: null,
+                sourceJobId: selected.value.jobId,
+                subject: selected.value.report.subject,
+                suggestion,
+                validation: new PrReviewSuggestionValidated({
+                  reviewedHead: selected.value.report.subject.headRevision,
+                  validatingJobId: selected.value.jobId,
+                  sourceRevisionId: REVIEW_REVISION_ID
+                }),
+                author: new PrReviewSuggestionAgentAuthor({
+                  jobId: selected.value.jobId,
+                  providerId: AgentProviderId.make(selected.value.providerId),
+                  model: selected.value.model,
+                  runtimeMetadata: null
+                }),
+                createdAt: selected.value.terminalAt
+              })
+              return PrReviewSuggestionRevisionPage.make({
+                current: revision,
+                revisions: [revision],
+                hasMore: false,
+                nextBeforeSequence: null
+              })
+            }),
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
@@ -569,12 +639,14 @@ describe("pull request reviews", () => {
       },
       expectedRevision: "source-7",
       payload: { content: "Publish this review suggestion." },
-      evidenceIds: [`pr-review:${REVIEW_JOB_ID}:${SUGGESTION_ID}`]
+      evidenceIds: [
+        `pr-review:${REVIEW_JOB_ID}:${SUGGESTION_ID}:${REVIEW_REVISION_ID}`
+      ]
     })
     const differentReview = Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
       ...request,
       evidenceIds: [
-        `pr-review:01890f6f-6d6a-7cc0-98d2-000000000099:${SUGGESTION_ID}`
+        `pr-review:01890f6f-6d6a-7cc0-98d2-000000000099:${SUGGESTION_ID}:${REVIEW_REVISION_ID}`
       ]
     })
     const exactReplay = Schema.decodeUnknownSync(ProposePluginActionRequestV1)(
@@ -624,6 +696,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
           yield* Ref.set(
@@ -639,6 +712,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: preview.finalContent,
               authorityBinding: preview.authorityBinding
             },
@@ -674,6 +748,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -898,6 +973,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -930,6 +1006,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: editedContent,
               authorityBinding: preview.authorityBinding
             },
@@ -1007,6 +1084,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const differentContent = ReviewSuggestionPublicationContent.make(
@@ -1018,6 +1096,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1030,6 +1109,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1041,6 +1121,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: differentContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1102,6 +1183,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent,
                 authorityBinding: AUTHORITY_BINDING
               },
@@ -1116,6 +1198,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: ReviewSuggestionPublicationContent.make(
                   `Changed after publication.\n\n${footer}`
                 ),
@@ -1169,6 +1252,7 @@ describe("pull request reviews", () => {
                 entityId: ENTITY_ID,
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 publishingOperator: OPERATOR_ID
               })
               const editedContent = ReviewSuggestionPublicationContent.make(
@@ -1181,6 +1265,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1195,6 +1280,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: editedContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1214,6 +1300,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1246,6 +1333,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
           yield* Ref.set(publicationFailure, "publication-conflict")
@@ -1255,6 +1343,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: preview.finalContent,
               authorityBinding: preview.authorityBinding
             },
@@ -1295,6 +1384,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             assert.deepStrictEqual(preview.anchor, anchor)
@@ -1305,6 +1395,7 @@ describe("pull request reviews", () => {
               request: {
                 jobId: REVIEW_JOB_ID,
                 suggestionId: SUGGESTION_ID,
+                revisionId: REVIEW_REVISION_ID,
                 finalContent: preview.finalContent,
                 authorityBinding: preview.authorityBinding
               },
@@ -1376,6 +1467,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const publish = () =>
@@ -1385,6 +1477,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1462,6 +1555,7 @@ describe("pull request reviews", () => {
               entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               publishingOperator: OPERATOR_ID
             })
             const publish = () =>
@@ -1471,6 +1565,7 @@ describe("pull request reviews", () => {
                 request: {
                   jobId: REVIEW_JOB_ID,
                   suggestionId: SUGGESTION_ID,
+                  revisionId: REVIEW_REVISION_ID,
                   finalContent: preview.finalContent,
                   authorityBinding: preview.authorityBinding
                 },
@@ -1503,6 +1598,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1538,6 +1634,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1567,6 +1664,7 @@ describe("pull request reviews", () => {
             entityId: ENTITY_ID,
             jobId: REVIEW_JOB_ID,
             suggestionId: SUGGESTION_ID,
+            revisionId: REVIEW_REVISION_ID,
             publishingOperator: OPERATOR_ID
           })
 
@@ -1605,6 +1703,7 @@ describe("pull request reviews", () => {
             request: {
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
+              revisionId: REVIEW_REVISION_ID,
               finalContent: ReviewSuggestionPublicationContent.make("Post this comment."),
               authorityBinding: AUTHORITY_BINDING
             },

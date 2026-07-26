@@ -500,7 +500,8 @@ const PullRequestReviewSuggestionPublishedEvent = Schema.TaggedStruct(
   "suggestion-published",
   {
     ...pullRequestReviewThreadEventFields,
-    suggestionId: PrReviewSuggestionId
+    suggestionId: PrReviewSuggestionId,
+    revisionId: PrReviewSuggestionRevisionId
   }
 )
 
@@ -608,7 +609,8 @@ export type ReviewSuggestionPublicationContent = typeof ReviewSuggestionPublicat
 /** Exact completed review suggestion selected for publication. */
 export const ReviewSuggestionPublicationSelection = Schema.Struct({
   jobId: JobId,
-  suggestionId: PrReviewSuggestionId
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId
 })
 
 /** Decoded review-suggestion publication selection. */
@@ -641,6 +643,8 @@ export class ReviewSuggestionPublicationPreview
     suggestionRevision: Schema.Struct({
       jobId: JobId,
       suggestionId: PrReviewSuggestionId,
+      revisionId: PrReviewSuggestionRevisionId,
+      sequence: PrReviewSuggestionRevisionSequence,
       reviewedHead: PrReviewSubject.fields.headRevision
     }),
     anchor: PrReviewSuggestion.fields.anchor,
@@ -885,12 +889,13 @@ const editReviewSuggestion = HttpApiEndpoint.post(
 
 const previewReviewSuggestionPublication = HttpApiEndpoint.get(
   "previewReviewSuggestionPublication",
-  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions/:revisionId/publication-preview",
   {
     params: Schema.Struct({
       entityId: EntityId,
       jobId: JobId,
-      suggestionId: PrReviewSuggestionId
+      suggestionId: PrReviewSuggestionId,
+      revisionId: PrReviewSuggestionRevisionId
     }),
     success: ReviewSuggestionPublicationPreview,
     error: [

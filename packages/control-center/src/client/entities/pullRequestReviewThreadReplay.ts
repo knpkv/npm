@@ -12,6 +12,7 @@ import type {
 } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
+import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 import type {
   PullRequestReviewControllerState,
@@ -181,8 +182,16 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
+        const revisions = yield* client.agent.reviewSuggestionRevisions({
+          params: { entityId, ...selection },
+          query: { limit: PrReviewSuggestionRevisionPageSize.make(1) }
+        })
         return yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, ...selection }
+          params: {
+            entityId,
+            ...selection,
+            revisionId: revisions.current.revisionId
+          }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }

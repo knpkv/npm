@@ -28,6 +28,7 @@ import {
   JobId,
   PersonId,
   PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
@@ -1750,6 +1751,9 @@ describe("first-party plugin runtime", () => {
           publicationGateway.publish({
             target: publicationTarget,
             jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000088"),
+            revisionId: PrReviewSuggestionRevisionId.make(
+              `sha256:${"4".repeat(64)}`
+            ),
             suggestion,
             finalContent: ReviewSuggestionPublicationContent.make(
               "Revalidate authority before committing this review comment."

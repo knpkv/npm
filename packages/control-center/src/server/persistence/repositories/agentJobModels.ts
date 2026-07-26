@@ -276,6 +276,7 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
   reservationId: ReviewSuggestionPublicationReservationId,
   reservedAt: UtcTimestamp
@@ -303,6 +304,7 @@ export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
   reservationId: ReviewSuggestionPublicationReservationId
 })
@@ -313,6 +315,7 @@ export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
   reservationId: ReviewSuggestionPublicationReservationId,
   publicationId: GovernedActionId,

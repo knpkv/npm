@@ -39,8 +39,15 @@ import {
   type PullRequestReviewTransport,
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
-import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
+import {
+  EntityId,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId
+} from "../../src/domain/identifiers.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewSuggestionRevisionSequence } from "../../src/domain/prReviewRevision.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -53,6 +60,8 @@ const HEAD_A = "a".repeat(40)
 const HEAD_B = "b".repeat(40)
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000602")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
+const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(`sha256:${"9".repeat(64)}`)
+const REVIEW_REVISION_SEQUENCE = PrReviewSuggestionRevisionSequence.make(1)
 const WRONG_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"8".repeat(64)}`)
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000603")
 const REVIEW_PROFILE: ReviewAgentProfile = {
@@ -186,6 +195,7 @@ const makePublicationFixture = (reviewedHead: string) => {
   const preview = new ReviewSuggestionPublicationPreview({
     jobId: JOB_ID,
     suggestionId: SUGGESTION_ID,
+    revisionId: REVIEW_REVISION_ID,
     subject: PrReviewSubject.make({
       providerId: "codecommit",
       repository: "control-center",
@@ -196,6 +206,8 @@ const makePublicationFixture = (reviewedHead: string) => {
     suggestionRevision: {
       jobId: JOB_ID,
       suggestionId: SUGGESTION_ID,
+      revisionId: REVIEW_REVISION_ID,
+      sequence: REVIEW_REVISION_SEQUENCE,
       reviewedHead: HEAD_A
     },
     anchor: {
@@ -227,6 +239,7 @@ const makePublicationFixture = (reviewedHead: string) => {
     publicationId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000604"),
     jobId: JOB_ID,
     suggestionId: SUGGESTION_ID,
+    revisionId: REVIEW_REVISION_ID,
     subject: preview.subject,
     suggestionRevision: {
       ...preview.suggestionRevision,
@@ -1313,7 +1326,11 @@ describe("usePullRequestReview", () => {
     await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
     expect(transport.publishSuggestion).toHaveBeenCalledWith(
       ENTITY_ID,
-      { jobId: JOB_ID, suggestionId: SUGGESTION_ID },
+      {
+        jobId: JOB_ID,
+        suggestionId: SUGGESTION_ID,
+        revisionId: REVIEW_REVISION_ID
+      },
       ReviewSuggestionPublicationContent.make("Confirmed content."),
       preview.authorityBinding,
       expect.any(AbortSignal)
@@ -1392,7 +1409,8 @@ describe("usePullRequestReview", () => {
       eventSequence: ReleaseAgentThreadCursor.make(1),
       jobId: JOB_ID,
       occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:05:00.000Z"),
-      suggestionId: SUGGESTION_ID
+      suggestionId: SUGGESTION_ID,
+      revisionId: REVIEW_REVISION_ID
     }
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
@@ -1436,7 +1454,8 @@ describe("usePullRequestReview", () => {
       eventSequence: ReleaseAgentThreadCursor.make(1),
       jobId: JOB_ID,
       occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:05:00.000Z"),
-      suggestionId: SUGGESTION_ID
+      suggestionId: SUGGESTION_ID,
+      revisionId: REVIEW_REVISION_ID
     }
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
@@ -1492,7 +1511,8 @@ describe("usePullRequestReview", () => {
       eventSequence: ReleaseAgentThreadCursor.make(1),
       jobId: JOB_ID,
       occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:05:00.000Z"),
-      suggestionId: SUGGESTION_ID
+      suggestionId: SUGGESTION_ID,
+      revisionId: REVIEW_REVISION_ID
     }
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),

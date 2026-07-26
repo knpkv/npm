@@ -14,7 +14,7 @@ import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, lazy, Suspense, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
 
-import type { DurableAgentPrompt, ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import type { DurableAgentPrompt } from "../../api/agent.js"
 import type { EntityId as EntityIdType, WorkspaceId as WorkspaceIdType } from "../../domain/identifiers.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import {
@@ -36,7 +36,8 @@ import { WorkspacePipelineExecutionDetails } from "./WorkspacePipelineExecutionD
 import {
   usePullRequestReview,
   type PullRequestReviewControllerState,
-  type PullRequestReviewPublicationState
+  type PullRequestReviewPublicationState,
+  type ReviewSuggestionPublicationTarget
 } from "./usePullRequestReview.js"
 import { useWorkspaceEntity, type WorkspaceEntityState } from "./useWorkspaceEntity.js"
 
@@ -278,7 +279,7 @@ const EntityContent = ({
   readonly reviewPublication: PullRequestReviewPublicationState
   readonly reviewPublicationCancel: () => void
   readonly reviewLoadEarlier: () => void
-  readonly reviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly reviewPublicationPreview: (selection: ReviewSuggestionPublicationTarget) => void
   readonly reviewRetry: () => void
   readonly reviewSuggestionPublish: (finalContent: string) => void
   readonly reviewStart: (prompt?: DurableAgentPrompt) => void
@@ -345,7 +346,7 @@ interface WorkspaceEntityViewProps {
   readonly reviewLoadEarlier?: () => void
   readonly reviewPublication?: PullRequestReviewPublicationState
   readonly reviewPublicationCancel?: () => void
-  readonly reviewPublicationPreview?: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly reviewPublicationPreview?: (selection: ReviewSuggestionPublicationTarget) => void
   readonly reviewRetry?: () => void
   readonly reviewSuggestionPublish?: (finalContent: string) => void
   readonly reviewStart?: (prompt?: DurableAgentPrompt) => void

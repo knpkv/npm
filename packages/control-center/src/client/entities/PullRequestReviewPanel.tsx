@@ -4,11 +4,14 @@ import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, use
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   type DurableAgentPrompt,
-  type PullRequestReviewThreadEvent,
-  type ReviewSuggestionPublicationSelection
+  type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
 import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
-import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
+import type {
+  PullRequestReviewControllerState,
+  PullRequestReviewPublicationState,
+  ReviewSuggestionPublicationTarget
+} from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const unavailableMessage = (
@@ -97,7 +100,7 @@ export const PullRequestReviewPanel = ({
   readonly canEnqueue: boolean
   readonly onCancelPublication: () => void
   readonly onLoadEarlier?: () => void
-  readonly onPreviewPublication: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
   readonly onStart: (prompt?: DurableAgentPrompt) => void

@@ -33,6 +33,7 @@ import {
   type EntityId,
   JobId,
   type PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   type ReleaseId,
   ReviewSuggestionPublicationReservationId,
   type WorkspaceId
@@ -96,6 +97,7 @@ const ReviewThreadUserMessagePayload = Schema.Struct({ prompt: AgentJobPrompt })
 const ReviewThreadProviderFailurePayload = Schema.Struct({ error: AgentProviderError })
 const ReviewThreadPublicationPayload = Schema.Struct({
   suggestionId: Schema.String,
+  revisionId: Schema.String,
   publicationId: Schema.String
 })
 const ReviewThreadRevisionPayload = Schema.Struct({
@@ -226,7 +228,10 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
         ...common,
         suggestionId: yield* Schema.decodeUnknownEffect(
           PrReviewSuggestionId
-        )(payload.suggestionId).pipe(Effect.mapError(unavailable))
+        )(payload.suggestionId).pipe(Effect.mapError(unavailable)),
+        revisionId: yield* Schema.decodeUnknownEffect(
+          PrReviewSuggestionRevisionId
+        )(payload.revisionId).pipe(Effect.mapError(unavailable))
       }
     }
     case "job-completed": {
@@ -436,6 +441,38 @@ const makePullRequestReviews = Effect.gen(function*() {
     return { latest: review, suggestion }
   })
 
+  const currentSuggestionRevision = Effect.fn(
+    "PullRequestReviews.currentSuggestionRevision"
+  )(function*(
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget,
+    jobId: JobId,
+    suggestionId: typeof PrReviewSuggestionId.Type
+  ) {
+    const selected = yield* selectedSuggestion(
+      workspaceId,
+      target,
+      jobId,
+      suggestionId
+    )
+    const current = (yield* mapPersistenceRead(
+      persistence.agentJobs.reviewSuggestionRevisions({
+        workspaceId,
+        jobId,
+        suggestionId,
+        beforeSequence: null,
+        limit: PrReviewSuggestionRevisionPageSize.make(1)
+      })
+    )).current
+    if (
+      current.sourceJobId !== jobId ||
+      !PrReviewSubjectEquivalence(current.subject, target.subject)
+    ) {
+      return yield* new ApplicationInvalidRequest()
+    }
+    return { latest: selected.latest, revision: current }
+  })
+
   const revisionHistory = Effect.fn(
     "PullRequestReviews.revisionHistory"
   )(function*(
@@ -451,7 +488,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     | ApplicationResourceNotFound
     | ApplicationServiceUnavailable
   > {
-    yield* selectedSuggestion(
+    yield* currentSuggestionRevision(
       workspaceId,
       target,
       jobId,
@@ -466,12 +503,6 @@ const makePullRequestReviews = Effect.gen(function*() {
         limit
       })
     )
-    if (
-      page.current.sourceJobId !== jobId ||
-      !PrReviewSubjectEquivalence(page.current.subject, target.subject)
-    ) {
-      return yield* new ApplicationInvalidRequest()
-    }
     return page
   })
 
@@ -858,13 +889,17 @@ const makePullRequestReviews = Effect.gen(function*() {
     previewPublication: Effect.fn("PullRequestReviews.previewPublication")(function*(input) {
       const target = yield* inspectTarget(input)
       if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
-      const selected = yield* selectedSuggestion(
+      const selected = yield* currentSuggestionRevision(
         input.workspaceId,
         target,
         input.jobId,
         input.suggestionId
       )
-      if (selected.suggestion.state !== "draft") {
+      if (
+        selected.revision.revisionId !== input.revisionId ||
+        selected.revision.suggestion.state !== "draft" ||
+        selected.revision.validation._tag !== "validated"
+      ) {
         return yield* new ApplicationInvalidRequest()
       }
       const authority = yield* publications.identity(
@@ -877,25 +912,28 @@ const makePullRequestReviews = Effect.gen(function*() {
       )
       const editableContentMaximumLength = MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH - footer.length - 2
       const editableContent = yield* defaultPublicationContent(
-        selected.suggestion,
+        selected.revision.suggestion,
         editableContentMaximumLength
       )
       const finalContent = yield* publicationContent(editableContent, footer)
       return new ReviewSuggestionPublicationPreview({
         jobId: input.jobId,
-        suggestionId: selected.suggestion.suggestionId,
+        suggestionId: selected.revision.suggestion.suggestionId,
+        revisionId: selected.revision.revisionId,
         subject: target.subject,
         suggestionRevision: {
           jobId: input.jobId,
-          suggestionId: selected.suggestion.suggestionId,
+          suggestionId: selected.revision.suggestion.suggestionId,
+          revisionId: selected.revision.revisionId,
+          sequence: selected.revision.sequence,
           reviewedHead: target.subject.headRevision
         },
-        anchor: selected.suggestion.anchor,
+        anchor: selected.revision.suggestion.anchor,
         editableContent,
         editableContentMaximumLength,
         finalContent,
         publicationFooter: footer,
-        replacement: selected.suggestion.replacement?.unifiedDiff ?? null,
+        replacement: selected.revision.suggestion.replacement?.unifiedDiff ?? null,
         connectedIdentity: authority.connectedIdentity,
         authorityBinding: authority.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
@@ -906,15 +944,19 @@ const makePullRequestReviews = Effect.gen(function*() {
       if (input.session.actor._tag !== "human") return yield* new ApplicationInvalidRequest()
       const target = yield* inspectTarget(input)
       if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
-      const selected = yield* selectedSuggestion(
+      const selected = yield* currentSuggestionRevision(
         input.workspaceId,
         target,
         input.request.jobId,
         input.request.suggestionId
       )
       if (
-        selected.suggestion.state !== "draft" &&
-        selected.suggestion.state !== "published"
+        selected.revision.revisionId !== input.request.revisionId ||
+        selected.revision.validation._tag !== "validated" ||
+        (
+          selected.revision.suggestion.state !== "draft" &&
+          selected.revision.suggestion.state !== "published"
+        )
       ) {
         return yield* new ApplicationInvalidRequest()
       }
@@ -935,7 +977,8 @@ const makePullRequestReviews = Effect.gen(function*() {
       const reservation = yield* persistence.agentJobs.reserveReviewSuggestionPublication({
         workspaceId: input.workspaceId,
         jobId: input.request.jobId,
-        suggestionId: selected.suggestion.suggestionId,
+        suggestionId: selected.revision.suggestion.suggestionId,
+        revisionId: selected.revision.revisionId,
         contentDigest,
         reservationId: requestedReservationId,
         reservedAt
@@ -951,7 +994,8 @@ const makePullRequestReviews = Effect.gen(function*() {
       const publicationCommand = {
         target: publicationTarget(input.workspaceId, target),
         jobId: input.request.jobId,
-        suggestion: selected.suggestion,
+        revisionId: selected.revision.revisionId,
+        suggestion: selected.revision.suggestion,
         finalContent: publishedContent,
         authorityBinding: input.request.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
@@ -977,7 +1021,8 @@ const makePullRequestReviews = Effect.gen(function*() {
           yield* persistence.agentJobs.releaseReviewSuggestionPublication({
             workspaceId: input.workspaceId,
             jobId: input.request.jobId,
-            suggestionId: selected.suggestion.suggestionId,
+            suggestionId: selected.revision.suggestion.suggestionId,
+            revisionId: selected.revision.revisionId,
             contentDigest,
             reservationId
           }).pipe(
@@ -992,7 +1037,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         yield* persistence.agentJobs.recordReviewSuggestionPublication({
           workspaceId: input.workspaceId,
           jobId: input.request.jobId,
-          suggestionId: selected.suggestion.suggestionId,
+          suggestionId: selected.revision.suggestion.suggestionId,
+          revisionId: selected.revision.revisionId,
           contentDigest,
           reservationId,
           publicationId: result.publicationId,
@@ -1012,7 +1058,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         yield* persistence.agentJobs.recordReviewSuggestionPublication({
           workspaceId: input.workspaceId,
           jobId: input.request.jobId,
-          suggestionId: selected.suggestion.suggestionId,
+          suggestionId: selected.revision.suggestion.suggestionId,
+          revisionId: selected.revision.revisionId,
           contentDigest,
           reservationId,
           publicationId: result.publicationId,
@@ -1031,14 +1078,17 @@ const makePullRequestReviews = Effect.gen(function*() {
       return new PublishedReviewComment({
         publicationId: result.publicationId,
         jobId: input.request.jobId,
-        suggestionId: selected.suggestion.suggestionId,
+        suggestionId: selected.revision.suggestion.suggestionId,
+        revisionId: selected.revision.revisionId,
         subject: target.subject,
         suggestionRevision: {
           jobId: input.request.jobId,
-          suggestionId: selected.suggestion.suggestionId,
+          suggestionId: selected.revision.suggestion.suggestionId,
+          revisionId: selected.revision.revisionId,
+          sequence: selected.revision.sequence,
           reviewedHead: target.subject.headRevision
         },
-        anchor: selected.suggestion.anchor,
+        anchor: selected.revision.suggestion.anchor,
         content: publishedContent,
         connectedIdentity: result.connectedIdentity,
         proposingAgent: selected.latest.reviewProfile,

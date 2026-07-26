@@ -278,6 +278,18 @@ const completeReview = Effect.gen(function*() {
   })
 })
 
+const currentSuggestionRevision = (suggestionId: typeof report.suggestions[number]["suggestionId"]) =>
+  Effect.gen(function*() {
+    const jobs = yield* AgentJobRepository
+    return (yield* jobs.reviewSuggestionRevisions({
+      workspaceId: WORKSPACE_ID,
+      jobId: JOB_ID,
+      suggestionId,
+      beforeSequence: null,
+      limit: PrReviewSuggestionRevisionPageSize.make(1)
+    })).current
+  })
+
 const withRepositoryConfig = <Success, Failure>(
   config: {
     readonly blobRoot: string
@@ -1080,11 +1092,13 @@ describe("agent job review results", () => {
         })
         const suggestionId = report.suggestions[0]?.suggestionId
         if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const revision = yield* currentSuggestionRevision(suggestionId)
 
         yield* jobs.reserveReviewSuggestionPublication({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           reservedAt: T3
@@ -1093,6 +1107,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
@@ -1114,6 +1129,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
@@ -1178,10 +1194,12 @@ describe("agent job review results", () => {
         })
         const suggestionId = bounded.suggestions[0]?.suggestionId
         if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const revision = yield* currentSuggestionRevision(suggestionId)
         yield* jobs.reserveReviewSuggestionPublication({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           reservedAt: T3
@@ -1190,6 +1208,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
@@ -1222,11 +1241,13 @@ describe("agent job review results", () => {
         })
         const suggestionId = report.suggestions[0]?.suggestionId
         if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const revision = yield* currentSuggestionRevision(suggestionId)
         const reserve = (contentDigest: typeof ReviewSuggestionPublicationDigest.Type) =>
           jobs.reserveReviewSuggestionPublication({
             workspaceId: WORKSPACE_ID,
             jobId: JOB_ID,
             suggestionId,
+            revisionId: revision.revisionId,
             contentDigest,
             reservationId: RESERVATION_ID,
             reservedAt: T3
@@ -1253,6 +1274,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: winningDigest,
           reservationId: RESERVATION_ID
         })
@@ -1265,6 +1287,7 @@ describe("agent job review results", () => {
             workspaceId: WORKSPACE_ID,
             jobId: JOB_ID,
             suggestionId,
+            revisionId: revision.revisionId,
             contentDigest: retryDigest,
             reservationId: RESERVATION_ID,
             publicationId: PUBLICATION_ID,
@@ -1313,11 +1336,13 @@ describe("agent job review results", () => {
         })
         const suggestionId = report.suggestions[0]?.suggestionId
         if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const revision = yield* currentSuggestionRevision(suggestionId)
         const reserveAt = (reservedAt: typeof UtcTimestamp.Type) =>
           jobs.reserveReviewSuggestionPublication({
             workspaceId: WORKSPACE_ID,
             jobId: JOB_ID,
             suggestionId,
+            revisionId: revision.revisionId,
             contentDigest: CONTENT_DIGEST,
             reservationId: reservedAt === T5 ? TAKEOVER_RESERVATION_ID : RESERVATION_ID,
             reservedAt
@@ -1330,6 +1355,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: RESERVATION_ID,
           publicationId: PUBLICATION_ID,
@@ -1341,6 +1367,7 @@ describe("agent job review results", () => {
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId,
+          revisionId: revision.revisionId,
           contentDigest: CONTENT_DIGEST,
           reservationId: TAKEOVER_RESERVATION_ID,
           publicationId: PUBLICATION_ID,

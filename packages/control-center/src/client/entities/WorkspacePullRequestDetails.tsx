@@ -2,9 +2,13 @@ import { Person, type RlyPerson } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import { type ReactElement, type ReactNode, lazy, Suspense } from "react"
 
-import type { DurableAgentPrompt, ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import type { DurableAgentPrompt } from "../../api/agent.js"
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
-import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
+import type {
+  PullRequestReviewControllerState,
+  PullRequestReviewPublicationState,
+  ReviewSuggestionPublicationTarget
+} from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
@@ -67,7 +71,7 @@ export const WorkspacePullRequestDetails = ({
   readonly onSessionExpired: (sessionKey: string) => void
   readonly onReviewPublicationCancel: () => void
   readonly onReviewLoadEarlier: () => void
-  readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
+  readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onReviewRetry: () => void
   readonly onReviewSuggestionPublish: (finalContent: string) => void
   readonly onReviewStart: (prompt?: DurableAgentPrompt) => void

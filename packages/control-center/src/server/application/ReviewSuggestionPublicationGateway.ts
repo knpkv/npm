@@ -11,7 +11,13 @@ import type {
   ReviewSuggestionPublicationAuthorityBinding,
   ReviewSuggestionPublicationContent
 } from "../../api/agent.js"
-import type { EntityId, JobId, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
+import type {
+  EntityId,
+  JobId,
+  PluginConnectionId,
+  PrReviewSuggestionRevisionId,
+  WorkspaceId
+} from "../../domain/identifiers.js"
 import type { PrReviewSubject, PrReviewSuggestion } from "../../domain/prReview.js"
 import type { SessionSummary } from "../auth/models.js"
 
@@ -42,6 +48,7 @@ export interface ReviewSuggestionPublicationTarget {
 export interface PublishReviewSuggestionCommand {
   readonly target: ReviewSuggestionPublicationTarget
   readonly jobId: JobId
+  readonly revisionId: PrReviewSuggestionRevisionId
   readonly suggestion: PrReviewSuggestion
   readonly finalContent: ReviewSuggestionPublicationContent
   readonly authorityBinding: ReviewSuggestionPublicationAuthorityBinding

@@ -1099,6 +1099,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               entityId: params.entityId,
               jobId: params.jobId,
               suggestionId: params.suggestionId,
+              revisionId: params.revisionId,
               publishingOperator: session.actor.personId
             }).pipe(Effect.catchTags({
               ApplicationInvalidRequest: mapApplicationInvalidRequest,

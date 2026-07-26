@@ -2216,6 +2216,9 @@ describe("Control Center API handlers", () => {
       const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000026")
       const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000027")
       const suggestionId = PrReviewSuggestionId.make(`sha256:${"5".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(
+        `sha256:${"6".repeat(64)}`
+      )
       const publicationId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000028")
       const subject = PrReviewSubject.make({
         providerId: "codecommit",
@@ -2243,10 +2246,13 @@ describe("Control Center API handlers", () => {
       const preview = new ReviewSuggestionPublicationPreview({
         jobId,
         suggestionId,
+        revisionId,
         subject,
         suggestionRevision: {
           jobId,
           suggestionId,
+          revisionId,
+          sequence: PrReviewSuggestionRevisionSequence.make(1),
           reviewedHead: subject.headRevision
         },
         anchor: {
@@ -2280,6 +2286,7 @@ describe("Control Center API handlers", () => {
         publicationId,
         jobId,
         suggestionId,
+        revisionId,
         subject,
         suggestionRevision: preview.suggestionRevision,
         anchor: preview.anchor,
@@ -2311,13 +2318,14 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const publicationPreview = yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, jobId, suggestionId }
+          params: { entityId, jobId, suggestionId, revisionId }
         })
         const publication = yield* client.agent.publishReviewSuggestion({
           params: { entityId },
           payload: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           }
@@ -2348,6 +2356,7 @@ describe("Control Center API handlers", () => {
           payload: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           }
@@ -2371,6 +2380,7 @@ describe("Control Center API handlers", () => {
           entityId,
           jobId,
           suggestionId,
+          revisionId,
           publishingOperator: sessionPersonId
         },
         {
@@ -2379,6 +2389,7 @@ describe("Control Center API handlers", () => {
           request: {
             jobId,
             suggestionId,
+            revisionId,
             finalContent,
             authorityBinding: preview.authorityBinding
           },
