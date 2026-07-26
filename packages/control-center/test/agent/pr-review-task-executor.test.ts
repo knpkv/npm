@@ -469,6 +469,11 @@ const runExecutor = <Success, Failure>(
         Effect.succeed({
           model: MODEL_ID,
           runtime,
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
           filesystemAccess: "none",
           languageModel
         })
@@ -1144,6 +1149,13 @@ describe("PR review task executor", () => {
           assert.include(firstPrompt, priorRequest)
           assert.include(firstPrompt, currentRequest)
           assert.strictEqual(firstPrompt.split(currentRequest).length - 1, 1)
+          assert.isTrue(
+            activity.some((event) =>
+              event._tag === "started" &&
+              event.runtimeMetadata?.implementation === "codex-cli" &&
+              event.runtimeMetadata.version === "1.2.3"
+            )
+          )
           assert.isTrue(activity.some((event) => event._tag === "output" && event.channel === "progress"))
         })
       ),

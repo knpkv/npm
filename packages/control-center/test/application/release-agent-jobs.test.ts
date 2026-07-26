@@ -151,7 +151,12 @@ const replayEvents: Array<AgentThreadEvent> = [
   threadEvent(3, "job-started", {
     _tag: "started",
     providerRunRef: "provider-native-run-secret",
-    sessionRef: "provider-native-session-secret"
+    sessionRef: "provider-native-session-secret",
+    runtimeMetadata: {
+      _tag: "local-cli",
+      implementation: "codex-cli",
+      version: "1.2.3"
+    }
   }),
   threadEvent(4, "assistant-output", {
     _tag: "output",
@@ -335,6 +340,17 @@ describe("release agent jobs", () => {
           { _tag: "job-failed", eventSequence: 6 }
         ]
       )
+      assert.deepStrictEqual(page.events[2], {
+        _tag: "job-started",
+        eventSequence: ReleaseAgentThreadCursor.make(3),
+        jobId: JOB_ID,
+        occurredAt: STARTED_AT,
+        runtimeMetadata: {
+          _tag: "local-cli",
+          implementation: "codex-cli",
+          version: "1.2.3"
+        }
+      })
       assert.deepStrictEqual(yield* Ref.get(replayInput), {
         workspaceId: WORKSPACE_ID,
         releaseId: RELEASE_ID,

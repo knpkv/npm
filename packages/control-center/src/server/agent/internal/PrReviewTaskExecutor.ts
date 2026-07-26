@@ -13,6 +13,7 @@ import {
   type AgentRunRequest,
   type AgentRuntimeError,
   type AgentRuntimeEvent,
+  attachAgentRuntimeMetadata,
   makeToolAgentAdapter,
   runToolAgent
 } from "@knpkv/ai-runtime"
@@ -761,6 +762,8 @@ const makeExecutor = Effect.gen(function*() {
           )
         )
       ).slice(0, 12)
+      const onRuntimeActivity = (event: AgentRuntimeEvent) =>
+        onActivity(attachAgentRuntimeMetadata(event, selected.runtimeMetadata))
 
       return yield* sessions.withSession(
         {
@@ -806,8 +809,8 @@ const makeExecutor = Effect.gen(function*() {
               context: claim.context,
               continuation: { _tag: "fresh" }
             }
-            const output = yield* collectReviewOutput(claim, adapter.run(request), onActivity)
-            return yield* anchorReport(cryptoService, claim, session, output, onActivity)
+            const output = yield* collectReviewOutput(claim, adapter.run(request), onRuntimeActivity)
+            return yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
           })
       ).pipe(
         Effect.mapError((failure) =>

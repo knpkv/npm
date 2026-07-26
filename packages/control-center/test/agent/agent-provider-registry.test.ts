@@ -7,9 +7,11 @@ import {
   type AgentRunRequest,
   type AgentRuntimeEvent
 } from "@knpkv/ai-runtime"
-import { Deferred, Duration, Effect, Fiber, Redacted, Result, Stream } from "effect"
+import { Deferred, Duration, Effect, Fiber, Layer, Redacted, Result, Sink, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
 import { agentProviderRuntimeRegistryLayer, AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
@@ -18,8 +20,10 @@ const OPENAI_PROVIDER_ID = AgentProviderId.make("openai-compatible")
 const OPENAI_MODEL = AgentModelId.make("review-model")
 const CREDENTIAL_CANARY = "credential-canary"
 const API_URL_CANARY = "https://provider-canary.example/v1"
-const COMMAND_CANARY = "/server-only/bin/codex-canary"
+const COMMAND_CANARY = "./bin/codex-canary"
 const CWD_CANARY = "/server-only/workspace-canary"
+const CLI_VERSION_OUTPUT = "codex-cli 1.2.3"
+const CLI_VERSION = "1.2.3"
 const RELEASE_CONTEXT_PROMPT = [
   "<release-context-json>",
   "{\"releaseId\":\"release-canary\",\"service\":\"payments-api\",\"version\":\"2.18.0\",\"status\":\"candidate\"}",
@@ -41,6 +45,37 @@ const runRequest = (model: AgentModelId): AgentRunRequest => ({
   },
   continuation: { _tag: "fresh" }
 })
+
+const versionProcessLayer = (
+  calls: Array<ChildProcess.Command>,
+  options: {
+    readonly exitCode?: number
+    readonly output?: string
+    readonly outputs?: ReadonlyArray<string>
+  } = {}
+): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
+  Layer.succeed(
+    ChildProcessSpawner.ChildProcessSpawner,
+    ChildProcessSpawner.make((command) => {
+      calls.push(command)
+      const output = Stream.make(
+        options.outputs?.[calls.length - 1] ?? options.output ?? `${CLI_VERSION_OUTPUT}\n`
+      ).pipe(Stream.encodeText)
+      return Effect.succeed(ChildProcessSpawner.makeHandle({
+        all: output,
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        isRunning: Effect.succeed(false),
+        kill: () => Effect.void,
+        pid: ChildProcessSpawner.ProcessId(42),
+        stderr: Stream.empty,
+        stdin: Sink.drain,
+        stdout: output,
+        unref: Effect.succeed(Effect.void)
+      }))
+    })
+  )
 
 describe("agent provider registry", () => {
   it.effect("advertises PR review only for a configured prompt-only provider when the worker is enabled", () =>
@@ -82,6 +117,7 @@ describe("agent provider registry", () => {
 
   it.effect("routes an explicit OpenAI-compatible selection and redacts provider administration", () => {
     let providerCalls = 0
+    const processCalls: Array<ChildProcess.Command> = []
     const providerClient = HttpClient.make((request) => {
       providerCalls += 1
       assert.strictEqual(request.headers.authorization, `Bearer ${CREDENTIAL_CANARY}`)
@@ -215,6 +251,12 @@ describe("agent provider registry", () => {
         access: "read-only",
         capability: "release-chat"
       })
+      const codexSelectedAgain = yield* registry.select({
+        providerId: AgentProviderId.make("codex"),
+        model: "configured-default",
+        access: "read-only",
+        capability: "release-chat"
+      })
       const legacy = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: null,
@@ -225,6 +267,25 @@ describe("agent provider registry", () => {
       assert.strictEqual(legacy.model, OPENAI_MODEL)
       assert.strictEqual(selected.filesystemAccess, "none")
       assert.strictEqual(codexSelected.filesystemAccess, "configured-workspace")
+      assert.deepStrictEqual(codexSelectedAgain.runtimeMetadata, {
+        _tag: "local-cli",
+        implementation: "codex-cli",
+        version: "1.2.4"
+      })
+      assert.deepStrictEqual(codexSelected.runtimeMetadata, {
+        _tag: "local-cli",
+        implementation: "codex-cli",
+        version: CLI_VERSION
+      })
+      assert.strictEqual(processCalls.length, 2)
+      const versionCommand = processCalls[0]
+      assert.isTrue(versionCommand !== undefined && ChildProcess.isStandardCommand(versionCommand))
+      if (versionCommand !== undefined && ChildProcess.isStandardCommand(versionCommand)) {
+        assert.strictEqual(versionCommand.command, COMMAND_CANARY)
+        assert.deepStrictEqual(versionCommand.args, ["--version"])
+        assert.strictEqual(versionCommand.options.cwd, CWD_CANARY)
+        assert.strictEqual(versionCommand.options.extendEnv, false)
+      }
       const events = new Array<AgentRuntimeEvent>()
       yield* selected.runtime
         .run(runRequest(selected.model))
@@ -232,7 +293,16 @@ describe("agent provider registry", () => {
 
       assert.strictEqual(providerCalls, 1)
       assert.deepStrictEqual(events, [
-        { _tag: "started", providerRunRef: null, sessionRef: null },
+        {
+          _tag: "started",
+          providerRunRef: null,
+          sessionRef: null,
+          runtimeMetadata: {
+            _tag: "remote-api",
+            implementation: "openai-compatible",
+            version: null
+          }
+        },
         { _tag: "output", channel: "assistant", text: "Provider answer" },
         { _tag: "usage", inputTokens: 8, outputTokens: 2 },
         { _tag: "completed", outcome: "success", sessionRef: null }
@@ -240,6 +310,9 @@ describe("agent provider registry", () => {
     }).pipe(
       Effect.provide(registryLayer),
       Effect.provideService(HttpClient.HttpClient, providerClient),
+      Effect.provide(versionProcessLayer(processCalls, {
+        outputs: [`${CLI_VERSION_OUTPUT}\n`, "codex-cli 1.2.4\n"]
+      })),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     )
@@ -299,4 +372,46 @@ describe("agent provider registry", () => {
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))
+
+  it.effect("classifies unavailable CLI metadata as retryable and invalid output as configuration", () =>
+    Effect.gen(function*() {
+      const selectCodex = (options: { readonly exitCode?: number; readonly output?: string }) =>
+        Effect.gen(function*() {
+          const registry = yield* AgentRuntimeRegistry
+          return yield* registry.select({
+            providerId: AgentProviderId.make("codex"),
+            model: "configured-default",
+            access: "read-only",
+            capability: "release-chat"
+          }).pipe(Effect.result)
+        }).pipe(
+          Effect.provide(agentProviderRuntimeRegistryLayer({
+            codex: {
+              cwd: CWD_CANARY,
+              executable: COMMAND_CANARY
+            }
+          })),
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("CLI metadata selection must not call HTTP"))
+          ),
+          Effect.provide(versionProcessLayer([], options)),
+          Effect.provide(NodeServices.layer),
+          Effect.scoped
+        )
+
+      const unavailable = yield* selectCodex({ exitCode: 1 })
+      const invalid = yield* selectCodex({ output: "" })
+
+      assert.isTrue(Result.isFailure(unavailable))
+      if (Result.isFailure(unavailable)) {
+        assert.strictEqual(unavailable.failure.phase, "launch")
+        assert.isTrue(unavailable.failure.retryable)
+      }
+      assert.isTrue(Result.isFailure(invalid))
+      if (Result.isFailure(invalid)) {
+        assert.strictEqual(invalid.failure.phase, "configuration")
+        assert.isFalse(invalid.failure.retryable)
+      }
+    }))
 })

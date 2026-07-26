@@ -1,6 +1,12 @@
 /** Provider-neutral Effect protocol for durable local agents. @module */
 
 export {
+  AgentRuntimeMetadata,
+  AgentRuntimeMetadataError,
+  type LocalCliRuntimeMetadataOptions,
+  readLocalCliRuntimeMetadata
+} from "./cliMetadata.js"
+export {
   type DeterministicAgentScript,
   type DeterministicLanguageModelScript,
   type DeterministicLanguageModelTurn,
@@ -20,6 +26,7 @@ export {
   AgentRuntimeEvent,
   AgentRuntimeProtocolError,
   AgentSessionRef,
+  attachAgentRuntimeMetadata,
   MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
   MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 } from "./model.js"

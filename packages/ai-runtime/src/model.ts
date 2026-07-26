@@ -5,6 +5,7 @@
  * @module
  */
 import * as Schema from "effect/Schema"
+import { AgentRuntimeMetadata } from "./cliMetadata.js"
 
 const boundedIdentifier = <const Brand extends string>(brand: Brand) =>
   Schema.String.check(
@@ -74,7 +75,8 @@ const SafeProviderReference = Schema.NullOr(
 
 const AgentStarted = Schema.TaggedStruct("started", {
   providerRunRef: SafeProviderReference,
-  sessionRef: Schema.NullOr(AgentSessionRef)
+  sessionRef: Schema.NullOr(AgentSessionRef),
+  runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
 })
 
 /** Maximum text characters emitted by one provider-neutral output event. */
@@ -106,6 +108,15 @@ export const AgentRuntimeEvent = Schema.Union([
   AgentCompleted
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type AgentRuntimeEvent = typeof AgentRuntimeEvent.Type
+
+/** Attach safe runtime identity only to the start event of one agent run. */
+export const attachAgentRuntimeMetadata = (
+  event: AgentRuntimeEvent,
+  runtimeMetadata: AgentRuntimeMetadata | undefined
+): AgentRuntimeEvent =>
+  event._tag === "started" && runtimeMetadata !== undefined
+    ? { ...event, runtimeMetadata }
+    : event
 
 /** A provider failed without exposing credentials or provider-native state. */
 export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderError>()(

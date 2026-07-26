@@ -1701,7 +1701,16 @@ describe("pull request reviews", () => {
           jobId: claim.value.jobId,
           attemptSequence: claim.value.attemptSequence,
           leaseToken: claim.value.leaseToken,
-          event: { _tag: "started", providerRunRef: null, sessionRef: null },
+          event: {
+            _tag: "started",
+            providerRunRef: null,
+            sessionRef: null,
+            runtimeMetadata: {
+              _tag: "local-cli",
+              implementation: "codex-cli",
+              version: "1.2.3"
+            }
+          },
           occurredAt: claimedAt
         })
         const failedAt = yield* DateTime.now
@@ -1728,6 +1737,17 @@ describe("pull request reviews", () => {
           failedPresented.events.map(({ _tag }) => _tag),
           ["run-started", "run-failed"]
         )
+        assert.deepStrictEqual(failedPresented.events[0], {
+          _tag: "run-started",
+          eventSequence: ReleaseAgentThreadCursor.make(secondPresented.nextCursor + 1),
+          jobId: active[0].jobId,
+          occurredAt: claimedAt,
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          }
+        })
 
         const retry = yield* enqueue("Re-check the durable transaction boundary.")
         assert.notStrictEqual(retry.jobId, active[0].jobId)

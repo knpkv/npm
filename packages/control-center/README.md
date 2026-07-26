@@ -140,7 +140,10 @@ session duration should be at least the selected Review Agent Profile budget.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, blocked-network policy,
 and sbx runtime before enqueue. The selected model explores the complete project exclusively through
-the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match immutable
+the Review Sandbox tools. Local CLI selection first reads a bounded, credential-free `--version`
+response and fails closed when the configured executable cannot identify itself. The safe runtime
+implementation and version are retained with the run-started event and shown in the Review Thread;
+executable paths and inherited credentials are excluded. Only schema-valid suggestions whose path, range, and excerpt match immutable
 diff evidence are retained; line suggestions use added lines, while file suggestions may use deleted
 base-side lines for deletion-only changes. Investigation remains live activity. A suggestion has one host-resolved line,
 file, or whole-change anchor, with repeated occurrences grouped as Related Locations. File anchors use

@@ -360,6 +360,13 @@ OpenTelemetry contains metadata only:
 
 Prompts, source, command output, model output, replacement patches, and credentials never enter traces.
 
+The same safe runtime identity is durable Review Thread data. For local
+providers, Control Center invokes the trusted CLI with `--version` through
+Effect Process, inherits only `PATH`, and persists the bounded implementation
+and version on the run-started event. A missing, unsuccessful, timed-out, or
+malformed version response fails provider selection closed. Executable paths,
+environment values, and provider-native references remain server-only.
+
 ## Acceptance gates
 
 - Pure suggestion lifecycle and reconciliation state-machine tests.

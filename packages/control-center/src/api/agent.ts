@@ -1,4 +1,4 @@
-import { MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
+import { AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
@@ -261,7 +261,10 @@ const ReleaseAgentJobQueuedEvent = Schema.TaggedStruct("job-queued", {
   providerId: DurableAgentProviderId
 })
 
-const ReleaseAgentJobStartedEvent = Schema.TaggedStruct("job-started", releaseAgentThreadEventFields)
+const ReleaseAgentJobStartedEvent = Schema.TaggedStruct("job-started", {
+  ...releaseAgentThreadEventFields,
+  runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
+})
 
 const ReleaseAgentAssistantOutputEvent = Schema.TaggedStruct("assistant-output", {
   ...releaseAgentThreadEventFields,
@@ -439,7 +442,10 @@ const PullRequestReviewRunQueuedEvent = Schema.TaggedStruct("run-queued", {
 
 const PullRequestReviewRunStartedEvent = Schema.TaggedStruct(
   "run-started",
-  pullRequestReviewThreadEventFields
+  {
+    ...pullRequestReviewThreadEventFields,
+    runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
+  }
 )
 
 const PullRequestReviewProgressEvent = Schema.TaggedStruct("progress", {

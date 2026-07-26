@@ -280,6 +280,19 @@ const makeStaticFixture = Effect.gen(function*() {
   return root
 })
 
+const makeCodexCliFixture = Effect.gen(function*() {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-codex-" })
+  const executable = path.join(root, "codex")
+  yield* fileSystem.writeFileString(
+    executable,
+    "#!/bin/sh\nprintf '%s\\n' 'codex-cli 1.2.3'\n"
+  )
+  yield* fileSystem.chmod(executable, 0o700)
+  return executable
+})
+
 const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuthorizedRuntimeAction")(function*(
   persistenceConfig: PersistenceConfig
 ) {
@@ -609,6 +622,7 @@ describe("Control Center closed runtime", () => {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const staticRoot = yield* makeStaticFixture
+      const codexExecutable = yield* makeCodexCliFixture
       const dataRoot = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-runtime-sync-" })
       yield* fileSystem.chmod(dataRoot, 0o700)
       const port = yield* acquireEphemeralPort
@@ -672,7 +686,11 @@ describe("Control Center closed runtime", () => {
           workspaceId: WORKSPACE_ID,
           pluginRuntimes: governedPluginRuntimes
         },
-        releaseAgent: { cwd: staticRoot, enabledProviders: ["codex"] }
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: ["codex"],
+          codexExecutable
+        }
       }))
       const bootstrapState = Context.get(runtime, ControlCenterBootstrap)
       const governedExecution = Context.getOption(runtime, GovernedActionExecutionStartup)
