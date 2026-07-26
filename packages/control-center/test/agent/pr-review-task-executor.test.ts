@@ -602,6 +602,9 @@ describe("PR review task executor", () => {
       const valid = yield* execute({ ...suggestion, replacement })
       assert.strictEqual(valid.result.suggestions.length, 1)
       assert.strictEqual(valid.result.suggestions[0]?.replacement?.reviewedHead, headRevision)
+      assert.isFalse(
+        observation.commands.some((command) => command.includes("--recount"))
+      )
 
       const malformed = yield* execute({
         ...suggestion,
@@ -617,6 +620,21 @@ describe("PR review task executor", () => {
         }
       })
       assert.deepStrictEqual(malformed.result.suggestions, [])
+
+      const inaccurateHunkCount = yield* execute({
+        ...suggestion,
+        replacement: {
+          ...replacement,
+          unifiedDiff: [
+            `--- a/${EVIDENCE_PATH}`,
+            `+++ b/${EVIDENCE_PATH}`,
+            "@@ -42,1 +42,1 @@",
+            ` ${EVIDENCE_EXCERPT}`,
+            "+const omittedByTheDeclaredCount = true"
+          ].join("\n")
+        }
+      })
+      assert.deepStrictEqual(inaccurateHunkCount.result.suggestions, [])
 
       const withoutReplacement = yield* execute(suggestion)
       assert.strictEqual(withoutReplacement.result.suggestions.length, 1)

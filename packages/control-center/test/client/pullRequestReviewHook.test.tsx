@@ -20,7 +20,7 @@ import {
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
 import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
-import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -146,9 +146,9 @@ const makePublicationFixture = (reviewedHead: string) => {
       reviewedHead: HEAD_A
     },
     anchor: {
-      path: "src/authorization.ts",
-      line: 42,
-      relativeFileVersion: "AFTER"
+      _tag: "line",
+      path: PrReviewPath.make("src/authorization.ts"),
+      line: 42
     },
     editableContent,
     editableContentMaximumLength: 10_100 - footer.length - 2,

@@ -204,7 +204,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
         `trap 'rm -f "$replacement_index"' EXIT && ` +
         `GIT_INDEX_FILE="$replacement_index" git read-tree ${shellQuote(session.headRevision)} && ` +
         `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | ` +
-        `GIT_INDEX_FILE="$replacement_index" git apply --check --cached --recount -`
+        `GIT_INDEX_FILE="$replacement_index" git apply --check --cached -`
     ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
     if (replacementCheck.exitCode !== 0) {
       return yield* providerFailure(

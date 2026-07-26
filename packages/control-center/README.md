@@ -154,6 +154,11 @@ compact overview. Control Center derives Changes Required, Non-blocking Suggesti
 or Unable to Conclude from the validated report. The model does not author that outcome, and there is
 no suggestion-count cap beyond the existing durable event byte envelope.
 
+Every draft suggestion scope can be explicitly published. Line and file suggestions become CodeCommit
+comments at their resolved line; whole-change suggestions become general pull-request comments without
+a file location. A successful governed publication appends an immutable lifecycle event, so reopening
+or refreshing the review keeps that suggestion `published` and cannot offer it as a new draft again.
+
 To exercise the installed `sbx` runtime against the current checkout without provider credentials or
 remote writes, run:
 

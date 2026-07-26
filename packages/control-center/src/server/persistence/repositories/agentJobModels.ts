@@ -3,8 +3,8 @@ import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessi
 import * as Schema from "effect/Schema"
 
 import { ReviewAgentProfile } from "../../../api/agent.js"
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
+import { AgentThreadId, GovernedActionId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 /** Maximum persisted provider output across one attempt. */
@@ -190,6 +190,16 @@ export const CompleteAgentReviewInput = Schema.Struct({
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 
+/** Successful governed publication to overlay onto one immutable review report. */
+export const RecordReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  publicationId: GovernedActionId,
+  publishedAt: UtcTimestamp
+})
+export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
+
 /** Workspace-scoped lookup for one durable review result. */
 export const AgentReviewResultInput = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -255,6 +265,7 @@ export const AgentThreadEvent = Schema.Struct({
     "progress",
     "usage",
     "review-report",
+    "review-suggestion-published",
     "job-completed",
     "job-failed",
     "cancel-requested"

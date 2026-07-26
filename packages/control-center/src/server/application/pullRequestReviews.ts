@@ -397,7 +397,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.jobId,
         input.suggestionId
       )
-      if (selected.suggestion.anchor._tag !== "line" || selected.suggestion.state !== "draft") {
+      if (selected.suggestion.state !== "draft") {
         return yield* new ApplicationInvalidRequest()
       }
       const authority = yield* publications.identity(
@@ -423,11 +423,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           suggestionId: selected.suggestion.suggestionId,
           reviewedHead: target.subject.headRevision
         },
-        anchor: {
-          path: selected.suggestion.anchor.path,
-          line: selected.suggestion.anchor.line,
-          relativeFileVersion: "AFTER"
-        },
+        anchor: selected.suggestion.anchor,
         editableContent,
         editableContentMaximumLength,
         finalContent,
@@ -449,7 +445,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.request.jobId,
         input.request.suggestionId
       )
-      if (selected.suggestion.anchor._tag !== "line" || selected.suggestion.state !== "draft") {
+      if (selected.suggestion.state !== "draft") {
         return yield* new ApplicationInvalidRequest()
       }
       const footer = publicationFooter(
@@ -470,6 +466,16 @@ const makePullRequestReviews = Effect.gen(function*() {
         proposingAgent: selected.latest.reviewProfile,
         session: input.session
       }).pipe(Effect.mapError(mapPublicationFailure))
+      yield* persistence.agentJobs.recordReviewSuggestionPublication({
+        workspaceId: input.workspaceId,
+        jobId: input.request.jobId,
+        suggestionId: selected.suggestion.suggestionId,
+        publicationId: result.publicationId,
+        publishedAt: result.publishedAt
+      }).pipe(
+        Effect.mapError(mapPersistenceWriteError),
+        Effect.mapError(() => unavailable())
+      )
       return new PublishedReviewComment({
         publicationId: result.publicationId,
         jobId: input.request.jobId,
@@ -480,11 +486,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           suggestionId: selected.suggestion.suggestionId,
           reviewedHead: target.subject.headRevision
         },
-        anchor: {
-          path: selected.suggestion.anchor.path,
-          line: selected.suggestion.anchor.line,
-          relativeFileVersion: "AFTER"
-        },
+        anchor: selected.suggestion.anchor,
         content: publishedContent,
         connectedIdentity: result.connectedIdentity,
         proposingAgent: selected.latest.reviewProfile,

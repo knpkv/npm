@@ -62,9 +62,9 @@ A draft Review Suggestion supports:
 
 An agent edit preserves prior revisions. An edit that changes the technical claim invalidates the old evidence until revalidated.
 
-Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action.
+Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and file anchors publish at their resolved line; whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
 
-Published comments are snapshots. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
+Published comments are snapshots. A successful provider receipt appends an immutable local lifecycle event; durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
 
 Every posted comment has a compact provenance footer:
 
@@ -319,6 +319,7 @@ Prompts, source, command output, model output, replacement patches, and credenti
 - Scripted fake-model tests for `@knpkv/ai-runtime`: tool calls, schema repair, output bounds, cancellation, and timeout.
 - sbx command-policy tests and an opt-in real sbx integration test when the CLI is available.
 - CodeCommit adapter contract tests for exact-head checkout and comment publication.
+- Durable publication replay for line, file, and whole-change suggestions.
 - Browser flow: launch, live activity, inline suggestion, edit, revalidation, publication preview, staleness, and re-review.
 - Opt-in real Codex smoke test using the locally authenticated CLI.
 

@@ -43,7 +43,8 @@ import {
   LatestAgentReviewInput,
   LatestAgentReviewRecord,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
-  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
+  RecordReviewSuggestionPublicationInput
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 
@@ -79,6 +80,11 @@ const CancellationRequestedPayload = Schema.Struct({
 
 const ProviderFailurePayload = Schema.Struct({
   error: AgentProviderError
+})
+
+const ReviewSuggestionPublishedPayload = Schema.Struct({
+  suggestionId: RecordReviewSuggestionPublicationInput.fields.suggestionId,
+  publicationId: RecordReviewSuggestionPublicationInput.fields.publicationId
 })
 
 const ThreadRow = Schema.Struct({
@@ -620,6 +626,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
             )
           )
         )
+      case "review-suggestion-published":
+        return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublishedPayload)(payload).pipe(
+          Effect.mapError(() =>
+            persistedRecordError(
+              workspaceId,
+              "agent-thread-event",
+              `${row.threadId}/${row.eventSequence}`,
+              "agent-thread-event-payload-invalid"
+            )
+          )
+        )
       case "job-started":
       case "assistant-output":
       case "progress":
@@ -669,11 +686,66 @@ const makeAgentJobRepository = Effect.gen(function*() {
         "agent-review-result-payload-invalid"
       )
     }
+    const publicationRows = yield* sql<Record<string, unknown>>`SELECT
+      workspace_id AS workspaceId, thread_id AS threadId,
+      event_sequence AS eventSequence, job_id AS jobId,
+      attempt_sequence AS attemptSequence, event_kind AS eventKind,
+      payload_json AS payloadJson, payload_digest AS payloadDigest,
+      payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+      FROM agent_thread_events
+      WHERE workspace_id = ${request.workspaceId}
+        AND job_id = ${request.jobId}
+        AND event_kind = 'review-suggestion-published'
+      ORDER BY event_sequence`.pipe(
+      mapPersistenceOperation("agent-job.review-suggestion-publications")
+    )
+    const publishedSuggestionIds = new Set<string>()
+    for (const unknownPublicationRow of publicationRows) {
+      const publicationRow = Schema.decodeUnknownResult(ThreadEventRow)(unknownPublicationRow)
+      if (Result.isFailure(publicationRow)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-schema-invalid"
+        )
+      }
+      const publication = yield* decodeEventPayload(request.workspaceId, publicationRow.success)
+      const decodedPublication = Schema.decodeUnknownResult(
+        ReviewSuggestionPublishedPayload
+      )(publication)
+      if (Result.isFailure(decodedPublication)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-payload-invalid"
+        )
+      }
+      publishedSuggestionIds.add(decodedPublication.success.suggestionId)
+    }
+    const projectedReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
+      ...decodedReport.success,
+      suggestions: decodedReport.success.suggestions.map((suggestion) => {
+        if (!publishedSuggestionIds.has(suggestion.suggestionId)) return suggestion
+        const published: typeof suggestion = { ...suggestion, state: "published" }
+        return published
+      })
+    }).pipe(
+      Effect.mapError(() =>
+        persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-projection-invalid"
+        )
+      )
+    )
     return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
       workspaceId: request.workspaceId,
       jobId: request.jobId,
       attemptSequence: row.success.attemptSequence,
-      report: decodedReport.success,
+      report: projectedReport,
       completedAt: row.success.occurredAt
     })
   })
@@ -1207,6 +1279,52 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         )
         .pipe(mapPersistenceOperation("agent-job.complete-review"))
+    }),
+
+    recordReviewSuggestionPublication: Effect.fn(
+      "AgentJobRepository.recordReviewSuggestionPublication"
+    )(function*(input: typeof RecordReviewSuggestionPublicationInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(RecordReviewSuggestionPublicationInput)
+      )(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const job = yield* getJob(request.workspaceId, request.jobId)
+          const review = yield* readReviewResult({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId
+          })
+          const suggestion = review.report.suggestions.find(
+            ({ suggestionId }) => suggestionId === request.suggestionId
+          )
+          if (
+            suggestion === undefined || (
+              suggestion.state !== "draft" &&
+              suggestion.state !== "published"
+            )
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          if (suggestion.state === "published") return
+          yield* appendThreadEvent({
+            workspaceId: request.workspaceId,
+            threadId: job.threadId,
+            jobId: request.jobId,
+            attemptSequence: review.attemptSequence,
+            eventKind: "review-suggestion-published",
+            payload: {
+              suggestionId: request.suggestionId,
+              publicationId: request.publicationId
+            },
+            payloadSchema: ReviewSuggestionPublishedPayload,
+            occurredAt: request.publishedAt
+          })
+        })
+      ).pipe(mapPersistenceOperation("agent-job.record-review-suggestion-publication"))
     }),
 
     failAttempt: Effect.fn("AgentJobRepository.failAttempt")(function*(input: typeof FailAgentAttemptInput.Type) {

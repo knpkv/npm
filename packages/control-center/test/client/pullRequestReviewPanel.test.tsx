@@ -20,7 +20,7 @@ import { PullRequestReviewPanel } from "../../src/client/entities/PullRequestRev
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
-import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -28,6 +28,8 @@ const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000701")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
 const FILE_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"6".repeat(64)}`)
+const ANCHOR_PATH = PrReviewPath.make("src/authorization.ts")
+const ANCHOR_LINE = 42
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000703")
 const SUBJECT = PrReviewSubject.make({
   providerId: "codecommit",
@@ -58,9 +60,9 @@ const PREVIEW = new ReviewSuggestionPublicationPreview({
     reviewedHead: SUBJECT.headRevision
   },
   anchor: {
-    path: "src/authorization.ts",
-    line: 42,
-    relativeFileVersion: "AFTER"
+    _tag: "line",
+    path: ANCHOR_PATH,
+    line: ANCHOR_LINE
   },
   editableContent: EDITABLE_CONTENT,
   editableContentMaximumLength: 10_100 - PUBLICATION_FOOTER.length - 2,
@@ -131,16 +133,16 @@ const REVIEW_STATE = {
           problem: "Mutation happens before authorization",
           impact: "An unauthorized caller can mutate durable state.",
           evidence: {
-            path: PREVIEW.anchor.path,
-            startLine: PREVIEW.anchor.line,
-            endLine: PREVIEW.anchor.line,
+            path: ANCHOR_PATH,
+            startLine: ANCHOR_LINE,
+            endLine: ANCHOR_LINE,
             excerpt: "yield* mutate()"
           },
           recommendation: "Authorize first.",
           anchor: {
             _tag: "line",
-            path: PREVIEW.anchor.path,
-            line: PREVIEW.anchor.line
+            path: ANCHOR_PATH,
+            line: ANCHOR_LINE
           },
           relatedLocations: [],
           replacement: {
@@ -178,7 +180,7 @@ const REVIEW_STATE = {
           problem: "The file repeats the same policy branch.",
           impact: "Future changes can drift.",
           evidence: {
-            path: PREVIEW.anchor.path,
+            path: ANCHOR_PATH,
             startLine: 50,
             endLine: 50,
             excerpt: "yield* authorizeAgain()"
@@ -186,7 +188,7 @@ const REVIEW_STATE = {
           recommendation: "Use the shared policy helper.",
           anchor: {
             _tag: "file",
-            path: PREVIEW.anchor.path,
+            path: ANCHOR_PATH,
             line: 40
           },
           relatedLocations: [
@@ -310,6 +312,54 @@ describe("PullRequestReviewPanel", () => {
     ).toBeNull()
   })
 
+  it("offers publication for a draft file suggestion", async () => {
+    if (REVIEW_STATE.review._tag !== "completed") {
+      throw new Error("Expected completed review fixture")
+    }
+    const onPreview = vi.fn()
+    const fileDraftReview: PullRequestReviewState = {
+      ...REVIEW_STATE.review,
+      report: {
+        ...REVIEW_STATE.review.report,
+        suggestions: REVIEW_STATE.review.report.suggestions.map((suggestion) => {
+          if (suggestion.suggestionId !== FILE_SUGGESTION_ID) return suggestion
+          const draft: typeof suggestion = { ...suggestion, state: "draft" }
+          return draft
+        })
+      }
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={onPreview}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: fileDraftReview }}
+        />
+      )
+    )
+    const fileSuggestion = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+      textContent?.includes("Centralize the authorization policy")
+    )
+    const publish = [...(fileSuggestion?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent === "Post comment"
+    )
+    if (publish === undefined) throw new Error("Expected file-suggestion publication action")
+    await act(async () => publish.click())
+    expect(onPreview).toHaveBeenCalledWith({
+      jobId: JOB_ID,
+      suggestionId: FILE_SUGGESTION_ID
+    })
+  })
+
   it("previews an exact suggestion and requires an editable human confirmation", async () => {
     const onPreview = vi.fn()
     const onPublish = vi.fn()
@@ -350,7 +400,7 @@ describe("PullRequestReviewPanel", () => {
     expect(host.querySelector("[role=dialog]")).not.toBeNull()
     expect(host.querySelector("[role=dialog]")?.getAttribute("aria-modal")).toBe("true")
     expect(host.textContent).toContain(PREVIEW.connectedIdentity.arn)
-    expect(host.textContent).toContain(`${PREVIEW.anchor.path}:${String(PREVIEW.anchor.line)} · AFTER`)
+    expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)} · AFTER`)
     expect(host.textContent).toContain(SUBJECT.headRevision)
     expect(host.textContent).toContain("Required publication footer")
 
@@ -430,7 +480,7 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Published Review Comment")
     expect(host.textContent).toContain(RECEIPT.safeSummary)
     expect(host.textContent).toContain(RECEIPT.providerOperationId)
-    expect(host.textContent).toContain(`${PREVIEW.anchor.path}:${String(PREVIEW.anchor.line)}`)
+    expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)}`)
   })
 
   it("keeps a superseded receipt visible after the refreshed head has no completed review", async () => {

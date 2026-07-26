@@ -100,6 +100,17 @@ const STARTED_TIMESTAMP = Schema.decodeUnknownSync(UtcTimestamp)(STARTED_AT)
 const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
   `sha256:${"a".repeat(64)}`
 )
+const HUMAN_SESSION = {
+  sessionId: SESSION_ID,
+  workspaceId: WORKSPACE_ID,
+  actor: { _tag: "human", personId: OPERATOR_ID },
+  permission: "workspace-owner",
+  createdAt: STARTED_TIMESTAMP,
+  lastSeenAt: STARTED_TIMESTAMP,
+  idleExpiresAt: IDLE_EXPIRES_AT,
+  absoluteExpiresAt: ABSOLUTE_EXPIRES_AT,
+  revokedAt: null
+} satisfies typeof SessionSummary.Type
 
 const release = Schema.decodeSync(Release)({
   id: RELEASE_ID,
@@ -353,7 +364,8 @@ const withService = <Success, Failure>(
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: () => Effect.succeed(latestReview)
+          latestReview: () => Effect.succeed(latestReview),
+          recordReviewSuggestionPublication: () => Effect.succeed(undefined)
         }
       })
       const publicationGateway = ReviewSuggestionPublicationGateway.of({
@@ -731,9 +743,9 @@ describe("pull request reviews", () => {
             arn: "arn:aws:iam::123456789012:user/local-operator"
           })
           assert.deepStrictEqual(preview.anchor, {
-            path: "src/authorization.ts",
-            line: 42,
-            relativeFileVersion: "AFTER"
+            _tag: "line",
+            path: PrReviewPath.make("src/authorization.ts"),
+            line: 42
           })
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
           assert.include(preview.replacement ?? "", "@@ -42,1 +42,2 @@")
@@ -785,6 +797,51 @@ describe("pull request reviews", () => {
       registry,
       Option.some(completedReview)
     ))
+
+  it.effect("publishes file anchors inline and whole-change anchors without a location", () => {
+    const verifyScope = (
+      anchor: typeof reviewReport.suggestions[number]["anchor"]
+    ) =>
+      withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            assert.deepStrictEqual(preview.anchor, anchor)
+
+            yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            })
+            const commands = yield* Ref.get(publicationCommands)
+            assert.strictEqual(commands.length, 1)
+            assert.deepStrictEqual(commands[0]?.suggestion.anchor, anchor)
+          }),
+        registry,
+        Option.some(completedReviewWithSuggestion({ anchor }))
+      )
+
+    return Effect.all([
+      verifyScope({
+        _tag: "file",
+        path: PrReviewPath.make("src/authorization.ts"),
+        line: 1
+      }),
+      verifyScope({ _tag: "changes" })
+    ], { concurrency: 1, discard: true })
+  })
 
   it.effect("includes every grouped related location in default publication content", () =>
     withService(

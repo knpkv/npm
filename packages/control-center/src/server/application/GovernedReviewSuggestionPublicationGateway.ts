@@ -143,6 +143,7 @@ const makeGateway = Effect.gen(function*() {
         checkedAt
       )
     ) return yield* conflict()
+    if (command.suggestion.state !== "draft") return yield* conflict()
 
     const prepared = yield* withProposalLease(
       command.target,
@@ -168,9 +169,17 @@ const makeGateway = Effect.gen(function*() {
             ({ capabilityId }) => capabilityId === "action.execute"
           )
           if (capability === undefined) return yield* conflict()
-          if (command.suggestion.anchor._tag !== "line" || command.suggestion.state !== "draft") {
-            return yield* conflict()
-          }
+          const location: undefined | {
+            readonly filePath: string
+            readonly filePosition: number
+            readonly relativeFileVersion: "AFTER"
+          } = command.suggestion.anchor._tag === "changes"
+            ? undefined
+            : {
+              filePath: command.suggestion.anchor.path,
+              filePosition: command.suggestion.anchor.line,
+              relativeFileVersion: "AFTER"
+            }
           const proposalRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
             actionKind: "comment",
             target: {
@@ -180,11 +189,7 @@ const makeGateway = Effect.gen(function*() {
             expectedRevision: Revision.make(command.target.sourceRevision),
             payload: {
               content: command.finalContent,
-              location: {
-                filePath: command.suggestion.anchor.path,
-                filePosition: command.suggestion.anchor.line,
-                relativeFileVersion: "AFTER"
-              }
+              ...(location === undefined ? {} : { location })
             },
             evidenceIds: [
               `pr-review:${command.jobId}:${command.suggestion.suggestionId}`

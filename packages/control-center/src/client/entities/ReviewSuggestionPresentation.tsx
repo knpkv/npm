@@ -169,7 +169,7 @@ export const ReviewSuggestionCard = ({
         </details>
       )}
 
-      {canPublish && suggestion.anchor._tag === "line" && suggestion.state === "draft" ? (
+      {canPublish && suggestion.state === "draft" ? (
         <Button
           disabled={isPreviewing}
           onClick={() =>
