@@ -140,17 +140,35 @@ export type PrReviewSuggestionEdit = typeof PrReviewSuggestionEdit.Type
 /** One complete immutable revision of a stable review suggestion. */
 export class PrReviewSuggestionRevision extends Schema.Class<PrReviewSuggestionRevision>(
   "PrReviewSuggestionRevision"
-)({
-  revisionId: PrReviewSuggestionRevisionId,
-  sequence: PrReviewSuggestionRevisionSequence,
-  predecessorRevisionId: Schema.NullOr(PrReviewSuggestionRevisionId),
-  sourceJobId: JobId,
-  subject: PrReviewSubject,
-  suggestion: PrReviewSuggestion,
-  validation: PrReviewSuggestionRevisionValidation,
-  author: PrReviewSuggestionRevisionAuthor,
-  createdAt: UtcTimestamp
-}) {}
+)(
+  Schema.Struct({
+    revisionId: PrReviewSuggestionRevisionId,
+    sequence: PrReviewSuggestionRevisionSequence,
+    predecessorRevisionId: Schema.NullOr(PrReviewSuggestionRevisionId),
+    sourceJobId: JobId,
+    subject: PrReviewSubject,
+    suggestion: PrReviewSuggestion,
+    validation: PrReviewSuggestionRevisionValidation,
+    author: PrReviewSuggestionRevisionAuthor,
+    createdAt: UtcTimestamp
+  }).check(
+    Schema.makeFilter(
+      ({ predecessorRevisionId, sequence }) => (sequence === 1) === (predecessorRevisionId === null),
+      {
+        expected: "only original sequence one to omit a predecessor revision"
+      }
+    ),
+    Schema.makeFilter(
+      ({ subject, suggestion, validation }) =>
+        validation.reviewedHead === subject.headRevision &&
+        (suggestion.replacement === undefined ||
+          suggestion.replacement.reviewedHead === subject.headRevision),
+      {
+        expected: "revision validation and replacement bound to the exact reviewed head"
+      }
+    )
+  )
+) {}
 
 /** Cursor-bounded immutable revision history, newest first. */
 export const PrReviewSuggestionRevisionPage = Schema.Struct({

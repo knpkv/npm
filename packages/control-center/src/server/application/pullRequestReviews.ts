@@ -20,7 +20,7 @@ import {
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   type PullRequestReviewState,
-  type PullRequestReviewThreadEvent,
+  PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
   ReleaseAgentThreadCursor,
@@ -89,6 +89,13 @@ const ReviewThreadProviderFailurePayload = Schema.Struct({ error: AgentProviderE
 const ReviewThreadPublicationPayload = Schema.Struct({
   suggestionId: Schema.String,
   publicationId: Schema.String
+})
+const ReviewThreadRevisionPayload = Schema.Struct({
+  suggestionId: Schema.String,
+  revisionId: Schema.String,
+  sequence: Schema.Int,
+  authorKind: Schema.Literals(["operator", "agent"]),
+  validationState: Schema.Literals(["validated", "requires-revalidation"])
 })
 const ReviewThreadCancellationPayload = Schema.Struct({ requestedAt: UtcTimestamp })
 
@@ -188,6 +195,19 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
         ...common,
         report: yield* decodeThreadPayload(PrReviewReport, event.payload)
       }
+    case "review-suggestion-revised": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadRevisionPayload,
+        event.payload
+      )
+      return yield* Schema.decodeUnknownEffect(
+        PullRequestReviewThreadEvent
+      )({
+        _tag: "suggestion-revised",
+        ...common,
+        ...payload
+      }).pipe(Effect.mapError(unavailable))
+    }
     case "review-suggestion-published": {
       const payload = yield* decodeThreadPayload(
         ReviewThreadPublicationPayload,

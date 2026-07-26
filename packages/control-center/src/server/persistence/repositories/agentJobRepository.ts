@@ -60,6 +60,7 @@ import {
   type AgentThreadEventPage,
   AgentThreadEventPageSize,
   AppendAgentEventInput,
+  type AppendReviewSuggestionRevisionInput,
   ClaimAgentJobInput,
   ClaimedAgentJob,
   CompleteAgentReviewInput,
@@ -70,6 +71,7 @@ import {
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
   PrReviewThreadContextSnapshot,
   type PrReviewThreadSubject,
+  type ReadReviewSuggestionRevisionsInput,
   RecordReviewSuggestionPublicationInput,
   ReleaseReviewSuggestionPublicationInput,
   ReserveReviewSuggestionPublicationInput,
@@ -77,6 +79,10 @@ import {
   ReviewSuggestionPublicationReservation
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
+import {
+  makeReviewSuggestionRevisionOperations,
+  ReviewSuggestionRevisedPayload
+} from "./internal/reviewSuggestionRevisions.js"
 
 const DISPATCH_CANDIDATE_LIMIT = 32
 const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
@@ -689,6 +695,19 @@ const makeAgentJobRepository = Effect.gen(function*() {
             )
           )
         )
+      case "review-suggestion-revised":
+        return yield* Schema.decodeUnknownEffect(
+          ReviewSuggestionRevisedPayload
+        )(payload).pipe(
+          Effect.mapError(() =>
+            persistedRecordError(
+              workspaceId,
+              "agent-thread-event",
+              `${row.threadId}/${row.eventSequence}`,
+              "agent-thread-event-payload-invalid"
+            )
+          )
+        )
       case "review-suggestion-published":
         return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublishedPayload)(payload).pipe(
           Effect.mapError(() =>
@@ -1198,7 +1217,24 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
   })
 
+  const reviewSuggestionRevisions = makeReviewSuggestionRevisionOperations({
+    database,
+    bytesFromText,
+    digestBytes,
+    readReviewResult,
+    getJob,
+    appendThreadEvent: (options) => appendThreadEvent(options)
+  })
+
   return {
+    appendReviewSuggestionRevision: Effect.fn(
+      "AgentJobRepository.appendReviewSuggestionRevision"
+    )(function*(input: typeof AppendReviewSuggestionRevisionInput.Type) {
+      return yield* reviewSuggestionRevisions.append(input).pipe(
+        mapPersistenceOperation("agent-job.append-review-suggestion-revision")
+      )
+    }),
+
     enqueue: Effect.fn("AgentJobRepository.enqueue")(function*(input: typeof EnqueueAgentJobInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(EnqueueAgentJobInput))(input)
       if (
@@ -2245,6 +2281,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }),
 
     reviewResult: readReviewResult,
+
+    reviewSuggestionRevisions: Effect.fn(
+      "AgentJobRepository.reviewSuggestionRevisions"
+    )(function*(input: typeof ReadReviewSuggestionRevisionsInput.Type) {
+      return yield* reviewSuggestionRevisions.read(input).pipe(
+        mapPersistenceOperation("agent-job.review-suggestion-revisions")
+      )
+    }),
 
     threadAfter: Effect.fn("AgentJobRepository.threadAfter")(function*(input: typeof AgentThreadAfterInput.Type) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(AgentThreadAfterInput))(input)

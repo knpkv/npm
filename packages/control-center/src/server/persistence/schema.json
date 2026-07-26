@@ -23,8 +23,13 @@
     },
     {
       "type": "table",
+      "name": "agent_review_suggestion_revisions",
+      "sql": "CREATE TABLE agent_review_suggestion_revisions (\n    workspace_id TEXT NOT NULL,\n    source_job_id TEXT NOT NULL,\n    suggestion_id TEXT NOT NULL CHECK(\n      length(suggestion_id) = 71 AND suggestion_id GLOB 'sha256:*'\n        AND substr(suggestion_id, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    revision_sequence INTEGER NOT NULL CHECK(\n      revision_sequence BETWEEN 2 AND 9007199254740991\n    ),\n    revision_id TEXT NOT NULL CHECK(\n      length(revision_id) = 71 AND revision_id GLOB 'sha256:*'\n        AND substr(revision_id, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    predecessor_revision_id TEXT NOT NULL CHECK(\n      length(predecessor_revision_id) = 71 AND predecessor_revision_id GLOB 'sha256:*'\n        AND substr(predecessor_revision_id, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    revision_json TEXT NOT NULL CHECK(length(revision_json) BETWEEN 2 AND 65536),\n    revision_digest TEXT NOT NULL CHECK(\n      length(revision_digest) = 71 AND revision_digest GLOB 'sha256:*'\n        AND substr(revision_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    created_at TEXT NOT NULL,\n    PRIMARY KEY (\n      workspace_id, source_job_id, suggestion_id, revision_sequence\n    ),\n    UNIQUE (workspace_id, revision_id),\n    FOREIGN KEY (workspace_id, source_job_id)\n      REFERENCES agent_jobs(workspace_id, job_id)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "agent_thread_events",
-      "sql": "CREATE TABLE agent_thread_events (\n    workspace_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    event_sequence INTEGER NOT NULL CHECK(event_sequence BETWEEN 1 AND 9007199254740991),\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER,\n    event_kind TEXT NOT NULL CHECK(event_kind IN (\n      'user-message', 'job-queued', 'job-started', 'assistant-output', 'progress',\n      'usage', 'review-report', 'review-suggestion-published',\n      'job-completed', 'job-failed', 'cancel-requested'\n    )),\n    payload_json TEXT NOT NULL CHECK(length(payload_json) BETWEEN 2 AND 32768),\n    payload_digest TEXT NOT NULL CHECK(\n      length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'\n        AND substr(payload_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    payload_byte_length INTEGER NOT NULL CHECK(payload_byte_length BETWEEN 2 AND 32768),\n    occurred_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, thread_id, event_sequence),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id)\n      REFERENCES agent_jobs(workspace_id, job_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id, attempt_sequence)\n      REFERENCES agent_job_attempts(workspace_id, job_id, attempt_sequence)\n      ON DELETE RESTRICT,\n    CHECK(payload_byte_length = length(CAST(payload_json AS BLOB))),\n    CHECK(\n      (event_kind IN ('user-message', 'job-queued', 'cancel-requested') AND attempt_sequence IS NULL) OR\n      (event_kind IN (\n        'job-started', 'assistant-output', 'progress', 'usage', 'review-report',\n        'review-suggestion-published', 'job-completed', 'job-failed'\n      ) AND attempt_sequence IS NOT NULL)\n    )\n  )"
+      "sql": "CREATE TABLE agent_thread_events (\n    workspace_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    event_sequence INTEGER NOT NULL CHECK(event_sequence BETWEEN 1 AND 9007199254740991),\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER,\n    event_kind TEXT NOT NULL CHECK(event_kind IN (\n      'user-message', 'job-queued', 'job-started', 'assistant-output', 'progress',\n      'usage', 'review-report', 'review-suggestion-revised',\n      'review-suggestion-published', 'job-completed', 'job-failed', 'cancel-requested'\n    )),\n    payload_json TEXT NOT NULL CHECK(length(payload_json) BETWEEN 2 AND 32768),\n    payload_digest TEXT NOT NULL CHECK(\n      length(payload_digest) = 71 AND payload_digest GLOB 'sha256:*'\n        AND substr(payload_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    payload_byte_length INTEGER NOT NULL CHECK(payload_byte_length BETWEEN 2 AND 32768),\n    occurred_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, thread_id, event_sequence),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id)\n      REFERENCES agent_jobs(workspace_id, job_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id, attempt_sequence)\n      REFERENCES agent_job_attempts(workspace_id, job_id, attempt_sequence)\n      ON DELETE RESTRICT,\n    CHECK(payload_byte_length = length(CAST(payload_json AS BLOB))),\n    CHECK(\n      (event_kind IN (\n        'user-message', 'job-queued', 'cancel-requested', 'review-suggestion-revised'\n      ) AND attempt_sequence IS NULL) OR\n      (event_kind IN (\n        'job-started', 'assistant-output', 'progress', 'usage', 'review-report',\n        'review-suggestion-published', 'job-completed', 'job-failed'\n      ) AND attempt_sequence IS NOT NULL)\n    )\n  )"
     },
     {
       "type": "table",
@@ -388,6 +393,11 @@
     },
     {
       "type": "index",
+      "name": "agent_review_suggestion_revisions_history_idx",
+      "sql": "CREATE INDEX agent_review_suggestion_revisions_history_idx\n    ON agent_review_suggestion_revisions(\n      workspace_id, source_job_id, suggestion_id, revision_sequence DESC\n    )"
+    },
+    {
+      "type": "index",
       "name": "agent_thread_events_job_idx",
       "sql": "CREATE INDEX agent_thread_events_job_idx\n    ON agent_thread_events(workspace_id, job_id, attempt_sequence, event_sequence)"
     },
@@ -700,6 +710,16 @@
       "type": "view",
       "name": "readiness_release_child_integrity",
       "sql": "CREATE VIEW readiness_release_child_integrity AS\n    SELECT assessment.workspace_id, assessment.assessment_id\n    FROM readiness_assessments assessment\n    WHERE assessment.scope_kind = 'release'\n      AND json_type(assessment.assessment_json, '$.environments') = 'array'\n      AND json_array_length(assessment.assessment_json, '$.environments') > 0\n      AND NOT EXISTS (\n        SELECT 1 FROM json_each(assessment.assessment_json, '$.environments') expected\n        WHERE NOT EXISTS (\n          SELECT 1 FROM readiness_release_children child\n          WHERE child.workspace_id = assessment.workspace_id\n            AND child.release_assessment_id = assessment.assessment_id\n            AND child.environment_id = json_extract(expected.value, '$.environmentId')\n            AND child.environment_assessment_id = json_extract(expected.value, '$.assessmentId')\n            AND child.environment_candidate_digest = json_extract(expected.value, '$.candidateDigest')\n        )\n      )\n      AND NOT EXISTS (\n        SELECT 1 FROM readiness_release_children child\n        WHERE child.workspace_id = assessment.workspace_id\n          AND child.release_assessment_id = assessment.assessment_id\n          AND NOT EXISTS (\n            SELECT 1 FROM json_each(assessment.assessment_json, '$.environments') expected\n            WHERE json_extract(expected.value, '$.environmentId') = child.environment_id\n              AND json_extract(expected.value, '$.assessmentId') = child.environment_assessment_id\n              AND json_extract(expected.value, '$.candidateDigest') = child.environment_candidate_digest\n          )\n      )"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_suggestion_revisions_no_delete",
+      "sql": "CREATE TRIGGER agent_review_suggestion_revisions_no_delete\n    BEFORE DELETE ON agent_review_suggestion_revisions\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review suggestion revisions are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_suggestion_revisions_no_update",
+      "sql": "CREATE TRIGGER agent_review_suggestion_revisions_no_update\n    BEFORE UPDATE ON agent_review_suggestion_revisions\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review suggestion revisions are immutable');\n    END"
     },
     {
       "type": "trigger",

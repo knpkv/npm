@@ -101,6 +101,25 @@ describe("PR review suggestion revisions", () => {
         Schema.decodeUnknownResult(PrReviewSuggestionRevisionSequence)(0)
       )
     )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PrReviewSuggestionRevision)({
+          revisionId,
+          sequence: 2,
+          predecessorRevisionId: null,
+          sourceJobId: jobId,
+          subject,
+          suggestion,
+          validation: PrReviewSuggestionValidated.make({
+            reviewedHead: subject.headRevision,
+            validatingJobId: jobId,
+            sourceRevisionId: revisionId
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({ personId }),
+          createdAt: "2026-07-26T18:00:00.000Z"
+        })
+      )
+    )
   })
 
   it("retains validation for title-only edits", () => {

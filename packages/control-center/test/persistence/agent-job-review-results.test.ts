@@ -13,19 +13,30 @@ import {
   AgentThreadId,
   GovernedActionId,
   JobId,
+  PersonId,
   PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionOperatorAuthor,
+  PrReviewSuggestionRevisionPageSize
+} from "../../src/domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   PrReviewThreadHistory,
   prReviewThreadHistoryLayer
 } from "../../src/server/agent/internal/PrReviewThreadHistory.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { PersistedRecordError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
+import {
+  PersistedRecordError,
+  RecordNotFoundError,
+  RevisionConflictError
+} from "../../src/server/persistence/errors.js"
 import {
   AgentAttemptSequence,
   AgentEventCursor,
@@ -43,6 +54,7 @@ import { makePersistenceTestConfig } from "./fixtures.js"
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+const PERSON_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000047")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000046")
 const SWAP_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000042")
 const PROVIDER_ID = AgentProviderId.make("deterministic-review")
@@ -253,15 +265,349 @@ const claimReview = Effect.gen(function*() {
   return claimed.value
 })
 
+const completeReview = Effect.gen(function*() {
+  const jobs = yield* AgentJobRepository
+  const claim = yield* claimReview
+  return yield* jobs.completeReview({
+    workspaceId: WORKSPACE_ID,
+    jobId: JOB_ID,
+    attemptSequence: claim.attemptSequence,
+    leaseToken: LEASE_TOKEN,
+    report,
+    completedAt: T2
+  })
+})
+
+const withRepositoryConfig = <Success, Failure>(
+  config: {
+    readonly blobRoot: string
+    readonly busyTimeoutMilliseconds: number
+    readonly databaseUrl: string
+    readonly maxConnections: number
+  },
+  use: Effect.Effect<Success, Failure, AgentJobRepository | Database>
+) => {
+  const database = databaseLayer(config)
+  const repository = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
+  return use.pipe(Effect.provide(repository), Effect.scoped)
+}
+
 const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, AgentJobRepository | Database>) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-agent-review-result-")
-    const database = databaseLayer(config)
-    const repository = AgentJobRepository.layer.pipe(Layer.provideMerge(database))
-    return yield* use.pipe(Effect.provide(repository), Effect.scoped)
+    return yield* withRepositoryConfig(config, use)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("projects the immutable report suggestion as validated revision one", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+
+        const page = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: report.suggestions[0]!.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+
+        assert.strictEqual(page.current.sequence, 1)
+        assert.isNull(page.current.predecessorRevisionId)
+        assert.strictEqual(page.current.author._tag, "agent")
+        assert.strictEqual(page.current.validation._tag, "validated")
+        assert.deepStrictEqual(page.revisions, [])
+        assert.isFalse(page.hasMore)
+      })
+    ))
+
+  it.effect("appends edits immutably and pages prior revisions newest first", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const author = PrReviewSuggestionOperatorAuthor.make({
+          personId: PERSON_ID
+        })
+        const titleEdit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...suggestion,
+          title: "Decode every review result before persistence"
+        })
+        const renamed = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: titleEdit,
+          author,
+          createdAt: T3
+        })
+        assert.strictEqual(renamed.sequence, 2)
+        assert.strictEqual(renamed.validation._tag, "validated")
+
+        const noOp = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: renamed.revisionId,
+          expectedSequence: renamed.sequence,
+          edit: titleEdit,
+          author,
+          createdAt: T4
+        })
+        assert.strictEqual(noOp.revisionId, renamed.revisionId)
+
+        const technicalEdit = Schema.decodeUnknownSync(
+          PrReviewSuggestionEdit
+        )({
+          ...titleEdit,
+          problem: "Untrusted agent output can reach durable state."
+        })
+        const technical = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: renamed.revisionId,
+          expectedSequence: renamed.sequence,
+          edit: technicalEdit,
+          author,
+          createdAt: T4
+        })
+        assert.strictEqual(technical.sequence, 3)
+        assert.strictEqual(
+          technical.validation._tag,
+          "requires-revalidation"
+        )
+
+        const firstPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.strictEqual(firstPage.current.revisionId, technical.revisionId)
+        assert.deepStrictEqual(
+          firstPage.revisions.map(({ sequence }) => sequence),
+          [2]
+        )
+        assert.isTrue(firstPage.hasMore)
+        assert.strictEqual(firstPage.nextBeforeSequence, 2)
+
+        const secondPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: firstPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(
+          secondPage.revisions.map(({ sequence }) => sequence),
+          [1]
+        )
+        assert.isFalse(secondPage.hasMore)
+
+        const thread = yield* jobs.reviewThreadTail({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject,
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(
+          thread.events.filter(
+            ({ eventKind }) => eventKind === "review-suggestion-revised"
+          ).length,
+          2
+        )
+
+        const update = yield* database.sql`UPDATE agent_review_suggestion_revisions
+          SET revision_digest = ${`sha256:${"f".repeat(64)}`}
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND source_job_id = ${JOB_ID}`.pipe(Effect.result)
+        const deletion = yield* database.sql`DELETE FROM agent_review_suggestion_revisions
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND source_job_id = ${JOB_ID}`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(update))
+        assert.isTrue(Result.isFailure(deletion))
+      })
+    ))
+
+  it.effect("rejects a mismatched expected revision identity without appending", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })).current
+
+        const result = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: PrReviewSuggestionRevisionId.make(`sha256:${"f".repeat(64)}`),
+          expectedSequence: original.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "This edit must not be persisted"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T3
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "revision-identity-mismatch")
+        }
+        const unchanged = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(unchanged.current.revisionId, original.revisionId)
+        assert.deepStrictEqual(unchanged.revisions, [])
+      })
+    ))
+
+  it.effect("keeps appended suggestion revisions durable across database restart", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-review-revision-restart-")
+      const persisted = yield* withRepositoryConfig(
+        config,
+        Effect.gen(function*() {
+          const jobs = yield* AgentJobRepository
+          yield* setupFoundation
+          yield* enqueueReview
+          yield* completeReview
+          const suggestion = report.suggestions[0]!
+          const original = (yield* jobs.reviewSuggestionRevisions({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            beforeSequence: null,
+            limit: PrReviewSuggestionRevisionPageSize.make(1)
+          })).current
+          return yield* jobs.appendReviewSuggestionRevision({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            expectedRevisionId: original.revisionId,
+            expectedSequence: original.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+              ...suggestion,
+              title: "Durable edited suggestion"
+            }),
+            author: PrReviewSuggestionOperatorAuthor.make({
+              personId: PERSON_ID
+            }),
+            createdAt: T3
+          })
+        })
+      )
+
+      yield* withRepositoryConfig(
+        config,
+        Effect.gen(function*() {
+          const jobs = yield* AgentJobRepository
+          const page = yield* jobs.reviewSuggestionRevisions({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: report.suggestions[0]!.suggestionId,
+            beforeSequence: null,
+            limit: PrReviewSuggestionRevisionPageSize.make(10)
+          })
+          assert.strictEqual(page.current.revisionId, persisted.revisionId)
+          assert.strictEqual(page.current.suggestion.title, "Durable edited suggestion")
+          assert.deepStrictEqual(page.revisions.map(({ sequence }) => sequence), [1])
+        })
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("allows one winner for concurrent edits of the same revision", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })).current
+        const author = PrReviewSuggestionOperatorAuthor.make({
+          personId: PERSON_ID
+        })
+        const attempts = yield* Effect.all(
+          ["First edit", "Second edit"].map((title) =>
+            jobs.appendReviewSuggestionRevision({
+              workspaceId: WORKSPACE_ID,
+              jobId: JOB_ID,
+              suggestionId: suggestion.suggestionId,
+              expectedRevisionId: original.revisionId,
+              expectedSequence: original.sequence,
+              edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+                ...suggestion,
+                title
+              }),
+              author,
+              createdAt: T3
+            }).pipe(Effect.result)
+          ),
+          { concurrency: "unbounded" }
+        )
+
+        assert.strictEqual(attempts.filter(Result.isSuccess).length, 1)
+        const failure = attempts.find(Result.isFailure)
+        assert.isDefined(failure)
+        if (failure !== undefined && Result.isFailure(failure)) {
+          assert.instanceOf(failure.failure, RevisionConflictError)
+        }
+        const page = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        assert.strictEqual(page.current.sequence, 2)
+        assert.deepStrictEqual(
+          page.revisions.map(({ sequence }) => sequence),
+          [1]
+        )
+      })
+    ))
+
   it.effect("freezes a terminal queued cancellation as cancelled review context", () =>
     withRepository(
       Effect.gen(function*() {

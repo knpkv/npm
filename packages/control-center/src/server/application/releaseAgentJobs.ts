@@ -115,6 +115,7 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
       return { _tag: "job-failed", ...common, retryable: payload.error.retryable }
     }
     case "review-report":
+    case "review-suggestion-revised":
     case "review-suggestion-published":
       return yield* unavailable()
     case "cancel-requested": {

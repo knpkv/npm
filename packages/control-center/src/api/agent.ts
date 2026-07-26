@@ -3,7 +3,15 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
-import { EntityId, EventCursor, GovernedActionId, JobId, PersonId, ReleaseId } from "../domain/identifiers.js"
+import {
+  EntityId,
+  EventCursor,
+  GovernedActionId,
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId,
+  ReleaseId
+} from "../domain/identifiers.js"
 import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
 import {
   PrReviewOutcome,
@@ -12,6 +20,7 @@ import {
   PrReviewSuggestion,
   PrReviewSuggestionId
 } from "../domain/prReview.js"
+import { PrReviewSuggestionRevisionSequence } from "../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -468,6 +477,18 @@ const PullRequestReviewReportEvent = Schema.TaggedStruct("review-report", {
   report: PrReviewReport
 })
 
+const PullRequestReviewSuggestionRevisedEvent = Schema.TaggedStruct(
+  "suggestion-revised",
+  {
+    ...pullRequestReviewThreadEventFields,
+    suggestionId: PrReviewSuggestionId,
+    revisionId: PrReviewSuggestionRevisionId,
+    sequence: PrReviewSuggestionRevisionSequence,
+    authorKind: Schema.Literals(["operator", "agent"]),
+    validationState: Schema.Literals(["validated", "requires-revalidation"])
+  }
+)
+
 const PullRequestReviewSuggestionPublishedEvent = Schema.TaggedStruct(
   "suggestion-published",
   {
@@ -502,6 +523,7 @@ export const PullRequestReviewThreadEvent = Schema.Union([
   PullRequestReviewProgressEvent,
   PullRequestReviewUsageEvent,
   PullRequestReviewReportEvent,
+  PullRequestReviewSuggestionRevisedEvent,
   PullRequestReviewSuggestionPublishedEvent,
   PullRequestReviewRunCompletedEvent,
   PullRequestReviewRunFailedEvent,

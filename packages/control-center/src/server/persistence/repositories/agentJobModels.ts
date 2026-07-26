@@ -8,11 +8,18 @@ import {
   GovernedActionId,
   JobId,
   PluginConnectionId,
+  PrReviewSuggestionRevisionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../../domain/identifiers.js"
 import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
+import {
+  PrReviewSuggestionEdit,
+  PrReviewSuggestionRevisionAuthor,
+  PrReviewSuggestionRevisionPageSize,
+  PrReviewSuggestionRevisionSequence
+} from "../../../domain/prReviewRevision.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 /** Maximum persisted provider output across one attempt. */
@@ -331,6 +338,29 @@ export const AgentReviewResultRecord = Schema.Struct({
 })
 export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
 
+/** Workspace-scoped bounded read of one stable suggestion's prior revisions. */
+export const ReadReviewSuggestionRevisionsInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  beforeSequence: Schema.NullOr(PrReviewSuggestionRevisionSequence),
+  limit: PrReviewSuggestionRevisionPageSize
+})
+export type ReadReviewSuggestionRevisionsInput = typeof ReadReviewSuggestionRevisionsInput.Type
+
+/** Complete compare-and-append command for one immutable suggestion edit. */
+export const AppendReviewSuggestionRevisionInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  edit: PrReviewSuggestionEdit,
+  author: PrReviewSuggestionRevisionAuthor,
+  createdAt: UtcTimestamp
+})
+export type AppendReviewSuggestionRevisionInput = typeof AppendReviewSuggestionRevisionInput.Type
+
 /** Exact immutable subject used to recover its newest durable review job. */
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -425,6 +455,7 @@ export const AgentThreadEvent = Schema.Struct({
     "progress",
     "usage",
     "review-report",
+    "review-suggestion-revised",
     "review-suggestion-published",
     "job-completed",
     "job-failed",
@@ -455,6 +486,7 @@ export class AgentJobInputError extends Schema.TaggedErrorClass<AgentJobInputErr
       "output-limit-exceeded",
       "event-limit-exceeded",
       "invalid-result",
+      "revision-identity-mismatch",
       "task-mismatch"
     ])
   }

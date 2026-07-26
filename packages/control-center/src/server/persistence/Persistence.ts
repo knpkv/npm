@@ -180,6 +180,15 @@ const makePersistence = Effect.gen(function*() {
     agentJobs: {
       appendEvent: (...args: Parameters<AgentJobRepositoryService["appendEvent"]>) =>
         publicOperation("agent-job.append-event", agentJobs.appendEvent(...args)),
+      appendReviewSuggestionRevision: (
+        ...args: Parameters<
+          AgentJobRepositoryService["appendReviewSuggestionRevision"]
+        >
+      ) =>
+        publicOperation(
+          "agent-job.append-review-suggestion-revision",
+          agentJobs.appendReviewSuggestionRevision(...args)
+        ),
       claimNext: (...args: Parameters<AgentJobRepositoryService["claimNext"]>) =>
         publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
       completeReview: (...args: Parameters<AgentJobRepositoryService["completeReview"]>) =>
@@ -221,6 +230,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.review-thread-tail", agentJobs.reviewThreadTail(...args)),
       reviewResult: (...args: Parameters<AgentJobRepositoryService["reviewResult"]>) =>
         publicOperation("agent-job.review-result", agentJobs.reviewResult(...args)),
+      reviewSuggestionRevisions: (
+        ...args: Parameters<AgentJobRepositoryService["reviewSuggestionRevisions"]>
+      ) =>
+        publicOperation(
+          "agent-job.review-suggestion-revisions",
+          agentJobs.reviewSuggestionRevisions(...args)
+        ),
       threadAfter: (...args: Parameters<AgentJobRepositoryService["threadAfter"]>) =>
         publicOperation("agent-job.thread-after", agentJobs.threadAfter(...args))
     },

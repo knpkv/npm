@@ -67,6 +67,8 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
       return event.text
     case "review-report":
       return `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
+    case "suggestion-revised":
+      return `Suggestion revision ${String(event.sequence)} · ${event.validationState === "validated" ? "validated" : "needs revalidation"}`
     case "suggestion-published":
       return "Suggestion published to CodeCommit"
     case "run-completed":
