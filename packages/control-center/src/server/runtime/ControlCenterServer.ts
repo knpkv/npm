@@ -88,12 +88,14 @@ import { DomainEventWakeups } from "./DomainEventWakeups.js"
 import {
   firstPartyPluginConnectionMapLayer,
   firstPartyPluginRuntimeLayers,
-  firstPartyPluginRuntimeRegistryLayer
+  firstPartyPluginRuntimeLayersFromRegistry,
+  firstPartyPluginRuntimeRegistryLayer,
+  type FirstPartyPluginRuntimeRegistryOverride
 } from "./FirstPartyPluginRuntime.js"
 import {
+  governedActionExecutionRuntimeFromRuntimeMapLayers,
   GovernedActionExecutionStartup,
   type GovernedActionExecutionStartupError,
-  governedActionExecutionStartupFromRuntimeMapLayer,
   governedActionExecutionStartupLayer,
   type GovernedActionExecutionStartupOptions,
   governedActionPolicyBindingSourceLayer,
@@ -154,6 +156,8 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly pluginConnections?: PluginConnectionMapV1 | null
   /** Enable the fixed production provider registry when no test map is injected. */
   readonly firstPartyPluginRuntime?: boolean | undefined
+  /** Deterministic first-party registry seam; production omits it. @internal */
+  readonly firstPartyPluginRuntimes?: FirstPartyPluginRuntimeRegistryOverride | undefined
   readonly secretRoot: SecretRoot
   readonly staticAssets: StaticAssetStoreOptions
   /** Deterministic outbound transport seam; production omits it. @internal */
@@ -277,7 +281,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     null
   const firstPartyPluginRuntime = options.firstPartyPluginRuntime ?? false
   const firstPartyRuntime = firstPartyPluginRuntime
-    ? firstPartyPluginRuntimeLayers(firstPartyPluginRuntimeRegistryLayer)
+    ? options.firstPartyPluginRuntimes === undefined
+      ? firstPartyPluginRuntimeLayers(firstPartyPluginRuntimeRegistryLayer)
+      : firstPartyPluginRuntimeLayersFromRegistry(options.firstPartyPluginRuntimes)
     : null
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
@@ -356,13 +362,28 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence)
   )
   const governedActionConfiguration = options.governedActionExecution ?? null
+  const firstPartyGovernedActionRuntime = governedActionConfiguration !== null &&
+      governedActionConfiguration.pluginRuntimes === undefined &&
+      firstPartyPluginRuntime
+    ? governedActionExecutionRuntimeFromRuntimeMapLayers(governedActionConfiguration.workspaceId)
+    : null
+  const firstPartyGovernedActionStartup = governedActionConfiguration !== null &&
+      governedActionConfiguration.pluginRuntimes === undefined &&
+      firstPartyPluginRuntime
+    ? firstPartyGovernedActionRuntime!.startup.pipe(
+      Layer.provide(firstPartyRuntime!.runtimeMap)
+    )
+    : null
+  const firstPartyGovernedActionExecutors = firstPartyGovernedActionRuntime === null
+    ? null
+    : firstPartyGovernedActionRuntime.executors.pipe(
+      Layer.provide(firstPartyRuntime!.runtimeMap)
+    )
   const governedActionStartupBase = governedActionConfiguration === null
     ? governedActionExecutionStartupLayer(null)
     : governedActionConfiguration.pluginRuntimes === undefined
     ? firstPartyPluginRuntime
-      ? governedActionExecutionStartupFromRuntimeMapLayer(governedActionConfiguration.workspaceId).pipe(
-        Layer.provide(firstPartyRuntime!.runtimeMap)
-      )
+      ? firstPartyGovernedActionStartup!
       : governedActionExecutionStartupLayer(null)
     : governedActionExecutionStartupLayer({
       workspaceId: governedActionConfiguration.workspaceId,
@@ -488,10 +509,23 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   return {
     application: routes.pipe(Layer.provideMerge(runtimeServices)),
+    applicationServices,
+    firstPartyGovernedActionExecutors,
+    firstPartyGovernedActionStartup,
+    firstPartyRuntime,
+    governedActionStartup,
     lifecycle,
     runtimeServices
   }
 }
+
+/** Inspect the exact application composition in focused ownership tests. @internal */
+export const makeControlCenterApplicationComposition = <
+  ApplicationError = never,
+  ApplicationRequirements = never
+>(
+  options: ControlCenterServerOptions<ApplicationError, ApplicationRequirements>
+): ReturnType<typeof makeApplication<ApplicationError, ApplicationRequirements>> => makeApplication(options)
 
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
 export const makeControlCenterApplication = <ApplicationError = never, ApplicationRequirements = never>(

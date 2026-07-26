@@ -30,6 +30,7 @@ import { GovernedActionExecutionEngine } from "../../src/server/governance/inter
 import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
 import { DeliveryGraphRepository } from "../../src/server/persistence/repositories/deliveryGraphRepository.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
 import {
@@ -63,14 +64,13 @@ import { jiraReadPluginDescriptor } from "../../src/server/plugins/jira/JiraRead
 import { hasPluginCapability } from "../../src/server/plugins/negotiation.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../../src/server/plugins/PluginConnectionMap.js"
-import { liveApplicationServices } from "../../src/server/runtime/ControlCenterServer.js"
+import { makeControlCenterApplicationComposition } from "../../src/server/runtime/ControlCenterServer.js"
 import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
-import {
-  firstPartyPluginConnectionMapLayer,
-  firstPartyPluginRuntimeLayers
-} from "../../src/server/runtime/FirstPartyPluginRuntime.js"
+import { firstPartyPluginConnectionMapLayer } from "../../src/server/runtime/FirstPartyPluginRuntime.js"
+import { GovernedActionExecutionStartup } from "../../src/server/runtime/GovernedActionExecutionStartup.js"
 import { SecretRef } from "../../src/server/secrets/SecretRef.js"
 import { SecretRoot, SecretStore } from "../../src/server/secrets/SecretStore.js"
+import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
 import {
   ACTION_ID as GOVERNED_ACTION_ID,
   CONNECTION_ID as GOVERNED_CONNECTION_ID,
@@ -1376,8 +1376,6 @@ describe("first-party plugin runtime", () => {
       const runtimeAuthority = pluginRuntimeAuthoritySourceLayer
       const discoveredProfiles = yield* Ref.make<Array<string>>([])
       const changedFileProfiles = yield* Ref.make<Array<string>>([])
-      const mapBuilds = yield* Ref.make(0)
-      const invalidations = yield* Ref.make(0)
       const providerMutations = yield* Ref.make(0)
       const pullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
         pullRequestId: "17",
@@ -1456,31 +1454,6 @@ describe("first-party plugin runtime", () => {
       })
       const clients = Layer.merge(readClient, reviewClient)
       const registry = makeFirstPartyPluginRuntimeRegistry(clients)
-      const firstPartyRuntime = firstPartyPluginRuntimeLayers(registry)
-      const baseConnections = firstPartyRuntime.connections
-      const executors = AuthorizedPluginExecutorMap.layer.pipe(
-        Layer.provide(firstPartyRuntime.runtimeMap)
-      )
-      const connections = Layer.effect(
-        PluginConnectionMap,
-        Effect.gen(function*() {
-          const connectionMap = yield* PluginConnectionMap
-          yield* Ref.update(mapBuilds, (count) => count + 1)
-          return PluginConnectionMap.of({
-            contextEffect: connectionMap.contextEffect,
-            ...(connectionMap.proposalContextEffect === undefined
-              ? {}
-              : { proposalContextEffect: connectionMap.proposalContextEffect }),
-            invalidate: (scope) =>
-              Ref.update(invalidations, (count) => count + 1).pipe(
-                Effect.andThen(connectionMap.invalidate(scope))
-              )
-          })
-        })
-      ).pipe(
-        Layer.provide(baseConnections),
-        Layer.provide(runtimeAuthority)
-      )
       const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
       const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
       const dependencies = Layer.mergeAll(
@@ -1526,6 +1499,31 @@ describe("first-party plugin runtime", () => {
           codeCommitPluginDefinition.rawDescriptor,
           0,
           CREATED_AT
+        )
+        const registryService = yield* PluginRuntimeRegistry
+        const composition = makeControlCenterApplicationComposition({
+          bindConfig: yield* decodeBindConfig({ port: 4173 }),
+          persistenceConfig: Schema.decodeUnknownSync(PersistenceConfig)(config),
+          secretRoot: SecretRoot.make(`${root}/secrets`),
+          staticAssets: { root },
+          firstPartyPluginRuntime: true,
+          firstPartyPluginRuntimes: registryService,
+          governedActionExecution: { workspaceId: GOVERNED_WORKSPACE }
+        })
+        if (
+          composition.firstPartyRuntime === null ||
+          composition.firstPartyGovernedActionStartup === null ||
+          composition.firstPartyGovernedActionExecutors === null
+        ) {
+          return yield* Effect.die("first-party governed runtime composition is unavailable")
+        }
+        const composed = yield* Layer.build(
+          Layer.mergeAll(
+            composition.applicationServices,
+            composition.firstPartyRuntime.connections,
+            composition.firstPartyGovernedActionStartup,
+            composition.firstPartyGovernedActionExecutors
+          ).pipe(Layer.provide(composition.lifecycle))
         )
         const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000087")
         const observedAt = DateTime.formatIso(CREATED_AT)
@@ -1578,8 +1576,8 @@ describe("first-party plugin runtime", () => {
           relationships: []
         })
 
-        const reads = yield* CompleteDiffReads
-        const administration = yield* PluginAdministration
+        const reads = Context.get(composed, CompleteDiffReads)
+        const administration = Context.get(composed, PluginAdministration)
         const request = {
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
@@ -1610,13 +1608,9 @@ describe("first-party plugin runtime", () => {
         const third = yield* reads.inventory(request)
         assert.deepStrictEqual(third, first)
         assert.deepStrictEqual({
-          mapBuilds: yield* Ref.get(mapBuilds),
-          invalidations: yield* Ref.get(invalidations),
           discoveredProfiles: yield* Ref.get(discoveredProfiles),
           changedFileProfiles: yield* Ref.get(changedFileProfiles)
         }, {
-          mapBuilds: 1,
-          invalidations: 1,
           discoveredProfiles: ["production", "rotated"],
           changedFileProfiles: ["production", "production", "rotated"]
         })
@@ -1646,8 +1640,9 @@ describe("first-party plugin runtime", () => {
           Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
         )
 
-        const connectionMap = yield* PluginConnectionMap
-        const executorMap = yield* AuthorizedPluginExecutorMap
+        const connectionMap = Context.get(composed, PluginConnectionMap)
+        const executorMap = Context.get(composed, AuthorizedPluginExecutorMap)
+        const governedExecution = Context.get(composed, GovernedActionExecutionStartup)
         const governedScope = {
           workspaceId: GOVERNED_WORKSPACE,
           pluginConnectionId: GOVERNED_CONNECTION
@@ -1686,22 +1681,14 @@ describe("first-party plugin runtime", () => {
           variant: "codecommit"
         })
         yield* seedGovernedActionCurrentInputs("codecommit")
-        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
-          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
-          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
-          Layer.provideMerge(QuarantineRepository.layer)
-        )
-        const engineLayer = GovernedActionExecutionEngine.layer.pipe(
-          Layer.provide(store),
-          Layer.provide(Layer.succeed(AuthorizedPluginExecutorMap, executorMap))
-        )
-        const execution = yield* Effect.gen(function*() {
-          const engine = yield* GovernedActionExecutionEngine
-          return yield* engine.run({
-            workspaceId: GOVERNED_WORKSPACE,
-            actionId: GOVERNED_ACTION
-          })
-        }).pipe(Effect.provide(engineLayer))
+        assert.strictEqual(governedExecution._tag, "ready")
+        if (governedExecution._tag !== "ready") {
+          return yield* Effect.die("governed execution composition is unavailable")
+        }
+        const execution = yield* governedExecution.advance({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
         const governedRecord = yield* (yield* GovernedActionRepository).read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
@@ -1711,13 +1698,7 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(governedRecord.head.state, "succeeded")
         assert.strictEqual(yield* Ref.get(providerMutations), 1)
       }).pipe(
-        Effect.provide(
-          Layer.mergeAll(
-            liveApplicationServices(null, true, "http://127.0.0.1:4173", connections),
-            executors,
-            connections
-          )
-        ),
+        Effect.provide(registry),
         Effect.provide(dependencies)
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))

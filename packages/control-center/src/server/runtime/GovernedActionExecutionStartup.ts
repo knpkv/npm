@@ -118,7 +118,7 @@ export const governedActionPolicyBindingSourceLayer = Layer.effect(
   )
 )
 
-const readyLayerFromRuntimeMap = (workspaceId: WorkspaceId) => {
+const readyLayersFromRuntimeMap = (workspaceId: WorkspaceId) => {
   const executors = AuthorizedPluginExecutorMap.layer
   const store = governedActionExecutionStoreLayer(workspaceId).pipe(
     Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
@@ -129,18 +129,21 @@ const readyLayerFromRuntimeMap = (workspaceId: WorkspaceId) => {
     Layer.provide(store),
     Layer.provide(executors)
   )
-  return Layer.merge(
-    Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
-      Layer.provide(engine)
-    ),
-    governedActionRecoveryClaimDrainLayer(workspaceId)
-  )
+  return {
+    executors,
+    startup: Layer.merge(
+      Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
+        Layer.provide(engine)
+      ),
+      governedActionRecoveryClaimDrainLayer(workspaceId)
+    )
+  }
 }
 
 const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
   const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
   const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
-  return readyLayerFromRuntimeMap(options.workspaceId).pipe(Layer.provide(runtimeMap))
+  return readyLayersFromRuntimeMap(options.workspaceId).startup.pipe(Layer.provide(runtimeMap))
 }
 
 /** Install the engine only when an internal runtime registry is explicitly configured. */
@@ -165,7 +168,12 @@ export const governedActionExecutionStartupFromRegistryLayer = (
 /** Resolve executors from the server-owned cache shared with proposal projections. @internal */
 export const governedActionExecutionStartupFromRuntimeMapLayer = (
   workspaceId: WorkspaceId
-) => readyLayerFromRuntimeMap(workspaceId)
+) => readyLayersFromRuntimeMap(workspaceId).startup
+
+/** Keep the exact private executor projection available to the server composition test. @internal */
+export const governedActionExecutionRuntimeFromRuntimeMapLayers = (
+  workspaceId: WorkspaceId
+) => readyLayersFromRuntimeMap(workspaceId)
 
 /** Acquire the private worker for server lifetime without returning its capability. */
 export const governedActionExecutionServerLayer = (

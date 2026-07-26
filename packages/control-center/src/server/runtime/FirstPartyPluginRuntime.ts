@@ -3,7 +3,7 @@ import * as Layer from "effect/Layer"
 import { FirstPartyPluginRuntimeRegistry } from "../plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginConnectionMapLive, PluginRuntimeMap } from "../plugins/internal/PluginRuntimeMap.js"
-import type { PluginRuntimeRegistry } from "../plugins/internal/PluginRuntimeRegistry.js"
+import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/internal/PluginRuntimeRegistry.js"
 
 /** Production first-party registry with persisted runtime-authority publication. @internal */
 export const firstPartyPluginRuntimeRegistryLayer = FirstPartyPluginRuntimeRegistry.pipe(
@@ -26,6 +26,14 @@ export const firstPartyPluginRuntimeLayers = <Error, Requirements>(
     runtimeMap
   }
 }
+
+/** Deterministic registry service accepted only by the server composition test seam. @internal */
+export type FirstPartyPluginRuntimeRegistryOverride = PluginRuntimeRegistryV1
+
+/** Project a deterministic registry service through the production cache factory. @internal */
+export const firstPartyPluginRuntimeLayersFromRegistry = (
+  registry: FirstPartyPluginRuntimeRegistryOverride
+) => firstPartyPluginRuntimeLayers(Layer.succeed(PluginRuntimeRegistry, registry))
 
 const firstPartyRuntime = firstPartyPluginRuntimeLayers(firstPartyPluginRuntimeRegistryLayer)
 
