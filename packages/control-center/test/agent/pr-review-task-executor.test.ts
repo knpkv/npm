@@ -443,7 +443,7 @@ const runExecutor = <Success, Failure>(
     PrReviewThreadHistory.of({
       page: ({ after }) =>
         Effect.succeed({
-          event: null,
+          events: [],
           hasMore: false,
           nextCursor: after
         })
@@ -491,8 +491,17 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
-  it.effect("pages fenced durable thread history only through the explicit tool", () => {
+  it.effect("exposes more than 64 fenced history events without exhausting tool steps", () => {
     const observedCursors = new Array<number>()
+    const eventKind = Schema.decodeSync(AgentThreadEvent.fields.eventKind)("user-message")
+    const events = Array.from({ length: 65 }, (_, index) => ({
+      eventSequence: AgentEventCursor.make(index + 1),
+      jobId: JOB_ID,
+      attemptSequence: null,
+      eventKind,
+      payload: { prompt: `Prior review request ${String(index + 1)}` },
+      occurredAt: Schema.decodeSync(UtcTimestamp)("2026-07-24T09:00:00.000Z")
+    }))
     const historyLayer = Layer.succeed(
       PrReviewThreadHistory,
       PrReviewThreadHistory.of({
@@ -500,16 +509,9 @@ describe("PR review task executor", () => {
           Effect.sync(() => {
             observedCursors.push(after)
             return {
-              event: {
-                eventSequence: AgentEventCursor.make(7),
-                jobId: JOB_ID,
-                attemptSequence: null,
-                eventKind: Schema.decodeSync(AgentThreadEvent.fields.eventKind)("user-message"),
-                payload: { prompt: "Re-check the transaction boundary." },
-                occurredAt: Schema.decodeSync(UtcTimestamp)("2026-07-24T09:00:00.000Z")
-              },
+              events,
               hasMore: false,
-              nextCursor: AgentEventCursor.make(7)
+              nextCursor: AgentEventCursor.make(65)
             }
           })
       })

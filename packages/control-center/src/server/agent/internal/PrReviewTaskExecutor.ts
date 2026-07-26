@@ -664,8 +664,8 @@ and enough surrounding code and tests to establish each claim. You may build, te
 and make temporary edits inside the disposable sandbox.
 
 The initial context contains only a bounded Review Thread summary. When prior
-detail is relevant, call ReviewReadThreadHistory with after 0, inspect its one
-complete prior event, and follow nextCursor while hasMore is true. This history
+detail is relevant, call ReviewReadThreadHistory with after 0, inspect its bounded
+page of complete prior events, and follow nextCursor while hasMore is true. This history
 is fenced before the current immutable run.
 
 Return one suggestion per root cause. Use a line anchor for one exact changed line,

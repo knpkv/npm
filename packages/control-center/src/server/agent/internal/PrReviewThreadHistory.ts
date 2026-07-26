@@ -1,6 +1,8 @@
 /** Fenced, cursor-paged durable history tools for one immutable PR-review run. @module */
+import { MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import * as Tool from "effect/unstable/ai/Tool"
@@ -10,9 +12,15 @@ import {
   AgentEventCursor,
   AgentThreadEvent,
   AgentThreadEventPageSize,
-  type ClaimedAgentJob
+  type ClaimedAgentJob,
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../persistence/repositories/agentJobRepository.js"
+
+const MAXIMUM_REVIEW_HISTORY_PAGE_BYTES = MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES - 4 * 1_024
+const REVIEW_HISTORY_FETCH_LIMIT = AgentThreadEventPageSize.make(
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+)
 
 const ReviewThreadHistoryEvent = Schema.Struct({
   eventSequence: AgentEventCursor,
@@ -24,10 +32,13 @@ const ReviewThreadHistoryEvent = Schema.Struct({
 })
 
 const ReviewThreadHistoryPage = Schema.Struct({
-  event: Schema.NullOr(ReviewThreadHistoryEvent),
+  events: Schema.Array(ReviewThreadHistoryEvent).check(
+    Schema.isMaxLength(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)
+  ),
   hasMore: Schema.Boolean,
   nextCursor: AgentEventCursor
 })
+const ReviewThreadHistoryPageJson = Schema.fromJsonString(ReviewThreadHistoryPage)
 
 /** Stable model-visible failure without persistence or host details. */
 export class PrReviewThreadHistoryError extends Schema.TaggedErrorClass<PrReviewThreadHistoryError>()(
@@ -70,7 +81,50 @@ const presentHistoryEvent = Effect.fn("PrReviewThreadHistory.presentHistoryEvent
   }
 })
 
-/** Persisted history implementation; one model call receives at most one complete event. */
+const encodedPageByteLength = Effect.fn("PrReviewThreadHistory.encodedPageByteLength")(function*(
+  page: typeof ReviewThreadHistoryPage.Type
+) {
+  const json = yield* Schema.encodeUnknownEffect(ReviewThreadHistoryPageJson)(page).pipe(
+    Effect.mapError(unavailable)
+  )
+  const bytes = yield* Effect.fromResult(
+    Encoding.decodeBase64(Encoding.encodeBase64(json))
+  ).pipe(Effect.mapError(unavailable))
+  return bytes.byteLength
+})
+
+const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage")(function*(
+  events: ReadonlyArray<AgentThreadEvent>,
+  after: typeof AgentEventCursor.Type
+) {
+  const presented = new Array<typeof ReviewThreadHistoryEvent.Type>()
+  for (const event of events) {
+    const next = yield* presentHistoryEvent(event)
+    const candidate = {
+      events: [...presented, next],
+      hasMore: true,
+      nextCursor: next.eventSequence
+    }
+    if ((yield* encodedPageByteLength(candidate)) > MAXIMUM_REVIEW_HISTORY_PAGE_BYTES) {
+      if (presented.length === 0) {
+        return yield* unavailable()
+      }
+      break
+    }
+    presented.push(next)
+  }
+  const nextCursor = presented.at(-1)?.eventSequence ?? after
+  return yield* Schema.decodeUnknownEffect(
+    Schema.toType(ReviewThreadHistoryPage)
+  )({
+    events: presented,
+    hasMore: presented.length < events.length ||
+      events.length === MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
+    nextCursor
+  }).pipe(Effect.mapError(unavailable))
+})
+
+/** Persisted history implementation; each model call receives a bounded page of complete events. */
 export const prReviewThreadHistoryLayer: Layer.Layer<
   PrReviewThreadHistory,
   never,
@@ -86,27 +140,17 @@ export const prReviewThreadHistoryLayer: Layer.Layer<
           threadId: claim.threadId,
           beforeJobId: claim.jobId,
           after,
-          limit: AgentThreadEventPageSize.make(2)
+          limit: REVIEW_HISTORY_FETCH_LIMIT
         }).pipe(Effect.mapError(unavailable))
-        const event = page.events[0]
-        const presented = event === undefined
-          ? null
-          : yield* presentHistoryEvent(event)
-        return yield* Schema.decodeUnknownEffect(
-          Schema.toType(ReviewThreadHistoryPage)
-        )({
-          event: presented,
-          hasMore: page.events.length > 1,
-          nextCursor: event?.eventSequence ?? after
-        }).pipe(Effect.mapError(unavailable))
+        return yield* makeBoundedPage(page.events, after)
       })
     })
   })
 )
 
-/** Read the next prior durable event; start at cursor zero and follow `nextCursor`. */
+/** Read the next bounded page of prior durable events; start at zero and follow `nextCursor`. */
 export const ReviewReadThreadHistory = Tool.make("ReviewReadThreadHistory", {
-  description: "Read one complete prior event from this pull request's durable Review Thread. " +
+  description: "Read a bounded page of complete prior events from this pull request's durable Review Thread. " +
     "Start with after 0 and repeat with nextCursor while hasMore is true.",
   failure: PrReviewThreadHistoryError,
   parameters: Schema.Struct({ after: AgentEventCursor }),

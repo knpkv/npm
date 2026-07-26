@@ -20,14 +20,20 @@ import {
 } from "../../src/domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import {
+  PrReviewThreadHistory,
+  prReviewThreadHistoryLayer
+} from "../../src/server/agent/internal/PrReviewThreadHistory.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import {
+  AgentAttemptSequence,
   AgentEventCursor,
   AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
+  EMPTY_PR_REVIEW_THREAD_CONTEXT,
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
   ReviewSuggestionPublicationDigest
 } from "../../src/server/persistence/repositories/agentJobModels.js"
@@ -607,6 +613,68 @@ describe("agent job review results", () => {
         })
         assert.deepStrictEqual(fabricated.events, [])
         assert.strictEqual(fabricated.nextCursor, AgentEventCursor.make(999))
+      })
+    ))
+
+  it.effect("packs more than 64 prior durable events into one model-visible history page", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        yield* setupFoundation
+        for (let index = 0; index < 33; index += 1) {
+          yield* enqueueReviewFor(
+            JobId.make(`01890f6f-6d6a-7cc0-98d2-${String(index + 100).padStart(12, "0")}`),
+            subject,
+            `Review request ${String(index + 1)}.`
+          )
+        }
+        const currentJobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000200")
+        yield* enqueueReviewFor(currentJobId, advancedSubject, "Review the current head.")
+        const rows = yield* database.sql<{ readonly threadId: string }>`SELECT
+          thread_id AS threadId
+        FROM agent_jobs
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND job_id = ${currentJobId}`
+        assert.strictEqual(rows.length, 1)
+        const threadId = AgentThreadId.make(rows[0]!.threadId)
+        const page = yield* Effect.gen(function*() {
+          const history = yield* PrReviewThreadHistory
+          return yield* history.page({
+            after: AgentEventCursor.make(0),
+            claim: {
+              workspaceId: WORKSPACE_ID,
+              releaseId: RELEASE_ID,
+              threadId,
+              jobId: currentJobId,
+              attemptSequence: AgentAttemptSequence.make(1),
+              leaseOwner: LEASE_OWNER,
+              leaseToken: LEASE_TOKEN,
+              leaseExpiresAt: T3,
+              providerId: PROVIDER_ID,
+              model: "deterministic-review-model",
+              access: "read-only",
+              prompt: "Review the current head.",
+              context: {
+                workspaceId: WORKSPACE_ID,
+                releaseId: RELEASE_ID,
+                subjectRevision: advancedSubject.headRevision,
+                fingerprint: FINGERPRINT,
+                task: {
+                  _tag: "pr-review",
+                  pluginConnectionId: PLUGIN_CONNECTION_ID,
+                  subject: advancedSubject,
+                  reviewProfile,
+                  context: EMPTY_PR_REVIEW_THREAD_CONTEXT
+                }
+              },
+              sessionRef: null,
+              cancellationRequested: false
+            }
+          })
+        }).pipe(Effect.provide(prReviewThreadHistoryLayer))
+        assert.strictEqual(page.events.length, 66)
+        assert.isFalse(page.hasMore)
+        assert.strictEqual(page.nextCursor, page.events.at(-1)?.eventSequence)
       })
     ))
 
