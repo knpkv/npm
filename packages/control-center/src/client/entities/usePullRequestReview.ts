@@ -347,10 +347,11 @@ export const usePullRequestReview = (
           abort.signal,
           latestScope,
           latestThread,
+          onSessionExpired,
           setState
         )
     )
-  }, [state, transport])
+  }, [onSessionExpired, state, transport])
 
   const start = useCallback((prompt?: DurableAgentPrompt) => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return

@@ -24,9 +24,11 @@ import {
 } from "../../src/api/agent.js"
 import {
   continuePullRequestReviewThread,
+  installNewestThread,
   loadEarlierPullRequestReviewThread,
   MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
-  MAXIMUM_REVIEW_THREAD_PAGE_READS
+  MAXIMUM_REVIEW_THREAD_PAGE_READS,
+  type PullRequestReviewThread
 } from "../../src/client/entities/pullRequestReviewThreadReplay.js"
 import {
   type PullRequestReviewTransport,
@@ -340,15 +342,25 @@ const PublicationHarness = ({
   )
 }
 
-const ReviewThreadHarness = ({ transport }: { readonly transport: PullRequestReviewTransport }): ReactElement => {
-  const controller = usePullRequestReview(ENTITY_ID, BASE_A, HEAD_A, "session-a", true, ignoreSessionExpired, transport)
+const ReviewThreadHarness = ({
+  onSessionExpired = ignoreSessionExpired,
+  transport
+}: {
+  readonly onSessionExpired?: (sessionKey: string) => void
+  readonly transport: PullRequestReviewTransport
+}): ReactElement => {
+  const controller = usePullRequestReview(ENTITY_ID, BASE_A, HEAD_A, "session-a", true, onSessionExpired, transport)
   return (
     <>
+      <span data-history>
+        {controller.state._tag === "ready" ? controller.state.historyAction : controller.state._tag}
+      </span>
       <span data-thread>
         {controller.state._tag === "ready"
           ? String(controller.state.thread?.events.length ?? 0)
           : controller.state._tag}
       </span>
+      <button data-load-earlier onClick={controller.loadEarlier} />
       <button data-start onClick={() => controller.start(TARGETED_PROMPT)} />
     </>
   )
@@ -380,6 +392,122 @@ describe("usePullRequestReview", () => {
     expect(thread.events[0]?.eventSequence).toBe(ReleaseAgentThreadCursor.make(129))
     expect(thread.events.at(-1)?.eventSequence).toBe(ReleaseAgentThreadCursor.make(384))
     expect(thread.nextCursor).toBe(ReleaseAgentThreadCursor.make(384))
+  })
+
+  it("re-enables explicit history when live replay later truncates a thread opened empty", async () => {
+    const pageSize = MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS / 2
+    const pages = [
+      PullRequestReviewThreadPage.make({
+        events: [],
+        hasMore: false,
+        nextCursor: ReleaseAgentThreadCursor.make(0)
+      }),
+      PullRequestReviewThreadPage.make({
+        events: Array.from({ length: pageSize }, (_, index) => threadEvent(index + 1)),
+        hasMore: false,
+        nextCursor: ReleaseAgentThreadCursor.make(pageSize)
+      }),
+      PullRequestReviewThreadPage.make({
+        events: Array.from({ length: pageSize }, (_, index) => threadEvent(index + pageSize + 1)),
+        hasMore: false,
+        nextCursor: ReleaseAgentThreadCursor.make(MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
+      }),
+      PullRequestReviewThreadPage.make({
+        events: [threadEvent(MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS + 1)],
+        hasMore: false,
+        nextCursor: ReleaseAgentThreadCursor.make(MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS + 1)
+      })
+    ]
+    const transport = {
+      loadThread: vi.fn(() => Promise.resolve(pages.shift() ?? EMPTY_THREAD))
+    }
+    const signal = new AbortController().signal
+
+    let thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal)
+    expect(thread.hasEarlier).toBe(false)
+    thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+    expect(thread.hasEarlier).toBe(false)
+    thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+    expect(thread.hasEarlier).toBe(false)
+    thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+
+    expect(thread.events).toHaveLength(MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
+    expect(thread.events[0]?.eventSequence).toBe(ReleaseAgentThreadCursor.make(2))
+    expect(thread.hasEarlier).toBe(true)
+  })
+
+  it.each(["history-first", "live-first"] satisfies ReadonlyArray<"history-first" | "live-first">)(
+    "merges concurrent backward and live reads when %s resolves",
+    async (order) => {
+      const history = deferred<PullRequestReviewThread>()
+      const live = deferred<PullRequestReviewThread>()
+      const target: { current: PullRequestReviewThread | null } = { current: null }
+      const signal = new AbortController().signal
+      const installHistory = history.promise.then((thread) => installNewestThread(target, thread, signal))
+      const installLive = live.promise.then((thread) => installNewestThread(target, thread, signal))
+      const historyThread = {
+        events: [threadEvent(127), threadEvent(128), threadEvent(129), threadEvent(130)],
+        hasEarlier: true,
+        historyLoaded: true,
+        nextCursor: ReleaseAgentThreadCursor.make(130)
+      }
+      const liveThread = {
+        events: [threadEvent(129), threadEvent(130), threadEvent(131)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(131)
+      }
+
+      if (order === "history-first") {
+        history.resolve(historyThread)
+        await installHistory
+        live.resolve(liveThread)
+      } else {
+        live.resolve(liveThread)
+        await installLive
+        history.resolve(historyThread)
+      }
+      await Promise.all([installHistory, installLive])
+
+      expect(target.current?.events.map(({ eventSequence }) => eventSequence)).toEqual([
+        ReleaseAgentThreadCursor.make(127),
+        ReleaseAgentThreadCursor.make(128),
+        ReleaseAgentThreadCursor.make(129),
+        ReleaseAgentThreadCursor.make(130),
+        ReleaseAgentThreadCursor.make(131)
+      ])
+      expect(target.current).toMatchObject({
+        hasEarlier: true,
+        historyLoaded: true,
+        nextCursor: ReleaseAgentThreadCursor.make(131)
+      })
+    }
+  )
+
+  it("fails closed when concurrent reads disagree about one durable event", () => {
+    const signal = new AbortController().signal
+    const original = {
+      events: [threadEvent(1)],
+      hasEarlier: false,
+      historyLoaded: false,
+      nextCursor: ReleaseAgentThreadCursor.make(1)
+    }
+    const target: { current: PullRequestReviewThread | null } = { current: original }
+    const conflicting = threadEvent(1)
+    if (conflicting._tag !== "operator-message") {
+      throw new Error("Expected operator-message fixture")
+    }
+
+    expect(() =>
+      installNewestThread(
+        target,
+        {
+          ...original,
+          events: [{ ...conflicting, prompt: DurableAgentPrompt.make("Conflicting prompt.") }]
+        },
+        signal
+      )
+    ).toThrow("conflicting duplicate events")
   })
 
   it("prepends one explicit backward page while preserving the live cursor", async () => {
@@ -651,6 +779,53 @@ describe("usePullRequestReview", () => {
       expect.any(AbortSignal)
     )
   })
+
+  it.each([
+    {
+      failure: { _tag: "UnauthorizedApiError" },
+      expectedHistoryAction: "failed",
+      expectedSessionExpirations: 1
+    },
+    {
+      failure: new Error("history unavailable"),
+      expectedHistoryAction: "failed",
+      expectedSessionExpirations: 0
+    }
+  ])(
+    "handles a rejected backward history read without retaining a stale session",
+    async ({ expectedHistoryAction, expectedSessionExpirations, failure }) => {
+      const onSessionExpired = vi.fn()
+      const initialPage = PullRequestReviewThreadPage.make({
+        events: [threadEvent(1)],
+        hasMore: false,
+        nextCursor: ReleaseAgentThreadCursor.make(1)
+      })
+      const transport = {
+        enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+        load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
+        loadThread: vi.fn((_entityId, _cursor, _signal, direction) =>
+          direction === "before" ? Promise.reject(failure) : Promise.resolve(initialPage)
+        ),
+        previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+        providers: () => Promise.resolve({ providers: [] }),
+        publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+      } satisfies PullRequestReviewTransport
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+
+      await act(async () =>
+        mountedRoot?.render(<ReviewThreadHarness onSessionExpired={onSessionExpired} transport={transport} />)
+      )
+      await act(async () => host.querySelector<HTMLButtonElement>("[data-load-earlier]")?.click())
+
+      expect(host.querySelector("[data-history]")?.textContent).toBe(expectedHistoryAction)
+      expect(onSessionExpired).toHaveBeenCalledTimes(expectedSessionExpirations)
+      if (expectedSessionExpirations === 1) {
+        expect(onSessionExpired).toHaveBeenCalledWith("session-a")
+      }
+    }
+  )
 
   it("gates publication, quarantines a mismatched receipt, and resets on scope change", async () => {
     const { preview, published } = makePublicationFixture(HEAD_B)

@@ -1,12 +1,14 @@
 /** Bounded browser replay for a durable pull-request review thread. @module */
 import * as Effect from "effect/Effect"
+import * as Equal from "effect/Equal"
+import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import type {
   AgentProviderCatalog,
   PullRequestReviewState,
   PullRequestReviewThreadEvent,
-  PullRequestReviewThreadPage,
-  ReleaseAgentThreadCursor
+  PullRequestReviewThreadPage
 } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
@@ -40,15 +42,60 @@ interface PullRequestReviewThreadRef {
   current: PullRequestReviewThread | null
 }
 
-const installNewestThread = (
+const earliestSequence = (thread: PullRequestReviewThread): number =>
+  thread.events[0]?.eventSequence ?? Number.MAX_SAFE_INTEGER
+
+/** Merge concurrent live and backward reads without dropping either cursor direction. */
+export const mergePullRequestReviewThreads = (
+  left: PullRequestReviewThread,
+  right: PullRequestReviewThread
+): PullRequestReviewThread => {
+  const eventsBySequence = new Map<number, PullRequestReviewThreadEvent>()
+  for (const event of [...left.events, ...right.events]) {
+    const existing = eventsBySequence.get(event.eventSequence)
+    if (existing !== undefined && !Equal.equals(existing, event)) {
+      throw new Error("Pull-request review thread contained conflicting duplicate events")
+    }
+    eventsBySequence.set(event.eventSequence, event)
+  }
+  const allEvents = [...eventsBySequence.values()].sort(
+    (left, right) => left.eventSequence - right.eventSequence
+  )
+  const leftEarliestSequence = earliestSequence(left)
+  const rightEarliestSequence = earliestSequence(right)
+  const boundary = leftEarliestSequence < rightEarliestSequence
+    ? left
+    : rightEarliestSequence < leftEarliestSequence
+    ? right
+    : left.historyLoaded
+    ? left
+    : right
+  const historyLoaded = boundary.historyLoaded
+  const events = historyLoaded
+    ? allEvents
+    : allEvents.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
+  return {
+    events,
+    hasEarlier: (leftEarliestSequence === rightEarliestSequence
+      ? left.hasEarlier || right.hasEarlier
+      : boundary.hasEarlier) || events.length < allEvents.length,
+    historyLoaded,
+    nextCursor: ReleaseAgentThreadCursor.make(
+      Math.max(left.nextCursor, right.nextCursor)
+    )
+  }
+}
+
+export const installNewestThread = (
   target: PullRequestReviewThreadRef,
   candidate: PullRequestReviewThread,
   signal: AbortSignal
 ): PullRequestReviewThread => {
-  if (
-    !signal.aborted &&
-    (target.current === null || target.current.nextCursor <= candidate.nextCursor)
-  ) target.current = candidate
+  if (!signal.aborted) {
+    target.current = target.current === null
+      ? candidate
+      : mergePullRequestReviewThreads(target.current, candidate)
+  }
   return target.current ?? candidate
 }
 
@@ -178,12 +225,16 @@ export const continuePullRequestReviewThread = async (
   const events = previous === undefined
     ? update.events
     : [...previous.events, ...update.events]
+  const historyLoaded = previous?.historyLoaded ?? false
+  const retainedEvents = historyLoaded
+    ? events
+    : events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS)
   return {
-    events: previous?.historyLoaded
-      ? events
-      : events.slice(-MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS),
-    hasEarlier: previous?.hasEarlier ?? events.length > 0,
-    historyLoaded: previous?.historyLoaded ?? false,
+    events: retainedEvents,
+    hasEarlier: previous === undefined
+      ? events.length > 0
+      : previous.hasEarlier || retainedEvents.length < events.length,
+    historyLoaded,
     nextCursor: update.nextCursor
   }
 }
@@ -240,31 +291,39 @@ export const loadEarlierPullRequestReviewThreadIntoState = (
   signal: AbortSignal,
   latestScope: { current: PullRequestReviewScope | null },
   latestThread: PullRequestReviewThreadRef,
+  onSessionExpired: (sessionKey: string) => void,
   setState: (
     update: (state: PullRequestReviewControllerState) => PullRequestReviewControllerState
   ) => void
-): void => {
-  loadEarlierPullRequestReviewThread(
-    transport,
-    current.entityId,
-    signal,
-    currentThread
-  ).then(
-    (thread) => {
+): Promise<void> => {
+  const run = async (): Promise<void> => {
+    try {
+      const thread = await loadEarlierPullRequestReviewThread(
+        transport,
+        current.entityId,
+        signal,
+        currentThread
+      )
       if (
         signal.aborted ||
         latestScope.current === null ||
         !sameReviewScope(latestScope.current, current)
       ) return
-      latestThread.current = thread
+      const installed = installNewestThread(latestThread, thread, signal)
       setState((latest) =>
         latest._tag === "ready" && sameReviewScope(latest, current)
-          ? { ...latest, historyAction: "idle", thread }
+          ? { ...latest, historyAction: "idle", thread: installed }
           : latest
       )
-    },
-    (failure) => {
-      if (signal.aborted) return
+    } catch (failure) {
+      if (
+        signal.aborted ||
+        latestScope.current === null ||
+        !sameReviewScope(latestScope.current, current)
+      ) return
+      if (Predicate.isTagged("UnauthorizedApiError")(failure)) {
+        onSessionExpired(current.sessionKey)
+      }
       Effect.runFork(Effect.logError("Pull-request review history load failed", failure))
       setState((latest) =>
         latest._tag === "ready" && sameReviewScope(latest, current)
@@ -272,7 +331,8 @@ export const loadEarlierPullRequestReviewThreadIntoState = (
           : latest
       )
     }
-  )
+  }
+  return run()
 }
 
 /** Load one coherent review snapshot and close a pending-to-terminal tail race. */
