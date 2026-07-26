@@ -228,7 +228,24 @@ Control Center owns:
 - CodeCommit publication previews.
 - UI projections.
 
-A run receives a bounded Review Context Snapshot rather than the whole thread: current revision, suggestion summaries, relevant recent operator messages, and prior limitations. Full history is available through a lookup tool. Targeted revalidation receives the selected suggestion's complete history.
+A pull request owns one durable thread keyed by its CodeCommit plugin
+connection, provider, repository, and pull-request identity. Identical
+repository and pull-request IDs in different AWS connections never share
+history. Changing the base or head creates a new immutable run in the same
+connection-scoped thread. Each run freezes a Review Context Snapshot with up to
+four recent operator requests and four prior run summaries, including bounded
+suggestion and note titles plus the prior limitation. Before enqueue, Control
+Center measures the complete encoded task and queued event; if necessary, it
+drops the oldest prior summaries, then the oldest requests, until both fit the
+32 KiB durable envelope and marks the snapshot truncated. A queued review that
+is cancelled before its first claim is frozen as cancelled, while non-terminal
+queued or running work remains unknown. The browser follows the explicit
+cursor-paged API to the thread tail, rejects non-advancing cursors, and fails
+closed at its bounded replay budget. A targeted operator request creates
+another immutable run without changing CodeCommit.
+
+Full history and retained artifacts remain behind explicit lookup boundaries.
+Targeted revalidation receives the selected suggestion's complete history.
 
 ### CodeCommit checkout and sbx isolation
 

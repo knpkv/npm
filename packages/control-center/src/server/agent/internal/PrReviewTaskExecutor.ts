@@ -38,7 +38,11 @@ import {
   type PrReviewSuggestionDraft as PrReviewSuggestionDraftType,
   PrReviewSuggestionId
 } from "../../../domain/prReview.js"
-import type { AgentJobInputError, ClaimedAgentJob } from "../../persistence/repositories/agentJobModels.js"
+import {
+  type AgentJobInputError,
+  type ClaimedAgentJob,
+  PrReviewThreadContextSnapshot
+} from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
 import {
   type PrReviewSandboxOutput,
@@ -724,6 +728,18 @@ const makeExecutor = Effect.gen(function*() {
         )
       }
       const subject = claim.context.task.subject
+      const threadContext = yield* Schema.encodeUnknownEffect(
+        PrReviewThreadContextSnapshot
+      )(claim.context.task.context).pipe(
+        Effect.mapError(() =>
+          providerFailure(
+            claim.providerId,
+            "protocol",
+            "Review thread context could not be encoded.",
+            false
+          )
+        )
+      )
       const attemptId = Encoding.encodeHex(
         yield* cryptoService.digest(
           "SHA-256",
@@ -749,11 +765,13 @@ const makeExecutor = Effect.gen(function*() {
             const toolkit = yield* PrReviewSandboxTools.pipe(
               Effect.provide(prReviewSandboxToolsLayer(session))
             )
-            const adapter = makeToolAgentAdapter(() =>
+            const adapter = makeToolAgentAdapter((request) =>
               runToolAgent({
                 budget: persistedProfile.budgetMillis,
                 context: {
+                  operatorRequest: request.prompt,
                   subject,
+                  threadContext,
                   sandbox: "sbx",
                   networkAccess: "blocked"
                 },

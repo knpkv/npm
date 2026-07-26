@@ -28,9 +28,9 @@ import { makeReleaseAgentJobs } from "../../src/server/application/releaseAgentJ
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
-  type AgentJobTask,
   AgentThreadEvent,
-  EnqueueAgentJobInput
+  EnqueueAgentJobInput,
+  type EnqueueAgentJobTask
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import {
   RecordRevision,
@@ -103,6 +103,7 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
 
 const reviewTask = {
   _tag: "pr-review",
+  pluginConnectionId: PLUGIN_CONNECTION_ID,
   reviewProfile: {
     profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
     label: "Full-project review",
@@ -117,9 +118,9 @@ const reviewTask = {
     baseRevision: "1".repeat(40),
     headRevision: "2".repeat(40)
   }
-} satisfies AgentJobTask
+} satisfies EnqueueAgentJobTask
 
-const releaseChatTask = { _tag: "release-chat" } satisfies AgentJobTask
+const releaseChatTask = { _tag: "release-chat" } satisfies EnqueueAgentJobTask
 
 const threadEvent = (
   eventSequence: number,
@@ -127,7 +128,7 @@ const threadEvent = (
   payload: unknown,
   options: {
     readonly jobId?: typeof JobId.Type
-    readonly task?: AgentJobTask
+    readonly task?: EnqueueAgentJobTask
   } = {}
 ): AgentThreadEvent =>
   AgentThreadEvent.make({

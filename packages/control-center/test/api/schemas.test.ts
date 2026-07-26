@@ -9,8 +9,10 @@ import {
   CreatePluginConnectionsRequest,
   CreatePluginConnectionsResponse,
   CurrentSessionResponse,
+  EnqueuePullRequestReviewRequest,
   EnqueueReleaseAgentJobRequest,
   EventCursorFromString,
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   MediaResponseHeaders,
   OpaqueMediaId,
   PairingCode,
@@ -21,6 +23,7 @@ import {
   PortfolioReleaseCollaborator,
   PortfolioReleaseSummary,
   PortfolioSnapshot,
+  PullRequestReviewThreadPage,
   RelationshipRepairProposalDraft,
   ReleaseAgentThreadCursorFromString,
   ReleaseAgentThreadEventLimitFromString,
@@ -794,6 +797,57 @@ describe("public API schemas", () => {
           jobId,
           occurredAt: timestamp
         }))
+      })
+    ))
+  })
+
+  it("bounds targeted pull-request review requests and browser-safe thread pages", () => {
+    const request = {
+      providerId: "openai-compatible",
+      model: "review-model",
+      profile: "read-only",
+      reviewProfileId: "openai-compatible:review-model:sbx",
+      prompt: "Re-check transaction ownership."
+    }
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(EnqueuePullRequestReviewRequest)(request)
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueuePullRequestReviewRequest)({
+        ...request,
+        prompt: "x".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH + 1)
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(EnqueuePullRequestReviewRequest)({
+        ...request,
+        prompt: " padded "
+      })
+    ))
+    assert.isTrue(Result.isSuccess(
+      Schema.decodeUnknownResult(PullRequestReviewThreadPage)({
+        events: [{
+          _tag: "operator-message",
+          eventSequence: 1,
+          jobId,
+          occurredAt: timestamp,
+          prompt: request.prompt
+        }],
+        hasMore: false,
+        nextCursor: 1
+      })
+    ))
+    assert.isTrue(Result.isFailure(
+      Schema.decodeUnknownResult(PullRequestReviewThreadPage)({
+        events: [{
+          _tag: "operator-message",
+          eventSequence: 1,
+          jobId,
+          occurredAt: timestamp,
+          prompt: "x".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH + 1)
+        }],
+        hasMore: false,
+        nextCursor: 1
       })
     ))
   })

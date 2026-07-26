@@ -3,9 +3,14 @@ import { describe, expect, it } from "vitest"
 import {
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
+  renderAgentReviewContextEventsQuery,
   renderAgentThreadReplayQuery,
+  renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
 } from "../src/index.js"
+
+const RELEASE_ID_PROJECTION = "\"agent_jobs\".\"release_id\" as \"releaseId\", "
+const withoutReleaseIdProjection = (sql: string): string => sql.replace(RELEASE_ID_PROJECTION, "")
 
 describe("durable agent job queries", () => {
   it("renders the exact bounded dispatch scan for queued or lease-expired active jobs", () => {
@@ -16,7 +21,8 @@ describe("durable agent job queries", () => {
       workspaceId: "workspace-secret"
     })
 
-    expect(rendered).toEqual({
+    expect(rendered.sql).toContain(RELEASE_ID_PROJECTION.trimEnd())
+    expect({ ...rendered, sql: withoutReleaseIdProjection(rendered.sql) }).toEqual({
       params: [
         0,
         "workspace-secret",
@@ -41,7 +47,8 @@ describe("durable agent job queries", () => {
       workspaceId: "workspace-secret"
     })
 
-    expect(rendered).toEqual({
+    expect(rendered.sql).toContain(RELEASE_ID_PROJECTION.trimEnd())
+    expect({ ...rendered, sql: withoutReleaseIdProjection(rendered.sql) }).toEqual({
       params: ["running", "workspace-secret", "job-secret", "queued", "2026-07-19T10:00:00.000Z"],
       sql:
         "update \"agent_jobs\" set \"state\" = ? where ((\"agent_jobs\".\"workspace_id\" = ?) and (\"agent_jobs\".\"job_id\" = ?) and (\"agent_jobs\".\"state\" = ?) and (not exists (select \"agent_job_attempts\".\"job_id\" as \"jobId\" from \"agent_job_attempts\" where ((\"agent_job_attempts\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_attempts\".\"job_id\" = \"agent_jobs\".\"job_id\")))) and (not exists (select \"agent_job_leases\".\"job_id\" as \"jobId\" from \"agent_job_leases\" where ((\"agent_job_leases\".\"workspace_id\" = \"agent_jobs\".\"workspace_id\") and (\"agent_job_leases\".\"job_id\" = \"agent_jobs\".\"job_id\") and (\"agent_job_leases\".\"lease_expires_at\" > ?))))) returning \"agent_jobs\".\"workspace_id\" as \"workspaceId\", \"agent_jobs\".\"job_id\" as \"jobId\", \"agent_jobs\".\"thread_id\" as \"threadId\", \"agent_jobs\".\"provider_id\" as \"providerId\", \"agent_jobs\".\"model\" as \"model\", \"agent_jobs\".\"access\" as \"access\", \"agent_jobs\".\"prompt\" as \"prompt\", \"agent_jobs\".\"context_fingerprint\" as \"contextFingerprint\", \"agent_jobs\".\"subject_revision\" as \"subjectRevision\", \"agent_jobs\".\"task_context_json\" as \"taskContextJson\", \"agent_jobs\".\"task_context_digest\" as \"taskContextDigest\", \"agent_jobs\".\"state\" as \"state\", \"agent_jobs\".\"created_at\" as \"createdAt\", \"agent_jobs\".\"cancel_requested_at\" as \"cancelRequestedAt\", \"agent_jobs\".\"terminal_at\" as \"terminalAt\""
@@ -57,7 +64,8 @@ describe("durable agent job queries", () => {
       workspaceId: "workspace-secret"
     })
 
-    expect(rendered).toEqual({
+    expect(rendered.sql).toContain(RELEASE_ID_PROJECTION.trimEnd())
+    expect({ ...rendered, sql: withoutReleaseIdProjection(rendered.sql) }).toEqual({
       params: [
         "cancel-requested",
         "workspace-secret",
@@ -87,6 +95,47 @@ describe("durable agent job queries", () => {
     })
   })
 
+  it("renders the newest bounded thread window", () => {
+    const rendered = renderAgentThreadTailQuery({
+      limit: 128,
+      threadId: "thread-secret",
+      workspaceId: "workspace-secret"
+    })
+
+    expect(rendered.params).toEqual(["workspace-secret", "thread-secret", 128])
+    expect(rendered.sql).toContain(
+      "order by \"agent_thread_events\".\"event_sequence\" desc limit ?"
+    )
+    expect(rendered.sql).not.toContain("\"event_sequence\" >")
+  })
+
+  it("renders the newest bounded context events for one stable review thread", () => {
+    const rendered = renderAgentReviewContextEventsQuery({
+      eventKinds: ["user-message", "review-report", "job-completed", "job-failed", "cancel-requested"],
+      limit: 16,
+      threadId: "thread-secret",
+      workspaceId: "workspace-secret"
+    })
+
+    expect(rendered.params).toEqual([
+      "workspace-secret",
+      "thread-secret",
+      "user-message",
+      "review-report",
+      "job-completed",
+      "job-failed",
+      "cancel-requested",
+      16
+    ])
+    expect(rendered.sql).toContain(
+      "\"agent_thread_events\".\"event_kind\" in (?, ?, ?, ?, ?)"
+    )
+    expect(rendered.sql).toContain("\"agent_jobs\".\"state\" as \"jobState\"")
+    expect(rendered.sql).toContain(
+      "order by \"agent_thread_events\".\"event_sequence\" desc limit ?"
+    )
+  })
+
   it("renders a bounded newest-job lookup for one exact immutable review subject", () => {
     const taskContextPrefix = "task_%prefix"
     const rendered = renderLatestAgentReviewQuery({
@@ -112,5 +161,17 @@ describe("durable agent job queries", () => {
     expect(rendered.sql).toContain(
       "order by \"agent_jobs\".\"created_at\" desc, \"agent_jobs\".\"job_id\" desc limit ?"
     )
+  })
+
+  it("can bind the newest-review lookup to one exact job", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      subjectRevision: "head-secret",
+      taskContextPrefix: "task-prefix",
+      jobId: "job-secret"
+    })
+
+    expect(rendered.params).toContain("job-secret")
+    expect(rendered.sql).toContain("\"agent_jobs\".\"job_id\" = ?")
   })
 })

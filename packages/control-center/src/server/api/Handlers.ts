@@ -1011,6 +1011,20 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("pullRequestReviewThread", ({ params, query }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            return yield* reviews.thread({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              after: query.after ?? null,
+              limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("enqueuePullRequestReview", ({ params, payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

@@ -394,7 +394,7 @@ export const WorkspaceEntityView = ({
             {backLabel}
           </Link>
         }
-        description="This object is not present in the current workspace. It may have been deleted, disconnected, or the address may be incorrect."
+        description="This object is not in this workspace. It may have been deleted, disconnected, or the address may be wrong."
         title="Object not found"
       />
     )

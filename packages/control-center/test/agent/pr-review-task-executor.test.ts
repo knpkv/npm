@@ -19,7 +19,7 @@ import {
   type ReviewAgentProfile,
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentThreadId, JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewPath,
@@ -41,15 +41,19 @@ import {
 } from "../../src/server/agent/internal/PrReviewTaskExecutor.js"
 import {
   AgentAttemptSequence,
+  AgentJobPrompt,
   AgentLeaseOwner,
   AgentLeaseToken,
-  type ClaimedAgentJob
+  type ClaimedAgentJob,
+  EMPTY_PR_REVIEW_THREAD_CONTEXT,
+  PrReviewThreadContextSnapshot
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000051")
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000052")
 const PROVIDER_ID = AgentProviderId.make("deterministic-review")
 const DURABLE_PROVIDER_ID = DurableAgentProviderId.make("deterministic-review")
 const MODEL_ID = AgentModelId.make("review-model")
@@ -94,7 +98,13 @@ const claim = {
     releaseId: RELEASE_ID,
     subjectRevision: HEAD_REVISION,
     fingerprint: FINGERPRINT,
-    task: { _tag: "pr-review", subject, reviewProfile: REVIEW_PROFILE }
+    task: {
+      _tag: "pr-review",
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
+      subject,
+      reviewProfile: REVIEW_PROFILE,
+      context: EMPTY_PR_REVIEW_THREAD_CONTEXT
+    }
   },
   sessionRef: null,
   cancellationRequested: false
@@ -899,13 +909,35 @@ describe("PR review task executor", () => {
       requests: []
     }
     const activity = new Array<AgentRuntimeEvent>()
+    const currentRequest = AgentJobPrompt.make("CURRENT_REQUEST_UNIQUE_MARKER")
+    const priorRequest = AgentJobPrompt.make("PRIOR_REQUEST_UNIQUE_MARKER")
+    const contextualClaim: ClaimedAgentJob = {
+      ...claim,
+      prompt: currentRequest,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          context: PrReviewThreadContextSnapshot.make({
+            recentRequests: [{
+              jobId: JOB_ID,
+              prompt: priorRequest,
+              subjectRevision: HEAD_REVISION,
+              requestedAt: LEASE_EXPIRES_AT
+            }],
+            priorRuns: [],
+            historyTruncated: false
+          })
+        }
+      }
+    }
     return runExecutor(
       completeScript(),
       observation,
       Effect.gen(function*() {
         const executor = yield* PrReviewTaskExecutor
         return yield* executor.execute(
-          claim,
+          contextualClaim,
           (event) =>
             Effect.sync(() => {
               activity.push(event)
@@ -946,6 +978,10 @@ describe("PR review task executor", () => {
             "deletion-only file suggestion"
           )
           assert.include(systemMessage?.content ?? "", "target deleted base lines")
+          const firstPrompt = JSON.stringify(fake.requests[0]?.prompt.content)
+          assert.include(firstPrompt, priorRequest)
+          assert.include(firstPrompt, currentRequest)
+          assert.strictEqual(firstPrompt.split(currentRequest).length - 1, 1)
           assert.isTrue(activity.some((event) => event._tag === "output" && event.channel === "progress"))
         })
       ),

@@ -12,6 +12,7 @@ import {
   PublishedReviewComment,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
+  PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
@@ -373,6 +374,7 @@ const releaseAgentJobsLayer = Layer.succeed(ReleaseAgentJobs, {
 })
 
 const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
+  thread: () => Effect.die("not used"),
   current: () => Effect.die("not used"),
   enqueue: () => Effect.die("not used"),
   previewPublication: () => Effect.die("not used"),
@@ -1954,6 +1956,20 @@ describe("Control Center API handlers", () => {
         sandbox: "sbx"
       }
       const reviews = Layer.succeed(PullRequestReviews, {
+        thread: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(PullRequestReviewThreadPage.make({
+              events: [{
+                _tag: "operator-message",
+                eventSequence: ReleaseAgentThreadCursor.make(1),
+                jobId,
+                occurredAt: session.lastSeenAt,
+                prompt: "Focus on the persistence boundary."
+              }],
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(1)
+            }))
+          ),
         current: (input) =>
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(new PullRequestReviewNotStarted({ subject }))
@@ -1987,16 +2003,21 @@ describe("Control Center API handlers", () => {
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
         const current = yield* client.agent.pullRequestReview({ params: { entityId } })
+        const thread = yield* client.agent.pullRequestReviewThread({
+          params: { entityId },
+          query: { after: ReleaseAgentThreadCursor.make(0), limit: 12 }
+        })
         const accepted = yield* client.agent.enqueuePullRequestReview({
           params: { entityId },
           payload: {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
             profile: "read-only",
-            reviewProfileId: reviewProfile.profileId
+            reviewProfileId: reviewProfile.profileId,
+            prompt: "Re-check transaction ownership."
           }
         })
-        return { accepted, current }
+        return { accepted, current, thread }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2006,8 +2027,15 @@ describe("Control Center API handlers", () => {
 
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
+      assert.strictEqual(result.thread.events[0]?._tag, "operator-message")
       assert.deepStrictEqual(yield* Ref.get(received), [
         { workspaceId: session.workspaceId, entityId },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          after: ReleaseAgentThreadCursor.make(0),
+          limit: 12
+        },
         {
           workspaceId: session.workspaceId,
           entityId,
@@ -2015,7 +2043,8 @@ describe("Control Center API handlers", () => {
             providerId: DurableAgentProviderId.make("openai-compatible"),
             model: AgentModelId.make("review-model"),
             profile: "read-only",
-            reviewProfileId: reviewProfile.profileId
+            reviewProfileId: reviewProfile.profileId,
+            prompt: "Re-check transaction ownership."
           }
         }
       ])
@@ -2102,6 +2131,7 @@ describe("Control Center API handlers", () => {
       })
       const received = yield* Ref.make<ReadonlyArray<unknown>>([])
       const reviews = Layer.succeed(PullRequestReviews, {
+        thread: () => Effect.die("not used"),
         current: () => Effect.die("not used"),
         enqueue: () => Effect.die("not used"),
         previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),

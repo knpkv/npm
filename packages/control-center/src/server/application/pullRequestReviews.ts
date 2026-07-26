@@ -1,5 +1,5 @@
 /** Immutable pull-request review orchestration for the authenticated API. @module */
-import { AgentContextFingerprint, AgentProviderId } from "@knpkv/ai-runtime"
+import { AgentContextFingerprint, AgentProviderError, AgentProviderId, AgentRuntimeEvent } from "@knpkv/ai-runtime"
 import * as Crypto from "effect/Crypto"
 import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
@@ -20,7 +20,10 @@ import {
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
   type PullRequestReviewState,
+  type PullRequestReviewThreadEvent,
+  PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
+  ReleaseAgentThreadCursor,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview
 } from "../../api/agent.js"
@@ -35,10 +38,13 @@ import {
 } from "../../domain/identifiers.js"
 import {
   derivePrReviewOutcome,
+  PrReviewReport,
   PrReviewSubject,
   type PrReviewSubject as PrReviewSubjectType,
-  type PrReviewSuggestion
+  type PrReviewSuggestion,
+  PrReviewSuggestionId
 } from "../../domain/prReview.js"
+import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../agent/AgentRuntimeRegistry.js"
 import {
   ApplicationInvalidRequest,
@@ -48,8 +54,13 @@ import {
 } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
 import {
+  AgentEventCursor,
   AgentJobPrompt,
+  type AgentThreadEvent,
+  AgentThreadEventPageSize,
   type LatestAgentReviewRecord,
+  PrReviewThreadSubject,
+  type PrReviewThreadSubject as PrReviewThreadSubjectType,
   ReviewSuggestionPublicationDigest
 } from "../persistence/repositories/agentJobModels.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
@@ -59,13 +70,27 @@ import {
   type ReviewSuggestionPublicationTarget
 } from "./ReviewSuggestionPublicationGateway.js"
 
+const DEFAULT_REVIEW_REQUEST = "Review this pull request."
 const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
 
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
   releaseId: Schema.String,
+  pluginConnectionId: Schema.String,
   subject: PrReviewSubject
 })
+
+const ReviewThreadJobQueuedPayload = Schema.Struct({
+  model: Schema.NullOr(Schema.String),
+  providerId: AgentProviderId
+})
+const ReviewThreadUserMessagePayload = Schema.Struct({ prompt: AgentJobPrompt })
+const ReviewThreadProviderFailurePayload = Schema.Struct({ error: AgentProviderError })
+const ReviewThreadPublicationPayload = Schema.Struct({
+  suggestionId: Schema.String,
+  publicationId: Schema.String
+})
+const ReviewThreadCancellationPayload = Schema.Struct({ requestedAt: UtcTimestamp })
 
 class AvailableReviewTarget extends Data.TaggedClass("available")<{
   readonly entityId: EntityId
@@ -79,7 +104,124 @@ type DerivedReviewTarget =
   | AvailableReviewTarget
   | Extract<PullRequestReviewState, { readonly _tag: "unavailable" }>
 
+interface ReviewThreadTarget {
+  readonly pluginConnectionId: PluginConnectionId
+  readonly subject: PrReviewThreadSubjectType
+}
+
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
+
+const decodeThreadPayload = <SchemaType, Encoded, Requirements>(
+  schema: Schema.Codec<SchemaType, Encoded, Requirements, never>,
+  payload: unknown
+): Effect.Effect<SchemaType, ApplicationServiceUnavailable, Requirements> =>
+  Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(unavailable))
+
+const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(function*(
+  event: AgentThreadEvent
+): Effect.fn.Return<PullRequestReviewThreadEvent, ApplicationServiceUnavailable> {
+  if (event.task?._tag !== "pr-review") return yield* unavailable()
+  const common = {
+    eventSequence: yield* Schema.decodeUnknownEffect(
+      ReleaseAgentThreadCursor
+    )(event.eventSequence).pipe(Effect.mapError(unavailable)),
+    jobId: event.jobId,
+    occurredAt: event.occurredAt
+  }
+  switch (event.eventKind) {
+    case "user-message": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadUserMessagePayload,
+        event.payload
+      )
+      return { _tag: "operator-message", ...common, prompt: payload.prompt }
+    }
+    case "job-queued": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadJobQueuedPayload,
+        event.payload
+      )
+      return {
+        _tag: "run-queued",
+        ...common,
+        providerId: yield* Schema.decodeUnknownEffect(
+          DurableAgentProviderId
+        )(payload.providerId).pipe(Effect.mapError(unavailable)),
+        model: yield* Schema.decodeUnknownEffect(Schema.NullOr(AgentModelId))(payload.model).pipe(
+          Effect.mapError(unavailable)
+        ),
+        reviewProfile: event.task.reviewProfile,
+        subject: event.task.subject
+      }
+    }
+    case "job-started": {
+      const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)
+      if (payload._tag !== "started") return yield* unavailable()
+      return { _tag: "run-started", ...common }
+    }
+    case "progress": {
+      const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)
+      if (payload._tag !== "output" || payload.channel !== "progress") {
+        return yield* unavailable()
+      }
+      return { _tag: "progress", ...common, text: payload.text }
+    }
+    case "usage": {
+      const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)
+      if (payload._tag !== "usage") return yield* unavailable()
+      return {
+        _tag: "usage",
+        ...common,
+        inputTokens: payload.inputTokens,
+        outputTokens: payload.outputTokens
+      }
+    }
+    case "review-report":
+      return {
+        _tag: "review-report",
+        ...common,
+        report: yield* decodeThreadPayload(PrReviewReport, event.payload)
+      }
+    case "review-suggestion-published": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadPublicationPayload,
+        event.payload
+      )
+      return {
+        _tag: "suggestion-published",
+        ...common,
+        suggestionId: yield* Schema.decodeUnknownEffect(
+          PrReviewSuggestionId
+        )(payload.suggestionId).pipe(Effect.mapError(unavailable))
+      }
+    }
+    case "job-completed": {
+      const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)
+      if (payload._tag !== "completed") return yield* unavailable()
+      return { _tag: "run-completed", ...common, outcome: payload.outcome }
+    }
+    case "job-failed": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadProviderFailurePayload,
+        event.payload
+      )
+      return { _tag: "run-failed", ...common, retryable: payload.error.retryable }
+    }
+    case "cancel-requested": {
+      const payload = yield* decodeThreadPayload(
+        ReviewThreadCancellationPayload,
+        event.payload
+      )
+      return {
+        _tag: "cancellation-requested",
+        ...common,
+        requestedAt: payload.requestedAt
+      }
+    }
+    case "assistant-output":
+      return yield* unavailable()
+  }
+})
 
 const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   inspection: WorkspaceEntityInspection
@@ -115,6 +257,23 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
     sourceRevision: inspection.source.revision,
     subject
   })
+})
+
+const deriveThreadTarget = Effect.fn("PullRequestReviews.deriveThreadTarget")(function*(
+  inspection: WorkspaceEntityInspection
+): Effect.fn.Return<ReviewThreadTarget | null, ApplicationServiceUnavailable> {
+  if (inspection.source.providerId !== "codecommit") return null
+  const details = inspection.entity.projection.details
+  if (details._tag !== "pull-request") return null
+  const subject = yield* Schema.decodeUnknownEffect(PrReviewThreadSubject)({
+    providerId: "codecommit",
+    repository: details.repository,
+    pullRequestId: inspection.source.vendorImmutableId
+  }).pipe(Effect.mapError(unavailable))
+  return {
+    pluginConnectionId: inspection.source.pluginConnectionId,
+    subject
+  }
 })
 
 const decodeJobIdentity = Effect.fn("PullRequestReviews.decodeJobIdentity")(function*(
@@ -190,7 +349,11 @@ const makePullRequestReviews = Effect.gen(function*() {
     target: AvailableReviewTarget
   ) {
     const latest = yield* mapPersistenceRead(
-      persistence.agentJobs.latestReview({ workspaceId, subject: target.subject })
+      persistence.agentJobs.latestReview({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject
+      })
     )
     return yield* presentLatest(target, latest)
   })
@@ -202,6 +365,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     const json = yield* Schema.encodeEffect(Schema.fromJsonString(ReviewContextIdentity))({
       workspaceId,
       releaseId: target.releaseId,
+      pluginConnectionId: target.pluginConnectionId,
       subject: target.subject
     }).pipe(Effect.mapError(unavailable))
     const bytes = yield* Effect.fromResult(
@@ -219,15 +383,23 @@ const makePullRequestReviews = Effect.gen(function*() {
     jobId: JobId,
     suggestionId: string
   ) {
-    const latest = yield* currentFor(workspaceId, target)
-    if (latest._tag !== "completed" || latest.jobId !== jobId) {
+    const selected = yield* mapPersistenceRead(
+      persistence.agentJobs.latestReview({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject,
+        jobId
+      })
+    )
+    const review = yield* presentLatest(target, selected)
+    if (review._tag !== "completed" || review.jobId !== jobId) {
       return yield* new ApplicationInvalidRequest()
     }
-    const suggestion = latest.report.suggestions.find(
+    const suggestion = review.report.suggestions.find(
       (candidate) => candidate.suggestionId === suggestionId
     )
     if (suggestion === undefined) return yield* new ApplicationInvalidRequest()
-    return { latest, suggestion }
+    return { latest: review, suggestion }
   })
 
   const publicationTarget = (
@@ -323,6 +495,88 @@ const makePullRequestReviews = Effect.gen(function*() {
   ): boolean => failure.reason !== "publication-unavailable"
 
   return PullRequestReviews.of({
+    thread: Effect.fn("PullRequestReviews.thread")(function*(input) {
+      const target = yield* inspection.workspaceEntity(input).pipe(
+        Effect.flatMap(deriveThreadTarget)
+      )
+      if (target === null) {
+        return PullRequestReviewThreadPage.make({
+          events: [],
+          hasMore: false,
+          nextCursor: input.after ?? ReleaseAgentThreadCursor.make(0)
+        })
+      }
+      const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(
+        input.limit
+      ).pipe(Effect.mapError(unavailable))
+      if (input.after === null) {
+        const tail = yield* mapPersistenceRead(
+          persistence.agentJobs.reviewThreadTail({
+            workspaceId: input.workspaceId,
+            pluginConnectionId: target.pluginConnectionId,
+            subject: target.subject,
+            limit
+          }).pipe(
+            Effect.catchTag(
+              "RecordNotFoundError",
+              () =>
+                Effect.succeed({
+                  events: [],
+                  nextCursor: AgentEventCursor.make(0)
+                })
+            )
+          )
+        )
+        const events = yield* Effect.forEach(tail.events, mapReviewThreadEvent)
+        return yield* Schema.decodeUnknownEffect(
+          Schema.toType(PullRequestReviewThreadPage)
+        )({
+          events,
+          hasMore: false,
+          nextCursor: tail.nextCursor
+        }).pipe(Effect.mapError(unavailable))
+      }
+      const after = yield* Schema.decodeUnknownEffect(AgentEventCursor)(
+        input.after
+      ).pipe(Effect.mapError(unavailable))
+      const page = yield* mapPersistenceRead(
+        persistence.agentJobs.reviewThreadAfter({
+          workspaceId: input.workspaceId,
+          pluginConnectionId: target.pluginConnectionId,
+          subject: target.subject,
+          after,
+          limit
+        }).pipe(
+          Effect.catchTag(
+            "RecordNotFoundError",
+            () => Effect.succeed({ events: [], nextCursor: after })
+          )
+        )
+      )
+      const hasMore = page.events.length === limit &&
+        (yield* mapPersistenceRead(
+            persistence.agentJobs.reviewThreadAfter({
+              workspaceId: input.workspaceId,
+              pluginConnectionId: target.pluginConnectionId,
+              subject: target.subject,
+              after: page.nextCursor,
+              limit: AgentThreadEventPageSize.make(1)
+            }).pipe(
+              Effect.catchTag(
+                "RecordNotFoundError",
+                () => Effect.succeed({ events: [], nextCursor: page.nextCursor })
+              )
+            )
+          )).events.length > 0
+      const events = yield* Effect.forEach(page.events, mapReviewThreadEvent)
+      return yield* Schema.decodeUnknownEffect(
+        Schema.toType(PullRequestReviewThreadPage)
+      )({
+        events,
+        hasMore,
+        nextCursor: page.nextCursor
+      }).pipe(Effect.mapError(unavailable))
+    }),
     current: Effect.fn("PullRequestReviews.current")(function*(input) {
       const derived = yield* inspectTarget(input)
       return derived._tag === "available"
@@ -365,7 +619,10 @@ const makePullRequestReviews = Effect.gen(function*() {
         Effect.mapError(unavailable)
       )
       const contextFingerprint = yield* makeContextFingerprint(input.workspaceId, target)
-      const prompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(REVIEW_PROMPT).pipe(
+      const userPrompt = input.request.prompt ?? DEFAULT_REVIEW_REQUEST
+      const prompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(
+        `${REVIEW_PROMPT}\n\nOperator request:\n${userPrompt}`
+      ).pipe(
         Effect.mapError(unavailable)
       )
       const createdAt = yield* DateTime.now
@@ -379,12 +636,13 @@ const makePullRequestReviews = Effect.gen(function*() {
           providerId,
           model: input.request.model,
           access: input.request.profile,
-          userPrompt: prompt,
+          userPrompt,
           prompt,
           contextFingerprint,
           subjectRevision: target.subject.headRevision,
           task: {
             _tag: "pr-review",
+            pluginConnectionId: target.pluginConnectionId,
             subject: target.subject,
             reviewProfile
           },

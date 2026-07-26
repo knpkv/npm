@@ -1,6 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { AgentProviderError, makeAgentRuntime, makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  makeAgentRuntime,
+  makeDeterministicLanguageModel
+} from "@knpkv/ai-runtime"
 import { DateTime, Deferred, Duration, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
@@ -8,6 +14,8 @@ import {
   AgentModelId,
   DurableAgentProviderId,
   MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
+  type PullRequestReviewUnavailable,
+  ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
   ReviewSuggestionPublicationAuthorityBinding,
@@ -75,6 +83,10 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000401")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000402")
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000403")
 const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000404")
+const OTHER_ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-00000000040b")
+const OTHER_PLUGIN_CONNECTION_ID = PluginConnectionId.make(
+  "01890f6f-6d6a-7cc0-98d2-00000000040c"
+)
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000405")
 const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000406")
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000407")
@@ -199,6 +211,22 @@ const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
   activity: { truncated: false, events: [] }
 })
 
+const encodedInspection = Schema.encodeSync(WorkspaceEntityInspection)(inspection)
+const otherConnectionInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  ...encodedInspection,
+  entity: {
+    ...encodedInspection.entity,
+    projection: {
+      ...encodedInspection.entity.projection,
+      entityId: OTHER_ENTITY_ID
+    }
+  },
+  source: {
+    ...encodedInspection.source,
+    pluginConnectionId: OTHER_PLUGIN_CONNECTION_ID
+  }
+})
+
 const reviewReport = Schema.decodeSync(PrReviewReport)({
   schemaVersion: 3,
   subject: {
@@ -261,6 +289,15 @@ const completedReview = Schema.decodeSync(LatestAgentReviewRecord)({
   reviewProfile: REVIEW_PROFILE,
   activity: { events: [], truncated: false }
 })
+const FOLLOW_UP_REVIEW_JOB_ID = JobId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000099"
+)
+const failedFollowUpReview = Schema.decodeSync(LatestAgentReviewRecord)({
+  ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+  jobId: FOLLOW_UP_REVIEW_JOB_ID,
+  state: "failed",
+  report: null
+})
 
 const completedReviewWithSuggestion = (
   overrides: Partial<typeof reviewReport.suggestions[number]>
@@ -291,6 +328,18 @@ const graphInspection = DeliveryGraphInspection.of({
   relationship: () => Effect.die("not used"),
   relationshipHistory: () => Effect.die("not used"),
   evidence: () => Effect.die("not used")
+})
+
+const multipleConnectionGraphInspection = DeliveryGraphInspection.of({
+  ...graphInspection,
+  workspaceEntity: ({ entityId, workspaceId }) =>
+    workspaceId !== WORKSPACE_ID
+      ? Effect.die("review crossed its workspace boundary")
+      : entityId === ENTITY_ID
+      ? Effect.succeed(inspection)
+      : entityId === OTHER_ENTITY_ID
+      ? Effect.succeed(otherConnectionInspection)
+      : Effect.die("review crossed its entity boundary")
 })
 
 const runtime = makeAgentRuntime({ run: () => Stream.empty })
@@ -370,7 +419,8 @@ const withService = <Success, Failure>(
     Effect.succeed({ _tag: "acquired" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined),
-  publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"]
+  publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"],
+  latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -387,7 +437,7 @@ const withService = <Success, Failure>(
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: () => Effect.succeed(latestReview),
+          latestReview: latestReviewOverride ?? (() => Effect.succeed(latestReview)),
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
@@ -472,7 +522,8 @@ const withRealService = <Success, Failure>(
   use: (
     service: PullRequestReviews["Service"],
     persistence: Persistence["Service"]
-  ) => Effect.Effect<Success, Failure>
+  ) => Effect.Effect<Success, Failure>,
+  selectedInspection = graphInspection
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-review-race-")
@@ -485,7 +536,7 @@ const withRealService = <Success, Failure>(
       yield* persistence.releases.create(WORKSPACE_ID, release)
       const service = yield* PullRequestReviews.pipe(
         Effect.provide(pullRequestReviewsLayer),
-        Effect.provideService(DeliveryGraphInspection, graphInspection),
+        Effect.provideService(DeliveryGraphInspection, selectedInspection),
         Effect.provideService(AgentRuntimeRegistry, registry),
         Effect.provideService(ReviewSuggestionPublicationGateway, unusedPublicationGateway)
       )
@@ -612,6 +663,35 @@ describe("pull request reviews", () => {
       Option.some(completedReview)
     ))
 
+  it.effect("keeps an earlier same-head completed suggestion publishable after a failed follow-up", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.strictEqual(preview.jobId, REVIEW_JOB_ID)
+          assert.strictEqual(preview.suggestionId, SUGGESTION_ID)
+        }),
+      registry,
+      Option.some(failedFollowUpReview),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (input) =>
+        Effect.succeed(
+          input.jobId === REVIEW_JOB_ID
+            ? Option.some(completedReview)
+            : Option.some(failedFollowUpReview)
+        )
+    ))
+
   it("rejects non-owner, expired, revoked, and cross-workspace publication sessions", () => {
     const checkedAt = Schema.decodeUnknownSync(UtcTimestamp)(
       "2026-07-24T15:30:00.000Z"
@@ -695,6 +775,7 @@ describe("pull request reviews", () => {
         ) {
           assert.deepStrictEqual(persisted.task, {
             _tag: "pr-review",
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
             reviewProfile: REVIEW_PROFILE,
             subject: {
               providerId: "codecommit",
@@ -1553,7 +1634,7 @@ describe("pull request reviews", () => {
   it.effect("atomically reuses one active exact-head review and permits a retry after terminal failure", () =>
     withRealService((service, persistence) =>
       Effect.gen(function*() {
-        const enqueue = () =>
+        const enqueue = (prompt?: string) =>
           service.enqueue({
             workspaceId: WORKSPACE_ID,
             entityId: ENTITY_ID,
@@ -1561,7 +1642,8 @@ describe("pull request reviews", () => {
               providerId: PROVIDER_ID,
               model: MODEL,
               profile: "read-only",
-              reviewProfileId: REVIEW_PROFILE.profileId
+              reviewProfileId: REVIEW_PROFILE.profileId,
+              ...(prompt === undefined ? {} : { prompt })
             }
           })
         const active = yield* Effect.all([enqueue(), enqueue()], {
@@ -1569,9 +1651,10 @@ describe("pull request reviews", () => {
         })
         assert.strictEqual(active[0].jobId, active[1].jobId)
 
-        const page = yield* persistence.agentJobs.threadAfter({
+        const page = yield* persistence.agentJobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
-          releaseId: RELEASE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: active[0].subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })
@@ -1579,6 +1662,28 @@ describe("pull request reviews", () => {
           "user-message",
           "job-queued"
         ])
+        const firstPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: ReleaseAgentThreadCursor.make(0),
+          limit: 1
+        })
+        assert.strictEqual(
+          firstPresented.events[0]?._tag === "operator-message"
+            ? firstPresented.events[0].prompt
+            : null,
+          "Review this pull request."
+        )
+        const secondPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: firstPresented.nextCursor,
+          limit: 1
+        })
+        assert.deepStrictEqual(
+          secondPresented.events.map(({ _tag }) => _tag),
+          ["run-queued"]
+        )
 
         const claimedAt = yield* DateTime.now
         const claim = yield* persistence.agentJobs.claimNext({
@@ -1591,6 +1696,14 @@ describe("pull request reviews", () => {
         })
         assert.isTrue(Option.isSome(claim))
         if (Option.isNone(claim)) return yield* Effect.die("review claim missing")
+        yield* persistence.agentJobs.appendEvent({
+          workspaceId: WORKSPACE_ID,
+          jobId: claim.value.jobId,
+          attemptSequence: claim.value.attemptSequence,
+          leaseToken: claim.value.leaseToken,
+          event: { _tag: "started", providerRunRef: null, sessionRef: null },
+          occurredAt: claimedAt
+        })
         const failedAt = yield* DateTime.now
         yield* persistence.agentJobs.failAttempt({
           workspaceId: WORKSPACE_ID,
@@ -1605,9 +1718,244 @@ describe("pull request reviews", () => {
           }),
           failedAt
         })
+        const failedPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: secondPresented.nextCursor,
+          limit: 128
+        })
+        assert.deepStrictEqual(
+          failedPresented.events.map(({ _tag }) => _tag),
+          ["run-started", "run-failed"]
+        )
 
-        const retry = yield* enqueue()
+        const retry = yield* enqueue("Re-check the durable transaction boundary.")
         assert.notStrictEqual(retry.jobId, active[0].jobId)
+        const retryPresented = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: failedPresented.nextCursor,
+          limit: 2
+        })
+        assert.strictEqual(
+          retryPresented.events[0]?._tag === "operator-message"
+            ? retryPresented.events[0].prompt
+            : null,
+          "Re-check the durable transaction boundary."
+        )
+        assert.strictEqual(retryPresented.events[1]?._tag, "run-queued")
+      })
+    ))
+
+  it.effect("keeps stable thread history visible while a pull request is temporarily ineligible", () =>
+    Effect.gen(function*() {
+      const selectedInspection = yield* Ref.make(inspection)
+      const changingInspection = DeliveryGraphInspection.of({
+        ...graphInspection,
+        workspaceEntity: () => Ref.get(selectedInspection)
+      })
+      yield* withRealService(
+        (service) =>
+          Effect.gen(function*() {
+            yield* service.enqueue({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                providerId: PROVIDER_ID,
+                model: MODEL,
+                profile: "read-only",
+                reviewProfileId: REVIEW_PROFILE.profileId
+              }
+            })
+            const unavailableInspections: ReadonlyArray<{
+              readonly reason: PullRequestReviewUnavailable["reason"]
+              readonly value: WorkspaceEntityInspection
+            }> = [
+              {
+                reason: "source-stale",
+                value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  isSourceCurrent: false
+                })
+              },
+              {
+                reason: "release-unavailable",
+                value: Schema.decodeSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  entity: {
+                    ...encodedInspection.entity,
+                    canonicalReleaseId: null,
+                    releaseIds: []
+                  }
+                })
+              },
+              {
+                reason: "base-revision-unavailable",
+                value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  entity: {
+                    ...encodedInspection.entity,
+                    projection: {
+                      ...encodedInspection.entity.projection,
+                      details: {
+                        ...encodedInspection.entity.projection.details,
+                        baseRevision: null
+                      }
+                    }
+                  }
+                })
+              }
+            ]
+            for (const candidate of unavailableInspections) {
+              yield* Ref.set(selectedInspection, candidate.value)
+              const current = yield* service.current({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID
+              })
+              assert.deepInclude(current, {
+                _tag: "unavailable",
+                reason: candidate.reason
+              })
+              const page = yield* service.thread({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                after: ReleaseAgentThreadCursor.make(0),
+                limit: 128
+              })
+              assert.deepStrictEqual(
+                page.events.map(({ _tag }) => _tag),
+                ["operator-message", "run-queued"]
+              )
+            }
+
+            yield* Ref.set(
+              selectedInspection,
+              Schema.decodeSync(WorkspaceEntityInspection)({
+                ...encodedInspection,
+                source: {
+                  ...encodedInspection.source,
+                  providerId: "jira"
+                }
+              })
+            )
+            const unrelated = yield* service.thread({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              after: ReleaseAgentThreadCursor.make(0),
+              limit: 128
+            })
+            assert.deepStrictEqual(unrelated.events, [])
+          }),
+        changingInspection
+      )
+    }))
+
+  it.effect("isolates identical pull-request identities across plugin connections", () =>
+    withRealService(
+      (service, persistence) =>
+        Effect.gen(function*() {
+          const enqueue = (entityId: EntityId, prompt: string) =>
+            service.enqueue({
+              workspaceId: WORKSPACE_ID,
+              entityId,
+              request: {
+                providerId: PROVIDER_ID,
+                model: MODEL,
+                profile: "read-only",
+                reviewProfileId: REVIEW_PROFILE.profileId,
+                prompt
+              }
+            })
+          const first = yield* enqueue(ENTITY_ID, "Review account one.")
+          const second = yield* enqueue(OTHER_ENTITY_ID, "Review account two.")
+          assert.notStrictEqual(first.jobId, second.jobId)
+          assert.deepStrictEqual(first.subject, second.subject)
+
+          const firstPage = yield* persistence.agentJobs.reviewThreadAfter({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
+            subject: first.subject,
+            after: AgentEventCursor.make(0),
+            limit: AgentThreadEventPageSize.make(128)
+          })
+          const secondPage = yield* persistence.agentJobs.reviewThreadAfter({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: OTHER_PLUGIN_CONNECTION_ID,
+            subject: second.subject,
+            after: AgentEventCursor.make(0),
+            limit: AgentThreadEventPageSize.make(128)
+          })
+          assert.deepStrictEqual(
+            firstPage.events.map(({ jobId }) => jobId),
+            [first.jobId, first.jobId]
+          )
+          assert.deepStrictEqual(
+            secondPage.events.map(({ jobId }) => jobId),
+            [second.jobId, second.jobId]
+          )
+          const firstPresented = yield* service.thread({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            after: ReleaseAgentThreadCursor.make(0),
+            limit: 128
+          })
+          const secondPresented = yield* service.thread({
+            workspaceId: WORKSPACE_ID,
+            entityId: OTHER_ENTITY_ID,
+            after: ReleaseAgentThreadCursor.make(0),
+            limit: 128
+          })
+          assert.strictEqual(
+            firstPresented.events[0]?._tag === "operator-message"
+              ? firstPresented.events[0].prompt
+              : null,
+            "Review account one."
+          )
+          assert.strictEqual(
+            secondPresented.events[0]?._tag === "operator-message"
+              ? secondPresented.events[0].prompt
+              : null,
+            "Review account two."
+          )
+        }),
+      multipleConnectionGraphInspection
+    ))
+
+  it.effect("replays a queued review whose optional model is null", () =>
+    withRealService((service, persistence) =>
+      Effect.gen(function*() {
+        const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000040d")
+        yield* persistence.agentJobs.enqueue({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          jobId,
+          providerId: AgentProviderId.make("openai-compatible"),
+          model: null,
+          access: "read-only",
+          userPrompt: "Review without a selected model.",
+          prompt: "Review without a selected model.",
+          contextFingerprint: AgentContextFingerprint.make(`sha256:${"d".repeat(64)}`),
+          subjectRevision: reviewReport.subject.headRevision,
+          task: {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
+            subject: reviewReport.subject,
+            reviewProfile: REVIEW_PROFILE
+          },
+          createdAt: STARTED_TIMESTAMP
+        })
+
+        const page = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: ReleaseAgentThreadCursor.make(0),
+          limit: 128
+        })
+        const queued = page.events.find(({ _tag }) => _tag === "run-queued")
+        if (queued?._tag !== "run-queued") {
+          return yield* Effect.die("queued review event missing")
+        }
+        assert.isNull(queued.model)
       })
     ))
 })

@@ -31,8 +31,35 @@ export interface AgentThreadReplayQueryInput {
   readonly workspaceId: string
 }
 
+/** Bounded newest-event input for opening a long-lived thread. */
+export interface AgentThreadTailQueryInput {
+  readonly limit: number
+  readonly threadId: string
+  readonly workspaceId: string
+}
+
+/** Stable event kinds retained while assembling a bounded review context. */
+export type AgentReviewContextEventKind =
+  | "cancel-requested"
+  | "job-completed"
+  | "job-failed"
+  | "review-report"
+  | "user-message"
+
+/** Input for the newest bounded context-bearing events in one review thread. */
+export interface AgentReviewContextEventsQueryInput {
+  readonly eventKinds: readonly [
+    AgentReviewContextEventKind,
+    ...ReadonlyArray<AgentReviewContextEventKind>
+  ]
+  readonly limit: number
+  readonly threadId: string
+  readonly workspaceId: string
+}
+
 /** Exact immutable review subject used to recover its newest durable job. */
 export interface LatestAgentReviewQueryInput {
+  readonly jobId?: string
   readonly subjectRevision: string
   readonly taskContextPrefix: string
   readonly workspaceId: string
@@ -45,6 +72,7 @@ const agentJobs = table("agentJobs", {
   workspaceId: Column.text(),
   jobId: Column.text(),
   threadId: Column.text(),
+  releaseId: Column.text(),
   providerId: Column.text(),
   model: Column.text().pipe(Column.nullable),
   access: Column.text(),
@@ -102,6 +130,7 @@ const jobProjection = {
   workspaceId: agentJobs.workspaceId,
   jobId: agentJobs.jobId,
   threadId: agentJobs.threadId,
+  releaseId: agentJobs.releaseId,
   providerId: agentJobs.providerId,
   model: agentJobs.model,
   access: agentJobs.access,
@@ -268,10 +297,95 @@ export const renderAgentThreadReplayQuery = (input: AgentThreadReplayQueryInput)
   return { params: rendered.params, sql: rendered.sql }
 }
 
+/** Render the newest bounded thread window; callers restore replay order. */
+export const renderAgentThreadTailQuery = (input: AgentThreadTailQueryInput): RenderedSql => {
+  const plan = Query.select({
+    workspaceId: agentThreadEvents.workspaceId,
+    threadId: agentThreadEvents.threadId,
+    eventSequence: agentThreadEvents.eventSequence,
+    jobId: agentThreadEvents.jobId,
+    attemptSequence: agentThreadEvents.attemptSequence,
+    eventKind: agentThreadEvents.eventKind,
+    payloadJson: agentThreadEvents.payloadJson,
+    payloadDigest: agentThreadEvents.payloadDigest,
+    payloadByteLength: agentThreadEvents.payloadByteLength,
+    taskContextJson: agentJobs.taskContextJson,
+    taskContextDigest: agentJobs.taskContextDigest,
+    occurredAt: agentThreadEvents.occurredAt
+  }).pipe(
+    Query.from(agentThreadEvents),
+    Query.innerJoin(
+      agentJobs,
+      Query.and(
+        Query.eq(agentJobs.workspaceId, agentThreadEvents.workspaceId),
+        Query.eq(agentJobs.jobId, agentThreadEvents.jobId)
+      )
+    ),
+    Query.where(
+      Query.and(
+        Query.eq(agentThreadEvents.workspaceId, input.workspaceId),
+        Query.eq(agentThreadEvents.threadId, input.threadId)
+      )
+    ),
+    Query.orderBy(agentThreadEvents.eventSequence, "desc"),
+    Query.limit(input.limit)
+  )
+  const rendered = renderer.render(plan)
+  return { params: rendered.params, sql: rendered.sql }
+}
+
+/** Render the newest bounded context-bearing events for one durable review thread. */
+export const renderAgentReviewContextEventsQuery = (
+  input: AgentReviewContextEventsQueryInput
+): RenderedSql => {
+  const [firstEventKind, ...remainingEventKinds] = input.eventKinds
+  const plan = Query.select({
+    workspaceId: agentThreadEvents.workspaceId,
+    threadId: agentThreadEvents.threadId,
+    eventSequence: agentThreadEvents.eventSequence,
+    jobId: agentThreadEvents.jobId,
+    attemptSequence: agentThreadEvents.attemptSequence,
+    eventKind: agentThreadEvents.eventKind,
+    payloadJson: agentThreadEvents.payloadJson,
+    payloadDigest: agentThreadEvents.payloadDigest,
+    payloadByteLength: agentThreadEvents.payloadByteLength,
+    jobState: agentJobs.state,
+    taskContextJson: agentJobs.taskContextJson,
+    taskContextDigest: agentJobs.taskContextDigest,
+    occurredAt: agentThreadEvents.occurredAt
+  }).pipe(
+    Query.from(agentThreadEvents),
+    Query.innerJoin(
+      agentJobs,
+      Query.and(
+        Query.eq(agentJobs.workspaceId, agentThreadEvents.workspaceId),
+        Query.eq(agentJobs.jobId, agentThreadEvents.jobId)
+      )
+    ),
+    Query.where(
+      Query.and(
+        Query.eq(agentThreadEvents.workspaceId, input.workspaceId),
+        Query.eq(agentThreadEvents.threadId, input.threadId),
+        Query.in(agentThreadEvents.eventKind, firstEventKind, ...remainingEventKinds)
+      )
+    ),
+    Query.orderBy(agentThreadEvents.eventSequence, "desc"),
+    Query.limit(input.limit)
+  )
+  const rendered = renderer.render(plan)
+  return { params: rendered.params, sql: rendered.sql }
+}
+
 /** Render the exact newest durable job for one immutable PR-review subject. */
 export const renderLatestAgentReviewQuery = (
   input: LatestAgentReviewQueryInput
 ): RenderedSql => {
+  const subjectAndOptionalJob = input.jobId === undefined
+    ? Query.eq(agentJobs.subjectRevision, input.subjectRevision)
+    : Query.and(
+      Query.eq(agentJobs.subjectRevision, input.subjectRevision),
+      Query.eq(agentJobs.jobId, input.jobId)
+    )
   const plan = Query.select({
     jobId: agentJobs.jobId,
     threadId: agentJobs.threadId,
@@ -287,7 +401,7 @@ export const renderLatestAgentReviewQuery = (
     Query.where(
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
-        Query.eq(agentJobs.subjectRevision, input.subjectRevision),
+        subjectAndOptionalJob,
         Query.eq(
           Query.cast(
             Fn.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),
