@@ -189,6 +189,8 @@ const reviewBaseRevision = "91c3627b4ce7447e38c906529a4af4be6bc6812d"
 const reviewHeadRevision = "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19"
 const reviewJobId = "01890f6f-6d6a-7cc0-98d2-000000000099"
 const reviewSuggestionId = `sha256:${"1".repeat(64)}`
+// EvidenceStamp's 12rem source minimum resolves against this fixture's 16px root size.
+const EVIDENCE_SOURCE_MIN_WIDTH_PX = 12 * 16
 const reviewProfile = Schema.encodeSync(ReviewAgentProfile)(
   Schema.decodeUnknownSync(ReviewAgentProfile)({
     profileId: "openai-compatible:review-model:sbx",
@@ -705,6 +707,7 @@ test("renders a synchronized Jira issue as a complete read-only document", async
 test("launches an exact-head review and presents its durable findings", async ({ page }) => {
   let enqueued = false
   let enqueuePayload: unknown
+  let remainingPendingReviewPolls = 1
   const threadEvents = Schema.encodeSync(PullRequestReviewThreadPage)(
     Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
       events: [
@@ -766,12 +769,16 @@ test("launches an exact-head review and presents its durable findings", async ({
     })
   })
   await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review`, async (route) => {
+    const review = !enqueued
+      ? notStartedPullRequestReview
+      : remainingPendingReviewPolls > 0
+      ? pendingPullRequestReview
+      : completedPullRequestReview
+    if (enqueued && remainingPendingReviewPolls > 0) {
+      remainingPendingReviewPolls -= 1
+    }
     await route.fulfill({
-      body: JSON.stringify(
-        enqueued
-          ? completedPullRequestReview
-          : notStartedPullRequestReview
-      ),
+      body: JSON.stringify(review),
       contentType: "application/json",
       status: 200
     })
@@ -809,7 +816,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(evidenceStamp.locator("[data-rly-evidence-freshness]")).toBeVisible()
   const evidenceSourceBox = await evidenceSource.boundingBox()
   if (evidenceSourceBox === null) throw new Error("Evidence source geometry was unavailable")
-  expect(evidenceSourceBox.width).toBeGreaterThanOrEqual(12 * 16)
+  expect(evidenceSourceBox.width).toBeGreaterThanOrEqual(EVIDENCE_SOURCE_MIN_WIDTH_PX)
 
   const reviewTrigger = page.getByRole("button", { name: "Review exact head" })
   await expect(reviewTrigger).toBeVisible()

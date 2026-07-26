@@ -338,7 +338,7 @@ export const PullRequestReviewPanel = ({
         <span>The failed run did not change approval or publish a recommendation.</span>
         {canEnqueue && state.provider !== null ? (
           <>
-            {state.action === "failed" ? (
+            {state.action === "failed" && submittedRequest === null ? (
               <span role="alert">
                 A new full review could not be started. Check the provider and worker, then try again.
               </span>

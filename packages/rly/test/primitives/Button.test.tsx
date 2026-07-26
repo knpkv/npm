@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 
+import { describe, expect, it } from "@effect/vitest"
 import { act, createRef } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
 import { Button, RLY_BUTTON_DEFAULT_VARIANTS, RLY_BUTTON_VARIANTS } from "../../src/primitives/Button.js"
 import { render } from "./render.js"
 

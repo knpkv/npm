@@ -78,13 +78,26 @@
   box-shadow: inset 3px 0 var(--rly-color-success-ink);
 }
 
+.resource[data-status-tone="positive"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-success-ink);
+}
+
 .resource[data-status-tone="critical"] {
   box-shadow: inset 3px 0 var(--rly-color-blocked-ink);
+}
+
+.resource[data-status-tone="critical"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-blocked-ink);
 }
 
 .resource[data-status-tone="caution"],
 .resource[data-status-tone="progress"] {
   box-shadow: inset 3px 0 var(--rly-color-text-2);
+}
+
+.resource[data-status-tone="caution"]:dir(rtl),
+.resource[data-status-tone="progress"]:dir(rtl) {
+  box-shadow: inset -3px 0 var(--rly-color-text-2);
 }
 
 .resourceSummary {

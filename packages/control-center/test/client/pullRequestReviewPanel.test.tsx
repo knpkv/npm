@@ -550,7 +550,7 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Load earlier activity")
   })
 
-  it("retains a targeted request when enqueue fails", async () => {
+  it("retains a targeted request without announcing the full-review failure", async () => {
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
@@ -581,14 +581,15 @@ describe("PullRequestReviewPanel", () => {
     )
     if (start === undefined) throw new Error("Expected targeted review action")
     await act(async () => start.click())
-    await act(async () => render({ ...REVIEW_STATE, action: "failed", thread: REVIEW_THREAD }))
+    await act(async () => render({ ...REVIEW_STATE, action: "failed", review: FAILED_REVIEW, thread: REVIEW_THREAD }))
 
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
       "Keep this request after failure."
     )
-    expect(host.querySelector("[role=alert]")?.textContent).toContain(
-      "Targeted review did not start. Your request is still here"
-    )
+    const alerts = host.querySelectorAll("[role=alert]")
+    expect(alerts).toHaveLength(1)
+    expect(alerts[0]?.textContent).toContain("Targeted review did not start. Your request is still here")
+    expect(host.textContent).not.toContain("A new full review could not be started")
   })
 
   it("preserves a draft within one immutable head and clears it when the reviewed head changes", async () => {
