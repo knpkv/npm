@@ -557,6 +557,12 @@ describe("ServicesPage connection tests", () => {
     const spaceResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
     const jiraConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
     const spaceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
+    const staleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)(
+      "01890f6f-6d6a-7cc0-98d2-000000000196"
+    )
+    const secondStaleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)(
+      "01890f6f-6d6a-7cc0-98d2-000000000197"
+    )
     const previousLocation = window.location.href
     const authorizationLocation = new URL("#account-card-atlassian-oauth", previousLocation)
     authorizationLocation.searchParams.set("state", grantId)
@@ -594,6 +600,26 @@ describe("ServicesPage connection tests", () => {
           displayName: "Payments space",
           isEnabled: true,
           health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: staleConfluenceConnectionId,
+          providerAccountId: null,
+          followedResourceId: null,
+          providerId: "confluence",
+          displayName: "Old Confluence setup",
+          isEnabled: false,
+          health: { _tag: "disabled", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: secondStaleConfluenceConnectionId,
+          providerAccountId: null,
+          followedResourceId: null,
+          providerId: "confluence",
+          displayName: "Second old Confluence setup",
+          isEnabled: false,
+          health: { _tag: "disabled", checkedAt: "2026-07-14T10:00:00.000Z" },
           updatedAt: "2026-07-14T10:00:00.000Z"
         }
       ],
@@ -661,6 +687,10 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Verified identity · cloud-2")
     expect(host.textContent).toContain("Project · project-payments")
     expect(host.textContent).toContain("Space · space-payments")
+    expect(host.textContent).not.toContain("Old Confluence setup")
+    expect(host.textContent).not.toContain("Second old Confluence setup")
+    expect(host.textContent).not.toContain("Configure jira.")
+    expect(host.textContent).not.toContain("Configure confluence.")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add Jira project", "Add Confluence space"])
     )

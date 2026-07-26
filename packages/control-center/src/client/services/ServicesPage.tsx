@@ -1035,8 +1035,14 @@ export const ServicesPage = ({
                   resources.map(({ followedResourceId }) => followedResourceId)
                 )
               )
+              const hasGroupedResource = configured.some(
+                ({ followedResourceId }) =>
+                  followedResourceId !== null && groupedResourceIds.has(followedResourceId)
+              )
               const standaloneConnections = configured.filter(
-                ({ followedResourceId }) => followedResourceId === null || !groupedResourceIds.has(followedResourceId)
+                ({ followedResourceId, isEnabled }) =>
+                  (followedResourceId === null || !groupedResourceIds.has(followedResourceId)) &&
+                  (isEnabled || !hasGroupedResource)
               )
               const missingAtlassianIntent = missingAtlassianProductsIntent(
                 connectionsState.overview.connections,
@@ -1071,8 +1077,10 @@ export const ServicesPage = ({
               if (
                 configured.length > 0 &&
                 openProvider !== catalog.providerId &&
-                catalog.providerId !== "jira" &&
-                catalog.providerId !== "confluence"
+                (
+                  hasGroupedResource ||
+                  (catalog.providerId !== "jira" && catalog.providerId !== "confluence")
+                )
               )
                 return cards
               return [
