@@ -463,9 +463,9 @@ describe("usePullRequestReview", () => {
       loadThread: vi.fn(() =>
         Promise.resolve(
           PullRequestReviewThreadPage.make({
-            events: [threadEvent(1)],
+            events: Array.from({ length: 13 }, (_, index) => threadEvent(index + 1)),
             hasMore: false,
-            nextCursor: ReleaseAgentThreadCursor.make(1)
+            nextCursor: ReleaseAgentThreadCursor.make(13)
           })
         )
       )
@@ -474,6 +474,7 @@ describe("usePullRequestReview", () => {
     const thread = await continuePullRequestReviewThread(transport, ENTITY_ID, new AbortController().signal)
 
     expect(thread.hasEarlier).toBe(false)
+    expect(thread.events).toHaveLength(13)
   })
 
   it("opens a bounded tail with earlier history without walking its cursor forward", async () => {
