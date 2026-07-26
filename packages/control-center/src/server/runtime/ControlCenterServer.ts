@@ -85,11 +85,15 @@ import {
 } from "./Bootstrap.js"
 import { databaseDrainLayer } from "./DatabaseDrain.js"
 import { DomainEventWakeups } from "./DomainEventWakeups.js"
-import { firstPartyPluginConnectionMapLayer, firstPartyPluginRuntimeRegistryLayer } from "./FirstPartyPluginRuntime.js"
+import {
+  firstPartyPluginConnectionMapLayer,
+  firstPartyPluginRuntimeLayers,
+  firstPartyPluginRuntimeRegistryLayer
+} from "./FirstPartyPluginRuntime.js"
 import {
   GovernedActionExecutionStartup,
   type GovernedActionExecutionStartupError,
-  governedActionExecutionStartupFromRegistryLayer,
+  governedActionExecutionStartupFromRuntimeMapLayer,
   governedActionExecutionStartupLayer,
   type GovernedActionExecutionStartupOptions,
   governedActionPolicyBindingSourceLayer,
@@ -272,6 +276,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const configuredPluginConnections = options.pluginConnections ?? options.releaseSynchronization?.pluginConnections ??
     null
   const firstPartyPluginRuntime = options.firstPartyPluginRuntime ?? false
+  const firstPartyRuntime = firstPartyPluginRuntime
+    ? firstPartyPluginRuntimeLayers(firstPartyPluginRuntimeRegistryLayer)
+    : null
   const selectedApplicationServices: Layer.Layer<
     ControlCenterCoreApplicationServices,
     ApplicationError,
@@ -287,7 +294,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   > = options.applicationServices ?? liveApplicationServices(
     configuredPluginConnections,
     firstPartyPluginRuntime,
-    options.bindConfig.publicOrigin
+    options.bindConfig.publicOrigin,
+    firstPartyRuntime?.connections ?? firstPartyPluginConnectionMapLayer
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer
@@ -352,8 +360,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ? governedActionExecutionStartupLayer(null)
     : governedActionConfiguration.pluginRuntimes === undefined
     ? firstPartyPluginRuntime
-      ? governedActionExecutionStartupFromRegistryLayer(governedActionConfiguration.workspaceId).pipe(
-        Layer.provide(firstPartyPluginRuntimeRegistryLayer)
+      ? governedActionExecutionStartupFromRuntimeMapLayer(governedActionConfiguration.workspaceId).pipe(
+        Layer.provide(firstPartyRuntime!.runtimeMap)
       )
       : governedActionExecutionStartupLayer(null)
     : governedActionExecutionStartupLayer({
@@ -366,7 +374,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   const publicationConnections = configuredPluginConnections === null
     ? firstPartyPluginRuntime
-      ? firstPartyPluginConnectionMapLayer.pipe(Layer.provide(database))
+      ? firstPartyRuntime!.connections.pipe(Layer.provide(database))
       : null
     : Layer.succeed(PluginConnectionMap, configuredPluginConnections)
   const reviewSuggestionPublications = governedActionConfiguration === null || publicationConnections === null

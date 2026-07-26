@@ -118,11 +118,9 @@ export const governedActionPolicyBindingSourceLayer = Layer.effect(
   )
 )
 
-const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
-  const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
-  const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
-  const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
-  const store = governedActionExecutionStoreLayer(options.workspaceId).pipe(
+const readyLayerFromRuntimeMap = (workspaceId: WorkspaceId) => {
+  const executors = AuthorizedPluginExecutorMap.layer
+  const store = governedActionExecutionStoreLayer(workspaceId).pipe(
     Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
     Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
     Layer.provideMerge(QuarantineRepository.layer)
@@ -135,8 +133,14 @@ const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
     Layer.effect(GovernedActionExecutionStartup, makeReadyStartup).pipe(
       Layer.provide(engine)
     ),
-    governedActionRecoveryClaimDrainLayer(options.workspaceId)
+    governedActionRecoveryClaimDrainLayer(workspaceId)
   )
+}
+
+const readyLayer = (options: GovernedActionExecutionStartupOptions) => {
+  const registry = Layer.succeed(PluginRuntimeRegistry, options.pluginRuntimes)
+  const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registry))
+  return readyLayerFromRuntimeMap(options.workspaceId).pipe(Layer.provide(runtimeMap))
 }
 
 /** Install the engine only when an internal runtime registry is explicitly configured. */
@@ -157,6 +161,11 @@ export const governedActionExecutionStartupFromRegistryLayer = (
       (pluginRuntimes) => governedActionExecutionStartupLayer({ workspaceId, pluginRuntimes })
     )
   )
+
+/** Resolve executors from the server-owned cache shared with proposal projections. @internal */
+export const governedActionExecutionStartupFromRuntimeMapLayer = (
+  workspaceId: WorkspaceId
+) => readyLayerFromRuntimeMap(workspaceId)
 
 /** Acquire the private worker for server lifetime without returning its capability. */
 export const governedActionExecutionServerLayer = (

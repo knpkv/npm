@@ -2,7 +2,7 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type {
   AgentProviderCatalog,
@@ -222,7 +222,7 @@ export const usePullRequestReview = (
         : { baseRevision, entityId, headRevision, sessionKey },
     [baseRevision, entityId, headRevision, sessionKey]
   )
-  useEffect(() => {
+  useLayoutEffect(() => {
     latestScope.current = scope
   }, [scope])
 
@@ -307,7 +307,7 @@ export const usePullRequestReview = (
     publicationAbort.current = null
     setPublication({ _tag: "idle" })
   }, [entityId, sessionKey])
-  useEffect(() => {
+  useLayoutEffect(() => {
     mutationAbort.current?.abort()
     mutationAbort.current = null
     setPublication((current) => current._tag === "publishing" ? current : { _tag: "idle" })

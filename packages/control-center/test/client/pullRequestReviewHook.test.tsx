@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { type ReactElement, act } from "react"
+import { type ReactElement, act, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Schema from "effect/Schema"
@@ -218,9 +218,11 @@ const Harness = ({
 
 const PublicationHarness = ({
   headRevision,
+  onRevisionCommit,
   transport
 }: {
   readonly headRevision: string
+  readonly onRevisionCommit?: ((headRevision: string) => void) | undefined
   readonly transport: PullRequestReviewTransport
 }): ReactElement => {
   const controller = usePullRequestReview(
@@ -232,9 +234,12 @@ const PublicationHarness = ({
     ignoreSessionExpired,
     transport
   )
+  useLayoutEffect(() => {
+    onRevisionCommit?.(headRevision)
+  }, [headRevision, onRevisionCommit])
   return (
     <>
-      <span data-publication>
+      <span data-head={headRevision} data-publication>
         {controller.publication._tag}
         {controller.publication._tag === "published"
           ? `:${controller.publication.headSuperseded ? "superseded" : "current"}:${controller.publication.publication.receipt.providerOperationId}`
@@ -307,7 +312,7 @@ describe("usePullRequestReview", () => {
     expect(host.querySelector("[data-publication]")?.textContent).toBe("idle")
   })
 
-  it("retains an in-flight publication receipt across source revision refresh", async () => {
+  it("classifies an in-flight receipt against the source revision at the commit boundary", async () => {
     const { preview, published } = makePublicationFixture(HEAD_A)
     const publication = deferred<PublishedReviewComment>()
     const transport = {
@@ -326,11 +331,42 @@ describe("usePullRequestReview", () => {
     await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
     expect(host.querySelector("[data-publication]")?.textContent).toBe("publishing")
 
-    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
-    expect(host.querySelector("[data-publication]")?.textContent).toBe("publishing")
-
-    await act(async () => publication.resolve(published))
+    const revisionCommitted = deferred<void>()
+    mountedRoot.render(
+      <PublicationHarness
+        headRevision={HEAD_B}
+        onRevisionCommit={() => {
+          publication.resolve(published)
+          revisionCommitted.resolve()
+        }}
+        transport={transport}
+      />
+    )
+    await revisionCommitted.promise
+    await act(async () => Promise.resolve())
     expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
+  })
+
+  it("keeps an in-flight receipt current when the source revision is unchanged", async () => {
+    const { preview, published } = makePublicationFixture(HEAD_A)
+    const publication = deferred<PublishedReviewComment>()
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn((_entityId, _signal) => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      previewPublication: vi.fn(() => Promise.resolve(preview)),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: vi.fn(() => publication.promise)
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_A} transport={transport} />))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
+    await act(async () => publication.resolve(published))
+
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("published:current:comment-42")
   })
 
   it("never presents a prior immutable head while the refreshed head loads", async () => {
