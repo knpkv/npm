@@ -7,28 +7,34 @@ message: "Control Center dialogs must use the shared rly Dialog primitive"
 
 rule:
   any:
-    - all:
-        - kind: jsx_attribute
-        - has:
-            kind: property_identifier
-            regex: "^role$"
-        - has:
-            stopBy: end
-            kind: string_fragment
-            regex: "^dialog$"
-    - all:
-        - kind: jsx_attribute
-        - has:
-            kind: property_identifier
-            regex: "^aria-modal$"
-        - any:
-            - has:
-                stopBy: end
-                kind: string_fragment
-                regex: "^true$"
-            - has:
-                stopBy: end
-                kind: "true"
+    - pattern:
+        context: '<div role="dialog" />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div role={"dialog"} />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: "<div role={`dialog`} />"
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div aria-modal="true" />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: '<div aria-modal={"true"} />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: "<div aria-modal={`true`} />"
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
+        context: "<div aria-modal={true} />"
+        selector: jsx_attribute
+        strictness: ast
     - pattern:
         context: "<div aria-modal />"
         selector: jsx_attribute

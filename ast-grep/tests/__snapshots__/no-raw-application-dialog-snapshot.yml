@@ -7,14 +7,6 @@ snapshots:
         style: primary
         start: 7
         end: 26
-      - source: aria-modal
-        style: secondary
-        start: 7
-        end: 17
-      - source: "true"
-        style: secondary
-        start: 20
-        end: 24
   ? |
     <aside aria-modal={'true'}>Review</aside>
   : labels:
@@ -22,14 +14,6 @@ snapshots:
         style: primary
         start: 7
         end: 26
-      - source: aria-modal
-        style: secondary
-        start: 7
-        end: 17
-      - source: "true"
-        style: secondary
-        start: 20
-        end: 24
   ? |
     <aside aria-modal={true}>Review</aside>
   : labels:
@@ -37,14 +21,6 @@ snapshots:
         style: primary
         start: 7
         end: 24
-      - source: aria-modal
-        style: secondary
-        start: 7
-        end: 17
-      - source: "true"
-        style: secondary
-        start: 19
-        end: 23
   ? |
     <div aria-modal="true" role="dialog">
       Review
@@ -54,14 +30,6 @@ snapshots:
         style: primary
         start: 5
         end: 22
-      - source: aria-modal
-        style: secondary
-        start: 5
-        end: 15
-      - source: "true"
-        style: secondary
-        start: 17
-        end: 21
   ? |
     <div aria-modal={`true`}>Review</div>
   : labels:
@@ -69,14 +37,6 @@ snapshots:
         style: primary
         start: 5
         end: 24
-      - source: aria-modal
-        style: secondary
-        start: 5
-        end: 15
-      - source: "true"
-        style: secondary
-        start: 18
-        end: 22
   ? |
     <div aria-modal>Review</div>
   : labels:
@@ -91,14 +51,6 @@ snapshots:
         style: primary
         start: 5
         end: 18
-      - source: role
-        style: secondary
-        start: 5
-        end: 9
-      - source: dialog
-        style: secondary
-        start: 11
-        end: 17
   ? |
     <div role={"dialog" as const}>Review</div>
   : labels:
@@ -121,14 +73,6 @@ snapshots:
         style: primary
         start: 5
         end: 20
-      - source: role
-        style: secondary
-        start: 5
-        end: 9
-      - source: dialog
-        style: secondary
-        start: 12
-        end: 18
   ? |
     <div role={'dialog'}>Review</div>
   : labels:
@@ -136,14 +80,6 @@ snapshots:
         style: primary
         start: 5
         end: 20
-      - source: role
-        style: secondary
-        start: 5
-        end: 9
-      - source: dialog
-        style: secondary
-        start: 12
-        end: 18
   ? |
     <div role={`dialog`}>Review</div>
   : labels:
@@ -151,14 +87,6 @@ snapshots:
         style: primary
         start: 5
         end: 20
-      - source: role
-        style: secondary
-        start: 5
-        end: 9
-      - source: dialog
-        style: secondary
-        start: 12
-        end: 18
   ? |
     <section aria-modal="true">
       Review
@@ -168,11 +96,3 @@ snapshots:
         style: primary
         start: 9
         end: 26
-      - source: aria-modal
-        style: secondary
-        start: 9
-        end: 19
-      - source: "true"
-        style: secondary
-        start: 21
-        end: 25
