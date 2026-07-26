@@ -126,16 +126,6 @@ interface GeneratedText {
   }
 }
 
-const cacheSuccessfulRuntimeMetadata = Effect.fn(
-  "AgentRuntimeRegistry.cacheSuccessfulRuntimeMetadata"
-)(function*(metadata: Effect.Effect<AgentRuntimeMetadata, AgentProviderError>) {
-  const [cached, invalidate] = yield* Effect.cachedInvalidateWithTTL(
-    metadata,
-    Duration.infinity
-  )
-  return cached.pipe(Effect.tapError(() => invalidate))
-})
-
 const unavailableCatalogEntry = (
   providerId: "codex" | "claude" | "openai-compatible"
 ): AgentProviderCatalogEntry => ({
@@ -343,15 +333,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     : {
       providerId: CODEX_PROVIDER_ID,
       catalog: availableCatalogEntry("codex", codexModelId),
-      runtimeMetadata: yield* cacheSuccessfulRuntimeMetadata(
-        readLocalCliRuntimeMetadata({
-          cwd: codexConfigured.cwd,
-          executable: codexConfigured.executable ?? "codex",
-          implementation: "codex-cli"
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.mapError((failure) => metadataFailure(CODEX_PROVIDER_ID, failure))
-        )
+      runtimeMetadata: readLocalCliRuntimeMetadata({
+        cwd: codexConfigured.cwd,
+        executable: codexConfigured.executable ?? "codex",
+        implementation: "codex-cli"
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError((failure) => metadataFailure(CODEX_PROVIDER_ID, failure))
       ),
       runtime: makeLanguageModelRuntime(
         CODEX_PROVIDER_ID,
@@ -380,15 +368,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     : {
       providerId: CLAUDE_PROVIDER_ID,
       catalog: availableCatalogEntry("claude", claudeModelId),
-      runtimeMetadata: yield* cacheSuccessfulRuntimeMetadata(
-        readLocalCliRuntimeMetadata({
-          cwd: claudeConfigured.cwd,
-          executable: claudeConfigured.executable ?? "claude",
-          implementation: "claude-cli"
-        }).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          Effect.mapError((failure) => metadataFailure(CLAUDE_PROVIDER_ID, failure))
-        )
+      runtimeMetadata: readLocalCliRuntimeMetadata({
+        cwd: claudeConfigured.cwd,
+        executable: claudeConfigured.executable ?? "claude",
+        implementation: "claude-cli"
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError((failure) => metadataFailure(CLAUDE_PROVIDER_ID, failure))
       ),
       runtime: makeLanguageModelRuntime(
         CLAUDE_PROVIDER_ID,

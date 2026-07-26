@@ -51,13 +51,16 @@ const versionProcessLayer = (
   options: {
     readonly exitCode?: number
     readonly output?: string
+    readonly outputs?: ReadonlyArray<string>
   } = {}
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       calls.push(command)
-      const output = Stream.make(options.output ?? `${CLI_VERSION_OUTPUT}\n`).pipe(Stream.encodeText)
+      const output = Stream.make(
+        options.outputs?.[calls.length - 1] ?? options.output ?? `${CLI_VERSION_OUTPUT}\n`
+      ).pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
         all: output,
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
@@ -264,13 +267,17 @@ describe("agent provider registry", () => {
       assert.strictEqual(legacy.model, OPENAI_MODEL)
       assert.strictEqual(selected.filesystemAccess, "none")
       assert.strictEqual(codexSelected.filesystemAccess, "configured-workspace")
-      assert.deepStrictEqual(codexSelectedAgain.runtimeMetadata, codexSelected.runtimeMetadata)
+      assert.deepStrictEqual(codexSelectedAgain.runtimeMetadata, {
+        _tag: "local-cli",
+        implementation: "codex-cli",
+        version: "1.2.4"
+      })
       assert.deepStrictEqual(codexSelected.runtimeMetadata, {
         _tag: "local-cli",
         implementation: "codex-cli",
         version: CLI_VERSION
       })
-      assert.strictEqual(processCalls.length, 1)
+      assert.strictEqual(processCalls.length, 2)
       const versionCommand = processCalls[0]
       assert.isTrue(versionCommand !== undefined && ChildProcess.isStandardCommand(versionCommand))
       if (versionCommand !== undefined && ChildProcess.isStandardCommand(versionCommand)) {
@@ -303,7 +310,9 @@ describe("agent provider registry", () => {
     }).pipe(
       Effect.provide(registryLayer),
       Effect.provideService(HttpClient.HttpClient, providerClient),
-      Effect.provide(versionProcessLayer(processCalls)),
+      Effect.provide(versionProcessLayer(processCalls, {
+        outputs: [`${CLI_VERSION_OUTPUT}\n`, "codex-cli 1.2.4\n"]
+      })),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     )
