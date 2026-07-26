@@ -109,7 +109,7 @@ export const PullRequestReviewPanel = ({
   const [request, setRequest] = useState("")
   const [submittedRequest, setSubmittedRequest] = useState<string | null>(null)
   const launchDialogRef = useRef<HTMLDivElement>(null)
-  const launchReturnFocusRef = useRef<{ readonly focus: () => void } | null>(null)
+  const launchReturnFocusRef = useRef<(() => void) | null>(null)
   const requestScope =
     state._tag === "idle"
       ? null
@@ -133,15 +133,13 @@ export const PullRequestReviewPanel = ({
   }, [launchOpen])
   const closeLaunchDialog = useCallback((): void => {
     setLaunchOpen(false)
-    launchReturnFocusRef.current?.focus()
+    launchReturnFocusRef.current?.()
     launchReturnFocusRef.current = null
   }, [])
   const openLaunchDialog = useCallback((): void => {
     const activeElement = document.activeElement
-    launchReturnFocusRef.current =
-      activeElement !== null && "focus" in activeElement && typeof activeElement.focus === "function"
-        ? activeElement
-        : null
+    const focus = activeElement !== null && "focus" in activeElement ? activeElement.focus : null
+    launchReturnFocusRef.current = typeof focus === "function" ? () => Reflect.apply(focus, activeElement, []) : null
     setSubmittedRequest(null)
     setLaunchOpen(true)
   }, [])
