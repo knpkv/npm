@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 const pairedSession = {
   absoluteExpiresAt: "2026-08-13T10:00:00.000Z",
@@ -112,7 +113,6 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
       status: 200
     })
   })
-
   await page.goto("/pair")
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
@@ -122,12 +122,42 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
 
   const newTab = await context.newPage()
-  await newTab.goto("/releases")
-  await expect(newTab.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
+  await newTab.goto("/services")
+  await expect(newTab.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
   await expect.poll(() => newTab.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
   await newTab.getByRole("link", { name: "Overview" }).click()
   await expect(newTab.getByText("Owner browser paired")).toBeVisible()
   await newTab.close()
+})
+
+test("routes an authenticated releases entry to the live workspace portfolio", async ({ context, page }) => {
+  const csrfToken = "cd".repeat(32)
+  await context.addCookies([{
+    name: "cc_session",
+    value: "ab".repeat(32),
+    url: "http://127.0.0.1:4173"
+  }])
+  await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken, session: pairedSession }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/portfolio/snapshot", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(releasePortfolioFixture),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto("/releases")
+
+  await expect(page).toHaveURL(`/w/${pairedSession.workspaceId}/overview`)
+  await expect(page.getByRole("link", { name: "Active work" })).toBeVisible()
+  await expect(page.getByText("Waiting for the first source")).toHaveCount(0)
 })
 
 test("invalidates a paired browser when the authoritative portfolio rejects its session", async ({ context, page }) => {
