@@ -146,6 +146,17 @@ const rangeIsChanged = (
   endLine: number
 ): boolean => intervals.some((interval) => startLine >= interval.startLine && endLine <= interval.endLine)
 
+const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  path: string
+) {
+  const check = yield* session.runCommand(
+    `git cat-file -e ${shellQuote(`${session.headRevision}:${path}`)}`
+  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  return check.exitCode === 0
+})
+
 const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   providerId: ClaimedAgentJob["providerId"],
   session: PrReviewSandboxSession,
@@ -165,12 +176,14 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     suggestion.evidence.startLine,
     suggestion.evidence.endLine
   )
-  const isFileDeletionEvidence = suggestion.anchor._tag === "file" &&
+  const isBaseChangedEvidence = suggestion.anchor._tag === "file" &&
     rangeIsChanged(
       diffLineIntervals(diff.stdout.text, "base"),
       suggestion.evidence.startLine,
       suggestion.evidence.endLine
     )
+  const isFileDeletionEvidence = isBaseChangedEvidence &&
+    !(yield* fileExistsInHead(providerId, session, path))
   if (!isAddedEvidence && !isFileDeletionEvidence) {
     return yield* providerFailure(
       providerId,
@@ -286,8 +299,7 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
     suggestion.evidence.endLine,
     suggestion.evidence.excerpt,
     suggestion.problem,
-    suggestion.recommendation,
-    suggestion.relatedLocations
+    suggestion.recommendation
   ])
   const bytes = yield* utf8Bytes(providerId, material)
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
@@ -322,6 +334,39 @@ const locationExistsInHead = Effect.fn("PrReviewTaskExecutor.locationExistsInHea
   return check.exitCode === 0
 })
 
+const locationIsChangedInHead = Effect.fn("PrReviewTaskExecutor.locationIsChangedInHead")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  location: PrReviewSuggestionDraftType["relatedLocations"][number]
+) {
+  const diff = yield* session.runCommand(
+    `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
+      `--inter-hunk-context=0 ` +
+      `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(location.path)}`
+  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  if (diff.exitCode !== 0 || diff.stdout.truncated || diff.stdout.artifactId !== null) return false
+  return rangeIsChanged(
+    diffLineIntervals(diff.stdout.text, "head"),
+    location.startLine,
+    location.endLine
+  )
+})
+
+const relatedLocationKey = (
+  location: PrReviewSuggestionDraftType["relatedLocations"][number]
+): string => `${location.path}:${String(location.startLine)}:${String(location.endLine)}:${location.label}`
+
+const mergeRelatedLocations = (
+  left: PrReviewSuggestionDraftType["relatedLocations"],
+  right: PrReviewSuggestionDraftType["relatedLocations"]
+): Array<PrReviewSuggestionDraftType["relatedLocations"][number]> => {
+  const locationsByKey = new Map<string, PrReviewSuggestionDraftType["relatedLocations"][number]>()
+  for (const location of [...left, ...right]) locationsByKey.set(relatedLocationKey(location), location)
+  return [...locationsByKey.values()].sort((first, second) =>
+    relatedLocationKey(first).localeCompare(relatedLocationKey(second))
+  )
+}
+
 const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelatedLocations")(function*(
   providerId: ClaimedAgentJob["providerId"],
   session: PrReviewSandboxSession,
@@ -329,13 +374,9 @@ const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelat
 ) {
   const validated = new Array<PrReviewSuggestionDraftType["relatedLocations"][number]>()
   for (const location of suggestion.relatedLocations) {
-    if (yield* locationExistsInHead(providerId, session, location)) validated.push(location)
+    if (yield* locationIsChangedInHead(providerId, session, location)) validated.push(location)
   }
-  return validated.sort((left, right) =>
-    `${left.path}:${String(left.startLine)}:${String(left.endLine)}:${left.label}`.localeCompare(
-      `${right.path}:${String(right.startLine)}:${String(right.endLine)}:${right.label}`
-    )
-  )
+  return validated.sort((left, right) => relatedLocationKey(left).localeCompare(relatedLocationKey(right)))
 })
 
 const validatedNoteLocation = Effect.fn("PrReviewTaskExecutor.validatedNoteLocation")(function*(
@@ -436,7 +477,7 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     )
   }
   const suggestions = new Array<(typeof PrReviewReport.Type)["suggestions"][number]>()
-  const seenSuggestionIds = new Set<string>()
+  const suggestionIndexes = new Map<string, number>()
   for (const suggestion of modelReport.suggestions) {
     const evidence = yield* exactEvidence(claim.providerId, session, suggestion).pipe(Effect.result)
     if (Result.isFailure(evidence)) {
@@ -460,19 +501,30 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
       subject,
       canonicalSuggestion
     )
-    if (seenSuggestionIds.has(suggestionId)) {
+    const existingIndex = suggestionIndexes.get(suggestionId)
+    if (existingIndex !== undefined) {
+      const existingSuggestion = suggestions[existingIndex]
+      if (existingSuggestion !== undefined) {
+        suggestions[existingIndex] = {
+          ...existingSuggestion,
+          relatedLocations: mergeRelatedLocations(
+            existingSuggestion.relatedLocations,
+            canonicalSuggestion.relatedLocations
+          )
+        }
+      }
       yield* onActivity({
         _tag: "output",
         channel: "progress",
-        text: `Dropped duplicate validated suggestion at ${suggestion.evidence.path}:${
+        text: `Merged duplicate validated suggestion at ${suggestion.evidence.path}:${
           String(suggestion.evidence.startLine)
         }-${String(suggestion.evidence.endLine)}.`
       }).pipe(Effect.mapError((failure) => executionFailure(claim.providerId, failure)))
       continue
     }
-    seenSuggestionIds.add(suggestionId)
     const anchor = yield* resolveAnchor(claim.providerId, session, canonicalSuggestion)
     suggestions.push({ ...canonicalSuggestion, anchor, state: "draft", suggestionId })
+    suggestionIndexes.set(suggestionId, suggestions.length - 1)
   }
   const notes = new Array<(typeof PrReviewReport.Type)["notes"][number]>()
   const seenNoteIds = new Set<string>()

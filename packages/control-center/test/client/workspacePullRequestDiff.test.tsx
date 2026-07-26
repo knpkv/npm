@@ -47,6 +47,10 @@ const scope = {
 }
 const fileAnchor = DiffFileAnchor.make("sha256:12a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a1d")
 const otherFileAnchor = DiffFileAnchor.make("sha256:22a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a2d")
+const binaryFileAnchor = DiffFileAnchor.make("sha256:32a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a3d")
+const generatedFileAnchor = DiffFileAnchor.make(
+  "sha256:42a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a4d"
+)
 const unauthorizedReadKinds: ReadonlyArray<"inventory" | "content"> = ["inventory", "content"]
 const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   suggestionId: `sha256:${"1".repeat(64)}`,
@@ -119,6 +123,36 @@ const renamedBeforeSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
     relativeFileVersion: "BEFORE"
   },
   relatedLocations: []
+})
+const lineSuggestionWithRelatedLocations = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  ...suggestion,
+  suggestionId: `sha256:${"5".repeat(64)}`,
+  relatedLocations: [
+    {
+      path: "src/other.ts",
+      startLine: 8,
+      endLine: 8,
+      label: "Actionable occurrence"
+    },
+    {
+      path: "src/absent.ts",
+      startLine: 3,
+      endLine: 3,
+      label: "Absent occurrence"
+    },
+    {
+      path: "src/binary.bin",
+      startLine: 1,
+      endLine: 1,
+      label: "Binary occurrence"
+    },
+    {
+      path: "src/generated.ts",
+      startLine: 2,
+      endLine: 2,
+      label: "Generated occurrence"
+    }
+  ]
 })
 
 describe("WorkspacePullRequestDiff", () => {
@@ -586,6 +620,112 @@ describe("WorkspacePullRequestDiff", () => {
     expect(document.activeElement).toBe(target)
   })
 
+  it("navigates line-suggestion related locations only when their diff content is actionable", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: fileAnchor,
+            path: PluginRelativePathV1.make("src/file.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: otherFileAnchor,
+            path: PluginRelativePathV1.make("src/other.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: binaryFileAnchor,
+            path: PluginRelativePathV1.make("src/binary.bin"),
+            previousPath: null,
+            status: "modified",
+            binary: true,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: generatedFileAnchor,
+            path: PluginRelativePathV1.make("src/generated.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: true,
+            oversized: false
+          }
+        ]
+      }),
+      content: async (_scope, entry, side) => {
+        const text =
+          String(entry.path) === "src/other.ts"
+            ? [
+                "// line 1",
+                "// line 2",
+                "// line 3",
+                "// line 4",
+                "// line 5",
+                "// line 6",
+                "// line 7",
+                side === "before" ? "export const related = 1" : "export const related = 2"
+              ].join("\n")
+            : side === "before"
+              ? "export const answer = 42\n"
+              : "export const answer = 43\n"
+        return {
+          bytesBase64: btoa(text),
+          totalBytes: text.length,
+          unavailableReason: null
+        }
+      }
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff
+          heading="PR 184"
+          scope={scope}
+          suggestions={[lineSuggestionWithRelatedLocations]}
+          transport={transport}
+        />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    const buttonWithLabel = (label: string) =>
+      [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) => textContent === label)
+    const actionableLocation = buttonWithLabel("src/other.ts:8")
+    if (actionableLocation === undefined) throw new Error("Expected actionable line-suggestion related location")
+    expect(buttonWithLabel("src/absent.ts:3")).toBeUndefined()
+    expect(buttonWithLabel("src/binary.bin:1")).toBeUndefined()
+    expect(buttonWithLabel("src/generated.ts:2")).toBeUndefined()
+
+    await act(async () => {
+      actionableLocation.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    const target = host.querySelector<HTMLElement>(
+      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
+    )
+    expect(document.activeElement).toBe(target)
+  })
+
   it("attaches a BEFORE file anchor to the previous path of a rename", async () => {
     const transport: WorkspacePullRequestDiffTransport = {
       inventory: async (): Promise<CompleteDiffInventory> => ({
@@ -635,10 +775,19 @@ describe("WorkspacePullRequestDiff", () => {
       ({ textContent }) => textContent === "src/old.ts:1"
     )
     if (anchor === undefined) throw new Error("Expected renamed BEFORE anchor navigation")
-    await act(async () => anchor.click())
+    await act(async () => {
+      anchor.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
     expect(
       host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
     ).toBe("true")
+    const target = host.querySelector<HTMLElement>(
+      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="1"][data-rly-diff-line-side="deletions"]`
+    )
+    expect(document.activeElement).toBe(target)
   })
 
   it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {

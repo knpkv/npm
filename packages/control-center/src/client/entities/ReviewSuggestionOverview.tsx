@@ -4,9 +4,11 @@ import type { CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PrReviewSuggestion } from "../../domain/prReview.js"
 import styles from "./WorkspacePullRequestDiff.module.css"
 
-const scopeKinds = ["file", "changes"] satisfies ReadonlyArray<"file" | "changes">
+const scopeKinds = ["line", "file", "changes"] satisfies ReadonlyArray<"line" | "file" | "changes">
+const canNavigateEntry = (entry: CompleteDiffInventoryEntry | undefined): entry is CompleteDiffInventoryEntry =>
+  entry !== undefined && !entry.binary && !entry.generated && !entry.oversized
 
-/** Group file- and change-scoped advice while keeping inventory-backed locations navigable. */
+/** Group scoped advice while keeping renderable inventory-backed locations navigable. */
 export const ReviewSuggestionOverview = ({
   entries,
   onNavigate,
@@ -14,14 +16,16 @@ export const ReviewSuggestionOverview = ({
   suggestions
 }: {
   readonly entries: ReadonlyArray<CompleteDiffInventoryEntry>
-  readonly onNavigate: (fileId: string, lineNumber?: number) => void
+  readonly onNavigate: (fileId: string, lineNumber: number, side: "additions" | "deletions") => void
   readonly onSelectAnchor: (anchor: Extract<PrReviewSuggestion["anchor"], { readonly _tag: "file" }>) => void
   readonly suggestions: ReadonlyArray<PrReviewSuggestion>
 }): ReactElement | null => {
-  const overviewSuggestions = suggestions.filter(({ anchor }) => anchor._tag !== "line")
+  const overviewSuggestions = suggestions.filter(
+    ({ anchor, relatedLocations }) => anchor._tag !== "line" || relatedLocations.length > 0
+  )
   if (overviewSuggestions.length === 0) return null
   return (
-    <section aria-label="File and whole-change suggestions" className={styles.overview}>
+    <section aria-label="Scoped review suggestions" className={styles.overview}>
       <header>
         <span>Review overview</span>
         <strong>{overviewSuggestions.length}</strong>
@@ -31,7 +35,13 @@ export const ReviewSuggestionOverview = ({
         if (scoped.length === 0) return null
         return (
           <section key={scopeKind}>
-            <h3>{scopeKind === "file" ? "File suggestions" : "Whole-change suggestions"}</h3>
+            <h3>
+              {scopeKind === "line"
+                ? "Line suggestion connections"
+                : scopeKind === "file"
+                  ? "File suggestions"
+                  : "Whole-change suggestions"}
+            </h3>
             <ul>
               {scoped.map((suggestion) => {
                 const anchor = suggestion.anchor
@@ -61,10 +71,13 @@ export const ReviewSuggestionOverview = ({
                             )
                             return (
                               <li key={`${location.path}:${String(location.startLine)}:${String(location.endLine)}`}>
-                                {entry === undefined ? (
+                                {!canNavigateEntry(entry) ? (
                                   <code>{label}</code>
                                 ) : (
-                                  <button onClick={() => onNavigate(entry.anchor, location.startLine)} type="button">
+                                  <button
+                                    onClick={() => onNavigate(entry.anchor, location.startLine, "additions")}
+                                    type="button"
+                                  >
                                     {label}
                                   </button>
                                 )}

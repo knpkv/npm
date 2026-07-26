@@ -327,9 +327,17 @@ describe("PullRequestReviewPanel", () => {
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("yield* authorize()")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("++ counter")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("+++ literal source")
+    expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain(
+      "src/authorization.ts · @@ -42,1 +42,2 @@"
+    )
+    expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain(
+      "src/authorization.ts · @@ -42,1 +42,2 @@"
+    )
     expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("src/literal.ts · @@ -50,1 +51,1 @@")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("src/literal.ts · @@ -50,1 +51,1 @@")
-    expect(replacements[1]?.querySelectorAll("pre")[0]?.textContent).not.toContain(" · @@")
+    expect(replacements[1]?.querySelectorAll("pre")[0]?.textContent).toContain(
+      "src/authorization.ts · @@ -50,1 +50,1 @@"
+    )
     expect(replacements[1]?.textContent).toContain("yield* authorizeShared()")
     expect(host.textContent).toContain("Review Notes")
     expect(host.textContent).toContain("Never publishable")

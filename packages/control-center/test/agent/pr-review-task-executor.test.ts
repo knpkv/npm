@@ -326,7 +326,9 @@ const makeSessionLayer = (
 ) => {
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
     if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
-      return output(diff)
+      return command.includes("missing.ts") || command.includes("deleted.ts")
+        ? output()
+        : output(diff)
     }
     if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
       return output(`${sourceExcerpt}\n`)
@@ -526,8 +528,8 @@ describe("PR review task executor", () => {
           },
           relatedLocations: [{
             path: "packages/control-center/test/fixture.ts",
-            startLine: 8,
-            endLine: 8,
+            startLine: 42,
+            endLine: 42,
             label: "Same root cause"
           }, {
             path: "missing.ts",
@@ -640,9 +642,14 @@ describe("PR review task executor", () => {
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-replacement-" })
       const sourcePath = path.join(root, EVIDENCE_PATH)
       const deletedPath = path.join(root, "packages/control-center/src/deleted.ts")
+      const mixedPath = path.join(root, "packages/control-center/src/mixed.ts")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
       yield* fileSystem.writeFileString(path.join(root, "AGENTS.md"), "# Review instructions\n")
       yield* fileSystem.writeFileString(deletedPath, "const obsolete = true\n")
+      yield* fileSystem.writeFileString(
+        mixedPath,
+        "const removed = true\n// retained 1\n// retained 2\n// retained 3\n"
+      )
       const source = (unsafe: string) =>
         `${Array.from({ length: 41 }, (_, index) => `// line ${String(index + 1)}`).join("\n")}\n` +
         `const unsafe = ${unsafe}\n`
@@ -651,7 +658,7 @@ describe("PR review task executor", () => {
       const initialize = yield* runShellCommand(
         root,
         "git init --quiet && git add -- AGENTS.md packages/control-center/src/review.ts " +
-          "packages/control-center/src/deleted.ts && " +
+          "packages/control-center/src/deleted.ts packages/control-center/src/mixed.ts && " +
           "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m base"
       )
       assert.strictEqual(initialize.exitCode, 0, initialize.stderr.text)
@@ -665,12 +672,16 @@ describe("PR review task executor", () => {
 
       yield* fileSystem.writeFileString(sourcePath, source("true"))
       yield* fileSystem.remove(deletedPath)
+      yield* fileSystem.writeFileString(
+        mixedPath,
+        "// retained 1\n// retained 2\n// retained 3\nconst added = true\n"
+      )
       const unterminatedPath = path.join(root, "packages/control-center/src/unterminated.ts")
       yield* fileSystem.writeFileString(unterminatedPath, "const finalLine = true")
       const commitHead = yield* runShellCommand(
         root,
         "git add --all -- packages/control-center/src/review.ts packages/control-center/src/unterminated.ts " +
-          "packages/control-center/src/deleted.ts && " +
+          "packages/control-center/src/deleted.ts packages/control-center/src/mixed.ts && " +
           "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m head"
       )
       assert.strictEqual(commitHead.exitCode, 0, commitHead.stderr.text)
@@ -795,6 +806,30 @@ describe("PR review task executor", () => {
         }]
       )
 
+      const changedRelatedLocations = yield* execute({
+        ...suggestion,
+        relatedLocations: [{
+          path: PrReviewPath.make(EVIDENCE_PATH),
+          startLine: 41,
+          endLine: 41,
+          label: "Unchanged nearby line"
+        }, {
+          path: PrReviewPath.make(EVIDENCE_PATH),
+          startLine: 42,
+          endLine: 42,
+          label: "Added nearby line"
+        }]
+      })
+      assert.deepStrictEqual(
+        changedRelatedLocations.result.suggestions[0]?.relatedLocations,
+        [{
+          path: PrReviewPath.make(EVIDENCE_PATH),
+          startLine: 42,
+          endLine: 42,
+          label: "Added nearby line"
+        }]
+      )
+
       const deletionOnlyFile = yield* execute({
         ...suggestion,
         anchor: {
@@ -814,6 +849,21 @@ describe("PR review task executor", () => {
         line: 1,
         relativeFileVersion: "BEFORE"
       })
+
+      const mixedDeletionAndAddition = yield* execute({
+        ...suggestion,
+        anchor: {
+          _tag: "file",
+          path: PrReviewPath.make("packages/control-center/src/mixed.ts")
+        },
+        evidence: {
+          path: PrReviewPath.make("packages/control-center/src/mixed.ts"),
+          startLine: 1,
+          endLine: 1,
+          excerpt: "const removed = true"
+        }
+      })
+      assert.deepStrictEqual(mixedDeletionAndAddition.result.suggestions, [])
     }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.scoped
@@ -981,30 +1031,36 @@ describe("PR review task executor", () => {
       requests: []
     }
     const activity = new Array<AgentRuntimeEvent>()
-    const relatedLocations = [{
-      path: "packages/control-center/test/a.ts",
-      startLine: 8,
-      endLine: 8,
+    const firstLocation = {
+      path: PrReviewPath.make("packages/control-center/test/a.ts"),
+      startLine: 42,
+      endLine: 42,
       label: "First occurrence"
-    }, {
-      path: "packages/control-center/test/b.ts",
-      startLine: 12,
-      endLine: 14,
+    }
+    const secondLocation = {
+      path: PrReviewPath.make("packages/control-center/test/b.ts"),
+      startLine: 42,
+      endLine: 42,
       label: "Second occurrence"
-    }]
+    }
     return runExecutor(
       completeScript({
         schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: [
-          { ...suggestion, relatedLocations },
+          { ...suggestion, relatedLocations: [firstLocation] },
           {
             ...suggestion,
-            relatedLocations: [...relatedLocations].reverse(),
+            relatedLocations: [secondLocation, firstLocation],
             confidence: {
               ...suggestion.confidence,
               reason: "A second model pass reached the same finding independently."
             }
+          },
+          {
+            ...suggestion,
+            problem: "A distinct unsafe value is enabled.",
+            relatedLocations: [firstLocation]
           }
         ],
         notes: []
@@ -1022,12 +1078,16 @@ describe("PR review task executor", () => {
     ).pipe(
       Effect.tap(({ result }) =>
         Effect.sync(() => {
-          assert.strictEqual(result.suggestions.length, 1)
+          assert.strictEqual(result.suggestions.length, 2)
+          assert.deepStrictEqual(result.suggestions[0]?.relatedLocations, [
+            firstLocation,
+            secondLocation
+          ])
           assert.isTrue(
             activity.some((event) =>
               event._tag === "output" &&
               event.channel === "progress" &&
-              event.text.startsWith("Dropped duplicate validated suggestion")
+              event.text.startsWith("Merged duplicate validated suggestion")
             )
           )
         })

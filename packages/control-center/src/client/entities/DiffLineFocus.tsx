@@ -4,17 +4,19 @@ import { type ReactNode, type RefObject, useEffect } from "react"
 export const DiffLineFocus = ({
   fileId,
   lineNumber,
-  root
+  root,
+  side
 }: {
   readonly fileId: string
   readonly lineNumber: number
   readonly root: RefObject<HTMLElement | null>
+  readonly side: "additions" | "deletions"
 }): ReactNode => {
   useEffect(() => {
     const focusLine = (): boolean => {
       const item = `[data-rly-diff-item="${CSS.escape(fileId)}"]`
       const line = root.current?.querySelector<HTMLElement>(
-        `${item}[data-rly-diff-line="${String(lineNumber)}"][data-rly-diff-line-side="additions"]`
+        `${item}[data-rly-diff-line="${String(lineNumber)}"][data-rly-diff-line-side="${side}"]`
       )
       line?.focus({ preventScroll: true })
       return line !== null && line !== undefined
@@ -26,6 +28,6 @@ export const DiffLineFocus = ({
     if (root.current === null) return
     observer.observe(root.current, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [fileId, lineNumber, root])
+  }, [fileId, lineNumber, root, side])
   return null
 }

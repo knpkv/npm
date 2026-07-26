@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useEffect, useMemo, useRef, useState } from "react"
+import { lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
@@ -195,6 +195,7 @@ export const WorkspacePullRequestDiff = ({
     readonly fileId: string
     readonly lineNumber: number
     readonly requestId: number
+    readonly side: "additions" | "deletions"
   }>()
   const viewerRef = useRef<HTMLDivElement>(null)
 
@@ -347,6 +348,15 @@ export const WorkspacePullRequestDiff = ({
       ),
     [severityFilter, suggestionStateFilter, suggestions]
   )
+  const navigateToLine = useCallback((fileId: string, lineNumber: number, side: "additions" | "deletions"): void => {
+    setFocusRequest((current) => ({
+      fileId,
+      lineNumber,
+      requestId: (current?.requestId ?? 0) + 1,
+      side
+    }))
+    setSelectedFileId(fileId)
+  }, [])
   const annotations = useMemo<ReadonlyArray<RlyDiffCodeAnnotation>>(
     () =>
       visibleSuggestions.flatMap((suggestion) => {
@@ -456,23 +466,15 @@ export const WorkspacePullRequestDiff = ({
       <Suspense fallback={null}>
         <ReviewSuggestionOverview
           entries={entries}
-          onNavigate={(fileId, lineNumber) => {
-            if (lineNumber === undefined) {
-              setFocusRequest(undefined)
-            } else {
-              setFocusRequest((current) => ({
-                fileId,
-                lineNumber,
-                requestId: (current?.requestId ?? 0) + 1
-              }))
-            }
-            setSelectedFileId(fileId)
-          }}
+          onNavigate={navigateToLine}
           onSelectAnchor={(anchor) => {
             const entry = entryForSuggestionAnchor(entries, anchor)
             if (entry === undefined) return
-            setFocusRequest(undefined)
-            setSelectedFileId(entry.anchor)
+            navigateToLine(
+              entry.anchor,
+              anchor.line,
+              anchor.relativeFileVersion === "BEFORE" ? "deletions" : "additions"
+            )
           }}
           suggestions={visibleSuggestions}
         />
@@ -556,6 +558,7 @@ export const WorkspacePullRequestDiff = ({
                     key={focusRequest.requestId}
                     lineNumber={focusRequest.lineNumber}
                     root={viewerRef}
+                    side={focusRequest.side}
                   />
                 </Suspense>
               )}
