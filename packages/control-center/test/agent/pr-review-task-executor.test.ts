@@ -759,7 +759,8 @@ describe("PR review task executor", () => {
       assert.deepStrictEqual(deletionOnlyFile.result.suggestions[0]?.anchor, {
         _tag: "file",
         path: PrReviewPath.make("packages/control-center/src/deleted.ts"),
-        line: 1
+        line: 1,
+        relativeFileVersion: "BEFORE"
       })
     }).pipe(
       Effect.provide(NodeServices.layer),

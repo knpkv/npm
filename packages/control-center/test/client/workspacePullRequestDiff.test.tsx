@@ -64,7 +64,8 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   anchor: {
     _tag: "line",
     path: "src/file.ts",
-    line: 1
+    line: 1,
+    relativeFileVersion: "AFTER"
   },
   relatedLocations: [],
   confidence: {
@@ -81,7 +82,8 @@ const fileSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   anchor: {
     _tag: "file",
     path: "src/file.ts",
-    line: 1
+    line: 1,
+    relativeFileVersion: "AFTER"
   },
   relatedLocations: [
     {
@@ -185,6 +187,13 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("Keep one invariant per file")
     expect(host.textContent).not.toContain("Keep the supported invariant")
 
+    const p4Filter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P4 severity']")
+    if (p4Filter === null) throw new Error("Expected the P4 review suggestion filter.")
+    await act(async () => {
+      p4Filter.click()
+    })
+    expect(host.textContent).not.toContain("Keep one invariant per file")
+
     await act(async () => {
       root.render(
         <WorkspacePullRequestDiff
@@ -198,6 +207,9 @@ describe("WorkspacePullRequestDiff", () => {
       await Promise.resolve()
     })
     expect(host.textContent).toContain("Keep the supported invariant")
+    expect(host.querySelector("[aria-label='Filter suggestions by P2 severity']")?.getAttribute("aria-pressed")).toBe(
+      "false"
+    )
     expect(host.querySelector("[aria-label='Filter suggestions by resolved state']")).toBeNull()
   })
 

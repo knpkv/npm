@@ -23,7 +23,8 @@ The agent never changes the branch or CodeCommit. The Local Operator may edit, r
 Opening a CodeCommit pull request uses one full-screen review workspace:
 
 - A compact top summary shows the exact head, derived Review State, counts, coverage, and the large review action.
-- A left rail lists changed files and filters by severity or suggestion state.
+- A left rail lists changed files and filters by severity or suggestion state. Filter choices survive
+  same-review rerenders and reset when the pull-request identity or revision changes.
 - The center renders the complete split or stacked diff through `@knpkv/rly/diff`, the pinned adapter over `@pierre/diffs`.
 - Validated Review Suggestions render inline at their primary anchors.
 - File-level and whole-change suggestions also appear in a compact overview above the diff.
@@ -62,9 +63,9 @@ A draft Review Suggestion supports:
 
 An agent edit preserves prior revisions. An edit that changes the technical claim invalidates the old evidence until revalidated.
 
-Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and file anchors publish at their resolved line; whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
+Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and modified-file anchors publish against the reviewed head; deletion-only file anchors persist their base-side resolution and publish against `BEFORE`. Whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
 
-Published comments are snapshots. Before CodeCommit is called, Control Center atomically reserves the suggestion for the exact confirmed content digest. A competing edit is rejected, while an interrupted same-content retry remains compatible with the governed provider idempotency key. Confirmed no-write outcomes release the reservation for an edited retry; unknown outcomes retain it so only the idempotent same-content recovery can proceed. A successful provider receipt atomically completes that reservation and appends an immutable local lifecycle event; matching completion retries are no-ops. Durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
+Published comments are snapshots. Before CodeCommit is called, Control Center atomically reserves the suggestion for the exact confirmed content digest. A competing edit is rejected, while an interrupted same-content retry remains compatible with the governed provider idempotency key. Confirmed no-write outcomes release the reservation for an edited retry; unknown outcomes retain it so only the idempotent same-content recovery can proceed. A successful provider receipt atomically completes that reservation and appends an immutable local lifecycle event; matching completion retries return the completed governed receipt without another provider call. Durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
 
 Every posted comment has a compact provenance footer:
 
@@ -103,8 +104,8 @@ Prevention Proposal is allowed only for recurring, high-impact, mechanically enf
 Review Evidence identifies its kind and records enough bounded data to reproduce the observation, such as a code path, command and exit result, test failure, or deterministic analysis result.
 
 The current presentation contract stores host-resolved line, file, and
-whole-change anchors. File anchors record the first added line, or line 1 when a
-file has no added hunk. Line evidence must match the immutable reviewed head;
+whole-change anchors. File anchors record the first added head line or, for a
+deletion-only file, the first deleted base line and its `BEFORE` side. Line evidence must match the immutable reviewed head;
 file-scoped evidence may instead match a deleted range in the immutable base so
 deletion-only changes remain reviewable. Suggestion state is host-owned and filterable; models
 cannot author it. Repeated occurrences are stored as Related Locations under

@@ -173,6 +173,7 @@ export const WorkspacePullRequestDiff = ({
   const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
 
   useEffect(() => {
+    setSeverityFilter("all")
     setSuggestionStateFilter("all")
   }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId])
 

@@ -468,7 +468,10 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.request.jobId,
         input.request.suggestionId
       )
-      if (selected.suggestion.state !== "draft") {
+      if (
+        selected.suggestion.state !== "draft" &&
+        selected.suggestion.state !== "published"
+      ) {
         return yield* new ApplicationInvalidRequest()
       }
       const footer = publicationFooter(
@@ -482,7 +485,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       )
       const contentDigest = yield* publicationContentDigest(publishedContent)
       const reservedAt = yield* DateTime.now
-      yield* persistence.agentJobs.reserveReviewSuggestionPublication({
+      const reservation = yield* persistence.agentJobs.reserveReviewSuggestionPublication({
         workspaceId: input.workspaceId,
         jobId: input.request.jobId,
         suggestionId: selected.suggestion.suggestionId,
@@ -497,7 +500,7 @@ const makePullRequestReviews = Effect.gen(function*() {
             : unavailable()
         )
       )
-      const publication = yield* publications.publish({
+      const publicationCommand = {
         target: publicationTarget(input.workspaceId, target),
         jobId: input.request.jobId,
         suggestion: selected.suggestion,
@@ -505,9 +508,20 @@ const makePullRequestReviews = Effect.gen(function*() {
         authorityBinding: input.request.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
         session: input.session
-      }).pipe(Effect.result)
+      }
+      const publication = yield* (
+        reservation._tag === "published"
+          ? publications.replay({
+            ...publicationCommand,
+            publicationId: reservation.publicationId
+          })
+          : publications.publish(publicationCommand)
+      ).pipe(Effect.result)
       if (Result.isFailure(publication)) {
-        if (publicationFailureConfirmsNoWrite(publication.failure)) {
+        if (
+          reservation._tag === "reserved" &&
+          publicationFailureConfirmsNoWrite(publication.failure)
+        ) {
           yield* persistence.agentJobs.releaseReviewSuggestionPublication({
             workspaceId: input.workspaceId,
             jobId: input.request.jobId,
@@ -521,22 +535,24 @@ const makePullRequestReviews = Effect.gen(function*() {
         return yield* mapPublicationFailure(publication.failure)
       }
       const result = publication.success
-      yield* persistence.agentJobs.recordReviewSuggestionPublication({
-        workspaceId: input.workspaceId,
-        jobId: input.request.jobId,
-        suggestionId: selected.suggestion.suggestionId,
-        contentDigest,
-        publicationId: result.publicationId,
-        publishedAt: result.publishedAt
-      }).pipe(
-        Effect.mapError(mapPersistenceWriteError),
-        Effect.mapError((error) =>
-          error._tag === "ApplicationInvalidRequest" ||
-            error._tag === "ApplicationResourceNotFound"
-            ? error
-            : unavailable()
+      if (reservation._tag === "reserved") {
+        yield* persistence.agentJobs.recordReviewSuggestionPublication({
+          workspaceId: input.workspaceId,
+          jobId: input.request.jobId,
+          suggestionId: selected.suggestion.suggestionId,
+          contentDigest,
+          publicationId: result.publicationId,
+          publishedAt: result.publishedAt
+        }).pipe(
+          Effect.mapError(mapPersistenceWriteError),
+          Effect.mapError((error) =>
+            error._tag === "ApplicationInvalidRequest" ||
+              error._tag === "ApplicationResourceNotFound"
+              ? error
+              : unavailable()
+          )
         )
-      )
+      }
       return new PublishedReviewComment({
         publicationId: result.publicationId,
         jobId: input.request.jobId,

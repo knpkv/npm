@@ -1677,7 +1677,8 @@ describe("first-party plugin runtime", () => {
           anchor: {
             _tag: "line",
             path: "src/runtime.ts",
-            line: 1
+            line: 1,
+            relativeFileVersion: "AFTER"
           },
           relatedLocations: [],
           confidence: {

@@ -234,8 +234,15 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
   session: PrReviewSandboxSession,
   suggestion: PrReviewSuggestionDraftType
 ) {
-  if (suggestion.anchor._tag !== "file") {
+  if (suggestion.anchor._tag === "changes") {
     return suggestion.anchor
+  }
+  if (suggestion.anchor._tag === "line") {
+    const anchor: PrReviewSuggestionAnchor = {
+      ...suggestion.anchor,
+      relativeFileVersion: "AFTER"
+    }
+    return anchor
   }
   const diff = yield* session.runCommand(
     `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
@@ -249,10 +256,13 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
   ) {
     return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
   }
+  const headLine = diffLineIntervals(diff.stdout.text, "head")[0]?.startLine
+  const baseLine = diffLineIntervals(diff.stdout.text, "base")[0]?.startLine
   const anchor: PrReviewSuggestionAnchor = {
     _tag: "file",
     path: suggestion.anchor.path,
-    line: diffLineIntervals(diff.stdout.text, "head")[0]?.startLine ?? 1
+    line: headLine ?? baseLine ?? 1,
+    relativeFileVersion: headLine === undefined && baseLine !== undefined ? "BEFORE" : "AFTER"
   }
   return anchor
 })
@@ -351,7 +361,13 @@ const projectedReportBytes = (
     suggestions: modelReport.suggestions.map((suggestion) => ({
       ...suggestion,
       anchor: suggestion.anchor._tag === "file"
-        ? { ...suggestion.anchor, line: Number.MAX_SAFE_INTEGER }
+        ? {
+          ...suggestion.anchor,
+          line: Number.MAX_SAFE_INTEGER,
+          relativeFileVersion: "BEFORE"
+        }
+        : suggestion.anchor._tag === "line"
+        ? { ...suggestion.anchor, relativeFileVersion: "AFTER" }
         : suggestion.anchor,
       state: "published",
       suggestionId: `sha256:${"f".repeat(64)}`

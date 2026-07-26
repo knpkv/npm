@@ -1,4 +1,5 @@
 /** Evidence-anchored pull-request review suggestion contracts. @module */
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
 /** Maximum UTF-8 JSON size retained inside the existing durable event envelope. */
@@ -191,16 +192,25 @@ export const PrReviewSuggestionDraftAnchor = Schema.Union([
 export type PrReviewSuggestionDraftAnchor = typeof PrReviewSuggestionDraftAnchor.Type
 
 /** Host-resolved primary anchor for line, file, or whole-change advice. */
+const PrReviewAfterRelativeFileVersion = Schema.Literal("AFTER").pipe(
+  Schema.withDecodingDefaultTypeKey(Effect.succeed("AFTER"))
+)
+const PrReviewRelativeFileVersion = Schema.Literals(["BEFORE", "AFTER"]).pipe(
+  Schema.withDecodingDefaultTypeKey(Effect.succeed("AFTER"))
+)
+
 export const PrReviewSuggestionAnchor = Schema.Union([
   Schema.Struct({
     _tag: Schema.Literal("line"),
     path: PrReviewPath,
-    line: PrReviewLine
+    line: PrReviewLine,
+    relativeFileVersion: PrReviewAfterRelativeFileVersion
   }),
   Schema.Struct({
     _tag: Schema.Literal("file"),
     path: PrReviewPath,
-    line: PrReviewLine
+    line: PrReviewLine,
+    relativeFileVersion: PrReviewRelativeFileVersion
   }),
   Schema.Struct({
     _tag: Schema.Literal("changes")

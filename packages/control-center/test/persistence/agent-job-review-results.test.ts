@@ -81,7 +81,8 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
       anchor: {
         _tag: "line",
         path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
-        line: 42
+        line: 42,
+        relativeFileVersion: "AFTER"
       },
       relatedLocations: [],
       confidence: {
@@ -398,6 +399,12 @@ describe("agent job review results", () => {
           record().pipe(Effect.result)
         ], { concurrency: "unbounded" })
         assert.isTrue(recordings.every(Result.isSuccess))
+        const replay = yield* reserve(retryDigest)
+        assert.deepStrictEqual(replay, {
+          _tag: "published",
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
 
         const page = yield* jobs.threadAfter({
           workspaceId: WORKSPACE_ID,

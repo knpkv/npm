@@ -45,7 +45,8 @@ import {
   reviewPublicationActionCanAdvance,
   reviewPublicationActionConfirmedNoWrite,
   reviewPublicationProposalRequestMatches,
-  reviewPublicationSessionIsAuthorized
+  reviewPublicationSessionIsAuthorized,
+  reviewSuggestionPublicationLocation
 } from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import {
@@ -62,7 +63,8 @@ import {
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
-  LatestAgentReviewRecord
+  LatestAgentReviewRecord,
+  ReviewSuggestionPublicationReservation
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -219,7 +221,8 @@ const reviewReport = Schema.decodeSync(PrReviewReport)({
     anchor: {
       _tag: "line",
       path: "src/authorization.ts",
-      line: 42
+      line: 42,
+      relativeFileVersion: "AFTER"
     },
     relatedLocations: [],
     confidence: {
@@ -342,7 +345,8 @@ const offlineRegistry = AgentRuntimeRegistry.of({
 
 const unusedPublicationGateway = ReviewSuggestionPublicationGateway.of({
   identity: () => Effect.die("review publication identity is not used"),
-  publish: () => Effect.die("review publication is not used")
+  publish: () => Effect.die("review publication is not used"),
+  replay: () => Effect.die("review publication replay is not used")
 })
 
 const withService = <Success, Failure>(
@@ -358,7 +362,7 @@ const withService = <Success, Failure>(
   recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined),
   reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
-    Effect.succeed(undefined),
+    Effect.succeed({ _tag: "reserved" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined)
 ) =>
@@ -423,7 +427,22 @@ const withService = <Success, Failure>(
                 arn: "arn:aws:iam::123456789012:user/local-operator"
               }
             })
-          )
+          ),
+        replay: () =>
+          Effect.succeed({
+            publicationId: PUBLICATION_ID,
+            receipt: {
+              status: "succeeded",
+              providerOperationId: PluginProviderOperationId.make("comment:review-comment-42"),
+              safeSummary: "CodeCommit review comment posted",
+              observedAt: PUBLISHED_TIMESTAMP
+            },
+            publishedAt: PUBLISHED_TIMESTAMP,
+            connectedIdentity: {
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/local-operator"
+            }
+          })
       })
       const service = yield* PullRequestReviews.pipe(
         Effect.provide(pullRequestReviewsLayer),
@@ -504,6 +523,36 @@ describe("pull request reviews", () => {
 
     assert.isTrue(reviewPublicationProposalRequestMatches(request, exactReplay))
     assert.isFalse(reviewPublicationProposalRequestMatches(request, differentReview))
+  })
+
+  it("publishes deleted-file anchors against the base revision", () => {
+    assert.deepStrictEqual(
+      reviewSuggestionPublicationLocation({
+        _tag: "file",
+        path: PrReviewPath.make("src/deleted.ts"),
+        line: 1,
+        relativeFileVersion: "BEFORE"
+      }),
+      {
+        filePath: "src/deleted.ts",
+        filePosition: 1,
+        relativeFileVersion: "BEFORE"
+      }
+    )
+    assert.deepStrictEqual(
+      reviewSuggestionPublicationLocation({
+        _tag: "file",
+        path: PrReviewPath.make("src/modified.ts"),
+        line: 4,
+        relativeFileVersion: "AFTER"
+      }),
+      {
+        filePath: "src/modified.ts",
+        filePosition: 4,
+        relativeFileVersion: "AFTER"
+      }
+    )
+    assert.isUndefined(reviewSuggestionPublicationLocation({ _tag: "changes" }))
   })
 
   it.effect("rejects publication when provider authority rotates after preview", () =>
@@ -769,7 +818,8 @@ describe("pull request reviews", () => {
           assert.deepStrictEqual(preview.anchor, {
             _tag: "line",
             path: PrReviewPath.make("src/authorization.ts"),
-            line: 42
+            line: 42,
+            relativeFileVersion: "AFTER"
           })
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
           assert.include(preview.replacement ?? "", "@@ -42,1 +42,2 @@")
@@ -850,7 +900,7 @@ describe("pull request reviews", () => {
                   reason: "invalid-transition"
                 })
             ),
-            Effect.as(undefined)
+            Effect.as(ReviewSuggestionPublicationReservation.make({ _tag: "reserved" }))
           )
 
       yield* withService(
@@ -905,6 +955,73 @@ describe("pull request reviews", () => {
       )
     }))
 
+  it.effect("replays an exact completed publication without posting again", () =>
+    Effect.gen(function*() {
+      const completedDigest = yield* Ref.make<null | string>(null)
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+        Ref.modify(completedDigest, (current): [boolean, string] =>
+          current === null || current === input.contentDigest
+            ? [true, String(input.contentDigest)]
+            : [false, current]).pipe(
+            Effect.flatMap((matches) =>
+              matches
+                ? Effect.succeed(ReviewSuggestionPublicationReservation.make({
+                  _tag: "published",
+                  publicationId: PUBLICATION_ID,
+                  publishedAt: PUBLISHED_TIMESTAMP
+                }))
+                : new AgentJobInputError({
+                  workspaceId: input.workspaceId,
+                  jobId: input.jobId,
+                  reason: "invalid-transition"
+                })
+            )
+          )
+
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const footer = `— ${REVIEW_PROFILE.label} · head ${"2".repeat(12)} · operator ${OPERATOR_ID}`
+            const finalContent = ReviewSuggestionPublicationContent.make(
+              `Exact completed body.\n\n${footer}`
+            )
+            const replay = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent,
+                authorityBinding: AUTHORITY_BINDING
+              },
+              session: HUMAN_SESSION
+            })
+            assert.strictEqual(replay.publicationId, PUBLICATION_ID)
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+
+            const changed = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: ReviewSuggestionPublicationContent.make(
+                  `Changed after publication.\n\n${footer}`
+                ),
+                authorityBinding: AUTHORITY_BINDING
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            assert.isTrue(Result.isFailure(changed))
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+          }),
+        registry,
+        Option.some(completedReviewWithSuggestion({ state: "published" })),
+        () => Effect.succeed(undefined),
+        reserve
+      )
+    }))
+
   it.effect("releases confirmed no-write failures but retains unknown outcomes", () => {
     const verify = (failureReason: "publication-rejected" | "publication-unavailable") =>
       Effect.gen(function*() {
@@ -916,7 +1033,9 @@ describe("pull request reviews", () => {
               : [false, current]).pipe(
               Effect.flatMap((accepted) =>
                 accepted
-                  ? Effect.succeed(undefined)
+                  ? Effect.succeed(
+                    ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+                  )
                   : new AgentJobInputError({
                     workspaceId: input.workspaceId,
                     jobId: input.jobId,
@@ -1046,7 +1165,8 @@ describe("pull request reviews", () => {
       verifyScope({
         _tag: "file",
         path: PrReviewPath.make("src/authorization.ts"),
-        line: 1
+        line: 1,
+        relativeFileVersion: "AFTER"
       }),
       verifyScope({ _tag: "changes" })
     ], { concurrency: 1, discard: true })

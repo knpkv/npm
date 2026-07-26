@@ -87,7 +87,8 @@ describe("PR review domain", () => {
         anchor: {
           _tag: "file",
           path: "packages/control-center/src/server/agent/OtherFile.ts",
-          line: 1
+          line: 1,
+          relativeFileVersion: "AFTER"
         }
       })
     )
@@ -97,7 +98,8 @@ describe("PR review domain", () => {
         anchor: {
           _tag: "file",
           path: suggestion.evidence.path,
-          line: 1
+          line: 1,
+          relativeFileVersion: "AFTER"
         }
       })
     )

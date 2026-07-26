@@ -47,7 +47,8 @@ import {
   RecordReviewSuggestionPublicationInput,
   ReleaseReviewSuggestionPublicationInput,
   ReserveReviewSuggestionPublicationInput,
-  ReviewSuggestionPublicationDigest
+  ReviewSuggestionPublicationDigest,
+  ReviewSuggestionPublicationReservation
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 
@@ -1309,6 +1310,35 @@ const makeAgentJobRepository = Effect.gen(function*() {
       )(input)
       return yield* database.transaction(
         Effect.gen(function*() {
+          const existingRows = yield* sql<Record<string, unknown>>`SELECT
+            content_digest AS contentDigest, state,
+            publication_id AS publicationId, reserved_at AS reservedAt,
+            published_at AS publishedAt
+            FROM agent_review_suggestion_publications
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND suggestion_id = ${request.suggestionId}`
+          if (existingRows.length > 0) {
+            const existing = yield* Schema.decodeUnknownEffect(
+              ReviewSuggestionPublicationRow
+            )(existingRows[0])
+            if (existing.contentDigest !== request.contentDigest) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            return existing.state === "published" &&
+                existing.publicationId !== null &&
+                existing.publishedAt !== null
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "published",
+                publicationId: existing.publicationId,
+                publishedAt: existing.publishedAt
+              })
+              : ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+          }
           const review = yield* readReviewResult({
             workspaceId: request.workspaceId,
             jobId: request.jobId
@@ -1343,7 +1373,6 @@ const makeAgentJobRepository = Effect.gen(function*() {
           if (
             rows.length !== 1 ||
             Result.isFailure(row) ||
-            row.success.state !== "reserved" ||
             row.success.contentDigest !== request.contentDigest
           ) {
             return yield* new AgentJobInputError({
@@ -1352,6 +1381,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
               reason: "invalid-transition"
             })
           }
+          return row.success.state === "published" &&
+              row.success.publicationId !== null &&
+              row.success.publishedAt !== null
+            ? ReviewSuggestionPublicationReservation.make({
+              _tag: "published",
+              publicationId: row.success.publicationId,
+              publishedAt: row.success.publishedAt
+            })
+            : ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
         })
       ).pipe(mapPersistenceOperation("agent-job.reserve-review-suggestion-publication"))
     }),

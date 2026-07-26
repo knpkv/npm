@@ -148,7 +148,8 @@ const makePublicationFixture = (reviewedHead: string) => {
     anchor: {
       _tag: "line",
       path: PrReviewPath.make("src/authorization.ts"),
-      line: 42
+      line: 42,
+      relativeFileVersion: "AFTER"
     },
     editableContent,
     editableContentMaximumLength: 10_100 - footer.length - 2,

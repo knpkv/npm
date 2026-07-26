@@ -206,6 +206,16 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
 })
 export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
 
+/** Durable result of reserving an exact publication body. */
+export const ReviewSuggestionPublicationReservation = Schema.Union([
+  Schema.TaggedStruct("reserved", {}),
+  Schema.TaggedStruct("published", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp
+  })
+])
+export type ReviewSuggestionPublicationReservation = typeof ReviewSuggestionPublicationReservation.Type
+
 /** Release one exact reservation after a confirmed provider no-write outcome. */
 export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,

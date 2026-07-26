@@ -62,7 +62,8 @@ const PREVIEW = new ReviewSuggestionPublicationPreview({
   anchor: {
     _tag: "line",
     path: ANCHOR_PATH,
-    line: ANCHOR_LINE
+    line: ANCHOR_LINE,
+    relativeFileVersion: "AFTER"
   },
   editableContent: EDITABLE_CONTENT,
   editableContentMaximumLength: 10_100 - PUBLICATION_FOOTER.length - 2,

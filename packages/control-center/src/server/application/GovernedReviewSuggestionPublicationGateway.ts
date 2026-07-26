@@ -44,6 +44,7 @@ import {
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 import {
+  type PublishReviewSuggestionCommand,
   ReviewSuggestionPublicationGateway,
   ReviewSuggestionPublicationGatewayError,
   type ReviewSuggestionPublicationTarget
@@ -98,6 +99,22 @@ export const reviewPublicationProposalRequestMatches = (
   prepared: typeof ProposePluginActionRequestV1.Type
 ): boolean => Equal.equals(existing, prepared)
 
+/** Provider location derived from one host-resolved durable review anchor. */
+export const reviewSuggestionPublicationLocation = (
+  anchor: PublishReviewSuggestionCommand["suggestion"]["anchor"]
+): undefined | {
+  readonly filePath: string
+  readonly filePosition: number
+  readonly relativeFileVersion: "BEFORE" | "AFTER"
+} =>
+  anchor._tag === "changes"
+    ? undefined
+    : {
+      filePath: anchor.path,
+      filePosition: anchor.line,
+      relativeFileVersion: anchor.relativeFileVersion
+    }
+
 const makeGateway = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const connections = yield* PluginConnectionMap
@@ -145,6 +162,82 @@ const makeGateway = Effect.gen(function*() {
     )
   })
 
+  const publishedResult = (
+    record: GovernedActionRecord,
+    connectedIdentity: {
+      readonly accountId: string
+      readonly arn: string
+    }
+  ) =>
+    record.head.state === "succeeded" &&
+      record.head.lineage._tag === "terminal" &&
+      record.head.lineage.receipt.status === "succeeded"
+      ? Effect.succeed({
+        publicationId: record.envelope.actionId,
+        receipt: record.head.lineage.receipt,
+        publishedAt: record.head.lineage.receipt.observedAt,
+        connectedIdentity
+      })
+      : Effect.fail(
+        reviewPublicationActionConfirmedNoWrite(record.head.state)
+          ? rejected()
+          : unavailable()
+      )
+
+  const replay = Effect.fn("ReviewSuggestionPublicationGateway.replay")(function*(command) {
+    const checkedAt = yield* DateTime.now
+    if (
+      !reviewPublicationSessionIsAuthorized(
+        command.session,
+        command.target.workspaceId,
+        checkedAt
+      )
+    ) return yield* conflict()
+    const authority = yield* identity(command.target)
+    if (authority.authorityBinding !== command.authorityBinding) return yield* conflict()
+    const record = yield* persistence.governedActions.read({
+      workspaceId: command.target.workspaceId,
+      actionId: command.publicationId
+    }).pipe(mapFailure)
+    const expectedLocation = command.suggestion.anchor._tag === "changes"
+      ? {}
+      : {
+        location: {
+          filePath: command.suggestion.anchor.path,
+          filePosition: command.suggestion.anchor.line,
+          relativeFileVersion: command.suggestion.anchor.relativeFileVersion
+        }
+      }
+    const expectedRequest = yield* Schema.decodeUnknownEffect(
+      ProposePluginActionRequestV1
+    )({
+      actionKind: "comment",
+      target: {
+        entityType: "pull-request",
+        vendorImmutableId: command.target.subject.pullRequestId
+      },
+      expectedRevision: Revision.make(command.target.sourceRevision),
+      payload: {
+        content: command.finalContent,
+        ...expectedLocation
+      },
+      evidenceIds: [
+        `pr-review:${command.jobId}:${command.suggestion.suggestionId}`
+      ]
+    }).pipe(mapFailure)
+    if (
+      record.envelope.pluginConnectionId !== command.target.pluginConnectionId ||
+      record.envelope.targetEntityId !== command.target.entityId ||
+      record.envelope.origin._tag !== "human" ||
+      record.envelope.origin.actor.personId !== command.session.actor.personId ||
+      !reviewPublicationProposalRequestMatches(
+        record.envelope.proposal.request,
+        expectedRequest
+      )
+    ) return yield* conflict()
+    return yield* publishedResult(record, authority.connectedIdentity)
+  })
+
   const publish = Effect.fn("ReviewSuggestionPublicationGateway.publish")(function*(command) {
     const checkedAt = yield* DateTime.now
     if (
@@ -180,17 +273,7 @@ const makeGateway = Effect.gen(function*() {
             ({ capabilityId }) => capabilityId === "action.execute"
           )
           if (capability === undefined) return yield* conflict()
-          const location: undefined | {
-            readonly filePath: string
-            readonly filePosition: number
-            readonly relativeFileVersion: "AFTER"
-          } = command.suggestion.anchor._tag === "changes"
-            ? undefined
-            : {
-              filePath: command.suggestion.anchor.path,
-              filePosition: command.suggestion.anchor.line,
-              relativeFileVersion: "AFTER"
-            }
+          const location = reviewSuggestionPublicationLocation(command.suggestion.anchor)
           const proposalRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
             actionKind: "comment",
             target: {
@@ -226,21 +309,6 @@ const makeGateway = Effect.gen(function*() {
       actor: command.session.actor,
       sessionId: command.session.sessionId
     } satisfies GovernedActionTransitionCause
-    const publishedResult = (record: GovernedActionRecord) =>
-      record.head.state === "succeeded" &&
-        record.head.lineage._tag === "terminal" &&
-        record.head.lineage.receipt.status === "succeeded"
-        ? Effect.succeed({
-          publicationId: record.envelope.actionId,
-          receipt: record.head.lineage.receipt,
-          publishedAt: record.head.lineage.receipt.observedAt,
-          connectedIdentity: prepared.connectedIdentity
-        })
-        : Effect.fail(
-          reviewPublicationActionConfirmedNoWrite(record.head.state)
-            ? rejected()
-            : unavailable()
-        )
     const prepareAuthorization = Effect.fn(
       "ReviewSuggestionPublicationGateway.prepareAuthorization"
     )(function*(
@@ -328,7 +396,7 @@ const makeGateway = Effect.gen(function*() {
         workspaceId: command.target.workspaceId,
         actionId
       }).pipe(mapFailure)
-      return yield* publishedResult(record)
+      return yield* publishedResult(record, prepared.connectedIdentity)
     })
 
     const idempotencyKey = GovernedActionIdempotencyKey.make(
@@ -358,7 +426,9 @@ const makeGateway = Effect.gen(function*() {
         envelope.origin._tag !== "human" ||
         envelope.origin.actor.personId !== command.session.actor.personId
       ) return yield* conflict()
-      if (record.head.state === "succeeded") return yield* publishedResult(record)
+      if (record.head.state === "succeeded") {
+        return yield* publishedResult(record, prepared.connectedIdentity)
+      }
       if (record.head.state === "proposed") {
         const authorization = yield* prepareAuthorization(
           envelope,
@@ -451,7 +521,8 @@ const makeGateway = Effect.gen(function*() {
 
   return ReviewSuggestionPublicationGateway.of({
     identity,
-    publish: (command) => publish(command).pipe(mapFailure)
+    publish: (command) => publish(command).pipe(mapFailure),
+    replay: (command) => replay(command).pipe(mapFailure)
   })
 })
 
