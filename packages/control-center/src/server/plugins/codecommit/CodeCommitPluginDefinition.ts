@@ -761,7 +761,8 @@ const toPullRequestEvent = (
   pullRequest: ReadClient.CodeCommitPullRequestRevision
 ) => ({
   _tag: "UpsertEntity",
-  eventId: `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}`,
+  eventId:
+    `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}:${pullRequest.status}`,
   observedAt: pullRequest.lastActivityDate.toISOString(),
   revision: pullRequest.revisionId,
   entityType: "pull-request",

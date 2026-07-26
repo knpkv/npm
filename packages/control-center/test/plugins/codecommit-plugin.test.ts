@@ -348,10 +348,10 @@ describe("CodeCommitPlugin", () => {
       }
     }))
 
-  it.effect("emits a terminal revision when a previously open pull request is merged", () =>
+  it.effect("emits a distinct terminal event when CodeCommit preserves the revision across merge", () =>
     Effect.gen(function*() {
       const terminal = yield* Ref.make(false)
-      const mergedPullRequest = makePullRequest(configuration.repositoryName, "MERGED", "revision-18")
+      const mergedPullRequest = makePullRequest(configuration.repositoryName, "MERGED", "revision-17")
       const client = baseReadClient({
         listPullRequestsPage: (request) =>
           Ref.get(terminal).pipe(
@@ -392,9 +392,10 @@ describe("CodeCommitPlugin", () => {
       const mergedEvent = mergedEvents[0]
       assert.strictEqual(mergedEvent?._tag, "UpsertEntity")
       if (mergedEvent?._tag === "UpsertEntity") {
-        assert.strictEqual(mergedEvent.revision, "revision-18")
+        assert.strictEqual(mergedEvent.revision, "revision-17")
         assert.strictEqual(mergedEvent.attributes.status, "MERGED")
       }
+      assert.notStrictEqual(openEvent?.eventId, mergedEvent?.eventId)
     }))
 
   it.effect("normalizes complete changed-file pages with stable rename paths", () =>
