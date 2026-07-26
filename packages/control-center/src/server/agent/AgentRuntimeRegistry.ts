@@ -7,9 +7,12 @@ import {
   AgentProviderError,
   AgentProviderId,
   type AgentRuntimeEvent,
+  AgentRuntimeMetadata,
+  AgentRuntimeMetadataError,
   type AgentRuntimeService,
   makeAgentRuntime,
-  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH
+  MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
+  readLocalCliRuntimeMetadata
 } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -60,6 +63,8 @@ export interface AgentRuntimeRegistryService {
 export interface SelectedAgentRuntime {
   readonly model: AgentModelId
   readonly runtime: AgentRuntimeService
+  /** Safe implementation/version identity persisted with each production run. */
+  readonly runtimeMetadata?: AgentRuntimeMetadata
   /**
    * Filesystem capability declared by the registry.
    *
@@ -108,6 +113,7 @@ interface ConfiguredProvider {
   readonly providerId: AgentProviderId
   readonly catalog: AgentProviderCatalogEntry
   readonly runtime: AgentRuntimeService | null
+  readonly runtimeMetadata?: Effect.Effect<AgentRuntimeMetadata, AgentProviderError>
   readonly languageModel?: LanguageModel.Service
 }
 
@@ -176,6 +182,20 @@ const timeoutFailure = (providerId: AgentProviderId): AgentProviderError =>
   })
 
 const isAgentProviderError = Schema.is(AgentProviderError)
+const isRuntimeMetadataError = Schema.is(AgentRuntimeMetadataError)
+
+const metadataFailure = (
+  providerId: AgentProviderId,
+  failure: unknown
+): AgentProviderError =>
+  new AgentProviderError({
+    providerId,
+    phase: "configuration",
+    message: isRuntimeMetadataError(failure)
+      ? `The selected ${failure.implementation} runtime metadata is unavailable.`
+      : "The selected agent runtime metadata is unavailable.",
+    retryable: false
+  })
 
 const textEvents = (text: string): ReadonlyArray<{
   readonly _tag: "output"
@@ -248,26 +268,46 @@ const makeRegistry = (providers: ReadonlyArray<ConfiguredProvider>): AgentRuntim
   const catalog: AgentProviderCatalog = { providers: providers.map(({ catalog }) => catalog) }
   return {
     catalog: () => Effect.succeed(catalog),
-    select: (selection) => {
+    select: Effect.fn("AgentRuntimeRegistry.select")(function*(selection) {
       const provider = providers.find(({ providerId }) => providerId === selection.providerId)
       const model = selection.model === null
         ? provider?.catalog.models[0]
         : provider?.catalog.models.find((model) => model === selection.model)
-      return provider !== undefined &&
+      if (
+        !(provider !== undefined &&
           provider.runtime !== null &&
           selection.access === "read-only" &&
           provider.catalog.capabilities.includes(selection.capability) &&
-          model !== undefined
-        ? Effect.succeed({
-          model,
-          runtime: provider.runtime,
-          ...(provider.languageModel === undefined ? {} : { languageModel: provider.languageModel }),
-          filesystemAccess: provider.providerId === OPENAI_COMPATIBLE_PROVIDER_ID
-            ? "none"
-            : "configured-workspace"
-        })
-        : Effect.fail(providerFailure(selection.providerId))
-    }
+          model !== undefined)
+      ) {
+        return yield* providerFailure(selection.providerId)
+      }
+      const runtimeMetadata = provider.runtimeMetadata === undefined
+        ? undefined
+        : yield* provider.runtimeMetadata
+      const configuredRuntime = provider.runtime
+      const runtime: AgentRuntimeService = runtimeMetadata === undefined
+        ? configuredRuntime
+        : {
+          run: (request) =>
+            configuredRuntime.run(request).pipe(
+              Stream.map((event) =>
+                event._tag === "started"
+                  ? { ...event, runtimeMetadata }
+                  : event
+              )
+            )
+        }
+      return {
+        model,
+        runtime,
+        ...(runtimeMetadata === undefined ? {} : { runtimeMetadata }),
+        ...(provider.languageModel === undefined ? {} : { languageModel: provider.languageModel }),
+        filesystemAccess: provider.providerId === OPENAI_COMPATIBLE_PROVIDER_ID
+          ? "none"
+          : "configured-workspace"
+      }
+    })
   }
 }
 
@@ -289,6 +329,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     : {
       providerId: CODEX_PROVIDER_ID,
       catalog: availableCatalogEntry("codex", codexModelId),
+      runtimeMetadata: readLocalCliRuntimeMetadata({
+        executable: codexConfigured.executable ?? "codex",
+        implementation: "codex-cli"
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError((failure) => metadataFailure(CODEX_PROVIDER_ID, failure))
+      ),
       runtime: makeLanguageModelRuntime(
         CODEX_PROVIDER_ID,
         ({ access, model, prompt }) =>
@@ -316,6 +363,13 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
     : {
       providerId: CLAUDE_PROVIDER_ID,
       catalog: availableCatalogEntry("claude", claudeModelId),
+      runtimeMetadata: readLocalCliRuntimeMetadata({
+        executable: claudeConfigured.executable ?? "claude",
+        implementation: "claude-cli"
+      }).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.mapError((failure) => metadataFailure(CLAUDE_PROVIDER_ID, failure))
+      ),
       runtime: makeLanguageModelRuntime(
         CLAUDE_PROVIDER_ID,
         ({ access, model, prompt }) =>
@@ -366,6 +420,11 @@ const makeLiveRegistry = Effect.fn("AgentRuntimeRegistry.makeLive")(function*(
         options.prReviewEnabled === true ? prReviewBudgetMillis : undefined
       ),
       languageModel: openAiLanguageModel,
+      runtimeMetadata: Effect.succeed(AgentRuntimeMetadata.make({
+        _tag: "remote-api",
+        implementation: "openai-compatible",
+        version: null
+      })),
       runtime: makeLanguageModelRuntime(
         OPENAI_COMPATIBLE_PROVIDER_ID,
         ({ prompt }) =>

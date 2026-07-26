@@ -77,7 +77,13 @@ const mapThreadEvent = Effect.fn("ReleaseAgentJobs.mapThreadEvent")(function*(
     case "job-started": {
       const payload = yield* runtimePayload(event)
       if (payload._tag !== "started") return yield* unavailable()
-      return { _tag: "job-started", ...common }
+      return {
+        _tag: "job-started",
+        ...common,
+        ...(payload.runtimeMetadata === undefined
+          ? {}
+          : { runtimeMetadata: payload.runtimeMetadata })
+      }
     }
     case "assistant-output": {
       const payload = yield* runtimePayload(event)

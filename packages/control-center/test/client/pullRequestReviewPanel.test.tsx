@@ -281,10 +281,21 @@ const REVIEW_THREAD = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
       jobId: JOB_ID,
       occurredAt: "2026-07-24T15:00:00.000Z",
       prompt: "Focus on transaction ownership."
+    },
+    {
+      _tag: "run-started",
+      eventSequence: 2,
+      jobId: JOB_ID,
+      occurredAt: "2026-07-24T15:00:01.000Z",
+      runtimeMetadata: {
+        _tag: "local-cli",
+        implementation: "codex-cli",
+        version: "1.2.3"
+      }
     }
   ],
   hasMore: false,
-  nextCursor: ReleaseAgentThreadCursor.make(1)
+  nextCursor: ReleaseAgentThreadCursor.make(2)
 })
 const REFRESHED_NOT_STARTED_STATE = {
   ...REVIEW_STATE,
@@ -359,6 +370,7 @@ describe("PullRequestReviewPanel", () => {
 
     expect(host.textContent).toContain("Durable across pull-request heads")
     expect(host.textContent).toContain("Local Operator · Focus on transaction ownership.")
+    expect(host.textContent).toContain("Review sandbox started · codex-cli 1.2.3")
     const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
     if (textarea === null) throw new Error("Expected targeted review request")
     expect(textarea.maxLength).toBe(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)

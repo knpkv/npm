@@ -5,6 +5,7 @@
  * @module
  */
 import * as Schema from "effect/Schema"
+import { AgentRuntimeMetadata } from "./cliMetadata.js"
 
 const boundedIdentifier = <const Brand extends string>(brand: Brand) =>
   Schema.String.check(
@@ -74,7 +75,8 @@ const SafeProviderReference = Schema.NullOr(
 
 const AgentStarted = Schema.TaggedStruct("started", {
   providerRunRef: SafeProviderReference,
-  sessionRef: Schema.NullOr(AgentSessionRef)
+  sessionRef: Schema.NullOr(AgentSessionRef),
+  runtimeMetadata: Schema.optionalKey(AgentRuntimeMetadata)
 })
 
 /** Maximum text characters emitted by one provider-neutral output event. */

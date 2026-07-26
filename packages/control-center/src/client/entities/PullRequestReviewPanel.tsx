@@ -60,7 +60,9 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
     case "run-queued":
       return `${event.reviewProfile.label} · head ${event.subject.headRevision.slice(0, 12)}`
     case "run-started":
-      return "Review sandbox started"
+      return event.runtimeMetadata === undefined
+        ? "Review sandbox started"
+        : `Review sandbox started · ${event.runtimeMetadata.implementation} ${event.runtimeMetadata.version ?? ""}`.trim()
     case "progress":
       return event.text
     case "review-report":

@@ -157,7 +157,13 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
     case "job-started": {
       const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)
       if (payload._tag !== "started") return yield* unavailable()
-      return { _tag: "run-started", ...common }
+      return {
+        _tag: "run-started",
+        ...common,
+        ...(payload.runtimeMetadata === undefined
+          ? {}
+          : { runtimeMetadata: payload.runtimeMetadata })
+      }
     }
     case "progress": {
       const payload = yield* decodeThreadPayload(AgentRuntimeEvent, event.payload)

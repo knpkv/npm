@@ -21,6 +21,14 @@ const program = Effect.gen(function* () {
 
 A successfully exhausted adapter stream must end with exactly one `completed` event. `AgentProviderError` is the alternative terminal for a failed run and must occur before completion. Interrupting the stream cancels the provider execution. Provider-native session data remains server-only; consumers receive only opaque session references bound to a context fingerprint.
 
+## Runtime identity
+
+`readLocalCliRuntimeMetadata` executes a trusted local CLI's bounded `--version`
+command through Effect Process. It inherits only `PATH`, applies a five-second
+timeout, and returns persistence-safe `{ implementation, version }` metadata.
+Control Center attaches this metadata to the durable `started` event; executable
+paths, credentials, and provider-native session data are never persisted.
+
 ## Structured tool loop
 
 `runToolAgent` adds a stateless multi-turn loop around any Effect AI

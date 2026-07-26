@@ -1,6 +1,12 @@
 /** Provider-neutral Effect protocol for durable local agents. @module */
 
 export {
+  AgentRuntimeMetadata,
+  AgentRuntimeMetadataError,
+  type LocalCliRuntimeMetadataOptions,
+  readLocalCliRuntimeMetadata
+} from "./cliMetadata.js"
+export {
   type DeterministicAgentScript,
   type DeterministicLanguageModelScript,
   type DeterministicLanguageModelTurn,
