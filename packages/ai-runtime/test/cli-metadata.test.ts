@@ -8,17 +8,21 @@ import { readLocalCliRuntimeMetadata } from "../src/index.js"
 const fakeProcessLayer = (
   calls: Array<ChildProcess.Command>,
   options: {
+    readonly all?: string
     readonly exitCode?: number
     readonly output: string
+    readonly stderr?: string
   }
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       calls.push(command)
-      const output = Stream.make(options.output).pipe(Stream.encodeText)
+      const stdout = Stream.make(options.output).pipe(Stream.encodeText)
+      const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
+      const all = Stream.make(options.all ?? `${options.output}${options.stderr ?? ""}`).pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
-        all: output,
+        all,
         exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
@@ -26,9 +30,9 @@ const fakeProcessLayer = (
         kill: () => Effect.void,
         pid: ChildProcessSpawner.ProcessId(42),
         reref: Effect.void,
-        stderr: Stream.empty,
+        stderr,
         stdin: Sink.drain,
-        stdout: output,
+        stdout,
         unref: Effect.succeed(Effect.void)
       }))
     })
@@ -39,10 +43,15 @@ describe("local CLI runtime metadata", () => {
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       const metadata = yield* readLocalCliRuntimeMetadata({
-        executable: "/trusted/bin/codex",
+        cwd: "/trusted/workspace",
+        executable: "./bin/codex",
         implementation: "codex-cli"
       }).pipe(
-        Effect.provide(fakeProcessLayer(calls, { output: "codex-cli 1.2.3\nignored\n" })),
+        Effect.provide(fakeProcessLayer(calls, {
+          all: "credential-canary\ncodex-cli 1.2.3\nignored\n",
+          output: "codex-cli 1.2.3\nignored\n",
+          stderr: "credential-canary\n"
+        })),
         Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
           env: {
             AWS_SECRET_ACCESS_KEY: "must-not-be-forwarded",
@@ -59,10 +68,51 @@ describe("local CLI runtime metadata", () => {
       const command = calls[0]
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
-        expect(command.command).toBe("/trusted/bin/codex")
+        expect(command.command).toBe("./bin/codex")
         expect(command.args).toEqual(["--version"])
+        expect(command.options.cwd).toBe("/trusted/workspace")
         expect(command.options.extendEnv).toBe(false)
         expect(command.options.env).toEqual({ PATH: "/trusted/bin" })
+      }
+    }))
+
+  it.effect("preserves invalid-output when successful output exceeds the byte bound", () =>
+    Effect.gen(function*() {
+      const result = yield* readLocalCliRuntimeMetadata({
+        executable: "codex",
+        implementation: "codex-cli"
+      }).pipe(
+        Effect.provide(fakeProcessLayer([], { output: "x".repeat(4_097) })),
+        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+          env: { PATH: "/trusted/bin" }
+        }))),
+        Effect.result
+      )
+
+      expect(Result.isFailure(result)).toBe(true)
+      if (Result.isFailure(result)) {
+        expect(result.failure.reason).toBe("invalid-output")
+      }
+    }))
+
+  it.effect("rejects malformed and display-spoofing successful output", () =>
+    Effect.gen(function*() {
+      for (const output of ["", "1.2\u202e3"]) {
+        const result = yield* readLocalCliRuntimeMetadata({
+          executable: "codex",
+          implementation: "codex-cli"
+        }).pipe(
+          Effect.provide(fakeProcessLayer([], { output })),
+          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
+            env: { PATH: "/trusted/bin" }
+          }))),
+          Effect.result
+        )
+
+        expect(Result.isFailure(result)).toBe(true)
+        if (Result.isFailure(result)) {
+          expect(result.failure.reason).toBe("invalid-output")
+        }
       }
     }))
 

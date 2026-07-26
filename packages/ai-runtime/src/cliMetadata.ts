@@ -24,7 +24,14 @@ const RuntimeVersion = Schema.String.check(
     (value) =>
       Array.from(value).every((character) => {
         const codePoint = character.codePointAt(0)
-        return codePoint !== undefined && codePoint >= 0x20 && codePoint !== 0x7f
+        return codePoint !== undefined &&
+          codePoint >= 0x20 &&
+          !(codePoint >= 0x7f && codePoint <= 0x9f) &&
+          codePoint !== 0x061c &&
+          codePoint !== 0x200e &&
+          codePoint !== 0x200f &&
+          !(codePoint >= 0x2028 && codePoint <= 0x202e) &&
+          !(codePoint >= 0x2066 && codePoint <= 0x2069)
       }),
     { expected: "a printable one-line CLI version" }
   )
@@ -41,6 +48,14 @@ const VersionArgument = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.makeFilter((value) => !value.includes("\u0000"), {
     expected: "a version argument without NUL bytes"
+  })
+)
+const WorkingDirectory = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.makeFilter((value) => !value.includes("\u0000"), {
+    expected: "a working directory without NUL bytes"
   })
 )
 
@@ -65,9 +80,11 @@ export class AgentRuntimeMetadataError extends Schema.TaggedErrorClass<AgentRunt
     reason: Schema.Literals(["invalid-output", "unavailable"])
   }
 ) {}
+const isRuntimeMetadataError = Schema.is(AgentRuntimeMetadataError)
 
 /** Trusted executable selection used only to read a local CLI's version. */
 export interface LocalCliRuntimeMetadataOptions {
+  readonly cwd?: string
   readonly executable: string
   readonly implementation: string
   readonly versionArguments?: ReadonlyArray<string>
@@ -131,6 +148,11 @@ export const readLocalCliRuntimeMetadata = Effect.fn("AgentRuntimeMetadata.readL
   const executable = yield* Schema.decodeUnknownEffect(Executable)(unknownOptions.executable).pipe(
     Effect.mapError(() => new AgentRuntimeMetadataError({ implementation, reason: "invalid-output" }))
   )
+  const cwd = unknownOptions.cwd === undefined
+    ? undefined
+    : yield* Schema.decodeUnknownEffect(WorkingDirectory)(unknownOptions.cwd).pipe(
+      Effect.mapError(() => new AgentRuntimeMetadataError({ implementation, reason: "invalid-output" }))
+    )
   const versionArguments = yield* Schema.decodeUnknownEffect(
     Schema.Array(VersionArgument).check(Schema.isMinLength(1), Schema.isMaxLength(8))
   )(unknownOptions.versionArguments ?? ["--version"]).pipe(
@@ -148,20 +170,30 @@ export const readLocalCliRuntimeMetadata = Effect.fn("AgentRuntimeMetadata.readL
       shell: false,
       stderr: "pipe",
       stdin: "ignore",
-      stdout: "pipe"
+      stdout: "pipe",
+      ...(cwd === undefined ? {} : { cwd })
     }
   )
   const result = yield* Effect.scoped(
     Effect.gen(function*() {
       const handle = yield* spawner.spawn(command)
-      return yield* Effect.all({
+      const result = yield* Effect.all({
         exitCode: handle.exitCode,
-        output: collectBounded(implementation, handle.all)
+        output: collectBounded(implementation, handle.stdout),
+        stderr: Stream.runDrain(handle.stderr)
       }, { concurrency: "unbounded" })
+      return {
+        exitCode: result.exitCode,
+        output: result.output
+      }
     })
   ).pipe(
     Effect.timeout(DEFAULT_DISCOVERY_TIMEOUT),
-    Effect.mapError(() => new AgentRuntimeMetadataError({ implementation, reason: "unavailable" }))
+    Effect.mapError((failure) =>
+      isRuntimeMetadataError(failure)
+        ? failure
+        : new AgentRuntimeMetadataError({ implementation, reason: "unavailable" })
+    )
   )
   if (result.exitCode !== ChildProcessSpawner.ExitCode(0)) {
     return yield* new AgentRuntimeMetadataError({ implementation, reason: "unavailable" })

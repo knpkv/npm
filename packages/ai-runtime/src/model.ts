@@ -109,6 +109,15 @@ export const AgentRuntimeEvent = Schema.Union([
 ]).pipe(Schema.toTaggedUnion("_tag"))
 export type AgentRuntimeEvent = typeof AgentRuntimeEvent.Type
 
+/** Attach safe runtime identity only to the start event of one agent run. */
+export const attachAgentRuntimeMetadata = (
+  event: AgentRuntimeEvent,
+  runtimeMetadata: AgentRuntimeMetadata | undefined
+): AgentRuntimeEvent =>
+  event._tag === "started" && runtimeMetadata !== undefined
+    ? { ...event, runtimeMetadata }
+    : event
+
 /** A provider failed without exposing credentials or provider-native state. */
 export class AgentProviderError extends Schema.TaggedErrorClass<AgentProviderError>()(
   "AgentProviderError",

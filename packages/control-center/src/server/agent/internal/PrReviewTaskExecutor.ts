@@ -13,6 +13,7 @@ import {
   type AgentRunRequest,
   type AgentRuntimeError,
   type AgentRuntimeEvent,
+  attachAgentRuntimeMetadata,
   makeToolAgentAdapter,
   runToolAgent
 } from "@knpkv/ai-runtime"
@@ -762,11 +763,7 @@ const makeExecutor = Effect.gen(function*() {
         )
       ).slice(0, 12)
       const onRuntimeActivity = (event: AgentRuntimeEvent) =>
-        onActivity(
-          event._tag === "started" && selected.runtimeMetadata !== undefined
-            ? { ...event, runtimeMetadata: selected.runtimeMetadata }
-            : event
-        )
+        onActivity(attachAgentRuntimeMetadata(event, selected.runtimeMetadata))
 
       return yield* sessions.withSession(
         {

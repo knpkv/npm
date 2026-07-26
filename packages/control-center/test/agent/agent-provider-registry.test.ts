@@ -20,7 +20,7 @@ const OPENAI_PROVIDER_ID = AgentProviderId.make("openai-compatible")
 const OPENAI_MODEL = AgentModelId.make("review-model")
 const CREDENTIAL_CANARY = "credential-canary"
 const API_URL_CANARY = "https://provider-canary.example/v1"
-const COMMAND_CANARY = "/server-only/bin/codex-canary"
+const COMMAND_CANARY = "./bin/codex-canary"
 const CWD_CANARY = "/server-only/workspace-canary"
 const CLI_VERSION_OUTPUT = "codex-cli 1.2.3"
 const CLI_VERSION = "1.2.3"
@@ -47,16 +47,20 @@ const runRequest = (model: AgentModelId): AgentRunRequest => ({
 })
 
 const versionProcessLayer = (
-  calls: Array<ChildProcess.Command>
+  calls: Array<ChildProcess.Command>,
+  options: {
+    readonly exitCode?: number
+    readonly output?: string
+  } = {}
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
       calls.push(command)
-      const output = Stream.make(`${CLI_VERSION_OUTPUT}\n`).pipe(Stream.encodeText)
+      const output = Stream.make(options.output ?? `${CLI_VERSION_OUTPUT}\n`).pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
         all: output,
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
         getInputFd: () => Sink.drain,
         getOutputFd: () => Stream.empty,
         isRunning: Effect.succeed(false),
@@ -244,6 +248,12 @@ describe("agent provider registry", () => {
         access: "read-only",
         capability: "release-chat"
       })
+      const codexSelectedAgain = yield* registry.select({
+        providerId: AgentProviderId.make("codex"),
+        model: "configured-default",
+        access: "read-only",
+        capability: "release-chat"
+      })
       const legacy = yield* registry.select({
         providerId: OPENAI_PROVIDER_ID,
         model: null,
@@ -254,6 +264,7 @@ describe("agent provider registry", () => {
       assert.strictEqual(legacy.model, OPENAI_MODEL)
       assert.strictEqual(selected.filesystemAccess, "none")
       assert.strictEqual(codexSelected.filesystemAccess, "configured-workspace")
+      assert.deepStrictEqual(codexSelectedAgain.runtimeMetadata, codexSelected.runtimeMetadata)
       assert.deepStrictEqual(codexSelected.runtimeMetadata, {
         _tag: "local-cli",
         implementation: "codex-cli",
@@ -265,6 +276,7 @@ describe("agent provider registry", () => {
       if (versionCommand !== undefined && ChildProcess.isStandardCommand(versionCommand)) {
         assert.strictEqual(versionCommand.command, COMMAND_CANARY)
         assert.deepStrictEqual(versionCommand.args, ["--version"])
+        assert.strictEqual(versionCommand.options.cwd, CWD_CANARY)
         assert.strictEqual(versionCommand.options.extendEnv, false)
       }
       const events = new Array<AgentRuntimeEvent>()
@@ -351,4 +363,46 @@ describe("agent provider registry", () => {
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))
+
+  it.effect("classifies unavailable CLI metadata as retryable and invalid output as configuration", () =>
+    Effect.gen(function*() {
+      const selectCodex = (options: { readonly exitCode?: number; readonly output?: string }) =>
+        Effect.gen(function*() {
+          const registry = yield* AgentRuntimeRegistry
+          return yield* registry.select({
+            providerId: AgentProviderId.make("codex"),
+            model: "configured-default",
+            access: "read-only",
+            capability: "release-chat"
+          }).pipe(Effect.result)
+        }).pipe(
+          Effect.provide(agentProviderRuntimeRegistryLayer({
+            codex: {
+              cwd: CWD_CANARY,
+              executable: COMMAND_CANARY
+            }
+          })),
+          Effect.provideService(
+            HttpClient.HttpClient,
+            HttpClient.make(() => Effect.die("CLI metadata selection must not call HTTP"))
+          ),
+          Effect.provide(versionProcessLayer([], options)),
+          Effect.provide(NodeServices.layer),
+          Effect.scoped
+        )
+
+      const unavailable = yield* selectCodex({ exitCode: 1 })
+      const invalid = yield* selectCodex({ output: "" })
+
+      assert.isTrue(Result.isFailure(unavailable))
+      if (Result.isFailure(unavailable)) {
+        assert.strictEqual(unavailable.failure.phase, "launch")
+        assert.isTrue(unavailable.failure.retryable)
+      }
+      assert.isTrue(Result.isFailure(invalid))
+      if (Result.isFailure(invalid)) {
+        assert.strictEqual(invalid.failure.phase, "configuration")
+        assert.isFalse(invalid.failure.retryable)
+      }
+    }))
 })
