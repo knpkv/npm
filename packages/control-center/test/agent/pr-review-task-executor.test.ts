@@ -574,6 +574,70 @@ describe("PR review task executor", () => {
       assert.strictEqual(page.nextCursor, AgentEventCursor.make(1))
     }))
 
+  it.effect("completes after reading 64 valid near-limit durable history events", () =>
+    Effect.gen(function*() {
+      const durableEvents = Array.from({ length: 64 }, (_, index) =>
+        Schema.decodeUnknownSync(AgentThreadEvent)({
+          workspaceId: WORKSPACE_ID,
+          threadId: THREAD_ID,
+          eventSequence: index + 1,
+          jobId: JOB_ID,
+          attemptSequence: 1,
+          eventKind: "assistant-output",
+          payload: {
+            _tag: "output",
+            channel: "assistant",
+            text: `${String(index)}:${"x".repeat(31 * 1_024)}`
+          },
+          occurredAt: "2026-07-24T09:00:00.000Z"
+        }))
+      const page = yield* makeBoundedPage(durableEvents, AgentEventCursor.make(0))
+      assert.strictEqual(page.events.length, 64)
+      assert.isTrue(page.events.every(({ payloadElided }) => payloadElided))
+      assert.isFalse(page.hasMore)
+      assert.strictEqual(page.nextCursor, AgentEventCursor.make(64))
+
+      const observedCursors = new Array<number>()
+      const historyLayer = Layer.succeed(
+        PrReviewThreadHistory,
+        PrReviewThreadHistory.of({
+          page: ({ after }) =>
+            Effect.sync(() => {
+              observedCursors.push(after)
+              return page
+            })
+        })
+      )
+      const observation: SessionObservation = {
+        commands: [],
+        operations: [],
+        requests: []
+      }
+      const script: ReadonlyArray<DeterministicLanguageModelTurn> = [{
+        _tag: "response",
+        parts: response({
+          id: "read-large-thread-history",
+          name: "ReviewReadThreadHistory",
+          params: { after: 0 },
+          type: "tool-call"
+        })
+      }, ...completeScript()]
+      const executed = yield* runExecutor(
+        script,
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute(claim)
+        }),
+        undefined,
+        undefined,
+        undefined,
+        historyLayer
+      )
+      assert.strictEqual(executed.result.suggestions.length, 1)
+      assert.deepStrictEqual(observedCursors, [0])
+    }))
+
   it.effect("reserves durable report space for host-authored metadata", () => {
     const note = (index: number) => ({
       reason: "low-confidence",

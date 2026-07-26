@@ -665,8 +665,9 @@ and make temporary edits inside the disposable sandbox.
 
 The initial context contains only a bounded Review Thread summary. When prior
 detail is relevant, call ReviewReadThreadHistory with after 0, inspect its bounded
-page of complete prior events, and follow nextCursor while hasMore is true. This history
-is fenced before the current immutable run.
+page of prior events, and follow nextCursor while hasMore is true. A null payload
+with payloadElided true means the durable event exceeded the per-event model
+projection budget. This history is fenced before the current immutable run.
 
 Return one suggestion per root cause. Use a line anchor for one exact changed line,
 a file anchor for advice about one changed file, or a changes anchor for advice

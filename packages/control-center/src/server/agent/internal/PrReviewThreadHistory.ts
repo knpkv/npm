@@ -18,6 +18,7 @@ import {
 import { AgentJobRepository } from "../../persistence/repositories/agentJobRepository.js"
 
 const MAXIMUM_REVIEW_HISTORY_PAGE_BYTES = MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES - 4 * 1_024
+const MAXIMUM_REVIEW_HISTORY_EVENT_BYTES = 6 * 1_024
 const REVIEW_HISTORY_FETCH_LIMIT = AgentThreadEventPageSize.make(
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
 )
@@ -102,7 +103,18 @@ export const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage"
 ) {
   const presented = new Array<typeof ReviewThreadHistoryEvent.Type>()
   for (const event of events) {
-    const next = yield* presentHistoryEvent(event)
+    const complete = yield* presentHistoryEvent(event)
+    const next = (yield* encodedPageByteLength({
+        events: [complete],
+        hasMore: true,
+        nextCursor: complete.eventSequence
+      })) > MAXIMUM_REVIEW_HISTORY_EVENT_BYTES
+      ? {
+        ...complete,
+        payload: null,
+        payloadElided: true
+      }
+      : complete
     const candidate = {
       events: [...presented, next],
       hasMore: true,
@@ -131,7 +143,7 @@ export const makeBoundedPage = Effect.fn("PrReviewThreadHistory.makeBoundedPage"
   }).pipe(Effect.mapError(unavailable))
 })
 
-/** Persisted history implementation; each model call receives a bounded page of complete events. */
+/** Persisted history implementation; each model call receives bounded event projections. */
 export const prReviewThreadHistoryLayer: Layer.Layer<
   PrReviewThreadHistory,
   never,
@@ -157,7 +169,8 @@ export const prReviewThreadHistoryLayer: Layer.Layer<
 
 /** Read the next bounded page of prior durable events; start at zero and follow `nextCursor`. */
 export const ReviewReadThreadHistory = Tool.make("ReviewReadThreadHistory", {
-  description: "Read a bounded page of complete prior events from this pull request's durable Review Thread. " +
+  description: "Read a bounded page of prior events from this pull request's durable Review Thread. " +
+    "Large payloads are null with payloadElided true. " +
     "Start with after 0 and repeat with nextCursor while hasMore is true.",
   failure: PrReviewThreadHistoryError,
   parameters: Schema.Struct({ after: AgentEventCursor }),
