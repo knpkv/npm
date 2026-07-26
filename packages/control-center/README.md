@@ -152,13 +152,24 @@ diffs and must pass `git apply --check` against the sandboxed head, while recurr
 prevention proposals stay visibly separate for later review.
 Low-confidence and pre-existing concerns appear as non-publishable Review Notes.
 
+Each retained suggestion has an immutable local revision history. The original agent result is
+revision 1; saving an edit appends a complete new snapshot instead of rewriting the report or prior
+evidence. The inline card shows the current revision, validation state, author, and time. **History**
+keeps prior snapshots in the diff workspace, while **Edit** opens a schema-checked complete editor.
+Concurrent saves use the expected revision and surface a conflict without discarding the local draft.
+A title-only edit retains its validation. Changes to severity, claims, evidence, confidence, anchor,
+related locations, replacement, or prevention are marked **Needs revalidation** and cannot be
+published.
+
 The diff workspace keeps the complete file inventory visible while severity and state filters narrow
 only the review advice. Line suggestions render inline; file and whole-change suggestions use the
 compact overview. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
 or Unable to Conclude from the validated report. The model does not author that outcome, and there is
 no suggestion-count cap beyond the existing durable event byte envelope.
 
-Every draft suggestion scope can be explicitly published. Line and file suggestions become CodeCommit
+Every current, validated draft suggestion can be explicitly published. Preview, governed evidence,
+reservation, provider receipt, and the Review Thread event all bind to the exact suggestion revision;
+an edit cannot reuse an older preview or publication reservation. Line and file suggestions become CodeCommit
 comments at their resolved line; whole-change suggestions become general pull-request comments without
 a file location. Control Center first reserves the exact confirmed content digest so competing edits
 cannot both reach the provider. Each attempt owns its reservation with a unique durable identifier.
