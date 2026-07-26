@@ -1,7 +1,6 @@
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type {
@@ -11,15 +10,19 @@ import type {
   PublishedReviewComment,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
+  ReleaseAgentThreadCursor,
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
-import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
-import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
 
 const POLL_INTERVAL = Duration.seconds(2)
+const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
+const generatedClientTransport = pullRequestReviewBrowser.then(
+  ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
+)
 
 interface ReviewProviderSelection {
   readonly model: AgentProviderCatalogEntry["models"][number]
@@ -43,7 +46,7 @@ export type PullRequestReviewControllerState =
     readonly action: "idle" | "starting" | "failed"
     readonly provider: ReviewProviderSelection | null
     readonly review: PullRequestReviewState
-    readonly thread?: PullRequestReviewThreadPage
+    readonly thread?: PullRequestReviewThread
   } & PullRequestReviewScope)
 
 export type PullRequestReviewPublicationState =
@@ -88,6 +91,7 @@ export interface PullRequestReviewTransport {
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
   readonly loadThread: (
     entityId: EntityId,
+    after: ReleaseAgentThreadCursor,
     signal: AbortSignal
   ) => Promise<PullRequestReviewThreadPage>
   readonly previewPublication: (
@@ -124,71 +128,12 @@ const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelectio
 
 /** Generated-client transport for the authenticated immutable-review contract. */
 export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
-  enqueue: (entityId, provider, prompt, signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeAuthenticatedMutationClient
-        return yield* client.agent.enqueuePullRequestReview({
-          params: { entityId },
-          payload: {
-            providerId: provider.providerId,
-            model: provider.model,
-            profile: "read-only",
-            reviewProfileId: provider.reviewProfile.profileId,
-            ...(prompt === undefined ? {} : { prompt })
-          }
-        })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    ),
-  load: (entityId, signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeControlCenterApiClient()
-        return yield* client.agent.pullRequestReview({ params: { entityId } })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    ),
-  loadThread: (entityId, signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeControlCenterApiClient()
-        return yield* client.agent.pullRequestReviewThread({
-          params: { entityId },
-          query: {}
-        })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    ),
-  previewPublication: (entityId, selection, signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeControlCenterApiClient()
-        return yield* client.agent.previewReviewSuggestionPublication({
-          params: { entityId, ...selection }
-        })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    ),
-  providers: (signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeControlCenterApiClient()
-        return yield* client.agent.providers()
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    ),
-  publishSuggestion: (entityId, selection, finalContent, authorityBinding, signal) =>
-    Effect.runPromise(
-      Effect.gen(function*() {
-        const client = yield* makeAuthenticatedMutationClient
-        return yield* client.agent.publishReviewSuggestion({
-          params: { entityId },
-          payload: { ...selection, finalContent, authorityBinding }
-        })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
-      { signal }
-    )
+  enqueue: (...args) => generatedClientTransport.then((transport) => transport.enqueue(...args)),
+  load: (...args) => generatedClientTransport.then((transport) => transport.load(...args)),
+  loadThread: (...args) => generatedClientTransport.then((transport) => transport.loadThread(...args)),
+  previewPublication: (...args) => generatedClientTransport.then((transport) => transport.previewPublication(...args)),
+  providers: (...args) => generatedClientTransport.then((transport) => transport.providers(...args)),
+  publishSuggestion: (...args) => generatedClientTransport.then((transport) => transport.publishSuggestion(...args))
 }
 
 const sameScope = (
@@ -259,7 +204,10 @@ export const usePullRequestReview = (
       : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
     Promise.all([
       transport.load(entityId, abort.signal),
-      transport.loadThread(entityId, abort.signal),
+      pullRequestReviewBrowser.then(
+        ({ loadCompletePullRequestReviewThread }) =>
+          loadCompletePullRequestReviewThread(transport, entityId, abort.signal)
+      ),
       providers
     ]).then(
       ([review, thread, catalog]) => {

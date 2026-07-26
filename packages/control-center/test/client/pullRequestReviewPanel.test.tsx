@@ -272,6 +272,7 @@ const REVIEW_THREAD = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
       prompt: "Focus on transaction ownership."
     }
   ],
+  hasMore: false,
   nextCursor: ReleaseAgentThreadCursor.make(1)
 })
 const REFRESHED_NOT_STARTED_STATE = {

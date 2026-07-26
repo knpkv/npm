@@ -96,7 +96,7 @@ describe("durable agent job queries", () => {
 
   it("renders the newest bounded context events for one stable review thread", () => {
     const rendered = renderAgentReviewContextEventsQuery({
-      eventKinds: ["user-message", "review-report", "job-completed", "job-failed"],
+      eventKinds: ["user-message", "review-report", "job-completed", "job-failed", "cancel-requested"],
       limit: 16,
       threadId: "thread-secret",
       workspaceId: "workspace-secret"
@@ -109,11 +109,13 @@ describe("durable agent job queries", () => {
       "review-report",
       "job-completed",
       "job-failed",
+      "cancel-requested",
       16
     ])
     expect(rendered.sql).toContain(
-      "\"agent_thread_events\".\"event_kind\" in (?, ?, ?, ?)"
+      "\"agent_thread_events\".\"event_kind\" in (?, ?, ?, ?, ?)"
     )
+    expect(rendered.sql).toContain("\"agent_jobs\".\"state\" as \"jobState\"")
     expect(rendered.sql).toContain(
       "order by \"agent_thread_events\".\"event_sequence\" desc limit ?"
     )

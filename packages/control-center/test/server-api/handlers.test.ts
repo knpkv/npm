@@ -1966,6 +1966,7 @@ describe("Control Center API handlers", () => {
                 occurredAt: session.lastSeenAt,
                 prompt: "Focus on the persistence boundary."
               }],
+              hasMore: false,
               nextCursor: ReleaseAgentThreadCursor.make(1)
             }))
           ),

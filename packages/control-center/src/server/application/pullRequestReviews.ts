@@ -468,6 +468,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       if (derived._tag !== "available") {
         return PullRequestReviewThreadPage.make({
           events: [],
+          hasMore: false,
           nextCursor: input.after
         })
       }
@@ -491,11 +492,27 @@ const makePullRequestReviews = Effect.gen(function*() {
           )
         )
       )
+      const hasMore = page.events.length === limit &&
+        (yield* mapPersistenceRead(
+            persistence.agentJobs.reviewThreadAfter({
+              workspaceId: input.workspaceId,
+              pluginConnectionId: derived.pluginConnectionId,
+              subject: derived.subject,
+              after: page.nextCursor,
+              limit: AgentThreadEventPageSize.make(1)
+            }).pipe(
+              Effect.catchTag(
+                "RecordNotFoundError",
+                () => Effect.succeed({ events: [], nextCursor: page.nextCursor })
+              )
+            )
+          )).events.length > 0
       const events = yield* Effect.forEach(page.events, mapReviewThreadEvent)
       return yield* Schema.decodeUnknownEffect(
         Schema.toType(PullRequestReviewThreadPage)
       )({
         events,
+        hasMore,
         nextCursor: page.nextCursor
       }).pipe(Effect.mapError(unavailable))
     }),

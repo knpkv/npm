@@ -33,6 +33,7 @@ export interface AgentThreadReplayQueryInput {
 
 /** Stable event kinds retained while assembling a bounded review context. */
 export type AgentReviewContextEventKind =
+  | "cancel-requested"
   | "job-completed"
   | "job-failed"
   | "review-report"
@@ -303,6 +304,7 @@ export const renderAgentReviewContextEventsQuery = (
     payloadJson: agentThreadEvents.payloadJson,
     payloadDigest: agentThreadEvents.payloadDigest,
     payloadByteLength: agentThreadEvents.payloadByteLength,
+    jobState: agentJobs.state,
     taskContextJson: agentJobs.taskContextJson,
     taskContextDigest: agentJobs.taskContextDigest,
     occurredAt: agentThreadEvents.occurredAt

@@ -507,6 +507,7 @@ export const PullRequestReviewThreadPage = Schema.Struct({
   events: Schema.Array(PullRequestReviewThreadEvent).check(
     Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)
   ),
+  hasMore: Schema.Boolean,
   nextCursor: ReleaseAgentThreadCursor
 })
 export type PullRequestReviewThreadPage = typeof PullRequestReviewThreadPage.Type

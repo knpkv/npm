@@ -255,6 +255,71 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("freezes a terminal queued cancellation as cancelled review context", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* jobs.requestCancellation({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          requestedAt: T1
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        yield* TestClock.setTime(DateTime.toEpochMillis(T2))
+        const next = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T2,
+          leaseExpiresAt: T4
+        })
+        assert.isTrue(Option.isSome(next))
+        if (Option.isNone(next)) return yield* Effect.die("follow-up review claim missing")
+        assert.strictEqual(next.value.jobId, SWAP_JOB_ID)
+        assert.strictEqual(next.value.context.task._tag, "pr-review")
+        if (next.value.context.task._tag !== "pr-review") {
+          return yield* Effect.die("follow-up review task mismatch")
+        }
+        assert.strictEqual(next.value.context.task.context.priorRuns[0]?.state, "cancelled")
+      })
+    ))
+
+  it.effect("keeps a genuinely queued prior review unknown in frozen context", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        yield* jobs.requestCancellation({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          requestedAt: T1
+        })
+
+        yield* TestClock.setTime(DateTime.toEpochMillis(T2))
+        const next = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T2,
+          leaseExpiresAt: T4
+        })
+        assert.isTrue(Option.isSome(next))
+        if (Option.isNone(next)) return yield* Effect.die("queued follow-up review claim missing")
+        assert.strictEqual(next.value.context.task._tag, "pr-review")
+        if (next.value.context.task._tag !== "pr-review") {
+          return yield* Effect.die("queued follow-up review task mismatch")
+        }
+        assert.strictEqual(next.value.context.task.context.priorRuns[0]?.state, "unknown")
+      })
+    ))
+
   it.effect("keeps one PR thread across heads and freezes bounded prior-run context", () =>
     withRepository(
       Effect.gen(function*() {

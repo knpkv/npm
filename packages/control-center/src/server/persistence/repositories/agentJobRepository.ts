@@ -213,6 +213,11 @@ const ReplayThreadEventRow = Schema.Struct({
   taskContextDigest: PersistedDigest
 })
 
+const ReviewContextThreadEventRow = Schema.Struct({
+  ...ReplayThreadEventRow.fields,
+  jobState: AgentJobState
+})
+
 const FailAgentAttemptInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
@@ -703,14 +708,14 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const rendered = renderAgentReviewContextEventsQuery({
       workspaceId,
       threadId,
-      eventKinds: ["user-message", "review-report", "job-completed", "job-failed"],
+      eventKinds: ["user-message", "review-report", "job-completed", "job-failed", "cancel-requested"],
       limit: REVIEW_CONTEXT_EVENT_LIMIT + 1
     })
     const unknownRows = yield* sql
       .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
       .pipe(mapPersistenceOperation("agent-job.review-context"))
     const decodedRows = Schema.decodeUnknownResult(
-      Schema.Array(ReplayThreadEventRow)
+      Schema.Array(ReviewContextThreadEventRow)
     )(unknownRows.slice(0, REVIEW_CONTEXT_EVENT_LIMIT))
     if (Result.isFailure(decodedRows)) {
       return yield* persistedRecordError(
@@ -817,6 +822,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
         }
         case "job-failed":
           runs.set(row.jobId, { ...current, state: "failed" })
+          break
+        case "cancel-requested":
+          if (row.jobState === "cancelled") {
+            runs.set(row.jobId, { ...current, state: "cancelled" })
+          }
           break
         default:
           break

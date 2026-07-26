@@ -12,6 +12,7 @@ import {
   PublishedReviewComment,
   PullRequestReviewNotStarted,
   PullRequestReviewState,
+  type PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
@@ -49,6 +50,7 @@ const REVIEW_PROFILE: ReviewAgentProfile = {
 const TARGETED_PROMPT = DurableAgentPrompt.make("Re-check transaction ownership.")
 const EMPTY_THREAD = PullRequestReviewThreadPage.make({
   events: [],
+  hasMore: false,
   nextCursor: ReleaseAgentThreadCursor.make(0)
 })
 
@@ -313,6 +315,80 @@ const ReviewThreadHarness = ({ transport }: { readonly transport: PullRequestRev
 }
 
 describe("usePullRequestReview", () => {
+  it("follows advancing cursors until the durable review thread reaches its tail", async () => {
+    const event = (sequence: number): PullRequestReviewThreadEvent => ({
+      _tag: "operator-message",
+      eventSequence: ReleaseAgentThreadCursor.make(sequence),
+      jobId: JOB_ID,
+      occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
+      prompt: TARGETED_PROMPT
+    })
+    const firstPage = PullRequestReviewThreadPage.make({
+      events: Array.from({ length: 128 }, (_, index) => event(index + 1)),
+      hasMore: true,
+      nextCursor: ReleaseAgentThreadCursor.make(128)
+    })
+    const tailPage = PullRequestReviewThreadPage.make({
+      events: [event(129)],
+      hasMore: false,
+      nextCursor: ReleaseAgentThreadCursor.make(129)
+    })
+    const tailRequested = deferred<void>()
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
+      loadThread: vi.fn((_entityId, after) => {
+        if (after === 0) return Promise.resolve(firstPage)
+        if (after === 128) {
+          tailRequested.resolve()
+          return Promise.resolve(tailPage)
+        }
+        return Promise.reject(new Error(`Unexpected cursor ${after}`))
+      }),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.resolve({ providers: [] }),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () => tailRequested.promise)
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("129")
+    expect(transport.loadThread).toHaveBeenCalledTimes(2)
+    expect(transport.loadThread).toHaveBeenLastCalledWith(
+      ENTITY_ID,
+      ReleaseAgentThreadCursor.make(128),
+      expect.any(AbortSignal)
+    )
+  })
+
+  it("fails closed when a paged review thread repeats its cursor", async () => {
+    const page = PullRequestReviewThreadPage.make({
+      events: [],
+      hasMore: true,
+      nextCursor: ReleaseAgentThreadCursor.make(0)
+    })
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
+      loadThread: vi.fn(() => Promise.resolve(page)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.resolve({ providers: [] }),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("failed")
+    expect(transport.loadThread).toHaveBeenCalledOnce()
+  })
+
   it("loads the durable thread and forwards a targeted request to enqueue", async () => {
     const thread = PullRequestReviewThreadPage.make({
       events: [
@@ -324,6 +400,7 @@ describe("usePullRequestReview", () => {
           prompt: TARGETED_PROMPT
         }
       ],
+      hasMore: false,
       nextCursor: ReleaseAgentThreadCursor.make(1)
     })
     const transport = {
@@ -353,7 +430,11 @@ describe("usePullRequestReview", () => {
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
     await act(async () => host.querySelector<HTMLButtonElement>("[data-start]")?.click())
 
-    expect(transport.loadThread).toHaveBeenCalledWith(ENTITY_ID, expect.any(AbortSignal))
+    expect(transport.loadThread).toHaveBeenCalledWith(
+      ENTITY_ID,
+      ReleaseAgentThreadCursor.make(0),
+      expect.any(AbortSignal)
+    )
     expect(transport.enqueue).toHaveBeenCalledWith(
       ENTITY_ID,
       expect.objectContaining({ reviewProfile: REVIEW_PROFILE }),

@@ -833,6 +833,7 @@ describe("public API schemas", () => {
           occurredAt: timestamp,
           prompt: request.prompt
         }],
+        hasMore: false,
         nextCursor: 1
       })
     ))
@@ -845,6 +846,7 @@ describe("public API schemas", () => {
           occurredAt: timestamp,
           prompt: "x".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH + 1)
         }],
+        hasMore: false,
         nextCursor: 1
       })
     ))
