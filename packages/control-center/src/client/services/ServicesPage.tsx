@@ -1036,8 +1036,7 @@ export const ServicesPage = ({
                 )
               )
               const hasGroupedResource = configured.some(
-                ({ followedResourceId }) =>
-                  followedResourceId !== null && groupedResourceIds.has(followedResourceId)
+                ({ followedResourceId }) => followedResourceId !== null && groupedResourceIds.has(followedResourceId)
               )
               const standaloneConnections = configured.filter(
                 ({ followedResourceId, isEnabled }) =>
@@ -1077,10 +1076,7 @@ export const ServicesPage = ({
               if (
                 configured.length > 0 &&
                 openProvider !== catalog.providerId &&
-                (
-                  hasGroupedResource ||
-                  (catalog.providerId !== "jira" && catalog.providerId !== "confluence")
-                )
+                (hasGroupedResource || (catalog.providerId !== "jira" && catalog.providerId !== "confluence"))
               )
                 return cards
               return [

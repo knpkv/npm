@@ -557,9 +557,7 @@ describe("ServicesPage connection tests", () => {
     const spaceResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
     const jiraConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
     const spaceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
-    const staleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)(
-      "01890f6f-6d6a-7cc0-98d2-000000000196"
-    )
+    const staleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000196")
     const secondStaleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)(
       "01890f6f-6d6a-7cc0-98d2-000000000197"
     )
