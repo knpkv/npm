@@ -239,8 +239,10 @@ export const usePullRequestReview = (
   )
   useLayoutEffect(() => {
     latestScope.current = scope
-    latestThread.current = null
   }, [scope])
+  useLayoutEffect(() => {
+    latestThread.current = null
+  }, [entityId, sessionKey])
 
   useEffect(() => {
     if (sessionKey === null || headRevision === null) {

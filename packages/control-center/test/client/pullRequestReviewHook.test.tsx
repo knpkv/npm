@@ -46,6 +46,7 @@ import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/do
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000601")
+const OTHER_ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000699")
 const BASE_A = "0".repeat(40)
 const BASE_B = "1".repeat(40)
 const HEAD_A = "a".repeat(40)
@@ -348,13 +349,19 @@ const PublicationHarness = ({
 }
 
 const ReviewThreadHarness = ({
+  entityId = ENTITY_ID,
+  headRevision = HEAD_A,
   onSessionExpired = ignoreSessionExpired,
+  sessionKey = "session-a",
   transport
 }: {
+  readonly entityId?: EntityId
+  readonly headRevision?: string
   readonly onSessionExpired?: (sessionKey: string) => void
+  readonly sessionKey?: string
   readonly transport: PullRequestReviewTransport
 }): ReactElement => {
-  const controller = usePullRequestReview(ENTITY_ID, BASE_A, HEAD_A, "session-a", true, onSessionExpired, transport)
+  const controller = usePullRequestReview(entityId, BASE_A, headRevision, sessionKey, true, onSessionExpired, transport)
   return (
     <>
       <span data-history>
@@ -363,6 +370,16 @@ const ReviewThreadHarness = ({
       <span data-thread>
         {controller.state._tag === "ready"
           ? String(controller.state.thread?.events.length ?? 0)
+          : controller.state._tag}
+      </span>
+      <span data-thread-history-loaded>
+        {controller.state._tag === "ready"
+          ? String(controller.state.thread?.historyLoaded ?? false)
+          : controller.state._tag}
+      </span>
+      <span data-thread-sequences>
+        {controller.state._tag === "ready"
+          ? (controller.state.thread?.events.map(({ eventSequence }) => eventSequence).join(",") ?? "")
           : controller.state._tag}
       </span>
       <button data-load-earlier onClick={controller.loadEarlier} />
@@ -655,6 +672,74 @@ describe("usePullRequestReview", () => {
       ReleaseAgentThreadCursor.make(131)
     ])
     expect(state._tag === "ready" ? state.thread?.historyLoaded : false).toBe(true)
+  })
+
+  it("preserves loaded history across heads but clears it for another entity", async () => {
+    const reviews = [reviewFor(BASE_A, HEAD_A), reviewFor(BASE_A, HEAD_B), reviewFor(BASE_A, HEAD_B)]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => Promise.resolve(reviews.shift() ?? reviewFor(BASE_A, HEAD_B))),
+      loadThread: vi.fn((entityId, cursor, _signal, direction) => {
+        if (entityId === OTHER_ENTITY_ID) {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: [threadEvent(900)],
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(900)
+            })
+          )
+        }
+        if (direction === "before") {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: [threadEvent(127), threadEvent(128)],
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(127)
+            })
+          )
+        }
+        return Promise.resolve(
+          cursor === null
+            ? PullRequestReviewThreadPage.make({
+                events: [threadEvent(129), threadEvent(130)],
+                hasEarlier: true,
+                hasMore: false,
+                nextCursor: ReleaseAgentThreadCursor.make(130)
+              })
+            : PullRequestReviewThreadPage.make({
+                events: [threadEvent(131)],
+                hasMore: false,
+                nextCursor: ReleaseAgentThreadCursor.make(131)
+              })
+        )
+      }),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.resolve({ providers: [] }),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    const render = (entityId: EntityId, headRevision: string) =>
+      mountedRoot?.render(<ReviewThreadHarness entityId={entityId} headRevision={headRevision} transport={transport} />)
+
+    await act(async () => render(ENTITY_ID, HEAD_A))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-load-earlier]")?.click())
+    expect(host.querySelector("[data-thread-sequences]")?.textContent).toBe("127,128,129,130")
+
+    await act(async () => render(ENTITY_ID, HEAD_B))
+    expect(host.querySelector("[data-thread-sequences]")?.textContent).toBe("127,128,129,130,131")
+    expect(host.querySelector("[data-thread-history-loaded]")?.textContent).toBe("true")
+    expect(transport.loadThread).toHaveBeenCalledWith(
+      ENTITY_ID,
+      ReleaseAgentThreadCursor.make(130),
+      expect.any(AbortSignal)
+    )
+
+    await act(async () => render(OTHER_ENTITY_ID, HEAD_B))
+    expect(host.querySelector("[data-thread-sequences]")?.textContent).toBe("900")
+    expect(host.querySelector("[data-thread-history-loaded]")?.textContent).toBe("false")
+    expect(transport.loadThread).toHaveBeenLastCalledWith(OTHER_ENTITY_ID, null, expect.any(AbortSignal))
   })
 
   it("prepends one explicit backward page while preserving the live cursor", async () => {
