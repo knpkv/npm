@@ -168,6 +168,18 @@ const REVIEW_STATE = {
             ].join("\n"),
             explanation: "Authorize before the mutation."
           },
+          prevention: {
+            summary: "Block mutation-before-authorization",
+            enforcement: "ast-grep",
+            existingRuleOrConfig: "no-mutation-before-authorization",
+            recurrenceEvidence: "The ordering defect has appeared in multiple handlers.",
+            targetFile: "ast-grep/rules/security/no-mutation-before-authorization.yml",
+            sourcePaths: ["packages/control-center/src/server"],
+            matcherOrInvariant: "A mutation cannot precede the authorization effect.",
+            invalidFixture: "yield* mutate()\nyield* authorize()",
+            validFixture: "yield* authorize()\nyield* mutate()",
+            boundary: "Exclude generated adapters; semantic aliases still require review."
+          },
           confidence: {
             level: "high",
             reason: "The execution order is explicit."
@@ -291,6 +303,15 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Suggested replacement")
     expect(host.textContent).toContain("Authorize before the mutation.")
     expect(host.textContent).toContain("Draft · high confidence")
+    expect(host.textContent).toContain("Block mutation-before-authorization")
+    expect(host.textContent).toContain("no-mutation-before-authorization")
+    expect(host.textContent).toContain("The ordering defect has appeared")
+    expect(host.textContent).toContain("ast-grep/rules/security/no-mutation-before-authorization.yml")
+    expect(host.textContent).toContain("packages/control-center/src/server")
+    expect(host.textContent).toContain("A mutation cannot precede")
+    expect(host.textContent).toContain("yield* mutate()")
+    expect(host.textContent).toContain("yield* authorize()")
+    expect(host.textContent).toContain("Exclude generated adapters")
     expect(host.textContent).toContain("Resolved · medium confidence")
     expect(host.textContent).toContain("No stable automated check")
     expect(host.textContent).toContain("semantic equivalence still requires reviewer judgment")

@@ -357,7 +357,9 @@ const makeSessionLayer = (
             : output("", 1)
         }
         if (command.includes("| awk 'END { exit NR ==")) {
-          return command.includes("missing.ts") ? output("", 1) : output()
+          return command.includes("missing.ts") || command.includes("deleted.ts")
+            ? output("", 1)
+            : output()
         }
         return command.startsWith("git show ")
           ? output("# Review instructions\n")
@@ -548,6 +550,32 @@ describe("PR review task executor", () => {
             startLine: 42,
             endLine: 42
           }
+        }, {
+          reason: "pre-existing",
+          title: "Invented source location",
+          observation: "The reported file does not exist.",
+          confidence: {
+            level: "medium",
+            reason: "The claim itself may still be useful without a source coordinate."
+          },
+          location: {
+            path: "missing.ts",
+            startLine: 999,
+            endLine: 999
+          }
+        }, {
+          reason: "pre-existing",
+          title: "Deleted source location",
+          observation: "Deleted-file notes intentionally omit stale base-side coordinates.",
+          confidence: {
+            level: "medium",
+            reason: "The reviewed head no longer contains this path."
+          },
+          location: {
+            path: "deleted.ts",
+            startLine: 1,
+            endLine: 1
+          }
         }]
       }),
       observation,
@@ -575,6 +603,20 @@ describe("PR review task executor", () => {
           )
           assert.match(result.notes[0]?.noteId ?? "", /^sha256:[0-9a-f]{64}$/u)
           assert.strictEqual(result.notes[0]?.reason, "low-confidence")
+          assert.deepStrictEqual(result.notes[0]?.location, {
+            path: EVIDENCE_PATH,
+            startLine: 42,
+            endLine: 42
+          })
+          assert.isUndefined(result.notes[1]?.location)
+          assert.isUndefined(result.notes[2]?.location)
+          const diffCommands = observation.commands.filter((command) =>
+            command.startsWith("git -c core.quotePath=false diff --unified=0")
+          )
+          assert.isAbove(diffCommands.length, 0)
+          assert.isTrue(
+            diffCommands.every((command) => command.includes("--inter-hunk-context=0"))
+          )
         })
       ),
       Effect.asVoid

@@ -99,7 +99,7 @@ Every Review Suggestion contains:
 
 Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions.
 
-Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically.
+Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically. Its expanded presentation exposes the existing rule, recurrence evidence, target and source paths, exact matcher or invariant, invalid and valid fixtures, and the remaining boundary or exclusions.
 
 Review Evidence identifies its kind and records enough bounded data to reproduce the observation, such as a code path, command and exit result, test failure, or deterministic analysis result.
 
@@ -110,8 +110,12 @@ file-scoped evidence may instead match a deleted range in the immutable base so
 deletion-only changes remain reviewable. Suggestion state is host-owned and filterable; models
 cannot author it. Repeated occurrences are stored as Related Locations under
 one root cause. Suggested Replacements carry the exact reviewed head, a unified
-diff, and an explanation. Review Notes have independent host-derived identities
-and are never accepted by the publication boundary. This is report schema v3;
+diff, and an explanation. Exact evidence diffs force zero inter-hunk context so
+unchanged lines cannot be admitted through a merged hunk. Review Notes have
+independent host-derived identities and are never accepted by the publication
+boundary. Optional note coordinates survive only when the reviewed head contains
+the complete non-binary text range; missing, out-of-range, binary, and deleted-file
+coordinates are removed while retaining the non-publishable observation. This is report schema v3;
 pre-stable v2 reports are intentionally not migrated.
 
 Provider output is admitted only when its conservative host projection still

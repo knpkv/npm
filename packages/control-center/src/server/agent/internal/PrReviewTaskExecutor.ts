@@ -153,6 +153,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   const path = suggestion.evidence.path
   const diff = yield* session.runCommand(
     `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
+      `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(path)}`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
   if (diff.exitCode !== 0 || diff.stdout.truncated || diff.stdout.artifactId !== null) {
@@ -246,6 +247,7 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
   }
   const diff = yield* session.runCommand(
     `git -c core.quotePath=false diff --unified=0 --no-ext-diff --no-textconv --no-color ` +
+      `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(suggestion.anchor.path)}`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
   if (
@@ -299,6 +301,26 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
   )
 })
 
+const locationExistsInHead = Effect.fn("PrReviewTaskExecutor.locationExistsInHead")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  location: {
+    readonly path: string
+    readonly startLine: number
+    readonly endLine: number
+  }
+) {
+  const expectedLines = location.endLine - location.startLine + 1
+  const source = shellQuote(`${session.headRevision}:${location.path}`)
+  const check = yield* session.runCommand(
+    `git show ${source} | LC_ALL=C grep -Iq '' && ` +
+      `git show ${source} | ` +
+      `sed -n '${String(location.startLine)},${String(location.endLine)}p' | ` +
+      `awk 'END { exit NR == ${String(expectedLines)} ? 0 : 1 }'`
+  ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+  return check.exitCode === 0
+})
+
 const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelatedLocations")(function*(
   providerId: ClaimedAgentJob["providerId"],
   session: PrReviewSandboxSession,
@@ -306,19 +328,24 @@ const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelat
 ) {
   const validated = new Array<PrReviewSuggestionDraftType["relatedLocations"][number]>()
   for (const location of suggestion.relatedLocations) {
-    const expectedLines = location.endLine - location.startLine + 1
-    const check = yield* session.runCommand(
-      `git show ${shellQuote(`${session.headRevision}:${location.path}`)} | ` +
-        `sed -n '${String(location.startLine)},${String(location.endLine)}p' | ` +
-        `awk 'END { exit NR == ${String(expectedLines)} ? 0 : 1 }'`
-    ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-    if (check.exitCode === 0) validated.push(location)
+    if (yield* locationExistsInHead(providerId, session, location)) validated.push(location)
   }
   return validated.sort((left, right) =>
     `${left.path}:${String(left.startLine)}:${String(left.endLine)}:${left.label}`.localeCompare(
       `${right.path}:${String(right.startLine)}:${String(right.endLine)}:${right.label}`
     )
   )
+})
+
+const validatedNoteLocation = Effect.fn("PrReviewTaskExecutor.validatedNoteLocation")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  note: PrReviewNoteDraftType
+) {
+  if (note.location === undefined) return undefined
+  return (yield* locationExistsInHead(providerId, session, note.location))
+    ? note.location
+    : undefined
 })
 
 const stableNoteId = Effect.fn("PrReviewTaskExecutor.stableNoteId")(function*(
@@ -448,10 +475,24 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   const notes = new Array<(typeof PrReviewReport.Type)["notes"][number]>()
   const seenNoteIds = new Set<string>()
   for (const note of modelReport.notes) {
-    const noteId = yield* stableNoteId(cryptoService, claim.providerId, subject, note)
+    const location = yield* validatedNoteLocation(claim.providerId, session, note)
+    const canonicalNote = location === undefined
+      ? {
+        reason: note.reason,
+        title: note.title,
+        observation: note.observation,
+        confidence: note.confidence
+      }
+      : { ...note, location }
+    const noteId = yield* stableNoteId(
+      cryptoService,
+      claim.providerId,
+      subject,
+      canonicalNote
+    )
     if (seenNoteIds.has(noteId)) continue
     seenNoteIds.add(noteId)
-    notes.push({ ...note, noteId })
+    notes.push({ ...canonicalNote, noteId })
   }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
     schemaVersion: 3,

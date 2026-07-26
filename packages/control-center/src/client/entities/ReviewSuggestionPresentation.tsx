@@ -178,6 +178,28 @@ export const ReviewSuggestionCard = ({
           <Text>
             {suggestion.prevention.summary} · {suggestion.prevention.enforcement}
           </Text>
+          <dl>
+            <dt>Recurring evidence</dt>
+            <dd>{suggestion.prevention.recurrenceEvidence}</dd>
+            <dt>Existing rule or configuration</dt>
+            <dd>{suggestion.prevention.existingRuleOrConfig}</dd>
+            <dt>Target file</dt>
+            <dd>{suggestion.prevention.targetFile}</dd>
+            <dt>Source paths</dt>
+            <dd>{suggestion.prevention.sourcePaths.join(", ")}</dd>
+            <dt>Matcher or invariant</dt>
+            <dd>{suggestion.prevention.matcherOrInvariant}</dd>
+            <dt>Invalid fixture</dt>
+            <dd>
+              <pre>{suggestion.prevention.invalidFixture}</pre>
+            </dd>
+            <dt>Valid fixture</dt>
+            <dd>
+              <pre>{suggestion.prevention.validFixture}</pre>
+            </dd>
+            <dt>Boundary and exclusions</dt>
+            <dd>{suggestion.prevention.boundary}</dd>
+          </dl>
         </details>
       )}
 

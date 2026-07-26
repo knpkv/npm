@@ -1126,6 +1126,52 @@ describe("pull request reviews", () => {
     ], { concurrency: 1, discard: true })
   })
 
+  it.effect("preserves the provider failure when reservation release also fails", () =>
+    withService(
+      (service, _enqueueInput, _publicationCommands, _authority, publicationFailure) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+          yield* Ref.set(publicationFailure, "publication-conflict")
+          const result = yield* service.publishSuggestion({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              finalContent: preview.finalContent,
+              authorityBinding: preview.authorityBinding
+            },
+            session: HUMAN_SESSION
+          }).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.instanceOf(result.failure, ApplicationInvalidRequest)
+          }
+        }),
+      registry,
+      Option.some(completedReview),
+      () => Effect.succeed(undefined),
+      () =>
+        Effect.succeed(
+          ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+        ),
+      () =>
+        Effect.fail(
+          new RecordNotFoundError({
+            workspaceId: WORKSPACE_ID,
+            recordKind: "agent-review-publication",
+            recordKey: SUGGESTION_ID
+          })
+        )
+    ))
+
   it.effect("publishes file anchors inline and whole-change anchors without a location", () => {
     const verifyScope = (
       anchor: typeof reviewReport.suggestions[number]["anchor"]

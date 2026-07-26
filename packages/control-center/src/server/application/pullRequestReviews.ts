@@ -529,7 +529,7 @@ const makePullRequestReviews = Effect.gen(function*() {
             contentDigest
           }).pipe(
             Effect.mapError(mapPersistenceWriteError),
-            Effect.mapError(() => unavailable())
+            Effect.ignore
           )
         }
         return yield* mapPublicationFailure(publication.failure)

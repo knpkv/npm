@@ -165,6 +165,7 @@ retain the original digest for idempotent recovery. Multi-region replacement pre
 file/hunk boundaries, and provider output reserves durable-envelope space for host-added review metadata.
 Completed same-content retries replay the durable governed receipt without another provider call, and
 deletion-only file anchors retain their base-side CodeCommit position.
+Compensating reservation cleanup is best-effort and never masks the provider result returned to the operator.
 
 To exercise the installed `sbx` runtime against the current checkout without provider credentials or
 remote writes, run:
