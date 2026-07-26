@@ -17,6 +17,14 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+### Release-cycle traceability
+
+End-to-end release verification should carry the Jira work-item key in the branch name, commit subject,
+and pull-request title. Add a Changesets entry for the affected package, attach the Jira work item to its
+target fix version, and synchronize the configured Jira and source-control providers after the feature and
+Version pull requests merge. The Releases view can then verify the issue, pull request, and published
+delivery evidence as one connected release.
+
 ### Distribution JavaScript budgets
 
 `validate:dist` checks every emitted client and server `.js` file independently using its raw byte length and deterministic level-9 gzip byte length. Source maps, the Vite manifest, and `build-graph.json` are build metadata and are not runtime JavaScript artifacts.
