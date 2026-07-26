@@ -24,6 +24,7 @@ import {
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
 import { PullRequestReviewPanel as ReviewPanel } from "../../src/client/entities/PullRequestReviewPanel.js"
+import type { ReviewSuggestionRevisionTransport } from "../../src/client/entities/useReviewSuggestionRevisions.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import {
   EntityId,
@@ -34,13 +35,16 @@ import {
 } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
-import { PrReviewSuggestionRevisionSequence } from "../../src/domain/prReviewRevision.js"
+import {
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionSequence
+} from "../../src/domain/prReviewRevision.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 const PullRequestReviewPanel = (props: ComponentProps<typeof ReviewPanel>): ReactElement => (
   <PortalProvider>
-    <ReviewPanel {...props} />
+    <ReviewPanel revisionTransport={REVISION_TRANSPORT} {...props} />
   </PortalProvider>
 )
 
@@ -283,6 +287,69 @@ const REVIEW_STATE = {
     }
   })
 } satisfies PullRequestReviewControllerState
+
+const REVISION_TRANSPORT: ReviewSuggestionRevisionTransport = {
+  load: (_scope, _before, _signal) => {
+    if (REVIEW_STATE.review._tag !== "completed") {
+      return Promise.reject(new Error("Completed review fixture missing"))
+    }
+    const suggestion = REVIEW_STATE.review.report.suggestions.find(
+      ({ suggestionId }) => suggestionId === _scope.suggestionId
+    )
+    if (suggestion === undefined) return Promise.reject(new Error("Suggestion fixture missing"))
+    const revisionId = PrReviewSuggestionRevisionId.make(
+      `sha256:${suggestion.suggestionId === SUGGESTION_ID ? "9".repeat(64) : "8".repeat(64)}`
+    )
+    return Promise.resolve(
+      Schema.decodeUnknownSync(PrReviewSuggestionRevisionPage)({
+        current: {
+          revisionId,
+          sequence: 1,
+          predecessorRevisionId: null,
+          sourceJobId: JOB_ID,
+          subject: SUBJECT,
+          suggestion,
+          validation: {
+            _tag: "validated",
+            reviewedHead: SUBJECT.headRevision,
+            validatingJobId: JOB_ID,
+            sourceRevisionId: revisionId
+          },
+          author: {
+            _tag: "operator",
+            personId: OPERATOR_ID
+          },
+          createdAt: "2026-07-24T15:05:00.000Z"
+        },
+        revisions: [
+          {
+            revisionId,
+            sequence: 1,
+            predecessorRevisionId: null,
+            sourceJobId: JOB_ID,
+            subject: SUBJECT,
+            suggestion,
+            validation: {
+              _tag: "validated",
+              reviewedHead: SUBJECT.headRevision,
+              validatingJobId: JOB_ID,
+              sourceRevisionId: revisionId
+            },
+            author: {
+              _tag: "operator",
+              personId: OPERATOR_ID
+            },
+            createdAt: "2026-07-24T15:05:00.000Z"
+          }
+        ],
+        hasMore: false,
+        nextBeforeSequence: null
+      })
+    )
+  },
+  edit: () => Promise.reject(new Error("Unexpected suggestion edit"))
+}
+
 const PENDING_REVIEW = new PullRequestReviewPending({
   subject: SUBJECT,
   jobId: JOB_ID,
@@ -861,11 +928,14 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Review Notes")
     expect(host.textContent).toContain("Never publishable")
     expect(host.textContent).toContain("Retry behavior needs a provider reproduction")
+    const resolvedSuggestion = [...host.querySelectorAll("li")].find(({ textContent }) =>
+      textContent?.includes("Centralize the authorization policy")
+    )
     expect(
-      [...host.querySelectorAll("li")]
-        .find(({ textContent }) => textContent?.includes("Centralize the authorization policy"))
-        ?.querySelector("button")
-    ).toBeNull()
+      [...(resolvedSuggestion?.querySelectorAll("button") ?? [])].some(
+        ({ textContent }) => textContent === "Post comment"
+      )
+    ).toBe(false)
   })
 
   it("offers publication for a draft file suggestion", async () => {
@@ -884,6 +954,27 @@ describe("PullRequestReviewPanel", () => {
         })
       }
     }
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      ...REVISION_TRANSPORT,
+      load: (...args) =>
+        REVISION_TRANSPORT.load(...args).then((page) => ({
+          ...page,
+          current: {
+            ...page.current,
+            suggestion: {
+              ...page.current.suggestion,
+              state: "draft"
+            }
+          },
+          revisions: page.revisions.map((revision) => ({
+            ...revision,
+            suggestion: {
+              ...revision.suggestion,
+              state: "draft"
+            }
+          }))
+        }))
+    }
     const host = document.createElement("div")
     document.body.append(host)
     root = createRoot(host)
@@ -898,6 +989,7 @@ describe("PullRequestReviewPanel", () => {
           onRetry={() => undefined}
           onStart={() => undefined}
           publication={{ _tag: "idle" }}
+          revisionTransport={revisionTransport}
           state={{ ...REVIEW_STATE, review: fileDraftReview }}
         />
       )

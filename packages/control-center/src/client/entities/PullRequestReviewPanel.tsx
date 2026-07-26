@@ -6,7 +6,9 @@ import {
   type DurableAgentPrompt,
   type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
-import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
+import { ReviewNotes } from "./ReviewSuggestionPresentation.js"
+import { VersionedReviewSuggestionCard } from "./VersionedReviewSuggestionCard.js"
+import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import type {
   PullRequestReviewControllerState,
   PullRequestReviewPublicationState,
@@ -95,6 +97,7 @@ export const PullRequestReviewPanel = ({
   onRetry,
   onStart,
   publication,
+  revisionTransport,
   state
 }: {
   readonly canEnqueue: boolean
@@ -105,6 +108,7 @@ export const PullRequestReviewPanel = ({
   readonly onRetry: () => void
   readonly onStart: (prompt?: DurableAgentPrompt) => void
   readonly publication: PullRequestReviewPublicationState
+  readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly state: PullRequestReviewControllerState
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
@@ -370,13 +374,16 @@ export const PullRequestReviewPanel = ({
           <ol className={styles.reviewFindings}>
             {review.report.suggestions.map((suggestion) => (
               <li key={suggestion.suggestionId}>
-                <ReviewSuggestionCard
-                  canPublish={canEnqueue}
+                <VersionedReviewSuggestionCard
+                  canEdit={canEnqueue}
+                  entityId={state.entityId}
                   isPreviewing={
                     publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
                   }
                   jobId={review.jobId}
                   onPreviewPublication={onPreviewPublication}
+                  {...(revisionTransport === undefined ? {} : { revisionTransport })}
+                  sessionKey={state.sessionKey}
                   suggestion={suggestion}
                 />
               </li>

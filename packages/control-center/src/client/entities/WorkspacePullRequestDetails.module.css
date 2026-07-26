@@ -347,11 +347,148 @@
     var(--rly-type-meta-font);
 }
 
+.suggestionRevisionMeta {
+  align-items: center;
+  border-block: 1px solid var(--rly-color-border-1);
+  color: var(--rly-color-text-2);
+  display: flex;
+  flex-wrap: wrap;
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  gap: var(--rly-space-8) var(--rly-space-16);
+  padding-block: var(--rly-space-8);
+}
+
+.suggestionRevisionMeta strong {
+  color: var(--rly-color-text-1);
+}
+
+.suggestionRevisionMeta[data-validation="requires-revalidation"] {
+  border-block-color: var(--rly-color-held-ink);
+}
+
+.suggestionActions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
 .severity {
   background: var(--rly-color-surface-3);
   border-radius: var(--rly-radius-field);
   padding: var(--rly-space-4) var(--rly-space-8);
   text-transform: uppercase;
+}
+
+.revisionDialog {
+  max-block-size: min(52rem, calc(100dvh - var(--rly-space-32)));
+}
+
+.revisionEditor,
+.revisionHistory {
+  display: grid;
+  gap: var(--rly-space-20);
+}
+
+.revisionEditor label {
+  display: grid;
+  gap: var(--rly-space-8);
+}
+
+.revisionEditor label > span,
+.revisionAdvanced summary {
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.revisionEditor input,
+.revisionEditor select,
+.revisionEditor textarea {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  color: var(--rly-color-text-1);
+  font: inherit;
+  inline-size: 100%;
+  padding: var(--rly-space-12);
+}
+
+.revisionEditor input:focus-visible,
+.revisionEditor select:focus-visible,
+.revisionEditor textarea:focus-visible {
+  border-color: var(--rly-color-focus);
+  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
+  outline-offset: var(--rly-space-2);
+}
+
+.revisionEditor textarea {
+  resize: vertical;
+}
+
+.revisionEditorLead {
+  display: grid;
+  gap: var(--rly-space-12);
+  grid-template-columns: minmax(var(--rly-space-0), 1fr) 7rem 9rem;
+}
+
+.revisionAdvanced {
+  border-block: 1px solid var(--rly-color-border-1);
+  display: grid;
+  gap: var(--rly-space-12);
+  padding-block: var(--rly-space-16);
+}
+
+.revisionAdvanced textarea {
+  font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+    var(--rly-type-code-font);
+}
+
+.revisionDialogActions {
+  display: flex;
+  gap: var(--rly-space-8);
+  justify-content: end;
+}
+
+.revisionHistory ol {
+  display: grid;
+  gap: var(--rly-space-8);
+  list-style: none;
+  margin: var(--rly-space-0);
+  padding: var(--rly-space-0);
+}
+
+.revisionHistory li {
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  display: grid;
+  gap: var(--rly-space-8);
+  padding: var(--rly-space-16);
+}
+
+.revisionHistory li > header {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8) var(--rly-space-16);
+  justify-content: space-between;
+}
+
+.revisionHistory li > header span,
+.revisionHistory time {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.revisionHistory dl {
+  display: grid;
+  gap: var(--rly-space-4);
+  margin: var(--rly-space-12) var(--rly-space-0) var(--rly-space-0);
+}
+
+.revisionHistory dd {
+  margin: var(--rly-space-0) var(--rly-space-0) var(--rly-space-8);
 }
 
 .suggestionDetails {
@@ -706,7 +843,8 @@
   }
 
   .reviewLaunchFacts > div,
-  .reviewLaunchActions {
+  .reviewLaunchActions,
+  .revisionEditorLead {
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
   }
 
