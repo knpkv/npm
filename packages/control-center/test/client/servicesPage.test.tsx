@@ -549,10 +549,7 @@ describe("ServicesPage connection tests", () => {
     expect(resources).toHaveLength(2)
     expect(resources.every(({ open }) => !open)).toBe(true)
     expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining("payments"),
-        expect.stringContaining("payments-release")
-      ])
+      expect.arrayContaining([expect.stringContaining("payments"), expect.stringContaining("payments-release")])
     )
     expect(resources.every((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))).toBe(
       true

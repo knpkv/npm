@@ -113,14 +113,8 @@ export const ProviderAccountCard = ({
         const needsAttention = status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
         if (connection === undefined) {
           return (
-            <div
-              className={styles.resource}
-              data-status-tone={status.tone}
-              key={resource.followedResourceId}
-            >
-              <div className={styles.resourceSummary}>
-                {resourceSummaryContent(resource, status, false)}
-              </div>
+            <div className={styles.resource} data-status-tone={status.tone} key={resource.followedResourceId}>
+              <div className={styles.resourceSummary}>{resourceSummaryContent(resource, status, false)}</div>
             </div>
           )
         }
@@ -131,9 +125,7 @@ export const ProviderAccountCard = ({
             key={resource.followedResourceId}
             open={needsAttention ? true : undefined}
           >
-            <summary className={styles.resourceSummary}>
-              {resourceSummaryContent(resource, status, true)}
-            </summary>
+            <summary className={styles.resourceSummary}>{resourceSummaryContent(resource, status, true)}</summary>
             <div className={styles.resourceBody}>
               <ConnectionTestEvidence state={testState} />
               <ConnectionSynchronization
