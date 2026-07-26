@@ -14,6 +14,7 @@ import {
 import {
   AgentModelId,
   DurableAgentProviderId,
+  type DurableAgentPrompt,
   PullRequestReviewNotStarted,
   PullRequestReviewState,
   ReviewAgentProfileId
@@ -772,7 +773,7 @@ afterEach(async () => {
 const renderView = async (
   onAskAgent: () => void,
   viewState: WorkspaceEntityState = state,
-  onReviewStart: () => void = () => undefined,
+  onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
   reviewState: PullRequestReviewControllerState = pullRequestReviewState
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
@@ -1359,15 +1360,15 @@ describe("canonical workspace entity", () => {
     )
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
-    expect(host.textContent).toContain("Launch full-project review")
+    expect(host.textContent).toContain("Review this exact head")
     expect(host.textContent).toContain(pullRequestReviewSubject.headRevision)
     expect(host.textContent).toContain("Full-project review · openai-compatible · review-model")
     expect(host.textContent).toContain("20 minutes")
-    expect(host.textContent).toContain("Blocked")
+    expect(host.textContent).toContain("Network blocked")
     expect(host.textContent).toContain("sbx")
     expect(onReviewStart).not.toHaveBeenCalled()
     const startButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Start review"
+      (button) => button.textContent === "Start full review"
     )
     if (startButton === undefined) throw new Error("Expected review confirmation")
     await act(async () => startButton.click())

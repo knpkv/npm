@@ -10,6 +10,7 @@ import {
   DurableAgentProviderId,
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   PublishedReviewComment,
+  PullRequestReviewFailed,
   PullRequestReviewPending,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
@@ -273,6 +274,17 @@ const PENDING_REVIEW = new PullRequestReviewPending({
   requestedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
   state: "queued"
 })
+const FAILED_REVIEW = new PullRequestReviewFailed({
+  subject: SUBJECT,
+  jobId: JOB_ID,
+  providerId: DurableAgentProviderId.make("openai-compatible"),
+  model: AgentModelId.make("review-model"),
+  reviewProfile: REVIEW_PROFILE,
+  activity: { events: [], truncated: false },
+  requestedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
+  completedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:01:00.000Z"),
+  state: "failed"
+})
 
 const REVIEW_THREAD_PAGE = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
   events: [
@@ -387,11 +399,13 @@ describe("PullRequestReviewPanel", () => {
       valueSetter.call(textarea, "Re-check the transaction boundary.")
       textarea.dispatchEvent(new Event("input", { bubbles: true }))
     })
-    const start = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Start targeted review"
+    expect(host.textContent).toContain("Ctrl/⌘ + Enter to run")
+    expect(host.textContent).toContain(
+      `${String("Re-check the transaction boundary.".length)} / ${String(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)}`
     )
-    if (start === undefined) throw new Error("Expected targeted review action")
-    await act(async () => start.click())
+    await act(async () =>
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
+    )
 
     expect(onStart).toHaveBeenCalledWith("Re-check the transaction boundary.")
     expect(textarea.value).toBe("Re-check the transaction boundary.")
@@ -565,6 +579,9 @@ describe("PullRequestReviewPanel", () => {
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
       "Keep this request after failure."
     )
+    expect(host.querySelector("[role=alert]")?.textContent).toContain(
+      "Targeted review did not start. Your request is still here"
+    )
   })
 
   it("preserves a draft within one immutable head and clears it when the reviewed head changes", async () => {
@@ -652,6 +669,83 @@ describe("PullRequestReviewPanel", () => {
 
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
     expect(host.querySelector("[role=dialog]")).toBeNull()
+  })
+
+  it("keeps full-review confirmation modal, keyboard-safe, and returns focus on dismissal", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={REFRESHED_NOT_STARTED_STATE}
+        />
+      )
+    )
+    const launch = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Review exact head"
+    )
+    if (launch === undefined) throw new Error("Expected review launch action")
+    launch.focus()
+    await act(async () => launch.click())
+
+    const dialog = host.querySelector<HTMLDivElement>("[role=dialog]")
+    if (dialog === null) throw new Error("Expected review launch dialog")
+    expect(dialog.getAttribute("aria-modal")).toBe("true")
+    expect(dialog.getAttribute("aria-describedby")).toBe("review-launch-description")
+    expect(document.activeElement).toBe(dialog)
+    expect(dialog.textContent).toContain("It cannot approve or change the pull request.")
+
+    await act(async () => dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
+
+    expect(host.querySelector("[role=dialog]")).toBeNull()
+    expect(document.activeElement).toBe(launch)
+  })
+
+  it("describes a failed full-review retry without mislabeling it as targeted", async () => {
+    const onStart = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (action: "failed" | "idle") =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, action, review: FAILED_REVIEW }}
+        />
+      )
+
+    await act(async () => render("idle"))
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Try again"
+    )
+    if (retry === undefined) throw new Error("Expected full-review retry action")
+    await act(async () => retry.click())
+    const start = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Start full review"
+    )
+    if (start === undefined) throw new Error("Expected full-review confirmation")
+    await act(async () => start.click())
+    expect(onStart).toHaveBeenCalledWith()
+
+    await act(async () => render("failed"))
+
+    expect(host.querySelector("[role=alert]")?.textContent).toContain("A new full review could not be started")
+    expect(host.textContent).not.toContain("Targeted review did not start")
   })
 
   it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {
