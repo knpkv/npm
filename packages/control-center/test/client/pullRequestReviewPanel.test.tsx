@@ -119,7 +119,7 @@ const REVIEW_STATE = {
     completedAt: "2026-07-24T15:04:00.000Z",
     outcome: "changes-required",
     report: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: SUBJECT,
       completion: { status: "complete" },
       suggestions: [

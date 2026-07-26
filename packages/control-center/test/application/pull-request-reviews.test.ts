@@ -179,7 +179,7 @@ const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const reviewReport = Schema.decodeSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject: {
     providerId: "codecommit",
     repository: "control-center",

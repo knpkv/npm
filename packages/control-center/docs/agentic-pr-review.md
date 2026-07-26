@@ -108,7 +108,8 @@ file has no added hunk. Suggestion state is host-owned and filterable; models
 cannot author it. Repeated occurrences are stored as Related Locations under
 one root cause. Suggested Replacements carry the exact reviewed head, a unified
 diff, and an explanation. Review Notes have independent host-derived identities
-and are never accepted by the publication boundary.
+and are never accepted by the publication boundary. This is report schema v3;
+pre-stable v2 reports are intentionally not migrated.
 
 ### Confidence
 

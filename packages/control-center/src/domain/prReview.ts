@@ -398,7 +398,7 @@ const hasMaximumReportBytes = Schema.makeFilter(
  * only aggregate storage bound.
  */
 export const PrReviewReport = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(3),
   subject: PrReviewSubject,
   completion: PrReviewCompletion,
   suggestions: Schema.Array(PrReviewSuggestion).check(

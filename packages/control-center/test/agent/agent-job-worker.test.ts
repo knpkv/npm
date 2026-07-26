@@ -73,7 +73,7 @@ const reviewProfile: ReviewAgentProfile = {
 }
 
 const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject: reviewSubject,
   completion: { status: "complete" },
   suggestions: [

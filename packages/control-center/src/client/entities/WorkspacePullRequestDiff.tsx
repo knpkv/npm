@@ -483,7 +483,7 @@ export const WorkspacePullRequestDiff = ({
       {unattachedSuggestionCount === 0 ? null : (
         <p role="status">
           {unattachedSuggestionCount} validated review{" "}
-          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the evidence path
+          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the anchor path
           is absent from this diff inventory.
         </p>
       )}

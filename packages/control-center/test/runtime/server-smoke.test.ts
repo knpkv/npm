@@ -838,7 +838,7 @@ describe("Control Center closed runtime", () => {
       const evidencePath = "packages/control-center/src/review.ts"
       const evidenceExcerpt = "const unsafe = true"
       const output = JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: [{
           title: "Disable unsafe review behavior",

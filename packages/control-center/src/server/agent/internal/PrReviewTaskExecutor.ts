@@ -49,7 +49,7 @@ import {
 } from "./PrReviewSandboxSession.js"
 
 const ModelReviewReport = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(3),
   completion: PrReviewCompletion,
   suggestions: Schema.Array(PrReviewSuggestionDraft),
   notes: Schema.Array(PrReviewNoteDraft)
@@ -200,7 +200,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   }
   if (suggestion.replacement !== undefined) {
     const replacementCheck = yield* session.runCommand(
-      `printf '%s' ${shellQuote(suggestion.replacement.unifiedDiff)} | git apply --check --recount -`
+      `printf '%s\\n' ${shellQuote(suggestion.replacement.unifiedDiff)} | git apply --check --recount -`
     ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
     if (replacementCheck.exitCode !== 0) {
       return yield* providerFailure(
@@ -367,7 +367,7 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     notes.push({ ...note, noteId })
   }
   return yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
-    schemaVersion: 2,
+    schemaVersion: 3,
     subject,
     completion: modelReport.completion,
     suggestions,

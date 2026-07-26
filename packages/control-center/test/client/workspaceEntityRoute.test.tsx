@@ -686,7 +686,7 @@ const completedPullRequestReviewState = {
     completedAt: "2026-07-14T10:01:00.000Z",
     outcome: "changes-required",
     report: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: pullRequestReviewSubject,
       completion: { status: "complete" },
       suggestions: [

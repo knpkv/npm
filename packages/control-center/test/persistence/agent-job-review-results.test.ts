@@ -56,7 +56,7 @@ const swappedSubject = {
 } satisfies PrReviewSubject
 
 const report = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject,
   completion: { status: "complete" },
   suggestions: [

@@ -60,7 +60,7 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
 })
 
 const report = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject,
   completion: { status: "complete" },
   suggestions: [suggestion],
@@ -68,6 +68,17 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
 })
 
 describe("PR review domain", () => {
+  it("rejects pre-stable schema v2 reports instead of guessing a migration", () => {
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PrReviewReport)({
+          ...report,
+          schemaVersion: 2
+        })
+      )
+    )
+  })
+
   it("retains suggestion scope, grouped locations, exact replacement patches, and non-publishable notes", () => {
     const richSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
       ...suggestion,

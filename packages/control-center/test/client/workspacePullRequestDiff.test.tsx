@@ -148,16 +148,25 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("src/other.ts:8")
     expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
 
+    const p1Filter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P1 severity']")
+    const allSeverityFilter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by all severity']")
+    const resolvedStateFilter = host.querySelector<HTMLButtonElement>(
+      "[aria-label='Filter suggestions by resolved state']"
+    )
+    if (p1Filter === null || allSeverityFilter === null || resolvedStateFilter === null) {
+      throw new Error("Expected review suggestion filters.")
+    }
+
     await act(async () => {
-      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P1 severity']")?.click()
+      p1Filter.click()
     })
     expect(host.textContent).toContain("Document the compatibility break")
     expect(host.textContent).not.toContain("Keep one invariant per file")
     expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
 
     await act(async () => {
-      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by all severity']")?.click()
-      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by resolved state']")?.click()
+      allSeverityFilter.click()
+      resolvedStateFilter.click()
     })
     expect(host.textContent).toContain("Keep one invariant per file")
     expect(host.textContent).not.toContain("Document the compatibility break")
@@ -456,7 +465,7 @@ describe("WorkspacePullRequestDiff", () => {
     })
 
     expect(host.querySelector("[role='status']")?.textContent).toContain(
-      "1 validated review suggestion is not attached"
+      "1 validated review suggestion is not attached because the anchor path is absent from this diff inventory."
     )
     expect(host.textContent).toContain("P2 · Keep the supported invariant")
   })

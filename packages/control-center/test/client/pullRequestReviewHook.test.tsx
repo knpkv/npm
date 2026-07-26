@@ -72,7 +72,7 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
     completedAt: "2026-07-24T15:04:00.000Z",
     outcome: "changes-required",
     report: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: {
         providerId: "codecommit",
         repository: "control-center",

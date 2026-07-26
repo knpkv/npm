@@ -155,7 +155,7 @@ const response = (
 ]
 
 const completeScript = (report: unknown = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   completion: { status: "complete" },
   suggestions: [suggestion],
   notes: []
@@ -254,6 +254,11 @@ const makeSessionLayer = (
         if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
           return output(`${sourceExcerpt}\n`)
         }
+        if (command.startsWith("printf ")) {
+          return command.startsWith("printf '%s\\n' ")
+            ? output()
+            : output("", 1)
+        }
         return command.startsWith("git show ")
           ? output("# Review instructions\n")
           : output("1 file changed\n")
@@ -331,7 +336,7 @@ describe("PR review task executor", () => {
     }
     return runExecutor(
       completeScript({
-        schemaVersion: 2,
+        schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: [{
           ...suggestion,
@@ -344,7 +349,18 @@ describe("PR review task executor", () => {
             startLine: 8,
             endLine: 8,
             label: "Same root cause"
-          }]
+          }],
+          replacement: {
+            reviewedHead: HEAD_REVISION,
+            unifiedDiff: [
+              `--- a/${EVIDENCE_PATH}`,
+              `+++ b/${EVIDENCE_PATH}`,
+              "@@ -42,1 +42,1 @@",
+              `-${EVIDENCE_EXCERPT}`,
+              "+const unsafe = false"
+            ].join("\n"),
+            explanation: "Use the validated value."
+          }
         }],
         notes: [{
           reason: "low-confidence",
@@ -376,6 +392,10 @@ describe("PR review task executor", () => {
           }
           assert.strictEqual(result.suggestions[0]?.state, "draft")
           assert.strictEqual(result.suggestions[0]?.relatedLocations.length, 1)
+          assert.strictEqual(result.suggestions[0]?.replacement?.reviewedHead, HEAD_REVISION)
+          assert.isTrue(
+            observation.commands.some((command) => command.startsWith("printf '%s\\n' "))
+          )
           assert.match(result.notes[0]?.noteId ?? "", /^sha256:[0-9a-f]{64}$/u)
           assert.strictEqual(result.notes[0]?.reason, "low-confidence")
         })
@@ -407,7 +427,7 @@ describe("PR review task executor", () => {
     ).pipe(
       Effect.tap(({ fake, result }) =>
         Effect.sync(() => {
-          assert.strictEqual(result.schemaVersion, 2)
+          assert.strictEqual(result.schemaVersion, 3)
           assert.strictEqual(result.completion.status, "complete")
           assert.strictEqual(result.suggestions.length, 1)
           assert.match(
@@ -481,7 +501,7 @@ describe("PR review task executor", () => {
     const activity = new Array<AgentRuntimeEvent>()
     return runExecutor(
       completeScript({
-        schemaVersion: 2,
+        schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: [
           suggestion,
@@ -593,7 +613,7 @@ describe("PR review task executor", () => {
     }
     return runExecutor(
       completeScript({
-        schemaVersion: 2,
+        schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: Array.from({ length: 80 }, () => suggestion),
         notes: []
@@ -629,7 +649,7 @@ describe("PR review task executor", () => {
     }
     return runExecutor(
       completeScript({
-        schemaVersion: 2,
+        schemaVersion: 3,
         completion: {
           status: "unable-to-conclude",
           reason: "The project build dependency was unavailable."
