@@ -115,11 +115,19 @@ export const installNewestThread = (
       target.current !== null &&
       candidate.nextCursor < target.current.nextCursor
     ) return target.current
+    const overlapsRetainedWindow = target.current !== null &&
+      candidate.replacesRetainedWindow === true &&
+      candidate.events.some((candidateEvent) =>
+        target.current?.events.some(
+          (retainedEvent) => retainedEvent.eventSequence === candidateEvent.eventSequence
+        )
+      )
     target.current = target.current === null ||
         candidateGeneration > retainedGeneration ||
         (
           candidate.replacesRetainedWindow === true &&
-          candidate.nextCursor > target.current.nextCursor
+          candidate.nextCursor > target.current.nextCursor &&
+          !overlapsRetainedWindow
         )
       ? versionedCandidate
       : mergePullRequestReviewThreads(target.current, retainedCandidate)

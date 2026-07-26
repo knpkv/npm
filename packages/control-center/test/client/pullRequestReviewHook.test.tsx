@@ -674,6 +674,18 @@ describe("usePullRequestReview", () => {
     installNewestThread(
       target,
       {
+        events: [threadEvent(100)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(100),
+        replayGeneration: 1,
+        replacesRetainedWindow: true
+      },
+      signal
+    )
+    installNewestThread(
+      target,
+      {
         events: [threadEvent(200)],
         hasEarlier: true,
         historyLoaded: false,
@@ -700,6 +712,40 @@ describe("usePullRequestReview", () => {
     expect(target.current).toMatchObject({
       hasEarlier: true,
       nextCursor: ReleaseAgentThreadCursor.make(200),
+      replayGeneration: 1
+    })
+  })
+
+  it("preserves loaded history when a newer replacement tail overlaps it", () => {
+    const signal = new AbortController().signal
+    const target: { current: PullRequestReviewThread | null } = {
+      current: {
+        events: [threadEvent(99), threadEvent(100)],
+        hasEarlier: true,
+        historyLoaded: true,
+        nextCursor: ReleaseAgentThreadCursor.make(100),
+        replayGeneration: 1
+      }
+    }
+
+    installNewestThread(
+      target,
+      {
+        events: [threadEvent(100), threadEvent(101)],
+        hasEarlier: true,
+        historyLoaded: false,
+        nextCursor: ReleaseAgentThreadCursor.make(101),
+        replayGeneration: 1,
+        replacesRetainedWindow: true
+      },
+      signal
+    )
+
+    expect(target.current?.events.map(({ eventSequence }) => eventSequence)).toEqual([99, 100, 101])
+    expect(target.current).toMatchObject({
+      hasEarlier: true,
+      historyLoaded: true,
+      nextCursor: ReleaseAgentThreadCursor.make(101),
       replayGeneration: 1
     })
   })
