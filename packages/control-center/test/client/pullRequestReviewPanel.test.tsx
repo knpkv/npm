@@ -10,6 +10,7 @@ import {
   DurableAgentProviderId,
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   PublishedReviewComment,
+  PullRequestReviewPending,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
   PullRequestReviewUnavailable,
@@ -261,6 +262,16 @@ const REVIEW_STATE = {
     }
   })
 } satisfies PullRequestReviewControllerState
+const PENDING_REVIEW = new PullRequestReviewPending({
+  subject: SUBJECT,
+  jobId: JOB_ID,
+  providerId: DurableAgentProviderId.make("openai-compatible"),
+  model: AgentModelId.make("review-model"),
+  reviewProfile: REVIEW_PROFILE,
+  activity: { events: [], truncated: false },
+  requestedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
+  state: "queued"
+})
 
 const REVIEW_THREAD = Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
   events: [
@@ -364,7 +375,74 @@ describe("PullRequestReviewPanel", () => {
     await act(async () => start.click())
 
     expect(onStart).toHaveBeenCalledWith("Re-check the transaction boundary.")
-    expect(textarea.value).toBe("")
+    expect(textarea.value).toBe("Re-check the transaction boundary.")
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: PENDING_REVIEW, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, thread: REVIEW_THREAD }}
+        />
+      )
+    )
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
+  })
+
+  it("retains a targeted request when enqueue fails", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (state: PullRequestReviewControllerState) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+    await act(async () => render({ ...REVIEW_STATE, thread: REVIEW_THREAD }))
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+      valueSetter.call(textarea, "Keep this request after failure.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const start = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Start targeted review"
+    )
+    if (start === undefined) throw new Error("Expected targeted review action")
+    await act(async () => start.click())
+    await act(async () => render({ ...REVIEW_STATE, action: "failed", thread: REVIEW_THREAD }))
+
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
+      "Keep this request after failure."
+    )
   })
 
   it("preserves a draft within one immutable head and clears it when the reviewed head changes", async () => {

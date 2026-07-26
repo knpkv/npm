@@ -89,7 +89,7 @@ export interface PullRequestReviewTransport {
   readonly load: (entityId: EntityId, signal: AbortSignal) => Promise<PullRequestReviewState>
   readonly loadThread: (
     entityId: EntityId,
-    after: ReleaseAgentThreadCursor,
+    after: ReleaseAgentThreadCursor | null,
     signal: AbortSignal
   ) => Promise<PullRequestReviewThreadPage>
   readonly previewPublication: (
@@ -178,7 +178,6 @@ export const usePullRequestReview = (
   const publicationAbort = useRef<AbortController | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
   const latestThread = useRef<PullRequestReviewThread | null>(null)
-  const recheckTerminalThread = useRef(false)
   const scope = useMemo(
     () =>
       sessionKey === null || headRevision === null
@@ -189,7 +188,6 @@ export const usePullRequestReview = (
   useLayoutEffect(() => {
     latestScope.current = scope
     latestThread.current = null
-    recheckTerminalThread.current = false
   }, [scope])
 
   useEffect(() => {
@@ -199,8 +197,6 @@ export const usePullRequestReview = (
     }
     const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
     const previousThread = latestThread.current ?? undefined
-    const recheckTerminalTail = recheckTerminalThread.current
-    recheckTerminalThread.current = false
     const abort = new AbortController()
     setState({ _tag: "loading", ...scope })
     pullRequestReviewBrowser.then(
@@ -211,7 +207,6 @@ export const usePullRequestReview = (
           canEnqueue,
           abort.signal,
           previousThread,
-          recheckTerminalTail,
           latestThread
         )
     ).then(
@@ -254,10 +249,7 @@ export const usePullRequestReview = (
     const abort = new AbortController()
     Effect.runPromise(Effect.sleep("2 seconds"), { signal: abort.signal }).then(
       () => {
-        if (!abort.signal.aborted) {
-          recheckTerminalThread.current = true
-          setRequestRevision((revision) => revision + 1)
-        }
+        if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
       },
       (_failure: unknown) => {
         if (!abort.signal.aborted) {

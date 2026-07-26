@@ -365,7 +365,7 @@ describe("usePullRequestReview", () => {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
       load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
       loadThread: vi.fn((_entityId, after) => {
-        if (after === 0) return Promise.resolve(firstPage)
+        if (after === null) return Promise.resolve(firstPage)
         if (after === 128) {
           tailRequested.resolve()
           return Promise.resolve(tailPage)
@@ -392,6 +392,50 @@ describe("usePullRequestReview", () => {
     )
   })
 
+  it("falls back to a bounded tail window when replay advances past the page budget", async () => {
+    let reads = 0
+    const tailEvent = threadEvent(16_385)
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
+      loadThread: vi.fn((_entityId, after) => {
+        reads += 1
+        if (reads <= 128) {
+          const firstSequence = (reads - 1) * 128 + 1
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: Array.from({ length: 128 }, (_, index) => threadEvent(firstSequence + index)),
+              hasMore: true,
+              nextCursor: ReleaseAgentThreadCursor.make(reads * 128)
+            })
+          )
+        }
+        if (after !== null) {
+          return Promise.reject(new Error("Expected bounded tail fallback"))
+        }
+        return Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events: [tailEvent],
+            hasMore: false,
+            nextCursor: tailEvent.eventSequence
+          })
+        )
+      }),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.resolve({ providers: [] }),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
+    expect(transport.loadThread).toHaveBeenCalledTimes(129)
+    expect(transport.loadThread).toHaveBeenLastCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
+  })
+
   it("polls pending reviews from the loaded cursor and appends only new thread events", async () => {
     vi.useFakeTimers()
     const firstPage = PullRequestReviewThreadPage.make({
@@ -408,7 +452,7 @@ describe("usePullRequestReview", () => {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
       load: vi.fn(() => Promise.resolve(pendingReviewFor(BASE_A, HEAD_A))),
       loadThread: vi.fn((_entityId, after) =>
-        after === 0
+        after === null
           ? Promise.resolve(firstPage)
           : after === 1
             ? Promise.resolve(nextPage)
@@ -457,7 +501,7 @@ describe("usePullRequestReview", () => {
     await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
 
     expect(host.querySelector("[data-thread]")?.textContent).toBe("failed")
-    expect(transport.loadThread).toHaveBeenCalledOnce()
+    expect(transport.loadThread).toHaveBeenCalledTimes(2)
   })
 
   it("loads the durable thread and forwards a targeted request to enqueue", async () => {
@@ -501,11 +545,7 @@ describe("usePullRequestReview", () => {
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
     await act(async () => host.querySelector<HTMLButtonElement>("[data-start]")?.click())
 
-    expect(transport.loadThread).toHaveBeenCalledWith(
-      ENTITY_ID,
-      ReleaseAgentThreadCursor.make(0),
-      expect.any(AbortSignal)
-    )
+    expect(transport.loadThread).toHaveBeenCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
     expect(transport.enqueue).toHaveBeenCalledWith(
       ENTITY_ID,
       expect.objectContaining({ reviewProfile: REVIEW_PROFILE }),
@@ -628,7 +668,7 @@ describe("usePullRequestReview", () => {
       load: vi.fn(() => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
       loadThread: vi.fn((_entityId, _after) => {
         threadReads += 1
-        return threadReads === 1
+        return threadReads <= 2
           ? Promise.resolve(EMPTY_THREAD)
           : Promise.resolve(
               PullRequestReviewThreadPage.make({
@@ -651,7 +691,7 @@ describe("usePullRequestReview", () => {
     await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
 
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
-    expect(transport.loadThread).toHaveBeenCalledTimes(2)
+    expect(transport.loadThread).toHaveBeenCalledTimes(3)
   })
 
   it("refreshes the active stable thread when publication finishes after the head changes", async () => {
@@ -675,9 +715,9 @@ describe("usePullRequestReview", () => {
       }),
       loadThread: vi.fn(() => {
         threadReads += 1
-        if (threadReads === 2) headBLoaded.resolve()
+        if (threadReads === 4) headBLoaded.resolve()
         return Promise.resolve(
-          threadReads < 3
+          threadReads < 5
             ? EMPTY_THREAD
             : PullRequestReviewThreadPage.make({
                 events: [publishedEvent],
@@ -705,7 +745,7 @@ describe("usePullRequestReview", () => {
 
     expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
-    expect(transport.loadThread).toHaveBeenCalledTimes(3)
+    expect(transport.loadThread).toHaveBeenCalledTimes(5)
   })
 
   it("does not let an older scope load overwrite a newer publication refresh", async () => {
@@ -714,6 +754,7 @@ describe("usePullRequestReview", () => {
     const staleThread = deferred<PullRequestReviewThreadPage>()
     const staleThreadRequested = deferred<void>()
     const refreshedThread = deferred<void>()
+    let reviewReads = 0
     let threadReads = 0
     const publishedEvent: PullRequestReviewThreadEvent = {
       _tag: "suggestion-published",
@@ -724,11 +765,14 @@ describe("usePullRequestReview", () => {
     }
     const transport = {
       enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
-      load: vi.fn(() => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      load: vi.fn(() => {
+        reviewReads += 1
+        return Promise.resolve(reviewReads === 1 ? completedReviewFor(BASE_A, HEAD_A) : reviewFor(BASE_A, HEAD_A))
+      }),
       loadThread: vi.fn(() => {
         threadReads += 1
-        if (threadReads === 1) return Promise.resolve(EMPTY_THREAD)
-        if (threadReads === 2) {
+        if (threadReads <= 2) return Promise.resolve(EMPTY_THREAD)
+        if (threadReads === 3) {
           staleThreadRequested.resolve()
           return staleThread.promise
         }
@@ -753,10 +797,10 @@ describe("usePullRequestReview", () => {
     await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
     await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
     await act(async () => host.querySelector<HTMLButtonElement>("[data-retry]")?.click())
-    await staleThreadRequested.promise
+    await act(async () => staleThreadRequested.promise)
 
     await act(async () => publication.resolve(published))
-    await refreshedThread.promise
+    await act(async () => refreshedThread.promise)
     await act(async () =>
       staleThread.resolve(
         PullRequestReviewThreadPage.make({
@@ -768,7 +812,7 @@ describe("usePullRequestReview", () => {
     )
 
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
-    expect(transport.loadThread).toHaveBeenCalledTimes(3)
+    expect(transport.loadThread).toHaveBeenCalledTimes(4)
   })
 
   it("rechecks the durable tail after a pending poll observes terminal review state", async () => {
@@ -832,6 +876,54 @@ describe("usePullRequestReview", () => {
     )
   })
 
+  it("rechecks the durable tail when the initial snapshot is already terminal", async () => {
+    let threadReads = 0
+    const terminalEvent: PullRequestReviewThreadEvent = {
+      _tag: "run-completed",
+      eventSequence: ReleaseAgentThreadCursor.make(2),
+      jobId: JOB_ID,
+      occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:05:00.000Z"),
+      outcome: "success"
+    }
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: () => Promise.resolve(completedReviewFor(BASE_A, HEAD_A)),
+      loadThread: vi.fn((_entityId, _after) => {
+        threadReads += 1
+        return Promise.resolve(
+          threadReads === 1
+            ? PullRequestReviewThreadPage.make({
+                events: [threadEvent(1)],
+                hasMore: false,
+                nextCursor: ReleaseAgentThreadCursor.make(1)
+              })
+            : PullRequestReviewThreadPage.make({
+                events: [terminalEvent],
+                hasMore: false,
+                nextCursor: ReleaseAgentThreadCursor.make(2)
+              })
+        )
+      }),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: () => Promise.resolve({ providers: [] }),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("2")
+    expect(transport.loadThread).toHaveBeenNthCalledWith(1, ENTITY_ID, null, expect.any(AbortSignal))
+    expect(transport.loadThread).toHaveBeenNthCalledWith(
+      2,
+      ENTITY_ID,
+      ReleaseAgentThreadCursor.make(1),
+      expect.any(AbortSignal)
+    )
+  })
+
   it("does not refresh the durable thread when publication fails", async () => {
     const { preview } = makePublicationFixture(HEAD_A)
     const transport = {
@@ -852,7 +944,7 @@ describe("usePullRequestReview", () => {
 
     expect(host.querySelector("[data-publication]")?.textContent).toBe("failed")
     expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
-    expect(transport.loadThread).toHaveBeenCalledOnce()
+    expect(transport.loadThread).toHaveBeenCalledTimes(2)
   })
 
   it("never presents a prior immutable head while the refreshed head loads", async () => {

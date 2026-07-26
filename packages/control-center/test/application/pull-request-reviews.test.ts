@@ -289,6 +289,15 @@ const completedReview = Schema.decodeSync(LatestAgentReviewRecord)({
   reviewProfile: REVIEW_PROFILE,
   activity: { events: [], truncated: false }
 })
+const FOLLOW_UP_REVIEW_JOB_ID = JobId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000099"
+)
+const failedFollowUpReview = Schema.decodeSync(LatestAgentReviewRecord)({
+  ...Schema.encodeSync(LatestAgentReviewRecord)(completedReview),
+  jobId: FOLLOW_UP_REVIEW_JOB_ID,
+  state: "failed",
+  report: null
+})
 
 const completedReviewWithSuggestion = (
   overrides: Partial<typeof reviewReport.suggestions[number]>
@@ -410,7 +419,8 @@ const withService = <Success, Failure>(
     Effect.succeed({ _tag: "acquired" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined),
-  publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"]
+  publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"],
+  latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -427,7 +437,7 @@ const withService = <Success, Failure>(
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: () => Effect.succeed(latestReview),
+          latestReview: latestReviewOverride ?? (() => Effect.succeed(latestReview)),
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
@@ -651,6 +661,35 @@ describe("pull request reviews", () => {
         }),
       registry,
       Option.some(completedReview)
+    ))
+
+  it.effect("keeps an earlier same-head completed suggestion publishable after a failed follow-up", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.strictEqual(preview.jobId, REVIEW_JOB_ID)
+          assert.strictEqual(preview.suggestionId, SUGGESTION_ID)
+        }),
+      registry,
+      Option.some(failedFollowUpReview),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (input) =>
+        Effect.succeed(
+          input.jobId === REVIEW_JOB_ID
+            ? Option.some(completedReview)
+            : Option.some(failedFollowUpReview)
+        )
     ))
 
   it("rejects non-owner, expired, revoked, and cross-workspace publication sessions", () => {

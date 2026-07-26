@@ -383,15 +383,23 @@ const makePullRequestReviews = Effect.gen(function*() {
     jobId: JobId,
     suggestionId: string
   ) {
-    const latest = yield* currentFor(workspaceId, target)
-    if (latest._tag !== "completed" || latest.jobId !== jobId) {
+    const selected = yield* mapPersistenceRead(
+      persistence.agentJobs.latestReview({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject,
+        jobId
+      })
+    )
+    const review = yield* presentLatest(target, selected)
+    if (review._tag !== "completed" || review.jobId !== jobId) {
       return yield* new ApplicationInvalidRequest()
     }
-    const suggestion = latest.report.suggestions.find(
+    const suggestion = review.report.suggestions.find(
       (candidate) => candidate.suggestionId === suggestionId
     )
     if (suggestion === undefined) return yield* new ApplicationInvalidRequest()
-    return { latest, suggestion }
+    return { latest: review, suggestion }
   })
 
   const publicationTarget = (
@@ -495,14 +503,41 @@ const makePullRequestReviews = Effect.gen(function*() {
         return PullRequestReviewThreadPage.make({
           events: [],
           hasMore: false,
-          nextCursor: input.after
+          nextCursor: input.after ?? ReleaseAgentThreadCursor.make(0)
         })
+      }
+      const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(
+        input.limit
+      ).pipe(Effect.mapError(unavailable))
+      if (input.after === null) {
+        const tail = yield* mapPersistenceRead(
+          persistence.agentJobs.reviewThreadTail({
+            workspaceId: input.workspaceId,
+            pluginConnectionId: target.pluginConnectionId,
+            subject: target.subject,
+            limit
+          }).pipe(
+            Effect.catchTag(
+              "RecordNotFoundError",
+              () =>
+                Effect.succeed({
+                  events: [],
+                  nextCursor: AgentEventCursor.make(0)
+                })
+            )
+          )
+        )
+        const events = yield* Effect.forEach(tail.events, mapReviewThreadEvent)
+        return yield* Schema.decodeUnknownEffect(
+          Schema.toType(PullRequestReviewThreadPage)
+        )({
+          events,
+          hasMore: false,
+          nextCursor: tail.nextCursor
+        }).pipe(Effect.mapError(unavailable))
       }
       const after = yield* Schema.decodeUnknownEffect(AgentEventCursor)(
         input.after
-      ).pipe(Effect.mapError(unavailable))
-      const limit = yield* Schema.decodeUnknownEffect(AgentThreadEventPageSize)(
-        input.limit
       ).pipe(Effect.mapError(unavailable))
       const page = yield* mapPersistenceRead(
         persistence.agentJobs.reviewThreadAfter({

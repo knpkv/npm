@@ -335,7 +335,8 @@ export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
-  subject: PrReviewSubject
+  subject: PrReviewSubject,
+  jobId: Schema.optionalKey(JobId)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 
@@ -355,6 +356,14 @@ export const AgentReviewThreadAfterInput = Schema.Struct({
   limit: AgentThreadEventPageSize
 })
 export type AgentReviewThreadAfterInput = typeof AgentReviewThreadAfterInput.Type
+
+export const AgentReviewThreadTailInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
+  subject: PrReviewThreadSubject,
+  limit: AgentThreadEventPageSize
+})
+export type AgentReviewThreadTailInput = typeof AgentReviewThreadTailInput.Type
 
 /** Newest durable lifecycle state for one exact immutable review subject. */
 export const LatestAgentReviewRecord = Schema.Struct({

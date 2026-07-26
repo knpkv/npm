@@ -9,12 +9,14 @@ export {
   type AgentReviewContextEventKind,
   type AgentReviewContextEventsQueryInput,
   type AgentThreadReplayQueryInput,
+  type AgentThreadTailQueryInput,
   type ClaimableAgentJobState,
   type LatestAgentReviewQueryInput,
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
   renderAgentThreadReplayQuery,
+  renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
 } from "./agentJobs.js"
 export {

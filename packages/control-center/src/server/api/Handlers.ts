@@ -1018,7 +1018,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             return yield* reviews.thread({
               workspaceId: session.workspaceId,
               entityId: params.entityId,
-              after: query.after ?? INITIAL_AGENT_THREAD_CURSOR,
+              after: query.after ?? null,
               limit: query.limit ?? DEFAULT_AGENT_THREAD_EVENT_LIMIT
             }).pipe(Effect.catchTags({
               ApplicationResourceNotFound: mapApplicationNotFound,

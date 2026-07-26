@@ -6,6 +6,7 @@ import {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
   renderAgentThreadReplayQuery,
+  renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
 } from "@knpkv/control-center-sql"
 import * as Context from "effect/Context"
@@ -50,6 +51,7 @@ import {
   AgentReviewResultInput,
   AgentReviewResultRecord,
   AgentReviewThreadAfterInput,
+  AgentReviewThreadTailInput,
   AgentThreadEvent,
   AgentThreadEventPageSize,
   AppendAgentEventInput,
@@ -1038,33 +1040,26 @@ const makeAgentJobRepository = Effect.gen(function*() {
     })
   })
 
-  const threadEventsAfter = Effect.fn("AgentJobRepository.threadEventsAfter")(function*(
+  const decodeThreadEventRows = Effect.fn("AgentJobRepository.decodeThreadEventRows")(function*(
     workspaceId: typeof WorkspaceId.Type,
     threadId: typeof AgentThreadId.Type,
-    after: typeof AgentEventCursor.Type,
-    limit: typeof AgentThreadEventPageSize.Type
+    rows: ReadonlyArray<Record<string, unknown>>
   ) {
-    const replay = renderAgentThreadReplayQuery({
-      workspaceId,
-      threadId,
-      afterSequence: after,
-      limit
-    })
-    const rows = yield* sql
-      .unsafe<Record<string, unknown>>(replay.sql, [...replay.params])
-      .pipe(mapPersistenceOperation("agent-job.thread-after"))
-    const decodedRows = Schema.decodeUnknownResult(Schema.Array(ReplayThreadEventRow))(rows)
-    if (Result.isFailure(decodedRows)) {
-      return yield* persistedRecordError(
-        workspaceId,
-        "agent-thread",
-        threadId,
-        "agent-thread-event-schema-invalid"
+    const decodedRows = yield* Schema.decodeUnknownEffect(
+      Schema.Array(ReplayThreadEventRow)
+    )(rows).pipe(
+      Effect.mapError(() =>
+        persistedRecordError(
+          workspaceId,
+          "agent-thread",
+          threadId,
+          "agent-thread-event-schema-invalid"
+        )
       )
-    }
+    )
     const tasksByJob = new Map<typeof JobId.Type, typeof AgentJobTask.Type>()
-    const events = yield* Effect.forEach(
-      decodedRows.success,
+    return yield* Effect.forEach(
+      decodedRows,
       (row) =>
         Effect.gen(function*() {
           const payload = yield* decodeEventPayload(workspaceId, row)
@@ -1099,9 +1094,51 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         })
     )
+  })
+
+  const threadEventsAfter = Effect.fn("AgentJobRepository.threadEventsAfter")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    threadId: typeof AgentThreadId.Type,
+    after: typeof AgentEventCursor.Type,
+    limit: typeof AgentThreadEventPageSize.Type
+  ) {
+    const replay = renderAgentThreadReplayQuery({
+      workspaceId,
+      threadId,
+      afterSequence: after,
+      limit
+    })
+    const rows = yield* sql
+      .unsafe<Record<string, unknown>>(replay.sql, [...replay.params])
+      .pipe(mapPersistenceOperation("agent-job.thread-after"))
+    const events = yield* decodeThreadEventRows(workspaceId, threadId, rows)
     return {
       events,
       nextCursor: events.at(-1)?.eventSequence ?? after
+    }
+  })
+
+  const threadEventsTail = Effect.fn("AgentJobRepository.threadEventsTail")(function*(
+    workspaceId: typeof WorkspaceId.Type,
+    threadId: typeof AgentThreadId.Type,
+    limit: typeof AgentThreadEventPageSize.Type
+  ) {
+    const tail = renderAgentThreadTailQuery({
+      workspaceId,
+      threadId,
+      limit
+    })
+    const rows = yield* sql
+      .unsafe<Record<string, unknown>>(tail.sql, [...tail.params])
+      .pipe(mapPersistenceOperation("agent-job.thread-tail"))
+    const events = yield* decodeThreadEventRows(
+      workspaceId,
+      threadId,
+      [...rows].reverse()
+    )
+    return {
+      events,
+      nextCursor: events.at(-1)?.eventSequence ?? AgentEventCursor.make(0)
     }
   })
 
@@ -2054,7 +2091,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
         subjectRevision: request.subject.headRevision,
-        taskContextPrefix
+        taskContextPrefix,
+        ...(request.jobId === undefined ? {} : { jobId: request.jobId })
       })
       const rows = yield* sql
         .unsafe<Record<string, unknown>>(rendered.sql, [...rendered.params])
@@ -2204,6 +2242,37 @@ const makeAgentJobRepository = Effect.gen(function*() {
         request.workspaceId,
         thread.value.threadId,
         request.after,
+        request.limit
+      )
+    }),
+
+    reviewThreadTail: Effect.fn("AgentJobRepository.reviewThreadTail")(function*(
+      input: typeof AgentReviewThreadTailInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(AgentReviewThreadTailInput)
+      )(input)
+      const subjectKey = yield* reviewThreadSubjectKey(
+        request.pluginConnectionId,
+        request.subject
+      )
+      const thread = yield* findThread(
+        request.workspaceId,
+        "pr-review",
+        subjectKey
+      ).pipe(mapPersistenceOperation("agent-job.find-review-thread"))
+      if (Option.isNone(thread)) {
+        return yield* new RecordNotFoundError({
+          workspaceId: request.workspaceId,
+          recordKind: "agent-review-thread",
+          recordKey: request.subject.pullRequestId
+            .slice(0, MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH)
+            .trimEnd()
+        })
+      }
+      return yield* threadEventsTail(
+        request.workspaceId,
+        thread.value.threadId,
         request.limit
       )
     })

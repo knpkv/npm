@@ -401,6 +401,25 @@ describe("agent job review results", () => {
           advancedPage.events.map(({ jobId }) => jobId),
           [JOB_ID, JOB_ID, JOB_ID, JOB_ID, SWAP_JOB_ID, SWAP_JOB_ID]
         )
+        const tail = yield* jobs.reviewThreadTail({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject,
+          limit: AgentThreadEventPageSize.make(3)
+        })
+        assert.deepStrictEqual(
+          tail.events.map(({ jobId }) => jobId),
+          [JOB_ID, SWAP_JOB_ID, SWAP_JOB_ID]
+        )
+        assert.deepStrictEqual(
+          tail.events.map(({ eventSequence }) => eventSequence),
+          [
+            AgentEventCursor.make(4),
+            AgentEventCursor.make(5),
+            AgentEventCursor.make(6)
+          ]
+        )
+        assert.strictEqual(tail.nextCursor, AgentEventCursor.make(6))
       })
     ))
 

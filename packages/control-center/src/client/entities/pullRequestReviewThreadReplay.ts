@@ -8,7 +8,6 @@ import type {
   PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor
 } from "../../api/agent.js"
-import { ReleaseAgentThreadCursor as ReviewThreadCursor } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
@@ -19,7 +18,7 @@ const MAXIMUM_REVIEW_THREAD_PAGE_READS = 128
 interface PullRequestReviewThreadPageTransport {
   readonly loadThread: (
     entityId: EntityId,
-    after: ReleaseAgentThreadCursor,
+    after: ReleaseAgentThreadCursor | null,
     signal: AbortSignal
   ) => Promise<PullRequestReviewThreadPage>
 }
@@ -78,7 +77,7 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
         const client = yield* makeControlCenterApiClient()
         return yield* client.agent.pullRequestReviewThread({
           params: { entityId },
-          query: { after }
+          query: after === null ? {} : { after }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -119,7 +118,7 @@ export const loadCompletePullRequestReviewThread = async (
   transport: PullRequestReviewThreadPageTransport,
   entityId: EntityId,
   signal: AbortSignal,
-  initialCursor: ReleaseAgentThreadCursor = ReviewThreadCursor.make(0)
+  initialCursor: ReleaseAgentThreadCursor | null = null
 ): Promise<PullRequestReviewThread> => {
   const events = new Array<PullRequestReviewThreadEvent>()
   let after = initialCursor
@@ -127,12 +126,16 @@ export const loadCompletePullRequestReviewThread = async (
     const page = await transport.loadThread(entityId, after, signal)
     for (const event of page.events) events.push(event)
     if (!page.hasMore) return { events, nextCursor: page.nextCursor }
-    if (page.nextCursor <= after) {
+    if (after !== null && page.nextCursor <= after) {
       throw new Error("Pull-request review thread cursor did not advance")
     }
     after = page.nextCursor
   }
-  throw new Error("Pull-request review thread exceeded the browser replay budget")
+  const tail = await transport.loadThread(entityId, null, signal)
+  if (tail.hasMore || (after !== null && tail.nextCursor <= after)) {
+    throw new Error("Pull-request review thread tail fallback was not usable")
+  }
+  return { events: [...tail.events], nextCursor: tail.nextCursor }
 }
 
 /** Continue one previously loaded thread without replaying its durable prefix. */
@@ -163,7 +166,6 @@ export const loadPullRequestReviewSnapshot = async (
   canEnqueue: boolean,
   signal: AbortSignal,
   previous: PullRequestReviewThread | undefined,
-  recheckTerminalTail: boolean,
   target: PullRequestReviewThreadRef
 ): Promise<{
   readonly catalog: AgentProviderCatalog
@@ -177,8 +179,7 @@ export const loadPullRequestReviewSnapshot = async (
       ? transport.providers(signal)
       : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
   ])
-  const thread = recheckTerminalTail &&
-      (review._tag === "completed" || review._tag === "failed")
+  const thread = review._tag === "completed" || review._tag === "failed"
     ? await continuePullRequestReviewThread(transport, entityId, signal, initialThread)
     : initialThread
   return { catalog, review, thread: installNewestThread(target, thread, signal) }

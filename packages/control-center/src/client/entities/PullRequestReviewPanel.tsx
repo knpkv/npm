@@ -100,6 +100,7 @@ export const PullRequestReviewPanel = ({
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
+  const [submittedRequest, setSubmittedRequest] = useState<string | null>(null)
   const requestScope =
     state._tag === "idle"
       ? null
@@ -107,7 +108,19 @@ export const PullRequestReviewPanel = ({
   useEffect(() => {
     setLaunchOpen(false)
     setRequest("")
+    setSubmittedRequest(null)
   }, [requestScope])
+  useEffect(() => {
+    if (submittedRequest === null || state._tag !== "ready") return
+    if (state.action === "failed") {
+      setSubmittedRequest(null)
+      return
+    }
+    if (state.action === "idle" && state.review._tag === "pending") {
+      setRequest((current) => (current.trim() === submittedRequest ? "" : current))
+      setSubmittedRequest(null)
+    }
+  }, [state, submittedRequest])
   const publicationSurface =
     publication._tag === "idle" || publication._tag === "previewing" ? null : (
       <Suspense fallback={<span>Preparing publication surface…</span>}>
@@ -187,7 +200,7 @@ export const PullRequestReviewPanel = ({
             onClick={() => {
               const prompt = request.trim()
               if (prompt.length === 0) return
-              setRequest("")
+              setSubmittedRequest(prompt)
               onStart(prompt)
             }}
           >

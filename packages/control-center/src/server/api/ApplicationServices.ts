@@ -513,7 +513,7 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
   readonly thread: (input: {
     readonly workspaceId: WorkspaceId
     readonly entityId: EntityId
-    readonly after: ReleaseAgentThreadCursor
+    readonly after: ReleaseAgentThreadCursor | null
     readonly limit: number
   }) => Effect.Effect<
     PullRequestReviewThreadPage,

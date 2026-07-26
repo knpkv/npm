@@ -5,6 +5,7 @@ import {
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
   renderAgentThreadReplayQuery,
+  renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
 } from "../src/index.js"
 
@@ -94,6 +95,20 @@ describe("durable agent job queries", () => {
     })
   })
 
+  it("renders the newest bounded thread window", () => {
+    const rendered = renderAgentThreadTailQuery({
+      limit: 128,
+      threadId: "thread-secret",
+      workspaceId: "workspace-secret"
+    })
+
+    expect(rendered.params).toEqual(["workspace-secret", "thread-secret", 128])
+    expect(rendered.sql).toContain(
+      "order by \"agent_thread_events\".\"event_sequence\" desc limit ?"
+    )
+    expect(rendered.sql).not.toContain("\"event_sequence\" >")
+  })
+
   it("renders the newest bounded context events for one stable review thread", () => {
     const rendered = renderAgentReviewContextEventsQuery({
       eventKinds: ["user-message", "review-report", "job-completed", "job-failed", "cancel-requested"],
@@ -146,5 +161,17 @@ describe("durable agent job queries", () => {
     expect(rendered.sql).toContain(
       "order by \"agent_jobs\".\"created_at\" desc, \"agent_jobs\".\"job_id\" desc limit ?"
     )
+  })
+
+  it("can bind the newest-review lookup to one exact job", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      subjectRevision: "head-secret",
+      taskContextPrefix: "task-prefix",
+      jobId: "job-secret"
+    })
+
+    expect(rendered.params).toContain("job-secret")
+    expect(rendered.sql).toContain("\"agent_jobs\".\"job_id\" = ?")
   })
 })
