@@ -36,6 +36,8 @@ export interface PullRequestReviewThread {
   readonly hasEarlier: boolean
   readonly historyLoaded: boolean
   readonly nextCursor: ReleaseAgentThreadCursor
+  /** Transient signal that a bounded tail must replace, rather than append to, an older window. */
+  readonly replacesRetainedWindow?: true
 }
 
 interface PullRequestReviewThreadRef {
@@ -99,9 +101,10 @@ export const installNewestThread = (
   signal: AbortSignal
 ): PullRequestReviewThread => {
   if (!signal.aborted) {
-    target.current = target.current === null
-      ? candidate
-      : mergePullRequestReviewThreads(target.current, candidate)
+    const { replacesRetainedWindow: _replacesRetainedWindow, ...retainedCandidate } = candidate
+    target.current = target.current === null || candidate.replacesRetainedWindow === true
+      ? retainedCandidate
+      : mergePullRequestReviewThreads(target.current, retainedCandidate)
   }
   return target.current ?? candidate
 }
@@ -210,9 +213,10 @@ export const loadCompletePullRequestReviewThread = async (
   }
   return {
     events: [...tail.events],
-    hasEarlier: tail.hasEarlier,
+    hasEarlier: true,
     historyLoaded: false,
-    nextCursor: tail.nextCursor
+    nextCursor: tail.nextCursor,
+    replacesRetainedWindow: true
   }
 }
 
@@ -229,6 +233,7 @@ export const continuePullRequestReviewThread = async (
     signal,
     previous?.nextCursor
   )
+  if (update.replacesRetainedWindow === true) return update
   const events = previous === undefined
     ? update.events
     : [...previous.events, ...update.events]
@@ -242,7 +247,8 @@ export const continuePullRequestReviewThread = async (
       update.hasEarlier ||
       retainedEvents.length < events.length,
     historyLoaded,
-    nextCursor: update.nextCursor
+    nextCursor: update.nextCursor,
+    ...(previous?.replacesRetainedWindow === true ? { replacesRetainedWindow: true } : {})
   }
 }
 

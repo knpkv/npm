@@ -894,6 +894,82 @@ describe("usePullRequestReview", () => {
     expect(transport.loadThread).toHaveBeenLastCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
   })
 
+  it("replaces a retained prefix at the replay budget so backward reads can close the gap", async () => {
+    const signal = new AbortController().signal
+    const previous: PullRequestReviewThread = {
+      events: [threadEvent(1)],
+      hasEarlier: false,
+      historyLoaded: true,
+      nextCursor: ReleaseAgentThreadCursor.make(1)
+    }
+    const transport = {
+      loadThread: vi.fn((_entityId, cursor, _signal, direction = "after") => {
+        if (direction === "before" && cursor === 131) {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: [threadEvent(130)],
+              hasMore: true,
+              nextCursor: ReleaseAgentThreadCursor.make(130)
+            })
+          )
+        }
+        if (direction === "before" && cursor === 130) {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: Array.from({ length: 128 }, (_, index) => threadEvent(index + 2)),
+              hasMore: true,
+              nextCursor: ReleaseAgentThreadCursor.make(2)
+            })
+          )
+        }
+        if (direction === "before" && cursor === 2) {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: [threadEvent(1)],
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(1)
+            })
+          )
+        }
+        if (cursor === null) {
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events: [threadEvent(131)],
+              hasEarlier: true,
+              hasMore: false,
+              nextCursor: ReleaseAgentThreadCursor.make(131)
+            })
+          )
+        }
+        return Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events: [threadEvent(cursor + 1)],
+            hasMore: true,
+            nextCursor: ReleaseAgentThreadCursor.make(cursor + 1)
+          })
+        )
+      })
+    }
+
+    let thread = await continuePullRequestReviewThread(transport, ENTITY_ID, signal, previous)
+
+    expect(thread.events.map(({ eventSequence }) => eventSequence)).toEqual([131])
+    expect(thread).toMatchObject({
+      hasEarlier: true,
+      historyLoaded: false,
+      replacesRetainedWindow: true
+    })
+
+    thread = await loadEarlierPullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+    thread = await loadEarlierPullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+    thread = await loadEarlierPullRequestReviewThread(transport, ENTITY_ID, signal, thread)
+
+    expect(thread.events.map(({ eventSequence }) => eventSequence)).toEqual(
+      Array.from({ length: 131 }, (_, index) => index + 1)
+    )
+    expect(thread.hasEarlier).toBe(false)
+  })
+
   it("polls pending reviews from the loaded cursor and appends only new thread events", async () => {
     vi.useFakeTimers()
     const firstPage = PullRequestReviewThreadPage.make({
