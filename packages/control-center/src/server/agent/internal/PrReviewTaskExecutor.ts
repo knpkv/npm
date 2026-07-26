@@ -193,17 +193,21 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
       `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(path)}`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-  if (diff.exitCode !== 0 || diff.stdout.truncated || diff.stdout.artifactId !== null) {
+  if (diff.exitCode !== 0) {
+    return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
+  }
+  const completeDiff = yield* completeOutputText(session, diff.stdout)
+  if (completeDiff === null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
   }
   const isAddedEvidence = rangeIsChanged(
-    diffLineIntervals(diff.stdout.text, "head"),
+    diffLineIntervals(completeDiff, "head"),
     suggestion.evidence.startLine,
     suggestion.evidence.endLine
   )
   const isBaseChangedEvidence = suggestion.anchor._tag === "file" &&
     rangeIsChanged(
-      diffLineIntervals(diff.stdout.text, "base"),
+      diffLineIntervals(completeDiff, "base"),
       suggestion.evidence.startLine,
       suggestion.evidence.endLine
     )
@@ -289,16 +293,15 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
       `--inter-hunk-context=0 ` +
       `${shellQuote(session.baseRevision)} ${shellQuote(session.headRevision)} -- ${shellQuote(suggestion.anchor.path)}`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-  if (
-    diff.exitCode !== 0 ||
-    diff.stdout.truncated ||
-    diff.stdout.artifactId !== null ||
-    diff.stdout.text.trim().length === 0
-  ) {
+  if (diff.exitCode !== 0) {
     return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
   }
-  const headLine = diffLineIntervals(diff.stdout.text, "head")[0]?.startLine
-  const baseLine = diffLineIntervals(diff.stdout.text, "base")[0]?.startLine
+  const completeDiff = yield* completeOutputText(session, diff.stdout)
+  if (completeDiff === null || completeDiff.trim().length === 0) {
+    return yield* providerFailure(providerId, "protocol", "File suggestion anchor was unavailable.", false)
+  }
+  const headLine = diffLineIntervals(completeDiff, "head")[0]?.startLine
+  const baseLine = diffLineIntervals(completeDiff, "base")[0]?.startLine
   const anchor: PrReviewSuggestionAnchor = {
     _tag: "file",
     path: suggestion.anchor.path,

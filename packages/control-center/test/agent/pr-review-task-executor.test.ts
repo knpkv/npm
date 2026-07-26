@@ -324,12 +324,17 @@ const makeSessionLayer = (
   diff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`,
   sourceExcerpt = EVIDENCE_EXCERPT,
   replacementFailure?: typeof PrReviewSandboxSessionError.Type,
-  retainedDiff?: string
+  retainedDiff?: string,
+  retainPrimaryDiff = false,
+  artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make("review-artifact-1")
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
     if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
-      if (retainedDiff !== undefined && command.includes("paged.ts")) {
+      if (
+        retainedDiff !== undefined &&
+        (retainPrimaryDiff || command.includes("paged.ts"))
+      ) {
         return {
           exitCode: 0,
           stderr: output().stderr,
@@ -394,7 +399,10 @@ const makeSessionLayer = (
       ),
     applyPatch: () => Effect.succeed(output()),
     readDiff: () => Effect.succeed(output(diff)),
-    pageArtifact: (_artifactId, offset, limit) => Effect.succeed(retainedDiff?.slice(offset, offset + limit) ?? ""),
+    pageArtifact: (_artifactId, offset, limit) =>
+      artifactPagingFailure === undefined
+        ? Effect.succeed(retainedDiff?.slice(offset, offset + limit) ?? "")
+        : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
     close: Effect.void
   }
@@ -1151,6 +1159,89 @@ describe("PR review task executor", () => {
       Effect.tap(({ result }) =>
         Effect.sync(() => {
           assert.deepStrictEqual(result.suggestions[0]?.relatedLocations, [pagedLocation])
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("validates primary evidence and file anchors from the complete retained diff artifact", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const retainedDiff = `${"x".repeat(32 * 1_024)}\n@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [{
+          ...suggestion,
+          anchor: {
+            _tag: "file",
+            path: PrReviewPath.make(EVIDENCE_PATH)
+          }
+        }],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        retainedDiff,
+        true
+      )
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(result.suggestions[0]?.anchor, {
+            _tag: "file",
+            path: PrReviewPath.make(EVIDENCE_PATH),
+            line: 42,
+            relativeFileVersion: "AFTER"
+          })
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("fails closed when retained primary evidence cannot be paged", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const retainedDiff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        retainedDiff,
+        true,
+        new PrReviewSandboxSessionError({ reason: "artifact-unavailable" })
+      )
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(result.suggestions, [])
         })
       ),
       Effect.asVoid
