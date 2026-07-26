@@ -1,0 +1,67 @@
+id: no-raw-application-dialog
+valid:
+  - |
+    <Dialog.Root>
+      <Dialog.Content title="Review">Content</Dialog.Content>
+    </Dialog.Root>
+  - |
+    <div role="status">Review complete</div>
+  - |
+    <div role="alert">Review failed</div>
+  - |
+    <div role={dialogRole} aria-modal={isModal}>
+      Dynamic third-party wrapper
+    </div>
+  - |
+    <div aria-modal={false}>Non-modal content</div>
+  - |
+    <div role={"dialog".length === 6 ? "status" : "alert"}>
+      Status
+    </div>
+  - |
+    <div aria-modal={"true".length === 4 ? false : false}>
+      Non-modal content
+    </div>
+invalid:
+  - |
+    <dialog>Confirm</dialog>
+  - |
+    <dialog />
+  - |
+    <dialog open aria-label="Confirm">Confirm</dialog>
+  - |
+    <div aria-modal="true" role="dialog">
+      Review
+    </div>
+  - |
+    <section aria-modal="true">
+      Review
+    </section>
+  - |
+    <div role='dialog'>Review</div>
+  - |
+    <div role={"dialog"}>Review</div>
+  - |
+    <div role={'dialog'}>Review</div>
+  - |
+    <div role={"dialog" as const}>Review</div>
+  - |
+    <aside aria-modal={"true"}>Review</aside>
+  - |
+    <aside aria-modal={'true'}>Review</aside>
+  - |
+    <aside aria-modal={true}>Review</aside>
+  - |
+    <div aria-modal>Review</div>
+  - |
+    <div role={`dialog`}>Review</div>
+  - |
+    <section role="alertdialog">Confirm</section>
+  - |
+    <section role={"alertdialog"}>Confirm</section>
+  - |
+    <section role={"alertdialog" as const}>Confirm</section>
+  - |
+    <section role={`alertdialog`}>Confirm</section>
+  - |
+    <div aria-modal={`true`}>Review</div>

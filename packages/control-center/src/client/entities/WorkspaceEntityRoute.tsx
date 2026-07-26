@@ -14,7 +14,7 @@ import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, lazy, Suspense, useEffect, useRef, useState } from "react"
 import { Link, useLocation, useNavigate, useOutletContext, useParams } from "react-router"
 
-import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import type { DurableAgentPrompt, ReviewSuggestionPublicationSelection } from "../../api/agent.js"
 import type { EntityId as EntityIdType, WorkspaceId as WorkspaceIdType } from "../../domain/identifiers.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import {
@@ -281,7 +281,7 @@ const EntityContent = ({
   readonly reviewPublicationPreview: (selection: ReviewSuggestionPublicationSelection) => void
   readonly reviewRetry: () => void
   readonly reviewSuggestionPublish: (finalContent: string) => void
-  readonly reviewStart: () => void
+  readonly reviewStart: (prompt?: DurableAgentPrompt) => void
   readonly reviewState: PullRequestReviewControllerState
   readonly retry: () => void
   readonly sessionKey: string | null
@@ -348,7 +348,7 @@ interface WorkspaceEntityViewProps {
   readonly reviewPublicationPreview?: (selection: ReviewSuggestionPublicationSelection) => void
   readonly reviewRetry?: () => void
   readonly reviewSuggestionPublish?: (finalContent: string) => void
-  readonly reviewStart?: () => void
+  readonly reviewStart?: (prompt?: DurableAgentPrompt) => void
   readonly reviewState?: PullRequestReviewControllerState
   readonly state: WorkspaceEntityState
   readonly sessionKey?: string | null

@@ -743,8 +743,23 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
         type: "oauth2",
         accessToken: Redacted.make(profile.token.access_token),
         cloudId: profile.token.cloud_id
-      }
-    } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+      },
+      verifiedUser: profile.token.user === undefined
+        ? null
+        : {
+          accountId: profile.token.user.account_id,
+          displayName: profile.token.user.name,
+          publicName: profile.token.user.name
+        }
+    } satisfies {
+      readonly credentialGeneration: string
+      readonly auth: JiraApiConfigShape["auth"]
+      readonly verifiedUser: {
+        readonly accountId: string
+        readonly displayName: string
+        readonly publicName: string
+      } | null
+    }
   }
   if (authMode !== "api-token") return yield* configurationFailure("plugin-authentication-mode-invalid")
   const emailCredential = yield* credentialTextValue(loaded.configuration, "email")
@@ -755,9 +770,29 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   const apiToken = yield* decodeSecret(apiTokenRef)
   return {
     credentialGeneration: `api-token:${emailCredential.generation}\0${apiTokenRef}`,
-    auth: { type: "basic", email, apiToken: Redacted.make(apiToken) }
-  } satisfies { readonly credentialGeneration: string; readonly auth: JiraApiConfigShape["auth"] }
+    auth: { type: "basic", email, apiToken: Redacted.make(apiToken) },
+    verifiedUser: null
+  } satisfies {
+    readonly credentialGeneration: string
+    readonly auth: JiraApiConfigShape["auth"]
+    readonly verifiedUser: {
+      readonly accountId: string
+      readonly displayName: string
+      readonly publicName: string
+    } | null
+  }
 })
+
+const MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH = 200
+
+const boundedConfluenceUserName = (value: string): string => {
+  let bounded = ""
+  for (const codePoint of value.trim()) {
+    if (bounded.length + codePoint.length > MAXIMUM_CONFLUENCE_USER_DISPLAY_NAME_LENGTH) break
+    bounded += codePoint
+  }
+  return bounded.trimEnd()
+}
 
 const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
   // Pre-stability persistence is intentionally breaking: old Jira connections
@@ -870,14 +905,16 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     ...(authMode.value === "oauth" ? ["oauthProfileId"] : ["apiToken", "email"])
   ])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const configurationInput = {
+  const storedConfigurationInput = {
     siteBaseUrl: yield* textValue(loaded.configuration, "siteBaseUrl", "url"),
     siteId: yield* textValue(loaded.configuration, "siteId"),
     spaceId: yield* textValue(loaded.configuration, "spaceId"),
     probePageId: yield* textValue(loaded.configuration, "probePageId"),
     ...(authMode.value === "oauth" ? { oauthVerifiedSiteId: yield* textValue(loaded.configuration, "siteId") } : {})
   }
-  const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(configurationInput).pipe(
+  const configuration = yield* Schema.decodeUnknownEffect(ConfluencePageAdapterConfiguration)(
+    storedConfigurationInput
+  ).pipe(
     Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid"))
   )
   const authentication = yield* atlassianAuthentication(
@@ -887,6 +924,23 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
     configuration.siteBaseUrl.origin,
     configuration.siteId
   )
+  const configurationWithCachedIdentity = {
+    ...storedConfigurationInput,
+    ...(authentication.verifiedUser === null
+      ? {}
+      : {
+        oauthVerifiedUser: {
+          ...authentication.verifiedUser,
+          displayName: boundedConfluenceUserName(authentication.verifiedUser.displayName),
+          publicName: boundedConfluenceUserName(authentication.verifiedUser.publicName)
+        }
+      })
+  }
+  const configurationInput = Option.isSome(
+      Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)
+    )
+    ? configurationWithCachedIdentity
+    : storedConfigurationInput
   const apiClient = ConfluenceApiClient.layer.pipe(
     Layer.provide(Layer.succeed(ConfluenceApiConfig, {
       baseUrl: configuration.siteBaseUrl.origin,

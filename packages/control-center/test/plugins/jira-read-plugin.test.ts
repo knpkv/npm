@@ -1,5 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
+import { JiraApi } from "@knpkv/jira-api-client"
 import * as Cause from "effect/Cause"
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
@@ -1106,6 +1107,44 @@ describe("JiraReadPlugin", () => {
       assert.deepStrictEqual(sam?.roles, ["change-author", "commenter", "creator", "reporter"])
       const ari = attributes.collaborators?.find(({ sourcePersonId }) => sourcePersonId === "ari")
       assert.strictEqual(ari?.avatarUrl, "https://avatar.example/ari.png")
+    }))
+
+  it.effect("does not inherit Object.prototype.toString for a missing Jira change value", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        getChangelogs: (_issueId, request) =>
+          Effect.succeed(
+            Schema.decodeUnknownSync(JiraApi.PageBeanChangelog)({
+              values: request.startAt === 0
+                ? [
+                  {
+                    id: "h-comment",
+                    created: "2026-07-17T09:30:00.000Z",
+                    items: [{ field: "Comment", fromString: "Previous comment" }]
+                  }
+                ]
+                : [],
+              startAt: request.startAt,
+              maxResults: request.maxResults,
+              total: 1
+            })
+          )
+      })
+
+      const result = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(issueReference("10042"))))
+      )
+      if (result._tag !== "found") return assert.fail("expected Jira issue to be found")
+      const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(result.event.attributes)
+
+      assert.deepStrictEqual(attributes.history?.[0]?.changes, [
+        {
+          field: "Comment",
+          from: "Previous comment",
+          to: null
+        }
+      ])
     }))
 
   it.effect("uses a longer Markdown fence when Jira code contains triple backticks", () =>

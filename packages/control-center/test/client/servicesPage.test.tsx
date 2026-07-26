@@ -465,6 +465,7 @@ describe("ServicesPage connection tests", () => {
     const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000171")
     const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000172")
     const pipelineId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    const unconnectedRepositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000176")
     const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000174")
     const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000175")
     const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
@@ -493,7 +494,13 @@ describe("ServicesPage connection tests", () => {
           providerId: "codepipeline",
           displayName: "Payments pipeline",
           isEnabled: true,
-          health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          health: {
+            _tag: "degraded",
+            checkedAt: "2026-07-14T10:00:00.000Z",
+            failureClass: "outage",
+            retryAt: null,
+            safeMessage: "Pipeline history is temporarily unavailable."
+          },
           updatedAt: "2026-07-14T10:00:00.000Z"
         }
       ],
@@ -517,17 +524,41 @@ describe("ServicesPage connection tests", () => {
               displayName: "payments-release",
               providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
               isEnabled: true
+            },
+            {
+              followedResourceId: unconnectedRepositoryId,
+              providerId: "codecommit",
+              displayName: "audit",
+              providerImmutableId: "eu-west-1:audit",
+              isEnabled: true
             }
           ]
         }
       ]
     })
+    const test = vi.fn<ConnectionTestTransport["test"]>(() =>
+      Promise.resolve(
+        Schema.decodeUnknownSync(PluginConnectionTestResult)({
+          _tag: "healthy",
+          pluginConnectionId: repositoryConnectionId,
+          providerId: "codecommit",
+          checkedAt: "2026-07-14T10:03:00.000Z",
+          latencyMilliseconds: 24,
+          identity: {
+            kind: "account",
+            label: "AWS account",
+            displayName: "Production account",
+            providerImmutableId: "123456789012"
+          }
+        })
+      )
+    )
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
       setEnabled: vi.fn(),
-      test: vi.fn()
+      test
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
@@ -537,9 +568,43 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Verified identity · 123456789012")
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
+    const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
+    expect(resources).toHaveLength(2)
+    const repositoryResource = resources.find(({ textContent }) => textContent?.includes("eu-west-1:payments"))
+    const pipelineResource = resources.find(({ textContent }) => textContent?.includes("payments-release"))
+    expect(repositoryResource?.open).toBe(false)
+    expect(pipelineResource?.open).toBe(true)
+    expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("payments"), expect.stringContaining("payments-release")])
+    )
+    expect(resources.every((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))).toBe(
+      true
+    )
+    const resourceRows = [...host.querySelectorAll<HTMLElement>("[data-status-tone]")]
+    expect(resourceRows).toHaveLength(3)
+    const unconnectedResource = resourceRows.find(({ textContent }) => textContent?.includes("audit"))
+    expect(unconnectedResource?.tagName).toBe("DIV")
+    expect(unconnectedResource?.textContent).toContain("Followed")
+    expect(unconnectedResource?.querySelector("summary")).toBeNull()
+    expect(unconnectedResource?.textContent).not.toContain("Controls")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )
+
+    expect(repositoryResource).toBeDefined()
+    pipelineResource?.removeAttribute("open")
+    expect(pipelineResource?.open).toBe(false)
+    if (repositoryResource === undefined) throw new Error("Expected the repository resource")
+    repositoryResource.open = true
+    const testButton = [...repositoryResource.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Test"
+    )
+    await act(async () => testButton?.click())
+
+    expect(test).toHaveBeenCalledWith(repositoryConnectionId, expect.any(AbortSignal))
+    expect(repositoryResource.open).toBe(true)
+    expect(repositoryResource.textContent).toContain("Connection healthy")
+    expect(pipelineResource?.open).toBe(false)
   })
 
   it("pins account-card Confluence setup to the owning Atlassian site", async () => {
@@ -548,6 +613,10 @@ describe("ServicesPage connection tests", () => {
     const spaceResourceId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000193")
     const jiraConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000194")
     const spaceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000195")
+    const staleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000196")
+    const secondStaleConfluenceConnectionId = Schema.decodeSync(PluginConnectionId)(
+      "01890f6f-6d6a-7cc0-98d2-000000000197"
+    )
     const previousLocation = window.location.href
     const authorizationLocation = new URL("#account-card-atlassian-oauth", previousLocation)
     authorizationLocation.searchParams.set("state", grantId)
@@ -585,6 +654,26 @@ describe("ServicesPage connection tests", () => {
           displayName: "Payments space",
           isEnabled: true,
           health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: staleConfluenceConnectionId,
+          providerAccountId: null,
+          followedResourceId: null,
+          providerId: "confluence",
+          displayName: "Old Confluence setup",
+          isEnabled: false,
+          health: { _tag: "disabled", checkedAt: "2026-07-14T10:00:00.000Z" },
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        },
+        {
+          pluginConnectionId: secondStaleConfluenceConnectionId,
+          providerAccountId: null,
+          followedResourceId: null,
+          providerId: "confluence",
+          displayName: "Second old Confluence setup",
+          isEnabled: false,
+          health: { _tag: "disabled", checkedAt: "2026-07-14T10:00:00.000Z" },
           updatedAt: "2026-07-14T10:00:00.000Z"
         }
       ],
@@ -652,9 +741,24 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Verified identity · cloud-2")
     expect(host.textContent).toContain("Project · project-payments")
     expect(host.textContent).toContain("Space · space-payments")
+    expect(host.textContent).toContain("Old Confluence setup")
+    expect(host.textContent).toContain("Second old Confluence setup")
+    expect(host.textContent).not.toContain("Configure jira.")
+    expect(host.textContent).not.toContain("Configure confluence.")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add Jira project", "Add Confluence space"])
     )
+    for (const displayName of ["Old Confluence setup", "Second old Confluence setup"]) {
+      const standaloneCard = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+        textContent?.includes(displayName)
+      )
+      expect(standaloneCard).toBeDefined()
+      expect(
+        [...(standaloneCard?.querySelectorAll<HTMLButtonElement>("button") ?? [])].some(
+          ({ textContent }) => textContent === "Enable service"
+        )
+      ).toBe(true)
+    }
 
     const addConfluence = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Add Confluence space")

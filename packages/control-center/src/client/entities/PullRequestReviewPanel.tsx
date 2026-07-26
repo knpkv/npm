@@ -1,5 +1,5 @@
-import { Button, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, lazy, Suspense, useEffect, useState } from "react"
+import { Button, Dialog, Text } from "@knpkv/rly/primitives"
+import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useState } from "react"
 
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
@@ -116,15 +116,30 @@ export const PullRequestReviewPanel = ({
   }, [requestScope])
   useEffect(() => {
     if (submittedRequest === null || state._tag !== "ready") return
-    if (state.action === "failed") {
-      setSubmittedRequest(null)
-      return
-    }
+    if (state.action === "failed") return
     if (state.action === "idle" && state.review._tag === "pending") {
       setRequest((current) => (current.trim() === submittedRequest ? "" : current))
       setSubmittedRequest(null)
     }
   }, [state, submittedRequest])
+  const changeLaunchOpen = useCallback((open: boolean): void => {
+    setLaunchOpen(open)
+  }, [])
+  const submitFullReview = useCallback((): void => {
+    setSubmittedRequest(null)
+    onStart()
+  }, [onStart])
+  const submitTargetedReview = useCallback((): void => {
+    const prompt = request.trim()
+    if (prompt.length === 0 || state._tag !== "ready" || state.action === "starting") return
+    setSubmittedRequest(prompt)
+    onStart(prompt)
+  }, [onStart, request, state])
+  const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
+    event.preventDefault()
+    submitTargetedReview()
+  }
   const publicationSurface =
     publication._tag === "idle" || publication._tag === "previewing" ? null : (
       <Suspense fallback={<span>Preparing publication surface…</span>}>
@@ -144,19 +159,20 @@ export const PullRequestReviewPanel = ({
 
   if (state._tag === "idle" || state._tag === "loading") {
     return withPublication(
-      <>
+      <div aria-live="polite" className={styles.reviewStatus} role="status">
         <strong>Loading review state</strong>
         <span>Checking durable review history for this exact head.</span>
-      </>
+        <span aria-hidden="true" className={styles.reviewRunway} />
+      </div>
     )
   }
   if (state._tag === "failed") {
     return withPublication(
-      <>
+      <div className={styles.reviewStatus}>
         <strong>Review state unavailable</strong>
         <span>The current review could not be loaded. No human decision was changed.</span>
         <Button onClick={onRetry}>Retry</Button>
-      </>
+      </div>
     )
   }
 
@@ -206,23 +222,28 @@ export const PullRequestReviewPanel = ({
         <div className={styles.reviewThreadComposer}>
           <label htmlFor="review-thread-request">Ask Relay about this pull request</label>
           <textarea
+            aria-describedby="review-thread-request-help review-thread-request-count"
             id="review-thread-request"
             maxLength={MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH}
             onChange={(event) => setRequest(event.currentTarget.value)}
+            onKeyDown={handleComposerKeyDown}
             placeholder="Re-check the error handling in the connection flow…"
             rows={3}
             value={request}
           />
-          <Button
-            disabled={state.action === "starting" || request.trim().length === 0}
-            onClick={() => {
-              const prompt = request.trim()
-              if (prompt.length === 0) return
-              setSubmittedRequest(prompt)
-              onStart(prompt)
-            }}
-          >
-            {state.action === "starting" ? "Starting…" : "Start targeted review"}
+          <div className={styles.reviewThreadComposerFooter}>
+            <span id="review-thread-request-help">Ctrl/⌘ + Enter to run</span>
+            <span id="review-thread-request-count">
+              {String(request.length)} / {String(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)}
+            </span>
+          </div>
+          {state.action === "failed" && submittedRequest !== null ? (
+            <span role="alert">
+              Targeted review did not start. Your request is still here—check the provider and worker, then try again.
+            </span>
+          ) : null}
+          <Button disabled={state.action === "starting" || request.trim().length === 0} onClick={submitTargetedReview}>
+            {state.action === "starting" ? "Starting targeted review…" : "Start targeted review"}
           </Button>
         </div>
       ) : null}
@@ -235,44 +256,46 @@ export const PullRequestReviewPanel = ({
         {threadSurface}
       </>
     )
-  const launchDialog = (headRevision: string): ReactElement | null =>
-    !launchOpen || state.provider === null ? null : (
-      <div aria-labelledby="review-launch-title" role="dialog">
-        <strong id="review-launch-title">Launch full-project review</strong>
-        <dl>
-          <div>
-            <dt>Exact head</dt>
-            <dd>
-              <code>{headRevision}</code>
-            </dd>
-          </div>
-          <div>
-            <dt>Review Agent Profile</dt>
-            <dd>{state.provider.reviewProfile.label}</dd>
-          </div>
-          <div>
-            <dt>Budget</dt>
-            <dd>{formatBudget(state.provider.reviewProfile.budgetMillis)}</dd>
-          </div>
-          <div>
-            <dt>Network</dt>
-            <dd>Blocked</dd>
-          </div>
-          <div>
-            <dt>Sandbox</dt>
-            <dd>sbx</dd>
-          </div>
-        </dl>
-        <Button onClick={() => setLaunchOpen(false)}>Cancel</Button>
-        <Button
-          onClick={() => {
-            setLaunchOpen(false)
-            onStart()
-          }}
+  const reviewLaunch = (headRevision: string, triggerLabel: string): ReactElement | null =>
+    state.provider === null ? null : (
+      <Dialog.Root onOpenChange={changeLaunchOpen} open={launchOpen}>
+        <Dialog.Trigger disabled={state.action === "starting"}>
+          {state.action === "starting" ? "Starting review…" : triggerLabel}
+        </Dialog.Trigger>
+        <Dialog.Content
+          className={styles.reviewLaunchDialog}
+          description="Relay will inspect the immutable revision in an isolated sandbox. It cannot approve or change the pull request."
+          title="Review this exact head"
         >
-          Start review
-        </Button>
-      </div>
+          <div className={styles.reviewLaunchBody}>
+            <small className={styles.reviewLaunchEyebrow}>Read-only agent run</small>
+            <dl className={styles.reviewLaunchFacts}>
+              <div>
+                <dt>Exact head</dt>
+                <dd>
+                  <code>{headRevision}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Review profile</dt>
+                <dd>{state.provider.reviewProfile.label}</dd>
+              </div>
+              <div>
+                <dt>Time budget</dt>
+                <dd>{formatBudget(state.provider.reviewProfile.budgetMillis)}</dd>
+              </div>
+              <div>
+                <dt>Runtime</dt>
+                <dd>Network blocked · sbx</dd>
+              </div>
+            </dl>
+            <div className={styles.reviewLaunchActions}>
+              <Dialog.Close>Keep reading</Dialog.Close>
+              <Dialog.Close onClick={submitFullReview}>Start full review</Dialog.Close>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
     )
   if (review._tag === "unavailable") {
     return withThread(
@@ -290,7 +313,7 @@ export const PullRequestReviewPanel = ({
           ? "Reviewing exact head"
           : "Cancellation requested"
     return withThread(
-      <>
+      <div aria-live="polite" className={styles.reviewStatus} role="status">
         <strong>{label}</strong>
         <span>
           Relay is using {review.providerId} · {review.model}. This page updates automatically.
@@ -307,7 +330,8 @@ export const PullRequestReviewPanel = ({
         )}
         {review.activity.truncated ? <span>Earlier review activity is not shown.</span> : null}
         <code className={styles.reviewHead}>{review.subject.headRevision}</code>
-      </>
+        <span aria-hidden="true" className={styles.reviewRunway} />
+      </div>
     )
   }
   if (review._tag === "failed") {
@@ -317,10 +341,12 @@ export const PullRequestReviewPanel = ({
         <span>The failed run did not change approval or publish a recommendation.</span>
         {canEnqueue && state.provider !== null ? (
           <>
-            <Button disabled={state.action === "starting"} onClick={() => setLaunchOpen(true)}>
-              {state.action === "starting" ? "Starting…" : "Try again"}
-            </Button>
-            {launchDialog(review.subject.headRevision)}
+            {state.action === "failed" && submittedRequest === null ? (
+              <span role="alert">
+                A new full review could not be started. Check the provider and worker, then try again.
+              </span>
+            ) : null}
+            {reviewLaunch(review.subject.headRevision, "Try again")}
           </>
         ) : null}
       </>
@@ -367,12 +393,7 @@ export const PullRequestReviewPanel = ({
       ) : state.provider === null ? (
         <span>Configure an sbx Review Agent Profile with an Effect AI provider to enable review.</span>
       ) : (
-        <>
-          <Button disabled={state.action === "starting"} onClick={() => setLaunchOpen(true)}>
-            {state.action === "starting" ? "Starting review…" : "Review exact head"}
-          </Button>
-          {launchDialog(review.subject.headRevision)}
-        </>
+        <>{reviewLaunch(review.subject.headRevision, "Review exact head")}</>
       )}
       {state.action === "failed" ? (
         <span role="alert">The review could not be started. Check provider and worker configuration, then retry.</span>

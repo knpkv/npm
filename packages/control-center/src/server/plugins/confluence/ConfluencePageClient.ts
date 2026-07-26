@@ -20,7 +20,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { RawConfluenceWatcherPage } from "./ConfluencePageSchemas.js"
+import { RawConfluencePage, RawConfluenceSpacePage, RawConfluenceWatcherPage } from "./ConfluencePageSchemas.js"
 
 const Operation = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
@@ -129,26 +129,40 @@ export const makeConfluencePageClient = (
   getPage: (pageId) =>
     bounded(
       "confluence-page-read",
-      api.v2.getPageById(pageId, {
-        params: {
-          "body-format": "atlas_doc_format",
-          "include-version": true,
-          status: ["current"]
-        }
-      })
+      // Atlassian returns `parentId: null` for a space homepage even though
+      // the generated OpenAPI schema currently models the field as a string.
+      // Decode this read at the narrow adapter boundary until the upstream
+      // contract describes the documented null case faithfully.
+      api.v2.httpClient.execute(
+        HttpClientRequest.get(`/pages/${encodeURIComponent(pageId)}`).pipe(
+          HttpClientRequest.setUrlParams({
+            "body-format": "atlas_doc_format",
+            "include-version": true,
+            status: ["current"]
+          })
+        )
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluencePage))
+      )
     ),
   getSpacePages: (spaceId, cursor) =>
     bounded(
       "confluence-space-pages",
-      api.v2.getPagesInSpace(spaceId, {
-        params: {
-          ...(cursor === null ? {} : { cursor }),
-          depth: "all",
-          limit: 25,
-          sort: "-modified-date",
-          status: ["current"]
-        }
-      })
+      api.v2.httpClient.execute(
+        HttpClientRequest.get(`/spaces/${encodeURIComponent(spaceId)}/pages`).pipe(
+          HttpClientRequest.setUrlParams({
+            ...(cursor === null ? {} : { cursor }),
+            depth: "all",
+            limit: 25,
+            sort: "-modified-date",
+            status: ["current"]
+          })
+        )
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluenceSpacePage))
+      )
     ),
   getPageAttachments: (pageId, cursor) =>
     bounded(

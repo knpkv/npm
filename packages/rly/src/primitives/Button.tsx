@@ -48,6 +48,8 @@ export type ButtonProps = Omit<ComponentPropsWithRef<"button">, "children"> & {
 
 /** Render a visible-text action with stable disabled and loading geometry. */
 export const Button = ({
+  "aria-label": ariaLabel,
+  "aria-labelledby": ariaLabelledBy,
   children,
   className,
   disabled,
@@ -70,6 +72,8 @@ export const Button = ({
     <button
       {...props}
       aria-busy={loading ? "true" : undefined}
+      aria-label={loading && !ariaLabelledBy?.trim() ? (ariaLabel?.trim() ? ariaLabel : String(children)) : ariaLabel}
+      aria-labelledby={ariaLabelledBy}
       className={classNames(
         style("root"),
         RLY_BUTTON_VARIANTS.variant[variant].className,

@@ -29,7 +29,7 @@ export const RawConfluencePage = Schema.Struct({
   status: Schema.Literal("current"),
   title: boundedString(500),
   spaceId: boundedString(512),
-  parentId: Schema.optionalKey(boundedString(512)),
+  parentId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
   authorId: Schema.optionalKey(boundedString(512)),
   ownerId: Schema.optionalKey(Schema.NullOr(boundedString(512))),
   createdAt: timestampString,

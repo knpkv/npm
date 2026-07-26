@@ -8,7 +8,7 @@
     color: var(--rly-color-text-1);
     display: grid;
     gap: var(--rly-space-16);
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
     padding: var(--rly-space-12) var(--rly-space-16);
@@ -50,11 +50,5 @@
     overflow-wrap: anywhere;
     padding: var(--rly-space-4) var(--rly-space-8);
     white-space: normal;
-  }
-
-  @media (max-width: 25rem) {
-    .root {
-      grid-template-columns: minmax(0, 1fr);
-    }
   }
 }

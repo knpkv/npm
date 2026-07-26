@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -14,6 +15,7 @@ import {
 import {
   AgentModelId,
   DurableAgentProviderId,
+  type DurableAgentPrompt,
   PullRequestReviewNotStarted,
   PullRequestReviewState,
   ReviewAgentProfileId
@@ -772,31 +774,33 @@ afterEach(async () => {
 const renderView = async (
   onAskAgent: () => void,
   viewState: WorkspaceEntityState = state,
-  onReviewStart: () => void = () => undefined,
+  onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
   reviewState: PullRequestReviewControllerState = pullRequestReviewState
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
   mountedRoot = createRoot(host)
   const view: ReactElement = (
-    <MemoryRouter>
-      <WorkspaceEntityView
-        onAskAgent={onAskAgent}
-        originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
-        originLabel="Back to items"
-        originState={null}
-        retry={() => undefined}
-        reviewCanEnqueue
-        reviewStart={onReviewStart}
-        reviewState={
-          viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
-            ? reviewState
-            : { _tag: "idle" }
-        }
-        state={viewState}
-        workspaceId={WORKSET_WORKSPACE_ID}
-      />
-    </MemoryRouter>
+    <PortalProvider>
+      <MemoryRouter>
+        <WorkspaceEntityView
+          onAskAgent={onAskAgent}
+          originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
+          originLabel="Back to items"
+          originState={null}
+          retry={() => undefined}
+          reviewCanEnqueue
+          reviewStart={onReviewStart}
+          reviewState={
+            viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
+              ? reviewState
+              : { _tag: "idle" }
+          }
+          state={viewState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      </MemoryRouter>
+    </PortalProvider>
   )
   await act(async () => mountedRoot?.render(view))
   await act(async () => vi.dynamicImportSettled())
@@ -1359,15 +1363,15 @@ describe("canonical workspace entity", () => {
     )
     if (reviewButton === undefined) throw new Error("Expected the pull-request agent review button")
     await act(async () => reviewButton.click())
-    expect(host.textContent).toContain("Launch full-project review")
+    expect(host.textContent).toContain("Review this exact head")
     expect(host.textContent).toContain(pullRequestReviewSubject.headRevision)
     expect(host.textContent).toContain("Full-project review · openai-compatible · review-model")
     expect(host.textContent).toContain("20 minutes")
-    expect(host.textContent).toContain("Blocked")
+    expect(host.textContent).toContain("Network blocked")
     expect(host.textContent).toContain("sbx")
     expect(onReviewStart).not.toHaveBeenCalled()
     const startButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Start review"
+      (button) => button.textContent === "Start full review"
     )
     if (startButton === undefined) throw new Error("Expected review confirmation")
     await act(async () => startButton.click())

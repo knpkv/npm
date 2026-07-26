@@ -1,6 +1,6 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import { type ReactElement, useEffect, useRef } from "react"
 
 import type { PluginConnectionSummary, ProviderAccountSummary } from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
@@ -23,6 +23,110 @@ const resourceKind = (providerId: ProviderId): string => {
     case "clockify":
       return "Workspace"
   }
+}
+
+const resourceSummaryContent = (
+  resource: ProviderAccountSummary["resources"][number],
+  status: ReturnType<typeof connectionStatus>,
+  hasControls: boolean
+): ReactElement => (
+  <>
+    <div className={styles.connectionIdentity}>
+      <ServiceMark service={resource.providerId} size="compact" />
+      <div className={styles.identity}>
+        <Text as="h3" variant="card-title">
+          {resource.displayName}
+        </Text>
+        <Text className={styles.identifier} tone="secondary" variant="meta">
+          {resourceKind(resource.providerId)} · {resource.providerImmutableId}
+        </Text>
+      </div>
+    </div>
+    <div className={styles.resourceStatus}>
+      <StateLabel label={status.label} size="compact" tone={status.tone} />
+      {hasControls ? (
+        <span className={styles.disclosure}>
+          Controls <span aria-hidden="true">›</span>
+        </span>
+      ) : null}
+    </div>
+  </>
+)
+
+const ConnectedProviderResource = ({
+  canConfigure,
+  connection,
+  enablementState,
+  onRefreshSynchronization,
+  onSetEnabled,
+  onSynchronize,
+  onTest,
+  resource,
+  synchronizationState,
+  testState
+}: {
+  readonly canConfigure: boolean
+  readonly connection: PluginConnectionSummary
+  readonly enablementState: ConnectionEnablementState | undefined
+  readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
+  readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
+  readonly onTest: (pluginConnectionId: PluginConnectionId) => void
+  readonly resource: ProviderAccountSummary["resources"][number]
+  readonly synchronizationState: ConnectionSynchronizationViewState | undefined
+  readonly testState: ConnectionTestState | undefined
+}): ReactElement => {
+  const status = connectionStatus(connection, testState)
+  const isTesting = testState?._tag === "testing"
+  const isChanging = enablementState === "changing"
+  const needsAttention = status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
+  const disclosure = useRef<HTMLDetailsElement>(null)
+  const previouslyNeededAttention = useRef(false)
+
+  useEffect(() => {
+    if (needsAttention && !previouslyNeededAttention.current && disclosure.current !== null) {
+      disclosure.current.open = true
+    }
+    previouslyNeededAttention.current = needsAttention
+  }, [needsAttention])
+
+  return (
+    <details className={styles.resource} data-status-tone={status.tone} ref={disclosure}>
+      <summary className={styles.resourceSummary}>{resourceSummaryContent(resource, status, true)}</summary>
+      <div className={styles.resourceBody}>
+        <ConnectionTestEvidence state={testState} />
+        <ConnectionSynchronization
+          canSynchronize={canConfigure && connection.isEnabled}
+          onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
+          onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
+          state={synchronizationState}
+        />
+        <div className={styles.resourceActions}>
+          <Button
+            disabled={!canConfigure || isChanging || isTesting || !connection.isEnabled}
+            loading={isTesting}
+            onClick={() => onTest(connection.pluginConnectionId)}
+            variant="secondary"
+          >
+            Test
+          </Button>
+          <Button
+            disabled={!canConfigure || isChanging}
+            loading={isChanging}
+            onClick={() => onSetEnabled(connection.pluginConnectionId, !connection.isEnabled)}
+            variant="quiet"
+          >
+            {connection.isEnabled ? "Disable" : "Enable"}
+          </Button>
+        </div>
+        {enablementState === "request-failed" ? (
+          <Text as="p" className={styles.setupError} role="alert" variant="body">
+            Control Center could not change this service. Refresh and try again.
+          </Text>
+        ) : null}
+      </div>
+    </details>
+  )
 }
 
 /** Compact account-level view of independently actionable provider resources. */
@@ -80,59 +184,27 @@ export const ProviderAccountCard = ({
           connection === undefined ? undefined : enablementStates.get(connection.pluginConnectionId)
         const status: ReturnType<typeof connectionStatus> =
           connection === undefined ? { label: "Followed", tone: "neutral" } : connectionStatus(connection, testState)
-        const isTesting = testState?._tag === "testing"
-        const isChanging = enablementState === "changing"
-        return (
-          <div className={styles.resource} key={resource.followedResourceId}>
-            <div className={styles.resourceHeading}>
-              <div className={styles.connectionIdentity}>
-                <ServiceMark service={resource.providerId} size="compact" />
-                <div className={styles.identity}>
-                  <Text as="h3" variant="card-title">
-                    {resource.displayName}
-                  </Text>
-                  <Text className={styles.identifier} tone="secondary" variant="meta">
-                    {resourceKind(resource.providerId)} · {resource.providerImmutableId}
-                  </Text>
-                </div>
-              </div>
-              <StateLabel label={status.label} size="compact" tone={status.tone} />
+        if (connection === undefined) {
+          return (
+            <div className={styles.resource} data-status-tone={status.tone} key={resource.followedResourceId}>
+              <div className={styles.resourceSummary}>{resourceSummaryContent(resource, status, false)}</div>
             </div>
-            {connection === undefined ? null : (
-              <>
-                <ConnectionTestEvidence state={testState} />
-                <ConnectionSynchronization
-                  canSynchronize={canConfigure && connection.isEnabled}
-                  onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
-                  onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
-                  state={synchronizationStates.get(connection.pluginConnectionId)}
-                />
-                <div className={styles.resourceActions}>
-                  <Button
-                    disabled={!canConfigure || isChanging || isTesting || !connection.isEnabled}
-                    loading={isTesting}
-                    onClick={() => onTest(connection.pluginConnectionId)}
-                    variant="secondary"
-                  >
-                    Test
-                  </Button>
-                  <Button
-                    disabled={!canConfigure || isChanging}
-                    loading={isChanging}
-                    onClick={() => onSetEnabled(connection.pluginConnectionId, !connection.isEnabled)}
-                    variant="quiet"
-                  >
-                    {connection.isEnabled ? "Disable" : "Enable"}
-                  </Button>
-                </div>
-                {enablementState === "request-failed" ? (
-                  <Text as="p" className={styles.setupError} role="alert" variant="body">
-                    Control Center could not change this service. Refresh and try again.
-                  </Text>
-                ) : null}
-              </>
-            )}
-          </div>
+          )
+        }
+        return (
+          <ConnectedProviderResource
+            canConfigure={canConfigure}
+            connection={connection}
+            enablementState={enablementState}
+            key={resource.followedResourceId}
+            onRefreshSynchronization={onRefreshSynchronization}
+            onSetEnabled={onSetEnabled}
+            onSynchronize={onSynchronize}
+            onTest={onTest}
+            resource={resource}
+            synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}
+            testState={testState}
+          />
         )
       })}
     </div>

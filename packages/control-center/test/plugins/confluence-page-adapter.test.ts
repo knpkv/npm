@@ -362,6 +362,29 @@ describe("Confluence page adapter", () => {
       assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
     }))
 
+  it.effect("marks watcher metadata incomplete when the classic endpoint reports OAuth scope mismatch as 401", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getPageWatchers: () =>
+            Effect.fail(
+              new ConfluencePageClientFailure({
+                operation: "confluence-page-watchers",
+                reason: "authentication",
+                retryAfterSeconds: null
+              })
+            )
+        })
+      )
+
+      const pages = yield* adapter.connection.sync(syncRequest).pipe(Stream.runCollect)
+      const entity = pages[0]?.events.find((event) => event._tag === "UpsertEntity")
+      assert.exists(entity)
+      if (entity?._tag !== "UpsertEntity") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(entity.attributes)
+      assert.deepStrictEqual(attributes.watcherInventory, { complete: false, pagesFetched: 0 })
+    }))
+
   it.effect("caps new watcher contributors while retaining watcher roles for known contributors", () =>
     Effect.gen(function*() {
       const versions = Array.from({ length: 500 }, (_, index) => ({
@@ -1040,6 +1063,33 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(discovery.workspace?.providerImmutableId, "site-acme")
     }))
 
+  it.effect("uses the OAuth profile identity without requiring a classic Confluence user scope", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getCurrentUser: Effect.die("OAuth discovery must use the already-verified profile identity")
+        }),
+        undefined,
+        undefined,
+        {
+          ...configuration,
+          oauthVerifiedSiteId: "site-acme",
+          oauthVerifiedUser: {
+            accountId: "account-oauth-user",
+            displayName: "OAuth Avery",
+            publicName: "OAuth Avery"
+          }
+        }
+      )
+
+      const discovery = yield* adapter.connection.discover
+
+      assert.deepStrictEqual(discovery.account, {
+        providerImmutableId: "account-oauth-user",
+        displayName: "OAuth Avery"
+      })
+    }))
+
   it.effect("uses the public name for a privacy-limited current-user profile", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(defaultClient({
@@ -1361,6 +1411,34 @@ describe("Confluence page adapter", () => {
       )
     }))
 
+  it.effect("returns unresolved inactive contributors when OAuth scope mismatch is reported as 401", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getUsers: () =>
+            Effect.fail(
+              new ConfluencePageClientFailure({
+                operation: "confluence-user-lookup",
+                reason: "authentication",
+                retryAfterSeconds: null
+              })
+            )
+        })
+      )
+      const result = yield* adapter.connection.readEntity(request)
+
+      assert.strictEqual(result._tag, "found")
+      if (result._tag !== "found") return
+      const attributes = Schema.decodeUnknownSync(ConfluencePageAttributesV1)(result.event.attributes)
+      assert.deepStrictEqual(
+        attributes.contributors.map(({ accountId, active, resolved }) => ({ accountId, active, resolved })),
+        [
+          { accountId: "account-author", active: false, resolved: false },
+          { accountId: "account-owner", active: false, resolved: false }
+        ]
+      )
+    }))
+
   it.effect("keeps non-authorization profile lookup failures fatal", () =>
     Effect.gen(function*() {
       const adapter = yield* makeAdapter(defaultClient({
@@ -1421,6 +1499,19 @@ describe("Confluence page adapter", () => {
       assert.strictEqual(versionCalls, 0)
       assert.strictEqual(userCalls, 0)
       assert.strictEqual(conversionCalls, 0)
+    }))
+
+  it.effect("accepts a space homepage with a null parent as the health probe", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(
+        defaultClient({
+          getPage: () => Effect.succeed({ ...currentPage, parentId: null })
+        })
+      )
+
+      const health = yield* adapter.connection.health
+
+      assert.strictEqual(health._tag, "healthy")
     }))
 
   it.effect("stops version traversal at five pages and marks history incomplete", () =>

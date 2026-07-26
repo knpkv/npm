@@ -29,9 +29,14 @@
 .reviewNotes > header > span,
 .reviewNotes ul,
 .reviewNotes li,
-.publicationBackdrop,
+.reviewStatus,
+.reviewLaunchDialog,
+.reviewLaunchBody,
+.reviewLaunchFacts,
+.reviewLaunchFacts > div,
+.reviewLaunchActions,
 .publicationDialog,
-.publicationDialog > header,
+.publicationDialogBody,
 .publicationFacts,
 .publicationFacts > div,
 .publicationEditor,
@@ -201,6 +206,86 @@
 
 .reviewLanes button {
   inline-size: fit-content;
+}
+
+.reviewStatus {
+  gap: var(--rly-space-8);
+}
+
+.reviewRunway {
+  background: var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  display: block;
+  inline-size: 100%;
+  margin-block-start: var(--rly-space-4);
+  min-block-size: var(--rly-space-4);
+  overflow: hidden;
+  position: relative;
+}
+
+.reviewRunway::after {
+  animation: review-runway 1.6s ease-in-out infinite;
+  background: var(--rly-color-service-codecommit);
+  border-radius: inherit;
+  content: "";
+  inset-block: var(--rly-space-0);
+  inline-size: 38%;
+  position: absolute;
+}
+
+.reviewLaunchDialog {
+  border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 52%, var(--rly-color-border-1));
+  border-block-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
+  inline-size: min(38rem, 100%);
+}
+
+.reviewLaunchBody,
+.publicationDialogBody {
+  gap: var(--rly-space-24);
+}
+
+.reviewLaunchEyebrow,
+.publicationEyebrow,
+.reviewLaunchFacts dt,
+.reviewThreadComposerFooter {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+}
+
+.reviewLaunchEyebrow,
+.publicationEyebrow {
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reviewLaunchFacts {
+  gap: var(--rly-space-12);
+  margin: var(--rly-space-0);
+}
+
+.reviewLaunchFacts > div {
+  gap: var(--rly-space-4);
+  grid-template-columns: 7rem minmax(var(--rly-space-0), 1fr);
+}
+
+.reviewLaunchFacts dd {
+  margin: var(--rly-space-0);
+  overflow-wrap: anywhere;
+}
+
+.reviewLaunchFacts code {
+  font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
+    var(--rly-type-code-font);
+}
+
+.reviewLaunchActions {
+  gap: var(--rly-space-12);
+  grid-template-columns: 1fr 1fr;
+}
+
+.reviewLaunchActions button {
+  inline-size: 100%;
 }
 
 .reviewHead {
@@ -392,37 +477,9 @@
   padding: var(--rly-space-12);
 }
 
-.publicationBackdrop {
-  align-items: center;
-  background: color-mix(in srgb, var(--rly-color-surface-1) 78%, transparent);
-  inset: var(--rly-space-0);
-  justify-items: center;
-  padding: var(--rly-space-24);
-  position: fixed;
-  z-index: 20;
-}
-
 .publicationDialog {
-  background: var(--rly-color-surface-1);
   border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 55%, var(--rly-color-border-1));
-  border-radius: var(--rly-radius-control);
-  box-shadow: 0 var(--rly-space-24) var(--rly-space-48) color-mix(in srgb, black 35%, transparent);
-  gap: var(--rly-space-24);
   inline-size: min(46rem, 100%);
-  max-block-size: calc(100dvh - var(--rly-space-48));
-  overflow: auto;
-  padding: var(--rly-space-32);
-}
-
-.publicationDialog > header {
-  gap: var(--rly-space-8);
-}
-
-.publicationDialog > header > strong {
-  font-family: var(--rly-type-section-title-font);
-  font-size: var(--rly-type-section-title-size);
-  font-weight: var(--rly-type-section-title-weight);
-  line-height: var(--rly-type-section-title-line-height);
 }
 
 .publicationFacts {
@@ -570,8 +627,24 @@
   outline-offset: var(--rly-space-2);
 }
 
+.reviewThreadComposerFooter {
+  display: flex;
+  gap: var(--rly-space-12);
+  justify-content: space-between;
+}
+
 .reviewThreadComposer button {
   justify-self: start;
+}
+
+@keyframes review-runway {
+  from {
+    translate: -100% 0;
+  }
+
+  to {
+    translate: 264% 0;
+  }
 }
 
 .deliveryCounts {
@@ -632,7 +705,19 @@
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
   }
 
+  .reviewLaunchFacts > div,
+  .reviewLaunchActions {
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
+  }
+
   .direction {
     rotate: 90deg;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reviewRunway::after {
+    animation: none;
+    inline-size: 100%;
   }
 }

@@ -398,6 +398,15 @@ const acceptanceCriteriaFromAdf = (
 const compact = (value: string | undefined): string | null =>
   value === undefined ? null : value.slice(0, MAX_CHANGE_VALUE_CHARACTERS)
 
+const ownChangeValue = (
+  item: typeof JiraChangeItem.Type,
+  preferred: "fromString" | "toString",
+  fallback: "from" | "to"
+): string | undefined => {
+  const preferredValue = Object.hasOwn(item, preferred) ? item[preferred] : undefined
+  return preferredValue ?? (Object.hasOwn(item, fallback) ? item[fallback] : undefined)
+}
+
 const namedValue = (value: typeof JiraNamedValue.Type | null | undefined) =>
   value === null || value === undefined ? null : { sourceId: value.id ?? null, name: value.name?.slice(0, 255) ?? null }
 
@@ -560,8 +569,8 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       (items ?? []).some(
         (item) =>
           (item.field ?? item.fieldId ?? "unknown").length > 255 ||
-          ((item.fromString ?? item.from)?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS ||
-          ((item.toString ?? item.to)?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS
+          (ownChangeValue(item, "fromString", "from")?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS ||
+          (ownChangeValue(item, "toString", "to")?.length ?? 0) > MAX_CHANGE_VALUE_CHARACTERS
       )
     )
   ) {
@@ -622,8 +631,8 @@ export const normalizeJiraIssue = Effect.fn("JiraIssueNormalization.normalize")(
       createdAt: history.created ?? null,
       changes: (history.items ?? []).slice(0, MAXIMUM_NORMALIZED_ISSUE_HISTORY_CHANGES).map((item) => ({
         field: (item.field ?? item.fieldId ?? "unknown").slice(0, 255),
-        from: compact(item.fromString ?? item.from),
-        to: compact(item.toString ?? item.to)
+        from: compact(ownChangeValue(item, "fromString", "from")),
+        to: compact(ownChangeValue(item, "toString", "to"))
       }))
     }))
     const collaboratorValues = Array.from(people.values())

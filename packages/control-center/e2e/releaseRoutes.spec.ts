@@ -1,7 +1,14 @@
 import { type BrowserContext, expect, type Page, test } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
+import {
+  AgentProviderCatalog,
+  PullRequestReviewState,
+  PullRequestReviewThreadPage,
+  ReviewAgentProfile
+} from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
+import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
@@ -176,6 +183,161 @@ const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
       synchronizedAt: "2026-07-14T10:01:00.000Z",
       vendorImmutableId: "jira-issue-ops-428"
     }
+  })
+)
+const reviewBaseRevision = "91c3627b4ce7447e38c906529a4af4be6bc6812d"
+const reviewHeadRevision = "a5d8c9e4f013bdf17c2e6765579e2770f63e7b19"
+const reviewJobId = "01890f6f-6d6a-7cc0-98d2-000000000099"
+const reviewSuggestionId = `sha256:${"1".repeat(64)}`
+// EvidenceStamp's 12rem source minimum resolves against this fixture's 16px root size.
+const EVIDENCE_SOURCE_MIN_WIDTH_PX = 12 * 16
+const reviewProfile = Schema.encodeSync(ReviewAgentProfile)(
+  Schema.decodeUnknownSync(ReviewAgentProfile)({
+    profileId: "openai-compatible:review-model:sbx",
+    label: "Full-project review · openai-compatible · review-model",
+    budgetMillis: 1_200_000,
+    networkAccess: "blocked",
+    sandbox: "sbx"
+  })
+)
+const reviewSubject = Schema.encodeSync(PrReviewSubject)(
+  Schema.decodeUnknownSync(PrReviewSubject)({
+    providerId: "codecommit",
+    repository: "payments-api",
+    pullRequestId: "184",
+    baseRevision: reviewBaseRevision,
+    headRevision: reviewHeadRevision
+  })
+)
+const reviewEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
+  Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+    ...canonicalEntityInspection,
+    entity: {
+      ...canonicalEntityInspection.entity,
+      projection: {
+        ...canonicalEntityInspection.entity.projection,
+        entityType: "pull-request",
+        displayKey: "184",
+        title: "Checkout and capture",
+        details: {
+          _tag: "pull-request",
+          repository: "payments-api",
+          sourceBranch: "feature/capture",
+          targetBranch: "main",
+          headRevision: reviewHeadRevision,
+          baseRevision: reviewBaseRevision,
+          mergeBaseRevision: "6a2621c69c57b428e2a83f415c23ad37a875c87d",
+          reviewState: "requested",
+          lifecycle: "open",
+          description: "Protect capture retries and preserve the original payment result.",
+          authorReference: "arn:aws:sts::123456789012:assumed-role/Developer/alice",
+          createdAt: "2026-07-12T08:00:00.000Z",
+          updatedAt: "2026-07-14T10:00:00.000Z"
+        }
+      }
+    },
+    source: {
+      ...canonicalEntityInspection.source,
+      providerId: "codecommit",
+      vendorImmutableId: "184",
+      revision: "revision-9",
+      sourceUrl:
+        "https://eu-central-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/184"
+    }
+  })
+)
+const reviewReport = Schema.encodeSync(PrReviewReport)(
+  Schema.decodeUnknownSync(PrReviewReport)({
+    schemaVersion: 3,
+    subject: reviewSubject,
+    completion: { status: "complete" },
+    suggestions: [
+      {
+        suggestionId: reviewSuggestionId,
+        state: "draft",
+        title: "Reuse the original idempotency key",
+        severity: "P2",
+        problem: "Retry can duplicate capture",
+        impact: "The retry path does not reuse the original idempotency key.",
+        evidence: {
+          path: "src/capture.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "return capture({ idempotencyKey: freshKey })"
+        },
+        recommendation: "Reuse the original idempotency key for retry attempts.",
+        anchor: {
+          _tag: "line",
+          path: "src/capture.ts",
+          line: 42
+        },
+        relatedLocations: [],
+        confidence: {
+          level: "high",
+          reason: "The added retry branch supplies a newly generated key."
+        },
+        prevention: {
+          summary: "Add a focused retry contract test.",
+          enforcement: "test",
+          existingRuleOrConfig: "capture integration suite",
+          recurrenceEvidence: "Every capture retry crosses the shared idempotency boundary.",
+          targetFile: "test/capture-retry.test.ts",
+          sourcePaths: ["src/capture.ts"],
+          matcherOrInvariant: "Every retry reuses its original idempotency key.",
+          invalidFixture: "capture({ retry: true, idempotencyKey: freshKey })",
+          validFixture: "capture({ retry: true, idempotencyKey: originalKey })",
+          boundary: "Only capture retries are covered."
+        }
+      }
+    ],
+    notes: []
+  })
+)
+const completedPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "completed",
+    subject: reviewSubject,
+    jobId: reviewJobId,
+    providerId: "openai-compatible",
+    model: "review-model",
+    reviewProfile,
+    activity: { events: [], truncated: false },
+    requestedAt: "2026-07-14T10:00:00.000Z",
+    completedAt: "2026-07-14T10:01:00.000Z",
+    outcome: "changes-required",
+    report: reviewReport
+  })
+)
+const notStartedPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "not-started",
+    subject: reviewSubject
+  })
+)
+const pendingPullRequestReview = Schema.encodeSync(PullRequestReviewState)(
+  Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "pending",
+    subject: reviewSubject,
+    jobId: reviewJobId,
+    providerId: "openai-compatible",
+    model: "review-model",
+    reviewProfile,
+    activity: { events: [], truncated: false },
+    requestedAt: "2026-07-14T10:00:00.000Z",
+    state: "queued"
+  })
+)
+const reviewProviderCatalog = Schema.encodeSync(AgentProviderCatalog)(
+  Schema.decodeUnknownSync(AgentProviderCatalog)({
+    providers: [
+      {
+        providerId: "openai-compatible",
+        models: ["review-model"],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available",
+        reviewProfile
+      }
+    ]
   })
 )
 
@@ -540,6 +702,159 @@ test("renders a synchronized Jira issue as a complete read-only document", async
   await expect(page.getByRole("heading", { name: "History" })).toBeVisible()
   await expect(page.getByText("In progress → In review")).toBeVisible()
   await expect(page.getByRole("textbox")).toHaveCount(0)
+})
+
+test("launches an exact-head review and presents its durable findings", async ({ page }) => {
+  let enqueued = false
+  let enqueuePayload: unknown
+  let remainingPendingReviewPolls = 1
+  const threadEvents = Schema.encodeSync(PullRequestReviewThreadPage)(
+    Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
+      events: [
+        {
+          _tag: "run-queued",
+          eventSequence: 1,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:00:00.000Z",
+          providerId: "openai-compatible",
+          model: "review-model",
+          reviewProfile,
+          subject: reviewSubject
+        },
+        {
+          _tag: "run-started",
+          eventSequence: 2,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:00:01.000Z"
+        },
+        {
+          _tag: "review-report",
+          eventSequence: 3,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:01:00.000Z",
+          report: reviewReport
+        },
+        {
+          _tag: "run-completed",
+          eventSequence: 4,
+          jobId: reviewJobId,
+          occurredAt: "2026-07-14T10:01:00.000Z",
+          outcome: "success"
+        }
+      ],
+      hasMore: false,
+      nextCursor: 4
+    })
+  ).events
+
+  await page.route(`**/api/v1/items/${canonicalEntityId}`, async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(reviewEntityInspection),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/diffs/*/pull-requests/*/inventory**", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ entries: [], ready: true }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(reviewProviderCatalog),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review`, async (route) => {
+    const review = !enqueued
+      ? notStartedPullRequestReview
+      : remainingPendingReviewPolls > 0
+      ? pendingPullRequestReview
+      : completedPullRequestReview
+    if (enqueued && remainingPendingReviewPolls > 0) {
+      remainingPendingReviewPolls -= 1
+    }
+    await route.fulfill({
+      body: JSON.stringify(review),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review-thread/events**`, async (route) => {
+    const after = Number.parseInt(new URL(route.request().url()).searchParams.get("after") ?? "0", 10)
+    const events = enqueued
+      ? threadEvents.filter(({ eventSequence }) => eventSequence > after)
+      : []
+    await route.fulfill({
+      body: JSON.stringify({
+        events,
+        hasMore: false,
+        nextCursor: events.at(-1)?.eventSequence ?? after
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/reviews`, async (route) => {
+    expect(route.request().method()).toBe("POST")
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    enqueuePayload = route.request().postDataJSON()
+    enqueued = true
+    await route.fulfill({
+      body: JSON.stringify(pendingPullRequestReview),
+      contentType: "application/json",
+      status: 202
+    })
+  })
+
+  await page.goto(canonicalEntityPath)
+  const evidenceStamp = page.locator("[data-rly-evidence-stamp]")
+  const evidenceSource = evidenceStamp.locator("[data-rly-evidence-source]")
+  await expect(evidenceStamp.locator("[data-rly-evidence-freshness]")).toBeVisible()
+  const evidenceSourceBox = await evidenceSource.boundingBox()
+  if (evidenceSourceBox === null) throw new Error("Evidence source geometry was unavailable")
+  expect(evidenceSourceBox.width).toBeGreaterThanOrEqual(EVIDENCE_SOURCE_MIN_WIDTH_PX)
+
+  const reviewTrigger = page.getByRole("button", { name: "Review exact head" })
+  await expect(reviewTrigger).toBeVisible()
+  await reviewTrigger.focus()
+  await reviewTrigger.click()
+
+  const launchDialog = page.getByRole("dialog", { name: "Review this exact head" })
+  await expect(launchDialog).toBeVisible()
+  await expect(launchDialog.getByRole("button", { name: "Keep reading" })).toBeFocused()
+  await expect(launchDialog).toContainText(reviewHeadRevision)
+  await expect(launchDialog).toContainText(reviewProfile.label)
+  await expect(launchDialog).toContainText("20 minutes")
+  await expect(launchDialog).toContainText("Network blocked · sbx")
+  await expect(page.locator("[inert]")).not.toHaveCount(0)
+  await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
+
+  await page.keyboard.press("Escape")
+  await expect(launchDialog).toHaveCount(0)
+  await expect(reviewTrigger).toBeFocused()
+  await expect(page.locator("[inert]")).toHaveCount(0)
+  await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked", "1")
+
+  await reviewTrigger.click()
+  await launchDialog.getByRole("button", { name: "Start full review" }).click()
+  await expect.poll(() => enqueuePayload).toEqual({
+    providerId: "openai-compatible",
+    model: "review-model",
+    profile: "read-only",
+    reviewProfileId: reviewProfile.profileId
+  })
+  await expect(page.getByText("Review queued")).toBeVisible()
+
+  await expect(page.getByText("Changes Required")).toBeVisible()
+  await expect(page.getByText("Reuse the original idempotency key", { exact: true })).toBeVisible()
+  await expect(page.getByText("Review sandbox started")).toBeVisible()
+  await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
+  await expect(page.getByText("Run completed · success")).toBeVisible()
+  await expect(page.getByText("Agent advice only. A person must still approve or request changes.")).toBeVisible()
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

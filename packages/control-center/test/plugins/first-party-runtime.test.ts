@@ -222,7 +222,7 @@ const jiraOAuthDescriptorWithSiteOnly = {
   configurationFields: historicalJiraDescriptor.configurationFields.filter(({ key }) => key !== "projectId")
 }
 
-const oauthProfile = (id: string, expiresAt: number) => ({
+const oauthProfile = (id: string, expiresAt: number, userName = "Avery Bell") => ({
   id,
   name: `${id} @ knpkv.atlassian.net`,
   token: {
@@ -232,7 +232,7 @@ const oauthProfile = (id: string, expiresAt: number) => ({
     scope: Array.from(new Set([...JIRA_SCOPES, ...CONFLUENCE_SCOPES])).join(" "),
     cloud_id: "cloud-1",
     site_url: "https://knpkv.atlassian.net/",
-    user: { account_id: "account-1", name: "Avery Bell", email: "avery@example.com" }
+    user: { account_id: "account-1", name: userName, email: "avery@example.com" }
   },
   created_at: "2026-07-18T10:00:00.000Z",
   updated_at: "2026-07-18T10:00:00.000Z"
@@ -975,7 +975,17 @@ describe("first-party plugin runtime", () => {
       yield* TestClock.setTime(now)
       const storePath = path.join(configRoot, "atlassian", "control-center")
       yield* fileSystem.makeDirectory(storePath, { recursive: true })
-      const profiles = [oauthProfile("valid-profile", now + 60_000), oauthProfile("expired-profile", now - 1)]
+      const longUserName = `Avery ${"B".repeat(195)}`
+      const supplementaryUserName = `${"A".repeat(199)}😀`
+      const exactBoundaryUserName = `${"A".repeat(199)}B`
+      const profiles = [
+        oauthProfile("valid-profile", now + 60_000),
+        oauthProfile("expired-profile", now - 1),
+        oauthProfile("legacy-spaced-name-profile", now + 60_000, " Avery Bell"),
+        oauthProfile("long-name-profile", now + 60_000, longUserName),
+        oauthProfile("supplementary-name-profile", now + 60_000, supplementaryUserName),
+        oauthProfile("exact-boundary-profile", now + 60_000, exactBoundaryUserName)
+      ]
       yield* fileSystem.writeFileString(
         path.join(storePath, "profiles.json"),
         JSON.stringify({ activeProfileId: "valid-profile", profiles })
@@ -1003,12 +1013,47 @@ describe("first-party plugin runtime", () => {
         const cases: ReadonlyArray<{
           readonly expectedDiagnosticCode: string | null
           readonly historicalDescriptor?: boolean
-          readonly profileId: "valid-profile" | "expired-profile"
+          readonly expectedDisplayName?: string
+          readonly profileId:
+            | "valid-profile"
+            | "expired-profile"
+            | "legacy-spaced-name-profile"
+            | "long-name-profile"
+            | "supplementary-name-profile"
+            | "exact-boundary-profile"
           readonly providerId: "jira" | "confluence"
           readonly siteId: string
         }> = [
           { expectedDiagnosticCode: null, providerId: "jira", profileId: "valid-profile", siteId: "cloud-1" },
           { expectedDiagnosticCode: null, providerId: "confluence", profileId: "valid-profile", siteId: "cloud-1" },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "Avery Bell",
+            providerId: "confluence",
+            profileId: "legacy-spaced-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: longUserName.slice(0, 200),
+            providerId: "confluence",
+            profileId: "long-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: "A".repeat(199),
+            providerId: "confluence",
+            profileId: "supplementary-name-profile",
+            siteId: "cloud-1"
+          },
+          {
+            expectedDiagnosticCode: null,
+            expectedDisplayName: exactBoundaryUserName,
+            providerId: "confluence",
+            profileId: "exact-boundary-profile",
+            siteId: "cloud-1"
+          },
           {
             expectedDiagnosticCode: null,
             historicalDescriptor: true,
@@ -1096,6 +1141,13 @@ describe("first-party plugin runtime", () => {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") {
               const connection = Context.get(outcome.success, PluginConnection)
+              if (testCase.providerId === "confluence") {
+                const discovery = yield* connection.discover
+                assert.deepStrictEqual(discovery.account, {
+                  providerImmutableId: "account-1",
+                  displayName: testCase.expectedDisplayName ?? "Avery Bell"
+                })
+              }
               if (testCase.historicalDescriptor === true) {
                 assert.isFalse(hasPluginCapability(connection.descriptor, "sync.incremental", 1))
                 const driver = firstPartyManualPluginSyncDrivers.get("confluence")
