@@ -29,7 +29,7 @@ const roots: Array<ReturnType<typeof createRoot>> = []
 const flushLazyDiffViewer = async (): Promise<void> => {
   await act(async () => {
     await import("@knpkv/rly/diff/bounded")
-    await Promise.resolve()
+    await vi.dynamicImportSettled()
   })
 }
 
@@ -46,6 +46,7 @@ const scope = {
   revision: Revision.make("revision-9")
 }
 const fileAnchor = DiffFileAnchor.make("sha256:12a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a1d")
+const otherFileAnchor = DiffFileAnchor.make("sha256:22a936386c815ae967006bbb95377860b3aa4e7000a05dda7486cf0a071d7a2d")
 const unauthorizedReadKinds: ReadonlyArray<"inventory" | "content"> = ["inventory", "content"]
 const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   suggestionId: `sha256:${"1".repeat(64)}`,
@@ -144,6 +145,7 @@ describe("WorkspacePullRequestDiff", () => {
       await Promise.resolve()
       await Promise.resolve()
     })
+    await flushLazyDiffViewer()
 
     expect(host.textContent).toContain("File suggestions")
     expect(host.textContent).toContain("Whole-change suggestions")
@@ -482,6 +484,89 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("Recommendation:")
     expect(host.querySelector("[aria-label='P2 review suggestion with high confidence']")).not.toBeNull()
     expect(host.querySelectorAll("[data-control-center-diff-layout]")).toHaveLength(0)
+  })
+
+  it("navigates a related location to its file and exact added line", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: fileAnchor,
+            path: PluginRelativePathV1.make("src/file.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: otherFileAnchor,
+            path: PluginRelativePathV1.make("src/other.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          }
+        ]
+      }),
+      content: async (_scope, entry, side) => {
+        const text =
+          String(entry.path) === "src/other.ts"
+            ? [
+                "// line 1",
+                "// line 2",
+                "// line 3",
+                "// line 4",
+                "// line 5",
+                "// line 6",
+                "// line 7",
+                side === "before" ? "export const related = 1" : "export const related = 2"
+              ].join("\n")
+            : side === "before"
+              ? "export const answer = 42\n"
+              : "export const answer = 43\n"
+        return {
+          bytesBase64: btoa(text),
+          totalBytes: text.length,
+          unavailableReason: null
+        }
+      }
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff heading="PR 184" scope={scope} suggestions={[fileSuggestion]} transport={transport} />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    const relatedLocation = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "src/other.ts:8"
+    )
+    if (relatedLocation === undefined) throw new Error("Expected related-location navigation")
+    await act(async () => {
+      relatedLocation.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    expect(
+      host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
+    ).toBe("true")
+    const target = host.querySelector<HTMLElement>(
+      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
+    )
+    expect(target).not.toBeNull()
+    expect(document.activeElement).toBe(target)
   })
 
   it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {

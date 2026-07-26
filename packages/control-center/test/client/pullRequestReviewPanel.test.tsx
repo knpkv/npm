@@ -157,6 +157,9 @@ const REVIEW_STATE = {
               "-yield* mutate()",
               "+yield* authorize()",
               "+yield* mutate()",
+              "@@ -45,1 +45,1 @@",
+              "-counter",
+              "+++ counter",
               "diff --git a/src/literal.ts b/src/literal.ts",
               "index 3333333..4444444 100644",
               "--- a/src/literal.ts",
@@ -322,6 +325,7 @@ describe("PullRequestReviewPanel", () => {
     expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("yield* mutate()")
     expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("--- literal source")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("yield* authorize()")
+    expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("++ counter")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("+++ literal source")
     expect(replacements[0]?.querySelectorAll("pre")[0]?.textContent).toContain("src/literal.ts · @@ -50,1 +51,1 @@")
     expect(replacements[0]?.querySelectorAll("pre")[1]?.textContent).toContain("src/literal.ts · @@ -50,1 +51,1 @@")
@@ -506,6 +510,63 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain(RECEIPT.safeSummary)
     expect(host.textContent).toContain(RECEIPT.providerOperationId)
     expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)}`)
+  })
+
+  it("shows the persisted relative file version in deletion-only previews and receipts", async () => {
+    const beforePreview = new ReviewSuggestionPublicationPreview({
+      ...PREVIEW,
+      anchor: {
+        _tag: "file",
+        path: ANCHOR_PATH,
+        line: ANCHOR_LINE,
+        relativeFileVersion: "BEFORE"
+      }
+    })
+    const beforePublication = new PublishedReviewComment({
+      ...PUBLICATION,
+      anchor: beforePreview.anchor
+    })
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "preview", preview: beforePreview }}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+    expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)} · BEFORE`)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{
+            _tag: "published",
+            headSuperseded: false,
+            preview: beforePreview,
+            publication: beforePublication
+          }}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+    expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)} · BEFORE`)
+    expect(host.textContent).not.toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)} · AFTER`)
   })
 
   it("keeps a superseded receipt visible after the refreshed head has no completed review", async () => {

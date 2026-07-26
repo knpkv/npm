@@ -12,7 +12,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, type ReactElement, Suspense, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
@@ -24,6 +24,14 @@ import styles from "./WorkspacePullRequestDiff.module.css"
 const BoundedDiffCodeView = lazy(async () => {
   const module = await import("@knpkv/rly/diff/bounded")
   return { default: module.BoundedDiffCodeView }
+})
+const DiffLineFocus = lazy(async () => {
+  const module = await import("./DiffLineFocus.js")
+  return { default: module.DiffLineFocus }
+})
+const ReviewSuggestionOverview = lazy(async () => {
+  const module = await import("./ReviewSuggestionOverview.js")
+  return { default: module.ReviewSuggestionOverview }
 })
 
 export interface WorkspacePullRequestDiffScope {
@@ -95,7 +103,6 @@ type InventoryLoadState =
 
 type SuggestionSeverityFilter = "all" | PrReviewSuggestion["severity"]
 type SuggestionStateFilter = "all" | PrReviewSuggestionState
-const overviewScopeKinds = ["file", "changes"] satisfies ReadonlyArray<"file" | "changes">
 
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
@@ -171,6 +178,12 @@ export const WorkspacePullRequestDiff = ({
   const [isWrapped, setIsWrapped] = useState(false)
   const [severityFilter, setSeverityFilter] = useState<SuggestionSeverityFilter>("all")
   const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
+  const [focusRequest, setFocusRequest] = useState<{
+    readonly fileId: string
+    readonly lineNumber: number
+    readonly requestId: number
+  }>()
+  const viewerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setSeverityFilter("all")
@@ -184,6 +197,7 @@ export const WorkspacePullRequestDiff = ({
     setContentStates(new Map())
     setLoadedText(new Map())
     setContentRetryKey(0)
+    setFocusRequest(undefined)
     transport.inventory(scope, abort.signal).then(
       (inventory) => {
         if (abort.signal.aborted) return
@@ -390,7 +404,6 @@ export const WorkspacePullRequestDiff = ({
       })),
     [visibleSuggestions]
   )
-  const overviewSuggestions = visibleSuggestions.filter(({ anchor }) => anchor._tag !== "line")
   const severities = ["all", "P1", "P2", "P3", "P4"] satisfies ReadonlyArray<SuggestionSeverityFilter>
   const states = [
     "all",
@@ -427,64 +440,24 @@ export const WorkspacePullRequestDiff = ({
           ))}
         </div>
       </section>
-      {overviewSuggestions.length === 0 ? null : (
-        <section aria-label="File and whole-change suggestions" className={styles.overview}>
-          <header>
-            <span>Review overview</span>
-            <strong>{overviewSuggestions.length}</strong>
-          </header>
-          {overviewScopeKinds.map((scopeKind) => {
-            const scoped = overviewSuggestions.filter(({ anchor }) => anchor._tag === scopeKind)
-            if (scoped.length === 0) return null
-            return (
-              <section key={scopeKind}>
-                <h3>{scopeKind === "file" ? "File suggestions" : "Whole-change suggestions"}</h3>
-                <ul>
-                  {scoped.map((suggestion) => {
-                    const anchor = suggestion.anchor
-                    return (
-                      <li data-severity={suggestion.severity} key={suggestion.suggestionId}>
-                        <span>
-                          {suggestion.severity} · {suggestion.state}
-                        </span>
-                        <strong>{suggestion.title}</strong>
-                        <p>{suggestion.problem}</p>
-                        {anchor._tag !== "file" ? null : (
-                          <button
-                            onClick={() => {
-                              const entry = entries.find(({ path }) => String(path) === String(anchor.path))
-                              if (entry !== undefined) setSelectedFileId(entry.anchor)
-                            }}
-                            type="button"
-                          >
-                            {anchor.path}:{String(anchor.line)}
-                          </button>
-                        )}
-                        {suggestion.relatedLocations.length === 0 ? null : (
-                          <details>
-                            <summary>Related locations</summary>
-                            <ul>
-                              {suggestion.relatedLocations.map((location) => (
-                                <li key={`${location.path}:${String(location.startLine)}:${String(location.endLine)}`}>
-                                  <code>
-                                    {location.path}:{String(location.startLine)}
-                                    {location.endLine === location.startLine ? "" : `–${String(location.endLine)}`}
-                                  </code>
-                                  <span>{location.label}</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </details>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              </section>
-            )
-          })}
-        </section>
-      )}
+      <Suspense fallback={null}>
+        <ReviewSuggestionOverview
+          entries={entries}
+          onNavigate={(fileId, lineNumber) => {
+            if (lineNumber === undefined) {
+              setFocusRequest(undefined)
+            } else {
+              setFocusRequest((current) => ({
+                fileId,
+                lineNumber,
+                requestId: (current?.requestId ?? 0) + 1
+              }))
+            }
+            setSelectedFileId(fileId)
+          }}
+          suggestions={visibleSuggestions}
+        />
+      </Suspense>
       {unattachedSuggestionCount === 0 ? null : (
         <p role="status">
           {unattachedSuggestionCount} validated review{" "}
@@ -547,15 +520,27 @@ export const WorkspacePullRequestDiff = ({
           selectedEntry === undefined || selectedText === undefined ? (
             "Select a supported text file to render its change."
           ) : (
-            <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-              <BoundedDiffCodeView
-                annotations={annotations}
-                key={selectedEntry.anchor}
-                initialItems={selectedCodeItems}
-                mode={layout}
-                wrap={isWrapped}
-              />
-            </Suspense>
+            <div className={styles.viewerTarget} ref={viewerRef}>
+              <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
+                <BoundedDiffCodeView
+                  annotations={annotations}
+                  key={selectedEntry.anchor}
+                  initialItems={selectedCodeItems}
+                  mode={layout}
+                  wrap={isWrapped}
+                />
+              </Suspense>
+              {focusRequest === undefined || focusRequest.fileId !== selectedEntry.anchor ? null : (
+                <Suspense fallback={null}>
+                  <DiffLineFocus
+                    fileId={focusRequest.fileId}
+                    key={focusRequest.requestId}
+                    lineNumber={focusRequest.lineNumber}
+                    root={viewerRef}
+                  />
+                </Suspense>
+              )}
+            </div>
           )
         }
       />

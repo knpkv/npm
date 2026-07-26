@@ -568,9 +568,11 @@ and make temporary edits inside the disposable sandbox.
 Return one suggestion per root cause. Use a line anchor for one exact changed line,
 a file anchor for advice about one changed file, or a changes anchor for advice
 about the pull request as a whole. Put secondary occurrences in Related Locations
-instead of repeating cards. Evidence excerpts must target added lines and match the
-immutable head exactly. Suggested Replacement must be an inert unified diff bound
-to the exact reviewed head.
+instead of repeating cards. Line anchors, related locations, and evidence for files
+present in the head must target added lines and match the immutable head exactly.
+For a deletion-only file suggestion, evidence may instead target deleted base lines
+and must match the immutable base exactly. Suggested Replacement must be an inert
+unified diff bound to the exact reviewed head.
 
 Use P1 for release-blocking critical defects, P2 for material defects that require
 changes, P3 for non-blocking improvements, and P4 for minor polish. Suggestions

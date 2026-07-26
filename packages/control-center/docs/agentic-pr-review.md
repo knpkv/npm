@@ -77,7 +77,7 @@ Every posted comment has a compact provenance footer:
 - File suggestion: first changed line in the file, falling back to line 1.
 - Whole-change suggestion: general pull-request comment.
 
-One root cause produces one suggestion with a primary anchor and navigable Related Locations. Publication creates one comment at the primary anchor and lists the related locations by default. The preview may explicitly split it into multiple comments.
+One root cause produces one suggestion with a primary anchor and navigable Related Locations. Activating a related location selects its inventory file, loads that file's bounded content, and focuses the exact added line. Publication creates one comment at the primary anchor and lists the related locations by default. The preview may explicitly split it into multiple comments.
 
 ## Structured result
 
@@ -97,7 +97,7 @@ Every Review Suggestion contains:
 - Optional Suggested Replacement.
 - Optional Prevention Proposal.
 
-Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions.
+Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions, including added source text that begins with diff-marker characters.
 
 Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically. Its expanded presentation exposes the existing rule, recurrence evidence, target and source paths, exact matcher or invariant, invalid and valid fixtures, and the remaining boundary or exclusions.
 

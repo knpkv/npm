@@ -1,8 +1,8 @@
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-// Includes the tiny module-preload index entry for the lazily split agent API contract.
-export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 365_100
+// Includes module-preload metadata for the lazy agent API and review-navigation surfaces.
+export const CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES = 366_500
 
 export const CONTROL_CENTER_BROWSER_SESSION_HYDRATOR_ENTRY = "src/client/BrowserSessionHydrator.tsx"
 

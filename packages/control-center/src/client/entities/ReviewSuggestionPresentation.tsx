@@ -29,10 +29,6 @@ const replacementSides = (
   let oldLinesRemaining = 0
   let newLinesRemaining = 0
   for (const line of unifiedDiff.split("\n")) {
-    if (line.startsWith("+++ ")) {
-      currentPath = line.slice(4).replace(/^b\//u, "")
-      continue
-    }
     const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/u.exec(line)
     if (hunk !== null) {
       if (hunkCount > 0) {
@@ -45,7 +41,11 @@ const replacementSides = (
       newLinesRemaining = Number(hunk[2] ?? "1")
       continue
     }
-    if ((oldLinesRemaining === 0 && newLinesRemaining === 0) || line === "\\ No newline at end of file") continue
+    if (oldLinesRemaining === 0 && newLinesRemaining === 0) {
+      if (line.startsWith("+++ ")) currentPath = line.slice(4).replace(/^b\//u, "")
+      continue
+    }
+    if (line === "\\ No newline at end of file") continue
     if (line.startsWith("-") && oldLinesRemaining > 0) {
       before.push(line.slice(1))
       oldLinesRemaining -= 1
@@ -62,6 +62,7 @@ const replacementSides = (
       after.push(content)
       oldLinesRemaining -= 1
       newLinesRemaining -= 1
+      continue
     }
   }
   return {

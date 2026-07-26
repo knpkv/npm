@@ -113,3 +113,8 @@
 .overview code {
   overflow-wrap: anywhere;
 }
+
+.viewerTarget > * {
+  border: 0;
+  border-radius: var(--rly-space-0);
+}

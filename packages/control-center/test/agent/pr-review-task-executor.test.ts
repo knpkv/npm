@@ -853,6 +853,16 @@ describe("PR review task executor", () => {
           )
           assert.strictEqual(observation.requests.length, 1)
           assert.strictEqual(fake.requests.length, 4)
+          const systemMessage = fake.requests[0]?.prompt.content.find(({ role }) => role === "system")
+          assert.include(
+            systemMessage?.content ?? "",
+            "present in the head must target added lines"
+          )
+          assert.include(
+            systemMessage?.content ?? "",
+            "deletion-only file suggestion"
+          )
+          assert.include(systemMessage?.content ?? "", "target deleted base lines")
           assert.isTrue(activity.some((event) => event._tag === "output" && event.channel === "progress"))
         })
       ),

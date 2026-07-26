@@ -6,7 +6,9 @@ import type { PullRequestReviewPublicationState } from "./usePullRequestReview.j
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const anchorLabel = (anchor: ReviewSuggestionPublicationPreview["anchor"]): string =>
-  anchor._tag === "changes" ? "Whole pull request" : `${anchor.path}:${String(anchor.line)} · AFTER`
+  anchor._tag === "changes"
+    ? "Whole pull request"
+    : `${anchor.path}:${String(anchor.line)} · ${anchor.relativeFileVersion}`
 
 /** Render the on-demand operator confirmation and durable publication receipt. */
 export const ReviewSuggestionPublicationSurface = ({
