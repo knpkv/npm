@@ -189,7 +189,7 @@ export const PullRequestReviewPanel = ({
         </ol>
       )}
       {state.thread?.hasEarlier ? (
-        <Button disabled={state.historyAction === "loading"} onClick={onLoadEarlier}>
+        <Button loading={state.historyAction === "loading"} onClick={onLoadEarlier}>
           {state.historyAction === "loading"
             ? "Loading earlier activity…"
             : state.historyAction === "failed"

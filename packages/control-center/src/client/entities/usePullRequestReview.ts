@@ -145,6 +145,31 @@ const sameReviewScope = (
   left.headRevision === right.headRevision &&
   left.sessionKey === right.sessionKey
 
+/** Observe the lazy history boundary so a missing browser chunk remains retryable. */
+export const observePullRequestReviewHistoryLoad = (
+  task: Promise<void>,
+  signal: AbortSignal,
+  current: PullRequestReviewControllerState & PullRequestReviewScope,
+  latestScope: { readonly current: PullRequestReviewScope | null },
+  setState: (
+    update: (state: PullRequestReviewControllerState) => PullRequestReviewControllerState
+  ) => void
+): void => {
+  task.catch((failure: unknown) => {
+    if (
+      signal.aborted ||
+      latestScope.current === null ||
+      !sameReviewScope(latestScope.current, current)
+    ) return
+    Effect.runFork(Effect.logError("Pull-request review history boundary failed", failure))
+    setState((latest) =>
+      latest._tag === "ready" && sameReviewScope(latest, current)
+        ? { ...latest, historyAction: "failed" }
+        : latest
+    )
+  })
+}
+
 const matchesScope = (
   review: PullRequestReviewState,
   scope: PullRequestReviewScope
@@ -338,18 +363,24 @@ export const usePullRequestReview = (
     const abort = new AbortController()
     historyAbort.current = abort
     setState({ ...current, historyAction: "loading" })
-    pullRequestReviewBrowser.then(
-      ({ loadEarlierPullRequestReviewThreadIntoState }) =>
-        loadEarlierPullRequestReviewThreadIntoState(
-          transport,
-          current,
-          currentThread,
-          abort.signal,
-          latestScope,
-          latestThread,
-          onSessionExpired,
-          setState
-        )
+    observePullRequestReviewHistoryLoad(
+      pullRequestReviewBrowser.then(
+        ({ loadEarlierPullRequestReviewThreadIntoState }) =>
+          loadEarlierPullRequestReviewThreadIntoState(
+            transport,
+            current,
+            currentThread,
+            abort.signal,
+            latestScope,
+            latestThread,
+            onSessionExpired,
+            setState
+          )
+      ),
+      abort.signal,
+      current,
+      latestScope,
+      setState
     )
   }, [onSessionExpired, state, transport])
 

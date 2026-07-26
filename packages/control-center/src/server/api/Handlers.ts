@@ -1015,6 +1015,9 @@ export const agentHandlersLayer = HttpApiBuilder.group(
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
+            if (query.after !== undefined && query.before !== undefined) {
+              return yield* Effect.flatMap(invalidRequestApiError, Effect.fail)
+            }
             return yield* reviews.thread({
               workspaceId: session.workspaceId,
               entityId: params.entityId,

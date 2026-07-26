@@ -2040,6 +2040,9 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.current._tag, "not-started")
       assert.strictEqual(result.accepted._tag, "pending")
       assert.isTrue(Result.isFailure(result.conflictingCursors))
+      if (Result.isFailure(result.conflictingCursors)) {
+        assert.strictEqual(result.conflictingCursors.failure._tag, "InvalidRequestApiError")
+      }
       assert.strictEqual(result.thread.events[0]?._tag, "operator-message")
       assert.strictEqual(result.earlierThread.events[0]?._tag, "operator-message")
       assert.deepStrictEqual(yield* Ref.get(received), [

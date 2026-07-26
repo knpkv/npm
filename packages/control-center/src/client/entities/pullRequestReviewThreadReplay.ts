@@ -232,7 +232,7 @@ export const continuePullRequestReviewThread = async (
   return {
     events: retainedEvents,
     hasEarlier: previous === undefined
-      ? events.length > 0
+      ? retainedEvents.length < events.length
       : previous.hasEarlier || retainedEvents.length < events.length,
     historyLoaded,
     nextCursor: update.nextCursor

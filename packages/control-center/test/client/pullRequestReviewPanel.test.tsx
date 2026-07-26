@@ -462,6 +462,11 @@ describe("PullRequestReviewPanel", () => {
       })
     )
     expect(host.textContent).toContain("Loading earlier activity…")
+    const loadingEarlier = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Loading earlier activity")
+    )
+    expect(loadingEarlier?.getAttribute("aria-busy")).toBe("true")
+    expect(loadingEarlier?.disabled).toBe(true)
 
     await act(async () =>
       render({

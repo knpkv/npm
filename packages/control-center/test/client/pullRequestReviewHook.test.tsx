@@ -31,6 +31,8 @@ import {
   type PullRequestReviewThread
 } from "../../src/client/entities/pullRequestReviewThreadReplay.js"
 import {
+  observePullRequestReviewHistoryLoad,
+  type PullRequestReviewControllerState,
   type PullRequestReviewTransport,
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
@@ -436,6 +438,53 @@ describe("usePullRequestReview", () => {
     expect(thread.hasEarlier).toBe(true)
   })
 
+  it("does not expose earlier history for a complete non-empty initial replay", async () => {
+    const transport = {
+      loadThread: vi.fn(() =>
+        Promise.resolve(
+          PullRequestReviewThreadPage.make({
+            events: [threadEvent(1)],
+            hasMore: false,
+            nextCursor: ReleaseAgentThreadCursor.make(1)
+          })
+        )
+      )
+    }
+
+    const thread = await continuePullRequestReviewThread(transport, ENTITY_ID, new AbortController().signal)
+
+    expect(thread.hasEarlier).toBe(false)
+  })
+
+  it("makes a rejected lazy history boundary retryable", async () => {
+    const current = {
+      _tag: "ready",
+      action: "idle",
+      baseRevision: BASE_A,
+      entityId: ENTITY_ID,
+      headRevision: HEAD_A,
+      historyAction: "loading",
+      provider: null,
+      review: reviewFor(BASE_A, HEAD_A),
+      sessionKey: "session-a"
+    } satisfies PullRequestReviewControllerState
+    let state: PullRequestReviewControllerState = current
+
+    observePullRequestReviewHistoryLoad(
+      Promise.reject(new Error("browser chunk unavailable")),
+      new AbortController().signal,
+      current,
+      { current },
+      (update) => {
+        state = update(state)
+      }
+    )
+
+    await vi.waitFor(() => {
+      expect(state._tag === "ready" ? state.historyAction : state._tag).toBe("failed")
+    })
+  })
+
   it.each(["history-first", "live-first"] satisfies ReadonlyArray<"history-first" | "live-first">)(
     "merges concurrent backward and live reads when %s resolves",
     async (order) => {
@@ -795,17 +844,25 @@ describe("usePullRequestReview", () => {
     "handles a rejected backward history read without retaining a stale session",
     async ({ expectedHistoryAction, expectedSessionExpirations, failure }) => {
       const onSessionExpired = vi.fn()
-      const initialPage = PullRequestReviewThreadPage.make({
-        events: [threadEvent(1)],
-        hasMore: false,
-        nextCursor: ReleaseAgentThreadCursor.make(1)
-      })
+      const pageSize = MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS / 2
       const transport = {
         enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
         load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
-        loadThread: vi.fn((_entityId, _cursor, _signal, direction) =>
-          direction === "before" ? Promise.reject(failure) : Promise.resolve(initialPage)
-        ),
+        loadThread: vi.fn((_entityId, cursor, _signal, direction) => {
+          if (direction === "before") return Promise.reject(failure)
+          const firstSequence = cursor === null ? 1 : cursor + 1
+          const events =
+            firstSequence > MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS
+              ? [threadEvent(firstSequence)]
+              : Array.from({ length: pageSize }, (_, index) => threadEvent(firstSequence + index))
+          return Promise.resolve(
+            PullRequestReviewThreadPage.make({
+              events,
+              hasMore: firstSequence <= MAXIMUM_RETAINED_REVIEW_THREAD_EVENTS,
+              nextCursor: events.at(-1)?.eventSequence ?? ReleaseAgentThreadCursor.make(0)
+            })
+          )
+        }),
         previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
         providers: () => Promise.resolve({ providers: [] }),
         publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))

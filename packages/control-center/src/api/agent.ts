@@ -718,12 +718,7 @@ const PullRequestReviewThreadQuery = Schema.Struct({
   after: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
   before: Schema.optionalKey(ReleaseAgentThreadCursorFromString),
   limit: Schema.optionalKey(ReleaseAgentThreadEventLimitFromString)
-}).check(
-  Schema.makeFilter(
-    ({ after, before }) => after === undefined || before === undefined,
-    { expected: "at most one pull-request review thread cursor" }
-  )
-)
+})
 
 const pullRequestReviewThread = HttpApiEndpoint.get(
   "pullRequestReviewThread",
@@ -733,6 +728,7 @@ const pullRequestReviewThread = HttpApiEndpoint.get(
     query: PullRequestReviewThreadQuery,
     success: PullRequestReviewThreadPage,
     error: [
+      InvalidRequestApiError,
       UnauthorizedApiError,
       ForbiddenApiError,
       NotFoundApiError,
