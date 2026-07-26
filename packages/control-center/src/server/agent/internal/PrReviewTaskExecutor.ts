@@ -278,6 +278,27 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
   )
 })
 
+const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelatedLocations")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  suggestion: PrReviewSuggestionDraftType
+) {
+  const validated = new Array<PrReviewSuggestionDraftType["relatedLocations"][number]>()
+  for (const location of suggestion.relatedLocations) {
+    const expectedLines = location.endLine - location.startLine + 1
+    const check = yield* session.runCommand(
+      `test "$(git show ${shellQuote(`${session.headRevision}:${location.path}`)} | ` +
+        `sed -n '${String(location.startLine)},${String(location.endLine)}p' | wc -l)" -eq ${String(expectedLines)}`
+    ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
+    if (check.exitCode === 0) validated.push(location)
+  }
+  return validated.sort((left, right) =>
+    `${left.path}:${String(left.startLine)}:${String(left.endLine)}:${left.label}`.localeCompare(
+      `${right.path}:${String(right.startLine)}:${String(right.endLine)}:${right.label}`
+    )
+  )
+})
+
 const stableNoteId = Effect.fn("PrReviewTaskExecutor.stableNoteId")(function*(
   cryptoService: Crypto.Crypto,
   providerId: ClaimedAgentJob["providerId"],
@@ -342,11 +363,15 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
       }).pipe(Effect.mapError((failure) => executionFailure(claim.providerId, failure)))
       continue
     }
+    const canonicalSuggestion = {
+      ...suggestion,
+      relatedLocations: yield* validatedRelatedLocations(claim.providerId, session, suggestion)
+    }
     const suggestionId = yield* stableSuggestionId(
       cryptoService,
       claim.providerId,
       subject,
-      suggestion
+      canonicalSuggestion
     )
     if (seenSuggestionIds.has(suggestionId)) {
       yield* onActivity({
@@ -359,8 +384,8 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
       continue
     }
     seenSuggestionIds.add(suggestionId)
-    const anchor = yield* resolveAnchor(claim.providerId, session, suggestion)
-    suggestions.push({ ...suggestion, anchor, state: "draft", suggestionId })
+    const anchor = yield* resolveAnchor(claim.providerId, session, canonicalSuggestion)
+    suggestions.push({ ...canonicalSuggestion, anchor, state: "draft", suggestionId })
   }
   const notes = new Array<(typeof PrReviewReport.Type)["notes"][number]>()
   const seenNoteIds = new Set<string>()

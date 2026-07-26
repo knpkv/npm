@@ -351,6 +351,9 @@ const makeSessionLayer = (
             ? output()
             : output("", 1)
         }
+        if (command.startsWith("test \"$(git show ")) {
+          return command.includes("missing.ts") ? output("", 1) : output()
+        }
         return command.startsWith("git show ")
           ? output("# Review instructions\n")
           : output("1 file changed\n")
@@ -442,6 +445,11 @@ describe("PR review task executor", () => {
             startLine: 8,
             endLine: 8,
             label: "Same root cause"
+          }, {
+            path: "missing.ts",
+            startLine: 999,
+            endLine: 999,
+            label: "Invented occurrence"
           }],
           replacement: {
             reviewedHead: HEAD_REVISION,
@@ -522,7 +530,8 @@ describe("PR review task executor", () => {
       assert.strictEqual(initialize.exitCode, 0, initialize.stderr.text)
       const topLevel = yield* runShellCommand(root, "git rev-parse --show-toplevel")
       assert.strictEqual(topLevel.exitCode, 0, topLevel.stderr.text)
-      assert.strictEqual(topLevel.stdout.text.trim(), root)
+      const resolvedRoot = yield* fileSystem.realPath(root)
+      assert.strictEqual(topLevel.stdout.text.trim(), resolvedRoot)
       const base = yield* runShellCommand(root, "git rev-parse HEAD")
       assert.strictEqual(base.exitCode, 0, base.stderr.text)
       const baseRevision = base.stdout.text.trim()
@@ -712,14 +721,26 @@ describe("PR review task executor", () => {
       requests: []
     }
     const activity = new Array<AgentRuntimeEvent>()
+    const relatedLocations = [{
+      path: "packages/control-center/test/a.ts",
+      startLine: 8,
+      endLine: 8,
+      label: "First occurrence"
+    }, {
+      path: "packages/control-center/test/b.ts",
+      startLine: 12,
+      endLine: 14,
+      label: "Second occurrence"
+    }]
     return runExecutor(
       completeScript({
         schemaVersion: 3,
         completion: { status: "complete" },
         suggestions: [
-          suggestion,
+          { ...suggestion, relatedLocations },
           {
             ...suggestion,
+            relatedLocations: [...relatedLocations].reverse(),
             confidence: {
               ...suggestion.confidence,
               reason: "A second model pass reached the same finding independently."

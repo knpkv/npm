@@ -153,7 +153,14 @@ export const ReviewSuggestionCard = ({
         </section>
       )}
 
-      {suggestion.prevention === undefined || suggestion.prevention.enforcement === "none" ? null : (
+      {suggestion.prevention === undefined ? null : suggestion.prevention.enforcement === "none" ? (
+        <details className={styles.preventionProposal}>
+          <summary>Prevention note · no stable guardrail</summary>
+          <Text>
+            {suggestion.prevention.summary} · {suggestion.prevention.rationale}
+          </Text>
+        </details>
+      ) : (
         <details className={styles.preventionProposal}>
           <summary>Prevention proposal · separate review required</summary>
           <Text>

@@ -256,6 +256,11 @@ const PublicationHarness = ({
             ? `:${controller.publication.publication.receipt.providerOperationId}`
             : ""}
       </span>
+      <span data-suggestion-state>
+        {controller.state._tag === "ready" && controller.state.review._tag === "completed"
+          ? controller.state.review.report.suggestions[0]?.state
+          : ""}
+      </span>
       <button
         data-preview
         onClick={() =>
@@ -376,6 +381,7 @@ describe("usePullRequestReview", () => {
     await act(async () => publication.resolve(published))
 
     expect(host.querySelector("[data-publication]")?.textContent).toBe("published:current:comment-42")
+    expect(host.querySelector("[data-suggestion-state]")?.textContent).toBe("published")
   })
 
   it("never presents a prior immutable head while the refreshed head loads", async () => {

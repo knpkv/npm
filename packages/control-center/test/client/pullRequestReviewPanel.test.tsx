@@ -208,6 +208,11 @@ const REVIEW_STATE = {
             ].join("\n"),
             explanation: "Use the shared authorization helper."
           },
+          prevention: {
+            summary: "No stable automated check",
+            enforcement: "none",
+            rationale: "The semantic equivalence still requires reviewer judgment."
+          },
           confidence: {
             level: "medium",
             reason: "The duplicate branches are directly visible."
@@ -284,6 +289,8 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Authorize before the mutation.")
     expect(host.textContent).toContain("Draft · high confidence")
     expect(host.textContent).toContain("Resolved · medium confidence")
+    expect(host.textContent).toContain("No stable automated check")
+    expect(host.textContent).toContain("semantic equivalence still requires reviewer judgment")
     const replacements = host.querySelectorAll<HTMLElement>("[aria-label='Suggested replacement']")
     expect(replacements).toHaveLength(2)
     expect(replacements[0]?.textContent).not.toContain("diff --git")
