@@ -367,6 +367,51 @@ describe("PullRequestReviewPanel", () => {
     expect(textarea.value).toBe("")
   })
 
+  it("preserves a draft within one immutable head and clears it when the reviewed head changes", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (state: PullRequestReviewControllerState) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+
+    await act(async () => render({ ...REVIEW_STATE, thread: REVIEW_THREAD }))
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+      valueSetter.call(textarea, "Keep this draft on the same head.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+
+    await act(async () =>
+      render({
+        ...REVIEW_STATE,
+        thread: {
+          events: [...REVIEW_THREAD.events, ...REVIEW_THREAD.events],
+          nextCursor: ReleaseAgentThreadCursor.make(2)
+        }
+      })
+    )
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
+      "Keep this draft on the same head."
+    )
+
+    await act(async () => render(REFRESHED_NOT_STARTED_STATE))
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
+  })
+
   it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {
     const host = document.createElement("div")
     document.body.append(host)

@@ -100,10 +100,11 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
 export const loadCompletePullRequestReviewThread = async (
   transport: PullRequestReviewThreadPageTransport,
   entityId: EntityId,
-  signal: AbortSignal
+  signal: AbortSignal,
+  initialCursor: ReleaseAgentThreadCursor = ReviewThreadCursor.make(0)
 ): Promise<PullRequestReviewThread> => {
   const events = new Array<PullRequestReviewThreadEvent>()
-  let after = ReviewThreadCursor.make(0)
+  let after = initialCursor
   for (let pageRead = 0; pageRead < MAXIMUM_REVIEW_THREAD_PAGE_READS; pageRead++) {
     const page = await transport.loadThread(entityId, after, signal)
     for (const event of page.events) events.push(event)
@@ -114,4 +115,25 @@ export const loadCompletePullRequestReviewThread = async (
     after = page.nextCursor
   }
   throw new Error("Pull-request review thread exceeded the browser replay budget")
+}
+
+/** Continue one previously loaded thread without replaying its durable prefix. */
+export const continuePullRequestReviewThread = async (
+  transport: PullRequestReviewThreadPageTransport,
+  entityId: EntityId,
+  signal: AbortSignal,
+  previous?: PullRequestReviewThread
+): Promise<PullRequestReviewThread> => {
+  const update = await loadCompletePullRequestReviewThread(
+    transport,
+    entityId,
+    signal,
+    previous?.nextCursor
+  )
+  return previous === undefined
+    ? update
+    : {
+      events: [...previous.events, ...update.events],
+      nextCursor: update.nextCursor
+    }
 }

@@ -1,4 +1,3 @@
-import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -18,7 +17,6 @@ import type {
 import type { EntityId } from "../../domain/identifiers.js"
 import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
 
-const POLL_INTERVAL = Duration.seconds(2)
 const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
 const generatedClientTransport = pullRequestReviewBrowser.then(
   ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
@@ -136,15 +134,14 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
   publishSuggestion: (...args) => generatedClientTransport.then((transport) => transport.publishSuggestion(...args))
 }
 
-const sameScope = (
-  state: PullRequestReviewControllerState,
-  scope: PullRequestReviewScope
+const sameReviewScope = (
+  left: PullRequestReviewScope,
+  right: PullRequestReviewScope
 ): boolean =>
-  state._tag !== "idle" &&
-  state.baseRevision === scope.baseRevision &&
-  state.entityId === scope.entityId &&
-  state.headRevision === scope.headRevision &&
-  state.sessionKey === scope.sessionKey
+  left.baseRevision === right.baseRevision &&
+  left.entityId === right.entityId &&
+  left.headRevision === right.headRevision &&
+  left.sessionKey === right.sessionKey
 
 const matchesScope = (
   review: PullRequestReviewState,
@@ -180,6 +177,7 @@ export const usePullRequestReview = (
   const mutationAbort = useRef<AbortController | null>(null)
   const publicationAbort = useRef<AbortController | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
+  const latestThread = useRef<PullRequestReviewThread | null>(null)
   const scope = useMemo(
     () =>
       sessionKey === null || headRevision === null
@@ -189,6 +187,7 @@ export const usePullRequestReview = (
   )
   useLayoutEffect(() => {
     latestScope.current = scope
+    latestThread.current = null
   }, [scope])
 
   useEffect(() => {
@@ -197,6 +196,7 @@ export const usePullRequestReview = (
       return
     }
     const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
+    const previousThread = latestThread.current ?? undefined
     const abort = new AbortController()
     setState({ _tag: "loading", ...scope })
     const providers = canEnqueue
@@ -205,13 +205,19 @@ export const usePullRequestReview = (
     Promise.all([
       transport.load(entityId, abort.signal),
       pullRequestReviewBrowser.then(
-        ({ loadCompletePullRequestReviewThread }) =>
-          loadCompletePullRequestReviewThread(transport, entityId, abort.signal)
+        ({ continuePullRequestReviewThread }) =>
+          continuePullRequestReviewThread(
+            transport,
+            entityId,
+            abort.signal,
+            previousThread
+          )
       ),
       providers
     ]).then(
       ([review, thread, catalog]) => {
         if (!abort.signal.aborted) {
+          latestThread.current = thread
           setState(
             matchesScope(review, scope)
               ? {
@@ -247,7 +253,7 @@ export const usePullRequestReview = (
   useEffect(() => {
     if (state._tag !== "ready" || state.review._tag !== "pending") return
     const abort = new AbortController()
-    Effect.runPromise(Effect.sleep(POLL_INTERVAL), { signal: abort.signal }).then(
+    Effect.runPromise(Effect.sleep("2 seconds"), { signal: abort.signal }).then(
       () => {
         if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
       },
@@ -286,6 +292,37 @@ export const usePullRequestReview = (
     setPublication((current) => current._tag === "publishing" ? current : { _tag: "idle" })
   }, [baseRevision, headRevision])
 
+  const refreshThread = useCallback((
+    refreshScope: PullRequestReviewScope,
+    signal: AbortSignal
+  ): void => {
+    const previous = latestThread.current ?? undefined
+    pullRequestReviewBrowser.then(
+      ({ continuePullRequestReviewThread }) =>
+        continuePullRequestReviewThread(
+          transport,
+          refreshScope.entityId,
+          signal,
+          previous
+        )
+    ).then(
+      (thread) => {
+        if (
+          signal.aborted ||
+          latestScope.current === null ||
+          !sameReviewScope(latestScope.current, refreshScope)
+        ) return
+        latestThread.current = thread
+        setState((latest) =>
+          latest._tag === "ready" && sameReviewScope(latest, refreshScope)
+            ? { ...latest, thread }
+            : latest
+        )
+      },
+      () => undefined
+    )
+  }, [transport])
+
   const start = useCallback((prompt?: DurableAgentPrompt) => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
     const provider = state.provider
@@ -300,10 +337,10 @@ export const usePullRequestReview = (
         if (abort.signal.aborted) return
         setState((latest) =>
           latest._tag === "ready" &&
-            sameScope(latest, current) &&
+            sameReviewScope(latest, current) &&
             matchesScope(review, current)
             ? { ...latest, action: "idle", review }
-            : latest._tag === "ready" && sameScope(latest, current)
+            : latest._tag === "ready" && sameReviewScope(latest, current)
             ? {
               _tag: "failed",
               baseRevision: current.baseRevision,
@@ -318,7 +355,7 @@ export const usePullRequestReview = (
         if (abort.signal.aborted) return
         if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
         setState((latest) =>
-          latest._tag === "ready" && sameScope(latest, current)
+          latest._tag === "ready" && sameReviewScope(latest, current)
             ? { ...latest, action: "failed" }
             : latest
         )
@@ -418,6 +455,7 @@ export const usePullRequestReview = (
             }
             : { _tag: "receipt-conflict", preview, publication: published }
         )
+        refreshThread(current, abort.signal)
       },
       (failure) => {
         if (abort.signal.aborted) return
@@ -425,11 +463,11 @@ export const usePullRequestReview = (
         setPublication({ _tag: "failed", preview, selection })
       }
     )
-  }, [entityId, onSessionExpired, publication, state, transport])
+  }, [entityId, onSessionExpired, publication, refreshThread, state, transport])
 
   const currentState: PullRequestReviewControllerState = scope === null
     ? { _tag: "idle" }
-    : sameScope(state, scope)
+    : state._tag !== "idle" && sameReviewScope(state, scope)
     ? state
     : { _tag: "loading", ...scope }
 

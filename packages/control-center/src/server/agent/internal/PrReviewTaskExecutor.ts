@@ -765,10 +765,11 @@ const makeExecutor = Effect.gen(function*() {
             const toolkit = yield* PrReviewSandboxTools.pipe(
               Effect.provide(prReviewSandboxToolsLayer(session))
             )
-            const adapter = makeToolAgentAdapter(() =>
+            const adapter = makeToolAgentAdapter((request) =>
               runToolAgent({
                 budget: persistedProfile.budgetMillis,
                 context: {
+                  operatorRequest: request.prompt,
                   subject,
                   threadContext,
                   sandbox: "sbx",
