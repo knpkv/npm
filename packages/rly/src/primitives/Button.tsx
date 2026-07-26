@@ -71,7 +71,7 @@ export const Button = ({
     <button
       {...props}
       aria-busy={loading ? "true" : undefined}
-      aria-label={loading ? (ariaLabel ?? String(children)) : ariaLabel}
+      aria-label={loading ? (ariaLabel?.trim() ? ariaLabel : String(children)) : ariaLabel}
       className={classNames(
         style("root"),
         RLY_BUTTON_VARIANTS.variant[variant].className,

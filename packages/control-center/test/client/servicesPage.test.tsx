@@ -465,6 +465,7 @@ describe("ServicesPage connection tests", () => {
     const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000171")
     const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000172")
     const pipelineId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000173")
+    const unconnectedRepositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000176")
     const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000174")
     const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000175")
     const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
@@ -517,6 +518,13 @@ describe("ServicesPage connection tests", () => {
               displayName: "payments-release",
               providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
               isEnabled: true
+            },
+            {
+              followedResourceId: unconnectedRepositoryId,
+              providerId: "codecommit",
+              displayName: "audit",
+              providerImmutableId: "eu-west-1:audit",
+              isEnabled: true
             }
           ]
         }
@@ -538,14 +546,23 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
     const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
-    expect(resources).toHaveLength(2)
+    expect(resources).toHaveLength(3)
     expect(resources.every(({ open }) => !open)).toBe(true)
     expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
-      expect.arrayContaining([expect.stringContaining("payments"), expect.stringContaining("payments-release")])
+      expect.arrayContaining([
+        expect.stringContaining("payments"),
+        expect.stringContaining("payments-release"),
+        expect.stringContaining("audit")
+      ])
     )
-    expect(resources.every((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))).toBe(
-      true
+    expect(
+      resources.filter((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))
+    ).toHaveLength(2)
+    const unconnectedResource = resources.find((resource) =>
+      resource.querySelector("summary")?.textContent?.includes("audit")
     )
+    expect(unconnectedResource?.querySelector("summary")?.textContent).toContain("Followed")
+    expect(unconnectedResource?.querySelector("summary")?.textContent).not.toContain("Controls")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )

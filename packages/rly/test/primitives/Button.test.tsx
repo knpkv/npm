@@ -30,6 +30,15 @@ describe("Button", () => {
     expect(button?.querySelectorAll("svg")).toHaveLength(2)
   })
 
+  it("falls back to visible content for a blank loading label", () => {
+    const button = render(
+      <Button aria-label=" " loading>
+        Continue
+      </Button>
+    )
+    expect(button?.getAttribute("aria-label")).toBe("Continue")
+  })
+
   it("forwards its native ref and suppresses activation while loading", () => {
     const host = document.createElement("div")
     const root = createRoot(host)

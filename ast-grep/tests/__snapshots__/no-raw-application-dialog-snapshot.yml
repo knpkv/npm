@@ -58,14 +58,6 @@ snapshots:
         style: primary
         start: 5
         end: 29
-      - source: role
-        style: secondary
-        start: 5
-        end: 9
-      - source: dialog
-        style: secondary
-        start: 12
-        end: 18
   ? |
     <div role={"dialog"}>Review</div>
   : labels:

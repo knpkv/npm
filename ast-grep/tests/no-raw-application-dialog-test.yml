@@ -36,6 +36,8 @@ invalid:
   - |
     <div role={'dialog'}>Review</div>
   - |
+    <div role={"dialog" as const}>Review</div>
+  - |
     <aside aria-modal={"true"}>Review</aside>
   - |
     <aside aria-modal={'true'}>Review</aside>

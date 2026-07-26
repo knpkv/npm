@@ -16,6 +16,10 @@ rule:
         selector: jsx_attribute
         strictness: ast
     - pattern:
+        context: '<div role={"dialog" as const} />'
+        selector: jsx_attribute
+        strictness: ast
+    - pattern:
         context: "<div role={`dialog`} />"
         selector: jsx_attribute
         strictness: ast

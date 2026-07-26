@@ -104,9 +104,11 @@ export const ProviderAccountCard = ({
               </div>
               <div className={styles.resourceStatus}>
                 <StateLabel label={status.label} size="compact" tone={status.tone} />
-                <span className={styles.disclosure}>
-                  Controls <span aria-hidden="true">›</span>
-                </span>
+                {connection === undefined ? null : (
+                  <span className={styles.disclosure}>
+                    Controls <span aria-hidden="true">›</span>
+                  </span>
+                )}
               </div>
             </summary>
             {connection === undefined ? null : (
