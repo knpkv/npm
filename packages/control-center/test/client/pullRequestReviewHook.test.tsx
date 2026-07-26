@@ -653,6 +653,60 @@ describe("usePullRequestReview", () => {
     expect(transport.loadThread).toHaveBeenCalledTimes(2)
   })
 
+  it("refreshes the active stable thread when publication finishes after the head changes", async () => {
+    const { preview, published } = makePublicationFixture(HEAD_A)
+    const publication = deferred<PublishedReviewComment>()
+    const headBLoaded = deferred<void>()
+    let reviewReads = 0
+    let threadReads = 0
+    const publishedEvent: PullRequestReviewThreadEvent = {
+      _tag: "suggestion-published",
+      eventSequence: ReleaseAgentThreadCursor.make(1),
+      jobId: JOB_ID,
+      occurredAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:05:00.000Z"),
+      suggestionId: SUGGESTION_ID
+    }
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => {
+        reviewReads += 1
+        return Promise.resolve(completedReviewFor(BASE_A, reviewReads === 1 ? HEAD_A : HEAD_B))
+      }),
+      loadThread: vi.fn(() => {
+        threadReads += 1
+        if (threadReads === 2) headBLoaded.resolve()
+        return Promise.resolve(
+          threadReads < 3
+            ? EMPTY_THREAD
+            : PullRequestReviewThreadPage.make({
+                events: [publishedEvent],
+                hasMore: false,
+                nextCursor: ReleaseAgentThreadCursor.make(1)
+              })
+        )
+      }),
+      previewPublication: vi.fn(() => Promise.resolve(preview)),
+      providers: () => Promise.reject(new Error("Unexpected provider read")),
+      publishSuggestion: vi.fn(() => publication.promise)
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_A} transport={transport} />))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-preview]")?.click())
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-publish]")?.click())
+    await act(async () => mountedRoot?.render(<PublicationHarness headRevision={HEAD_B} transport={transport} />))
+    await act(async () => headBLoaded.promise)
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+
+    await act(async () => publication.resolve(published))
+
+    expect(host.querySelector("[data-publication]")?.textContent).toBe("published:superseded:comment-42")
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
+    expect(transport.loadThread).toHaveBeenCalledTimes(3)
+  })
+
   it("does not refresh the durable thread when publication fails", async () => {
     const { preview } = makePublicationFixture(HEAD_A)
     const transport = {

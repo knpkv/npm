@@ -298,8 +298,8 @@ export const usePullRequestReview = (
   ): void => {
     const previous = latestThread.current ?? undefined
     pullRequestReviewBrowser.then(
-      ({ continuePullRequestReviewThread }) =>
-        continuePullRequestReviewThread(
+      ({ refreshPullRequestReviewThread }) =>
+        refreshPullRequestReviewThread(
           transport,
           refreshScope.entityId,
           signal,
@@ -455,7 +455,12 @@ export const usePullRequestReview = (
             }
             : { _tag: "receipt-conflict", preview, publication: published }
         )
-        refreshThread(current, abort.signal)
+        const activeScope = latestScope.current
+        if (
+          activeScope !== null &&
+          activeScope.entityId === current.entityId &&
+          activeScope.sessionKey === current.sessionKey
+        ) refreshThread(activeScope, abort.signal)
       },
       (failure) => {
         if (abort.signal.aborted) return

@@ -137,3 +137,20 @@ export const continuePullRequestReviewThread = async (
       nextCursor: update.nextCursor
     }
 }
+
+/** Continue a visible thread while retaining diagnostics for non-fatal refresh failures. */
+export const refreshPullRequestReviewThread = async (
+  transport: PullRequestReviewThreadPageTransport,
+  entityId: EntityId,
+  signal: AbortSignal,
+  previous?: PullRequestReviewThread
+): Promise<PullRequestReviewThread> => {
+  try {
+    return await continuePullRequestReviewThread(transport, entityId, signal, previous)
+  } catch (failure) {
+    if (!signal.aborted) {
+      Effect.runFork(Effect.logError("Pull-request review thread refresh failed", failure))
+    }
+    throw failure
+  }
+}
