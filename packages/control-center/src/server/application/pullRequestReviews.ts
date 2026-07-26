@@ -269,7 +269,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     const base = `${suggestion.problem}\n\n${suggestion.recommendation}`
     const replacement = suggestion.replacement === undefined
       ? ""
-      : `\n\n\`\`\`suggestion\n${suggestion.replacement.content}\n\`\`\``
+      : `\n\n${suggestion.replacement.explanation}\n\n\`\`\`diff\n${suggestion.replacement.unifiedDiff}\n\`\`\``
     const complete = `${base}${replacement}`
     const bounded = complete.length <= maximumLength
       ? complete
@@ -387,6 +387,9 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.jobId,
         input.suggestionId
       )
+      if (selected.suggestion.anchor._tag !== "line" || selected.suggestion.state !== "draft") {
+        return yield* new ApplicationInvalidRequest()
+      }
       const authority = yield* publications.identity(
         publicationTarget(input.workspaceId, target)
       ).pipe(Effect.mapError(mapPublicationFailure))
@@ -411,15 +414,15 @@ const makePullRequestReviews = Effect.gen(function*() {
           reviewedHead: target.subject.headRevision
         },
         anchor: {
-          path: selected.suggestion.evidence.path,
-          line: selected.suggestion.evidence.startLine,
+          path: selected.suggestion.anchor.path,
+          line: selected.suggestion.anchor.line,
           relativeFileVersion: "AFTER"
         },
         editableContent,
         editableContentMaximumLength,
         finalContent,
         publicationFooter: footer,
-        replacement: selected.suggestion.replacement?.content ?? null,
+        replacement: selected.suggestion.replacement?.unifiedDiff ?? null,
         connectedIdentity: authority.connectedIdentity,
         authorityBinding: authority.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
@@ -436,6 +439,9 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.request.jobId,
         input.request.suggestionId
       )
+      if (selected.suggestion.anchor._tag !== "line" || selected.suggestion.state !== "draft") {
+        return yield* new ApplicationInvalidRequest()
+      }
       const footer = publicationFooter(
         selected.latest.reviewProfile,
         input.session.actor.personId,
@@ -465,8 +471,8 @@ const makePullRequestReviews = Effect.gen(function*() {
           reviewedHead: target.subject.headRevision
         },
         anchor: {
-          path: selected.suggestion.evidence.path,
-          line: selected.suggestion.evidence.startLine,
+          path: selected.suggestion.anchor.path,
+          line: selected.suggestion.anchor.line,
           relativeFileVersion: "AFTER"
         },
         content: publishedContent,

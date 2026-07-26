@@ -4,6 +4,7 @@ import { Result, Schema } from "effect"
 import {
   derivePrReviewOutcome,
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewNote,
   PrReviewPrevention,
   PrReviewReport,
   PrReviewSubject,
@@ -22,6 +23,7 @@ const prevention = Schema.decodeUnknownSync(PrReviewPrevention)({
   summary: "Protect active-lease review completion.",
   enforcement: "test",
   existingRuleOrConfig: "agent job repository integration suite",
+  recurrenceEvidence: "The same active-lease boundary is used by completion and retry transitions.",
   targetFile: "packages/control-center/test/persistence/agent-job-repository.test.ts",
   sourcePaths: ["packages/control-center/src/server/persistence/repositories/agentJobRepository.ts"],
   matcherOrInvariant: "A review result and its terminal job state commit under the same active lease.",
@@ -32,6 +34,8 @@ const prevention = Schema.decodeUnknownSync(PrReviewPrevention)({
 
 const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   suggestionId: `sha256:${"1".repeat(64)}`,
+  state: "draft",
+  title: "Decode review output before persistence",
   severity: "P2",
   problem: "Review output must cross a typed boundary.",
   impact: "Malformed review output could otherwise enter durable state.",
@@ -42,6 +46,12 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
     excerpt: "const report = decodeReviewOutput(output)"
   },
   recommendation: "Decode the complete report before committing any model-authored result.",
+  anchor: {
+    _tag: "line",
+    path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+    line: 42
+  },
+  relatedLocations: [],
   confidence: {
     level: "high",
     reason: "The persistence boundary is directly observable."
@@ -53,10 +63,65 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
   schemaVersion: 2,
   subject,
   completion: { status: "complete" },
-  suggestions: [suggestion]
+  suggestions: [suggestion],
+  notes: []
 })
 
 describe("PR review domain", () => {
+  it("retains suggestion scope, grouped locations, exact replacement patches, and non-publishable notes", () => {
+    const richSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+      ...suggestion,
+      title: "Authorize before writing durable state",
+      anchor: {
+        _tag: "file",
+        path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+        line: 40
+      },
+      relatedLocations: [{
+        path: "packages/control-center/test/agent/agent-job-worker.test.ts",
+        startLine: 529,
+        endLine: 529,
+        label: "Nearby regression coverage"
+      }],
+      replacement: {
+        reviewedHead: subject.headRevision,
+        unifiedDiff: [
+          "--- a/packages/control-center/src/server/agent/AgentJobWorker.ts",
+          "+++ b/packages/control-center/src/server/agent/AgentJobWorker.ts",
+          "@@ -42,1 +42,2 @@",
+          "+yield* authorize()",
+          " const report = decodeReviewOutput(output)"
+        ].join("\n"),
+        explanation: "Make the authority check explicit before the durable write."
+      }
+    })
+    const note = Schema.decodeUnknownSync(PrReviewNote)({
+      noteId: `sha256:${"2".repeat(64)}`,
+      reason: "low-confidence",
+      title: "A provider retry may obscure the first failure",
+      observation: "The retry path needs a provider-backed reproduction before this can become a suggestion.",
+      confidence: {
+        level: "low",
+        reason: "Static control-flow evidence is incomplete."
+      },
+      location: {
+        path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+        startLine: 80,
+        endLine: 80
+      }
+    })
+    const richReport = Schema.decodeUnknownSync(PrReviewReport)({
+      ...report,
+      suggestions: [richSuggestion],
+      notes: [note]
+    })
+
+    assert.strictEqual(richReport.suggestions[0]?.anchor._tag, "file")
+    assert.strictEqual(richReport.suggestions[0]?.relatedLocations.length, 1)
+    assert.strictEqual(richReport.suggestions[0]?.replacement?.reviewedHead, subject.headRevision)
+    assert.strictEqual(richReport.notes[0]?.reason, "low-confidence")
+  })
+
   it("derives the browser outcome instead of accepting a model-authored verdict", () => {
     assert.strictEqual(derivePrReviewOutcome(report), "changes-required")
     assert.strictEqual(
@@ -67,6 +132,13 @@ describe("PR review domain", () => {
       "non-blocking-suggestions"
     )
     assert.strictEqual(derivePrReviewOutcome({ ...report, suggestions: [] }), "no-issues-found")
+    assert.strictEqual(
+      derivePrReviewOutcome({
+        ...report,
+        suggestions: [{ ...suggestion, state: "resolved" }]
+      }),
+      "no-issues-found"
+    )
     assert.strictEqual(
       derivePrReviewOutcome({
         ...report,
@@ -184,6 +256,12 @@ describe("PR review domain", () => {
       Schema.is(PrReviewSuggestion)({
         ...suggestion,
         prevention: { ...prevention, enforcement: "eslint" }
+      })
+    )
+    assert.isFalse(
+      Schema.is(PrReviewSuggestion)({
+        ...suggestion,
+        severity: "P3"
       })
     )
   })

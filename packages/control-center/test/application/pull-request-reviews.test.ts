@@ -190,6 +190,8 @@ const reviewReport = Schema.decodeSync(PrReviewReport)({
   completion: { status: "complete" },
   suggestions: [{
     suggestionId: SUGGESTION_ID,
+    state: "draft",
+    title: "Authorize before mutating",
     severity: "P2",
     problem: "Authorization is checked after the mutation.",
     impact: "An unauthorized caller can change durable state.",
@@ -200,14 +202,29 @@ const reviewReport = Schema.decodeSync(PrReviewReport)({
       excerpt: "yield* mutate()"
     },
     recommendation: "Move the authorization check before the mutation.",
+    anchor: {
+      _tag: "line",
+      path: "src/authorization.ts",
+      line: 42
+    },
+    relatedLocations: [],
     confidence: {
       level: "high",
       reason: "The execution order is explicit in the reviewed source."
     },
     replacement: {
-      content: "yield* authorize()\nyield* mutate()"
+      reviewedHead: "2".repeat(40),
+      unifiedDiff: [
+        "--- a/src/authorization.ts",
+        "+++ b/src/authorization.ts",
+        "@@ -42,1 +42,2 @@",
+        "+yield* authorize()",
+        " yield* mutate()"
+      ].join("\n"),
+      explanation: "Authorize before mutating."
     }
-  }]
+  }],
+  notes: []
 })
 
 const completedReview = Schema.decodeSync(LatestAgentReviewRecord)({
@@ -719,8 +736,8 @@ describe("pull request reviews", () => {
             relativeFileVersion: "AFTER"
           })
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
-          assert.strictEqual(preview.replacement, "yield* authorize()\nyield* mutate()")
-          assert.include(preview.finalContent, "```suggestion")
+          assert.include(preview.replacement ?? "", "@@ -42,1 +42,2 @@")
+          assert.include(preview.finalContent, "```diff")
           assert.include(preview.finalContent, preview.publicationFooter)
           assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
 
@@ -811,13 +828,19 @@ describe("pull request reviews", () => {
 
           assert.notInclude(preview.editableContent, "```suggestion")
           assert.notInclude(preview.editableContent, "```")
-          assert.strictEqual(preview.replacement, "x".repeat(16_000))
+          assert.include(preview.replacement ?? "", "x".repeat(15_800))
         }),
       registry,
       Option.some(completedReviewWithSuggestion({
         problem: "Keep the concise explanation.",
         recommendation: "Apply the replacement.",
-        replacement: { content: "x".repeat(16_000) }
+        replacement: {
+          reviewedHead: reviewReport.subject.headRevision,
+          unifiedDiff: `--- a/src/authorization.ts\n+++ b/src/authorization.ts\n@@ -42,1 +42,1 @@\n-${
+            "x".repeat(15_800)
+          }\n+y`,
+          explanation: "Apply the bounded replacement."
+        }
       }))
     ))
 

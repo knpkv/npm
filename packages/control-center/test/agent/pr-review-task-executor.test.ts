@@ -93,6 +93,7 @@ const claim = {
 } satisfies ClaimedAgentJob
 
 const suggestion = Schema.decodeUnknownSync(PrReviewSuggestionDraft)({
+  title: "Reject unsafe review configuration",
   severity: "P2",
   problem: "An unsafe value is enabled.",
   impact: "The production review path can accept unsafe state.",
@@ -103,6 +104,12 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestionDraft)({
     excerpt: EVIDENCE_EXCERPT
   },
   recommendation: "Replace the unsafe value with a validated configuration.",
+  anchor: {
+    _tag: "line",
+    path: EVIDENCE_PATH,
+    line: 42
+  },
+  relatedLocations: [],
   confidence: {
     level: "high",
     reason: "The exact added line enables the unsafe state."
@@ -111,6 +118,7 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestionDraft)({
     summary: "Exercise the configuration boundary.",
     enforcement: "test",
     existingRuleOrConfig: "PR review task executor suite",
+    recurrenceEvidence: "The configuration boundary is shared by every provider-backed review run.",
     targetFile: "packages/control-center/test/agent/pr-review-task-executor.test.ts",
     sourcePaths: [EVIDENCE_PATH],
     matcherOrInvariant: "Unsafe review configuration cannot be enabled.",
@@ -149,7 +157,8 @@ const response = (
 const completeScript = (report: unknown = {
   schemaVersion: 2,
   completion: { status: "complete" },
-  suggestions: [suggestion]
+  suggestions: [suggestion],
+  notes: []
 }): DeterministicLanguageModelScript => [
   {
     _tag: "response",
@@ -314,6 +323,67 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("resolves file anchors and derives identities for non-publishable notes", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 2,
+        completion: { status: "complete" },
+        suggestions: [{
+          ...suggestion,
+          anchor: {
+            _tag: "file",
+            path: EVIDENCE_PATH
+          },
+          relatedLocations: [{
+            path: "packages/control-center/test/fixture.ts",
+            startLine: 8,
+            endLine: 8,
+            label: "Same root cause"
+          }]
+        }],
+        notes: [{
+          reason: "low-confidence",
+          title: "Provider retry behavior needs reproduction",
+          observation: "The sandbox cannot reproduce the external provider response.",
+          confidence: {
+            level: "low",
+            reason: "Only a local control-flow path is available."
+          },
+          location: {
+            path: EVIDENCE_PATH,
+            startLine: 42,
+            endLine: 42
+          }
+        }]
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+      })
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          const anchor = result.suggestions[0]?.anchor
+          assert.strictEqual(anchor?._tag, "file")
+          if (anchor?._tag === "file") {
+            assert.strictEqual(String(anchor.path), EVIDENCE_PATH)
+            assert.strictEqual(anchor.line, 42)
+          }
+          assert.strictEqual(result.suggestions[0]?.state, "draft")
+          assert.strictEqual(result.suggestions[0]?.relatedLocations.length, 1)
+          assert.match(result.notes[0]?.noteId ?? "", /^sha256:[0-9a-f]{64}$/u)
+          assert.strictEqual(result.notes[0]?.reason, "low-confidence")
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
   it.effect("drives full-project exploration through sandbox tools and publishes only anchored suggestions", () => {
     const observation: SessionObservation = {
       commands: [],
@@ -422,7 +492,8 @@ describe("PR review task executor", () => {
               reason: "A second model pass reached the same finding independently."
             }
           }
-        ]
+        ],
+        notes: []
       }),
       observation,
       Effect.gen(function*() {
@@ -524,7 +595,8 @@ describe("PR review task executor", () => {
       completeScript({
         schemaVersion: 2,
         completion: { status: "complete" },
-        suggestions: Array.from({ length: 80 }, () => suggestion)
+        suggestions: Array.from({ length: 80 }, () => suggestion),
+        notes: []
       }),
       observation,
       Effect.gen(function*() {
@@ -562,7 +634,8 @@ describe("PR review task executor", () => {
           status: "unable-to-conclude",
           reason: "The project build dependency was unavailable."
         },
-        suggestions: []
+        suggestions: [],
+        notes: []
       }),
       observation,
       Effect.gen(function*() {

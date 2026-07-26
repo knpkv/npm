@@ -27,6 +27,7 @@ Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000701")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"7".repeat(64)}`)
+const FILE_SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"6".repeat(64)}`)
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000703")
 const SUBJECT = PrReviewSubject.make({
   providerId: "codecommit",
@@ -124,6 +125,8 @@ const REVIEW_STATE = {
       suggestions: [
         {
           suggestionId: SUGGESTION_ID,
+          state: "draft",
+          title: "Authorize before mutating",
           severity: "P1",
           problem: "Mutation happens before authorization",
           impact: "An unauthorized caller can mutate durable state.",
@@ -134,14 +137,75 @@ const REVIEW_STATE = {
             excerpt: "yield* mutate()"
           },
           recommendation: "Authorize first.",
+          anchor: {
+            _tag: "line",
+            path: PREVIEW.anchor.path,
+            line: PREVIEW.anchor.line
+          },
+          relatedLocations: [],
           replacement: {
-            content: PREVIEW.replacement,
-            startLine: PREVIEW.anchor.line,
-            endLine: PREVIEW.anchor.line
+            reviewedHead: SUBJECT.headRevision,
+            unifiedDiff: [
+              "--- a/src/authorization.ts",
+              "+++ b/src/authorization.ts",
+              "@@ -42,1 +42,2 @@",
+              "+yield* authorize()",
+              " yield* mutate()"
+            ].join("\n"),
+            explanation: "Authorize before the mutation."
           },
           confidence: {
             level: "high",
             reason: "The execution order is explicit."
+          }
+        },
+        {
+          suggestionId: FILE_SUGGESTION_ID,
+          state: "draft",
+          title: "Centralize the authorization policy",
+          severity: "P3",
+          problem: "The file repeats the same policy branch.",
+          impact: "Future changes can drift.",
+          evidence: {
+            path: PREVIEW.anchor.path,
+            startLine: 50,
+            endLine: 50,
+            excerpt: "yield* authorizeAgain()"
+          },
+          recommendation: "Use the shared policy helper.",
+          anchor: {
+            _tag: "file",
+            path: PREVIEW.anchor.path,
+            line: 40
+          },
+          relatedLocations: [
+            {
+              path: "src/handler.ts",
+              startLine: 18,
+              endLine: 18,
+              label: "Same policy branch"
+            }
+          ],
+          confidence: {
+            level: "medium",
+            reason: "The duplicate branches are directly visible."
+          }
+        }
+      ],
+      notes: [
+        {
+          noteId: `sha256:${"5".repeat(64)}`,
+          reason: "low-confidence",
+          title: "Retry behavior needs a provider reproduction",
+          observation: "The first error may be obscured, but the local fixture cannot prove it.",
+          confidence: {
+            level: "low",
+            reason: "Provider behavior is unavailable in the sandbox."
+          },
+          location: {
+            path: "src/retry.ts",
+            startLine: 12,
+            endLine: 12
           }
         }
       ]
@@ -171,6 +235,41 @@ afterEach(async () => {
 })
 
 describe("PullRequestReviewPanel", () => {
+  it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+
+    expect(host.textContent).toContain("File suggestion")
+    expect(host.textContent).toContain("Related locations")
+    expect(host.textContent).toContain("src/handler.ts:18")
+    expect(host.textContent).toContain("Suggested replacement")
+    expect(host.textContent).toContain("Authorize before the mutation.")
+    expect(host.textContent).toContain("Review Notes")
+    expect(host.textContent).toContain("Never publishable")
+    expect(host.textContent).toContain("Retry behavior needs a provider reproduction")
+    expect(
+      [...host.querySelectorAll("li")]
+        .find(({ textContent }) => textContent?.includes("Centralize the authorization policy"))
+        ?.querySelector("button")
+    ).toBeNull()
+  })
+
   it("previews an exact suggestion and requires an editable human confirmation", async () => {
     const onPreview = vi.fn()
     const onPublish = vi.fn()

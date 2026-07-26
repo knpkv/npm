@@ -17,8 +17,9 @@ import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestion } from "../../domain/prReview.js"
+import type { PrReviewSuggestion, PrReviewSuggestionState } from "../../domain/prReview.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
+import styles from "./WorkspacePullRequestDiff.module.css"
 
 const BoundedDiffCodeView = lazy(async () => {
   const module = await import("@knpkv/rly/diff/bounded")
@@ -92,6 +93,10 @@ type InventoryLoadState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly inventory: CompleteDiffInventory }
 
+type SuggestionSeverityFilter = "all" | PrReviewSuggestion["severity"]
+type SuggestionStateFilter = "all" | PrReviewSuggestionState
+const overviewScopeKinds = ["file", "changes"] satisfies ReadonlyArray<"file" | "changes">
+
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 
@@ -164,6 +169,8 @@ export const WorkspacePullRequestDiff = ({
   const [contentRetryKey, setContentRetryKey] = useState(0)
   const [layout, setLayout] = useState<RlyDiffLayout>("split")
   const [isWrapped, setIsWrapped] = useState(false)
+  const [severityFilter, setSeverityFilter] = useState<SuggestionSeverityFilter>("all")
+  const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
 
   useEffect(() => {
     const abort = new AbortController()
@@ -299,17 +306,28 @@ export const WorkspacePullRequestDiff = ({
           ],
     [scope.revision, selectedEntry, selectedText]
   )
+  const visibleSuggestions = useMemo(
+    () =>
+      suggestions.filter(
+        (suggestion) =>
+          (severityFilter === "all" || suggestion.severity === severityFilter) &&
+          (suggestionStateFilter === "all" || suggestion.state === suggestionStateFilter)
+      ),
+    [severityFilter, suggestionStateFilter, suggestions]
+  )
   const annotations = useMemo<ReadonlyArray<RlyDiffCodeAnnotation>>(
     () =>
-      suggestions.flatMap((suggestion) => {
-        const entry = entries.find(({ path }) => String(path) === String(suggestion.evidence.path))
+      visibleSuggestions.flatMap((suggestion) => {
+        if (suggestion.anchor._tag !== "line") return []
+        const anchor = suggestion.anchor
+        const entry = entries.find(({ path }) => String(path) === String(anchor.path))
         if (entry === undefined) return []
         const annotation: RlyDiffCodeAnnotation = {
           accessibilityLabel: `${suggestion.severity} review suggestion with ${suggestion.confidence.level} confidence`,
           id: suggestion.suggestionId,
           location: {
             itemId: entry.anchor,
-            lineNumber: suggestion.evidence.startLine,
+            lineNumber: anchor.line,
             side: "additions"
           },
           render: ({ returnFocus }) => (
@@ -317,7 +335,7 @@ export const WorkspacePullRequestDiff = ({
               <strong>
                 {suggestion.severity} · {suggestion.confidence.level} confidence
               </strong>
-              <p>{suggestion.problem}</p>
+              <p>{suggestion.title}</p>
               <p>
                 <strong>Impact:</strong> {suggestion.impact}
               </p>
@@ -326,7 +344,10 @@ export const WorkspacePullRequestDiff = ({
                 <strong>Recommendation:</strong> {suggestion.recommendation}
               </p>
               <p>{suggestion.confidence.reason}</p>
-              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.content}</pre>}
+              {suggestion.relatedLocations.length === 0 ? null : (
+                <p>{suggestion.relatedLocations.length} related locations</p>
+              )}
+              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.unifiedDiff}</pre>}
               <button onClick={returnFocus} type="button">
                 Return to line
               </button>
@@ -335,34 +356,130 @@ export const WorkspacePullRequestDiff = ({
         }
         return [annotation]
       }),
-    [entries, suggestions]
+    [entries, visibleSuggestions]
   )
   const unattachedSuggestionCount = useMemo(
     () =>
-      suggestions.filter((suggestion) => !entries.some(({ path }) => String(path) === String(suggestion.evidence.path)))
-        .length,
-    [entries, suggestions]
+      visibleSuggestions.filter((suggestion) => {
+        const anchor = suggestion.anchor
+        return anchor._tag !== "changes" && !entries.some(({ path }) => String(path) === String(anchor.path))
+      }).length,
+    [entries, visibleSuggestions]
   )
   const findings = useMemo(
     () =>
-      suggestions.map((suggestion) => ({
+      visibleSuggestions.map((suggestion) => ({
         id: suggestion.suggestionId,
         content: (
           <>
             <strong>
-              {suggestion.severity} · {suggestion.problem}
+              {suggestion.severity} · {suggestion.title}
             </strong>
             <p>
-              {suggestion.evidence.path}:{suggestion.evidence.startLine}
+              {suggestion.anchor._tag === "changes"
+                ? "Whole change"
+                : `${suggestion.anchor.path}:${String(suggestion.anchor.line)}`}
             </p>
           </>
         )
       })),
-    [suggestions]
+    [visibleSuggestions]
   )
+  const overviewSuggestions = visibleSuggestions.filter(({ anchor }) => anchor._tag !== "line")
+  const severities = ["all", "P1", "P2", "P3", "P4"] satisfies ReadonlyArray<SuggestionSeverityFilter>
+  const states = [
+    "all",
+    ...new Set(suggestions.map(({ state }) => state))
+  ] satisfies ReadonlyArray<SuggestionStateFilter>
 
   return (
     <>
+      <section aria-label="Review suggestion filters" className={styles.filters}>
+        <div aria-label="Severity" role="group">
+          {severities.map((severity) => (
+            <button
+              aria-label={`Filter suggestions by ${severity === "all" ? "all" : severity} severity`}
+              aria-pressed={severityFilter === severity}
+              key={severity}
+              onClick={() => setSeverityFilter(severity)}
+              type="button"
+            >
+              {severity === "all" ? "All severities" : severity}
+            </button>
+          ))}
+        </div>
+        <div aria-label="Suggestion state" role="group">
+          {states.map((state) => (
+            <button
+              aria-label={`Filter suggestions by ${state} state`}
+              aria-pressed={suggestionStateFilter === state}
+              key={state}
+              onClick={() => setSuggestionStateFilter(state)}
+              type="button"
+            >
+              {state === "all" ? "All states" : state}
+            </button>
+          ))}
+        </div>
+      </section>
+      {overviewSuggestions.length === 0 ? null : (
+        <section aria-label="File and whole-change suggestions" className={styles.overview}>
+          <header>
+            <span>Review overview</span>
+            <strong>{overviewSuggestions.length}</strong>
+          </header>
+          {overviewScopeKinds.map((scopeKind) => {
+            const scoped = overviewSuggestions.filter(({ anchor }) => anchor._tag === scopeKind)
+            if (scoped.length === 0) return null
+            return (
+              <section key={scopeKind}>
+                <h3>{scopeKind === "file" ? "File suggestions" : "Whole-change suggestions"}</h3>
+                <ul>
+                  {scoped.map((suggestion) => {
+                    const anchor = suggestion.anchor
+                    return (
+                      <li data-severity={suggestion.severity} key={suggestion.suggestionId}>
+                        <span>
+                          {suggestion.severity} · {suggestion.state}
+                        </span>
+                        <strong>{suggestion.title}</strong>
+                        <p>{suggestion.problem}</p>
+                        {anchor._tag !== "file" ? null : (
+                          <button
+                            onClick={() => {
+                              const entry = entries.find(({ path }) => String(path) === String(anchor.path))
+                              if (entry !== undefined) setSelectedFileId(entry.anchor)
+                            }}
+                            type="button"
+                          >
+                            {anchor.path}:{String(anchor.line)}
+                          </button>
+                        )}
+                        {suggestion.relatedLocations.length === 0 ? null : (
+                          <details>
+                            <summary>Related locations</summary>
+                            <ul>
+                              {suggestion.relatedLocations.map((location) => (
+                                <li key={`${location.path}:${String(location.startLine)}:${String(location.endLine)}`}>
+                                  <code>
+                                    {location.path}:{String(location.startLine)}
+                                    {location.endLine === location.startLine ? "" : `–${String(location.endLine)}`}
+                                  </code>
+                                  <span>{location.label}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+            )
+          })}
+        </section>
+      )}
       {unattachedSuggestionCount === 0 ? null : (
         <p role="status">
           {unattachedSuggestionCount} validated review{" "}
@@ -375,7 +492,7 @@ export const WorkspacePullRequestDiff = ({
         findings={findings}
         header={
           <DiffHeader
-            findingFilter="all"
+            findingFilter="agent"
             heading={heading}
             indexedCount={files.length}
             isWrapped={isWrapped}

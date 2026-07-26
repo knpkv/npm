@@ -2,6 +2,7 @@ import { Button, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, lazy, Suspense, useState } from "react"
 
 import type { ReviewSuggestionPublicationSelection } from "../../api/agent.js"
+import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
@@ -203,56 +204,25 @@ export const PullRequestReviewPanel = ({
           <Text>{review.report.completion.reason}</Text>
         ) : null}
         {review.report.suggestions.length === 0 ? (
-          <span>No validated line suggestions were retained for this exact head.</span>
+          <span>No validated suggestions were retained for this exact head.</span>
         ) : (
           <ol className={styles.reviewFindings}>
             {review.report.suggestions.map((suggestion) => (
-              <li data-severity={suggestion.severity} key={suggestion.suggestionId}>
-                <div className={styles.findingHeading}>
-                  <span>{suggestion.severity}</span>
-                  <strong>{suggestion.problem}</strong>
-                </div>
-                <code>
-                  {suggestion.evidence.path}:{suggestion.evidence.startLine}
-                  {suggestion.evidence.endLine === suggestion.evidence.startLine
-                    ? ""
-                    : `–${String(suggestion.evidence.endLine)}`}
-                </code>
-                <Text>{suggestion.impact}</Text>
-                <Text>{suggestion.recommendation}</Text>
-                <small>
-                  {suggestion.confidence.level} confidence · {suggestion.confidence.reason}
-                </small>
-                {suggestion.prevention === undefined ? null : (
-                  <div className={styles.preventionProposal}>
-                    <small>Prevention proposal · separate review required</small>
-                    <span>
-                      {suggestion.prevention.summary} · {suggestion.prevention.enforcement}
-                    </span>
-                  </div>
-                )}
-                {canEnqueue ? (
-                  <Button
-                    disabled={
-                      publication._tag === "previewing" &&
-                      publication.selection.suggestionId === suggestion.suggestionId
-                    }
-                    onClick={() =>
-                      onPreviewPublication({
-                        jobId: review.jobId,
-                        suggestionId: suggestion.suggestionId
-                      })
-                    }
-                  >
-                    {publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
-                      ? "Preparing preview…"
-                      : "Post comment"}
-                  </Button>
-                ) : null}
+              <li key={suggestion.suggestionId}>
+                <ReviewSuggestionCard
+                  canPublish={canEnqueue}
+                  isPreviewing={
+                    publication._tag === "previewing" && publication.selection.suggestionId === suggestion.suggestionId
+                  }
+                  jobId={review.jobId}
+                  onPreviewPublication={onPreviewPublication}
+                  suggestion={suggestion}
+                />
               </li>
             ))}
           </ol>
         )}
+        <ReviewNotes notes={review.report.notes} />
         <span>Agent advice only. A person must still approve or request changes.</span>
       </>
     )

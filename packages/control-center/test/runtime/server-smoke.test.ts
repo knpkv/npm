@@ -841,6 +841,7 @@ describe("Control Center closed runtime", () => {
         schemaVersion: 2,
         completion: { status: "complete" },
         suggestions: [{
+          title: "Disable unsafe review behavior",
           severity: "P2",
           problem: "Unsafe review behavior is enabled.",
           impact: "The production path can accept unsafe state.",
@@ -851,11 +852,18 @@ describe("Control Center closed runtime", () => {
             excerpt: evidenceExcerpt
           },
           recommendation: "Use the validated safe configuration.",
+          anchor: {
+            _tag: "line",
+            path: evidencePath,
+            line: 42
+          },
+          relatedLocations: [],
           confidence: {
             level: "high",
             reason: "The exact added line enables the unsafe state."
           }
-        }]
+        }],
+        notes: []
       })
       let providerCalls = 0
       const providerClient = HttpClient.make((request) => {

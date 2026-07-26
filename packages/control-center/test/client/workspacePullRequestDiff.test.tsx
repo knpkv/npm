@@ -49,6 +49,8 @@ const fileAnchor = DiffFileAnchor.make("sha256:12a936386c815ae967006bbb95377860b
 const unauthorizedReadKinds: ReadonlyArray<"inventory" | "content"> = ["inventory", "content"]
 const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   suggestionId: `sha256:${"1".repeat(64)}`,
+  state: "draft",
+  title: "Keep the supported invariant",
   severity: "P2",
   problem: "The answer changed without updating its invariant.",
   impact: "Callers can observe an unsupported value.",
@@ -59,13 +61,109 @@ const suggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
     excerpt: "export const answer = 43"
   },
   recommendation: "Update the invariant or retain the supported answer.",
+  anchor: {
+    _tag: "line",
+    path: "src/file.ts",
+    line: 1
+  },
+  relatedLocations: [],
   confidence: {
     level: "high",
     reason: "The exact added line contains the unsupported value."
   }
 })
+const fileSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  ...suggestion,
+  suggestionId: `sha256:${"2".repeat(64)}`,
+  state: "resolved",
+  title: "Keep one invariant per file",
+  severity: "P3",
+  anchor: {
+    _tag: "file",
+    path: "src/file.ts",
+    line: 1
+  },
+  relatedLocations: [
+    {
+      path: "src/other.ts",
+      startLine: 8,
+      endLine: 8,
+      label: "Same unsupported invariant"
+    }
+  ]
+})
+const changesSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  ...suggestion,
+  suggestionId: `sha256:${"3".repeat(64)}`,
+  title: "Document the compatibility break",
+  severity: "P1",
+  anchor: { _tag: "changes" },
+  relatedLocations: []
+})
 
 describe("WorkspacePullRequestDiff", () => {
+  it("keeps the complete diff visible while filtering file and whole-change advice by severity and state", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: fileAnchor,
+            path: PluginRelativePathV1.make("src/file.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          }
+        ]
+      }),
+      content: async (_scope, _entry, side) => ({
+        bytesBase64:
+          side === "before" ? "ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDQyCg==" : "ZXhwb3J0IGNvbnN0IGFuc3dlciA9IDQzCg==",
+        totalBytes: 25,
+        unavailableReason: null
+      })
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff
+          heading="PR 184"
+          scope={scope}
+          suggestions={[suggestion, fileSuggestion, changesSuggestion]}
+          transport={transport}
+        />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(host.textContent).toContain("File suggestions")
+    expect(host.textContent).toContain("Whole-change suggestions")
+    expect(host.textContent).toContain("src/other.ts:8")
+    expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P1 severity']")?.click()
+    })
+    expect(host.textContent).toContain("Document the compatibility break")
+    expect(host.textContent).not.toContain("Keep one invariant per file")
+    expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by all severity']")?.click()
+      host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by resolved state']")?.click()
+    })
+    expect(host.textContent).toContain("Keep one invariant per file")
+    expect(host.textContent).not.toContain("Document the compatibility break")
+    expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
+  })
+
   it.each(unauthorizedReadKinds)(
     "invalidates the active session exactly once for unauthorized %s reads",
     async (kind) => {
@@ -330,7 +428,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
     expect(host.textContent).toContain("answer = 42")
     expect(host.textContent).toContain("answer = 43")
-    expect(host.textContent).toContain("P2 · The answer changed without updating its invariant.")
+    expect(host.textContent).toContain("P2 · Keep the supported invariant")
     expect(host.textContent).toContain("Impact:")
     expect(host.textContent).toContain("Recommendation:")
     expect(host.querySelector("[aria-label='P2 review suggestion with high confidence']")).not.toBeNull()
@@ -360,6 +458,6 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[role='status']")?.textContent).toContain(
       "1 validated review suggestion is not attached"
     )
-    expect(host.textContent).toContain("P2 · The answer changed without updating its invariant.")
+    expect(host.textContent).toContain("P2 · Keep the supported invariant")
   })
 })

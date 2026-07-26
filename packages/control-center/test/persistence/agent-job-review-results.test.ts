@@ -62,6 +62,8 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
   suggestions: [
     {
       suggestionId: `sha256:${"1".repeat(64)}`,
+      state: "draft",
+      title: "Decode review output before persistence",
       severity: "P2",
       problem: "Review output must cross a typed boundary.",
       impact: "Malformed model output could otherwise enter durable state.",
@@ -72,6 +74,12 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         excerpt: "const report = decodeReviewOutput(output)"
       },
       recommendation: "Decode the complete report before committing model-authored output.",
+      anchor: {
+        _tag: "line",
+        path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+        line: 42
+      },
+      relatedLocations: [],
       confidence: {
         level: "high",
         reason: "The persistence boundary is directly observable."
@@ -80,6 +88,7 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         summary: "Protect active-lease review completion.",
         enforcement: "test",
         existingRuleOrConfig: "agent job repository integration suite",
+        recurrenceEvidence: "Every completion and retry reuses the active-lease transaction boundary.",
         targetFile: "packages/control-center/test/persistence/agent-job-review-results.test.ts",
         sourcePaths: ["packages/control-center/src/server/persistence/repositories/agentJobRepository.ts"],
         matcherOrInvariant: "A review result and terminal state commit under the same active lease.",
@@ -88,7 +97,8 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         boundary: "Only durable PR-review jobs are covered."
       }
     }
-  ]
+  ],
+  notes: []
 })
 
 const setupFoundation = Effect.gen(function*() {

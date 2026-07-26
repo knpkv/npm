@@ -84,6 +84,8 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
       suggestions: [
         {
           suggestionId: SUGGESTION_ID,
+          state: "draft",
+          title: "Authorize before mutating",
           severity: "P1",
           problem: "Mutation happens before authorization",
           impact: "An unauthorized caller can mutate durable state.",
@@ -94,12 +96,19 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
             excerpt: "yield* mutate()"
           },
           recommendation: "Authorize first.",
+          anchor: {
+            _tag: "line",
+            path: "src/authorization.ts",
+            line: 42
+          },
+          relatedLocations: [],
           confidence: {
             level: "high",
             reason: "The execution order is explicit."
           }
         }
-      ]
+      ],
+      notes: []
     }
   })
 

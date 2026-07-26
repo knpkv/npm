@@ -168,6 +168,9 @@ const makeGateway = Effect.gen(function*() {
             ({ capabilityId }) => capabilityId === "action.execute"
           )
           if (capability === undefined) return yield* conflict()
+          if (command.suggestion.anchor._tag !== "line" || command.suggestion.state !== "draft") {
+            return yield* conflict()
+          }
           const proposalRequest = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
             actionKind: "comment",
             target: {
@@ -178,8 +181,8 @@ const makeGateway = Effect.gen(function*() {
             payload: {
               content: command.finalContent,
               location: {
-                filePath: command.suggestion.evidence.path,
-                filePosition: command.suggestion.evidence.startLine,
+                filePath: command.suggestion.anchor.path,
+                filePosition: command.suggestion.anchor.line,
                 relativeFileVersion: "AFTER"
               }
             },

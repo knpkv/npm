@@ -692,6 +692,8 @@ const completedPullRequestReviewState = {
       suggestions: [
         {
           suggestionId: `sha256:${"1".repeat(64)}`,
+          state: "draft",
+          title: "Reuse the original idempotency key",
           severity: "P2",
           problem: "Retry can duplicate capture",
           impact: "The retry path does not reuse the original idempotency key.",
@@ -702,6 +704,12 @@ const completedPullRequestReviewState = {
             excerpt: "return capture({ idempotencyKey: freshKey })"
           },
           recommendation: "Reuse the original idempotency key for retry attempts.",
+          anchor: {
+            _tag: "line",
+            path: "src/capture.ts",
+            line: 42
+          },
+          relatedLocations: [],
           confidence: {
             level: "high",
             reason: "The added retry branch supplies a newly generated key."
@@ -710,6 +718,7 @@ const completedPullRequestReviewState = {
             summary: "Add a focused retry contract test.",
             enforcement: "test",
             existingRuleOrConfig: "capture integration suite",
+            recurrenceEvidence: "Every capture retry crosses the shared idempotency boundary.",
             targetFile: "test/capture-retry.test.ts",
             sourcePaths: ["src/capture.ts"],
             matcherOrInvariant: "Every retry reuses its original idempotency key.",
@@ -718,7 +727,8 @@ const completedPullRequestReviewState = {
             boundary: "Only capture retries are covered."
           }
         }
-      ]
+      ],
+      notes: []
     }
   })
 } satisfies PullRequestReviewControllerState
