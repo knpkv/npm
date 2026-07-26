@@ -166,6 +166,7 @@ describe("agent job review results", () => {
   it.effect("projects a published suggestion after a durable reload", () =>
     withRepository(
       Effect.gen(function*() {
+        const database = yield* Database
         const jobs = yield* AgentJobRepository
         yield* setupFoundation
         yield* enqueueReview
@@ -188,6 +189,18 @@ describe("agent job review results", () => {
           publicationId: PUBLICATION_ID,
           publishedAt: T3
         })
+        const duplicateEvent = yield* database.sql`INSERT INTO agent_thread_events (
+          workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        )
+        SELECT
+          workspace_id, thread_id, event_sequence + 1000, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        FROM agent_thread_events
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND job_id = ${JOB_ID}
+          AND event_kind = 'review-suggestion-published'`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(duplicateEvent))
         yield* jobs.recordReviewSuggestionPublication({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,

@@ -474,7 +474,12 @@ const makePullRequestReviews = Effect.gen(function*() {
         publishedAt: result.publishedAt
       }).pipe(
         Effect.mapError(mapPersistenceWriteError),
-        Effect.mapError(() => unavailable())
+        Effect.mapError((error) =>
+          error._tag === "ApplicationInvalidRequest" ||
+            error._tag === "ApplicationResourceNotFound"
+            ? error
+            : unavailable()
+        )
       )
       return new PublishedReviewComment({
         publicationId: result.publicationId,

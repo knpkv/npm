@@ -53,6 +53,7 @@ import {
   ReviewSuggestionPublicationGatewayError
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
+import { RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
@@ -350,7 +351,9 @@ const withService = <Success, Failure>(
     publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
-  latestReview: Option.Option<LatestAgentReviewRecord> = Option.none()
+  latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
+  recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
+    Effect.succeed(undefined)
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -365,7 +368,7 @@ const withService = <Success, Failure>(
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
           latestReview: () => Effect.succeed(latestReview),
-          recordReviewSuggestionPublication: () => Effect.succeed(undefined)
+          recordReviewSuggestionPublication: recordPublication
         }
       })
       const publicationGateway = ReviewSuggestionPublicationGateway.of({
@@ -842,6 +845,47 @@ describe("pull request reviews", () => {
       verifyScope({ _tag: "changes" })
     ], { concurrency: 1, discard: true })
   })
+
+  it.effect("preserves a deterministic lifecycle-write failure after provider publication", () =>
+    withService(
+      (service, _enqueueInput, publicationCommands) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+          const result = yield* service.publishSuggestion({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              finalContent: preview.finalContent,
+              authorityBinding: preview.authorityBinding
+            },
+            session: HUMAN_SESSION
+          }).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "ApplicationResourceNotFound")
+          }
+          assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+        }),
+      registry,
+      Option.some(completedReview),
+      () =>
+        Effect.fail(
+          new RecordNotFoundError({
+            workspaceId: WORKSPACE_ID,
+            recordKind: "agent-review-result",
+            recordKey: REVIEW_JOB_ID
+          })
+        )
+    ))
 
   it.effect("includes every grouped related location in default publication content", () =>
     withService(

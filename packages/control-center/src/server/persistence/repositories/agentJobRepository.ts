@@ -724,6 +724,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
       }
       publishedSuggestionIds.add(decodedPublication.success.suggestionId)
     }
+    if (publishedSuggestionIds.size === 0) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
+        workspaceId: request.workspaceId,
+        jobId: request.jobId,
+        attemptSequence: row.success.attemptSequence,
+        report: decodedReport.success,
+        completedAt: row.success.occurredAt
+      })
+    }
     const projectedReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
       ...decodedReport.success,
       suggestions: decodedReport.success.suggestions.map((suggestion) => {

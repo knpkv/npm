@@ -393,6 +393,11 @@
     },
     {
       "type": "index",
+      "name": "agent_thread_events_review_suggestion_published_idx",
+      "sql": "CREATE UNIQUE INDEX agent_thread_events_review_suggestion_published_idx\n    ON agent_thread_events(\n      workspace_id, job_id, json_extract(payload_json, '$.suggestionId')\n    )\n    WHERE event_kind = 'review-suggestion-published'"
+    },
+    {
+      "type": "index",
       "name": "authorized_share_grantee_expiry_idx",
       "sql": "CREATE INDEX authorized_share_grantee_expiry_idx\n    ON authorized_share_grants(workspace_id, grantee_person_id, expires_at)"
     },
