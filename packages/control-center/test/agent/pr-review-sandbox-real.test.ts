@@ -75,33 +75,65 @@ const runGit = (
     })
   )
 
-const acquireNetworkProbe = Effect.acquireRelease(
-  Effect.tryPromise({
-    try: () =>
-      new Promise<{ readonly port: number; readonly server: Server }>(
-        (resolve, reject) => {
-          const server = createServer((socket) => {
-            socket.end("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
-          })
-          server.once("error", reject)
-          server.listen(0, "0.0.0.0", () => {
-            const address = server.address()
-            if (address === null || typeof address === "string") {
-              server.close()
-              reject(new Error("Network probe did not expose an internet port"))
-              return
-            }
-            resolve({ port: address.port, server })
-          })
-        }
-      ),
-    catch: (cause) =>
-      new Error("Could not start the sandbox network probe", {
-        cause
+const startNetworkProbe = Effect.tryPromise({
+  try: () =>
+    new Promise<Server>((resolve, reject) => {
+      const server = createServer((socket) => {
+        socket.end("HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n")
       })
-  }),
-  ({ server }) => Effect.sync(() => server.close())
-)
+      server.once("error", reject)
+      server.listen(0, "0.0.0.0", () => resolve(server))
+    }),
+  catch: (cause) =>
+    new Error("Could not start the sandbox network probe", {
+      cause
+    })
+})
+
+const releaseNetworkProbe = (server: Server): Effect.Effect<void> => Effect.sync(() => server.close())
+
+const acquireNetworkProbe = (
+  addressOf: (server: Server) => ReturnType<Server["address"]> = (server) => server.address(),
+  release: (server: Server) => Effect.Effect<void> = releaseNetworkProbe
+) =>
+  Effect.gen(function*() {
+    const server = yield* Effect.acquireRelease(startNetworkProbe, release)
+    const address = addressOf(server)
+    if (address === null || typeof address === "string") {
+      return yield* Effect.fail(new Error("Network probe did not expose an internet port"))
+    }
+    return { port: address.port, server }
+  })
+
+it.effect("registers network-probe cleanup before validating its listening address", () =>
+  Effect.gen(function*() {
+    let invalidProbeReleased = false
+    const invalid = yield* Effect.scoped(
+      acquireNetworkProbe(
+        () => null,
+        (server) =>
+          Effect.sync(() => {
+            invalidProbeReleased = true
+            server.close()
+          })
+      )
+    ).pipe(Effect.flip)
+
+    assert.strictEqual(invalid.message, "Network probe did not expose an internet port")
+    assert.isTrue(invalidProbeReleased)
+
+    let validServer: Server | undefined
+    yield* Effect.scoped(
+      Effect.gen(function*() {
+        const probe = yield* acquireNetworkProbe()
+        validServer = probe.server
+        assert.isTrue(probe.server.listening)
+        assert.isAbove(probe.port, 0)
+      })
+    )
+    if (validServer === undefined) return yield* Effect.die("valid network probe was not acquired")
+    assert.isFalse(validServer.listening)
+  }))
 
 it.effect("drains high-volume child output while awaiting exit", () =>
   Effect.gen(function*() {
@@ -133,7 +165,7 @@ it.effect("runs the review session through the installed sbx runtime", () =>
         LC_ALL: "C",
         PATH: executablePath
       }
-      const networkProbe = yield* acquireNetworkProbe
+      const networkProbe = yield* acquireNetworkProbe()
       const sourceRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "control-center-real-sbx-"
       })

@@ -148,6 +148,19 @@ const REVIEW_STATE = {
     }
   })
 } satisfies PullRequestReviewControllerState
+const REFRESHED_NOT_STARTED_STATE = {
+  ...REVIEW_STATE,
+  baseRevision: "3".repeat(40),
+  headRevision: "4".repeat(40),
+  review: Schema.decodeUnknownSync(PullRequestReviewState)({
+    _tag: "not-started",
+    subject: {
+      ...SUBJECT,
+      baseRevision: "3".repeat(40),
+      headRevision: "4".repeat(40)
+    }
+  })
+} satisfies PullRequestReviewControllerState
 
 let root: Root | undefined
 
@@ -279,5 +292,38 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain(RECEIPT.safeSummary)
     expect(host.textContent).toContain(RECEIPT.providerOperationId)
     expect(host.textContent).toContain(`${PREVIEW.anchor.path}:${String(PREVIEW.anchor.line)}`)
+  })
+
+  it("keeps a superseded receipt visible after the refreshed head has no completed review", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{
+            _tag: "published",
+            headSuperseded: true,
+            preview: PREVIEW,
+            publication: PUBLICATION
+          }}
+          state={REFRESHED_NOT_STARTED_STATE}
+        />
+      )
+    )
+    await act(async () => vi.dynamicImportSettled())
+
+    expect(host.textContent).toContain("Agent review not run")
+    expect(host.textContent).toContain("Published Review Comment")
+    expect(host.textContent).toContain(RECEIPT.providerOperationId)
+    expect(host.textContent).toContain("The comment was published against a head that is no longer current.")
+    expect(host.querySelectorAll("[role=status]")).toHaveLength(1)
   })
 })

@@ -68,9 +68,25 @@ export const PullRequestReviewPanel = ({
   readonly state: PullRequestReviewControllerState
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
+  const publicationSurface =
+    publication._tag === "idle" || publication._tag === "previewing" ? null : (
+      <Suspense fallback={<span>Preparing publication surface…</span>}>
+        <ReviewSuggestionPublicationSurface
+          onCancel={onCancelPublication}
+          onPublish={onPublishSuggestion}
+          publication={publication}
+        />
+      </Suspense>
+    )
+  const withPublication = (content: ReactElement): ReactElement => (
+    <>
+      {content}
+      {publicationSurface}
+    </>
+  )
 
   if (state._tag === "idle" || state._tag === "loading") {
-    return (
+    return withPublication(
       <>
         <strong>Loading review state</strong>
         <span>Checking durable review history for this exact head.</span>
@@ -78,7 +94,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (state._tag === "failed") {
-    return (
+    return withPublication(
       <>
         <strong>Review state unavailable</strong>
         <span>The current review could not be loaded. No human decision was changed.</span>
@@ -128,7 +144,7 @@ export const PullRequestReviewPanel = ({
       </div>
     )
   if (review._tag === "unavailable") {
-    return (
+    return withPublication(
       <>
         <strong>Review unavailable</strong>
         <span>{unavailableMessage(review.reason)}</span>
@@ -142,7 +158,7 @@ export const PullRequestReviewPanel = ({
         : review.state === "running"
           ? "Reviewing exact head"
           : "Cancellation requested"
-    return (
+    return withPublication(
       <>
         <strong>{label}</strong>
         <span>
@@ -164,7 +180,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "failed") {
-    return (
+    return withPublication(
       <>
         <strong>{review.state === "cancelled" ? "Review cancelled" : "Review did not finish"}</strong>
         <span>The failed run did not change approval or publish a recommendation.</span>
@@ -180,7 +196,7 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "completed") {
-    return (
+    return withPublication(
       <>
         <strong>{outcomeLabel(review.outcome)}</strong>
         {review.report.completion.status === "unable-to-conclude" ? (
@@ -237,21 +253,12 @@ export const PullRequestReviewPanel = ({
             ))}
           </ol>
         )}
-        {publication._tag === "idle" || publication._tag === "previewing" ? null : (
-          <Suspense fallback={<span>Preparing publication surface…</span>}>
-            <ReviewSuggestionPublicationSurface
-              onCancel={onCancelPublication}
-              onPublish={onPublishSuggestion}
-              publication={publication}
-            />
-          </Suspense>
-        )}
         <span>Agent advice only. A person must still approve or request changes.</span>
       </>
     )
   }
 
-  return (
+  return withPublication(
     <>
       <strong>Agent review not run</strong>
       <span>An immutable-head review produces advice, never a human approval.</span>
