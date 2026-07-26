@@ -16,9 +16,11 @@ export const reviewSuggestionRevisionValidationLabel = (revision: PrReviewSugges
 /** Inspect complete immutable suggestion history without leaving the diff. */
 export const ReviewSuggestionRevisionHistory = ({
   loadEarlier,
+  loadingEarlier,
   page
 }: {
   readonly loadEarlier: () => void
+  readonly loadingEarlier: boolean
   readonly page: PrReviewSuggestionRevisionPage
 }): ReactElement => {
   const revisions = [page.current, ...page.revisions.filter(({ revisionId }) => revisionId !== page.current.revisionId)]
@@ -96,7 +98,11 @@ export const ReviewSuggestionRevisionHistory = ({
           </li>
         ))}
       </ol>
-      {page.hasMore ? <Button onClick={loadEarlier}>Load earlier revisions</Button> : null}
+      {page.hasMore ? (
+        <Button aria-busy={loadingEarlier} disabled={loadingEarlier} loading={loadingEarlier} onClick={loadEarlier}>
+          {loadingEarlier ? "Loading earlier revisions…" : "Load earlier revisions"}
+        </Button>
+      ) : null}
     </div>
   )
 }

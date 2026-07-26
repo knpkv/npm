@@ -932,6 +932,7 @@ describe("PullRequestReviewPanel", () => {
     const resolvedSuggestion = [...host.querySelectorAll("li")].find(({ textContent }) =>
       textContent?.includes("Centralize the authorization policy")
     )
+    expect(resolvedSuggestion).toBeDefined()
     expect(
       [...(resolvedSuggestion?.querySelectorAll("button") ?? [])].some(
         ({ textContent }) => textContent === "Post comment"
@@ -1008,6 +1009,80 @@ describe("PullRequestReviewPanel", () => {
       revisionId: FILE_REVIEW_REVISION_ID,
       suggestionId: FILE_SUGGESTION_ID
     })
+  })
+
+  it("removes omitted optional advanced fields from an edited suggestion", async () => {
+    const originalPage = await REVISION_TRANSPORT.load(
+      {
+        entityId: ENTITY_ID,
+        jobId: JOB_ID,
+        sessionKey: "session-a",
+        suggestionId: SUGGESTION_ID
+      },
+      null,
+      new AbortController().signal
+    )
+    const edit = vi.fn((..._arguments: Parameters<ReviewSuggestionRevisionTransport["edit"]>) =>
+      Promise.resolve(originalPage.current)
+    )
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      load: () => Promise.resolve(originalPage),
+      edit
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          revisionTransport={revisionTransport}
+          state={REVIEW_STATE}
+        />
+      )
+    )
+    await act(async () => undefined)
+    const suggestion = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+      textContent?.includes("Authorize before mutating")
+    )
+    const editButton = [...(suggestion?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
+      ({ textContent }) => textContent === "Edit"
+    )
+    if (editButton === undefined) throw new Error("Expected suggestion edit action")
+    await act(async () => editButton.click())
+    const advanced = host.querySelector<HTMLTextAreaElement>(
+      "[aria-label='Advanced evidence, anchor, replacement and prevention JSON']"
+    )
+    if (advanced === null) throw new Error("Expected advanced suggestion fields")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+      valueSetter.call(
+        advanced,
+        JSON.stringify({
+          anchor: originalPage.current.suggestion.anchor,
+          evidence: originalPage.current.suggestion.evidence,
+          relatedLocations: originalPage.current.suggestion.relatedLocations
+        })
+      )
+      advanced.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const save = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Save revision"
+    )
+    if (save === undefined) throw new Error("Expected revision save action")
+    await act(async () => save.click())
+
+    expect(edit).toHaveBeenCalledOnce()
+    const request = edit.mock.calls[0]?.[1]
+    expect(request?.edit).not.toHaveProperty("replacement")
+    expect(request?.edit).not.toHaveProperty("prevention")
   })
 
   it("previews an exact suggestion and requires an editable human confirmation", async () => {

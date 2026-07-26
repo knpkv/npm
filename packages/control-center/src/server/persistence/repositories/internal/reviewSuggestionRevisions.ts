@@ -345,6 +345,14 @@ export const makeReviewSuggestionRevisionOperations = <
       suggestionId,
       row.success.revisionSequence
     )
+    if (row.success.revisionSequence < 2) {
+      return yield* recordFailure(
+        workspaceId,
+        jobId,
+        suggestionId,
+        "agent-review-revision-row-invalid"
+      )
+    }
     const expectedPredecessorId = yield* deriveRevisionId(
       jobId,
       suggestionId,
@@ -568,9 +576,11 @@ export const makeReviewSuggestionRevisionOperations = <
           ) ||
           DateTime.Order(request.createdAt, current.createdAt) < 0
         ) {
-          return yield* operationFailure(
-            "agent-job.review-revision-transition-invalid"
-          )
+          return yield* new AgentJobInputError({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            reason: "invalid-transition"
+          })
         }
         const sequence = PrReviewSuggestionRevisionSequence.make(
           current.sequence + 1

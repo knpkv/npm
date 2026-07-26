@@ -324,6 +324,40 @@ describe("useReviewSuggestionRevisions", () => {
     }
   })
 
+  it("starts only one earlier-page request while pagination is in flight", async () => {
+    const third = revision(3)
+    const second = revision(2)
+    const earlier = deferred<ReturnType<typeof page>>()
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(page(third, [second], true))
+      .mockReturnValueOnce(earlier.promise)
+    const latest: { current: ReviewSuggestionRevisionState } = {
+      current: { _tag: "idle" }
+    }
+    await mount(
+      scope(),
+      {
+        load,
+        edit: () => Promise.reject(new Error("Unexpected edit"))
+      },
+      (state) => {
+        latest.current = state
+      }
+    )
+    await act(async () => undefined)
+    const button = host?.querySelector<HTMLButtonElement>("[data-earlier]")
+    await act(async () => {
+      button?.click()
+      button?.click()
+    })
+
+    expect(load).toHaveBeenCalledTimes(2)
+    earlier.resolve(page(third, [revision(1)]))
+    await act(async () => undefined)
+    expect(latest.current._tag).toBe("ready")
+  })
+
   it("preserves a conflict draft across failed and successful history reads", async () => {
     const original = revision(1)
     const winner = revision(2, "Another edit won")

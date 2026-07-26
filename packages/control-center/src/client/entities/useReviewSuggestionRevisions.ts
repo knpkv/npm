@@ -140,18 +140,23 @@ export const useReviewSuggestionRevisions = (
   transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport
 ): {
   readonly loadEarlier: () => void
+  readonly loadingEarlier: boolean
   readonly retry: () => void
   readonly save: (draft: PrReviewSuggestionEdit) => void
   readonly state: ReviewSuggestionRevisionState
 } => {
   const [requestRevision, setRequestRevision] = useState(0)
+  const [loadingEarlier, setLoadingEarlier] = useState(false)
   const [state, setState] = useState<ReviewSuggestionRevisionState>({ _tag: "idle" })
   const activeAbort = useRef<AbortController | null>(null)
+  const loadingEarlierRef = useRef(false)
   const latestScope = useRef(scope)
   latestScope.current = scope
 
   useEffect(() => {
     activeAbort.current?.abort()
+    loadingEarlierRef.current = false
+    setLoadingEarlier(false)
     if (scope === null) {
       setState({ _tag: "idle" })
       return
@@ -191,6 +196,8 @@ export const useReviewSuggestionRevisions = (
     if (retained === null) return
     const current = scope
     activeAbort.current?.abort()
+    loadingEarlierRef.current = false
+    setLoadingEarlier(false)
     const abort = new AbortController()
     activeAbort.current = abort
     setState({ _tag: "saving", draft, page: retained })
@@ -240,14 +247,17 @@ export const useReviewSuggestionRevisions = (
     if (
       scope === null ||
       (state._tag !== "ready" && state._tag !== "conflict") ||
+      loadingEarlierRef.current ||
       !state.page.hasMore ||
       state.page.nextBeforeSequence === null
     ) return
     const current = scope
     const retained = state.page
-    const retainedDraft = state._tag === "conflict" ? state.draft : null
+    activeAbort.current?.abort()
     const abort = new AbortController()
     activeAbort.current = abort
+    loadingEarlierRef.current = true
+    setLoadingEarlier(true)
     transport.load(
       current,
       retained.nextBeforeSequence,
@@ -259,12 +269,14 @@ export const useReviewSuggestionRevisions = (
           latestScope.current === null ||
           !sameScope(latestScope.current, current)
         ) return
-        const merged = mergePages(retained, page)
-        setState(
-          retainedDraft === null
-            ? { _tag: "ready", page: merged }
-            : { _tag: "conflict", draft: retainedDraft, page: merged }
+        if (activeAbort.current !== abort) return
+        setState((latest) =>
+          latest._tag === "ready" || latest._tag === "conflict"
+            ? { ...latest, page: mergePages(latest.page, page) }
+            : latest
         )
+        loadingEarlierRef.current = false
+        setLoadingEarlier(false)
       },
       () => {
         if (
@@ -272,17 +284,21 @@ export const useReviewSuggestionRevisions = (
           latestScope.current === null ||
           !sameScope(latestScope.current, current)
         ) return
-        setState(
-          retainedDraft === null
-            ? { _tag: "failed", draft: null, page: retained }
-            : { _tag: "conflict", draft: retainedDraft, page: retained }
+        if (activeAbort.current !== abort) return
+        setState((latest) =>
+          latest._tag === "ready"
+            ? { _tag: "failed", draft: null, page: latest.page }
+            : latest
         )
+        loadingEarlierRef.current = false
+        setLoadingEarlier(false)
       }
     )
   }, [scope, state, transport])
 
   return useMemo(() => ({
     loadEarlier,
+    loadingEarlier,
     retry: () => {
       if (state._tag === "conflict") return
       if (
@@ -297,5 +313,5 @@ export const useReviewSuggestionRevisions = (
     },
     save,
     state
-  }), [loadEarlier, save, state])
+  }), [loadEarlier, loadingEarlier, save, state])
 }

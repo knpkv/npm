@@ -54,6 +54,7 @@ export const ReviewSuggestionRevisionDialog = ({
   canEdit,
   conflict,
   loadEarlier,
+  loadingEarlier,
   mode,
   onOpenChange,
   onSave,
@@ -65,6 +66,7 @@ export const ReviewSuggestionRevisionDialog = ({
   readonly canEdit: boolean
   readonly conflict: boolean
   readonly loadEarlier: () => void
+  readonly loadingEarlier: boolean
   readonly mode: "edit" | "history"
   readonly onOpenChange: (open: boolean) => void
   readonly onSave: (edit: PrReviewSuggestionEdit) => void
@@ -99,7 +101,12 @@ export const ReviewSuggestionRevisionDialog = ({
     }
     setAdvancedError(false)
     onSave({
-      ...draft,
+      title: draft.title,
+      severity: draft.severity,
+      problem: draft.problem,
+      impact: draft.impact,
+      recommendation: draft.recommendation,
+      confidence: draft.confidence,
       ...decoded.success
     })
   }
@@ -113,7 +120,7 @@ export const ReviewSuggestionRevisionDialog = ({
         title={mode === "edit" ? "Edit review suggestion" : "Revision history"}
       >
         {mode === "history" ? (
-          <ReviewSuggestionRevisionHistory loadEarlier={loadEarlier} page={page} />
+          <ReviewSuggestionRevisionHistory loadEarlier={loadEarlier} loadingEarlier={loadingEarlier} page={page} />
         ) : (
           <form
             className={styles.revisionEditor}
@@ -214,13 +221,19 @@ export const ReviewSuggestionRevisionDialog = ({
                 Complete schema-checked JSON. Invalid or incoherent evidence cannot be saved.
               </Text>
               <textarea
+                aria-describedby={advancedError ? "revision-advanced-error" : undefined}
                 aria-invalid={advancedError}
+                aria-label="Advanced evidence, anchor, replacement and prevention JSON"
                 onChange={(event) => setAdvanced(event.currentTarget.value)}
                 rows={14}
                 spellCheck={false}
                 value={advanced}
               />
-              {advancedError ? <span role="alert">Advanced fields are not a valid complete suggestion.</span> : null}
+              {advancedError ? (
+                <span id="revision-advanced-error" role="alert">
+                  Advanced fields are not a valid complete suggestion.
+                </span>
+              ) : null}
             </details>
             {conflict ? (
               <span role="alert">

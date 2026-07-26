@@ -509,6 +509,45 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("rejects an invalid suggestion transition as a typed input error", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        const result = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            replacement: {
+              reviewedHead: "3".repeat(40),
+              unifiedDiff: "--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new",
+              explanation: "Targets a different head."
+            }
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T3
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(result.failure.reason, "invalid-transition")
+        }
+      })
+    ))
+
   it.effect("rejects an oversized revision as a typed input error", () =>
     withRepository(
       Effect.gen(function*() {

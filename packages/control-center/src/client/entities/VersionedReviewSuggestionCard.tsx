@@ -130,6 +130,7 @@ export const VersionedReviewSuggestionCard = ({
           canEdit={canEdit}
           conflict={controller.state._tag === "conflict"}
           loadEarlier={controller.loadEarlier}
+          loadingEarlier={controller.loadingEarlier}
           mode={dialogMode}
           onOpenChange={setDialogOpen}
           onSave={controller.save}
