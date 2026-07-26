@@ -5,8 +5,14 @@ import { DateTime, Effect, Layer, Option, Result, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
-import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../src/domain/identifiers.js"
+import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
@@ -16,7 +22,8 @@ import {
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
-  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
+  ReviewSuggestionPublicationDigest
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
@@ -33,6 +40,17 @@ const T0 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 const T1 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:01:00.000Z")
 const T2 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:02:00.000Z")
 const T3 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:03:00.000Z")
+const T4 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:12:00.000Z")
+const T5 = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:14:00.000Z")
+const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000043")
+const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000044"
+)
+const TAKEOVER_RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000045"
+)
+const CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"b".repeat(64)}`)
+const ALTERNATE_CONTENT_DIGEST = ReviewSuggestionPublicationDigest.make(`sha256:${"c".repeat(64)}`)
 
 const subject = {
   providerId: "codecommit",
@@ -56,12 +74,14 @@ const swappedSubject = {
 } satisfies PrReviewSubject
 
 const report = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject,
   completion: { status: "complete" },
   suggestions: [
     {
       suggestionId: `sha256:${"1".repeat(64)}`,
+      state: "draft",
+      title: "Decode review output before persistence",
       severity: "P2",
       problem: "Review output must cross a typed boundary.",
       impact: "Malformed model output could otherwise enter durable state.",
@@ -72,6 +92,13 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         excerpt: "const report = decodeReviewOutput(output)"
       },
       recommendation: "Decode the complete report before committing model-authored output.",
+      anchor: {
+        _tag: "line",
+        path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+        line: 42,
+        relativeFileVersion: "AFTER"
+      },
+      relatedLocations: [],
       confidence: {
         level: "high",
         reason: "The persistence boundary is directly observable."
@@ -80,6 +107,7 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         summary: "Protect active-lease review completion.",
         enforcement: "test",
         existingRuleOrConfig: "agent job repository integration suite",
+        recurrenceEvidence: "Every completion and retry reuses the active-lease transaction boundary.",
         targetFile: "packages/control-center/test/persistence/agent-job-review-results.test.ts",
         sourcePaths: ["packages/control-center/src/server/persistence/repositories/agentJobRepository.ts"],
         matcherOrInvariant: "A review result and terminal state commit under the same active lease.",
@@ -88,8 +116,38 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
         boundary: "Only durable PR-review jobs are covered."
       }
     }
-  ]
+  ],
+  notes: []
 })
+
+const nearLimitReport = (): PrReviewReport => {
+  const suggestion = report.suggestions[0]!
+  const suggestions = Array.from({ length: 4 }, (_, index) => ({
+    ...suggestion,
+    suggestionId: `sha256:${String(index + 1).repeat(64)}`,
+    recommendation: "r".repeat(6_000)
+  }))
+  const candidate = {
+    ...report,
+    suggestions
+  }
+  const encoder = new TextEncoder()
+  const projectedBytes = () =>
+    encoder.encode(JSON.stringify({
+      ...candidate,
+      suggestions: suggestions.map((item) => ({ ...item, state: "published" }))
+    })).byteLength
+  let remaining = MAXIMUM_PR_REVIEW_REPORT_BYTES - 1 - projectedBytes()
+  for (const item of suggestions) {
+    const available = 8_000 - item.recommendation.length
+    const added = Math.min(available, remaining)
+    item.recommendation += "r".repeat(added)
+    remaining -= added
+  }
+  assert.strictEqual(remaining, 0)
+  assert.strictEqual(projectedBytes(), MAXIMUM_PR_REVIEW_REPORT_BYTES - 1)
+  return Schema.decodeUnknownSync(PrReviewReport)(candidate)
+}
 
 const setupFoundation = Effect.gen(function*() {
   const database = yield* Database
@@ -152,6 +210,291 @@ const withRepository = <Success, Failure>(use: Effect.Effect<Success, Failure, A
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("agent job review results", () => {
+  it.effect("projects a published suggestion after a durable reload", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestionId = report.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T3
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+        const duplicateEvent = yield* database.sql`INSERT INTO agent_thread_events (
+          workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        )
+        SELECT
+          workspace_id, thread_id, event_sequence + 1000, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        FROM agent_thread_events
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND job_id = ${JOB_ID}
+          AND event_kind = 'review-suggestion-published'`.pipe(Effect.result)
+        assert.isTrue(Result.isFailure(duplicateEvent))
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+
+        const reloaded = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.strictEqual(reloaded.report.suggestions[0]?.state, "published")
+
+        const latest = yield* jobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          subject
+        })
+        assert.isTrue(Option.isSome(latest))
+        if (Option.isSome(latest)) {
+          assert.strictEqual(latest.value.report?.suggestions[0]?.state, "published")
+        }
+
+        const page = yield* jobs.threadAfter({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(
+          page.events.filter(({ eventKind }) => eventKind === "review-suggestion-published").length,
+          1
+        )
+      })
+    ))
+
+  it.effect("reserves aggregate bytes for the longest lifecycle projection", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        const bounded = nearLimitReport()
+        const tooLarge = {
+          ...bounded,
+          suggestions: bounded.suggestions.map((suggestion, index) =>
+            index === 0
+              ? { ...suggestion, title: `${suggestion.title}xx` }
+              : suggestion
+          )
+        }
+        assert.isFalse(Schema.is(PrReviewReport)(tooLarge))
+
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: bounded,
+          completedAt: T2
+        })
+        const suggestionId = bounded.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T3
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+
+        const reloaded = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.strictEqual(reloaded.report.suggestions[0]?.state, "published")
+      })
+    ))
+
+  it.effect("atomically reserves one body and idempotently records one publication", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestionId = report.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const reserve = (contentDigest: typeof ReviewSuggestionPublicationDigest.Type) =>
+          jobs.reserveReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest,
+            reservationId: RESERVATION_ID,
+            reservedAt: T3
+          })
+        const reservations = yield* Effect.all([
+          reserve(CONTENT_DIGEST).pipe(Effect.result),
+          reserve(ALTERNATE_CONTENT_DIGEST).pipe(Effect.result)
+        ], { concurrency: "unbounded" })
+        assert.strictEqual(
+          reservations.filter(Result.isSuccess).length,
+          1
+        )
+        const rows = yield* database.sql<{ readonly contentDigest: string }>`SELECT
+          content_digest AS contentDigest
+          FROM agent_review_suggestion_publications
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND job_id = ${JOB_ID}
+            AND suggestion_id = ${suggestionId}`
+        assert.strictEqual(rows.length, 1)
+        const winningDigest = Schema.decodeUnknownSync(ReviewSuggestionPublicationDigest)(
+          rows[0]?.contentDigest
+        )
+        yield* jobs.releaseReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: winningDigest,
+          reservationId: RESERVATION_ID
+        })
+        const retryDigest = winningDigest === CONTENT_DIGEST
+          ? ALTERNATE_CONTENT_DIGEST
+          : CONTENT_DIGEST
+        yield* reserve(retryDigest)
+        const record = () =>
+          jobs.recordReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest: retryDigest,
+            reservationId: RESERVATION_ID,
+            publicationId: PUBLICATION_ID,
+            publishedAt: T3
+          })
+        const recordings = yield* Effect.all([
+          record().pipe(Effect.result),
+          record().pipe(Effect.result)
+        ], { concurrency: "unbounded" })
+        assert.isTrue(recordings.every(Result.isSuccess))
+        const replay = yield* reserve(retryDigest)
+        assert.deepStrictEqual(replay, {
+          _tag: "published",
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3
+        })
+
+        const page = yield* jobs.threadAfter({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(
+          page.events.filter(({ eventKind }) => eventKind === "review-suggestion-published").length,
+          1
+        )
+      })
+    ))
+
+  it.effect("keeps a live publication reservation exclusive and recovers it after expiry", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const claim = yield* claimReview
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report,
+          completedAt: T2
+        })
+        const suggestionId = report.suggestions[0]?.suggestionId
+        if (suggestionId === undefined) return yield* Effect.die("review suggestion missing")
+        const reserveAt = (reservedAt: typeof UtcTimestamp.Type) =>
+          jobs.reserveReviewSuggestionPublication({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId,
+            contentDigest: CONTENT_DIGEST,
+            reservationId: reservedAt === T5 ? TAKEOVER_RESERVATION_ID : RESERVATION_ID,
+            reservedAt
+          })
+
+        assert.deepStrictEqual(yield* reserveAt(T3), { _tag: "acquired" })
+        assert.deepStrictEqual(yield* reserveAt(T4), { _tag: "in-progress" })
+        assert.deepStrictEqual(yield* reserveAt(T5), { _tag: "acquired" })
+        const staleOwner = yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: false
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(staleOwner))
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: TAKEOVER_RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: false
+        })
+      })
+    ))
+
   it.effect("atomically persists one sanitized report and terminal state under the active lease", () =>
     withRepository(
       Effect.gen(function*() {

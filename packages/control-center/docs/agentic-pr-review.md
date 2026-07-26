@@ -23,7 +23,8 @@ The agent never changes the branch or CodeCommit. The Local Operator may edit, r
 Opening a CodeCommit pull request uses one full-screen review workspace:
 
 - A compact top summary shows the exact head, derived Review State, counts, coverage, and the large review action.
-- A left rail lists changed files and filters by severity or suggestion state.
+- A left rail lists changed files and filters by severity or suggestion state. Filter choices survive
+  same-review rerenders and reset when the pull-request identity or revision changes.
 - The center renders the complete split or stacked diff through `@knpkv/rly/diff`, the pinned adapter over `@pierre/diffs`.
 - Validated Review Suggestions render inline at their primary anchors.
 - File-level and whole-change suggestions also appear in a compact overview above the diff.
@@ -62,9 +63,9 @@ A draft Review Suggestion supports:
 
 An agent edit preserves prior revisions. An edit that changes the technical claim invalidates the old evidence until revalidated.
 
-Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action.
+Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and modified-file anchors publish against the reviewed head; deletion-only file anchors persist their base-side resolution and publish against `BEFORE`. Whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
 
-Published comments are snapshots. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
+Published comments are snapshots. Before CodeCommit is called, Control Center atomically acquires the suggestion for the exact confirmed content digest with a unique publication-attempt owner. Same-content joiners observe an in-progress reservation but cannot publish or release it; a competing edit is rejected. Confirmed no-write outcomes let only the current owner release the reservation for an edited retry. A reservation without a recovery handle remains live for ten minutes, after which another attempt may atomically take ownership and re-enter the governed idempotent publication path. The old owner cannot release or complete the replacement reservation, and the immutable initial reservation time is retained for provider-receipt chronology. After provider success, Control Center persists the governed action as a recovery handle before appending the local lifecycle event. An exact retry can replay that receipt without another provider proposal or write if lifecycle projection was interrupted. Durable review reads overlay the completed event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
 
 Every posted comment has a compact provenance footer:
 
@@ -76,7 +77,7 @@ Every posted comment has a compact provenance footer:
 - File suggestion: first changed line in the file, falling back to line 1.
 - Whole-change suggestion: general pull-request comment.
 
-One root cause produces one suggestion with a primary anchor and navigable Related Locations. Publication creates one comment at the primary anchor and lists the related locations by default. The preview may explicitly split it into multiple comments.
+One root cause produces one suggestion with a primary anchor and navigable Related Locations. Activating a related location selects its inventory file, loads that file's bounded content, and focuses the exact added line. Publication creates one comment at the primary anchor and lists the related locations by default. The preview may explicitly split it into multiple comments.
 
 ## Structured result
 
@@ -96,11 +97,33 @@ Every Review Suggestion contains:
 - Optional Suggested Replacement.
 - Optional Prevention Proposal.
 
-Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch.
+Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions, including added source text that begins with diff-marker characters.
 
-Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically.
+Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically. Its expanded presentation exposes the existing rule, recurrence evidence, target and source paths, exact matcher or invariant, invalid and valid fixtures, and the remaining boundary or exclusions.
 
 Review Evidence identifies its kind and records enough bounded data to reproduce the observation, such as a code path, command and exit result, test failure, or deterministic analysis result.
+
+The current presentation contract stores host-resolved line, file, and
+whole-change anchors. File anchors record the first added head line or, for a
+deletion-only file, the first deleted base line and its `BEFORE` side. A renamed
+file's `BEFORE` anchor attaches through the inventory's previous path, while
+`AFTER` anchors attach through its current path. Line evidence must match the immutable reviewed head;
+file-scoped evidence may instead match a deleted range in the immutable base so
+deletion-only changes remain reviewable. Suggestion state is host-owned and filterable; models
+cannot author it. Repeated occurrences are stored as Related Locations under
+one root cause. Suggested Replacements carry the exact reviewed head, a unified
+diff, and an explanation. Exact evidence diffs force zero inter-hunk context so
+unchanged lines cannot be admitted through a merged hunk. Review Notes have
+independent host-derived identities and are never accepted by the publication
+boundary. Optional note coordinates survive only when the reviewed head contains
+the complete non-binary text range; missing, out-of-range, binary, and deleted-file
+coordinates are removed while retaining the non-publishable observation. This is report schema v3;
+pre-stable v2 reports are intentionally not migrated.
+
+Provider output is admitted only when its conservative host projection still
+fits the durable report envelope. The projection reserves space for subject
+identity, resolved anchors, lifecycle state, suggestion IDs, and note IDs before
+the executor performs evidence validation.
 
 ### Confidence
 
@@ -310,6 +333,7 @@ Prompts, source, command output, model output, replacement patches, and credenti
 - Scripted fake-model tests for `@knpkv/ai-runtime`: tool calls, schema repair, output bounds, cancellation, and timeout.
 - sbx command-policy tests and an opt-in real sbx integration test when the CLI is available.
 - CodeCommit adapter contract tests for exact-head checkout and comment publication.
+- Durable publication replay for line, file, and whole-change suggestions.
 - Browser flow: launch, live activity, inline suggestion, edit, revalidation, publication preview, staleness, and re-review.
 - Opt-in real Codex smoke test using the locally authenticated CLI.
 

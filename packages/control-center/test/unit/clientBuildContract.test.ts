@@ -81,11 +81,11 @@ describe("client build contract", () => {
     const artifactSizes = new Map([
       ["assets/index.mjs", 200_000],
       ["assets/runtime.mjs", 8_000],
-      ["assets/ui.mjs", 158_000]
+      ["assets/ui.mjs", 159_000]
     ])
 
     expect(inspectClientBuildContract(validMjsManifest(), artifactSizes)).toContain(
-      `initial JavaScript closure is 366000 bytes; budget is ${CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES} bytes`
+      `initial JavaScript closure is 367000 bytes; budget is ${CONTROL_CENTER_INITIAL_JAVASCRIPT_BUDGET_BYTES} bytes`
     )
   })
 

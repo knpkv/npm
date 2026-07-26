@@ -136,6 +136,14 @@ export const JobId = canonicalUuid7("JobId")
 /** Decoded asynchronous job identifier. */
 export type JobId = typeof JobId.Type
 
+/** Canonical owner identifier for one expiring review-publication reservation. */
+export const ReviewSuggestionPublicationReservationId = canonicalUuid7(
+  "ReviewSuggestionPublicationReservationId"
+)
+
+/** Decoded review-publication reservation owner identifier. */
+export type ReviewSuggestionPublicationReservationId = typeof ReviewSuggestionPublicationReservationId.Type
+
 /** Canonical identifier of one durable release-scoped agent thread. */
 export const AgentThreadId = canonicalUuid7("AgentThreadId")
 

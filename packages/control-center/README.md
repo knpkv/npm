@@ -140,11 +140,35 @@ session duration should be at least the selected Review Agent Profile budget.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, blocked-network policy,
 and sbx runtime before enqueue. The selected model explores the complete project exclusively through
-the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match added
-lines are retained; investigation remains live activity. Control Center derives Changes Required,
-Non-blocking Suggestions, No Issues Found, or Unable to Conclude from the validated report. The model
-does not author that outcome, and there is no suggestion-count cap beyond the existing durable event
-byte envelope.
+the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match immutable
+diff evidence are retained; line suggestions use added lines, while file suggestions may use deleted
+base-side lines for deletion-only changes. Investigation remains live activity. A suggestion has one host-resolved line,
+file, or whole-change anchor, with repeated occurrences grouped as Related Locations. File anchors use
+the first added line and fall back to line 1. Exact-head Suggested Replacements remain inert unified
+diffs and must pass `git apply --check` against the sandboxed head, while recurring high-impact
+prevention proposals stay visibly separate for later review.
+Low-confidence and pre-existing concerns appear as non-publishable Review Notes.
+
+The diff workspace keeps the complete file inventory visible while severity and state filters narrow
+only the review advice. Line suggestions render inline; file and whole-change suggestions use the
+compact overview. Control Center derives Changes Required, Non-blocking Suggestions, No Issues Found,
+or Unable to Conclude from the validated report. The model does not author that outcome, and there is
+no suggestion-count cap beyond the existing durable event byte envelope.
+
+Every draft suggestion scope can be explicitly published. Line and file suggestions become CodeCommit
+comments at their resolved line; whole-change suggestions become general pull-request comments without
+a file location. Control Center first reserves the exact confirmed content digest so competing edits
+cannot both reach the provider. Each attempt owns its reservation with a unique durable identifier.
+Live same-content joiners remain in progress; a null-handle reservation may be atomically taken over
+after ten minutes, while the stale owner remains unable to release or complete it. The successor
+re-enters the governed idempotent publication path, which prevents a second provider write when the
+first attempt's outcome was ambiguous. A successful governed publication completes that reservation and appends an immutable lifecycle event, so reopening
+or refreshing the review keeps that suggestion `published` and cannot offer it as a new draft again.
+Confirmed provider no-write outcomes release the reservation for an edited retry. Multi-region replacement previews keep explicit
+file/hunk boundaries, and provider output reserves durable-envelope space for host-added review metadata.
+Completed same-content retries replay the durable governed receipt without another provider call, and
+deletion-only file anchors retain their base-side CodeCommit position.
+Compensating reservation cleanup is best-effort and never masks the provider result returned to the operator.
 
 To exercise the installed `sbx` runtime against the current checkout without provider credentials or
 remote writes, run:

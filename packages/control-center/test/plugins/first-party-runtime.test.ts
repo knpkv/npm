@@ -1662,6 +1662,8 @@ describe("first-party plugin runtime", () => {
         const publicationIdentity = yield* publicationGateway.identity(publicationTarget)
         const suggestion = Schema.decodeSync(PrReviewSuggestion)({
           suggestionId: PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`),
+          state: "draft",
+          title: "Revalidate runtime authority before publication",
           severity: "P2",
           problem: "The shared runtime can rotate before publication commits.",
           impact: "A stale action would become permanently unexecutable.",
@@ -1672,6 +1674,13 @@ describe("first-party plugin runtime", () => {
             excerpt: "export const runtime = shared"
           },
           recommendation: "Revalidate authority in the same transaction as the durable commit.",
+          anchor: {
+            _tag: "line",
+            path: "src/runtime.ts",
+            line: 1,
+            relativeFileVersion: "AFTER"
+          },
+          relatedLocations: [],
           confidence: {
             level: "high",
             reason: "The deterministic barrier crosses the administration invalidation boundary."

@@ -61,7 +61,7 @@ import {
   WorkspaceId
 } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
-import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
@@ -2060,7 +2060,8 @@ describe("Control Center API handlers", () => {
           reviewedHead: subject.headRevision
         },
         anchor: {
-          path: "src/authorization.ts",
+          _tag: "line",
+          path: PrReviewPath.make("src/authorization.ts"),
           line: 42,
           relativeFileVersion: "AFTER"
         },

@@ -20,7 +20,7 @@ import {
   usePullRequestReview
 } from "../../src/client/entities/usePullRequestReview.js"
 import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
-import { PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -72,7 +72,7 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
     completedAt: "2026-07-24T15:04:00.000Z",
     outcome: "changes-required",
     report: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       subject: {
         providerId: "codecommit",
         repository: "control-center",
@@ -84,6 +84,8 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
       suggestions: [
         {
           suggestionId: SUGGESTION_ID,
+          state: "draft",
+          title: "Authorize before mutating",
           severity: "P1",
           problem: "Mutation happens before authorization",
           impact: "An unauthorized caller can mutate durable state.",
@@ -94,12 +96,19 @@ const completedReviewFor = (baseRevision: string, headRevision: string): PullReq
             excerpt: "yield* mutate()"
           },
           recommendation: "Authorize first.",
+          anchor: {
+            _tag: "line",
+            path: "src/authorization.ts",
+            line: 42
+          },
+          relatedLocations: [],
           confidence: {
             level: "high",
             reason: "The execution order is explicit."
           }
         }
-      ]
+      ],
+      notes: []
     }
   })
 
@@ -137,7 +146,8 @@ const makePublicationFixture = (reviewedHead: string) => {
       reviewedHead: HEAD_A
     },
     anchor: {
-      path: "src/authorization.ts",
+      _tag: "line",
+      path: PrReviewPath.make("src/authorization.ts"),
       line: 42,
       relativeFileVersion: "AFTER"
     },
@@ -246,6 +256,11 @@ const PublicationHarness = ({
           : controller.publication._tag === "receipt-conflict"
             ? `:${controller.publication.publication.receipt.providerOperationId}`
             : ""}
+      </span>
+      <span data-suggestion-state>
+        {controller.state._tag === "ready" && controller.state.review._tag === "completed"
+          ? controller.state.review.report.suggestions[0]?.state
+          : ""}
       </span>
       <button
         data-preview
@@ -367,6 +382,7 @@ describe("usePullRequestReview", () => {
     await act(async () => publication.resolve(published))
 
     expect(host.querySelector("[data-publication]")?.textContent).toBe("published:current:comment-42")
+    expect(host.querySelector("[data-suggestion-state]")?.textContent).toBe("published")
   })
 
   it("never presents a prior immutable head while the refreshed head loads", async () => {

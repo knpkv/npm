@@ -23,6 +23,7 @@ export class ReviewSuggestionPublicationGatewayError
       reason: Schema.Literals([
         "identity-unavailable",
         "publication-conflict",
+        "publication-rejected",
         "publication-unavailable"
       ])
     }
@@ -48,6 +49,11 @@ export interface PublishReviewSuggestionCommand {
   readonly session: SessionSummary
 }
 
+/** Read-only recovery of one already completed governed publication. */
+export interface ReplayReviewSuggestionPublicationCommand extends PublishReviewSuggestionCommand {
+  readonly publicationId: PublishedReviewComment["publicationId"]
+}
+
 /** Provider result needed to construct the durable local publication snapshot. */
 export interface ReviewSuggestionPublicationReceipt {
   readonly publicationId: PublishedReviewComment["publicationId"]
@@ -71,6 +77,9 @@ export class ReviewSuggestionPublicationGateway extends Context.Service<
     readonly publish: (
       command: PublishReviewSuggestionCommand
     ) => Effect.Effect<ReviewSuggestionPublicationReceipt, ReviewSuggestionPublicationGatewayError>
+    readonly replay: (
+      command: ReplayReviewSuggestionPublicationCommand
+    ) => Effect.Effect<ReviewSuggestionPublicationReceipt, ReviewSuggestionPublicationGatewayError>
   }
 >()("@knpkv/control-center/server/application/ReviewSuggestionPublicationGateway") {}
 
@@ -81,6 +90,7 @@ export const reviewSuggestionPublicationGatewayUnavailableLayer = Layer.succeed(
   ReviewSuggestionPublicationGateway,
   {
     identity: () => Effect.fail(unavailable()),
-    publish: () => Effect.fail(unavailable())
+    publish: () => Effect.fail(unavailable()),
+    replay: () => Effect.fail(unavailable())
   }
 )

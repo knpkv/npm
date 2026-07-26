@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, makeAgentRuntime, makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
-import { DateTime, Duration, Effect, Option, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Duration, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
 import {
@@ -23,6 +23,7 @@ import {
   PersonId,
   PluginConnectionId,
   ReleaseId,
+  ReviewSuggestionPublicationReservationId,
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
@@ -31,20 +32,23 @@ import {
   type PluginProviderReceiptV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/actions.js"
-import { PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
+import { PrReviewPath, PrReviewReport, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
   ApplicationInvalidRequest,
+  ApplicationServiceUnavailable,
   DeliveryGraphInspection,
   PullRequestReviews
 } from "../../src/server/api/ApplicationServices.js"
 import {
   reviewPublicationActionCanAdvance,
+  reviewPublicationActionConfirmedNoWrite,
   reviewPublicationProposalRequestMatches,
-  reviewPublicationSessionIsAuthorized
+  reviewPublicationSessionIsAuthorized,
+  reviewSuggestionPublicationLocation
 } from "../../src/server/application/GovernedReviewSuggestionPublicationGateway.js"
 import { pullRequestReviewsLayer } from "../../src/server/application/pullRequestReviews.js"
 import {
@@ -53,13 +57,16 @@ import {
   ReviewSuggestionPublicationGatewayError
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
+import { RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
+  AgentJobInputError,
   AgentLeaseOwner,
   AgentLeaseToken,
   AgentThreadEventPageSize,
-  LatestAgentReviewRecord
+  LatestAgentReviewRecord,
+  ReviewSuggestionPublicationReservation
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -72,6 +79,9 @@ const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000405")
 const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000406")
 const OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000407")
 const PUBLICATION_ID = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000408")
+const RESERVATION_ID = ReviewSuggestionPublicationReservationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000409"
+)
 const SUGGESTION_ID = PrReviewSuggestionId.make(`sha256:${"3".repeat(64)}`)
 const MODEL = AgentModelId.make("review-model")
 const PROVIDER_ID = DurableAgentProviderId.make("openai-compatible")
@@ -100,6 +110,17 @@ const STARTED_TIMESTAMP = Schema.decodeUnknownSync(UtcTimestamp)(STARTED_AT)
 const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
   `sha256:${"a".repeat(64)}`
 )
+const HUMAN_SESSION = {
+  sessionId: SESSION_ID,
+  workspaceId: WORKSPACE_ID,
+  actor: { _tag: "human", personId: OPERATOR_ID },
+  permission: "workspace-owner",
+  createdAt: STARTED_TIMESTAMP,
+  lastSeenAt: STARTED_TIMESTAMP,
+  idleExpiresAt: IDLE_EXPIRES_AT,
+  absoluteExpiresAt: ABSOLUTE_EXPIRES_AT,
+  revokedAt: null
+} satisfies typeof SessionSummary.Type
 
 const release = Schema.decodeSync(Release)({
   id: RELEASE_ID,
@@ -179,7 +200,7 @@ const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const reviewReport = Schema.decodeSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject: {
     providerId: "codecommit",
     repository: "control-center",
@@ -190,6 +211,8 @@ const reviewReport = Schema.decodeSync(PrReviewReport)({
   completion: { status: "complete" },
   suggestions: [{
     suggestionId: SUGGESTION_ID,
+    state: "draft",
+    title: "Authorize before mutating",
     severity: "P2",
     problem: "Authorization is checked after the mutation.",
     impact: "An unauthorized caller can change durable state.",
@@ -200,14 +223,30 @@ const reviewReport = Schema.decodeSync(PrReviewReport)({
       excerpt: "yield* mutate()"
     },
     recommendation: "Move the authorization check before the mutation.",
+    anchor: {
+      _tag: "line",
+      path: "src/authorization.ts",
+      line: 42,
+      relativeFileVersion: "AFTER"
+    },
+    relatedLocations: [],
     confidence: {
       level: "high",
       reason: "The execution order is explicit in the reviewed source."
     },
     replacement: {
-      content: "yield* authorize()\nyield* mutate()"
+      reviewedHead: "2".repeat(40),
+      unifiedDiff: [
+        "--- a/src/authorization.ts",
+        "+++ b/src/authorization.ts",
+        "@@ -42,1 +42,2 @@",
+        "+yield* authorize()",
+        " yield* mutate()"
+      ].join("\n"),
+      explanation: "Authorize before mutating."
     }
-  }]
+  }],
+  notes: []
 })
 
 const completedReview = Schema.decodeSync(LatestAgentReviewRecord)({
@@ -311,7 +350,8 @@ const offlineRegistry = AgentRuntimeRegistry.of({
 
 const unusedPublicationGateway = ReviewSuggestionPublicationGateway.of({
   identity: () => Effect.die("review publication identity is not used"),
-  publish: () => Effect.die("review publication is not used")
+  publish: () => Effect.die("review publication is not used"),
+  replay: () => Effect.die("review publication replay is not used")
 })
 
 const withService = <Success, Failure>(
@@ -319,10 +359,18 @@ const withService = <Success, Failure>(
     service: PullRequestReviews["Service"],
     enqueueInput: Ref.Ref<unknown>,
     publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>,
-    publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>
+    publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>,
+    publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
-  latestReview: Option.Option<LatestAgentReviewRecord> = Option.none()
+  latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
+  recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
+    Effect.succeed(undefined),
+  reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
+    Effect.succeed({ _tag: "acquired" }),
+  releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
+    Effect.succeed(undefined),
+  publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -331,14 +379,52 @@ const withService = <Success, Failure>(
       const enqueueInput = yield* Ref.make<unknown>(null)
       const publicationCommands = yield* Ref.make<ReadonlyArray<PublishReviewSuggestionCommand>>([])
       const publicationAuthority = yield* Ref.make(AUTHORITY_BINDING)
+      const publicationFailure = yield* Ref.make<
+        null | ReviewSuggestionPublicationGatewayError["reason"]
+      >(null)
       const testPersistence = Persistence.of({
         ...persistence,
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
-          latestReview: () => Effect.succeed(latestReview)
+          latestReview: () => Effect.succeed(latestReview),
+          recordReviewSuggestionPublication: recordPublication,
+          releaseReviewSuggestionPublication: releasePublication,
+          reserveReviewSuggestionPublication: reservePublication
         }
       })
+      const defaultPublish: ReviewSuggestionPublicationGateway["Service"]["publish"] = (command) =>
+        Ref.get(publicationAuthority).pipe(
+          Effect.filterOrFail(
+            (authorityBinding) => authorityBinding === command.authorityBinding,
+            () =>
+              new ReviewSuggestionPublicationGatewayError({
+                reason: "publication-conflict"
+              })
+          ),
+          Effect.andThen(
+            Ref.get(publicationFailure)
+          ),
+          Effect.flatMap((failure) =>
+            failure === null
+              ? Ref.update(publicationCommands, (commands) => [...commands, command])
+              : Effect.fail(new ReviewSuggestionPublicationGatewayError({ reason: failure }))
+          ),
+          Effect.as({
+            publicationId: PUBLICATION_ID,
+            receipt: {
+              status: "succeeded",
+              providerOperationId: PluginProviderOperationId.make("comment:review-comment-42"),
+              safeSummary: "CodeCommit review comment posted",
+              observedAt: PUBLISHED_TIMESTAMP
+            } satisfies PluginProviderReceiptV1,
+            publishedAt: PUBLISHED_TIMESTAMP,
+            connectedIdentity: {
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/local-operator"
+            }
+          })
+        )
       const publicationGateway = ReviewSuggestionPublicationGateway.of({
         identity: () =>
           Ref.get(publicationAuthority).pipe(Effect.map((authorityBinding) => ({
@@ -348,33 +434,22 @@ const withService = <Success, Failure>(
             },
             authorityBinding
           }))),
-        publish: (command) =>
-          Ref.get(publicationAuthority).pipe(
-            Effect.filterOrFail(
-              (authorityBinding) => authorityBinding === command.authorityBinding,
-              () =>
-                new ReviewSuggestionPublicationGatewayError({
-                  reason: "publication-conflict"
-                })
-            ),
-            Effect.andThen(
-              Ref.update(publicationCommands, (commands) => [...commands, command])
-            ),
-            Effect.as({
-              publicationId: PUBLICATION_ID,
-              receipt: {
-                status: "succeeded",
-                providerOperationId: PluginProviderOperationId.make("comment:review-comment-42"),
-                safeSummary: "CodeCommit review comment posted",
-                observedAt: PUBLISHED_TIMESTAMP
-              } satisfies PluginProviderReceiptV1,
-              publishedAt: PUBLISHED_TIMESTAMP,
-              connectedIdentity: {
-                accountId: "123456789012",
-                arn: "arn:aws:iam::123456789012:user/local-operator"
-              }
-            })
-          )
+        publish: publishPublication ?? defaultPublish,
+        replay: () =>
+          Effect.succeed({
+            publicationId: PUBLICATION_ID,
+            receipt: {
+              status: "succeeded",
+              providerOperationId: PluginProviderOperationId.make("comment:review-comment-42"),
+              safeSummary: "CodeCommit review comment posted",
+              observedAt: PUBLISHED_TIMESTAMP
+            },
+            publishedAt: PUBLISHED_TIMESTAMP,
+            connectedIdentity: {
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/local-operator"
+            }
+          })
       })
       const service = yield* PullRequestReviews.pipe(
         Effect.provide(pullRequestReviewsLayer),
@@ -387,7 +462,8 @@ const withService = <Success, Failure>(
         service,
         enqueueInput,
         publicationCommands,
-        publicationAuthority
+        publicationAuthority,
+        publicationFailure
       )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
@@ -426,6 +502,9 @@ describe("pull request reviews", () => {
     assert.isTrue(reviewPublicationActionCanAdvance("cancel-requested-unknown"))
     assert.isFalse(reviewPublicationActionCanAdvance("succeeded"))
     assert.isFalse(reviewPublicationActionCanAdvance("failed"))
+    assert.isTrue(reviewPublicationActionConfirmedNoWrite("failed"))
+    assert.isTrue(reviewPublicationActionConfirmedNoWrite("cancelled"))
+    assert.isFalse(reviewPublicationActionConfirmedNoWrite("unknown"))
   })
 
   it("recovers publication only for the exact immutable review evidence", () => {
@@ -451,6 +530,36 @@ describe("pull request reviews", () => {
 
     assert.isTrue(reviewPublicationProposalRequestMatches(request, exactReplay))
     assert.isFalse(reviewPublicationProposalRequestMatches(request, differentReview))
+  })
+
+  it("publishes deleted-file anchors against the base revision", () => {
+    assert.deepStrictEqual(
+      reviewSuggestionPublicationLocation({
+        _tag: "file",
+        path: PrReviewPath.make("src/deleted.ts"),
+        line: 1,
+        relativeFileVersion: "BEFORE"
+      }),
+      {
+        filePath: "src/deleted.ts",
+        filePosition: 1,
+        relativeFileVersion: "BEFORE"
+      }
+    )
+    assert.deepStrictEqual(
+      reviewSuggestionPublicationLocation({
+        _tag: "file",
+        path: PrReviewPath.make("src/modified.ts"),
+        line: 4,
+        relativeFileVersion: "AFTER"
+      }),
+      {
+        filePath: "src/modified.ts",
+        filePosition: 4,
+        relativeFileVersion: "AFTER"
+      }
+    )
+    assert.isUndefined(reviewSuggestionPublicationLocation({ _tag: "changes" }))
   })
 
   it.effect("rejects publication when provider authority rotates after preview", () =>
@@ -714,13 +823,15 @@ describe("pull request reviews", () => {
             arn: "arn:aws:iam::123456789012:user/local-operator"
           })
           assert.deepStrictEqual(preview.anchor, {
-            path: "src/authorization.ts",
+            _tag: "line",
+            path: PrReviewPath.make("src/authorization.ts"),
             line: 42,
             relativeFileVersion: "AFTER"
           })
           assert.strictEqual(preview.suggestionRevision.reviewedHead, "2".repeat(40))
-          assert.strictEqual(preview.replacement, "yield* authorize()\nyield* mutate()")
-          assert.include(preview.finalContent, "```suggestion")
+          assert.include(preview.replacement ?? "", "@@ -42,1 +42,2 @@")
+          assert.include(preview.finalContent, "```diff")
+          assert.notInclude(preview.editableContent, "Related locations:")
           assert.include(preview.finalContent, preview.publicationFooter)
           assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
 
@@ -768,6 +879,573 @@ describe("pull request reviews", () => {
       Option.some(completedReview)
     ))
 
+  it.effect("reserves one edited body before allowing the provider call", () =>
+    Effect.gen(function*() {
+      const reservedDigest = yield* Ref.make<null | string>(null)
+      const firstReservationEntered = yield* Deferred.make<void>()
+      const releaseFirstReservation = yield* Deferred.make<void>()
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+        Ref.modify(reservedDigest, (current): [
+          "acquired" | "conflict" | "replay",
+          null | string
+        ] =>
+          current === null
+            ? ["acquired", String(input.contentDigest)]
+            : current === input.contentDigest
+            ? ["replay", current]
+            : ["conflict", current]).pipe(
+            Effect.flatMap((outcome) =>
+              (
+                outcome === "acquired"
+                  ? Deferred.succeed(firstReservationEntered, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseFirstReservation))
+                  )
+                  : outcome === "replay"
+                  ? Effect.void
+                  : new AgentJobInputError({
+                    workspaceId: input.workspaceId,
+                    jobId: input.jobId,
+                    reason: "invalid-transition"
+                  })
+              ).pipe(Effect.as(outcome))
+            ),
+            Effect.map((outcome) =>
+              ReviewSuggestionPublicationReservation.make({
+                _tag: outcome === "acquired" ? "acquired" : "in-progress"
+              })
+            )
+          )
+
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            const differentContent = ReviewSuggestionPublicationContent.make(
+              `A different confirmed body.\n\n${preview.publicationFooter}`
+            )
+            const first = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.forkChild({ startImmediately: true }))
+            yield* Deferred.await(firstReservationEntered)
+            const joiner = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            const different = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: differentContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            yield* Deferred.succeed(releaseFirstReservation, undefined)
+            yield* Fiber.join(first)
+
+            assert.isTrue(Result.isFailure(joiner))
+            if (Result.isFailure(joiner)) {
+              assert.instanceOf(joiner.failure, ApplicationServiceUnavailable)
+            }
+            assert.isTrue(Result.isFailure(different))
+            if (Result.isFailure(different)) {
+              assert.instanceOf(different.failure, ApplicationInvalidRequest)
+            }
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+          }),
+        registry,
+        Option.some(completedReview),
+        () => Effect.succeed(undefined),
+        reserve
+      )
+    }))
+
+  it.effect("replays an exact completed publication without posting again", () =>
+    Effect.gen(function*() {
+      const completedDigest = yield* Ref.make<null | string>(null)
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+        Ref.modify(completedDigest, (current): [boolean, string] =>
+          current === null || current === input.contentDigest
+            ? [true, String(input.contentDigest)]
+            : [false, current]).pipe(
+            Effect.flatMap((matches) =>
+              matches
+                ? Effect.succeed(ReviewSuggestionPublicationReservation.make({
+                  _tag: "published",
+                  publicationId: PUBLICATION_ID,
+                  publishedAt: PUBLISHED_TIMESTAMP
+                }))
+                : new AgentJobInputError({
+                  workspaceId: input.workspaceId,
+                  jobId: input.jobId,
+                  reason: "invalid-transition"
+                })
+            )
+          )
+
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const footer = `— ${REVIEW_PROFILE.label} · head ${"2".repeat(12)} · operator ${OPERATOR_ID}`
+            const finalContent = ReviewSuggestionPublicationContent.make(
+              `Exact completed body.\n\n${footer}`
+            )
+            const replay = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent,
+                authorityBinding: AUTHORITY_BINDING
+              },
+              session: HUMAN_SESSION
+            })
+            assert.strictEqual(replay.publicationId, PUBLICATION_ID)
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+
+            const changed = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: ReviewSuggestionPublicationContent.make(
+                  `Changed after publication.\n\n${footer}`
+                ),
+                authorityBinding: AUTHORITY_BINDING
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            assert.isTrue(Result.isFailure(changed))
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+          }),
+        registry,
+        Option.some(completedReviewWithSuggestion({ state: "published" })),
+        () => Effect.succeed(undefined),
+        reserve
+      )
+    }))
+
+  it.effect("releases confirmed no-write failures but retains unknown outcomes", () => {
+    const verify = (failureReason: "publication-rejected" | "publication-unavailable") =>
+      Effect.gen(function*() {
+        const reservedDigest = yield* Ref.make<null | string>(null)
+        const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+          Ref.modify(reservedDigest, (current): [boolean, null | string] =>
+            current === null || current === input.contentDigest
+              ? [true, String(input.contentDigest)]
+              : [false, current]).pipe(
+              Effect.flatMap((accepted) =>
+                accepted
+                  ? Effect.succeed(
+                    ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
+                  )
+                  : new AgentJobInputError({
+                    workspaceId: input.workspaceId,
+                    jobId: input.jobId,
+                    reason: "invalid-transition"
+                  })
+              )
+            )
+        const release: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = (input) =>
+          Ref.update(
+            reservedDigest,
+            (current) =>
+              current === input.contentDigest ? null : current
+          ).pipe(Effect.as(undefined))
+
+        yield* withService(
+          (service, _enqueueInput, publicationCommands, _authority, publicationFailure) =>
+            Effect.gen(function*() {
+              const preview = yield* service.previewPublication({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                publishingOperator: OPERATOR_ID
+              })
+              const editedContent = ReviewSuggestionPublicationContent.make(
+                `Edited after a confirmed failure.\n\n${preview.publicationFooter}`
+              )
+              yield* Ref.set(publicationFailure, failureReason)
+              const failed = yield* service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: preview.finalContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              }).pipe(Effect.result)
+              assert.isTrue(Result.isFailure(failed))
+              yield* Ref.set(publicationFailure, null)
+
+              const edited = yield* service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: editedContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              }).pipe(Effect.result)
+              if (failureReason === "publication-rejected") {
+                assert.isTrue(Result.isSuccess(edited))
+                assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+                return
+              }
+              assert.isTrue(Result.isFailure(edited))
+              assert.strictEqual((yield* Ref.get(publicationCommands)).length, 0)
+
+              const replay = yield* service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: preview.finalContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              })
+              assert.strictEqual(replay.publicationId, PUBLICATION_ID)
+              assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+            }),
+          registry,
+          Option.some(completedReview),
+          () =>
+            Effect.succeed(undefined),
+          reserve,
+          release
+        )
+      })
+
+    return Effect.all([
+      verify("publication-rejected"),
+      verify("publication-unavailable")
+    ], { concurrency: 1, discard: true })
+  })
+
+  it.effect("preserves the provider failure when reservation release also fails", () =>
+    withService(
+      (service, _enqueueInput, _publicationCommands, _authority, publicationFailure) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+          yield* Ref.set(publicationFailure, "publication-conflict")
+          const result = yield* service.publishSuggestion({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              finalContent: preview.finalContent,
+              authorityBinding: preview.authorityBinding
+            },
+            session: HUMAN_SESSION
+          }).pipe(Effect.result)
+
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.instanceOf(result.failure, ApplicationInvalidRequest)
+          }
+        }),
+      registry,
+      Option.some(completedReview),
+      () => Effect.succeed(undefined),
+      () =>
+        Effect.succeed(
+          ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
+        ),
+      () =>
+        Effect.fail(
+          new RecordNotFoundError({
+            workspaceId: WORKSPACE_ID,
+            recordKind: "agent-review-publication",
+            recordKey: SUGGESTION_ID
+          })
+        )
+    ))
+
+  it.effect("publishes file anchors inline and whole-change anchors without a location", () => {
+    const verifyScope = (
+      anchor: typeof reviewReport.suggestions[number]["anchor"]
+    ) =>
+      withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            assert.deepStrictEqual(preview.anchor, anchor)
+
+            yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            })
+            const commands = yield* Ref.get(publicationCommands)
+            assert.strictEqual(commands.length, 1)
+            assert.deepStrictEqual(commands[0]?.suggestion.anchor, anchor)
+          }),
+        registry,
+        Option.some(completedReviewWithSuggestion({ anchor }))
+      )
+
+    return Effect.all([
+      verifyScope({
+        _tag: "file",
+        path: PrReviewPath.make("src/authorization.ts"),
+        line: 1,
+        relativeFileVersion: "AFTER"
+      }),
+      verifyScope({ _tag: "changes" })
+    ], { concurrency: 1, discard: true })
+  })
+
+  it.effect("recovers a provider success after the lifecycle projection initially fails", () =>
+    Effect.gen(function*() {
+      const reservation = yield* Ref.make<"acquired" | "recoverable" | "published">("acquired")
+      const failProjection = yield* Ref.make(true)
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
+        Ref.get(reservation).pipe(
+          Effect.map((state) =>
+            state === "acquired"
+              ? ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
+              : state === "recoverable"
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "recoverable",
+                publicationId: PUBLICATION_ID,
+                publishedAt: PUBLISHED_TIMESTAMP,
+                reservationId: RESERVATION_ID
+              })
+              : ReviewSuggestionPublicationReservation.make({
+                _tag: "published",
+                publicationId: PUBLICATION_ID,
+                publishedAt: PUBLISHED_TIMESTAMP
+              })
+          )
+        )
+      const record: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = (input) =>
+        (input.finalize === false
+          ? Ref.set(reservation, "recoverable")
+          : Ref.getAndSet(failProjection, false).pipe(
+            Effect.flatMap((mustFail) =>
+              mustFail
+                ? Effect.fail(
+                  new RecordNotFoundError({
+                    workspaceId: WORKSPACE_ID,
+                    recordKind: "agent-review-result",
+                    recordKey: REVIEW_JOB_ID
+                  })
+                )
+                : Ref.set(reservation, "published")
+            )
+          )).pipe(Effect.as(undefined))
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            const publish = () =>
+              service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: preview.finalContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              }).pipe(Effect.result)
+            const first = yield* publish()
+            const recovered = yield* publish()
+
+            assert.isTrue(Result.isFailure(first))
+            if (Result.isFailure(first)) {
+              assert.strictEqual(first.failure._tag, "ApplicationResourceNotFound")
+            }
+            assert.isTrue(Result.isSuccess(recovered))
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+          }),
+        registry,
+        Option.some(completedReview),
+        record,
+        reserve
+      )
+    }))
+
+  it.effect("retries an expired null-handle reservation through governed idempotency", () =>
+    Effect.gen(function*() {
+      const reservationIds = yield* Ref.make<ReadonlyArray<string>>([])
+      const handleWrites = yield* Ref.make(0)
+      const gatewayCalls = yield* Ref.make(0)
+      const providerWrites = yield* Ref.make(0)
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = (input) =>
+        Ref.update(reservationIds, (current) => [...current, input.reservationId]).pipe(
+          Effect.as(ReviewSuggestionPublicationReservation.make({ _tag: "acquired" }))
+        )
+      const record: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = (input) =>
+        (input.finalize === false
+          ? Ref.getAndUpdate(handleWrites, (current) => current + 1).pipe(
+            Effect.flatMap((attempt) =>
+              attempt === 0
+                ? Effect.fail(
+                  new RecordNotFoundError({
+                    workspaceId: WORKSPACE_ID,
+                    recordKind: "agent-review-publication",
+                    recordKey: REVIEW_JOB_ID
+                  })
+                )
+                : Effect.void
+            )
+          )
+          : Effect.void).pipe(Effect.as(undefined))
+      const idempotentPublish: ReviewSuggestionPublicationGateway["Service"]["publish"] = () =>
+        Ref.update(gatewayCalls, (current) => current + 1).pipe(
+          Effect.andThen(
+            Ref.update(providerWrites, (current) => current === 0 ? 1 : current)
+          ),
+          Effect.as({
+            publicationId: PUBLICATION_ID,
+            receipt: {
+              status: "succeeded",
+              providerOperationId: PluginProviderOperationId.make("comment:review-comment-42"),
+              safeSummary: "CodeCommit review comment posted",
+              observedAt: PUBLISHED_TIMESTAMP
+            },
+            publishedAt: PUBLISHED_TIMESTAMP,
+            connectedIdentity: {
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:user/local-operator"
+            }
+          })
+        )
+
+      yield* withService(
+        (service) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              jobId: REVIEW_JOB_ID,
+              suggestionId: SUGGESTION_ID,
+              publishingOperator: OPERATOR_ID
+            })
+            const publish = () =>
+              service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: preview.finalContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              }).pipe(Effect.result)
+
+            assert.isTrue(Result.isFailure(yield* publish()))
+            assert.isTrue(Result.isSuccess(yield* publish()))
+            const owners = yield* Ref.get(reservationIds)
+            assert.strictEqual(owners.length, 2)
+            assert.notStrictEqual(owners[0], owners[1])
+            assert.strictEqual(yield* Ref.get(gatewayCalls), 2)
+            assert.strictEqual(yield* Ref.get(providerWrites), 1)
+          }),
+        registry,
+        Option.some(completedReview),
+        record,
+        reserve,
+        () => Effect.succeed(undefined),
+        idempotentPublish
+      )
+    }))
+
+  it.effect("includes every grouped related location in default publication content", () =>
+    withService(
+      (service) =>
+        Effect.gen(function*() {
+          const preview = yield* service.previewPublication({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            publishingOperator: OPERATOR_ID
+          })
+
+          assert.include(preview.editableContent, "Related locations:")
+          assert.include(preview.editableContent, "src/handler.ts:18-18")
+          assert.include(preview.editableContent, "src/policy.ts:30-34")
+        }),
+      registry,
+      Option.some(completedReviewWithSuggestion({
+        relatedLocations: [
+          {
+            path: PrReviewPath.make("src/handler.ts"),
+            startLine: 18,
+            endLine: 18,
+            label: "Same policy branch"
+          },
+          {
+            path: PrReviewPath.make("src/policy.ts"),
+            startLine: 30,
+            endLine: 34,
+            label: "Shared policy implementation"
+          }
+        ]
+      }))
+    ))
+
   it.effect("bounds every generated editable draft before adding the provider footer", () =>
     withService(
       (service) =>
@@ -811,13 +1489,26 @@ describe("pull request reviews", () => {
 
           assert.notInclude(preview.editableContent, "```suggestion")
           assert.notInclude(preview.editableContent, "```")
-          assert.strictEqual(preview.replacement, "x".repeat(16_000))
+          assert.include(preview.editableContent, "src/handler.ts:18-18")
+          assert.include(preview.replacement ?? "", "x".repeat(15_800))
         }),
       registry,
       Option.some(completedReviewWithSuggestion({
         problem: "Keep the concise explanation.",
         recommendation: "Apply the replacement.",
-        replacement: { content: "x".repeat(16_000) }
+        relatedLocations: [{
+          path: PrReviewPath.make("src/handler.ts"),
+          startLine: 18,
+          endLine: 18,
+          label: "Same policy branch"
+        }],
+        replacement: {
+          reviewedHead: reviewReport.subject.headRevision,
+          unifiedDiff: `--- a/src/authorization.ts\n+++ b/src/authorization.ts\n@@ -42,1 +42,1 @@\n-${
+            "x".repeat(15_800)
+          }\n+y`,
+          explanation: "Apply the bounded replacement."
+        }
       }))
     ))
 

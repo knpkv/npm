@@ -73,12 +73,14 @@ const reviewProfile: ReviewAgentProfile = {
 }
 
 const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
-  schemaVersion: 2,
+  schemaVersion: 3,
   subject: reviewSubject,
   completion: { status: "complete" },
   suggestions: [
     {
       suggestionId: `sha256:${"1".repeat(64)}`,
+      state: "draft",
+      title: "Decode review output before persistence",
       severity: "P2",
       problem: "Review output must cross a typed boundary.",
       impact: "Malformed model output could otherwise enter durable state.",
@@ -89,6 +91,12 @@ const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
         excerpt: "const report = decodeReviewOutput(output)"
       },
       recommendation: "Decode the complete report before committing model-authored output.",
+      anchor: {
+        _tag: "line",
+        path: "packages/control-center/src/server/agent/AgentJobWorker.ts",
+        line: 42
+      },
+      relatedLocations: [],
       confidence: {
         level: "high",
         reason: "The persistence boundary is exercised directly by this test."
@@ -97,6 +105,7 @@ const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
         summary: "Keep raw review chunks out of durable replay.",
         enforcement: "test",
         existingRuleOrConfig: "agent job worker integration suite",
+        recurrenceEvidence: "Every durable review completion crosses the same decoded-report boundary.",
         targetFile: "packages/control-center/test/agent/agent-job-worker.test.ts",
         sourcePaths: ["packages/control-center/src/server/agent/AgentJobWorker.ts"],
         matcherOrInvariant: "Review jobs persist only one complete sanitized report.",
@@ -105,7 +114,8 @@ const reviewReport = Schema.decodeUnknownSync(PrReviewReport)({
         boundary: "Release-chat streaming remains unchanged."
       }
     }
-  ]
+  ],
+  notes: []
 })
 const OUTPUT_CHUNK_BYTES = 32_000
 const MAXIMUM_RUNTIME_OUTPUT_CHARACTERS = 32_768

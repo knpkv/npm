@@ -4,7 +4,13 @@ import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/ht
 
 import { EntityId, EventCursor, GovernedActionId, JobId, PersonId, ReleaseId } from "../domain/identifiers.js"
 import { PluginProviderReceiptV1 } from "../domain/plugins/actions.js"
-import { PrReviewOutcome, PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../domain/prReview.js"
+import {
+  PrReviewOutcome,
+  PrReviewReport,
+  PrReviewSubject,
+  PrReviewSuggestion,
+  PrReviewSuggestionId
+} from "../domain/prReview.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"
 import {
   ForbiddenApiError,
@@ -458,11 +464,7 @@ export class ReviewSuggestionPublicationPreview
       suggestionId: PrReviewSuggestionId,
       reviewedHead: PrReviewSubject.fields.headRevision
     }),
-    anchor: Schema.Struct({
-      path: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
-      line: Schema.Int.check(Schema.isGreaterThan(0)),
-      relativeFileVersion: Schema.Literal("AFTER")
-    }),
+    anchor: PrReviewSuggestion.fields.anchor,
     editableContent: ReviewSuggestionPublicationContent,
     editableContentMaximumLength: Schema.Int.check(Schema.isGreaterThan(0)),
     finalContent: ReviewSuggestionPublicationContent,

@@ -410,9 +410,31 @@ export const usePullRequestReview = (
     ).then(
       (published) => {
         if (abort.signal.aborted) return
+        const receiptMatches = published.suggestionRevision.reviewedHead ===
+          preview.suggestionRevision.reviewedHead
+        if (receiptMatches) {
+          setState((latest) =>
+            latest._tag === "ready" && latest.review._tag === "completed" &&
+              latest.review.jobId === published.jobId
+              ? {
+                ...latest,
+                review: {
+                  ...latest.review,
+                  report: {
+                    ...latest.review.report,
+                    suggestions: latest.review.report.suggestions.map((suggestion) => {
+                      if (suggestion.suggestionId !== published.suggestionId) return suggestion
+                      const transitioned: typeof suggestion = { ...suggestion, state: "published" }
+                      return transitioned
+                    })
+                  }
+                }
+              }
+              : latest
+          )
+        }
         setPublication(
-          published.suggestionRevision.reviewedHead ===
-              preview.suggestionRevision.reviewedHead
+          receiptMatches
             ? {
               _tag: "published",
               headSuperseded: latestScope.current === null ||

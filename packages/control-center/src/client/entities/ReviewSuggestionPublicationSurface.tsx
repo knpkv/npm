@@ -1,8 +1,14 @@
 import { Button, Text } from "@knpkv/rly/primitives"
 import { type KeyboardEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
+import type { ReviewSuggestionPublicationPreview } from "../../api/agent.js"
 import type { PullRequestReviewPublicationState } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
+
+const anchorLabel = (anchor: ReviewSuggestionPublicationPreview["anchor"]): string =>
+  anchor._tag === "changes"
+    ? "Whole pull request"
+    : `${anchor.path}:${String(anchor.line)} · ${anchor.relativeFileVersion}`
 
 /** Render the on-demand operator confirmation and durable publication receipt. */
 export const ReviewSuggestionPublicationSurface = ({
@@ -67,9 +73,7 @@ export const ReviewSuggestionPublicationSurface = ({
         <small>
           {receiptConflict ? "Published comment · receipt verification conflict" : "Published Review Comment"}
         </small>
-        <strong>
-          {publication.publication.anchor.path}:{publication.publication.anchor.line}
-        </strong>
+        <strong>{anchorLabel(publication.publication.anchor)}</strong>
         <Text>{publication.publication.receipt.safeSummary}</Text>
         <code>{publication.publication.receipt.providerOperationId}</code>
         <span>
@@ -103,7 +107,7 @@ export const ReviewSuggestionPublicationSurface = ({
       >
         <header>
           <small>Human-confirmed provider action</small>
-          <strong id="review-publication-title">Post line suggestion</strong>
+          <strong id="review-publication-title">Post review suggestion</strong>
           <Text id="review-publication-context" tone="secondary">
             Review the exact AWS identity, revision, anchor, and editable comment before publishing.
           </Text>
@@ -123,9 +127,7 @@ export const ReviewSuggestionPublicationSurface = ({
           </div>
           <div>
             <dt>Anchor</dt>
-            <dd>
-              {preview.anchor.path}:{preview.anchor.line} · AFTER
-            </dd>
+            <dd>{anchorLabel(preview.anchor)}</dd>
           </div>
         </dl>
         <label className={styles.publicationEditor}>

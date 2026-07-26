@@ -12,17 +12,26 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useEffect, useMemo, useState } from "react"
+import { lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestion } from "../../domain/prReview.js"
+import type { PrReviewSuggestion, PrReviewSuggestionState } from "../../domain/prReview.js"
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
+import styles from "./WorkspacePullRequestDiff.module.css"
 
 const BoundedDiffCodeView = lazy(async () => {
   const module = await import("@knpkv/rly/diff/bounded")
   return { default: module.BoundedDiffCodeView }
+})
+const DiffLineFocus = lazy(async () => {
+  const module = await import("./DiffLineFocus.js")
+  return { default: module.DiffLineFocus }
+})
+const ReviewSuggestionOverview = lazy(async () => {
+  const module = await import("./ReviewSuggestionOverview.js")
+  return { default: module.ReviewSuggestionOverview }
 })
 
 export interface WorkspacePullRequestDiffScope {
@@ -92,6 +101,9 @@ type InventoryLoadState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly inventory: CompleteDiffInventory }
 
+type SuggestionSeverityFilter = "all" | PrReviewSuggestion["severity"]
+type SuggestionStateFilter = "all" | PrReviewSuggestionState
+
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 
@@ -118,6 +130,19 @@ const unavailableContent = (reason: NonNullable<CompleteDiffContentRange["unavai
       return { state: "unavailable", reason: "CodeCommit content is temporarily unavailable." }
   }
 }
+
+const entryForSuggestionAnchor = (
+  entries: ReadonlyArray<CompleteDiffInventoryEntry>,
+  anchor: Exclude<PrReviewSuggestion["anchor"], { readonly _tag: "changes" }>
+): CompleteDiffInventoryEntry | undefined =>
+  anchor.relativeFileVersion === "BEFORE"
+    ? (entries.find(
+        (entry) =>
+          entry.status === "renamed" &&
+          entry.previousPath !== null &&
+          String(entry.previousPath) === String(anchor.path)
+      ) ?? entries.find(({ path }) => String(path) === String(anchor.path)))
+    : entries.find(({ path }) => String(path) === String(anchor.path))
 
 const textFrom = (content: CompleteDiffContentRange): string | null => {
   if (content.unavailableReason !== null || content.bytesBase64 === null) return null
@@ -164,6 +189,20 @@ export const WorkspacePullRequestDiff = ({
   const [contentRetryKey, setContentRetryKey] = useState(0)
   const [layout, setLayout] = useState<RlyDiffLayout>("split")
   const [isWrapped, setIsWrapped] = useState(false)
+  const [severityFilter, setSeverityFilter] = useState<SuggestionSeverityFilter>("all")
+  const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
+  const [focusRequest, setFocusRequest] = useState<{
+    readonly fileId: string
+    readonly lineNumber: number
+    readonly requestId: number
+    readonly side: "additions" | "deletions"
+  }>()
+  const viewerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    setSeverityFilter("all")
+    setSuggestionStateFilter("all")
+  }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId])
 
   useEffect(() => {
     const abort = new AbortController()
@@ -172,6 +211,7 @@ export const WorkspacePullRequestDiff = ({
     setContentStates(new Map())
     setLoadedText(new Map())
     setContentRetryKey(0)
+    setFocusRequest(undefined)
     transport.inventory(scope, abort.signal).then(
       (inventory) => {
         if (abort.signal.aborted) return
@@ -299,17 +339,37 @@ export const WorkspacePullRequestDiff = ({
           ],
     [scope.revision, selectedEntry, selectedText]
   )
+  const visibleSuggestions = useMemo(
+    () =>
+      suggestions.filter(
+        (suggestion) =>
+          (severityFilter === "all" || suggestion.severity === severityFilter) &&
+          (suggestionStateFilter === "all" || suggestion.state === suggestionStateFilter)
+      ),
+    [severityFilter, suggestionStateFilter, suggestions]
+  )
+  const navigateToLine = useCallback((fileId: string, lineNumber: number, side: "additions" | "deletions"): void => {
+    setFocusRequest((current) => ({
+      fileId,
+      lineNumber,
+      requestId: (current?.requestId ?? 0) + 1,
+      side
+    }))
+    setSelectedFileId(fileId)
+  }, [])
   const annotations = useMemo<ReadonlyArray<RlyDiffCodeAnnotation>>(
     () =>
-      suggestions.flatMap((suggestion) => {
-        const entry = entries.find(({ path }) => String(path) === String(suggestion.evidence.path))
+      visibleSuggestions.flatMap((suggestion) => {
+        if (suggestion.anchor._tag !== "line") return []
+        const anchor = suggestion.anchor
+        const entry = entries.find(({ path }) => String(path) === String(anchor.path))
         if (entry === undefined) return []
         const annotation: RlyDiffCodeAnnotation = {
           accessibilityLabel: `${suggestion.severity} review suggestion with ${suggestion.confidence.level} confidence`,
           id: suggestion.suggestionId,
           location: {
             itemId: entry.anchor,
-            lineNumber: suggestion.evidence.startLine,
+            lineNumber: anchor.line,
             side: "additions"
           },
           render: ({ returnFocus }) => (
@@ -317,7 +377,7 @@ export const WorkspacePullRequestDiff = ({
               <strong>
                 {suggestion.severity} · {suggestion.confidence.level} confidence
               </strong>
-              <p>{suggestion.problem}</p>
+              <p>{suggestion.title}</p>
               <p>
                 <strong>Impact:</strong> {suggestion.impact}
               </p>
@@ -326,7 +386,10 @@ export const WorkspacePullRequestDiff = ({
                 <strong>Recommendation:</strong> {suggestion.recommendation}
               </p>
               <p>{suggestion.confidence.reason}</p>
-              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.content}</pre>}
+              {suggestion.relatedLocations.length === 0 ? null : (
+                <p>{suggestion.relatedLocations.length} related locations</p>
+              )}
+              {suggestion.replacement === undefined ? null : <pre>{suggestion.replacement.unifiedDiff}</pre>}
               <button onClick={returnFocus} type="button">
                 Return to line
               </button>
@@ -335,38 +398,91 @@ export const WorkspacePullRequestDiff = ({
         }
         return [annotation]
       }),
-    [entries, suggestions]
+    [entries, visibleSuggestions]
   )
   const unattachedSuggestionCount = useMemo(
     () =>
-      suggestions.filter((suggestion) => !entries.some(({ path }) => String(path) === String(suggestion.evidence.path)))
-        .length,
-    [entries, suggestions]
+      visibleSuggestions.filter((suggestion) => {
+        const anchor = suggestion.anchor
+        return anchor._tag !== "changes" && entryForSuggestionAnchor(entries, anchor) === undefined
+      }).length,
+    [entries, visibleSuggestions]
   )
   const findings = useMemo(
     () =>
-      suggestions.map((suggestion) => ({
+      visibleSuggestions.map((suggestion) => ({
         id: suggestion.suggestionId,
         content: (
           <>
             <strong>
-              {suggestion.severity} · {suggestion.problem}
+              {suggestion.severity} · {suggestion.title}
             </strong>
             <p>
-              {suggestion.evidence.path}:{suggestion.evidence.startLine}
+              {suggestion.anchor._tag === "changes"
+                ? "Whole change"
+                : `${suggestion.anchor.path}:${String(suggestion.anchor.line)}`}
             </p>
           </>
         )
       })),
-    [suggestions]
+    [visibleSuggestions]
   )
+  const severities = ["all", "P1", "P2", "P3", "P4"] satisfies ReadonlyArray<SuggestionSeverityFilter>
+  const states = [
+    "all",
+    ...new Set(suggestions.map(({ state }) => state))
+  ] satisfies ReadonlyArray<SuggestionStateFilter>
 
   return (
     <>
+      <section aria-label="Review suggestion filters" className={styles.filters}>
+        <div aria-label="Severity" role="group">
+          {severities.map((severity) => (
+            <button
+              aria-label={`Filter suggestions by ${severity === "all" ? "all" : severity} severity`}
+              aria-pressed={severityFilter === severity}
+              key={severity}
+              onClick={() => setSeverityFilter(severity)}
+              type="button"
+            >
+              {severity === "all" ? "All severities" : severity}
+            </button>
+          ))}
+        </div>
+        <div aria-label="Suggestion state" role="group">
+          {states.map((state) => (
+            <button
+              aria-label={`Filter suggestions by ${state} state`}
+              aria-pressed={suggestionStateFilter === state}
+              key={state}
+              onClick={() => setSuggestionStateFilter(state)}
+              type="button"
+            >
+              {state === "all" ? "All states" : state}
+            </button>
+          ))}
+        </div>
+      </section>
+      <Suspense fallback={null}>
+        <ReviewSuggestionOverview
+          entries={entries}
+          onNavigate={navigateToLine}
+          onSelectAnchor={(anchor) => {
+            const entry = entryForSuggestionAnchor(entries, anchor)
+            if (entry === undefined) return
+            navigateToLine(
+              entry.anchor,
+              anchor.line,
+              anchor.relativeFileVersion === "BEFORE" ? "deletions" : "additions"
+            )
+          }}
+          suggestions={visibleSuggestions}
+        />
+      </Suspense>
       {unattachedSuggestionCount === 0 ? null : (
         <p role="status">
           {unattachedSuggestionCount} validated review{" "}
-          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the evidence path
+          {unattachedSuggestionCount === 1 ? "suggestion is" : "suggestions are"} not attached because the anchor path
           is absent from this diff inventory.
         </p>
       )}
@@ -375,7 +491,7 @@ export const WorkspacePullRequestDiff = ({
         findings={findings}
         header={
           <DiffHeader
-            findingFilter="all"
+            findingFilter="agent"
             heading={heading}
             indexedCount={files.length}
             isWrapped={isWrapped}
@@ -425,15 +541,28 @@ export const WorkspacePullRequestDiff = ({
           selectedEntry === undefined || selectedText === undefined ? (
             "Select a supported text file to render its change."
           ) : (
-            <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-              <BoundedDiffCodeView
-                annotations={annotations}
-                key={selectedEntry.anchor}
-                initialItems={selectedCodeItems}
-                mode={layout}
-                wrap={isWrapped}
-              />
-            </Suspense>
+            <div className={styles.viewerTarget} ref={viewerRef}>
+              <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
+                <BoundedDiffCodeView
+                  annotations={annotations}
+                  key={selectedEntry.anchor}
+                  initialItems={selectedCodeItems}
+                  mode={layout}
+                  wrap={isWrapped}
+                />
+              </Suspense>
+              {focusRequest === undefined || focusRequest.fileId !== selectedEntry.anchor ? null : (
+                <Suspense fallback={null}>
+                  <DiffLineFocus
+                    fileId={focusRequest.fileId}
+                    key={focusRequest.requestId}
+                    lineNumber={focusRequest.lineNumber}
+                    root={viewerRef}
+                    side={focusRequest.side}
+                  />
+                </Suspense>
+              )}
+            </div>
           )
         }
       />

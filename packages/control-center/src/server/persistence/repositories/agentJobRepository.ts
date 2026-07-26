@@ -18,7 +18,14 @@ import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
+import {
+  AgentThreadId,
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
@@ -43,13 +50,19 @@ import {
   LatestAgentReviewInput,
   LatestAgentReviewRecord,
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
-  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE
+  MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
+  RecordReviewSuggestionPublicationInput,
+  ReleaseReviewSuggestionPublicationInput,
+  ReserveReviewSuggestionPublicationInput,
+  ReviewSuggestionPublicationDigest,
+  ReviewSuggestionPublicationReservation
 } from "./agentJobModels.js"
 import { mapAlreadyExists, mapPersistenceOperation, readChanges } from "./internal.js"
 
 const DISPATCH_CANDIDATE_LIMIT = 32
 const MAXIMUM_AGENT_EVENT_BYTES = MAXIMUM_AGENT_RUNTIME_EVENT_BYTES
 const SHA_256_PREFIX = "sha256:"
+const REVIEW_SUGGESTION_PUBLICATION_RESERVATION_LIFETIME_MINUTES = 10
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const PersistedDigest = Schema.String.check(
@@ -79,6 +92,21 @@ const CancellationRequestedPayload = Schema.Struct({
 
 const ProviderFailurePayload = Schema.Struct({
   error: AgentProviderError
+})
+
+const ReviewSuggestionPublishedPayload = Schema.Struct({
+  suggestionId: RecordReviewSuggestionPublicationInput.fields.suggestionId,
+  publicationId: RecordReviewSuggestionPublicationInput.fields.publicationId
+})
+
+const ReviewSuggestionPublicationRow = Schema.Struct({
+  contentDigest: ReviewSuggestionPublicationDigest,
+  state: Schema.Literals(["reserved", "published"]),
+  publicationId: Schema.NullOr(GovernedActionId),
+  reservationAcquiredAt: UtcTimestamp,
+  reservationId: ReviewSuggestionPublicationReservationId,
+  reservedAt: UtcTimestamp,
+  publishedAt: Schema.NullOr(UtcTimestamp)
 })
 
 const ThreadRow = Schema.Struct({
@@ -620,6 +648,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
             )
           )
         )
+      case "review-suggestion-published":
+        return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublishedPayload)(payload).pipe(
+          Effect.mapError(() =>
+            persistedRecordError(
+              workspaceId,
+              "agent-thread-event",
+              `${row.threadId}/${row.eventSequence}`,
+              "agent-thread-event-payload-invalid"
+            )
+          )
+        )
       case "job-started":
       case "assistant-output":
       case "progress":
@@ -669,11 +708,75 @@ const makeAgentJobRepository = Effect.gen(function*() {
         "agent-review-result-payload-invalid"
       )
     }
+    const publicationRows = yield* sql<Record<string, unknown>>`SELECT
+      workspace_id AS workspaceId, thread_id AS threadId,
+      event_sequence AS eventSequence, job_id AS jobId,
+      attempt_sequence AS attemptSequence, event_kind AS eventKind,
+      payload_json AS payloadJson, payload_digest AS payloadDigest,
+      payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+      FROM agent_thread_events
+      WHERE workspace_id = ${request.workspaceId}
+        AND job_id = ${request.jobId}
+        AND event_kind = 'review-suggestion-published'
+      ORDER BY event_sequence`.pipe(
+      mapPersistenceOperation("agent-job.review-suggestion-publications")
+    )
+    const publishedSuggestionIds = new Set<string>()
+    for (const unknownPublicationRow of publicationRows) {
+      const publicationRow = Schema.decodeUnknownResult(ThreadEventRow)(unknownPublicationRow)
+      if (Result.isFailure(publicationRow)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-schema-invalid"
+        )
+      }
+      const publication = yield* decodeEventPayload(request.workspaceId, publicationRow.success)
+      const decodedPublication = Schema.decodeUnknownResult(
+        ReviewSuggestionPublishedPayload
+      )(publication)
+      if (Result.isFailure(decodedPublication)) {
+        return yield* persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-payload-invalid"
+        )
+      }
+      publishedSuggestionIds.add(decodedPublication.success.suggestionId)
+    }
+    if (publishedSuggestionIds.size === 0) {
+      return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
+        workspaceId: request.workspaceId,
+        jobId: request.jobId,
+        attemptSequence: row.success.attemptSequence,
+        report: decodedReport.success,
+        completedAt: row.success.occurredAt
+      })
+    }
+    const projectedReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
+      ...decodedReport.success,
+      suggestions: decodedReport.success.suggestions.map((suggestion) => {
+        if (!publishedSuggestionIds.has(suggestion.suggestionId)) return suggestion
+        const published: typeof suggestion = { ...suggestion, state: "published" }
+        return published
+      })
+    }).pipe(
+      Effect.mapError(() =>
+        persistedRecordError(
+          request.workspaceId,
+          "agent-review-result",
+          request.jobId,
+          "agent-review-publication-projection-invalid"
+        )
+      )
+    )
     return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
       workspaceId: request.workspaceId,
       jobId: request.jobId,
       attemptSequence: row.success.attemptSequence,
-      report: decodedReport.success,
+      report: projectedReport,
       completedAt: row.success.occurredAt
     })
   })
@@ -1207,6 +1310,287 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         )
         .pipe(mapPersistenceOperation("agent-job.complete-review"))
+    }),
+
+    reserveReviewSuggestionPublication: Effect.fn(
+      "AgentJobRepository.reserveReviewSuggestionPublication"
+    )(function*(input: typeof ReserveReviewSuggestionPublicationInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(ReserveReviewSuggestionPublicationInput)
+      )(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const existingRows = yield* sql<Record<string, unknown>>`SELECT
+            content_digest AS contentDigest, state,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
+            published_at AS publishedAt
+            FROM agent_review_suggestion_publications
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND suggestion_id = ${request.suggestionId}`
+          if (existingRows.length > 0) {
+            const existing = yield* Schema.decodeUnknownEffect(
+              ReviewSuggestionPublicationRow
+            )(existingRows[0])
+            if (existing.contentDigest !== request.contentDigest) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            return existing.state === "published" &&
+                existing.publicationId !== null &&
+                existing.publishedAt !== null
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "published",
+                publicationId: existing.publicationId,
+                publishedAt: existing.publishedAt
+              })
+              : existing.publicationId !== null && existing.publishedAt !== null
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "recoverable",
+                publicationId: existing.publicationId,
+                publishedAt: existing.publishedAt,
+                reservationId: existing.reservationId
+              })
+              : yield* Effect.gen(function*() {
+                const recoveryEligibleAt = DateTime.add(existing.reservationAcquiredAt, {
+                  minutes: REVIEW_SUGGESTION_PUBLICATION_RESERVATION_LIFETIME_MINUTES
+                })
+                if (DateTime.Order(request.reservedAt, recoveryEligibleAt) < 0) {
+                  return ReviewSuggestionPublicationReservation.make({ _tag: "in-progress" })
+                }
+                yield* sql`UPDATE agent_review_suggestion_publications
+                  SET reservation_id = ${request.reservationId},
+                      reservation_acquired_at = ${encodeTimestamp(request.reservedAt)}
+                  WHERE workspace_id = ${request.workspaceId}
+                    AND job_id = ${request.jobId}
+                    AND suggestion_id = ${request.suggestionId}
+                    AND content_digest = ${request.contentDigest}
+                    AND state = 'reserved'
+                    AND publication_id IS NULL
+                    AND reservation_id = ${existing.reservationId}
+                    AND reservation_acquired_at = ${encodeTimestamp(existing.reservationAcquiredAt)}`
+                return ReviewSuggestionPublicationReservation.make({
+                  _tag: (yield* readChanges(sql)) === 1 ? "acquired" : "in-progress"
+                })
+              })
+          }
+          const review = yield* readReviewResult({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId
+          })
+          const suggestion = review.report.suggestions.find(
+            ({ suggestionId }) => suggestionId === request.suggestionId
+          )
+          if (suggestion?.state !== "draft") {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          const inserted = yield* sql<Record<string, unknown>>`INSERT INTO agent_review_suggestion_publications (
+            workspace_id, job_id, suggestion_id, content_digest, state,
+            publication_id, reservation_id, reservation_acquired_at,
+            reserved_at, published_at
+          ) VALUES (
+            ${request.workspaceId}, ${request.jobId}, ${request.suggestionId},
+            ${request.contentDigest}, 'reserved', NULL,
+            ${request.reservationId}, ${encodeTimestamp(request.reservedAt)},
+            ${encodeTimestamp(request.reservedAt)}, NULL
+          ) ON CONFLICT DO NOTHING
+          RETURNING suggestion_id AS suggestionId`
+          const rows = yield* sql<Record<string, unknown>>`SELECT
+            content_digest AS contentDigest, state,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
+            published_at AS publishedAt
+            FROM agent_review_suggestion_publications
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND suggestion_id = ${request.suggestionId}`
+          const row = Schema.decodeUnknownResult(ReviewSuggestionPublicationRow)(rows[0])
+          if (
+            rows.length !== 1 ||
+            Result.isFailure(row) ||
+            row.success.contentDigest !== request.contentDigest
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          return row.success.state === "published" &&
+              row.success.publicationId !== null &&
+              row.success.publishedAt !== null
+            ? ReviewSuggestionPublicationReservation.make({
+              _tag: "published",
+              publicationId: row.success.publicationId,
+              publishedAt: row.success.publishedAt
+            })
+            : row.success.publicationId !== null && row.success.publishedAt !== null
+            ? ReviewSuggestionPublicationReservation.make({
+              _tag: "recoverable",
+              publicationId: row.success.publicationId,
+              publishedAt: row.success.publishedAt,
+              reservationId: row.success.reservationId
+            })
+            : ReviewSuggestionPublicationReservation.make({
+              _tag: inserted.length === 1 ? "acquired" : "in-progress"
+            })
+        })
+      ).pipe(mapPersistenceOperation("agent-job.reserve-review-suggestion-publication"))
+    }),
+
+    releaseReviewSuggestionPublication: Effect.fn(
+      "AgentJobRepository.releaseReviewSuggestionPublication"
+    )(function*(input: typeof ReleaseReviewSuggestionPublicationInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(ReleaseReviewSuggestionPublicationInput)
+      )(input)
+      yield* sql`DELETE FROM agent_review_suggestion_publications
+        WHERE workspace_id = ${request.workspaceId}
+          AND job_id = ${request.jobId}
+          AND suggestion_id = ${request.suggestionId}
+          AND content_digest = ${request.contentDigest}
+          AND state = 'reserved'
+          AND publication_id IS NULL
+          AND reservation_id = ${request.reservationId}`.pipe(
+        mapPersistenceOperation("agent-job.release-review-suggestion-publication")
+      )
+    }),
+
+    recordReviewSuggestionPublication: Effect.fn(
+      "AgentJobRepository.recordReviewSuggestionPublication"
+    )(function*(input: typeof RecordReviewSuggestionPublicationInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(RecordReviewSuggestionPublicationInput)
+      )(input)
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          const job = yield* getJob(request.workspaceId, request.jobId)
+          const publicationRows = yield* sql<Record<string, unknown>>`SELECT
+            content_digest AS contentDigest, state,
+            publication_id AS publicationId, reservation_id AS reservationId,
+            reservation_acquired_at AS reservationAcquiredAt, reserved_at AS reservedAt,
+            published_at AS publishedAt
+            FROM agent_review_suggestion_publications
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND suggestion_id = ${request.suggestionId}`
+          const publication = Schema.decodeUnknownResult(
+            ReviewSuggestionPublicationRow
+          )(publicationRows[0])
+          if (publicationRows.length !== 1 || Result.isFailure(publication)) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          if (publication.success.state === "published") {
+            if (
+              publication.success.contentDigest === request.contentDigest &&
+              publication.success.publicationId === request.publicationId
+            ) return
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          if (publication.success.contentDigest !== request.contentDigest) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          if (request.finalize === false) {
+            yield* sql`UPDATE agent_review_suggestion_publications
+              SET publication_id = ${request.publicationId},
+                  published_at = ${encodeTimestamp(request.publishedAt)}
+              WHERE workspace_id = ${request.workspaceId}
+                AND job_id = ${request.jobId}
+                AND suggestion_id = ${request.suggestionId}
+                AND content_digest = ${request.contentDigest}
+                AND state = 'reserved'
+                AND reservation_id = ${request.reservationId}
+                AND (
+                  publication_id IS NULL OR publication_id = ${request.publicationId}
+                )`
+            if ((yield* readChanges(sql)) !== 1) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            return
+          }
+          if (
+            publication.success.publicationId !== null &&
+            publication.success.publicationId !== request.publicationId
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          const review = yield* readReviewResult({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId
+          })
+          const suggestion = review.report.suggestions.find(
+            ({ suggestionId }) => suggestionId === request.suggestionId
+          )
+          if (suggestion?.state !== "draft") {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          yield* sql`UPDATE agent_review_suggestion_publications
+            SET state = 'published',
+                publication_id = ${request.publicationId},
+                published_at = ${encodeTimestamp(request.publishedAt)}
+            WHERE workspace_id = ${request.workspaceId}
+              AND job_id = ${request.jobId}
+              AND suggestion_id = ${request.suggestionId}
+              AND content_digest = ${request.contentDigest}
+              AND state = 'reserved'
+              AND reservation_id = ${request.reservationId}
+              AND (
+                publication_id IS NULL OR publication_id = ${request.publicationId}
+              )`
+          if ((yield* readChanges(sql)) !== 1) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
+          yield* appendThreadEvent({
+            workspaceId: request.workspaceId,
+            threadId: job.threadId,
+            jobId: request.jobId,
+            attemptSequence: review.attemptSequence,
+            eventKind: "review-suggestion-published",
+            payload: {
+              suggestionId: request.suggestionId,
+              publicationId: request.publicationId
+            },
+            payloadSchema: ReviewSuggestionPublishedPayload,
+            occurredAt: request.publishedAt
+          })
+        })
+      ).pipe(mapPersistenceOperation("agent-job.record-review-suggestion-publication"))
     }),
 
     failAttempt: Effect.fn("AgentJobRepository.failAttempt")(function*(input: typeof FailAgentAttemptInput.Type) {

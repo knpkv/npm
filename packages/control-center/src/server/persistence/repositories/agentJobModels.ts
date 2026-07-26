@@ -3,8 +3,15 @@ import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessi
 import * as Schema from "effect/Schema"
 
 import { ReviewAgentProfile } from "../../../api/agent.js"
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
-import { PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
+import {
+  AgentThreadId,
+  GovernedActionId,
+  JobId,
+  ReleaseId,
+  ReviewSuggestionPublicationReservationId,
+  WorkspaceId
+} from "../../../domain/identifiers.js"
+import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 
 /** Maximum persisted provider output across one attempt. */
@@ -190,6 +197,62 @@ export const CompleteAgentReviewInput = Schema.Struct({
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
 
+/** Digest binding one durable publication reservation to the exact confirmed body. */
+export const ReviewSuggestionPublicationDigest = Schema.String.check(
+  Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
+).pipe(Schema.brand("ReviewSuggestionPublicationDigest"))
+export type ReviewSuggestionPublicationDigest = typeof ReviewSuggestionPublicationDigest.Type
+
+/** Atomic pre-provider reservation for one suggestion and exact confirmed body. */
+export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId,
+  reservedAt: UtcTimestamp
+})
+export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
+
+/** Durable result of reserving an exact publication body. */
+export const ReviewSuggestionPublicationReservation = Schema.Union([
+  Schema.TaggedStruct("acquired", {}),
+  Schema.TaggedStruct("in-progress", {}),
+  Schema.TaggedStruct("recoverable", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp,
+    reservationId: ReviewSuggestionPublicationReservationId
+  }),
+  Schema.TaggedStruct("published", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp
+  })
+])
+export type ReviewSuggestionPublicationReservation = typeof ReviewSuggestionPublicationReservation.Type
+
+/** Release one exact reservation after a confirmed provider no-write outcome. */
+export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId
+})
+export type ReleaseReviewSuggestionPublicationInput = typeof ReleaseReviewSuggestionPublicationInput.Type
+
+/** Successful governed publication to overlay onto one immutable review report. */
+export const RecordReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest,
+  reservationId: ReviewSuggestionPublicationReservationId,
+  publicationId: GovernedActionId,
+  publishedAt: UtcTimestamp,
+  finalize: Schema.optionalKey(Schema.Boolean)
+})
+export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
+
 /** Workspace-scoped lookup for one durable review result. */
 export const AgentReviewResultInput = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -255,6 +318,7 @@ export const AgentThreadEvent = Schema.Struct({
     "progress",
     "usage",
     "review-report",
+    "review-suggestion-published",
     "job-completed",
     "job-failed",
     "cancel-requested"
