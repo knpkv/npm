@@ -140,8 +140,9 @@ session duration should be at least the selected Review Agent Profile budget.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, blocked-network policy,
 and sbx runtime before enqueue. The selected model explores the complete project exclusively through
-the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match added
-lines are retained; investigation remains live activity. A suggestion has one host-resolved line,
+the Review Sandbox tools. Only schema-valid suggestions whose path, range, and excerpt match immutable
+diff evidence are retained; line suggestions use added lines, while file suggestions may use deleted
+base-side lines for deletion-only changes. Investigation remains live activity. A suggestion has one host-resolved line,
 file, or whole-change anchor, with repeated occurrences grouped as Related Locations. File anchors use
 the first added line and fall back to line 1. Exact-head Suggested Replacements remain inert unified
 diffs and must pass `git apply --check` against the sandboxed head, while recurring high-impact

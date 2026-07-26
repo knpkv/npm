@@ -104,7 +104,9 @@ Review Evidence identifies its kind and records enough bounded data to reproduce
 
 The current presentation contract stores host-resolved line, file, and
 whole-change anchors. File anchors record the first added line, or line 1 when a
-file has no added hunk. Suggestion state is host-owned and filterable; models
+file has no added hunk. Line evidence must match the immutable reviewed head;
+file-scoped evidence may instead match a deleted range in the immutable base so
+deletion-only changes remain reviewable. Suggestion state is host-owned and filterable; models
 cannot author it. Repeated occurrences are stored as Related Locations under
 one root cause. Suggested Replacements carry the exact reviewed head, a unified
 diff, and an explanation. Review Notes have independent host-derived identities

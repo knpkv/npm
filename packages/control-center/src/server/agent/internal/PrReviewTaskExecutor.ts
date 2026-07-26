@@ -3,7 +3,7 @@
  *
  * The selected Effect AI model can inspect the project only through the typed
  * sandbox toolkit. Model output crosses a strict schema boundary and every
- * published suggestion is then matched to exact added-line source evidence.
+ * published suggestion is then matched to exact immutable diff evidence.
  *
  * @module
  */
@@ -61,7 +61,7 @@ interface ReviewOutputAccumulator {
   readonly outputBytes: number
 }
 
-interface AddedLineInterval {
+interface DiffLineInterval {
   readonly endLine: number
   readonly startLine: number
 }
@@ -122,22 +122,25 @@ const utf8Bytes = (
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 const textEncoder = new TextEncoder()
 
-const addedLineIntervals = (diff: string): ReadonlyArray<AddedLineInterval> => {
-  const intervals = new Array<AddedLineInterval>()
+const diffLineIntervals = (
+  diff: string,
+  side: "base" | "head"
+): ReadonlyArray<DiffLineInterval> => {
+  const intervals = new Array<DiffLineInterval>()
   for (const line of diff.split("\n")) {
-    const match = /^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@/u.exec(line)
-    const startText = match?.[1]
+    const match = /^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@/u.exec(line)
+    const startText = match?.[side === "base" ? 1 : 3]
     if (startText === undefined) continue
     const startLine = Number(startText)
-    const count = Number(match?.[2] ?? "1")
+    const count = Number(match?.[side === "base" ? 2 : 4] ?? "1")
     if (!Number.isSafeInteger(startLine) || !Number.isSafeInteger(count) || count <= 0) continue
     intervals.push({ startLine, endLine: startLine + count - 1 })
   }
   return intervals
 }
 
-const rangeIsAdded = (
-  intervals: ReadonlyArray<AddedLineInterval>,
+const rangeIsChanged = (
+  intervals: ReadonlyArray<DiffLineInterval>,
   startLine: number,
   endLine: number
 ): boolean => intervals.some((interval) => startLine >= interval.startLine && endLine <= interval.endLine)
@@ -155,22 +158,30 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
   if (diff.exitCode !== 0 || diff.stdout.truncated || diff.stdout.artifactId !== null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion diff evidence was unavailable.", false)
   }
-  if (
-    !rangeIsAdded(
-      addedLineIntervals(diff.stdout.text),
+  const isAddedEvidence = rangeIsChanged(
+    diffLineIntervals(diff.stdout.text, "head"),
+    suggestion.evidence.startLine,
+    suggestion.evidence.endLine
+  )
+  const isFileDeletionEvidence = suggestion.anchor._tag === "file" &&
+    rangeIsChanged(
+      diffLineIntervals(diff.stdout.text, "base"),
       suggestion.evidence.startLine,
       suggestion.evidence.endLine
     )
-  ) {
+  if (!isAddedEvidence && !isFileDeletionEvidence) {
     return yield* providerFailure(
       providerId,
       "protocol",
-      "Suggestion evidence did not target an added line in the immutable diff.",
+      "Suggestion evidence did not target an eligible changed line in the immutable diff.",
       false
     )
   }
+  const evidenceRevision = isAddedEvidence
+    ? session.headRevision
+    : session.baseRevision
   const source = yield* session.runCommand(
-    `git show ${shellQuote(`${session.headRevision}:${path}`)} | ` +
+    `git show ${shellQuote(`${evidenceRevision}:${path}`)} | ` +
       `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
   if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifactId !== null) {
@@ -241,7 +252,7 @@ const resolveAnchor = Effect.fn("PrReviewTaskExecutor.resolveAnchor")(function*(
   const anchor: PrReviewSuggestionAnchor = {
     _tag: "file",
     path: suggestion.anchor.path,
-    line: addedLineIntervals(diff.stdout.text)[0]?.startLine ?? 1
+    line: diffLineIntervals(diff.stdout.text, "head")[0]?.startLine ?? 1
   }
   return anchor
 })

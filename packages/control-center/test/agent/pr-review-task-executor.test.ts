@@ -515,8 +515,10 @@ describe("PR review task executor", () => {
       const path = yield* Path.Path
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-replacement-" })
       const sourcePath = path.join(root, EVIDENCE_PATH)
+      const deletedPath = path.join(root, "packages/control-center/src/deleted.ts")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
       yield* fileSystem.writeFileString(path.join(root, "AGENTS.md"), "# Review instructions\n")
+      yield* fileSystem.writeFileString(deletedPath, "const obsolete = true\n")
       const source = (unsafe: string) =>
         `${Array.from({ length: 41 }, (_, index) => `// line ${String(index + 1)}`).join("\n")}\n` +
         `const unsafe = ${unsafe}\n`
@@ -524,7 +526,8 @@ describe("PR review task executor", () => {
 
       const initialize = yield* runShellCommand(
         root,
-        "git init --quiet && git add -- AGENTS.md packages/control-center/src/review.ts && " +
+        "git init --quiet && git add -- AGENTS.md packages/control-center/src/review.ts " +
+          "packages/control-center/src/deleted.ts && " +
           "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m base"
       )
       assert.strictEqual(initialize.exitCode, 0, initialize.stderr.text)
@@ -537,11 +540,13 @@ describe("PR review task executor", () => {
       const baseRevision = base.stdout.text.trim()
 
       yield* fileSystem.writeFileString(sourcePath, source("true"))
+      yield* fileSystem.remove(deletedPath)
       const unterminatedPath = path.join(root, "packages/control-center/src/unterminated.ts")
       yield* fileSystem.writeFileString(unterminatedPath, "const finalLine = true")
       const commitHead = yield* runShellCommand(
         root,
-        "git add -- packages/control-center/src/review.ts packages/control-center/src/unterminated.ts && " +
+        "git add --all -- packages/control-center/src/review.ts packages/control-center/src/unterminated.ts " +
+          "packages/control-center/src/deleted.ts && " +
           "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m head"
       )
       assert.strictEqual(commitHead.exitCode, 0, commitHead.stderr.text)
@@ -665,6 +670,25 @@ describe("PR review task executor", () => {
           label: "Unterminated final line"
         }]
       )
+
+      const deletionOnlyFile = yield* execute({
+        ...suggestion,
+        anchor: {
+          _tag: "file",
+          path: PrReviewPath.make("packages/control-center/src/deleted.ts")
+        },
+        evidence: {
+          path: PrReviewPath.make("packages/control-center/src/deleted.ts"),
+          startLine: 1,
+          endLine: 1,
+          excerpt: "const obsolete = true"
+        }
+      })
+      assert.deepStrictEqual(deletionOnlyFile.result.suggestions[0]?.anchor, {
+        _tag: "file",
+        path: PrReviewPath.make("packages/control-center/src/deleted.ts"),
+        line: 1
+      })
     }).pipe(
       Effect.provide(NodeServices.layer),
       Effect.scoped
