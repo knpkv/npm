@@ -4,7 +4,7 @@ import {
   AgentContextFingerprint,
   AgentProviderId,
   type AgentRuntimeEvent,
-  type DeterministicLanguageModelScript,
+  type DeterministicLanguageModelTurn,
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
@@ -39,11 +39,14 @@ import {
   PrReviewTaskExecutor,
   prReviewTaskExecutorLayer
 } from "../../src/server/agent/internal/PrReviewTaskExecutor.js"
+import { PrReviewThreadHistory } from "../../src/server/agent/internal/PrReviewThreadHistory.js"
 import {
   AgentAttemptSequence,
+  AgentEventCursor,
   AgentJobPrompt,
   AgentLeaseOwner,
   AgentLeaseToken,
+  AgentThreadEvent,
   type ClaimedAgentJob,
   EMPTY_PR_REVIEW_THREAD_CONTEXT,
   PrReviewThreadContextSnapshot
@@ -180,7 +183,7 @@ const completeScript = (
     notes: []
   },
   reviewSubject: PrReviewSubject = subject
-): DeterministicLanguageModelScript => [
+): ReadonlyArray<DeterministicLanguageModelTurn> => [
   {
     _tag: "response",
     parts: response({
@@ -434,7 +437,18 @@ const runExecutor = <Success, Failure>(
   use: Effect.Effect<Success, Failure, PrReviewTaskExecutor>,
   diff?: string,
   sourceExcerpt?: string,
-  sessionLayer?: Layer.Layer<PrReviewSandboxSessions>
+  sessionLayer?: Layer.Layer<PrReviewSandboxSessions>,
+  historyLayer: Layer.Layer<PrReviewThreadHistory> = Layer.succeed(
+    PrReviewThreadHistory,
+    PrReviewThreadHistory.of({
+      page: ({ after }) =>
+        Effect.succeed({
+          event: null,
+          hasMore: false,
+          nextCursor: after
+        })
+    })
+  )
 ) => {
   const fake = makeDeterministicLanguageModel(script)
   return Effect.gen(function*() {
@@ -463,7 +477,8 @@ const runExecutor = <Success, Failure>(
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
-          Layer.provide(sessionLayer ?? makeSessionLayer(observation, diff, sourceExcerpt))
+          Layer.provide(sessionLayer ?? makeSessionLayer(observation, diff, sourceExcerpt)),
+          Layer.provide(historyLayer)
         )
       )
     )
@@ -476,6 +491,65 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("pages fenced durable thread history only through the explicit tool", () => {
+    const observedCursors = new Array<number>()
+    const historyLayer = Layer.succeed(
+      PrReviewThreadHistory,
+      PrReviewThreadHistory.of({
+        page: ({ after }) =>
+          Effect.sync(() => {
+            observedCursors.push(after)
+            return {
+              event: {
+                eventSequence: AgentEventCursor.make(7),
+                jobId: JOB_ID,
+                attemptSequence: null,
+                eventKind: Schema.decodeSync(AgentThreadEvent.fields.eventKind)("user-message"),
+                payload: { prompt: "Re-check the transaction boundary." },
+                occurredAt: Schema.decodeSync(UtcTimestamp)("2026-07-24T09:00:00.000Z")
+              },
+              hasMore: false,
+              nextCursor: AgentEventCursor.make(7)
+            }
+          })
+      })
+    )
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const script: ReadonlyArray<DeterministicLanguageModelTurn> = [{
+      _tag: "response",
+      parts: response({
+        id: "read-thread-history",
+        name: "ReviewReadThreadHistory",
+        params: { after: 0 },
+        type: "tool-call"
+      })
+    }, ...completeScript()]
+
+    return runExecutor(
+      script,
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      undefined,
+      historyLayer
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.strictEqual(result.suggestions.length, 1)
+          assert.deepStrictEqual(observedCursors, [0])
+        })
+      )
+    )
+  })
+
   it.effect("reserves durable report space for host-authored metadata", () => {
     const note = (index: number) => ({
       reason: "low-confidence",

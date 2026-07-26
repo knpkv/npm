@@ -10,6 +10,7 @@ import {
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import {
+  AgentThreadId,
   GovernedActionId,
   JobId,
   PluginConnectionId,
@@ -560,6 +561,52 @@ describe("agent job review results", () => {
         assert.isAtMost(rows[0]!.contextBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
         assert.isAtMost(rows[0]!.taskBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
         assert.isAtMost(rows[0]!.queuedBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
+      })
+    ))
+
+  it.effect("fences explicit history before the current run even for a fabricated cursor", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        const priorJobId = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000005c")
+        const currentJobId = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000005d")
+        const futureJobId = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000005e")
+        yield* enqueueReviewFor(priorJobId, subject, "Review the first head.")
+        yield* enqueueReviewFor(currentJobId, advancedSubject, "Review the current head.")
+        yield* enqueueReviewFor(
+          futureJobId,
+          { ...advancedSubject, headRevision: "5".repeat(40) },
+          "Review the future head."
+        )
+        const rows = yield* database.sql<{ readonly threadId: string }>`SELECT
+          thread_id AS threadId
+        FROM agent_jobs
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND job_id = ${currentJobId}`
+        assert.strictEqual(rows.length, 1)
+        const threadId = AgentThreadId.make(rows[0]!.threadId)
+
+        const history = yield* jobs.reviewThreadHistory({
+          workspaceId: WORKSPACE_ID,
+          threadId,
+          beforeJobId: currentJobId,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)
+        })
+        assert.strictEqual(history.events.length, 2)
+        assert.isTrue(history.events.every(({ jobId }) => jobId === priorJobId))
+
+        const fabricated = yield* jobs.reviewThreadHistory({
+          workspaceId: WORKSPACE_ID,
+          threadId,
+          beforeJobId: currentJobId,
+          after: AgentEventCursor.make(999),
+          limit: AgentThreadEventPageSize.make(MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE)
+        })
+        assert.deepStrictEqual(fabricated.events, [])
+        assert.strictEqual(fabricated.nextCursor, AgentEventCursor.make(999))
       })
     ))
 

@@ -36,6 +36,7 @@ import {
 } from "./internal/AgentJobTaskExecutor.js"
 import type { PrReviewSandboxSessions } from "./internal/PrReviewSandboxSession.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
+import { prReviewThreadHistoryLayer } from "./internal/PrReviewThreadHistory.js"
 
 /** Worker lease policy fixed when the server composes the module. */
 export interface AgentJobWorkerOptions {
@@ -411,7 +412,11 @@ export const agentJobWorkerWithPrReviewLayer = (
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
       reviewEnabledTaskExecutorLayer.pipe(
-        Layer.provide(prReviewTaskExecutorLayer)
+        Layer.provide(
+          prReviewTaskExecutorLayer.pipe(
+            Layer.provide(prReviewThreadHistoryLayer)
+          )
+        )
       )
     )
   )
@@ -427,7 +432,11 @@ export const prReviewAgentJobWorkerLayer = (
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
       prReviewOnlyTaskExecutorLayer.pipe(
-        Layer.provide(prReviewTaskExecutorLayer)
+        Layer.provide(
+          prReviewTaskExecutorLayer.pipe(
+            Layer.provide(prReviewThreadHistoryLayer)
+          )
+        )
       )
     )
   )

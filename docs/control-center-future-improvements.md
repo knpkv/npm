@@ -28,7 +28,6 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Pull-request review threads
 
-- Add an agent-callable, cursor-paged full-history lookup tool. The first durable-thread slice freezes bounded prior requests and run summaries into each immutable job and exposes paged history to the browser, but does not place the full transcript in model context.
 - Persist large command artifacts under the documented retention policy and expose explicit page/search tools across recovered runs. Current sbx command artifacts are deliberately session-local and disappear with the sandbox.
 - Capture the installed provider CLI name and version as sanitized run metadata. The durable thread currently records provider, model, Review Agent Profile, sandbox activity, reports, and terminal outcome but not a separately probed CLI version.
 - Add browser pagination or virtualization beyond the first bounded thread page, and keep prior history visible when a synchronized pull request temporarily lacks the release or exact revision data required to launch a new review.

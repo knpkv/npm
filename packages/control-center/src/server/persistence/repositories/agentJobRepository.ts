@@ -5,6 +5,7 @@ import {
   renderAgentJobClaimQuery,
   renderAgentJobDispatchCandidatesQuery,
   renderAgentReviewContextEventsQuery,
+  renderAgentReviewThreadHistoryQuery,
   renderAgentThreadReplayQuery,
   renderAgentThreadTailQuery,
   renderLatestAgentReviewQuery
@@ -38,12 +39,12 @@ import {
   PersistenceOperationError,
   RecordNotFoundError
 } from "../errors.js"
-import type { AgentJobPrompt, PrReviewThreadSubject } from "./agentJobModels.js"
 import {
   AgentAttemptSequence,
   AgentContextSnapshotRecord,
   AgentEventCursor,
   AgentJobInputError,
+  type AgentJobPrompt,
   AgentJobState,
   AgentJobTask,
   AgentJobTaskTag,
@@ -51,8 +52,10 @@ import {
   AgentReviewResultInput,
   AgentReviewResultRecord,
   AgentReviewThreadAfterInput,
+  AgentReviewThreadHistoryInput,
   AgentReviewThreadTailInput,
   AgentThreadEvent,
+  type AgentThreadEventPage,
   AgentThreadEventPageSize,
   AppendAgentEventInput,
   ClaimAgentJobInput,
@@ -64,6 +67,7 @@ import {
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
   PrReviewThreadContextSnapshot,
+  type PrReviewThreadSubject,
   RecordReviewSuggestionPublicationInput,
   ReleaseReviewSuggestionPublicationInput,
   ReserveReviewSuggestionPublicationInput,
@@ -2268,6 +2272,33 @@ const makeAgentJobRepository = Effect.gen(function*() {
         request.after,
         request.limit
       )
+    }),
+
+    reviewThreadHistory: Effect.fn("AgentJobRepository.reviewThreadHistory")(function*(
+      input: typeof AgentReviewThreadHistoryInput.Type
+    ) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(AgentReviewThreadHistoryInput)
+      )(input)
+      const history = renderAgentReviewThreadHistoryQuery({
+        workspaceId: request.workspaceId,
+        threadId: request.threadId,
+        beforeJobId: request.beforeJobId,
+        afterSequence: request.after,
+        limit: request.limit
+      })
+      const rows = yield* sql
+        .unsafe<Record<string, unknown>>(history.sql, [...history.params])
+        .pipe(mapPersistenceOperation("agent-job.review-thread-history"))
+      const events = yield* decodeThreadEventRows(
+        request.workspaceId,
+        request.threadId,
+        rows
+      )
+      return {
+        events,
+        nextCursor: events.at(-1)?.eventSequence ?? request.after
+      } satisfies AgentThreadEventPage
     }),
 
     reviewThreadTail: Effect.fn("AgentJobRepository.reviewThreadTail")(function*(
