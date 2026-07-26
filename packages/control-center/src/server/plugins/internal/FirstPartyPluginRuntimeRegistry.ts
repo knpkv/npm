@@ -937,8 +937,8 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
       })
   }
   const configurationInput = Option.isSome(
-    Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)
-  )
+      Schema.decodeUnknownOption(ConfluencePageAdapterConfiguration)(configurationWithCachedIdentity)
+    )
     ? configurationWithCachedIdentity
     : storedConfigurationInput
   const apiClient = ConfluenceApiClient.layer.pipe(
