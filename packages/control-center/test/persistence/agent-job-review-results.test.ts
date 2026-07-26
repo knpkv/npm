@@ -1,10 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { AgentContextFingerprint, AgentProviderId } from "@knpkv/ai-runtime"
+import { AgentContextFingerprint, AgentProviderId, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES } from "@knpkv/ai-runtime"
 import { DateTime, Effect, Layer, Option, Result, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
-import { type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
+import {
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
+  type ReviewAgentProfile,
+  ReviewAgentProfileId
+} from "../../src/api/agent.js"
 import {
   GovernedActionId,
   JobId,
@@ -396,7 +400,11 @@ describe("agent job review results", () => {
             ...subject,
             headRevision: String(index + 3).repeat(40)
           } satisfies PrReviewSubject
-          yield* enqueueReviewFor(jobId, runSubject, "p".repeat(2_500))
+          yield* enqueueReviewFor(
+            jobId,
+            runSubject,
+            "p".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+          )
           yield* TestClock.setTime(DateTime.toEpochMillis(T1))
           const leaseToken = AgentLeaseToken.make(String(index + 3).repeat(64))
           const claimed = yield* jobs.claimNext({
@@ -459,8 +467,8 @@ describe("agent job review results", () => {
         WHERE job.workspace_id = ${WORKSPACE_ID}
           AND job.job_id = ${followUpJobId}`
         assert.strictEqual(rows.length, 1)
-        assert.isAtMost(rows[0]!.taskBytes, 32_768)
-        assert.isAtMost(rows[0]!.queuedBytes, 32_768)
+        assert.isAtMost(rows[0]!.taskBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
+        assert.isAtMost(rows[0]!.queuedBytes, MAXIMUM_AGENT_RUNTIME_EVENT_BYTES)
       })
     ))
 

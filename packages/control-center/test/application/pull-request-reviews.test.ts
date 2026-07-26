@@ -1809,8 +1809,10 @@ describe("pull request reviews", () => {
           limit: 128
         })
         const queued = page.events.find(({ _tag }) => _tag === "run-queued")
-        assert.strictEqual(queued?._tag, "run-queued")
-        if (queued?._tag === "run-queued") assert.isNull(queued.model)
+        if (queued?._tag !== "run-queued") {
+          return yield* Effect.die("queued review event missing")
+        }
+        assert.isNull(queued.model)
       })
     ))
 })
