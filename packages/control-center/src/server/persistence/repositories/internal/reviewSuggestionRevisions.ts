@@ -14,6 +14,7 @@ import {
 import { PrReviewSuggestion, type PrReviewSuggestionId } from "../../../../domain/prReview.js"
 import {
   hasSamePrReviewTechnicalClaim,
+  MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
   PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
   PrReviewSuggestionRequiresRevalidation,
@@ -172,15 +173,22 @@ export const makeReviewSuggestionRevisionOperations = <
 
   const encodeRevision = Effect.fn(
     "ReviewSuggestionRevisions.encodeRevision"
-  )(function*(revision: PrReviewSuggestionRevision) {
+  )(function*(
+    workspaceId: WorkspaceId,
+    revision: PrReviewSuggestionRevision
+  ) {
     const json = yield* Schema.encodeUnknownEffect(
       Schema.fromJsonString(PrReviewSuggestionRevision)
     )(revision).pipe(
       Effect.mapError(() => operationFailure("agent-job.encode-review-revision"))
     )
     const bytes = yield* bytesFromText(json)
-    if (bytes.length > 65_536) {
-      return yield* operationFailure("agent-job.review-revision-too-large")
+    if (bytes.length > MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES) {
+      return yield* new AgentJobInputError({
+        workspaceId,
+        jobId: revision.sourceJobId,
+        reason: "output-limit-exceeded"
+      })
     }
     return {
       json,
@@ -537,6 +545,20 @@ export const makeReviewSuggestionRevisionOperations = <
           Effect.mapError(() => operationFailure("agent-job.encode-requested-review-edit"))
         )
         if (currentEditJson === requestedEditJson) return current
+        const activePublication = yield* sql`SELECT 1
+          FROM agent_review_suggestion_publications
+          WHERE workspace_id = ${request.workspaceId}
+            AND job_id = ${request.jobId}
+            AND suggestion_id = ${request.suggestionId}
+            AND state = 'reserved'
+          LIMIT 1`
+        if (activePublication.length > 0) {
+          return yield* new AgentJobInputError({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            reason: "invalid-transition"
+          })
+        }
         if (
           current.suggestion.state !== "draft" ||
           (
@@ -594,7 +616,7 @@ export const makeReviewSuggestionRevisionOperations = <
             }),
           catch: () => operationFailure("agent-job.review-revision-invalid")
         })
-        const encoded = yield* encodeRevision(revision)
+        const encoded = yield* encodeRevision(request.workspaceId, revision)
         yield* sql`INSERT INTO agent_review_suggestion_revisions (
           workspace_id, source_job_id, suggestion_id, revision_sequence,
           revision_id, predecessor_revision_id, revision_json,

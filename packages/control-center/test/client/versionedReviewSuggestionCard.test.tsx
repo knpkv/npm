@@ -152,6 +152,8 @@ describe("VersionedReviewSuggestionCard", () => {
     const host = await renderCard(transport)
     expect(host.textContent).toContain("Revision 1")
     expect(host.textContent).toContain("Validated")
+    expect([...host.querySelectorAll("span")].some(({ textContent }) => textContent === "Operator")).toBe(true)
+    expect([...host.querySelectorAll("span")].some(({ textContent }) => textContent === "You")).toBe(false)
     await click("Edit")
     const title = document.querySelector<HTMLInputElement>("input")
     if (title === null) throw new Error("Title editor missing")

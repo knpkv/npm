@@ -9,6 +9,9 @@ import { UtcTimestamp } from "./utcTimestamp.js"
 /** Maximum revisions returned by one bounded history page. */
 export const MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_PAGE_SIZE = 128
 
+/** Maximum UTF-8 JSON size of one complete durable suggestion revision. */
+export const MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES = 65_536
+
 /** Strictly positive aggregate-local suggestion revision sequence. */
 export const PrReviewSuggestionRevisionSequence = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })

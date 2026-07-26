@@ -17,7 +17,7 @@ import type { ReviewSuggestionPublicationTarget } from "./usePullRequestReview.j
 import styles from "./WorkspacePullRequestDetails.module.css"
 
 const authorLabel = (author: PrReviewSuggestionRevisionAuthor): string =>
-  author._tag === "operator" ? "You" : author.providerId
+  author._tag === "operator" ? "Operator" : author.providerId
 
 /** Enrich one immediate review-report card with its durable current revision. */
 export const VersionedReviewSuggestionCard = ({

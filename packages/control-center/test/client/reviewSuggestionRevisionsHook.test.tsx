@@ -290,7 +290,78 @@ describe("useReviewSuggestionRevisions", () => {
 
     expect(latest.current._tag).toBe("ready")
     if (latest.current._tag === "ready") {
+      expect(latest.current.page.current.sequence).toBe(3)
+      expect(latest.current.page.revisions.map(({ sequence }) => sequence)).toEqual([2, 1])
+    }
+  })
+
+  it("adopts a concurrently appended current revision and retains the displaced current", async () => {
+    const fourth = revision(4, "Newest concurrent edit")
+    const third = revision(3, "Previously displayed edit")
+    const second = revision(2)
+    const first = revision(1)
+    const transport: ReviewSuggestionRevisionTransport = {
+      load: vi
+        .fn()
+        .mockResolvedValueOnce(page(third, [second], true))
+        .mockResolvedValueOnce(page(fourth, [second, first])),
+      edit: () => Promise.reject(new Error("Unexpected edit"))
+    }
+    const latest: { current: ReviewSuggestionRevisionState } = {
+      current: { _tag: "idle" }
+    }
+    await mount(scope(), transport, (state) => {
+      latest.current = state
+    })
+    await act(async () => undefined)
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-earlier]")?.click())
+    await act(async () => undefined)
+
+    expect(latest.current._tag).toBe("ready")
+    if (latest.current._tag === "ready") {
+      expect(latest.current.page.current.sequence).toBe(4)
       expect(latest.current.page.revisions.map(({ sequence }) => sequence)).toEqual([3, 2, 1])
+    }
+  })
+
+  it("preserves a conflict draft across failed and successful history reads", async () => {
+    const original = revision(1)
+    const winner = revision(2, "Another edit won")
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(page(original))
+      .mockResolvedValueOnce(page(winner, [original], true))
+      .mockRejectedValueOnce(new Error("History temporarily unavailable"))
+      .mockResolvedValueOnce(page(winner, [original]))
+    const transport: ReviewSuggestionRevisionTransport = {
+      load,
+      edit: () => Promise.reject({ _tag: "ConflictApiError" })
+    }
+    const latest: { current: ReviewSuggestionRevisionState } = {
+      current: { _tag: "idle" }
+    }
+    await mount(scope(), transport, (state) => {
+      latest.current = state
+    })
+    await act(async () => undefined)
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-save]")?.click())
+    await act(async () => undefined)
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-earlier]")?.click())
+    await act(async () => undefined)
+
+    expect(latest.current._tag).toBe("conflict")
+    if (latest.current._tag === "conflict") {
+      expect(latest.current.draft.title).toBe(EDIT.title)
+    }
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-retry]")?.click())
+    expect(load).toHaveBeenCalledTimes(3)
+    await act(async () => host?.querySelector<HTMLButtonElement>("[data-earlier]")?.click())
+    await act(async () => undefined)
+
+    expect(latest.current._tag).toBe("conflict")
+    if (latest.current._tag === "conflict") {
+      expect(latest.current.draft.title).toBe(EDIT.title)
+      expect(latest.current.page.current.sequence).toBe(2)
     }
   })
 })

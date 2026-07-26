@@ -22,6 +22,7 @@ import {
 } from "../../src/domain/identifiers.js"
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
 import {
+  MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
   PrReviewSuggestionEdit,
   PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevisionPageSize
@@ -505,6 +506,74 @@ describe("agent job review results", () => {
         })
         assert.strictEqual(unchanged.current.revisionId, original.revisionId)
         assert.deepStrictEqual(unchanged.revisions, [])
+      })
+    ))
+
+  it.effect("rejects an oversized revision as a typed input error", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        const path = (index: number) => `${String(index).padStart(2, "0")}/${"x".repeat(1_000)}`
+        const oversizedEdit = Schema.decodeUnknownSync(
+          PrReviewSuggestionEdit
+        )({
+          ...suggestion,
+          relatedLocations: Array.from({ length: 32 }, (_, index) => ({
+            path: path(index + 40),
+            startLine: index + 1,
+            endLine: index + 1,
+            label: "l".repeat(500)
+          })),
+          prevention: {
+            summary: "Bound the complete revision before persistence.",
+            enforcement: "test",
+            existingRuleOrConfig: "agent job repository integration suite",
+            recurrenceEvidence: "r".repeat(2_000),
+            targetFile: path(99),
+            sourcePaths: Array.from({ length: 32 }, (_, index) => path(index)),
+            matcherOrInvariant: "m".repeat(4_000),
+            invalidFixture: "i".repeat(8_000),
+            validFixture: "v".repeat(8_000),
+            boundary: "b".repeat(4_000)
+          }
+        })
+        assert.isAbove(
+          new TextEncoder().encode(JSON.stringify(oversizedEdit)).byteLength,
+          MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES
+        )
+
+        const result = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: oversizedEdit,
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T3
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.instanceOf(result.failure, AgentJobInputError)
+          assert.strictEqual(
+            result.failure.reason,
+            "output-limit-exceeded"
+          )
+        }
+        const unchanged = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        assert.strictEqual(unchanged.revisionId, original.revisionId)
       })
     ))
 
@@ -1161,6 +1230,94 @@ describe("agent job review results", () => {
         })
         assert.strictEqual(
           page.events.filter(({ eventKind }) => eventKind === "review-suggestion-published").length,
+          1
+        )
+      })
+    ))
+
+  it.effect("blocks edits until an in-flight publication is finalized", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const revision = yield* currentSuggestionRevision(
+          suggestion.suggestionId
+        )
+        yield* jobs.reserveReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          reservedAt: T3
+        })
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: false
+        })
+
+        const edit = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: revision.revisionId,
+          expectedSequence: revision.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "Do not race an in-flight publication"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T4
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(edit))
+        if (Result.isFailure(edit)) {
+          assert.instanceOf(edit.failure, AgentJobInputError)
+          assert.strictEqual(edit.failure.reason, "invalid-transition")
+        }
+
+        yield* jobs.recordReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          revisionId: revision.revisionId,
+          contentDigest: CONTENT_DIGEST,
+          reservationId: RESERVATION_ID,
+          publicationId: PUBLICATION_ID,
+          publishedAt: T3,
+          finalize: true
+        })
+        const reloaded = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.strictEqual(
+          reloaded.report.suggestions[0]?.state,
+          "published"
+        )
+        const thread = yield* jobs.reviewThreadAfter({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        assert.strictEqual(
+          thread.events.filter(
+            ({ eventKind }) => eventKind === "review-suggestion-published"
+          ).length,
           1
         )
       })

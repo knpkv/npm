@@ -109,14 +109,21 @@ const mergePages = (
   retained: ReviewSuggestionRevisionPage,
   earlier: ReviewSuggestionRevisionPage
 ): ReviewSuggestionRevisionPage => {
+  const current = earlier.current.sequence > retained.current.sequence
+    ? earlier.current
+    : retained.current
   const revisions = new Map(
-    [...retained.revisions, ...earlier.revisions].map((revision) => [
-      revision.revisionId,
-      revision
-    ])
+    [
+      retained.current,
+      earlier.current,
+      ...retained.revisions,
+      ...earlier.revisions
+    ]
+      .filter(({ revisionId }) => revisionId !== current.revisionId)
+      .map((revision) => [revision.revisionId, revision])
   )
   return {
-    current: retained.current,
+    current,
     revisions: [...revisions.values()].sort(
       (left, right) => right.sequence - left.sequence
     ),
@@ -238,6 +245,7 @@ export const useReviewSuggestionRevisions = (
     ) return
     const current = scope
     const retained = state.page
+    const retainedDraft = state._tag === "conflict" ? state.draft : null
     const abort = new AbortController()
     activeAbort.current = abort
     transport.load(
@@ -251,7 +259,12 @@ export const useReviewSuggestionRevisions = (
           latestScope.current === null ||
           !sameScope(latestScope.current, current)
         ) return
-        setState({ _tag: "ready", page: mergePages(retained, page) })
+        const merged = mergePages(retained, page)
+        setState(
+          retainedDraft === null
+            ? { _tag: "ready", page: merged }
+            : { _tag: "conflict", draft: retainedDraft, page: merged }
+        )
       },
       () => {
         if (
@@ -259,14 +272,29 @@ export const useReviewSuggestionRevisions = (
           latestScope.current === null ||
           !sameScope(latestScope.current, current)
         ) return
-        setState({ _tag: "failed", draft: null, page: retained })
+        setState(
+          retainedDraft === null
+            ? { _tag: "failed", draft: null, page: retained }
+            : { _tag: "conflict", draft: retainedDraft, page: retained }
+        )
       }
     )
   }, [scope, state, transport])
 
   return useMemo(() => ({
     loadEarlier,
-    retry: () => setRequestRevision((revision) => revision + 1),
+    retry: () => {
+      if (state._tag === "conflict") return
+      if (
+        state._tag === "failed" &&
+        state.draft !== null &&
+        state.page !== null
+      ) {
+        save(state.draft)
+        return
+      }
+      setRequestRevision((revision) => revision + 1)
+    },
     save,
     state
   }), [loadEarlier, save, state])

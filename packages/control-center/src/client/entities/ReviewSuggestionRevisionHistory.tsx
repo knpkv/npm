@@ -7,7 +7,7 @@ import styles from "./WorkspacePullRequestDetails.module.css"
 
 export const reviewSuggestionRevisionAuthorLabel = (revision: PrReviewSuggestionRevision): string =>
   revision.author._tag === "operator"
-    ? "You"
+    ? "Operator"
     : `${revision.author.providerId}${revision.author.model === null ? "" : ` · ${revision.author.model}`}`
 
 export const reviewSuggestionRevisionValidationLabel = (revision: PrReviewSuggestionRevision): string =>
