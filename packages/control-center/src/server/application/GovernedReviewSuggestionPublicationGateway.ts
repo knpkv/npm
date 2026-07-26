@@ -53,6 +53,8 @@ const unavailable = () => new ReviewSuggestionPublicationGatewayError({ reason: 
 
 const conflict = () => new ReviewSuggestionPublicationGatewayError({ reason: "publication-conflict" })
 
+const rejected = () => new ReviewSuggestionPublicationGatewayError({ reason: "publication-rejected" })
+
 const isGatewayFailure = Schema.is(ReviewSuggestionPublicationGatewayError)
 const mapFailure = Effect.catch((failure) =>
   isGatewayFailure(failure) ? Effect.fail(failure) : Effect.fail(unavailable())
@@ -80,6 +82,15 @@ export const reviewPublicationActionCanAdvance = (
   state === "unknown" ||
   state === "cancel-requested" ||
   state === "cancel-requested-unknown"
+
+/** Terminal states proving that no review comment was published. */
+export const reviewPublicationActionConfirmedNoWrite = (
+  state: GovernedActionRecord["head"]["state"]
+): boolean =>
+  state === "denied" ||
+  state === "expired" ||
+  state === "cancelled" ||
+  state === "failed"
 
 /** Exact immutable proposal request required before an idempotent publication can be recovered. */
 export const reviewPublicationProposalRequestMatches = (
@@ -225,7 +236,11 @@ const makeGateway = Effect.gen(function*() {
           publishedAt: record.head.lineage.receipt.observedAt,
           connectedIdentity: prepared.connectedIdentity
         })
-        : Effect.fail(unavailable())
+        : Effect.fail(
+          reviewPublicationActionConfirmedNoWrite(record.head.state)
+            ? rejected()
+            : unavailable()
+        )
     const prepareAuthorization = Effect.fn(
       "ReviewSuggestionPublicationGateway.prepareAuthorization"
     )(function*(
@@ -353,7 +368,9 @@ const makeGateway = Effect.gen(function*() {
           persistence.governedActions.commit(authorization)
         )
       } else if (!reviewPublicationActionCanAdvance(record.head.state)) {
-        return yield* unavailable()
+        return yield* reviewPublicationActionConfirmedNoWrite(record.head.state)
+          ? rejected()
+          : unavailable()
       }
       return yield* advanceAndRead(envelope.actionId)
     }

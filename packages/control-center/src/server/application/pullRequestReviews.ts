@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
 import {
@@ -316,6 +317,10 @@ const makePullRequestReviews = Effect.gen(function*() {
       ? new ApplicationInvalidRequest()
       : new ApplicationServiceUnavailable({ retryAt: null })
 
+  const publicationFailureConfirmsNoWrite = (
+    failure: ReviewSuggestionPublicationGatewayError
+  ): boolean => failure.reason !== "publication-unavailable"
+
   return PullRequestReviews.of({
     current: Effect.fn("PullRequestReviews.current")(function*(input) {
       const derived = yield* inspectTarget(input)
@@ -492,7 +497,7 @@ const makePullRequestReviews = Effect.gen(function*() {
             : unavailable()
         )
       )
-      const result = yield* publications.publish({
+      const publication = yield* publications.publish({
         target: publicationTarget(input.workspaceId, target),
         jobId: input.request.jobId,
         suggestion: selected.suggestion,
@@ -500,7 +505,22 @@ const makePullRequestReviews = Effect.gen(function*() {
         authorityBinding: input.request.authorityBinding,
         proposingAgent: selected.latest.reviewProfile,
         session: input.session
-      }).pipe(Effect.mapError(mapPublicationFailure))
+      }).pipe(Effect.result)
+      if (Result.isFailure(publication)) {
+        if (publicationFailureConfirmsNoWrite(publication.failure)) {
+          yield* persistence.agentJobs.releaseReviewSuggestionPublication({
+            workspaceId: input.workspaceId,
+            jobId: input.request.jobId,
+            suggestionId: selected.suggestion.suggestionId,
+            contentDigest
+          }).pipe(
+            Effect.mapError(mapPersistenceWriteError),
+            Effect.mapError(() => unavailable())
+          )
+        }
+        return yield* mapPublicationFailure(publication.failure)
+      }
+      const result = publication.success
       yield* persistence.agentJobs.recordReviewSuggestionPublication({
         workspaceId: input.workspaceId,
         jobId: input.request.jobId,

@@ -374,12 +374,22 @@ describe("agent job review results", () => {
         const winningDigest = Schema.decodeUnknownSync(ReviewSuggestionPublicationDigest)(
           rows[0]?.contentDigest
         )
+        yield* jobs.releaseReviewSuggestionPublication({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId,
+          contentDigest: winningDigest
+        })
+        const retryDigest = winningDigest === CONTENT_DIGEST
+          ? ALTERNATE_CONTENT_DIGEST
+          : CONTENT_DIGEST
+        yield* reserve(retryDigest)
         const record = () =>
           jobs.recordReviewSuggestionPublication({
             workspaceId: WORKSPACE_ID,
             jobId: JOB_ID,
             suggestionId,
-            contentDigest: winningDigest,
+            contentDigest: retryDigest,
             publicationId: PUBLICATION_ID,
             publishedAt: T3
           })

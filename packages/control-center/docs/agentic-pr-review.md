@@ -64,7 +64,7 @@ An agent edit preserves prior revisions. An edit that changes the technical clai
 
 Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and file anchors publish at their resolved line; whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
 
-Published comments are snapshots. Before CodeCommit is called, Control Center atomically reserves the suggestion for the exact confirmed content digest. A competing edit is rejected, while an interrupted same-content retry remains compatible with the governed provider idempotency key. A successful provider receipt atomically completes that reservation and appends an immutable local lifecycle event; matching completion retries are no-ops. Durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
+Published comments are snapshots. Before CodeCommit is called, Control Center atomically reserves the suggestion for the exact confirmed content digest. A competing edit is rejected, while an interrupted same-content retry remains compatible with the governed provider idempotency key. Confirmed no-write outcomes release the reservation for an edited retry; unknown outcomes retain it so only the idempotent same-content recovery can proceed. A successful provider receipt atomically completes that reservation and appends an immutable local lifecycle event; matching completion retries are no-ops. Durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
 
 Every posted comment has a compact provenance footer:
 
@@ -96,7 +96,7 @@ Every Review Suggestion contains:
 - Optional Suggested Replacement.
 - Optional Prevention Proposal.
 
-Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch.
+Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions.
 
 Prevention Proposal is allowed only for recurring, high-impact, mechanically enforceable defect classes. It may propose ast-grep, ESLint, a type check, a test, or repository agent instructions, but never changes the repository automatically.
 
@@ -112,6 +112,11 @@ one root cause. Suggested Replacements carry the exact reviewed head, a unified
 diff, and an explanation. Review Notes have independent host-derived identities
 and are never accepted by the publication boundary. This is report schema v3;
 pre-stable v2 reports are intentionally not migrated.
+
+Provider output is admitted only when its conservative host projection still
+fits the durable report envelope. The projection reserves space for subject
+identity, resolved anchors, lifecycle state, suggestion IDs, and note IDs before
+the executor performs evidence validation.
 
 ### Confidence
 

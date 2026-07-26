@@ -206,6 +206,15 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
 })
 export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSuggestionPublicationInput.Type
 
+/** Release one exact reservation after a confirmed provider no-write outcome. */
+export const ReleaseReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  contentDigest: ReviewSuggestionPublicationDigest
+})
+export type ReleaseReviewSuggestionPublicationInput = typeof ReleaseReviewSuggestionPublicationInput.Type
+
 /** Successful governed publication to overlay onto one immutable review report. */
 export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,

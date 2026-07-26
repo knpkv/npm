@@ -340,6 +340,28 @@ const stableNoteId = Effect.fn("PrReviewTaskExecutor.stableNoteId")(function*(
   )
 })
 
+const projectedReportBytes = (
+  subject: PrReviewSubject,
+  modelReport: typeof ModelReviewReport.Type
+): number =>
+  textEncoder.encode(JSON.stringify({
+    schemaVersion: 3,
+    subject,
+    completion: modelReport.completion,
+    suggestions: modelReport.suggestions.map((suggestion) => ({
+      ...suggestion,
+      anchor: suggestion.anchor._tag === "file"
+        ? { ...suggestion.anchor, line: Number.MAX_SAFE_INTEGER }
+        : suggestion.anchor,
+      state: "published",
+      suggestionId: `sha256:${"f".repeat(64)}`
+    })),
+    notes: modelReport.notes.map((note) => ({
+      ...note,
+      noteId: `sha256:${"f".repeat(64)}`
+    }))
+  })).byteLength
+
 const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   cryptoService: Crypto.Crypto,
   claim: ClaimedAgentJob,
@@ -361,6 +383,14 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
     return yield* providerFailure(claim.providerId, "protocol", "PR review task context was unavailable.", false)
   }
   const subject = claim.context.task.subject
+  if (projectedReportBytes(subject, modelReport) > MAXIMUM_PR_REVIEW_REPORT_BYTES) {
+    return yield* providerFailure(
+      claim.providerId,
+      "protocol",
+      "PR review provider output left insufficient room for host metadata.",
+      false
+    )
+  }
   const suggestions = new Array<(typeof PrReviewReport.Type)["suggestions"][number]>()
   const seenSuggestionIds = new Set<string>()
   for (const suggestion of modelReport.suggestions) {

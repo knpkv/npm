@@ -45,6 +45,7 @@ import {
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES,
   MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE,
   RecordReviewSuggestionPublicationInput,
+  ReleaseReviewSuggestionPublicationInput,
   ReserveReviewSuggestionPublicationInput,
   ReviewSuggestionPublicationDigest
 } from "./agentJobModels.js"
@@ -1353,6 +1354,22 @@ const makeAgentJobRepository = Effect.gen(function*() {
           }
         })
       ).pipe(mapPersistenceOperation("agent-job.reserve-review-suggestion-publication"))
+    }),
+
+    releaseReviewSuggestionPublication: Effect.fn(
+      "AgentJobRepository.releaseReviewSuggestionPublication"
+    )(function*(input: typeof ReleaseReviewSuggestionPublicationInput.Type) {
+      const request = yield* Schema.decodeUnknownEffect(
+        Schema.toType(ReleaseReviewSuggestionPublicationInput)
+      )(input)
+      yield* sql`DELETE FROM agent_review_suggestion_publications
+        WHERE workspace_id = ${request.workspaceId}
+          AND job_id = ${request.jobId}
+          AND suggestion_id = ${request.suggestionId}
+          AND content_digest = ${request.contentDigest}
+          AND state = 'reserved'`.pipe(
+        mapPersistenceOperation("agent-job.release-review-suggestion-publication")
+      )
     }),
 
     recordReviewSuggestionPublication: Effect.fn(

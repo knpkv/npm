@@ -20,7 +20,12 @@ import {
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { PrReviewPath, type PrReviewSubject, PrReviewSuggestionDraft } from "../../src/domain/prReview.js"
+import {
+  MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewPath,
+  type PrReviewSubject,
+  PrReviewSuggestionDraft
+} from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
@@ -424,6 +429,73 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("reserves durable report space for host-authored metadata", () => {
+    const note = (index: number) => ({
+      reason: "low-confidence",
+      title: `Bounded observation ${String(index)}`,
+      observation: `${"x".repeat(64)}-${String(index)}`,
+      confidence: {
+        level: "low",
+        reason: "The provider could not verify this observation."
+      }
+    })
+    const projectedBytes = (notes: ReadonlyArray<ReturnType<typeof note>>) =>
+      new TextEncoder().encode(JSON.stringify({
+        schemaVersion: 3,
+        subject,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: notes.map((item) => ({
+          ...item,
+          noteId: `sha256:${"f".repeat(64)}`
+        }))
+      })).byteLength
+    const notes = new Array<ReturnType<typeof note>>()
+    while (projectedBytes([...notes, note(notes.length)]) <= MAXIMUM_PR_REVIEW_REPORT_BYTES) {
+      notes.push(note(notes.length))
+    }
+    const oversizedNotes = [...notes, note(notes.length)]
+    assert.isAtMost(
+      new TextEncoder().encode(JSON.stringify({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: oversizedNotes
+      })).byteLength,
+      MAXIMUM_PR_REVIEW_REPORT_BYTES
+    )
+    const execute = (candidateNotes: ReadonlyArray<ReturnType<typeof note>>) => {
+      const observation: SessionObservation = {
+        commands: [],
+        operations: [],
+        requests: []
+      }
+      return runExecutor(
+        completeScript({
+          schemaVersion: 3,
+          completion: { status: "complete" },
+          suggestions: [],
+          notes: candidateNotes
+        }),
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute(claim)
+        })
+      )
+    }
+
+    return Effect.gen(function*() {
+      const accepted = yield* execute(notes)
+      assert.strictEqual(accepted.result.notes.length, notes.length)
+      const rejected = yield* execute(oversizedNotes).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.include(rejected.failure.message, "insufficient room for host metadata")
+      }
+    })
+  })
+
   it.effect("resolves file anchors and derives identities for non-publishable notes", () => {
     const observation: SessionObservation = {
       commands: [],

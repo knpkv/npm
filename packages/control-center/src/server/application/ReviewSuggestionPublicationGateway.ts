@@ -23,6 +23,7 @@ export class ReviewSuggestionPublicationGatewayError
       reason: Schema.Literals([
         "identity-unavailable",
         "publication-conflict",
+        "publication-rejected",
         "publication-unavailable"
       ])
     }

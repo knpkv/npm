@@ -24,11 +24,23 @@ const replacementSides = (
 } => {
   const before = new Array<string>()
   const after = new Array<string>()
+  let currentPath = ""
+  let hunkCount = 0
   let oldLinesRemaining = 0
   let newLinesRemaining = 0
   for (const line of unifiedDiff.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      currentPath = line.slice(4).replace(/^b\//u, "")
+      continue
+    }
     const hunk = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/u.exec(line)
     if (hunk !== null) {
+      if (hunkCount > 0) {
+        const boundary = `⋯ ${currentPath} · ${line}`
+        before.push(boundary)
+        after.push(boundary)
+      }
+      hunkCount += 1
       oldLinesRemaining = Number(hunk[1] ?? "1")
       newLinesRemaining = Number(hunk[2] ?? "1")
       continue

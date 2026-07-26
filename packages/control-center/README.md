@@ -160,6 +160,9 @@ comments at their resolved line; whole-change suggestions become general pull-re
 a file location. Control Center first reserves the exact confirmed content digest so competing edits
 cannot both reach the provider. A successful governed publication completes that reservation and appends an immutable lifecycle event, so reopening
 or refreshing the review keeps that suggestion `published` and cannot offer it as a new draft again.
+Confirmed provider no-write outcomes release the reservation for an edited retry; unknown outcomes
+retain the original digest for idempotent recovery. Multi-region replacement previews keep explicit
+file/hunk boundaries, and provider output reserves durable-envelope space for host-added review metadata.
 
 To exercise the installed `sbx` runtime against the current checkout without provider credentials or
 remote writes, run:
