@@ -1303,71 +1303,122 @@ describe("manual plugin synchronization", () => {
       assert.match(afterAccepted.checkpointJson ?? "", /^"complete:[0-9a-f]{64}"$/u)
     })))
 
-  it.effect("keeps state reads observational and recovers a stale attempt on the next owner sync", () =>
-    withApplication(Effect.gen(function*() {
-      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
-      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
-      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
-      const { connections, persistence, streamKey } = yield* setupFixture(fixture)
-      const drivers = makeManualPluginSyncDriverRegistry([{
-        providerId: fixture.providerId,
-        streamKey: fixture.streamKey,
-        sync: () => Stream.succeed(pageFor(fixture))
-      }])
-      const commitFailure = new PersistenceOperationError({ operation: "test.manual-sync-page-commit" })
-      const failingPersistence = Persistence.of({
-        ...persistence,
-        pluginRuntime: {
-          ...persistence.pluginRuntime,
-          commitNormalizedPageReceipt: () => Effect.fail(commitFailure)
+  it.effect("keeps state reads observational after closing a failed owner attempt", () =>
+    withApplication(
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+        const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+        if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+        const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+        const drivers = makeManualPluginSyncDriverRegistry([
+          {
+            providerId: fixture.providerId,
+            streamKey: fixture.streamKey,
+            sync: () => Stream.succeed(pageFor(fixture))
+          }
+        ])
+        const commitFailure = new PersistenceOperationError({ operation: "test.manual-sync-page-commit" })
+        const failingPersistence = Persistence.of({
+          ...persistence,
+          pluginRuntime: {
+            ...persistence.pluginRuntime,
+            commitNormalizedPageReceipt: () => Effect.fail(commitFailure)
+          }
+        })
+        const beforeRestart = yield* makeManualPluginSynchronization(connections, drivers).pipe(
+          Effect.provideService(Persistence, failingPersistence)
+        )
+        const failed = yield* beforeRestart
+          .synchronize({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: fixture.pluginConnectionId
+          })
+          .pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(failed))
+        if (Result.isFailure(failed)) assert.instanceOf(failed.failure, ApplicationServiceUnavailable)
+        const openAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        )
+        assert.lengthOf(openAttempts, 1)
+        assert.strictEqual(openAttempts[0]?.outcome, "interrupted")
+
+        const afterRestart = yield* makeManualPluginSynchronization(connections, drivers)
+        const observed = yield* afterRestart.state({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: fixture.pluginConnectionId
+        })
+        assert.strictEqual(observed.result, "interrupted")
+        const stillOpen = yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        )
+        assert.strictEqual(stillOpen[0]?.outcome, "interrupted")
+
+        const recovered = yield* afterRestart.synchronize({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: fixture.pluginConnectionId
+        })
+        assert.strictEqual(recovered.result, "synchronized")
+        assert.strictEqual(recovered.pagesCommitted, 1)
+        const completedAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        )
+        assert.lengthOf(completedAttempts, 2)
+        assert.strictEqual(completedAttempts[0]?.outcome, "interrupted")
+        assert.strictEqual(completedAttempts[1]?.outcome, "synchronized")
+      })
+    ))
+
+  it.effect("closes an owner attempt when its synchronization fiber is interrupted", () =>
+    withApplication(
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+        const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+        if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+        const { connections, persistence, streamKey } = yield* setupFixture(fixture)
+        const providerEntered = yield* Deferred.make<void>()
+        const releaseProvider = yield* Deferred.make<void>()
+        const drivers = makeManualPluginSyncDriverRegistry([
+          {
+            providerId: fixture.providerId,
+            streamKey: fixture.streamKey,
+            sync: () =>
+              Stream.fromEffect(
+                Deferred.succeed(providerEntered, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseProvider)),
+                  Effect.as(pageFor(fixture))
+                )
+              )
+          }
+        ])
+        const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+        const input = {
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: fixture.pluginConnectionId
         }
-      })
-      const beforeRestart = yield* makeManualPluginSynchronization(connections, drivers).pipe(
-        Effect.provideService(Persistence, failingPersistence)
-      )
-      const failed = yield* beforeRestart.synchronize({
-        workspaceId: WORKSPACE_ID,
-        pluginConnectionId: fixture.pluginConnectionId
-      }).pipe(Effect.result)
+        const fiber = yield* synchronization.synchronize(input).pipe(Effect.forkChild({ startImmediately: true }))
+        yield* Deferred.await(providerEntered)
 
-      assert.isTrue(Result.isFailure(failed))
-      if (Result.isFailure(failed)) assert.instanceOf(failed.failure, ApplicationServiceUnavailable)
-      const openAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
-        WORKSPACE_ID,
-        fixture.pluginConnectionId,
-        streamKey
-      )
-      assert.lengthOf(openAttempts, 1)
-      assert.isNull(openAttempts[0]?.outcome)
+        const interruptFiber = yield* Fiber.interrupt(fiber).pipe(Effect.forkChild())
+        yield* Effect.yieldNow
+        yield* Deferred.succeed(releaseProvider, undefined)
+        yield* Fiber.join(interruptFiber)
 
-      const afterRestart = yield* makeManualPluginSynchronization(connections, drivers)
-      const observed = yield* afterRestart.state({
-        workspaceId: WORKSPACE_ID,
-        pluginConnectionId: fixture.pluginConnectionId
+        const attempts = yield* persistence.pluginRuntime.listSyncAttempts(
+          WORKSPACE_ID,
+          fixture.pluginConnectionId,
+          streamKey
+        )
+        assert.lengthOf(attempts, 1)
+        assert.strictEqual(attempts[0]?.outcome, "interrupted")
       })
-      assert.strictEqual(observed.result, "running")
-      const stillOpen = yield* persistence.pluginRuntime.listSyncAttempts(
-        WORKSPACE_ID,
-        fixture.pluginConnectionId,
-        streamKey
-      )
-      assert.isNull(stillOpen[0]?.outcome)
-
-      const recovered = yield* afterRestart.synchronize({
-        workspaceId: WORKSPACE_ID,
-        pluginConnectionId: fixture.pluginConnectionId
-      })
-      assert.strictEqual(recovered.result, "synchronized")
-      assert.strictEqual(recovered.pagesCommitted, 1)
-      const completedAttempts = yield* persistence.pluginRuntime.listSyncAttempts(
-        WORKSPACE_ID,
-        fixture.pluginConnectionId,
-        streamKey
-      )
-      assert.lengthOf(completedAttempts, 2)
-      assert.strictEqual(completedAttempts[0]?.outcome, "interrupted")
-      assert.strictEqual(completedAttempts[1]?.outcome, "synchronized")
-    })))
+    ))
 
   it.effect("keeps cross-instance state reads observational while rejecting cross-instance overlap", () =>
     withApplication(Effect.gen(function*() {

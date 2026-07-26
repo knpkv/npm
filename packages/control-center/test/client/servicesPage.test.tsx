@@ -537,6 +537,15 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Verified identity · 123456789012")
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
+    const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
+    expect(resources).toHaveLength(2)
+    expect(resources.every(({ open }) => !open)).toBe(true)
+    expect(resources.map((resource) => resource.querySelector("summary")?.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining("payments"), expect.stringContaining("payments-release")])
+    )
+    expect(resources.every((resource) => resource.querySelector("summary")?.textContent?.includes("Controls"))).toBe(
+      true
+    )
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
       expect.arrayContaining(["Add repository", "Add pipeline"])
     )

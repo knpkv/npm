@@ -44,6 +44,71 @@ const pageClientLayer = (
   )
 
 describe("Confluence page client", () => {
+  it.effect("accepts a space homepage whose provider parent id is null", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const page = {
+      id: "262489",
+      status: "current",
+      title: "Software Development",
+      spaceId: "262368",
+      parentId: null,
+      authorId: "account-owner",
+      ownerId: "account-owner",
+      createdAt: "2026-06-24T06:45:14.260Z",
+      version: {
+        number: 1,
+        message: "",
+        minorEdit: false,
+        authorId: "account-owner",
+        createdAt: "2026-06-24T06:45:17.307Z"
+      },
+      body: {
+        atlas_doc_format: {
+          representation: "atlas_doc_format",
+          value: "{}"
+        }
+      }
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.getPage("262489")
+
+      assert.deepStrictEqual(result, page)
+      assert.strictEqual(requests[0]?.url, "https://acme.atlassian.net/wiki/api/v2/pages/262489")
+      assert.deepStrictEqual(
+        new Map(requests[0]?.urlParams ?? []),
+        new Map([
+          ["body-format", "atlas_doc_format"],
+          ["include-version", "true"],
+          ["status", "current"]
+        ])
+      )
+    }).pipe(Effect.provide(pageClientLayer(page, requests)))
+  })
+
+  it.effect("accepts a space listing containing a null-parent homepage", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const page = {
+      id: "262489",
+      status: "current",
+      title: "Software Development",
+      spaceId: "262368",
+      parentId: null,
+      createdAt: "2026-06-24T06:45:14.260Z",
+      version: {
+        number: 1,
+        createdAt: "2026-06-24T06:45:17.307Z"
+      }
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.getSpacePages("262368", null)
+
+      assert.deepStrictEqual(result, { results: [page], _links: {} })
+      assert.strictEqual(requests[0]?.url, "https://acme.atlassian.net/wiki/api/v2/spaces/262368/pages")
+    }).pipe(Effect.provide(pageClientLayer({ results: [page], _links: {} }, requests)))
+  })
+
   it.effect("preserves privacy-redacted watcher identities for adapter normalization", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

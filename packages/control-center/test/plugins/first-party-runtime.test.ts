@@ -1096,6 +1096,13 @@ describe("first-party plugin runtime", () => {
             assert.strictEqual(outcome._tag, "Success")
             if (outcome._tag === "Success") {
               const connection = Context.get(outcome.success, PluginConnection)
+              if (testCase.providerId === "confluence") {
+                const discovery = yield* connection.discover
+                assert.deepStrictEqual(discovery.account, {
+                  providerImmutableId: "account-1",
+                  displayName: "Avery Bell"
+                })
+              }
               if (testCase.historicalDescriptor === true) {
                 assert.isFalse(hasPluginCapability(connection.descriptor, "sync.incremental", 1))
                 const driver = firstPartyManualPluginSyncDrivers.get("confluence")

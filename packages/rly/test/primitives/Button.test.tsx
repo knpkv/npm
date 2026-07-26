@@ -24,6 +24,7 @@ describe("Button", () => {
     )
     expect(button?.hasAttribute("disabled")).toBe(true)
     expect(button?.getAttribute("aria-busy")).toBe("true")
+    expect(button?.getAttribute("aria-label")).toBe("Continue")
     expect(button?.getAttribute("data-loading")).toBe("true")
     expect(button?.textContent).toContain("Continue")
     expect(button?.querySelectorAll("svg")).toHaveLength(2)

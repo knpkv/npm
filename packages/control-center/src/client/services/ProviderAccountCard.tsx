@@ -82,9 +82,15 @@ export const ProviderAccountCard = ({
           connection === undefined ? { label: "Followed", tone: "neutral" } : connectionStatus(connection, testState)
         const isTesting = testState?._tag === "testing"
         const isChanging = enablementState === "changing"
+        const needsAttention = status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
         return (
-          <div className={styles.resource} key={resource.followedResourceId}>
-            <div className={styles.resourceHeading}>
+          <details
+            className={styles.resource}
+            data-status-tone={status.tone}
+            key={resource.followedResourceId}
+            open={needsAttention ? true : undefined}
+          >
+            <summary className={styles.resourceSummary}>
               <div className={styles.connectionIdentity}>
                 <ServiceMark service={resource.providerId} size="compact" />
                 <div className={styles.identity}>
@@ -96,10 +102,15 @@ export const ProviderAccountCard = ({
                   </Text>
                 </div>
               </div>
-              <StateLabel label={status.label} size="compact" tone={status.tone} />
-            </div>
+              <div className={styles.resourceStatus}>
+                <StateLabel label={status.label} size="compact" tone={status.tone} />
+                <span className={styles.disclosure}>
+                  Controls <span aria-hidden="true">›</span>
+                </span>
+              </div>
+            </summary>
             {connection === undefined ? null : (
-              <>
+              <div className={styles.resourceBody}>
                 <ConnectionTestEvidence state={testState} />
                 <ConnectionSynchronization
                   canSynchronize={canConfigure && connection.isEnabled}
@@ -130,9 +141,9 @@ export const ProviderAccountCard = ({
                     Control Center could not change this service. Refresh and try again.
                   </Text>
                 ) : null}
-              </>
+              </div>
             )}
-          </div>
+          </details>
         )
       })}
     </div>

@@ -278,6 +278,19 @@ export const makeManualPluginSynchronization = Effect.fn(
   const releaseSynchronization = Effect.fn(
     "ManualPluginSynchronization.releaseSynchronization"
   )(function*(claim: SynchronizationClaim) {
+    const completedAt = DateTime.makeUnsafe(yield* Effect.clockWith((clock) => clock.currentTimeMillis))
+    yield* persistence.pluginRuntime.reconcileSyncAttempts(
+      claim.workspaceId,
+      claim.pluginConnectionId,
+      claim.providerId,
+      claim.streamKey,
+      completedAt
+    ).pipe(
+      Effect.ignore({
+        log: "Error",
+        message: "Could not reconcile an incomplete manual synchronization attempt"
+      })
+    )
     yield* persistence.pluginRuntime.releaseSyncClaim(
       claim.workspaceId,
       claim.pluginConnectionId,
@@ -527,6 +540,16 @@ export const makeManualPluginSynchronization = Effect.fn(
       claimSynchronization(bound),
       () => synchronizeBound(input, bound),
       releaseSynchronization
+    ).pipe(
+      Effect.tapCause((cause) =>
+        Effect.logError("Manual plugin synchronization orchestration failed", cause).pipe(
+          Effect.annotateLogs({
+            workspaceId: bound.workspaceId,
+            pluginConnectionId: bound.pluginConnectionId,
+            streamKey: bound.streamKey
+          })
+        )
+      )
     )
   })
 

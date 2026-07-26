@@ -73,6 +73,58 @@ const mapRateLimit = Effect.fn("JiraReadProviderTest.mapRateLimit")(function*(re
 })
 
 describe("JiraReadProvider", () => {
+  it.effect("normalizes nullable changelog values before OpenAPI decoding", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* JiraApiClient
+      const provider = makeJiraReadProvider(client)
+
+      const changelogs = yield* provider.getChangelogs("10033", {
+        startAt: 0,
+        maxResults: 50
+      })
+
+      assert.deepStrictEqual(changelogs.values?.[0]?.items?.[0], {
+        field: "status",
+        fieldtype: "jira",
+        fieldId: "status",
+        fromString: "To Do",
+        toString: "Done"
+      })
+      assert.include(requests[0]?.url ?? "", "/rest/api/3/issue/10033/changelog")
+    }).pipe(
+      Effect.provide(
+        jiraClientLayer(
+          {
+            self: "https://acme.atlassian.net/rest/api/3/issue/10033/changelog",
+            maxResults: 50,
+            startAt: 0,
+            total: 1,
+            isLast: true,
+            values: [
+              {
+                id: "1",
+                created: "2026-07-26T12:00:00.000Z",
+                items: [
+                  {
+                    field: "status",
+                    fieldtype: "jira",
+                    fieldId: "status",
+                    from: null,
+                    fromString: "To Do",
+                    to: null,
+                    toString: "Done"
+                  }
+                ]
+              }
+            ]
+          },
+          requests
+        )
+      )
+    )
+  })
+
   it.effect("loads one exact Jira comment for reply validation", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     return Effect.gen(function*() {

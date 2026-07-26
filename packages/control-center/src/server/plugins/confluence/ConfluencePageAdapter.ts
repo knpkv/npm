@@ -135,7 +135,14 @@ export const ConfluencePageAdapterConfiguration = Schema.Struct({
   siteId: Identifier,
   spaceId: Identifier,
   probePageId: Identifier,
-  oauthVerifiedSiteId: Schema.optionalKey(Identifier)
+  oauthVerifiedSiteId: Schema.optionalKey(Identifier),
+  oauthVerifiedUser: Schema.optionalKey(
+    Schema.Struct({
+      accountId: Identifier,
+      displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+      publicName: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(200)))
+    })
+  )
 })
 
 /** Decoded Confluence page adapter configuration. @internal */
@@ -518,6 +525,7 @@ const readUsers = Effect.fn("ConfluencePage.readUsers")(function*(
     if (batch.length === 0) continue
     const raw = yield* providerCall(client.getUsers(batch)).pipe(
       Effect.map(Option.some),
+      Effect.catchTag("PluginAuthenticationFailure", () => Effect.succeed(Option.none<unknown>())),
       Effect.catchTag("PluginAuthorizationFailure", () => Effect.succeed(Option.none<unknown>()))
     )
     if (Option.isNone(raw)) return new Map<string, RawConfluenceUser>()
@@ -707,7 +715,10 @@ const readWatcherInventory = Effect.fn("ConfluencePage.readWatcherInventory")(fu
   while (pagesFetched < MAXIMUM_WATCHER_PAGES) {
     const loaded = yield* providerCall(client.getPageWatchers(pageId, start)).pipe(Effect.result)
     if (Result.isFailure(loaded)) {
-      if (loaded.failure._tag === "PluginAuthorizationFailure") {
+      if (
+        loaded.failure._tag === "PluginAuthenticationFailure" ||
+        loaded.failure._tag === "PluginAuthorizationFailure"
+      ) {
         return { accountIds: [...accountIds], complete: false, pagesFetched }
       }
       return yield* loaded.failure
@@ -1245,13 +1256,17 @@ export const makeConfluencePageAdapter = (
       if (verifiedSite.cloudId !== input.configuration.siteId) {
         return yield* malformed("confluence-system-info", "confluence-site-identity-mismatch")
       }
-      const rawUser = yield* providerCall(input.client.getCurrentUser)
-      const user = yield* decodeProvider(
-        "confluence-current-user",
-        "confluence-current-user-invalid",
-        RawConfluenceCurrentUser,
-        rawUser
-      )
+      const user = input.configuration.oauthVerifiedUser ??
+        (yield* providerCall(input.client.getCurrentUser).pipe(
+          Effect.flatMap((rawUser) =>
+            decodeProvider(
+              "confluence-current-user",
+              "confluence-current-user-invalid",
+              RawConfluenceCurrentUser,
+              rawUser
+            )
+          )
+        ))
       const endpoint = yield* Schema.decodeUnknownEffect(SourceUrl)(
         new URL("/wiki/api/v2", input.configuration.siteBaseUrl).toString()
       ).pipe(Effect.mapError(() => malformed("confluence-discover", "confluence-endpoint-invalid")))

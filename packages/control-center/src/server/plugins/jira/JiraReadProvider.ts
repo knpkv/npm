@@ -7,13 +7,15 @@
  *
  * @internal
  */
-import type { JiraApi, JiraApiClientShape } from "@knpkv/jira-api-client"
+import { JiraApi, type JiraApiClientShape } from "@knpkv/jira-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import {
   PluginAuthenticationFailure,
@@ -252,6 +254,40 @@ const providerCall = <Value, Error>(
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> => Effect.catch(effect, (error) => mapFailure(operation, error))
 
+const omitJsonNulls = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(omitJsonNulls)
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, field]) => field !== null)
+        .map(([key, field]) => [key, omitJsonNulls(field)])
+    )
+  }
+  return value
+}
+
+const getChangelogs = (
+  client: JiraApiClientShape,
+  issueId: string,
+  request: JiraPageRequest
+): Effect.Effect<JiraApi.PageBeanChangelog, PluginFailure> =>
+  providerCall(
+    "jira-get-changelogs",
+    client.httpClient.execute(
+      HttpClientRequest.get(`/rest/api/3/issue/${encodeURIComponent(issueId)}/changelog`).pipe(
+        HttpClientRequest.setUrlParams({
+          startAt: request.startAt,
+          maxResults: request.maxResults
+        })
+      )
+    ).pipe(
+      Effect.flatMap(HttpClientResponse.filterStatusOk),
+      Effect.flatMap(HttpClientResponse.schemaBodyJson(Schema.Json)),
+      Effect.map(omitJsonNulls),
+      Effect.flatMap(Schema.decodeUnknownEffect(JiraApi.PageBeanChangelog))
+    )
+  )
+
 const ISSUE_FIELDS = [
   "summary",
   "description",
@@ -408,12 +444,7 @@ export const makeJiraReadProvider = (client: JiraApiClientShape): JiraReadProvid
     ),
   getChangelogs: (issueId, request) =>
     decodeJiraProviderPathIdentifier(issueId).pipe(
-      Effect.flatMap((issueId) =>
-        providerCall(
-          "jira-get-changelogs",
-          client.getChangeLogs(issueId, { params: request })
-        )
-      )
+      Effect.flatMap((issueId) => getChangelogs(client, issueId, request))
     ),
   searchProjectIssues: (request) =>
     projectJql(request).pipe(
