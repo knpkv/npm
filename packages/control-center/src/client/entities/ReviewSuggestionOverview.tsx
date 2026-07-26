@@ -10,10 +10,12 @@ const scopeKinds = ["file", "changes"] satisfies ReadonlyArray<"file" | "changes
 export const ReviewSuggestionOverview = ({
   entries,
   onNavigate,
+  onSelectAnchor,
   suggestions
 }: {
   readonly entries: ReadonlyArray<CompleteDiffInventoryEntry>
   readonly onNavigate: (fileId: string, lineNumber?: number) => void
+  readonly onSelectAnchor: (anchor: Extract<PrReviewSuggestion["anchor"], { readonly _tag: "file" }>) => void
   readonly suggestions: ReadonlyArray<PrReviewSuggestion>
 }): ReactElement | null => {
   const overviewSuggestions = suggestions.filter(({ anchor }) => anchor._tag !== "line")
@@ -41,13 +43,7 @@ export const ReviewSuggestionOverview = ({
                     <strong>{suggestion.title}</strong>
                     <p>{suggestion.problem}</p>
                     {anchor._tag !== "file" ? null : (
-                      <button
-                        onClick={() => {
-                          const entry = entries.find(({ path }) => String(path) === String(anchor.path))
-                          if (entry !== undefined) onNavigate(entry.anchor)
-                        }}
-                        type="button"
-                      >
+                      <button onClick={() => onSelectAnchor(anchor)} type="button">
                         {anchor.path}:{String(anchor.line)}
                       </button>
                     )}

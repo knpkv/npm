@@ -108,6 +108,7 @@ const sandboxFailure = (
     `Review Sandbox failed (${failure.reason}).`,
     failure.reason === "sandbox-unavailable" ||
       failure.reason === "sandbox-timeout" ||
+      failure.reason === "command-timeout" ||
       failure.reason === "cleanup-failed"
   )
 
@@ -439,6 +440,7 @@ const anchorReport = Effect.fn("PrReviewTaskExecutor.anchorReport")(function*(
   for (const suggestion of modelReport.suggestions) {
     const evidence = yield* exactEvidence(claim.providerId, session, suggestion).pipe(Effect.result)
     if (Result.isFailure(evidence)) {
+      if (evidence.failure.phase !== "protocol") return yield* evidence.failure
       yield* onActivity({
         _tag: "output",
         channel: "progress",

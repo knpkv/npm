@@ -65,7 +65,7 @@ An agent edit preserves prior revisions. An edit that changes the technical clai
 
 Publishing opens a compact preview with the connected AWS identity, exact revision and anchor, final editable content, replacement diff, related locations, and one prominent `Post comment` action. Line and modified-file anchors publish against the reviewed head; deletion-only file anchors persist their base-side resolution and publish against `BEFORE`. Whole-change anchors omit the CodeCommit location and publish as a general pull-request comment.
 
-Published comments are snapshots. Before CodeCommit is called, Control Center atomically reserves the suggestion for the exact confirmed content digest. A competing edit is rejected, while an interrupted same-content retry remains compatible with the governed provider idempotency key. Confirmed no-write outcomes release the reservation for an edited retry; unknown outcomes retain it so only the idempotent same-content recovery can proceed. A successful provider receipt atomically completes that reservation and appends an immutable local lifecycle event; matching completion retries return the completed governed receipt without another provider call. Durable review reads overlay that event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
+Published comments are snapshots. Before CodeCommit is called, Control Center atomically acquires the suggestion for the exact confirmed content digest. Same-content joiners observe an in-progress reservation but cannot publish or release it; a competing edit is rejected. Confirmed no-write outcomes let only the acquirer release the reservation for an edited retry, while unknown outcomes retain it. After provider success, Control Center persists the governed action as a recovery handle before appending the local lifecycle event. An exact retry can replay that receipt without another provider proposal or write if lifecycle projection was interrupted. Durable review reads overlay the completed event as `published`, including after navigation, refresh, or restart. Later local edits do not synchronize automatically; updating a posted comment or posting a resolution reply requires another explicit preview.
 
 Every posted comment has a compact provenance footer:
 
@@ -105,7 +105,9 @@ Review Evidence identifies its kind and records enough bounded data to reproduce
 
 The current presentation contract stores host-resolved line, file, and
 whole-change anchors. File anchors record the first added head line or, for a
-deletion-only file, the first deleted base line and its `BEFORE` side. Line evidence must match the immutable reviewed head;
+deletion-only file, the first deleted base line and its `BEFORE` side. A renamed
+file's `BEFORE` anchor attaches through the inventory's previous path, while
+`AFTER` anchors attach through its current path. Line evidence must match the immutable reviewed head;
 file-scoped evidence may instead match a deleted range in the immutable base so
 deletion-only changes remain reviewable. Suggestion state is host-owned and filterable; models
 cannot author it. Repeated occurrences are stored as Related Locations under

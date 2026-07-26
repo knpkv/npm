@@ -509,8 +509,9 @@ const makePullRequestReviews = Effect.gen(function*() {
         proposingAgent: selected.latest.reviewProfile,
         session: input.session
       }
+      if (reservation._tag === "in-progress") return yield* unavailable()
       const publication = yield* (
-        reservation._tag === "published"
+        reservation._tag === "published" || reservation._tag === "recoverable"
           ? publications.replay({
             ...publicationCommand,
             publicationId: reservation.publicationId
@@ -519,7 +520,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       ).pipe(Effect.result)
       if (Result.isFailure(publication)) {
         if (
-          reservation._tag === "reserved" &&
+          reservation._tag === "acquired" &&
           publicationFailureConfirmsNoWrite(publication.failure)
         ) {
           yield* persistence.agentJobs.releaseReviewSuggestionPublication({
@@ -535,14 +536,34 @@ const makePullRequestReviews = Effect.gen(function*() {
         return yield* mapPublicationFailure(publication.failure)
       }
       const result = publication.success
-      if (reservation._tag === "reserved") {
+      if (reservation._tag === "acquired") {
         yield* persistence.agentJobs.recordReviewSuggestionPublication({
           workspaceId: input.workspaceId,
           jobId: input.request.jobId,
           suggestionId: selected.suggestion.suggestionId,
           contentDigest,
           publicationId: result.publicationId,
-          publishedAt: result.publishedAt
+          publishedAt: result.publishedAt,
+          finalize: false
+        }).pipe(
+          Effect.mapError(mapPersistenceWriteError),
+          Effect.mapError((error) =>
+            error._tag === "ApplicationInvalidRequest" ||
+              error._tag === "ApplicationResourceNotFound"
+              ? error
+              : unavailable()
+          )
+        )
+      }
+      if (reservation._tag !== "published") {
+        yield* persistence.agentJobs.recordReviewSuggestionPublication({
+          workspaceId: input.workspaceId,
+          jobId: input.request.jobId,
+          suggestionId: selected.suggestion.suggestionId,
+          contentDigest,
+          publicationId: result.publicationId,
+          publishedAt: result.publishedAt,
+          finalize: true
         }).pipe(
           Effect.mapError(mapPersistenceWriteError),
           Effect.mapError((error) =>

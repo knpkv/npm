@@ -131,6 +131,19 @@ const unavailableContent = (reason: NonNullable<CompleteDiffContentRange["unavai
   }
 }
 
+const entryForSuggestionAnchor = (
+  entries: ReadonlyArray<CompleteDiffInventoryEntry>,
+  anchor: Exclude<PrReviewSuggestion["anchor"], { readonly _tag: "changes" }>
+): CompleteDiffInventoryEntry | undefined =>
+  anchor.relativeFileVersion === "BEFORE"
+    ? (entries.find(
+        (entry) =>
+          entry.status === "renamed" &&
+          entry.previousPath !== null &&
+          String(entry.previousPath) === String(anchor.path)
+      ) ?? entries.find(({ path }) => String(path) === String(anchor.path)))
+    : entries.find(({ path }) => String(path) === String(anchor.path))
+
 const textFrom = (content: CompleteDiffContentRange): string | null => {
   if (content.unavailableReason !== null || content.bytesBase64 === null) return null
   const decoded = Encoding.decodeBase64(content.bytesBase64)
@@ -381,7 +394,7 @@ export const WorkspacePullRequestDiff = ({
     () =>
       visibleSuggestions.filter((suggestion) => {
         const anchor = suggestion.anchor
-        return anchor._tag !== "changes" && !entries.some(({ path }) => String(path) === String(anchor.path))
+        return anchor._tag !== "changes" && entryForSuggestionAnchor(entries, anchor) === undefined
       }).length,
     [entries, visibleSuggestions]
   )
@@ -454,6 +467,12 @@ export const WorkspacePullRequestDiff = ({
               }))
             }
             setSelectedFileId(fileId)
+          }}
+          onSelectAnchor={(anchor) => {
+            const entry = entryForSuggestionAnchor(entries, anchor)
+            if (entry === undefined) return
+            setFocusRequest(undefined)
+            setSelectedFileId(entry.anchor)
           }}
           suggestions={visibleSuggestions}
         />

@@ -31,6 +31,7 @@ import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistr
 import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
+  PrReviewSandboxSessionError,
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
@@ -320,8 +321,33 @@ const makeRealGitSessionLayer = (
 const makeSessionLayer = (
   observation: SessionObservation,
   diff = `@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`,
-  sourceExcerpt = EVIDENCE_EXCERPT
+  sourceExcerpt = EVIDENCE_EXCERPT,
+  replacementFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
+  const commandResult = (command: string): PrReviewSandboxCommandResult => {
+    if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+      return output(diff)
+    }
+    if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
+      return output(`${sourceExcerpt}\n`)
+    }
+    if (command.includes("git apply --check")) {
+      return command.includes("GIT_INDEX_FILE=") &&
+          command.includes(`git read-tree '${HEAD_REVISION}'`) &&
+          command.includes("printf '%s\\n' ") &&
+          command.includes("git apply --check --cached")
+        ? output()
+        : output("", 1)
+    }
+    if (command.includes("| awk 'END { exit NR ==")) {
+      return command.includes("missing.ts") || command.includes("deleted.ts")
+        ? output("", 1)
+        : output()
+    }
+    return command.startsWith("git show ")
+      ? output("# Review instructions\n")
+      : output("1 file changed\n")
+  }
   const session: PrReviewSandboxSession = {
     attemptId: "0123456789ab",
     baseRevision: subject.baseRevision,
@@ -342,29 +368,13 @@ const makeSessionLayer = (
       Effect.sync(() => {
         observation.operations.push("runCommand")
         observation.commands.push(command)
-        if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
-          return output(diff)
-        }
-        if (command.startsWith(`git show '${HEAD_REVISION}:${EVIDENCE_PATH}' | sed -n '42,42p'`)) {
-          return output(`${sourceExcerpt}\n`)
-        }
-        if (command.includes("git apply --check")) {
-          return command.includes("GIT_INDEX_FILE=") &&
-              command.includes(`git read-tree '${HEAD_REVISION}'`) &&
-              command.includes("printf '%s\\n' ") &&
-              command.includes("git apply --check --cached")
-            ? output()
-            : output("", 1)
-        }
-        if (command.includes("| awk 'END { exit NR ==")) {
-          return command.includes("missing.ts") || command.includes("deleted.ts")
-            ? output("", 1)
-            : output()
-        }
-        return command.startsWith("git show ")
-          ? output("# Review instructions\n")
-          : output("1 file changed\n")
-      }),
+      }).pipe(
+        Effect.andThen(
+          replacementFailure !== undefined && command.includes("git apply --check")
+            ? Effect.fail(replacementFailure)
+            : Effect.sync(() => commandResult(command))
+        )
+      ),
     applyPatch: () => Effect.succeed(output()),
     readDiff: () => Effect.succeed(output(diff)),
     pageArtifact: () => Effect.succeed(""),
@@ -901,6 +911,63 @@ describe("PR review task executor", () => {
               event.text.startsWith("Rejected unverifiable suggestion")
             )
           )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("propagates a typed sandbox timeout during replacement validation", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const replacementSuggestion = {
+      ...suggestion,
+      replacement: {
+        reviewedHead: HEAD_REVISION,
+        unifiedDiff: [
+          `--- a/${EVIDENCE_PATH}`,
+          `+++ b/${EVIDENCE_PATH}`,
+          "@@ -42,1 +42,1 @@",
+          `-${EVIDENCE_EXCERPT}`,
+          "+const unsafe = false"
+        ].join("\n"),
+        explanation: "Use the safe value."
+      }
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [replacementSuggestion],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "command-timeout" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.phase, "timeout")
+              assert.isTrue(result.failure.retryable)
+            }
+          }
         })
       ),
       Effect.asVoid

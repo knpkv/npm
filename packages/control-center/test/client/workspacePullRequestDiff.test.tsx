@@ -103,6 +103,23 @@ const changesSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
   anchor: { _tag: "changes" },
   relatedLocations: []
 })
+const renamedBeforeSuggestion = Schema.decodeUnknownSync(PrReviewSuggestion)({
+  ...fileSuggestion,
+  suggestionId: `sha256:${"4".repeat(64)}`,
+  evidence: {
+    path: "src/old.ts",
+    startLine: 1,
+    endLine: 1,
+    excerpt: "export const oldName = true"
+  },
+  anchor: {
+    _tag: "file",
+    path: "src/old.ts",
+    line: 1,
+    relativeFileVersion: "BEFORE"
+  },
+  relatedLocations: []
+})
 
 describe("WorkspacePullRequestDiff", () => {
   it("keeps the complete diff visible while filtering file and whole-change advice by severity and state", async () => {
@@ -567,6 +584,61 @@ describe("WorkspacePullRequestDiff", () => {
     )
     expect(target).not.toBeNull()
     expect(document.activeElement).toBe(target)
+  })
+
+  it("attaches a BEFORE file anchor to the previous path of a rename", async () => {
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: otherFileAnchor,
+            path: PluginRelativePathV1.make("src/new.ts"),
+            previousPath: PluginRelativePathV1.make("src/old.ts"),
+            status: "renamed",
+            binary: false,
+            generated: false,
+            oversized: false
+          }
+        ]
+      }),
+      content: async (_scope, _entry, side) => {
+        const text = side === "before" ? "export const oldName = true\n" : "export const newName = true\n"
+        return {
+          bytesBase64: btoa(text),
+          totalBytes: text.length,
+          unavailableReason: null
+        }
+      }
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(
+        <WorkspacePullRequestDiff
+          heading="PR 184"
+          scope={scope}
+          suggestions={[renamedBeforeSuggestion]}
+          transport={transport}
+        />
+      )
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    expect(host.textContent).not.toContain("not attached")
+    const anchor = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "src/old.ts:1"
+    )
+    if (anchor === undefined) throw new Error("Expected renamed BEFORE anchor navigation")
+    await act(async () => anchor.click())
+    expect(
+      host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
+    ).toBe("true")
   })
 
   it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {

@@ -208,7 +208,12 @@ export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSugges
 
 /** Durable result of reserving an exact publication body. */
 export const ReviewSuggestionPublicationReservation = Schema.Union([
-  Schema.TaggedStruct("reserved", {}),
+  Schema.TaggedStruct("acquired", {}),
+  Schema.TaggedStruct("in-progress", {}),
+  Schema.TaggedStruct("recoverable", {
+    publicationId: GovernedActionId,
+    publishedAt: UtcTimestamp
+  }),
   Schema.TaggedStruct("published", {
     publicationId: GovernedActionId,
     publishedAt: UtcTimestamp
@@ -232,7 +237,8 @@ export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   contentDigest: ReviewSuggestionPublicationDigest,
   publicationId: GovernedActionId,
-  publishedAt: UtcTimestamp
+  publishedAt: UtcTimestamp,
+  finalize: Schema.optionalKey(Schema.Boolean)
 })
 export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
 

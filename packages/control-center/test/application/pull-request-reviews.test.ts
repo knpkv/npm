@@ -38,6 +38,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
   ApplicationInvalidRequest,
+  ApplicationServiceUnavailable,
   DeliveryGraphInspection,
   PullRequestReviews
 } from "../../src/server/api/ApplicationServices.js"
@@ -362,7 +363,7 @@ const withService = <Success, Failure>(
   recordPublication: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined),
   reservePublication: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
-    Effect.succeed({ _tag: "reserved" }),
+    Effect.succeed({ _tag: "acquired" }),
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined)
 ) =>
@@ -888,19 +889,25 @@ describe("pull request reviews", () => {
             ? ["replay", current]
             : ["conflict", current]).pipe(
             Effect.flatMap((outcome) =>
-              outcome === "acquired"
-                ? Deferred.succeed(firstReservationEntered, undefined).pipe(
-                  Effect.andThen(Deferred.await(releaseFirstReservation))
-                )
-                : outcome === "replay"
-                ? Effect.void
-                : new AgentJobInputError({
-                  workspaceId: input.workspaceId,
-                  jobId: input.jobId,
-                  reason: "invalid-transition"
-                })
+              (
+                outcome === "acquired"
+                  ? Deferred.succeed(firstReservationEntered, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseFirstReservation))
+                  )
+                  : outcome === "replay"
+                  ? Effect.void
+                  : new AgentJobInputError({
+                    workspaceId: input.workspaceId,
+                    jobId: input.jobId,
+                    reason: "invalid-transition"
+                  })
+              ).pipe(Effect.as(outcome))
             ),
-            Effect.as(ReviewSuggestionPublicationReservation.make({ _tag: "reserved" }))
+            Effect.map((outcome) =>
+              ReviewSuggestionPublicationReservation.make({
+                _tag: outcome === "acquired" ? "acquired" : "in-progress"
+              })
+            )
           )
 
       yield* withService(
@@ -928,7 +935,18 @@ describe("pull request reviews", () => {
               session: HUMAN_SESSION
             }).pipe(Effect.forkChild({ startImmediately: true }))
             yield* Deferred.await(firstReservationEntered)
-            const second = yield* service.publishSuggestion({
+            const joiner = yield* service.publishSuggestion({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                jobId: REVIEW_JOB_ID,
+                suggestionId: SUGGESTION_ID,
+                finalContent: preview.finalContent,
+                authorityBinding: preview.authorityBinding
+              },
+              session: HUMAN_SESSION
+            }).pipe(Effect.result)
+            const different = yield* service.publishSuggestion({
               workspaceId: WORKSPACE_ID,
               entityId: ENTITY_ID,
               request: {
@@ -942,9 +960,13 @@ describe("pull request reviews", () => {
             yield* Deferred.succeed(releaseFirstReservation, undefined)
             yield* Fiber.join(first)
 
-            assert.isTrue(Result.isFailure(second))
-            if (Result.isFailure(second)) {
-              assert.instanceOf(second.failure, ApplicationInvalidRequest)
+            assert.isTrue(Result.isFailure(joiner))
+            if (Result.isFailure(joiner)) {
+              assert.instanceOf(joiner.failure, ApplicationServiceUnavailable)
+            }
+            assert.isTrue(Result.isFailure(different))
+            if (Result.isFailure(different)) {
+              assert.instanceOf(different.failure, ApplicationInvalidRequest)
             }
             assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
           }),
@@ -1034,7 +1056,7 @@ describe("pull request reviews", () => {
               Effect.flatMap((accepted) =>
                 accepted
                   ? Effect.succeed(
-                    ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+                    ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
                   )
                   : new AgentJobInputError({
                     workspaceId: input.workspaceId,
@@ -1160,7 +1182,7 @@ describe("pull request reviews", () => {
       () => Effect.succeed(undefined),
       () =>
         Effect.succeed(
-          ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+          ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
         ),
       () =>
         Effect.fail(
@@ -1218,46 +1240,82 @@ describe("pull request reviews", () => {
     ], { concurrency: 1, discard: true })
   })
 
-  it.effect("preserves a deterministic lifecycle-write failure after provider publication", () =>
-    withService(
-      (service, _enqueueInput, publicationCommands) =>
-        Effect.gen(function*() {
-          const preview = yield* service.previewPublication({
-            workspaceId: WORKSPACE_ID,
-            entityId: ENTITY_ID,
-            jobId: REVIEW_JOB_ID,
-            suggestionId: SUGGESTION_ID,
-            publishingOperator: OPERATOR_ID
-          })
-          const result = yield* service.publishSuggestion({
-            workspaceId: WORKSPACE_ID,
-            entityId: ENTITY_ID,
-            request: {
+  it.effect("recovers a provider success after the lifecycle projection initially fails", () =>
+    Effect.gen(function*() {
+      const reservation = yield* Ref.make<"acquired" | "recoverable" | "published">("acquired")
+      const failProjection = yield* Ref.make(true)
+      const reserve: Persistence["Service"]["agentJobs"]["reserveReviewSuggestionPublication"] = () =>
+        Ref.get(reservation).pipe(
+          Effect.map((state) =>
+            state === "acquired"
+              ? ReviewSuggestionPublicationReservation.make({ _tag: "acquired" })
+              : state === "recoverable"
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "recoverable",
+                publicationId: PUBLICATION_ID,
+                publishedAt: PUBLISHED_TIMESTAMP
+              })
+              : ReviewSuggestionPublicationReservation.make({
+                _tag: "published",
+                publicationId: PUBLICATION_ID,
+                publishedAt: PUBLISHED_TIMESTAMP
+              })
+          )
+        )
+      const record: Persistence["Service"]["agentJobs"]["recordReviewSuggestionPublication"] = (input) =>
+        (input.finalize === false
+          ? Ref.set(reservation, "recoverable")
+          : Ref.getAndSet(failProjection, false).pipe(
+            Effect.flatMap((mustFail) =>
+              mustFail
+                ? Effect.fail(
+                  new RecordNotFoundError({
+                    workspaceId: WORKSPACE_ID,
+                    recordKind: "agent-review-result",
+                    recordKey: REVIEW_JOB_ID
+                  })
+                )
+                : Ref.set(reservation, "published")
+            )
+          )).pipe(Effect.as(undefined))
+      yield* withService(
+        (service, _enqueueInput, publicationCommands) =>
+          Effect.gen(function*() {
+            const preview = yield* service.previewPublication({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
               jobId: REVIEW_JOB_ID,
               suggestionId: SUGGESTION_ID,
-              finalContent: preview.finalContent,
-              authorityBinding: preview.authorityBinding
-            },
-            session: HUMAN_SESSION
-          }).pipe(Effect.result)
+              publishingOperator: OPERATOR_ID
+            })
+            const publish = () =>
+              service.publishSuggestion({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                request: {
+                  jobId: REVIEW_JOB_ID,
+                  suggestionId: SUGGESTION_ID,
+                  finalContent: preview.finalContent,
+                  authorityBinding: preview.authorityBinding
+                },
+                session: HUMAN_SESSION
+              }).pipe(Effect.result)
+            const first = yield* publish()
+            const recovered = yield* publish()
 
-          assert.isTrue(Result.isFailure(result))
-          if (Result.isFailure(result)) {
-            assert.strictEqual(result.failure._tag, "ApplicationResourceNotFound")
-          }
-          assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
-        }),
-      registry,
-      Option.some(completedReview),
-      () =>
-        Effect.fail(
-          new RecordNotFoundError({
-            workspaceId: WORKSPACE_ID,
-            recordKind: "agent-review-result",
-            recordKey: REVIEW_JOB_ID
-          })
-        )
-    ))
+            assert.isTrue(Result.isFailure(first))
+            if (Result.isFailure(first)) {
+              assert.strictEqual(first.failure._tag, "ApplicationResourceNotFound")
+            }
+            assert.isTrue(Result.isSuccess(recovered))
+            assert.strictEqual((yield* Ref.get(publicationCommands)).length, 1)
+          }),
+        registry,
+        Option.some(completedReview),
+        record,
+        reserve
+      )
+    }))
 
   it.effect("includes every grouped related location in default publication content", () =>
     withService(

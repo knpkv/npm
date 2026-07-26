@@ -1337,7 +1337,13 @@ const makeAgentJobRepository = Effect.gen(function*() {
                 publicationId: existing.publicationId,
                 publishedAt: existing.publishedAt
               })
-              : ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+              : existing.publicationId !== null && existing.publishedAt !== null
+              ? ReviewSuggestionPublicationReservation.make({
+                _tag: "recoverable",
+                publicationId: existing.publicationId,
+                publishedAt: existing.publishedAt
+              })
+              : ReviewSuggestionPublicationReservation.make({ _tag: "in-progress" })
           }
           const review = yield* readReviewResult({
             workspaceId: request.workspaceId,
@@ -1353,14 +1359,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
               reason: "invalid-transition"
             })
           }
-          yield* sql`INSERT INTO agent_review_suggestion_publications (
+          const inserted = yield* sql<Record<string, unknown>>`INSERT INTO agent_review_suggestion_publications (
             workspace_id, job_id, suggestion_id, content_digest, state,
             publication_id, reserved_at, published_at
           ) VALUES (
             ${request.workspaceId}, ${request.jobId}, ${request.suggestionId},
             ${request.contentDigest}, 'reserved', NULL,
             ${encodeTimestamp(request.reservedAt)}, NULL
-          ) ON CONFLICT DO NOTHING`
+          ) ON CONFLICT DO NOTHING
+          RETURNING suggestion_id AS suggestionId`
           const rows = yield* sql<Record<string, unknown>>`SELECT
             content_digest AS contentDigest, state,
             publication_id AS publicationId, reserved_at AS reservedAt,
@@ -1389,7 +1396,15 @@ const makeAgentJobRepository = Effect.gen(function*() {
               publicationId: row.success.publicationId,
               publishedAt: row.success.publishedAt
             })
-            : ReviewSuggestionPublicationReservation.make({ _tag: "reserved" })
+            : row.success.publicationId !== null && row.success.publishedAt !== null
+            ? ReviewSuggestionPublicationReservation.make({
+              _tag: "recoverable",
+              publicationId: row.success.publicationId,
+              publishedAt: row.success.publishedAt
+            })
+            : ReviewSuggestionPublicationReservation.make({
+              _tag: inserted.length === 1 ? "acquired" : "in-progress"
+            })
         })
       ).pipe(mapPersistenceOperation("agent-job.reserve-review-suggestion-publication"))
     }),
@@ -1405,7 +1420,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
           AND job_id = ${request.jobId}
           AND suggestion_id = ${request.suggestionId}
           AND content_digest = ${request.contentDigest}
-          AND state = 'reserved'`.pipe(
+          AND state = 'reserved'
+          AND publication_id IS NULL`.pipe(
         mapPersistenceOperation("agent-job.release-review-suggestion-publication")
       )
     }),
@@ -1455,6 +1471,37 @@ const makeAgentJobRepository = Effect.gen(function*() {
               reason: "invalid-transition"
             })
           }
+          if (request.finalize === false) {
+            yield* sql`UPDATE agent_review_suggestion_publications
+              SET publication_id = ${request.publicationId},
+                  published_at = ${encodeTimestamp(request.publishedAt)}
+              WHERE workspace_id = ${request.workspaceId}
+                AND job_id = ${request.jobId}
+                AND suggestion_id = ${request.suggestionId}
+                AND content_digest = ${request.contentDigest}
+                AND state = 'reserved'
+                AND (
+                  publication_id IS NULL OR publication_id = ${request.publicationId}
+                )`
+            if ((yield* readChanges(sql)) !== 1) {
+              return yield* new AgentJobInputError({
+                workspaceId: request.workspaceId,
+                jobId: request.jobId,
+                reason: "invalid-transition"
+              })
+            }
+            return
+          }
+          if (
+            publication.success.publicationId !== null &&
+            publication.success.publicationId !== request.publicationId
+          ) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.jobId,
+              reason: "invalid-transition"
+            })
+          }
           const review = yield* readReviewResult({
             workspaceId: request.workspaceId,
             jobId: request.jobId
@@ -1477,7 +1524,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
               AND job_id = ${request.jobId}
               AND suggestion_id = ${request.suggestionId}
               AND content_digest = ${request.contentDigest}
-              AND state = 'reserved'`
+              AND state = 'reserved'
+              AND (
+                publication_id IS NULL OR publication_id = ${request.publicationId}
+              )`
           if ((yield* readChanges(sql)) !== 1) {
             return yield* new AgentJobInputError({
               workspaceId: request.workspaceId,
