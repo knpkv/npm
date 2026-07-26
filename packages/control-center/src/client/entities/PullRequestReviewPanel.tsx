@@ -1,5 +1,5 @@
-import { Button, Text } from "@knpkv/rly/primitives"
-import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
+import { Button, Dialog, Text } from "@knpkv/rly/primitives"
+import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useState } from "react"
 
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
@@ -53,9 +53,6 @@ const formatBudget = (budgetMillis: number): string => {
 
 const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
 
-const focusableSelector =
-  'button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
-
 const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null => {
   switch (event._tag) {
     case "operator-message":
@@ -108,8 +105,6 @@ export const PullRequestReviewPanel = ({
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
   const [submittedRequest, setSubmittedRequest] = useState<string | null>(null)
-  const launchDialogRef = useRef<HTMLDivElement>(null)
-  const launchReturnFocusRef = useRef<(() => void) | null>(null)
   const requestScope =
     state._tag === "idle"
       ? null
@@ -127,21 +122,9 @@ export const PullRequestReviewPanel = ({
       setSubmittedRequest(null)
     }
   }, [state, submittedRequest])
-  useEffect(() => {
-    if (!launchOpen) return
-    launchDialogRef.current?.focus()
-  }, [launchOpen])
-  const closeLaunchDialog = useCallback((): void => {
-    setLaunchOpen(false)
-    launchReturnFocusRef.current?.()
-    launchReturnFocusRef.current = null
-  }, [])
-  const openLaunchDialog = useCallback((): void => {
-    const activeElement = document.activeElement
-    const focus = activeElement !== null && "focus" in activeElement ? activeElement.focus : null
-    launchReturnFocusRef.current = typeof focus === "function" ? () => Reflect.apply(focus, activeElement, []) : null
-    setSubmittedRequest(null)
-    setLaunchOpen(true)
+  const changeLaunchOpen = useCallback((open: boolean): void => {
+    if (open) setSubmittedRequest(null)
+    setLaunchOpen(open)
   }, [])
   const submitTargetedReview = useCallback((): void => {
     const prompt = request.trim()
@@ -153,30 +136,6 @@ export const PullRequestReviewPanel = ({
     if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
     submitTargetedReview()
-  }
-  const handleLaunchKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === "Escape") {
-      event.preventDefault()
-      closeLaunchDialog()
-      return
-    }
-    if (event.key !== "Tab") return
-    const focusable = launchDialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector)
-    if (focusable === undefined || focusable.length === 0) {
-      event.preventDefault()
-      launchDialogRef.current?.focus()
-      return
-    }
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (first === undefined || last === undefined) return
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === launchDialogRef.current)) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
   }
   const publicationSurface =
     publication._tag === "idle" || publication._tag === "previewing" ? null : (
@@ -294,61 +253,46 @@ export const PullRequestReviewPanel = ({
         {threadSurface}
       </>
     )
-  const launchDialog = (headRevision: string): ReactElement | null =>
-    !launchOpen || state.provider === null ? null : (
-      <div className={styles.reviewLaunchBackdrop}>
-        <div
-          aria-describedby="review-launch-description"
-          aria-labelledby="review-launch-title"
-          aria-modal="true"
+  const reviewLaunch = (headRevision: string, triggerLabel: string): ReactElement | null =>
+    state.provider === null ? null : (
+      <Dialog.Root onOpenChange={changeLaunchOpen} open={launchOpen}>
+        <Dialog.Trigger disabled={state.action === "starting"}>
+          {state.action === "starting" ? "Starting review…" : triggerLabel}
+        </Dialog.Trigger>
+        <Dialog.Content
           className={styles.reviewLaunchDialog}
-          onKeyDown={handleLaunchKeyDown}
-          ref={launchDialogRef}
-          role="dialog"
-          tabIndex={-1}
+          description="Relay will inspect the immutable revision in an isolated sandbox. It cannot approve or change the pull request."
+          title="Review this exact head"
         >
-          <header>
-            <small>Read-only agent run</small>
-            <strong id="review-launch-title">Review this exact head</strong>
-            <Text id="review-launch-description" tone="secondary">
-              Relay will inspect the immutable revision in an isolated sandbox. It cannot approve or change the pull
-              request.
-            </Text>
-          </header>
-          <dl className={styles.reviewLaunchFacts}>
-            <div>
-              <dt>Exact head</dt>
-              <dd>
-                <code>{headRevision}</code>
-              </dd>
+          <div className={styles.reviewLaunchBody}>
+            <small className={styles.reviewLaunchEyebrow}>Read-only agent run</small>
+            <dl className={styles.reviewLaunchFacts}>
+              <div>
+                <dt>Exact head</dt>
+                <dd>
+                  <code>{headRevision}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>Review profile</dt>
+                <dd>{state.provider.reviewProfile.label}</dd>
+              </div>
+              <div>
+                <dt>Time budget</dt>
+                <dd>{formatBudget(state.provider.reviewProfile.budgetMillis)}</dd>
+              </div>
+              <div>
+                <dt>Runtime</dt>
+                <dd>Network blocked · sbx</dd>
+              </div>
+            </dl>
+            <div className={styles.reviewLaunchActions}>
+              <Dialog.Close>Keep reading</Dialog.Close>
+              <Dialog.Close onClick={() => onStart()}>Start full review</Dialog.Close>
             </div>
-            <div>
-              <dt>Review profile</dt>
-              <dd>{state.provider.reviewProfile.label}</dd>
-            </div>
-            <div>
-              <dt>Time budget</dt>
-              <dd>{formatBudget(state.provider.reviewProfile.budgetMillis)}</dd>
-            </div>
-            <div>
-              <dt>Runtime</dt>
-              <dd>Network blocked · sbx</dd>
-            </div>
-          </dl>
-          <div className={styles.reviewLaunchActions}>
-            <Button onClick={closeLaunchDialog}>Keep reading</Button>
-            <Button
-              onClick={() => {
-                setLaunchOpen(false)
-                launchReturnFocusRef.current = null
-                onStart()
-              }}
-            >
-              Start full review
-            </Button>
           </div>
-        </div>
-      </div>
+        </Dialog.Content>
+      </Dialog.Root>
     )
   if (review._tag === "unavailable") {
     return withThread(
@@ -399,10 +343,7 @@ export const PullRequestReviewPanel = ({
                 A new full review could not be started. Check the provider and worker, then try again.
               </span>
             ) : null}
-            <Button disabled={state.action === "starting"} onClick={openLaunchDialog}>
-              {state.action === "starting" ? "Starting…" : "Try again"}
-            </Button>
-            {launchDialog(review.subject.headRevision)}
+            {reviewLaunch(review.subject.headRevision, "Try again")}
           </>
         ) : null}
       </>
@@ -449,12 +390,7 @@ export const PullRequestReviewPanel = ({
       ) : state.provider === null ? (
         <span>Configure an sbx Review Agent Profile with an Effect AI provider to enable review.</span>
       ) : (
-        <>
-          <Button disabled={state.action === "starting"} onClick={openLaunchDialog}>
-            {state.action === "starting" ? "Starting review…" : "Review exact head"}
-          </Button>
-          {launchDialog(review.subject.headRevision)}
-        </>
+        <>{reviewLaunch(review.subject.headRevision, "Review exact head")}</>
       )}
       {state.action === "failed" ? (
         <span role="alert">The review could not be started. Check provider and worker configuration, then retry.</span>

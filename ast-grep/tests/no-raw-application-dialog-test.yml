@@ -1,0 +1,17 @@
+id: no-raw-application-dialog
+valid:
+  - |
+    <Dialog.Root>
+      <Dialog.Content title="Review">Content</Dialog.Content>
+    </Dialog.Root>
+  - |
+    <div role="status">Review complete</div>
+invalid:
+  - |
+    <div aria-modal="true" role="dialog">
+      Review
+    </div>
+  - |
+    <section aria-modal="true">
+      Review
+    </section>

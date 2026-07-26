@@ -1,0 +1,20 @@
+id: no-raw-application-dialog
+snapshots:
+  ? |
+    <div aria-modal="true" role="dialog">
+      Review
+    </div>
+  : labels:
+      - source: <div aria-modal="true" role="dialog">
+        style: primary
+        start: 0
+        end: 37
+  ? |
+    <section aria-modal="true">
+      Review
+    </section>
+  : labels:
+      - source: <section aria-modal="true">
+        style: primary
+        start: 0
+        end: 27

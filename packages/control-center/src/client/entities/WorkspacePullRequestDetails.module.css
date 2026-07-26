@@ -30,15 +30,13 @@
 .reviewNotes ul,
 .reviewNotes li,
 .reviewStatus,
-.reviewLaunchBackdrop,
 .reviewLaunchDialog,
-.reviewLaunchDialog > header,
+.reviewLaunchBody,
 .reviewLaunchFacts,
 .reviewLaunchFacts > div,
 .reviewLaunchActions,
-.publicationBackdrop,
 .publicationDialog,
-.publicationDialog > header,
+.publicationDialogBody,
 .publicationFacts,
 .publicationFacts > div,
 .publicationEditor,
@@ -235,39 +233,19 @@
   position: absolute;
 }
 
-.reviewLaunchBackdrop {
-  align-items: center;
-  background: color-mix(in srgb, var(--rly-color-text-1) 38%, transparent);
-  inset: var(--rly-space-0);
-  justify-items: center;
-  padding: var(--rly-space-24);
-  position: fixed;
-  z-index: 30;
-}
-
 .reviewLaunchDialog {
-  background: var(--rly-color-surface-1);
   border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 52%, var(--rly-color-border-1));
   border-block-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
-  border-radius: var(--rly-radius-control);
-  box-shadow: 0 var(--rly-space-20) var(--rly-space-48) color-mix(in srgb, var(--rly-color-text-1) 24%, transparent);
-  gap: var(--rly-space-24);
   inline-size: min(38rem, 100%);
-  max-block-size: calc(100dvh - var(--rly-space-48));
-  overflow: auto;
-  padding: var(--rly-space-24);
 }
 
-.reviewLaunchDialog:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+.reviewLaunchBody,
+.publicationDialogBody {
+  gap: var(--rly-space-24);
 }
 
-.reviewLaunchDialog > header {
-  gap: var(--rly-space-8);
-}
-
-.reviewLaunchDialog > header > small,
+.reviewLaunchEyebrow,
+.publicationEyebrow,
 .reviewLaunchFacts dt,
 .reviewThreadComposerFooter {
   color: var(--rly-color-text-2);
@@ -275,14 +253,10 @@
     var(--rly-type-meta-font);
 }
 
-.reviewLaunchDialog > header > small {
+.reviewLaunchEyebrow,
+.publicationEyebrow {
   letter-spacing: 0.08em;
   text-transform: uppercase;
-}
-
-.reviewLaunchDialog > header > strong {
-  font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
-    var(--rly-type-card-title-font);
 }
 
 .reviewLaunchFacts {
@@ -503,37 +477,9 @@
   padding: var(--rly-space-12);
 }
 
-.publicationBackdrop {
-  align-items: center;
-  background: color-mix(in srgb, var(--rly-color-surface-1) 78%, transparent);
-  inset: var(--rly-space-0);
-  justify-items: center;
-  padding: var(--rly-space-24);
-  position: fixed;
-  z-index: 20;
-}
-
 .publicationDialog {
-  background: var(--rly-color-surface-1);
   border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 55%, var(--rly-color-border-1));
-  border-radius: var(--rly-radius-control);
-  box-shadow: 0 var(--rly-space-24) var(--rly-space-48) color-mix(in srgb, black 35%, transparent);
-  gap: var(--rly-space-24);
   inline-size: min(46rem, 100%);
-  max-block-size: calc(100dvh - var(--rly-space-48));
-  overflow: auto;
-  padding: var(--rly-space-32);
-}
-
-.publicationDialog > header {
-  gap: var(--rly-space-8);
-}
-
-.publicationDialog > header > strong {
-  font-family: var(--rly-type-section-title-font);
-  font-size: var(--rly-type-section-title-size);
-  font-weight: var(--rly-type-section-title-weight);
-  line-height: var(--rly-type-section-title-line-height);
 }
 
 .publicationFacts {

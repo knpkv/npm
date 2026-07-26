@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
 import { type ReactElement, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
@@ -780,24 +781,26 @@ const renderView = async (
   document.body.append(host)
   mountedRoot = createRoot(host)
   const view: ReactElement = (
-    <MemoryRouter>
-      <WorkspaceEntityView
-        onAskAgent={onAskAgent}
-        originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
-        originLabel="Back to items"
-        originState={null}
-        retry={() => undefined}
-        reviewCanEnqueue
-        reviewStart={onReviewStart}
-        reviewState={
-          viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
-            ? reviewState
-            : { _tag: "idle" }
-        }
-        state={viewState}
-        workspaceId={WORKSET_WORKSPACE_ID}
-      />
-    </MemoryRouter>
+    <PortalProvider>
+      <MemoryRouter>
+        <WorkspaceEntityView
+          onAskAgent={onAskAgent}
+          originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
+          originLabel="Back to items"
+          originState={null}
+          retry={() => undefined}
+          reviewCanEnqueue
+          reviewStart={onReviewStart}
+          reviewState={
+            viewState._tag !== "idle" && viewState.entityId === pullRequestInspection.entity.projection.entityId
+              ? reviewState
+              : { _tag: "idle" }
+          }
+          state={viewState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      </MemoryRouter>
+    </PortalProvider>
   )
   await act(async () => mountedRoot?.render(view))
   await act(async () => vi.dynamicImportSettled())

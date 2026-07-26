@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-raw-application-dialog
+language: tsx
+severity: error
+message: "Control Center dialogs must use the shared rly Dialog primitive"
+
+rule:
+  kind: jsx_opening_element
+  regex: '\b(?:role="dialog"|aria-modal="true")'
+
+files:
+  - "packages/control-center/src/client/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  The shared rly Dialog primitive owns portal isolation, focus containment,
+  dismissal, focus restoration, scroll locking, nesting, and reduced motion.
+  Third-party wrappers require a narrow documented ignore rather than another
+  application-owned modal lifecycle.

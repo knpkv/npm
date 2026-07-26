@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
 
+import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
-import { act } from "react"
+import { act, type ComponentProps, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -22,13 +23,19 @@ import {
   ReviewSuggestionPublicationContent,
   ReviewSuggestionPublicationPreview
 } from "../../src/api/agent.js"
-import { PullRequestReviewPanel } from "../../src/client/entities/PullRequestReviewPanel.js"
+import { PullRequestReviewPanel as ReviewPanel } from "../../src/client/entities/PullRequestReviewPanel.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
 import { EntityId, GovernedActionId, JobId, PersonId } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
+
+const PullRequestReviewPanel = (props: ComponentProps<typeof ReviewPanel>): ReactElement => (
+  <PortalProvider>
+    <ReviewPanel {...props} />
+  </PortalProvider>
+)
 
 const ENTITY_ID = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000701")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000702")
@@ -699,15 +706,17 @@ describe("PullRequestReviewPanel", () => {
 
     const dialog = host.querySelector<HTMLDivElement>("[role=dialog]")
     if (dialog === null) throw new Error("Expected review launch dialog")
-    expect(dialog.getAttribute("aria-modal")).toBe("true")
-    expect(dialog.getAttribute("aria-describedby")).toBe("review-launch-description")
-    expect(document.activeElement).toBe(dialog)
+    expect(dialog.getAttribute("aria-describedby")).not.toBeNull()
+    expect(document.activeElement?.textContent).toBe("Keep reading")
     expect(dialog.textContent).toContain("It cannot approve or change the pull request.")
+    expect(document.body.getAttribute("data-scroll-locked")).toBe("1")
 
     await act(async () => dialog.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
+    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
 
     expect(host.querySelector("[role=dialog]")).toBeNull()
     expect(document.activeElement).toBe(launch)
+    expect(document.body.getAttribute("data-scroll-locked")).toBeNull()
   })
 
   it("describes a failed full-review retry without mislabeling it as targeted", async () => {
@@ -903,7 +912,7 @@ describe("PullRequestReviewPanel", () => {
     await render({ _tag: "preview", preview: PREVIEW })
     await act(async () => vi.dynamicImportSettled())
     expect(host.querySelector("[role=dialog]")).not.toBeNull()
-    expect(host.querySelector("[role=dialog]")?.getAttribute("aria-modal")).toBe("true")
+    expect(host.querySelector("[role=dialog]")?.getAttribute("aria-describedby")).not.toBeNull()
     expect(host.textContent).toContain(PREVIEW.connectedIdentity.arn)
     expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)} · AFTER`)
     expect(host.textContent).toContain(SUBJECT.headRevision)
