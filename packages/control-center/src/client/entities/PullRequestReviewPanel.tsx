@@ -101,7 +101,9 @@ export const PullRequestReviewPanel = ({
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
   const requestScope =
-    state._tag === "idle" ? null : `${state.entityId}:${state.baseRevision ?? ""}:${state.headRevision}`
+    state._tag === "idle"
+      ? null
+      : `${state.entityId}:${state.baseRevision ?? ""}:${state.headRevision}:${state.sessionKey}`
   useEffect(() => {
     setLaunchOpen(false)
     setRequest("")

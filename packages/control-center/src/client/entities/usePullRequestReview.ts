@@ -178,6 +178,7 @@ export const usePullRequestReview = (
   const publicationAbort = useRef<AbortController | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
   const latestThread = useRef<PullRequestReviewThread | null>(null)
+  const recheckTerminalThread = useRef(false)
   const scope = useMemo(
     () =>
       sessionKey === null || headRevision === null
@@ -188,6 +189,7 @@ export const usePullRequestReview = (
   useLayoutEffect(() => {
     latestScope.current = scope
     latestThread.current = null
+    recheckTerminalThread.current = false
   }, [scope])
 
   useEffect(() => {
@@ -197,27 +199,24 @@ export const usePullRequestReview = (
     }
     const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
     const previousThread = latestThread.current ?? undefined
+    const recheckTerminalTail = recheckTerminalThread.current
+    recheckTerminalThread.current = false
     const abort = new AbortController()
     setState({ _tag: "loading", ...scope })
-    const providers = canEnqueue
-      ? transport.providers(abort.signal)
-      : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
-    Promise.all([
-      transport.load(entityId, abort.signal),
-      pullRequestReviewBrowser.then(
-        ({ continuePullRequestReviewThread }) =>
-          continuePullRequestReviewThread(
-            transport,
-            entityId,
-            abort.signal,
-            previousThread
-          )
-      ),
-      providers
-    ]).then(
-      ([review, thread, catalog]) => {
+    pullRequestReviewBrowser.then(
+      ({ loadPullRequestReviewSnapshot }) =>
+        loadPullRequestReviewSnapshot(
+          transport,
+          entityId,
+          canEnqueue,
+          abort.signal,
+          previousThread,
+          recheckTerminalTail,
+          latestThread
+        )
+    ).then(
+      ({ catalog, review, thread }) => {
         if (!abort.signal.aborted) {
-          latestThread.current = thread
           setState(
             matchesScope(review, scope)
               ? {
@@ -255,7 +254,10 @@ export const usePullRequestReview = (
     const abort = new AbortController()
     Effect.runPromise(Effect.sleep("2 seconds"), { signal: abort.signal }).then(
       () => {
-        if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
+        if (!abort.signal.aborted) {
+          recheckTerminalThread.current = true
+          setRequestRevision((revision) => revision + 1)
+        }
       },
       (_failure: unknown) => {
         if (!abort.signal.aborted) {
@@ -303,7 +305,8 @@ export const usePullRequestReview = (
           transport,
           refreshScope.entityId,
           signal,
-          previous
+          previous,
+          latestThread
         )
     ).then(
       (thread) => {
@@ -312,7 +315,6 @@ export const usePullRequestReview = (
           latestScope.current === null ||
           !sameReviewScope(latestScope.current, refreshScope)
         ) return
-        latestThread.current = thread
         setState((latest) =>
           latest._tag === "ready" && sameReviewScope(latest, refreshScope)
             ? { ...latest, thread }

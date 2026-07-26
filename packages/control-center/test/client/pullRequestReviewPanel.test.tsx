@@ -412,6 +412,46 @@ describe("PullRequestReviewPanel", () => {
     expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
   })
 
+  it("clears the targeted draft and launch dialog when the authenticated session changes", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const render = (state: PullRequestReviewControllerState) =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+
+    await act(async () => render(REFRESHED_NOT_STARTED_STATE))
+    const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
+    if (textarea === null) throw new Error("Expected targeted review request")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected textarea value setter")
+      valueSetter.call(textarea, "Private draft for session A.")
+      textarea.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const launch = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Review exact head"
+    )
+    if (launch === undefined) throw new Error("Expected review launch action")
+    await act(async () => launch.click())
+    expect(host.querySelector("[role=dialog]")).not.toBeNull()
+
+    await act(async () => render({ ...REFRESHED_NOT_STARTED_STATE, sessionKey: "session-b" }))
+
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe("")
+    expect(host.querySelector("[role=dialog]")).toBeNull()
+  })
+
   it("separates non-publishable notes and presents grouped file advice with replacement context", async () => {
     const host = document.createElement("div")
     document.body.append(host)

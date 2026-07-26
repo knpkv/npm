@@ -14,6 +14,7 @@ import {
   AgentModelId,
   DurableAgentProviderId,
   MAXIMUM_REVIEW_SUGGESTION_PUBLICATION_CONTENT_LENGTH,
+  type PullRequestReviewUnavailable,
   ReleaseAgentThreadCursor,
   type ReviewAgentProfile,
   ReviewAgentProfileId,
@@ -1706,6 +1707,109 @@ describe("pull request reviews", () => {
         assert.strictEqual(retryPresented.events[1]?._tag, "run-queued")
       })
     ))
+
+  it.effect("keeps stable thread history visible while a pull request is temporarily ineligible", () =>
+    Effect.gen(function*() {
+      const selectedInspection = yield* Ref.make(inspection)
+      const changingInspection = DeliveryGraphInspection.of({
+        ...graphInspection,
+        workspaceEntity: () => Ref.get(selectedInspection)
+      })
+      yield* withRealService(
+        (service) =>
+          Effect.gen(function*() {
+            yield* service.enqueue({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              request: {
+                providerId: PROVIDER_ID,
+                model: MODEL,
+                profile: "read-only",
+                reviewProfileId: REVIEW_PROFILE.profileId
+              }
+            })
+            const unavailableInspections: ReadonlyArray<{
+              readonly reason: PullRequestReviewUnavailable["reason"]
+              readonly value: WorkspaceEntityInspection
+            }> = [
+              {
+                reason: "source-stale",
+                value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  isSourceCurrent: false
+                })
+              },
+              {
+                reason: "release-unavailable",
+                value: Schema.decodeSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  entity: {
+                    ...encodedInspection.entity,
+                    canonicalReleaseId: null,
+                    releaseIds: []
+                  }
+                })
+              },
+              {
+                reason: "base-revision-unavailable",
+                value: Schema.decodeUnknownSync(WorkspaceEntityInspection)({
+                  ...encodedInspection,
+                  entity: {
+                    ...encodedInspection.entity,
+                    projection: {
+                      ...encodedInspection.entity.projection,
+                      details: {
+                        ...encodedInspection.entity.projection.details,
+                        baseRevision: null
+                      }
+                    }
+                  }
+                })
+              }
+            ]
+            for (const candidate of unavailableInspections) {
+              yield* Ref.set(selectedInspection, candidate.value)
+              const current = yield* service.current({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID
+              })
+              assert.deepInclude(current, {
+                _tag: "unavailable",
+                reason: candidate.reason
+              })
+              const page = yield* service.thread({
+                workspaceId: WORKSPACE_ID,
+                entityId: ENTITY_ID,
+                after: ReleaseAgentThreadCursor.make(0),
+                limit: 128
+              })
+              assert.deepStrictEqual(
+                page.events.map(({ _tag }) => _tag),
+                ["operator-message", "run-queued"]
+              )
+            }
+
+            yield* Ref.set(
+              selectedInspection,
+              Schema.decodeSync(WorkspaceEntityInspection)({
+                ...encodedInspection,
+                source: {
+                  ...encodedInspection.source,
+                  providerId: "jira"
+                }
+              })
+            )
+            const unrelated = yield* service.thread({
+              workspaceId: WORKSPACE_ID,
+              entityId: ENTITY_ID,
+              after: ReleaseAgentThreadCursor.make(0),
+              limit: 128
+            })
+            assert.deepStrictEqual(unrelated.events, [])
+          }),
+        changingInspection
+      )
+    }))
 
   it.effect("isolates identical pull-request identities across plugin connections", () =>
     withRealService(

@@ -340,10 +340,17 @@ export const LatestAgentReviewInput = Schema.Struct({
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 
 /** Cursor-bounded lookup for the durable thread behind a stable pull request. */
+export const PrReviewThreadSubject = Schema.Struct({
+  providerId: PrReviewSubject.fields.providerId,
+  repository: PrReviewSubject.fields.repository,
+  pullRequestId: PrReviewSubject.fields.pullRequestId
+})
+export type PrReviewThreadSubject = typeof PrReviewThreadSubject.Type
+
 export const AgentReviewThreadAfterInput = Schema.Struct({
   workspaceId: WorkspaceId,
   pluginConnectionId: PluginConnectionId,
-  subject: PrReviewSubject,
+  subject: PrReviewThreadSubject,
   after: AgentEventCursor,
   limit: AgentThreadEventPageSize
 })

@@ -2,6 +2,8 @@
 import * as Effect from "effect/Effect"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import type {
+  AgentProviderCatalog,
+  PullRequestReviewState,
   PullRequestReviewThreadEvent,
   PullRequestReviewThreadPage,
   ReleaseAgentThreadCursor
@@ -25,6 +27,22 @@ interface PullRequestReviewThreadPageTransport {
 export interface PullRequestReviewThread {
   readonly events: ReadonlyArray<PullRequestReviewThreadEvent>
   readonly nextCursor: ReleaseAgentThreadCursor
+}
+
+interface PullRequestReviewThreadRef {
+  current: PullRequestReviewThread | null
+}
+
+const installNewestThread = (
+  target: PullRequestReviewThreadRef,
+  candidate: PullRequestReviewThread,
+  signal: AbortSignal
+): PullRequestReviewThread => {
+  if (
+    !signal.aborted &&
+    (target.current === null || target.current.nextCursor <= candidate.nextCursor)
+  ) target.current = candidate
+  return target.current ?? candidate
 }
 
 /** Generated-client transport kept outside the default workspace-entity chunk. */
@@ -138,15 +156,45 @@ export const continuePullRequestReviewThread = async (
     }
 }
 
+/** Load one coherent review snapshot and close a pending-to-terminal tail race. */
+export const loadPullRequestReviewSnapshot = async (
+  transport: PullRequestReviewTransport,
+  entityId: EntityId,
+  canEnqueue: boolean,
+  signal: AbortSignal,
+  previous: PullRequestReviewThread | undefined,
+  recheckTerminalTail: boolean,
+  target: PullRequestReviewThreadRef
+): Promise<{
+  readonly catalog: AgentProviderCatalog
+  readonly review: PullRequestReviewState
+  readonly thread: PullRequestReviewThread
+}> => {
+  const [review, initialThread, catalog] = await Promise.all([
+    transport.load(entityId, signal),
+    continuePullRequestReviewThread(transport, entityId, signal, previous),
+    canEnqueue
+      ? transport.providers(signal)
+      : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
+  ])
+  const thread = recheckTerminalTail &&
+      (review._tag === "completed" || review._tag === "failed")
+    ? await continuePullRequestReviewThread(transport, entityId, signal, initialThread)
+    : initialThread
+  return { catalog, review, thread: installNewestThread(target, thread, signal) }
+}
+
 /** Continue a visible thread while retaining diagnostics for non-fatal refresh failures. */
 export const refreshPullRequestReviewThread = async (
   transport: PullRequestReviewThreadPageTransport,
   entityId: EntityId,
   signal: AbortSignal,
-  previous?: PullRequestReviewThread
+  previous: PullRequestReviewThread | undefined,
+  target: PullRequestReviewThreadRef
 ): Promise<PullRequestReviewThread> => {
   try {
-    return await continuePullRequestReviewThread(transport, entityId, signal, previous)
+    const thread = await continuePullRequestReviewThread(transport, entityId, signal, previous)
+    return installNewestThread(target, thread, signal)
   } catch (failure) {
     if (!signal.aborted) {
       Effect.runFork(Effect.logError("Pull-request review thread refresh failed", failure))

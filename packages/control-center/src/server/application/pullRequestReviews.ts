@@ -59,6 +59,8 @@ import {
   type AgentThreadEvent,
   AgentThreadEventPageSize,
   type LatestAgentReviewRecord,
+  PrReviewThreadSubject,
+  type PrReviewThreadSubject as PrReviewThreadSubjectType,
   ReviewSuggestionPublicationDigest
 } from "../persistence/repositories/agentJobModels.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
@@ -101,6 +103,11 @@ class AvailableReviewTarget extends Data.TaggedClass("available")<{
 type DerivedReviewTarget =
   | AvailableReviewTarget
   | Extract<PullRequestReviewState, { readonly _tag: "unavailable" }>
+
+interface ReviewThreadTarget {
+  readonly pluginConnectionId: PluginConnectionId
+  readonly subject: PrReviewThreadSubjectType
+}
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
@@ -250,6 +257,23 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
     sourceRevision: inspection.source.revision,
     subject
   })
+})
+
+const deriveThreadTarget = Effect.fn("PullRequestReviews.deriveThreadTarget")(function*(
+  inspection: WorkspaceEntityInspection
+): Effect.fn.Return<ReviewThreadTarget | null, ApplicationServiceUnavailable> {
+  if (inspection.source.providerId !== "codecommit") return null
+  const details = inspection.entity.projection.details
+  if (details._tag !== "pull-request") return null
+  const subject = yield* Schema.decodeUnknownEffect(PrReviewThreadSubject)({
+    providerId: "codecommit",
+    repository: details.repository,
+    pullRequestId: inspection.source.vendorImmutableId
+  }).pipe(Effect.mapError(unavailable))
+  return {
+    pluginConnectionId: inspection.source.pluginConnectionId,
+    subject
+  }
 })
 
 const decodeJobIdentity = Effect.fn("PullRequestReviews.decodeJobIdentity")(function*(
@@ -464,8 +488,10 @@ const makePullRequestReviews = Effect.gen(function*() {
 
   return PullRequestReviews.of({
     thread: Effect.fn("PullRequestReviews.thread")(function*(input) {
-      const derived = yield* inspectTarget(input)
-      if (derived._tag !== "available") {
+      const target = yield* inspection.workspaceEntity(input).pipe(
+        Effect.flatMap(deriveThreadTarget)
+      )
+      if (target === null) {
         return PullRequestReviewThreadPage.make({
           events: [],
           hasMore: false,
@@ -481,8 +507,8 @@ const makePullRequestReviews = Effect.gen(function*() {
       const page = yield* mapPersistenceRead(
         persistence.agentJobs.reviewThreadAfter({
           workspaceId: input.workspaceId,
-          pluginConnectionId: derived.pluginConnectionId,
-          subject: derived.subject,
+          pluginConnectionId: target.pluginConnectionId,
+          subject: target.subject,
           after,
           limit
         }).pipe(
@@ -496,8 +522,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         (yield* mapPersistenceRead(
             persistence.agentJobs.reviewThreadAfter({
               workspaceId: input.workspaceId,
-              pluginConnectionId: derived.pluginConnectionId,
-              subject: derived.subject,
+              pluginConnectionId: target.pluginConnectionId,
+              subject: target.subject,
               after: page.nextCursor,
               limit: AgentThreadEventPageSize.make(1)
             }).pipe(

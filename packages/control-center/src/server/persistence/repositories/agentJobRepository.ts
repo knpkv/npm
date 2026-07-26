@@ -37,7 +37,7 @@ import {
   PersistenceOperationError,
   RecordNotFoundError
 } from "../errors.js"
-import type { AgentJobPrompt } from "./agentJobModels.js"
+import type { AgentJobPrompt, PrReviewThreadSubject } from "./agentJobModels.js"
 import {
   AgentAttemptSequence,
   AgentContextSnapshotRecord,
@@ -412,7 +412,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
 
   const reviewThreadSubjectKey = Effect.fn("AgentJobRepository.reviewThreadSubjectKey")(function*(
     pluginConnectionId: typeof PluginConnectionId.Type,
-    subject: typeof PrReviewSubject.Type
+    subject: typeof PrReviewThreadSubject.Type
   ) {
     return yield* Schema.encodeUnknownEffect(
       Schema.fromJsonString(PrReviewThreadIdentity)
