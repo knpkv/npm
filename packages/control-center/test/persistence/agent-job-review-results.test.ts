@@ -8,11 +8,12 @@ import { type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/age
 import {
   GovernedActionId,
   JobId,
+  PluginConnectionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
+import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
@@ -31,6 +32,7 @@ import { makePersistenceTestConfig } from "./fixtures.js"
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000046")
 const SWAP_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000042")
 const PROVIDER_ID = AgentProviderId.make("deterministic-review")
 const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
@@ -127,6 +129,29 @@ const report = Schema.decodeUnknownSync(PrReviewReport)({
   notes: []
 })
 
+const denseContextReport = (taskSubject: PrReviewSubject): PrReviewReport => {
+  const suggestion = report.suggestions[0]!
+  return Schema.decodeUnknownSync(PrReviewReport)({
+    ...report,
+    subject: taskSubject,
+    suggestions: Array.from({ length: 8 }, (_, index) => ({
+      ...suggestion,
+      suggestionId: `sha256:${String(index + 1).repeat(64)}`,
+      title: `${String(index)}${"s".repeat(499)}`
+    })),
+    notes: Array.from({ length: 8 }, (_, index) => ({
+      noteId: `sha256:${String(index + 1).repeat(64)}`,
+      reason: "pre-existing",
+      title: `${String(index)}${"n".repeat(499)}`,
+      observation: "This issue predates the reviewed pull request.",
+      confidence: {
+        level: "medium",
+        reason: "The base revision contains the same behavior."
+      }
+    }))
+  })
+}
+
 const nearLimitReport = (): PrReviewReport => {
   const suggestion = report.suggestions[0]!
   const suggestions = Array.from({ length: 4 }, (_, index) => ({
@@ -172,7 +197,11 @@ const setupFoundation = Effect.gen(function*() {
   )`
 })
 
-const enqueueReviewFor = (jobId: typeof JobId.Type, taskSubject: PrReviewSubject) =>
+const enqueueReviewFor = (
+  jobId: typeof JobId.Type,
+  taskSubject: PrReviewSubject,
+  prompt = "Review the immutable pull request."
+) =>
   Effect.gen(function*() {
     const jobs = yield* AgentJobRepository
     yield* jobs.enqueue({
@@ -182,11 +211,16 @@ const enqueueReviewFor = (jobId: typeof JobId.Type, taskSubject: PrReviewSubject
       providerId: PROVIDER_ID,
       model: "deterministic-review-model",
       access: "read-only",
-      userPrompt: "Review the immutable pull request.",
-      prompt: "Review the immutable pull request.",
+      userPrompt: prompt,
+      prompt,
       contextFingerprint: FINGERPRINT,
       subjectRevision: taskSubject.headRevision,
-      task: { _tag: "pr-review", subject: taskSubject, reviewProfile },
+      task: {
+        _tag: "pr-review",
+        pluginConnectionId: PLUGIN_CONNECTION_ID,
+        subject: taskSubject,
+        reviewProfile
+      },
       createdAt: T0
     })
   })
@@ -281,12 +315,14 @@ describe("agent job review results", () => {
 
         const firstPage = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
         })
         const advancedPage = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject: advancedSubject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
@@ -296,6 +332,161 @@ describe("agent job review results", () => {
           advancedPage.events.map(({ jobId }) => jobId),
           [JOB_ID, JOB_ID, JOB_ID, JOB_ID, SWAP_JOB_ID, SWAP_JOB_ID]
         )
+      })
+    ))
+
+  it.effect("trims limitation cutoffs before freezing follow-up context", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        const firstClaim = yield* claimReview
+        const reason = `${"x".repeat(999)} tail`
+        const limitedReport = Schema.decodeUnknownSync(PrReviewReport)({
+          ...report,
+          completion: { status: "unable-to-conclude", reason }
+        })
+        yield* jobs.completeReview({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          attemptSequence: firstClaim.attemptSequence,
+          leaseToken: LEASE_TOKEN,
+          report: limitedReport,
+          completedAt: T2
+        })
+
+        yield* enqueueReviewFor(SWAP_JOB_ID, advancedSubject)
+        yield* TestClock.setTime(DateTime.toEpochMillis(T3))
+        const secondClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T3,
+          leaseExpiresAt: T4
+        })
+        assert.isTrue(Option.isSome(secondClaim))
+        if (Option.isNone(secondClaim)) return yield* Effect.die("follow-up review claim missing")
+        assert.strictEqual(secondClaim.value.context.task._tag, "pr-review")
+        if (secondClaim.value.context.task._tag !== "pr-review") {
+          return yield* Effect.die("follow-up review task mismatch")
+        }
+        assert.strictEqual(
+          secondClaim.value.context.task.context.priorRuns[0]?.limitation,
+          "x".repeat(999)
+        )
+      })
+    ))
+
+  it.effect("fits maximum valid thread history into the durable event envelope", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        const jobIds = [
+          JobId.make("01890f6f-6d6a-7cc0-98d2-000000000047"),
+          JobId.make("01890f6f-6d6a-7cc0-98d2-000000000048"),
+          JobId.make("01890f6f-6d6a-7cc0-98d2-000000000049"),
+          JobId.make("01890f6f-6d6a-7cc0-98d2-00000000004a")
+        ]
+        for (const [index, jobId] of jobIds.entries()) {
+          const runSubject = {
+            ...subject,
+            headRevision: String(index + 3).repeat(40)
+          } satisfies PrReviewSubject
+          yield* enqueueReviewFor(jobId, runSubject, "p".repeat(2_500))
+          yield* TestClock.setTime(DateTime.toEpochMillis(T1))
+          const leaseToken = AgentLeaseToken.make(String(index + 3).repeat(64))
+          const claimed = yield* jobs.claimNext({
+            workspaceId: WORKSPACE_ID,
+            taskTags: ["pr-review"],
+            leaseOwner: LEASE_OWNER,
+            leaseToken,
+            claimedAt: T1,
+            leaseExpiresAt: T4
+          })
+          assert.isTrue(Option.isSome(claimed))
+          if (Option.isNone(claimed)) return yield* Effect.die("dense review claim missing")
+          yield* jobs.completeReview({
+            workspaceId: WORKSPACE_ID,
+            jobId,
+            attemptSequence: claimed.value.attemptSequence,
+            leaseToken,
+            report: denseContextReport(runSubject),
+            completedAt: T2
+          })
+        }
+
+        const followUpJobId = JobId.make("01890f6f-6d6a-7cc0-98d2-00000000004b")
+        const followUpSubject = {
+          ...subject,
+          headRevision: "7".repeat(40)
+        } satisfies PrReviewSubject
+        yield* enqueueReviewFor(followUpJobId, followUpSubject, "Review the newest head.")
+        yield* TestClock.setTime(DateTime.toEpochMillis(T3))
+        const followUpClaim = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T3,
+          leaseExpiresAt: T4
+        })
+        assert.isTrue(Option.isSome(followUpClaim))
+        if (Option.isNone(followUpClaim)) return yield* Effect.die("bounded follow-up claim missing")
+        assert.strictEqual(followUpClaim.value.context.task._tag, "pr-review")
+        if (followUpClaim.value.context.task._tag !== "pr-review") {
+          return yield* Effect.die("bounded follow-up task mismatch")
+        }
+        const context = followUpClaim.value.context.task.context
+        assert.isTrue(context.historyTruncated)
+        assert.strictEqual(context.recentRequests.length, 4)
+        assert.isBelow(context.priorRuns.length, 4)
+
+        const rows = yield* database.sql<{
+          readonly taskBytes: number
+          readonly queuedBytes: number
+        }>`SELECT
+          length(CAST(job.task_context_json AS BLOB)) AS taskBytes,
+          event.payload_byte_length AS queuedBytes
+        FROM agent_jobs job
+        INNER JOIN agent_thread_events event
+          ON event.workspace_id = job.workspace_id
+         AND event.job_id = job.job_id
+         AND event.event_kind = 'job-queued'
+        WHERE job.workspace_id = ${WORKSPACE_ID}
+          AND job.job_id = ${followUpJobId}`
+        assert.strictEqual(rows.length, 1)
+        assert.isAtMost(rows[0]!.taskBytes, 32_768)
+        assert.isAtMost(rows[0]!.queuedBytes, 32_768)
+      })
+    ))
+
+  it.effect("returns a bounded not-found identity for maximum valid PR subjects", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        const maximumSubject = Schema.decodeUnknownSync(PrReviewSubject)({
+          ...subject,
+          repository: "r".repeat(200),
+          pullRequestId: "p".repeat(512)
+        })
+        const result = yield* jobs.reviewThreadAfter({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject: maximumSubject,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.isTrue(Schema.is(RecordNotFoundError)(result.failure))
+          if (Schema.is(RecordNotFoundError)(result.failure)) {
+            assert.strictEqual(result.failure.recordKey, "p".repeat(500))
+          }
+        }
       })
     ))
 
@@ -365,6 +556,7 @@ describe("agent job review results", () => {
 
         const latest = yield* jobs.latestReview({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject
         })
         assert.isTrue(Option.isSome(latest))
@@ -374,6 +566,7 @@ describe("agent job review results", () => {
 
         const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
@@ -519,6 +712,7 @@ describe("agent job review results", () => {
 
         const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
@@ -627,6 +821,7 @@ describe("agent job review results", () => {
 
         const latest = yield* jobs.latestReview({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject
         })
         assert.isTrue(Option.isSome(latest))
@@ -638,6 +833,7 @@ describe("agent job review results", () => {
 
         const page = yield* jobs.reviewThreadAfter({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject,
           after: AgentEventCursor.make(0),
           limit: AgentThreadEventPageSize.make(128)
@@ -645,10 +841,22 @@ describe("agent job review results", () => {
         assert.deepStrictEqual(
           page.events.map(({ eventKind, task }) => ({ eventKind, task })),
           [
-            { eventKind: "user-message", task: { _tag: "pr-review", subject, reviewProfile } },
-            { eventKind: "job-queued", task: { _tag: "pr-review", subject, reviewProfile } },
-            { eventKind: "review-report", task: { _tag: "pr-review", subject, reviewProfile } },
-            { eventKind: "job-completed", task: { _tag: "pr-review", subject, reviewProfile } }
+            {
+              eventKind: "user-message",
+              task: { _tag: "pr-review", pluginConnectionId: PLUGIN_CONNECTION_ID, subject, reviewProfile }
+            },
+            {
+              eventKind: "job-queued",
+              task: { _tag: "pr-review", pluginConnectionId: PLUGIN_CONNECTION_ID, subject, reviewProfile }
+            },
+            {
+              eventKind: "review-report",
+              task: { _tag: "pr-review", pluginConnectionId: PLUGIN_CONNECTION_ID, subject, reviewProfile }
+            },
+            {
+              eventKind: "job-completed",
+              task: { _tag: "pr-review", pluginConnectionId: PLUGIN_CONNECTION_ID, subject, reviewProfile }
+            }
           ]
         )
       })
@@ -734,6 +942,7 @@ describe("agent job review results", () => {
 
         const latest = yield* jobs.latestReview({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject
         })
         assert.isTrue(Option.isSome(latest))

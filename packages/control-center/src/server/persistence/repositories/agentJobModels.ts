@@ -7,6 +7,7 @@ import {
   AgentThreadId,
   GovernedActionId,
   JobId,
+  PluginConnectionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
@@ -85,6 +86,7 @@ export type AgentJobTaskTag = typeof AgentJobTaskTag.Type
 const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 
 const PrReviewAgentJobTaskFields = {
+  pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
   reviewProfile: ReviewAgentProfile
 }
@@ -332,6 +334,7 @@ export type AgentReviewResultRecord = typeof AgentReviewResultRecord.Type
 /** Exact immutable subject used to recover its newest durable review job. */
 export const LatestAgentReviewInput = Schema.Struct({
   workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
@@ -339,6 +342,7 @@ export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 /** Cursor-bounded lookup for the durable thread behind a stable pull request. */
 export const AgentReviewThreadAfterInput = Schema.Struct({
   workspaceId: WorkspaceId,
+  pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
   after: AgentEventCursor,
   limit: AgentThreadEventPageSize

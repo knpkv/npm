@@ -74,6 +74,7 @@ const REVIEW_PROMPT = "Review the exact immutable pull request using only the fu
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
   releaseId: Schema.String,
+  pluginConnectionId: Schema.String,
   subject: PrReviewSubject
 })
 
@@ -139,7 +140,7 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
         providerId: yield* Schema.decodeUnknownEffect(
           DurableAgentProviderId
         )(payload.providerId).pipe(Effect.mapError(unavailable)),
-        model: yield* Schema.decodeUnknownEffect(AgentModelId)(payload.model).pipe(
+        model: yield* Schema.decodeUnknownEffect(Schema.NullOr(AgentModelId))(payload.model).pipe(
           Effect.mapError(unavailable)
         ),
         reviewProfile: event.task.reviewProfile,
@@ -324,7 +325,11 @@ const makePullRequestReviews = Effect.gen(function*() {
     target: AvailableReviewTarget
   ) {
     const latest = yield* mapPersistenceRead(
-      persistence.agentJobs.latestReview({ workspaceId, subject: target.subject })
+      persistence.agentJobs.latestReview({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject
+      })
     )
     return yield* presentLatest(target, latest)
   })
@@ -336,6 +341,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     const json = yield* Schema.encodeEffect(Schema.fromJsonString(ReviewContextIdentity))({
       workspaceId,
       releaseId: target.releaseId,
+      pluginConnectionId: target.pluginConnectionId,
       subject: target.subject
     }).pipe(Effect.mapError(unavailable))
     const bytes = yield* Effect.fromResult(
@@ -474,6 +480,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       const page = yield* mapPersistenceRead(
         persistence.agentJobs.reviewThreadAfter({
           workspaceId: input.workspaceId,
+          pluginConnectionId: derived.pluginConnectionId,
           subject: derived.subject,
           after,
           limit
@@ -557,6 +564,7 @@ const makePullRequestReviews = Effect.gen(function*() {
           subjectRevision: target.subject.headRevision,
           task: {
             _tag: "pr-review",
+            pluginConnectionId: target.pluginConnectionId,
             subject: target.subject,
             reviewProfile
           },

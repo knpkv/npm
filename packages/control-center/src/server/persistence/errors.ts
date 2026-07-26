@@ -8,10 +8,13 @@ const RecordKind = Schema.String.check(
   Schema.isMaxLength(100)
 )
 
+/** Maximum diagnostic identity retained by persistence-domain errors. */
+export const MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH = 500
+
 const RecordKey = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
-  Schema.isMaxLength(500)
+  Schema.isMaxLength(MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH)
 )
 
 const Revision = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   AgentModelId,
   DurableAgentProviderId,
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   PublishedReviewComment,
   PullRequestReviewState,
   PullRequestReviewThreadPage,
@@ -348,6 +349,7 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).toContain("Local Operator · Focus on transaction ownership.")
     const textarea = host.querySelector<HTMLTextAreaElement>("#review-thread-request")
     if (textarea === null) throw new Error("Expected targeted review request")
+    expect(textarea.maxLength).toBe(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
       if (valueSetter === undefined) throw new Error("Expected textarea value setter")

@@ -956,7 +956,12 @@ describe("Control Center closed runtime", () => {
           prompt: "Review the immutable pull request.",
           contextFingerprint: AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`),
           subjectRevision: subject.headRevision,
-          task: { _tag: "pr-review", subject, reviewProfile },
+          task: {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_ID,
+            subject,
+            reviewProfile
+          },
           createdAt: FIXTURE_TIME
         })
       }).pipe(
@@ -1061,6 +1066,7 @@ describe("Control Center closed runtime", () => {
         const persistence = yield* Persistence
         return yield* persistence.agentJobs.latestReview({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
           subject
         })
       }).pipe(Effect.provide(seedPersistence))
@@ -1098,6 +1104,7 @@ describe("Control Center closed runtime", () => {
       const persistence = Context.get(runtime, Persistence)
       const latest = yield* persistence.agentJobs.latestReview({
         workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
         subject
       })
 

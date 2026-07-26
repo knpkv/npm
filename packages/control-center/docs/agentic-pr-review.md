@@ -228,13 +228,18 @@ Control Center owns:
 - CodeCommit publication previews.
 - UI projections.
 
-A pull request owns one durable thread keyed by its CodeCommit provider,
-repository, and pull-request identity; changing the base or head creates a new
-immutable run in that same thread. Each run freezes a bounded Review Context
-Snapshot with up to four recent operator requests and four prior run summaries,
-including bounded suggestion and note titles plus the prior limitation. The
-browser reads the thread through an explicit cursor-paged API, and a targeted
-operator request creates another immutable run without changing CodeCommit.
+A pull request owns one durable thread keyed by its CodeCommit plugin
+connection, provider, repository, and pull-request identity. Identical
+repository and pull-request IDs in different AWS connections never share
+history. Changing the base or head creates a new immutable run in the same
+connection-scoped thread. Each run freezes a Review Context Snapshot with up to
+four recent operator requests and four prior run summaries, including bounded
+suggestion and note titles plus the prior limitation. Before enqueue, Control
+Center measures the complete encoded task and queued event; if necessary, it
+drops the oldest prior summaries, then the oldest requests, until both fit the
+32 KiB durable envelope and marks the snapshot truncated. The browser reads the
+thread through an explicit cursor-paged API, and a targeted operator request
+creates another immutable run without changing CodeCommit.
 
 Full history and retained artifacts remain behind explicit lookup boundaries.
 Targeted revalidation receives the selected suggestion's complete history.

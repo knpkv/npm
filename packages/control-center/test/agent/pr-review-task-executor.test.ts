@@ -19,7 +19,7 @@ import {
   type ReviewAgentProfile,
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
-import { AgentThreadId, JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentThreadId, JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewPath,
@@ -51,6 +51,7 @@ const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const THREAD_ID = AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000051")
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000052")
 const PROVIDER_ID = AgentProviderId.make("deterministic-review")
 const DURABLE_PROVIDER_ID = DurableAgentProviderId.make("deterministic-review")
 const MODEL_ID = AgentModelId.make("review-model")
@@ -97,6 +98,7 @@ const claim = {
     fingerprint: FINGERPRINT,
     task: {
       _tag: "pr-review",
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
       subject,
       reviewProfile: REVIEW_PROFILE,
       context: EMPTY_PR_REVIEW_THREAD_CONTEXT

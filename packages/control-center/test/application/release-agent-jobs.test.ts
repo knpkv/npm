@@ -103,6 +103,7 @@ const unauthorizedRelease = Schema.decodeSync(Schema.toType(Release))({
 
 const reviewTask = {
   _tag: "pr-review",
+  pluginConnectionId: PLUGIN_CONNECTION_ID,
   reviewProfile: {
     profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
     label: "Full-project review",

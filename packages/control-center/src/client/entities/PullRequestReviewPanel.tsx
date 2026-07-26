@@ -1,10 +1,11 @@
 import { Button, Text } from "@knpkv/rly/primitives"
 import { type ReactElement, lazy, Suspense, useEffect, useState } from "react"
 
-import type {
-  DurableAgentPrompt,
-  PullRequestReviewThreadEvent,
-  ReviewSuggestionPublicationSelection
+import {
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
+  type DurableAgentPrompt,
+  type PullRequestReviewThreadEvent,
+  type ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
 import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
 import type { PullRequestReviewControllerState, PullRequestReviewPublicationState } from "./usePullRequestReview.js"
@@ -172,7 +173,7 @@ export const PullRequestReviewPanel = ({
           <label htmlFor="review-thread-request">Ask Relay about this pull request</label>
           <textarea
             id="review-thread-request"
-            maxLength={2_500}
+            maxLength={MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH}
             onChange={(event) => setRequest(event.currentTarget.value)}
             placeholder="Re-check the error handling in the connection flow…"
             rows={3}

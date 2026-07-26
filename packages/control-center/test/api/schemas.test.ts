@@ -12,6 +12,7 @@ import {
   EnqueuePullRequestReviewRequest,
   EnqueueReleaseAgentJobRequest,
   EventCursorFromString,
+  MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   MediaResponseHeaders,
   OpaqueMediaId,
   PairingCode,
@@ -814,7 +815,7 @@ describe("public API schemas", () => {
     assert.isTrue(Result.isFailure(
       Schema.decodeUnknownResult(EnqueuePullRequestReviewRequest)({
         ...request,
-        prompt: "x".repeat(2_501)
+        prompt: "x".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH + 1)
       })
     ))
     assert.isTrue(Result.isFailure(
@@ -842,7 +843,7 @@ describe("public API schemas", () => {
           eventSequence: 1,
           jobId,
           occurredAt: timestamp,
-          prompt: "x".repeat(2_501)
+          prompt: "x".repeat(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH + 1)
         }],
         nextCursor: 1
       })

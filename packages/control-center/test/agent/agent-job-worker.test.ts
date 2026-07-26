@@ -13,7 +13,7 @@ import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema, Strea
 import * as TestClock from "effect/testing/TestClock"
 
 import { AgentModelId, type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
-import { JobId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
@@ -42,6 +42,7 @@ import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000041")
+const PLUGIN_CONNECTION_ID = PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-000000000042")
 const PROVIDER_ID = AgentProviderId.make("deterministic")
 const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
 const LEASE_OWNER = AgentLeaseOwner.make("agent-worker-test")
@@ -182,6 +183,7 @@ const enqueueReview = Effect.gen(function*() {
     subjectRevision: reviewSubject.headRevision,
     task: {
       _tag: "pr-review",
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
       subject: reviewSubject,
       reviewProfile
     },
@@ -199,6 +201,7 @@ const replay = Effect.gen(function*() {
   }).pipe(Effect.catchTag("RecordNotFoundError", () =>
     jobs.reviewThreadAfter({
       workspaceId: WORKSPACE_ID,
+      pluginConnectionId: PLUGIN_CONNECTION_ID,
       subject: reviewSubject,
       after: CURSOR_ZERO,
       limit: PAGE_SIZE
@@ -339,6 +342,7 @@ describe("agent job worker", () => {
         assert.isFalse(events.events.some(({ eventKind }) => eventKind === "assistant-output"))
         const latest = yield* jobs.latestReview({
           workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
           subject: reviewSubject
         })
         assert.isTrue(Option.isSome(latest))

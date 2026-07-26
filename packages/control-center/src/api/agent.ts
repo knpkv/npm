@@ -32,6 +32,8 @@ const MAXIMUM_HISTORY_MESSAGE_LENGTH = 12_000
 const MAXIMUM_HISTORY_CONTENT_LENGTH = 64_000
 const MAXIMUM_REPLY_LENGTH = 32_000
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
+/** Maximum targeted request length retained in a pull-request review thread. */
+export const MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH = 2_500
 const MAXIMUM_THREAD_EVENT_PAGE_SIZE = 128
 const MAXIMUM_AGENT_MODELS_PER_PROVIDER = 32
 
@@ -336,7 +338,10 @@ export const EnqueuePullRequestReviewRequest = Schema.Struct({
   profile: AgentSafeProfile,
   reviewProfileId: ReviewAgentProfileId,
   prompt: Schema.optionalKey(
-    DurableAgentPrompt.check(Schema.isTrimmed(), Schema.isMaxLength(2_500))
+    DurableAgentPrompt.check(
+      Schema.isTrimmed(),
+      Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+    )
   )
 })
 
@@ -419,13 +424,15 @@ const pullRequestReviewThreadEventFields = {
 
 const PullRequestReviewOperatorMessageEvent = Schema.TaggedStruct("operator-message", {
   ...pullRequestReviewThreadEventFields,
-  prompt: DurableAgentPrompt.check(Schema.isMaxLength(2_500))
+  prompt: DurableAgentPrompt.check(
+    Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH)
+  )
 })
 
 const PullRequestReviewRunQueuedEvent = Schema.TaggedStruct("run-queued", {
   ...pullRequestReviewThreadEventFields,
   providerId: DurableAgentProviderId,
-  model: AgentModelId,
+  model: Schema.NullOr(AgentModelId),
   reviewProfile: ReviewAgentProfile,
   subject: PrReviewSubject
 })

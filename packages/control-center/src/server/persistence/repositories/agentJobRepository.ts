@@ -23,6 +23,7 @@ import {
   AgentThreadId,
   GovernedActionId,
   JobId,
+  PluginConnectionId,
   ReleaseId,
   ReviewSuggestionPublicationReservationId,
   WorkspaceId
@@ -30,7 +31,12 @@ import {
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../../domain/prReview.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { Database } from "../Database.js"
-import { PersistedRecordError, PersistenceOperationError, RecordNotFoundError } from "../errors.js"
+import {
+  MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH,
+  PersistedRecordError,
+  PersistenceOperationError,
+  RecordNotFoundError
+} from "../errors.js"
 import type { AgentJobPrompt } from "./agentJobModels.js"
 import {
   AgentAttemptSequence,
@@ -73,6 +79,7 @@ const REVIEW_CONTEXT_ITEM_LIMIT = 4
 const REVIEW_CONTEXT_REPORT_ITEM_LIMIT = 8
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 const PrReviewThreadIdentity = Schema.Struct({
+  pluginConnectionId: PluginConnectionId,
   providerId: PrReviewSubject.fields.providerId,
   repository: PrReviewSubject.fields.repository,
   pullRequestId: PrReviewSubject.fields.pullRequestId
@@ -399,11 +406,13 @@ const makeAgentJobRepository = Effect.gen(function*() {
   })
 
   const reviewThreadSubjectKey = Effect.fn("AgentJobRepository.reviewThreadSubjectKey")(function*(
+    pluginConnectionId: typeof PluginConnectionId.Type,
     subject: typeof PrReviewSubject.Type
   ) {
     return yield* Schema.encodeUnknownEffect(
       Schema.fromJsonString(PrReviewThreadIdentity)
     )({
+      pluginConnectionId,
       providerId: subject.providerId,
       repository: subject.repository,
       pullRequestId: subject.pullRequestId
@@ -727,13 +736,16 @@ const makeAgentJobRepository = Effect.gen(function*() {
       readonly requestedAt: typeof UtcTimestamp.Type
     }>()
     const runs = new Map<typeof JobId.Type, RunDraft>()
+    const tasks = new Map<typeof JobId.Type, typeof AgentJobTask.Type>()
     for (const row of [...decodedRows.success].reverse()) {
-      const task = yield* decodeTaskContext(
+      const cachedTask = tasks.get(row.jobId)
+      const task = cachedTask ?? (yield* decodeTaskContext(
         workspaceId,
         row.jobId,
         row.taskContextJson,
         row.taskContextDigest
-      )
+      ))
+      if (cachedTask === undefined) tasks.set(row.jobId, task)
       if (task._tag !== "pr-review") continue
       const current: RunDraft = runs.get(row.jobId) ?? {
         jobId: row.jobId,
@@ -814,6 +826,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const allRuns = Array.from(runs.values())
     const selectedRuns = allRuns.slice(-REVIEW_CONTEXT_ITEM_LIMIT)
     const recentRequests = requests.slice(-REVIEW_CONTEXT_ITEM_LIMIT)
+    const boundedText = (value: string, maximum: number): string => value.slice(0, maximum).trim()
     return yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewThreadContextSnapshot))({
       recentRequests,
       priorRuns: selectedRuns.map(({ jobId, report, requestedAt, state, subject }) => ({
@@ -823,20 +836,83 @@ const makeAgentJobRepository = Effect.gen(function*() {
         state,
         suggestionTitles: report?.suggestions
           .slice(0, REVIEW_CONTEXT_REPORT_ITEM_LIMIT)
-          .map(({ title }) => title) ?? [],
+          .map(({ title }) => boundedText(title, 500)) ?? [],
         suggestionsTruncated: (report?.suggestions.length ?? 0) > REVIEW_CONTEXT_REPORT_ITEM_LIMIT,
         noteTitles: report?.notes
           .slice(0, REVIEW_CONTEXT_REPORT_ITEM_LIMIT)
-          .map(({ title }) => title) ?? [],
+          .map(({ title }) => boundedText(title, 500)) ?? [],
         notesTruncated: (report?.notes.length ?? 0) > REVIEW_CONTEXT_REPORT_ITEM_LIMIT,
         limitation: report?.completion.status === "unable-to-conclude"
-          ? report.completion.reason.slice(0, 1_000)
+          ? boundedText(report.completion.reason, 1_000)
           : null
       })),
       historyTruncated: unknownRows.length > REVIEW_CONTEXT_EVENT_LIMIT ||
         requests.length > REVIEW_CONTEXT_ITEM_LIMIT ||
         allRuns.length > REVIEW_CONTEXT_ITEM_LIMIT
     })
+  })
+
+  const fitPrReviewTask = Effect.fn("AgentJobRepository.fitPrReviewTask")(function*(
+    request: typeof EnqueueAgentJobInput.Type,
+    snapshot: typeof PrReviewThreadContextSnapshot.Type
+  ) {
+    if (request.task._tag !== "pr-review") {
+      return yield* new PersistenceOperationError({
+        operation: "agent-job.fit-review-task-mismatch"
+      })
+    }
+    let context = snapshot
+    while (true) {
+      const task = yield* Schema.decodeUnknownEffect(Schema.toType(AgentJobTask))({
+        ...request.task,
+        context
+      }).pipe(
+        Effect.mapError(() =>
+          new PersistenceOperationError({
+            operation: "agent-job.encode-payload"
+          })
+        )
+      )
+      const taskContext = yield* Effect.result(encodePayload(AgentJobTask, task))
+      const queuedPayload = yield* Effect.result(encodePayload(PersistedJobQueuedPayload, {
+        access: request.access,
+        contextFingerprint: request.contextFingerprint,
+        model: request.model,
+        providerId: request.providerId,
+        subjectRevision: request.subjectRevision,
+        task
+      }))
+      if (Result.isSuccess(taskContext) && Result.isSuccess(queuedPayload)) {
+        return { task, taskContext: taskContext.success }
+      }
+      const failure = Result.isFailure(taskContext)
+        ? taskContext.failure
+        : Result.isFailure(queuedPayload)
+        ? queuedPayload.failure
+        : null
+      if (failure === null || failure.operation !== "agent-job.event-too-large") {
+        return yield* (failure ?? new PersistenceOperationError({
+          operation: "agent-job.fit-review-task"
+        }))
+      }
+      if (context.priorRuns.length > 0) {
+        context = PrReviewThreadContextSnapshot.make({
+          ...context,
+          priorRuns: context.priorRuns.slice(1),
+          historyTruncated: true
+        })
+        continue
+      }
+      if (context.recentRequests.length > 0) {
+        context = PrReviewThreadContextSnapshot.make({
+          ...context,
+          recentRequests: context.recentRequests.slice(1),
+          historyTruncated: true
+        })
+        continue
+      }
+      return yield* failure
+    }
   })
 
   const readReviewResult = Effect.fn("AgentJobRepository.readReviewResult")(function*(
@@ -996,6 +1072,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             ? task
             : {
               _tag: task._tag,
+              pluginConnectionId: task.pluginConnectionId,
               subject: task.subject,
               reviewProfile: task.reviewProfile
             }
@@ -1038,7 +1115,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const threadKind = request.task._tag
       const subjectKey = request.task._tag === "release-chat"
         ? request.releaseId
-        : yield* reviewThreadSubjectKey(request.task.subject)
+        : yield* reviewThreadSubjectKey(
+          request.task.pluginConnectionId,
+          request.task.subject
+        )
       return yield* database
         .transaction(
           Effect.gen(function*() {
@@ -1063,18 +1143,19 @@ const makeAgentJobRepository = Effect.gen(function*() {
             if (Option.isNone(thread)) {
               return yield* new PersistenceOperationError({ operation: "agent-job.find-thread" })
             }
-            const task = yield* Schema.decodeUnknownEffect(Schema.toType(AgentJobTask))(
-              request.task._tag === "release-chat"
-                ? request.task
-                : {
-                  ...request.task,
-                  context: yield* reviewContextSnapshot(
-                    request.workspaceId,
-                    thread.value.threadId
-                  )
-                }
-            )
-            const taskContext = yield* encodePayload(AgentJobTask, task)
+            const fitted = request.task._tag === "release-chat"
+              ? {
+                task: request.task,
+                taskContext: yield* encodePayload(AgentJobTask, request.task)
+              }
+              : yield* fitPrReviewTask(
+                request,
+                yield* reviewContextSnapshot(
+                  request.workspaceId,
+                  thread.value.threadId
+                )
+              )
+            const { task, taskContext } = fitted
             yield* sql`INSERT INTO agent_jobs (
           workspace_id, job_id, thread_id, release_id, provider_id, model, access, prompt,
           context_fingerprint, subject_revision, task_context_json, task_context_digest, state, created_at,
@@ -1958,7 +2039,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         )
       )
-      const taskContextPrefix = `{"_tag":"pr-review","subject":${subjectJson},"reviewProfile":`
+      const taskContextPrefix =
+        `{"_tag":"pr-review","pluginConnectionId":"${request.pluginConnectionId}","subject":${subjectJson},"reviewProfile":`
       const rendered = renderLatestAgentReviewQuery({
         workspaceId: request.workspaceId,
         subjectRevision: request.subject.headRevision,
@@ -1983,7 +2065,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.taskContextJson,
         row.success.taskContextDigest
       )
-      if (task._tag !== "pr-review" || !PrReviewSubjectEquivalence(task.subject, request.subject)) {
+      if (
+        task._tag !== "pr-review" ||
+        task.pluginConnectionId !== request.pluginConnectionId ||
+        !PrReviewSubjectEquivalence(task.subject, request.subject)
+      ) {
         return yield* persistedRecordError(
           request.workspaceId,
           "agent-review",
@@ -2086,7 +2172,10 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const request = yield* Schema.decodeUnknownEffect(
         Schema.toType(AgentReviewThreadAfterInput)
       )(input)
-      const subjectKey = yield* reviewThreadSubjectKey(request.subject)
+      const subjectKey = yield* reviewThreadSubjectKey(
+        request.pluginConnectionId,
+        request.subject
+      )
       const thread = yield* findThread(
         request.workspaceId,
         "pr-review",
@@ -2096,7 +2185,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
         return yield* new RecordNotFoundError({
           workspaceId: request.workspaceId,
           recordKind: "agent-review-thread",
-          recordKey: subjectKey
+          recordKey: request.subject.pullRequestId
+            .slice(0, MAXIMUM_PERSISTENCE_RECORD_KEY_LENGTH)
+            .trimEnd()
         })
       }
       return yield* threadEventsAfter(
