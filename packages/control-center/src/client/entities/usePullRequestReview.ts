@@ -1,4 +1,7 @@
+import * as DateTime from "effect/DateTime"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type {
@@ -13,6 +16,7 @@ import type {
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
+import type { RateLimitedApiError } from "../../api/errors.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import {
   isRecoverablePullRequestReviewFailure,
@@ -24,6 +28,21 @@ const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
 const generatedClientTransport = pullRequestReviewBrowser.then(
   ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
 )
+
+const isRateLimitedReviewFailure = (failure: unknown): failure is RateLimitedApiError =>
+  Predicate.isTagged(failure, "RateLimitedApiError")
+
+const waitBeforeAutomaticReviewRetry = (failure?: unknown): Effect.Effect<void> => {
+  if (!isRateLimitedReviewFailure(failure)) return Effect.sleep(Duration.seconds(1))
+  const retryAt = failure.retryAt
+  if (retryAt === null) return Effect.sleep(Duration.seconds(2))
+  return Effect.flatMap(DateTime.now, (now) =>
+    Effect.sleep(
+      Duration.millis(
+        Math.max(0, DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(now))
+      )
+    ))
+}
 
 interface ReviewProviderSelection {
   readonly displayName?: NonNullable<AgentProviderCatalogEntry["displayName"]>
@@ -279,7 +298,7 @@ export const usePullRequestReview = (
       ) return false
       automaticRetryScope.current = scope
       Effect.runFork(Effect.logWarning(message, failure))
-      Effect.runPromise(Effect.sleep("1 second"), { signal: abort.signal }).then(
+      Effect.runPromise(waitBeforeAutomaticReviewRetry(failure), { signal: abort.signal }).then(
         () => {
           if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
         },

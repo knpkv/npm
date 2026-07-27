@@ -1394,6 +1394,72 @@ describe("usePullRequestReview", () => {
     expect(transport.load).toHaveBeenCalledTimes(2)
   })
 
+  it("waits until the advertised rate-limit retry instant", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const reviewReads = [
+      Promise.reject({
+        _tag: "RateLimitedApiError",
+        retryAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("1970-01-01T00:00:05.000Z")
+      }),
+      Promise.resolve(completedReviewFor(BASE_A, HEAD_A))
+    ]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => reviewReads.shift() ?? Promise.reject(new Error("Unexpected review read"))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.resolve({ providers: [] })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () => vi.advanceTimersByTimeAsync(4_999))
+
+    expect(transport.load).toHaveBeenCalledOnce()
+
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.load).toHaveBeenCalledTimes(2)
+  })
+
+  it("backs off long enough to replenish a three-read retry batch", async () => {
+    vi.useFakeTimers()
+    const reviewReads = [
+      Promise.reject({ _tag: "RateLimitedApiError", retryAt: null }),
+      Promise.resolve(reviewFor(BASE_A, HEAD_A))
+    ]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => reviewReads.shift() ?? Promise.reject(new Error("Unexpected review read"))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.resolve({ providers: [] })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(transport.load).toHaveBeenCalledOnce()
+    expect(transport.loadThread).toHaveBeenCalledOnce()
+    expect(transport.providers).toHaveBeenCalledOnce()
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.load).toHaveBeenCalledTimes(2)
+    expect(transport.loadThread).toHaveBeenCalledTimes(2)
+    expect(transport.providers).toHaveBeenCalledTimes(2)
+  })
+
   it.each([
     {
       failure: { _tag: "UnauthorizedApiError" },
