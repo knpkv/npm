@@ -74,9 +74,14 @@ import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 
 const PULL_REQUEST_STREAM_KEY = "pull-requests"
 const COMPLETED_CHECKPOINT = "complete"
+const DURABLE_COMPLETED_CHECKPOINT_PREFIX = "complete:v1:"
 const NEXT_CHECKPOINT_PREFIX = "next:"
+const DURABLE_NEXT_CHECKPOINT_PREFIX = "next:v1:"
 const CLOSED_CHECKPOINT = "closed"
 const CLOSED_NEXT_CHECKPOINT_PREFIX = "closed:"
+const DURABLE_CLOSED_CHECKPOINT_PREFIX = "closed:v1:"
+const DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX = "closed-next:v1:"
+const SYNC_INVENTORY_DIGEST_LENGTH = 64
 const RETRY_DELAY_SECONDS = 30
 
 type PullRequestStatus = "OPEN" | "CLOSED"
@@ -84,6 +89,7 @@ type PullRequestStatus = "OPEN" | "CLOSED"
 interface SyncCursor {
   readonly status: PullRequestStatus
   readonly nextToken: string | null
+  readonly inventoryDigest: string | null
 }
 
 /** Secret-free production adapter configuration. @internal */
@@ -762,7 +768,7 @@ const toPullRequestEvent = (
 ) => ({
   _tag: "UpsertEntity",
   eventId:
-    `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}:${pullRequest.status}`,
+    `${configuration.repositoryName}:pull-request:${pullRequest.pullRequestId}:${pullRequest.revisionId}:${pullRequest.status}:${pullRequest.lastActivityDate.toISOString()}`,
   observedAt: pullRequest.lastActivityDate.toISOString(),
   revision: pullRequest.revisionId,
   entityType: "pull-request",
@@ -787,37 +793,91 @@ const toPullRequestEvent = (
 const syncCursorFromCheckpoint = (
   checkpoint: PluginSyncRequestV1["checkpoint"]
 ): Effect.Effect<SyncCursor, PluginConfigurationFailure> => {
-  if (checkpoint === null || checkpoint === COMPLETED_CHECKPOINT) {
-    return Effect.succeed({ status: "OPEN", nextToken: null })
+  if (
+    checkpoint === null ||
+    checkpoint === COMPLETED_CHECKPOINT ||
+    (
+      checkpoint.startsWith(DURABLE_COMPLETED_CHECKPOINT_PREFIX) &&
+      /^[0-9a-f]{64}$/u.test(checkpoint.slice(DURABLE_COMPLETED_CHECKPOINT_PREFIX.length))
+    )
+  ) {
+    return Effect.succeed({ status: "OPEN", nextToken: null, inventoryDigest: null })
   }
-  if (checkpoint === CLOSED_CHECKPOINT) return Effect.succeed({ status: "CLOSED", nextToken: null })
+  if (checkpoint.startsWith(DURABLE_CLOSED_CHECKPOINT_PREFIX)) {
+    const inventoryDigest = checkpoint.slice(DURABLE_CLOSED_CHECKPOINT_PREFIX.length)
+    return /^[0-9a-f]{64}$/u.test(inventoryDigest)
+      ? Effect.succeed({ status: "CLOSED", nextToken: null, inventoryDigest })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
+  }
+  if (checkpoint === CLOSED_CHECKPOINT) {
+    return Effect.succeed({ status: "CLOSED", nextToken: null, inventoryDigest: null })
+  }
+  const durablePagePrefixes: ReadonlyArray<readonly [string, PullRequestStatus]> = [
+    [DURABLE_NEXT_CHECKPOINT_PREFIX, "OPEN"],
+    [DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX, "CLOSED"]
+  ]
+  for (
+    const [prefix, status] of durablePagePrefixes
+  ) {
+    if (!checkpoint.startsWith(prefix)) continue
+    const payload = checkpoint.slice(prefix.length)
+    const separator = payload.indexOf(":")
+    const inventoryDigest = payload.slice(0, separator)
+    const nextToken = payload.slice(separator + 1)
+    return separator === SYNC_INVENTORY_DIGEST_LENGTH &&
+        /^[0-9a-f]{64}$/u.test(inventoryDigest) &&
+        nextToken.length > 0
+      ? Effect.succeed({ status, nextToken, inventoryDigest })
+      : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
+  }
   if (checkpoint.startsWith(NEXT_CHECKPOINT_PREFIX)) {
     const token = checkpoint.slice(NEXT_CHECKPOINT_PREFIX.length)
     return token.length > 0
-      ? Effect.succeed({ status: "OPEN", nextToken: token })
+      ? Effect.succeed({ status: "OPEN", nextToken: token, inventoryDigest: null })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
   }
   if (checkpoint.startsWith(CLOSED_NEXT_CHECKPOINT_PREFIX)) {
     const token = checkpoint.slice(CLOSED_NEXT_CHECKPOINT_PREFIX.length)
     return token.length > 0
-      ? Effect.succeed({ status: "CLOSED", nextToken: token })
+      ? Effect.succeed({ status: "CLOSED", nextToken: token, inventoryDigest: null })
       : Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
   }
   return Effect.fail(new PluginConfigurationFailure({ diagnosticCode: "codecommit-sync-checkpoint-invalid" }))
 }
 
-const checkpointFromSyncCursor = (cursor: SyncCursor | null): string => {
-  if (cursor === null) return COMPLETED_CHECKPOINT
-  if (cursor.nextToken === null) return CLOSED_CHECKPOINT
+const checkpointFromSyncCursor = (cursor: SyncCursor | null, inventoryDigest: string): string => {
+  if (cursor === null) return `${DURABLE_COMPLETED_CHECKPOINT_PREFIX}${inventoryDigest}`
+  if (cursor.nextToken === null) return `${DURABLE_CLOSED_CHECKPOINT_PREFIX}${inventoryDigest}`
   return cursor.status === "OPEN"
-    ? `${NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
-    : `${CLOSED_NEXT_CHECKPOINT_PREFIX}${cursor.nextToken}`
+    ? `${DURABLE_NEXT_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor.nextToken}`
+    : `${DURABLE_CLOSED_NEXT_CHECKPOINT_PREFIX}${inventoryDigest}:${cursor.nextToken}`
 }
 
-const nextSyncCursor = (status: PullRequestStatus, nextToken: string | null): SyncCursor | null => {
-  if (nextToken !== null) return { status, nextToken }
-  return status === "OPEN" ? { status: "CLOSED", nextToken: null } : null
+const nextSyncCursor = (
+  status: PullRequestStatus,
+  nextToken: string | null,
+  inventoryDigest: string
+): SyncCursor | null => {
+  if (nextToken !== null) return { status, nextToken, inventoryDigest }
+  return status === "OPEN" ? { status: "CLOSED", nextToken: null, inventoryDigest } : null
 }
+
+const digestSyncInventory = Effect.fn("CodeCommitPlugin.digestSyncInventory")(function*(
+  cryptoService: Crypto.Crypto,
+  events: ReadonlyArray<unknown>,
+  previousInventoryDigest: string | null
+) {
+  const serialized = JSON.stringify({ events, previousInventoryDigest })
+  const bytes = yield* Effect.fromResult(
+    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+  ).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
+  )
+  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+    Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
+  )
+  return Encoding.encodeHex(digest)
+})
 
 const enforceConfiguredRepository = Effect.fn("CodeCommitPlugin.enforceConfiguredRepository")(function*(
   configuredRepositoryName: string,
@@ -961,10 +1021,15 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
       (pullRequest) => enforceConfiguredRepository(configuration.repositoryName, pullRequest)
     )
     const events = pullRequests.map((pullRequest) => toPullRequestEvent(configuration, pullRequest))
-    const nextCursor = nextSyncCursor(cursor.status, page.nextToken)
+    const inventoryDigest = yield* digestSyncInventory(
+      cryptoService,
+      events,
+      cursor.inventoryDigest
+    )
+    const nextCursor = nextSyncCursor(cursor.status, page.nextToken, inventoryDigest)
     const normalized = yield* output("sync", PluginSyncPageV1, {
       events,
-      checkpointAfterPage: checkpointFromSyncCursor(nextCursor),
+      checkpointAfterPage: checkpointFromSyncCursor(nextCursor, inventoryDigest),
       hasMore: nextCursor !== null
     })
     return { normalized, nextCursor }

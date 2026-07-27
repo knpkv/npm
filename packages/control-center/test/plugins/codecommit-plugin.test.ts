@@ -329,14 +329,17 @@ describe("CodeCommitPlugin", () => {
         { status: "CLOSED", nextToken: null }
       ])
       assert.strictEqual(pages.first.length, 3)
-      assert.strictEqual(pages.first[0]?.checkpointAfterPage, "next:provider-page-2")
+      assert.match(
+        pages.first[0]?.checkpointAfterPage ?? "",
+        /^next:v1:[0-9a-f]{64}:provider-page-2$/u
+      )
       assert.isTrue(pages.first[0]?.hasMore)
-      assert.strictEqual(pages.first[1]?.checkpointAfterPage, "closed")
+      assert.match(pages.first[1]?.checkpointAfterPage ?? "", /^closed:v1:[0-9a-f]{64}$/u)
       assert.isTrue(pages.first[1]?.hasMore)
-      assert.strictEqual(pages.first[2]?.checkpointAfterPage, "complete")
+      assert.match(pages.first[2]?.checkpointAfterPage ?? "", /^complete:v1:[0-9a-f]{64}$/u)
       assert.isFalse(pages.first[2]?.hasMore)
-      assert.strictEqual(pages.resumed[0]?.checkpointAfterPage, "closed")
-      assert.strictEqual(pages.resumed[1]?.checkpointAfterPage, "complete")
+      assert.match(pages.resumed[0]?.checkpointAfterPage ?? "", /^closed:v1:[0-9a-f]{64}$/u)
+      assert.match(pages.resumed[1]?.checkpointAfterPage ?? "", /^complete:v1:[0-9a-f]{64}$/u)
       const event = pages.first[0]?.events[0]
       assert.strictEqual(event?._tag, "UpsertEntity")
       if (event?._tag === "UpsertEntity") {
@@ -396,6 +399,63 @@ describe("CodeCommitPlugin", () => {
         assert.strictEqual(mergedEvent.attributes.status, "MERGED")
       }
       assert.notStrictEqual(openEvent?.eventId, mergedEvent?.eventId)
+    }))
+
+  it.effect("emits a distinct event when mutable pull-request metadata changes without a new revision", () =>
+    Effect.gen(function*() {
+      const updated = yield* Ref.make(false)
+      const renamedPullRequest = Schema.decodeUnknownSync(ReadClient.CodeCommitPullRequestRevision)({
+        ...pullRequest,
+        title: "KAN-3 Preserve exact revisions",
+        lastActivityDate: new Date("2026-07-16T10:00:00.000Z")
+      })
+      const client = baseReadClient({
+        listPullRequestsPage: (request) =>
+          Ref.get(updated).pipe(
+            Effect.map((isUpdated) =>
+              new ReadClient.CodeCommitPullRequestPage({
+                pullRequests: request.status === "OPEN"
+                  ? [isUpdated ? renamedPullRequest : pullRequest]
+                  : [],
+                nextToken: null
+              })
+            )
+          )
+      })
+      const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+        streamKey: "pull-requests",
+        checkpoint: null
+      })
+      const pages = yield* runWithClient(
+        client,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const original = yield* connection.sync(request).pipe(Stream.runCollect)
+          yield* Ref.set(updated, true)
+          const renamed = yield* connection.sync(request).pipe(Stream.runCollect)
+          const replay = yield* connection.sync(request).pipe(Stream.runCollect)
+          return { original, renamed, replay }
+        })
+      )
+      const originalEvent = pages.original.flatMap(({ events }) => events)[0]
+      const renamedEvent = pages.renamed.flatMap(({ events }) => events)[0]
+
+      assert.strictEqual(originalEvent?._tag, "UpsertEntity")
+      assert.strictEqual(renamedEvent?._tag, "UpsertEntity")
+      if (originalEvent?._tag === "UpsertEntity" && renamedEvent?._tag === "UpsertEntity") {
+        assert.strictEqual(originalEvent.revision, "revision-17")
+        assert.strictEqual(renamedEvent.revision, "revision-17")
+        assert.strictEqual(renamedEvent.title, "KAN-3 Preserve exact revisions")
+      }
+      assert.notStrictEqual(originalEvent?.eventId, renamedEvent?.eventId)
+      assert.notStrictEqual(
+        pages.original.at(-1)?.checkpointAfterPage,
+        pages.renamed.at(-1)?.checkpointAfterPage
+      )
+      assert.strictEqual(
+        pages.renamed.at(-1)?.checkpointAfterPage,
+        pages.replay.at(-1)?.checkpointAfterPage
+      )
     }))
 
   it.effect("normalizes complete changed-file pages with stable rename paths", () =>
