@@ -774,7 +774,7 @@ export const AgentPage = ({ availableProviders, runTurn }: AgentPageProps): Reac
 
 /** Route entry wired to the authenticated Control Center release-agent API. */
 export const ConnectedAgentPage = (): ReactElement => {
-  const [availableProviders, setAvailableProviders] = useState<ReadonlyArray<"claude" | "codex">>([])
+  const [availableProviders, setAvailableProviders] = useState<ReadonlyArray<"claude" | "codex"> | undefined>(undefined)
   useEffect(() => {
     const abort = new AbortController()
     loadBrowserReleaseAgentPresets(abort.signal).then(

@@ -211,6 +211,8 @@ describe("AgentPage context", () => {
       (button) => button.textContent?.includes("Which evidence is still missing?") === true
     )
     if (suggestion === undefined) throw new Error("Expected an agent suggestion")
+    expect(host.textContent).not.toContain("Selected agent is not configured")
+    expect(suggestion.disabled).toBe(false)
     await act(async () => suggestion.click())
     const textarea = host.querySelector<HTMLTextAreaElement>("textarea")
     if (textarea === null) throw new Error("Expected the release agent composer")
