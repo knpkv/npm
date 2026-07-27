@@ -15,6 +15,7 @@ const limitPolicyLayer = Layer.succeed(RequestLimitPolicy, {
   maximumBodyBytes: 256 * 1024,
   pairing: { limit: 1, window: Duration.minutes(1) },
   read: { limit: 1, window: Duration.minutes(1) },
+  "agent-read": { limit: 1, window: Duration.minutes(1) },
   mutation: { limit: 1, window: Duration.minutes(1) },
   synchronization: { limit: 1, window: Duration.minutes(1) },
   agent: { limit: 1, window: Duration.minutes(1) },
@@ -149,7 +150,7 @@ describe("API request boundary", () => {
     }
   })
 
-  it("budgets safe agent reads separately from agent mutations", async () => {
+  it("isolates safe agent reads from ordinary reads and agent mutations", async () => {
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     try {
       const request = (path: string, method: "GET" | "POST", correlationId: string) =>
@@ -166,6 +167,8 @@ describe("API request boundary", () => {
         "agent-mutation-1"
       )
       const secondRead = await request("/api/v1/agent/providers", "GET", "agent-read-2")
+      const firstOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-1")
+      const secondOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-2")
       const secondMutation = await request(
         "/api/v1/agent/releases/release-1/jobs",
         "POST",
@@ -175,6 +178,8 @@ describe("API request boundary", () => {
       assert.strictEqual(firstRead.status, 200)
       assert.strictEqual(firstMutation.status, 200)
       assert.strictEqual(secondRead.status, 429)
+      assert.strictEqual(firstOrdinaryRead.status, 200)
+      assert.strictEqual(secondOrdinaryRead.status, 429)
       assert.strictEqual(secondMutation.status, 429)
     } finally {
       await webHandler.dispose()

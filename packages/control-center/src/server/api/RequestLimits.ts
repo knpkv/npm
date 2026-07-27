@@ -10,6 +10,7 @@ import * as RateLimiter from "effect/unstable/persistence/RateLimiter"
 export const RequestLimitProfile = Schema.Literals([
   "pairing",
   "read",
+  "agent-read",
   "mutation",
   "synchronization",
   "agent",
@@ -22,6 +23,7 @@ export interface RequestLimitPolicyValue {
   readonly maximumBodyBytes: number
   readonly pairing: { readonly limit: number; readonly window: Duration.Duration }
   readonly read: { readonly limit: number; readonly window: Duration.Duration }
+  readonly "agent-read": { readonly limit: number; readonly window: Duration.Duration }
   readonly mutation: { readonly limit: number; readonly window: Duration.Duration }
   readonly synchronization: { readonly limit: number; readonly window: Duration.Duration }
   readonly agent: { readonly limit: number; readonly window: Duration.Duration }
@@ -41,6 +43,7 @@ export class RequestLimitPolicy extends Context.Service<
     maximumBodyBytes: 256 * 1024,
     pairing: { limit: 10, window: Duration.minutes(5) },
     read: { limit: 120, window: Duration.minutes(1) },
+    "agent-read": { limit: 120, window: Duration.minutes(1) },
     mutation: { limit: 30, window: Duration.minutes(1) },
     synchronization: { limit: 8, window: Duration.minutes(1) },
     agent: { limit: 8, window: Duration.minutes(1) },
