@@ -80,6 +80,20 @@ const versionProcessLayer = (
   )
 
 describe("agent provider registry", () => {
+  it("keeps the public catalog bounded without fixing it to today's provider count", () => {
+    const decoded = Schema.decodeUnknownResult(AgentProviderCatalog)({
+      providers: Array.from({ length: 4 }, (_, index) => ({
+        providerId: `future-provider-${String(index + 1)}`,
+        displayName: `Future Provider ${String(index + 1)}`,
+        models: [],
+        capabilities: ["release-chat"],
+        health: "not-configured"
+      }))
+    })
+
+    assert.isTrue(Result.isSuccess(decoded))
+  })
+
   it.effect("advertises PR review only for configured runners when the worker is enabled", () =>
     Effect.gen(function*() {
       const registry = yield* AgentRuntimeRegistry
@@ -102,6 +116,10 @@ describe("agent provider registry", () => {
         ]
       )
       assert.strictEqual(catalog.providers.at(-1)?.reviewProfile?.profileId, "openai-compatible:review-model:sbx")
+      assert.deepStrictEqual(
+        catalog.providers.map(({ displayName }) => displayName),
+        ["Codex", "Claude", "OpenAI-compatible"]
+      )
     }).pipe(
       Effect.provide(
         agentProviderRuntimeRegistryLayer({

@@ -23,6 +23,7 @@ const generatedClientTransport = pullRequestReviewBrowser.then(
 )
 
 interface ReviewProviderSelection {
+  readonly displayName?: NonNullable<AgentProviderCatalogEntry["displayName"]>
   readonly model: AgentProviderCatalogEntry["models"][number]
   readonly providerId: AgentProviderCatalogEntry["providerId"]
   readonly reviewProfile: NonNullable<AgentProviderCatalogEntry["reviewProfile"]>
@@ -129,7 +130,12 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
       provider.reviewProfile !== undefined &&
       model
     ) {
-      eligible.push({ providerId: provider.providerId, model, reviewProfile: provider.reviewProfile })
+      eligible.push({
+        providerId: provider.providerId,
+        model,
+        reviewProfile: provider.reviewProfile,
+        ...(provider.displayName === undefined ? {} : { displayName: provider.displayName })
+      })
     }
   }
   return eligible

@@ -379,15 +379,29 @@ type ReviewProviderSelection = NonNullable<
 >
 const CODEX_REVIEW_PRESET: ReviewProviderSelection = {
   providerId: DurableAgentProviderId.make("codex"),
+  displayName: "Codex",
   model: AgentModelId.make("configured-default"),
   reviewProfile: NATIVE_PENDING_REVIEW.reviewProfile
 }
 const CLAUDE_REVIEW_PRESET: ReviewProviderSelection = {
   providerId: DurableAgentProviderId.make("claude"),
+  displayName: "Claude",
   model: AgentModelId.make("default"),
   reviewProfile: {
     profileId: ReviewAgentProfileId.make("claude:default:sbx"),
     label: "Full-project review · claude · default",
+    budgetMillis: 1_200_000,
+    networkAccess: "provider-enabled",
+    sandbox: "sbx"
+  }
+}
+const FUTURE_REVIEW_PRESET: ReviewProviderSelection = {
+  providerId: DurableAgentProviderId.make("relay-gateway"),
+  displayName: "Relay Gateway",
+  model: AgentModelId.make("review-v1"),
+  reviewProfile: {
+    profileId: ReviewAgentProfileId.make("relay-gateway:review-v1:sbx"),
+    label: "Full-project review · relay-gateway · review-v1",
     budgetMillis: 1_200_000,
     networkAccess: "provider-enabled",
     sandbox: "sbx"
@@ -482,7 +496,7 @@ describe("PullRequestReviewPanel", () => {
     expect(host.textContent).not.toContain("network blocked · sbx")
   })
 
-  it("offers explicit Codex and Claude review presets with reusable prompt templates", async () => {
+  it("offers catalog-defined review presets with reusable prompt templates", async () => {
     const onStart = vi.fn()
     const host = document.createElement("div")
     document.body.append(host)
@@ -490,7 +504,7 @@ describe("PullRequestReviewPanel", () => {
     const state = {
       ...REFRESHED_NOT_STARTED_STATE,
       provider: CODEX_REVIEW_PRESET,
-      providerPresets: [CODEX_REVIEW_PRESET, CLAUDE_REVIEW_PRESET]
+      providerPresets: [CODEX_REVIEW_PRESET, CLAUDE_REVIEW_PRESET, FUTURE_REVIEW_PRESET]
     } satisfies PullRequestReviewControllerState
 
     await act(async () =>
@@ -508,6 +522,7 @@ describe("PullRequestReviewPanel", () => {
       )
     )
 
+    expect(host.textContent).toContain("Relay Gateway review")
     const targetedClaudePreset = [...host.querySelectorAll<HTMLButtonElement>("[role=radio]")].find(
       ({ textContent }) => textContent?.includes("Claude review") === true
     )

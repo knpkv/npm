@@ -51,6 +51,7 @@ const MAXIMUM_REPLY_LENGTH = 32_000
 const MAXIMUM_DURABLE_PROMPT_LENGTH = 5_000
 /** Maximum targeted request length retained in a pull-request review thread. */
 export const MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH = 2_500
+const MAXIMUM_AGENT_PROVIDERS = 32
 const MAXIMUM_THREAD_EVENT_PAGE_SIZE = 128
 const MAXIMUM_AGENT_MODELS_PER_PROVIDER = 32
 
@@ -140,6 +141,9 @@ export type AgentProviderCapability = typeof AgentProviderCapability.Type
 /** Browser-safe catalog entry for one server-owned agent provider. */
 export const AgentProviderCatalogEntry = Schema.Struct({
   providerId: DurableAgentProviderId,
+  displayName: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+  ),
   models: Schema.Array(AgentModelId).check(
     Schema.makeFilter((models) => models.length <= MAXIMUM_AGENT_MODELS_PER_PROVIDER, {
       expected: `at most ${MAXIMUM_AGENT_MODELS_PER_PROVIDER} agent models`
@@ -161,8 +165,8 @@ export type AgentProviderCatalogEntry = typeof AgentProviderCatalogEntry.Type
 /** Redacted catalog for the fixed server-side provider registry. */
 export const AgentProviderCatalog = Schema.Struct({
   providers: Schema.Array(AgentProviderCatalogEntry).check(
-    Schema.makeFilter((providers) => providers.length <= 3, {
-      expected: "at most three agent providers"
+    Schema.makeFilter((providers) => providers.length <= MAXIMUM_AGENT_PROVIDERS, {
+      expected: `at most ${MAXIMUM_AGENT_PROVIDERS} agent providers`
     }),
     Schema.makeFilter(
       (providers) => new Set(providers.map(({ providerId }) => providerId)).size === providers.length,
