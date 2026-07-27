@@ -96,11 +96,13 @@ export const WorkspacePullRequestDetails = ({
   }>(() => ({ jobId: reviewJobId, suggestions: new Map() }))
   const presentedSuggestions = useMemo(() => {
     if (suggestionOverrides.jobId !== reviewJobId) return reportSuggestions
-    return reportSuggestions.map((suggestion) =>
-      suggestion.state === "published" || suggestion.state === "resolved"
-        ? suggestion
-        : (suggestionOverrides.suggestions.get(suggestion.suggestionId) ?? suggestion)
-    )
+    return reportSuggestions.map((suggestion) => {
+      const accepted = suggestionOverrides.suggestions.get(suggestion.suggestionId)
+      if (accepted === undefined) return suggestion
+      return suggestion.state === "published" || suggestion.state === "resolved"
+        ? { ...accepted, state: suggestion.state }
+        : accepted
+    })
   }, [reportSuggestions, reviewJobId, suggestionOverrides])
   const onSuggestionRevisionAccepted = useCallback(
     (suggestion: PrReviewSuggestion): void => {

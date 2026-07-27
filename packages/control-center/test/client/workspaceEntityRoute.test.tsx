@@ -2,7 +2,7 @@
 
 import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
-import { type ReactElement, act } from "react"
+import { type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter, useLocation, useNavigate } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -755,7 +755,11 @@ if (completedReview._tag !== "completed") throw new Error("Expected the complete
 const reviewSuggestion = completedReview.report.suggestions[0]
 if (reviewSuggestion === undefined) throw new Error("Expected a review suggestion fixture")
 
-const reviewSuggestionRevisionPage = (sequence: 1 | 2, state: "dismissed" | "draft") => {
+const reviewSuggestionRevisionPage = (
+  sequence: 1 | 2,
+  state: "dismissed" | "draft",
+  title = reviewSuggestion.title
+) => {
   const originalRevisionId = PrReviewSuggestionRevisionId.make(`sha256:${"2".repeat(64)}`)
   const revisionId = sequence === 1 ? originalRevisionId : PrReviewSuggestionRevisionId.make(`sha256:${"3".repeat(64)}`)
   const revision = {
@@ -764,7 +768,7 @@ const reviewSuggestionRevisionPage = (sequence: 1 | 2, state: "dismissed" | "dra
     predecessorRevisionId: sequence === 1 ? null : originalRevisionId,
     sourceJobId: REVIEW_JOB_ID,
     subject: pullRequestReviewSubject,
-    suggestion: { ...reviewSuggestion, state },
+    suggestion: { ...reviewSuggestion, state, title },
     validation: {
       _tag: "validated",
       reviewedHead: pullRequestReviewSubject.headRevision,
@@ -784,6 +788,20 @@ const reviewSuggestionRevisionPage = (sequence: 1 | 2, state: "dismissed" | "dra
     nextBeforeSequence: null
   })
 }
+
+const publishedPullRequestReviewState = {
+  ...completedPullRequestReviewState,
+  review: {
+    ...completedReview,
+    report: {
+      ...completedReview.report,
+      suggestions: completedReview.report.suggestions.map((suggestion) => ({
+        ...suggestion,
+        state: "published" as const
+      }))
+    }
+  }
+} satisfies PullRequestReviewControllerState
 
 const pipelineState = {
   _tag: "ready",
@@ -856,6 +874,35 @@ const renderView = async (
   await act(async () => mountedRoot?.render(view))
   await act(async () => vi.dynamicImportSettled())
   return host
+}
+
+const PullRequestLifecycleHarness = ({
+  revisionTransport
+}: {
+  readonly revisionTransport: ReviewSuggestionRevisionTransport
+}): ReactElement => {
+  const [reviewState, setReviewState] = useState<PullRequestReviewControllerState>(completedPullRequestReviewState)
+  return (
+    <PortalProvider>
+      <MemoryRouter>
+        <button onClick={() => setReviewState(publishedPullRequestReviewState)} type="button">
+          Publish report fixture
+        </button>
+        <WorkspaceEntityView
+          onAskAgent={() => undefined}
+          originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
+          originLabel="Back to items"
+          originState={null}
+          retry={() => undefined}
+          reviewCanEnqueue
+          reviewState={reviewState}
+          reviewSuggestionRevisionTransport={revisionTransport}
+          state={pullRequestState}
+          workspaceId={WORKSET_WORKSPACE_ID}
+        />
+      </MemoryRouter>
+    </PortalProvider>
+  )
 }
 
 const LocationProbe = (): ReactElement => {
@@ -1527,6 +1574,58 @@ describe("canonical workspace entity", () => {
     expect(dismiss).toHaveBeenCalledOnce()
     expect(semanticFindings.textContent).not.toContain(reviewSuggestion.title)
     expect(semanticFindings.textContent).toContain("No validated review suggestions are attached to this revision.")
+  })
+
+  it("preserves accepted suggestion content across a published report transition", async () => {
+    const editedTitle = "Reuse the persisted idempotency key"
+    const draftPage = reviewSuggestionRevisionPage(1, "draft")
+    const editedPage = reviewSuggestionRevisionPage(2, "draft", editedTitle)
+    const edit = vi.fn(() => Promise.resolve(editedPage.current))
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      edit,
+      load: vi.fn().mockResolvedValueOnce(draftPage).mockResolvedValue(editedPage)
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<PullRequestLifecycleHarness revisionTransport={revisionTransport} />))
+    await act(async () => vi.dynamicImportSettled())
+    await act(async () => undefined)
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (semanticFindings === null) throw new Error("Expected semantic review findings")
+
+    const editButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Edit"
+    )
+    if (editButton === undefined) throw new Error("Expected the review suggestion edit action")
+    await act(async () => editButton.click())
+    const title = document.querySelector<HTMLInputElement>("input")
+    if (title === null) throw new Error("Expected the review suggestion title editor")
+    await act(async () => {
+      const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+      if (valueSetter === undefined) throw new Error("Expected the input value setter")
+      valueSetter.call(title, editedTitle)
+      title.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const save = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Save revision"
+    )
+    if (save === undefined) throw new Error("Expected the revision save action")
+    await act(async () => save.click())
+    expect(edit).toHaveBeenCalledOnce()
+    expect(semanticFindings.textContent).toContain(editedTitle)
+
+    const publish = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Publish report fixture"
+    )
+    if (publish === undefined) throw new Error("Expected the report lifecycle transition")
+    await act(async () => publish.click())
+
+    const published = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by published state']")
+    expect(published).not.toBeNull()
+    await act(async () => published?.click())
+    expect(semanticFindings.textContent).toContain(editedTitle)
+    expect(semanticFindings.textContent).not.toContain(reviewSuggestion.title)
   })
 
   it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {
