@@ -74,7 +74,7 @@ const NATIVE_MODEL_ID = AgentModelId.make("configured-default")
 const NATIVE_REVIEW_PROFILE: ReviewAgentProfile = {
   profileId: ReviewAgentProfileId.make("codex:configured-default:sbx"),
   label: "Full-project review · codex · configured-default",
-  budgetMillis: 120_000,
+  budgetMillis: 60_000,
   networkAccess: "provider-enabled",
   sandbox: "sbx"
 }
@@ -634,7 +634,7 @@ describe("PR review task executor", () => {
       assert.strictEqual(setupRequest.reviewExecution, "native-codex")
       const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
       assert.include(nativeRequest.prompt ?? "", "control-center-review-base")
-      assert.strictEqual(nativeRequest.maximumDurationMillis, 90_000)
+      assert.strictEqual(nativeRequest.maximumDurationMillis, 30_000)
       assert.include(nativeRequest.outputSchema ?? "", "\"schemaVersion\"")
       assert.notInclude(nativeRequest.outputSchema ?? "", "\"allOf\"")
       assert.notInclude(nativeRequest.outputSchema ?? "", "\"uniqueItems\"")
@@ -656,6 +656,102 @@ describe("PR review task executor", () => {
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
           Layer.provide(nativeSessionLayer),
           Layer.provide(historyLayer)
+        )
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    )
+  })
+
+  it.effect("rejects a native review budget that cannot preserve an execution window", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const invalidProfile = {
+      ...NATIVE_REVIEW_PROFILE,
+      budgetMillis: 30_000
+    } satisfies ReviewAgentProfile
+    const invalidClaim = {
+      ...claim,
+      providerId: NATIVE_PROVIDER_ID,
+      model: NATIVE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: invalidProfile
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      JSON.stringify({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: []
+      })
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: invalidProfile
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-codex",
+          reviewExecutable: "codex"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const result = yield* executor.execute(invalidClaim).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "AgentProviderError")
+        if (result.failure._tag === "AgentProviderError") {
+          assert.strictEqual(result.failure.phase, "configuration")
+        }
+      }
+      assert.notInclude(observation.operations, "runNativeCodexReview")
+      assert.strictEqual(observation.requests.length, 1)
+    }).pipe(
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(
+            Layer.succeed(
+              PrReviewThreadHistory,
+              PrReviewThreadHistory.of({
+                page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+              })
+            )
+          )
         )
       ),
       Effect.provide(NodeServices.layer),

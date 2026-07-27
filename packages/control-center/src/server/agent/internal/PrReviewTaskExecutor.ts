@@ -48,6 +48,7 @@ import {
   PrReviewThreadContextSnapshot
 } from "../../persistence/repositories/agentJobModels.js"
 import { AgentRuntimeRegistry } from "../AgentRuntimeRegistry.js"
+import { nativeReviewMaximumDurationMillis } from "../PrReviewTiming.js"
 import {
   type PrReviewSandboxOutput,
   type PrReviewSandboxSession,
@@ -784,8 +785,6 @@ responsible complete review. Suggestions already supported by exact evidence may
 still be returned in that state.
 `.trim()
 
-const NATIVE_REVIEW_POST_PROCESSING_RESERVE_MILLIS = 30_000
-
 const NATIVE_REVIEW_INSTRUCTIONS = `
 Review the complete immutable project in this disposable review sandbox. The trusted
 base is the Git ref control-center-review-base and the reviewed head is HEAD. Inspect
@@ -914,6 +913,17 @@ const makeExecutor = Effect.gen(function*() {
                 ? session.runNativeCodexReview
                 : session.runNativeClaudeReview
               const nativeProviderLabel = nativeCodexReview ? "Codex" : "Claude"
+              const maximumDurationMillis = nativeReviewMaximumDurationMillis(
+                persistedProfile.budgetMillis
+              )
+              if (maximumDurationMillis === null) {
+                return yield* providerFailure(
+                  claim.providerId,
+                  "configuration",
+                  `Native ${nativeProviderLabel} review requires a budget of at least 60,000 milliseconds.`,
+                  false
+                )
+              }
               if (runNativeReview === undefined) {
                 return yield* providerFailure(
                   claim.providerId,
@@ -952,10 +962,7 @@ const makeExecutor = Effect.gen(function*() {
                 executable: selected.reviewExecutable,
                 prompt: nativePrompt,
                 outputSchema,
-                maximumDurationMillis: Math.max(
-                  1,
-                  persistedProfile.budgetMillis - NATIVE_REVIEW_POST_PROCESSING_RESERVE_MILLIS
-                ),
+                maximumDurationMillis,
                 ...(String(selected.model) === "configured-default" || String(selected.model) === "default"
                   ? {}
                   : { model: String(selected.model) })
