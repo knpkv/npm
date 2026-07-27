@@ -442,6 +442,11 @@ describe("ControlCenterApi contract", () => {
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
         ],
         [
+          "dismissReviewSuggestion",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal"
+        ],
+        [
           "previewReviewSuggestionPublication",
           "GET",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview"
@@ -563,6 +568,7 @@ describe("ControlCenterApi contract", () => {
       enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
       reviewSuggestionRevisions: [SessionCookieAuth.key],
       editReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
+      dismissReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       previewReviewSuggestionPublication: [SessionCookieAuth.key],
       publishReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key]
     })

@@ -118,7 +118,7 @@ export const ReviewAgentProfile = Schema.Struct({
   profileId: ReviewAgentProfileId,
   label: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   budgetMillis: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1_800_000 })),
-  networkAccess: Schema.Literal("blocked"),
+  networkAccess: Schema.Literals(["blocked", "provider-enabled"]),
   sandbox: Schema.Literal("sbx")
 })
 

@@ -67,6 +67,12 @@ const serverConfiguration = Config.all({
   prReviewSbxEnabled: Config.boolean("CONTROL_CENTER_PR_REVIEW_SBX_ENABLED").pipe(Config.withDefault(false)),
   prReviewSbxExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE").pipe(Config.withDefault("sbx")),
   prReviewSbxTemplate: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE").pipe(Config.withDefault("")),
+  prReviewCodexExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE").pipe(
+    Config.withDefault("codex")
+  ),
+  prReviewClaudeExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE").pipe(
+    Config.withDefault("claude")
+  ),
   prReviewBudgetMillis: Config.int("CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS").pipe(
     Config.withDefault(1_200_000)
   ),
@@ -192,7 +198,12 @@ const program = Effect.scoped(
             : { apiKey: configured.agentOpenAiApiKey })
         }
         : undefined
-      if (configured.prReviewSbxEnabled && openAiCompatible === undefined) {
+      if (
+        configured.prReviewSbxEnabled &&
+        openAiCompatible === undefined &&
+        !agentProviders.includes("codex") &&
+        !agentProviders.includes("claude")
+      ) {
         return yield* new ControlCenterCliConfigurationError({
           reason: "pr-review-provider-unavailable"
         })
@@ -208,6 +219,12 @@ const program = Effect.scoped(
       )
       const sbxTemplate = optionalNonBlankConfigurationValue(
         configured.prReviewSbxTemplate
+      )
+      const prReviewCodexExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewCodexExecutable
+      )
+      const prReviewClaudeExecutable = optionalNonBlankConfigurationValue(
+        configured.prReviewClaudeExecutable
       )
       const allowedHosts = commaSeparated(configured.allowedHosts)
       const allowedOrigins = commaSeparated(configured.allowedOrigins)
@@ -251,6 +268,8 @@ const program = Effect.scoped(
               workspaceRoot: path.join(dataPaths.dataRoot, "pr-review-workspaces"),
               ...(sbxExecutable === undefined ? {} : { sbxExecutable }),
               ...(sbxTemplate === undefined ? {} : { sbxTemplate }),
+              ...(prReviewCodexExecutable === undefined ? {} : { codexExecutable: prReviewCodexExecutable }),
+              ...(prReviewClaudeExecutable === undefined ? {} : { claudeExecutable: prReviewClaudeExecutable }),
               reviewBudgetMillis: prReviewTiming.budgetMillis,
               leaseOwner: AgentLeaseOwner.make("control-center-pr-review-worker"),
               maximumSandboxDurationMillis: prReviewTiming.maximumSandboxDurationMillis

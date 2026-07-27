@@ -68,6 +68,26 @@ const REVIEW_PROFILE: ReviewAgentProfile = {
   networkAccess: "blocked",
   sandbox: "sbx"
 }
+const NATIVE_PROVIDER_ID = AgentProviderId.make("codex")
+const NATIVE_DURABLE_PROVIDER_ID = DurableAgentProviderId.make("codex")
+const NATIVE_MODEL_ID = AgentModelId.make("configured-default")
+const NATIVE_REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("codex:configured-default:sbx"),
+  label: "Full-project review · codex · configured-default",
+  budgetMillis: 120_000,
+  networkAccess: "provider-enabled",
+  sandbox: "sbx"
+}
+const NATIVE_CLAUDE_PROVIDER_ID = AgentProviderId.make("claude")
+const NATIVE_CLAUDE_DURABLE_PROVIDER_ID = DurableAgentProviderId.make("claude")
+const NATIVE_CLAUDE_MODEL_ID = AgentModelId.make("default")
+const NATIVE_CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("claude:default:sbx"),
+  label: "Full-project review · claude · default",
+  budgetMillis: 120_000,
+  networkAccess: "provider-enabled",
+  sandbox: "sbx"
+}
 const HEAD_REVISION = "2".repeat(40)
 const FINGERPRINT = AgentContextFingerprint.make(`sha256:${"a".repeat(64)}`)
 const LEASE_TOKEN = AgentLeaseToken.make("b".repeat(64))
@@ -295,6 +315,17 @@ interface SessionObservation {
   readonly requests: Array<unknown>
 }
 
+const SessionSetupRequestObservation = Schema.Struct({
+  reviewExecution: Schema.optionalKey(Schema.String)
+})
+
+const NativeReviewRequestObservation = Schema.Struct({
+  executable: Schema.optionalKey(Schema.String),
+  model: Schema.optionalKey(Schema.String),
+  outputSchema: Schema.optionalKey(Schema.String),
+  prompt: Schema.optionalKey(Schema.String)
+})
+
 const makeRealGitSessionLayer = (
   observation: SessionObservation,
   cwd: string,
@@ -339,7 +370,9 @@ const makeSessionLayer = (
   replacementFailure?: typeof PrReviewSandboxSessionError.Type,
   retainedDiff?: string,
   retainPrimaryDiff = false,
-  artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type
+  artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type,
+  nativeReviewOutput?: string,
+  nativeReviewRunner: "claude" | "codex" = "codex"
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make("review-artifact-1")
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
@@ -417,6 +450,26 @@ const makeSessionLayer = (
         ? Effect.succeed(retainedDiff?.slice(offset, offset + limit) ?? "")
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
+    ...(nativeReviewOutput === undefined || nativeReviewRunner !== "codex"
+      ? {}
+      : {
+        runNativeCodexReview: (request: unknown) =>
+          Effect.sync(() => {
+            observation.operations.push("runNativeCodexReview")
+            observation.requests.push(request)
+            return output(nativeReviewOutput)
+          })
+      }),
+    ...(nativeReviewOutput === undefined || nativeReviewRunner !== "claude"
+      ? {}
+      : {
+        runNativeClaudeReview: (request: unknown) =>
+          Effect.sync(() => {
+            observation.operations.push("runNativeClaudeReview")
+            observation.requests.push(request)
+            return output(nativeReviewOutput)
+          })
+      }),
     close: Effect.void
   }
   return Layer.succeed(
@@ -475,6 +528,7 @@ const runExecutor = <Success, Failure>(
             version: "1.2.3"
           },
           filesystemAccess: "none",
+          reviewExecution: "effect-ai",
           languageModel
         })
     })
@@ -496,6 +550,209 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("executes Codex-only review through the native sbx runner", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const activity = new Array<AgentRuntimeEvent>()
+    const nativeClaim = {
+      ...claim,
+      providerId: NATIVE_PROVIDER_ID,
+      model: NATIVE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: NATIVE_REVIEW_PROFILE
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeReport = JSON.stringify({
+      schemaVersion: 3,
+      completion: { status: "complete" },
+      suggestions: [{ ...suggestion, prevention: null, replacement: null }],
+      notes: []
+    })
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      nativeReport
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: NATIVE_REVIEW_PROFILE
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-codex",
+          reviewExecutable: "codex"
+        })
+    })
+    const historyLayer = Layer.succeed(
+      PrReviewThreadHistory,
+      PrReviewThreadHistory.of({
+        page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+      })
+    )
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const report = yield* executor.execute(
+        nativeClaim,
+        (event) =>
+          Effect.sync(() => {
+            activity.push(event)
+          })
+      )
+
+      assert.strictEqual(report.suggestions.length, 1)
+      assert.include(observation.operations, "runNativeCodexReview")
+      const setupRequest = Schema.decodeUnknownSync(SessionSetupRequestObservation)(observation.requests[0])
+      assert.strictEqual(setupRequest.reviewExecution, "native-codex")
+      const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
+      assert.include(nativeRequest.prompt ?? "", "control-center-review-base")
+      assert.include(nativeRequest.outputSchema ?? "", "\"schemaVersion\"")
+      assert.notInclude(nativeRequest.outputSchema ?? "", "\"allOf\"")
+      assert.notInclude(nativeRequest.outputSchema ?? "", "\"uniqueItems\"")
+      assert.include(nativeRequest.outputSchema ?? "", "\"minLength\":1")
+      assert.include(nativeRequest.outputSchema ?? "", "\"prevention\":{\"anyOf\"")
+      assert.include(nativeRequest.outputSchema ?? "", "\"replacement\":{\"anyOf\"")
+      assert.include(
+        nativeRequest.outputSchema ?? "",
+        "\"prevention\",\"replacement\",\"anchor\""
+      )
+      assert.strictEqual(nativeRequest.executable, "codex")
+      assert.deepStrictEqual(
+        activity.map(({ _tag }) => _tag),
+        ["started", "output"]
+      )
+    }).pipe(
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(historyLayer)
+        )
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    )
+  })
+
+  it.effect("executes Claude review through the same immutable native sbx contract", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const nativeClaim = {
+      ...claim,
+      providerId: NATIVE_CLAUDE_PROVIDER_ID,
+      model: NATIVE_CLAUDE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: NATIVE_CLAUDE_REVIEW_PROFILE
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeReport = JSON.stringify({
+      schemaVersion: 3,
+      completion: { status: "complete" },
+      suggestions: [],
+      notes: []
+    })
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      nativeReport,
+      "claude"
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_CLAUDE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_CLAUDE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: NATIVE_CLAUDE_REVIEW_PROFILE
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_CLAUDE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "claude-cli",
+            version: "2.1.195"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-claude",
+          reviewExecutable: "claude"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const report = yield* executor.execute(nativeClaim)
+
+      assert.strictEqual(report.suggestions.length, 0)
+      assert.include(observation.operations, "runNativeClaudeReview")
+      const setupRequest = Schema.decodeUnknownSync(SessionSetupRequestObservation)(observation.requests[0])
+      assert.strictEqual(setupRequest.reviewExecution, "native-claude")
+      const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
+      assert.strictEqual(nativeRequest.executable, "claude")
+      assert.notProperty(nativeRequest, "model")
+    }).pipe(
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(
+            Layer.succeed(
+              PrReviewThreadHistory,
+              PrReviewThreadHistory.of({
+                page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+              })
+            )
+          )
+        )
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    )
+  })
+
   it.effect("exposes more than 64 fenced history events without exhausting tool steps", () => {
     const observedCursors = new Array<number>()
     const eventKind = Schema.decodeSync(AgentThreadEvent.fields.eventKind)("user-message")

@@ -31,6 +31,9 @@ const MAXIMUM_PATCH_BYTES = 256 * 1_024
 const MAXIMUM_ARTIFACT_PAGE_BYTES = 64 * 1_024
 const MAXIMUM_RETAINED_ARTIFACT_BYTES = 64 * 1_024 * 1_024
 const MAXIMUM_RETAINED_ARTIFACTS = 64
+const NATIVE_CODEX_BASE_REF = "control-center-review-base"
+const NATIVE_CODEX_OUTPUT_PATH = "/tmp/control-center-review-output.json"
+const NATIVE_CODEX_SCHEMA_PATH = "/tmp/control-center-review-schema.json"
 
 const textEncoder = new TextEncoder()
 const textDecoder = new TextDecoder("utf-8", { fatal: true })
@@ -105,6 +108,9 @@ const PositiveLimit = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: M
 const CommandTimeoutMillis = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: MAXIMUM_COMMAND_TIMEOUT_MILLIS })
 )
+const SessionTimeoutMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: MAXIMUM_SESSION_TIMEOUT_MILLIS })
+)
 const PatchText = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.makeFilter(
@@ -125,21 +131,62 @@ const SessionRequest = Schema.Struct({
   repository: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9._-]{1,100}$/u)),
   attemptId: SandboxAttemptId,
   baseRevision: GitRevision,
-  headRevision: GitRevision
+  headRevision: GitRevision,
+  reviewExecution: Schema.optionalKey(Schema.Literals(["effect-ai", "native-claude", "native-codex"]))
+})
+
+const NativeCodexReviewRequest = Schema.Struct({
+  executable: Executable,
+  prompt: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_048_576)),
+  outputSchema: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_048_576)),
+  model: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
+  maximumDurationMillis: SessionTimeoutMillis
+})
+
+const NativeClaudeReviewRequest = Schema.Struct({
+  executable: Executable,
+  prompt: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_048_576)),
+  outputSchema: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_048_576)),
+  model: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))),
+  maximumDurationMillis: SessionTimeoutMillis
+})
+
+const NativeClaudeReviewEnvelope = Schema.Struct({
+  type: Schema.Literal("result"),
+  subtype: Schema.Literal("success"),
+  is_error: Schema.Literal(false),
+  structured_output: Schema.Unknown
 })
 
 const SessionOptions = Schema.Struct({
   executable: Schema.optionalKey(Executable),
   template: Schema.optionalKey(Template),
   maximumCommandDurationMillis: Schema.optionalKey(CommandTimeoutMillis),
-  maximumSessionDurationMillis: Schema.optionalKey(
-    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: MAXIMUM_SESSION_TIMEOUT_MILLIS }))
-  )
+  maximumSessionDurationMillis: Schema.optionalKey(SessionTimeoutMillis)
 })
 
 /** Exact review identity used to acquire a disposable writable session. */
 export interface PrReviewSandboxSessionRequest extends PrReviewSourceRequest {
   readonly attemptId: string
+  readonly reviewExecution?: "effect-ai" | "native-claude" | "native-codex"
+}
+
+/** Structured native Codex review material accepted only by Codex-backed sessions. */
+export interface PrReviewNativeCodexRequest {
+  readonly executable: string
+  readonly prompt: string
+  readonly outputSchema: string
+  readonly model?: string
+  readonly maximumDurationMillis: number
+}
+
+/** Structured native Claude review material accepted only by Claude-backed sessions. */
+export interface PrReviewNativeClaudeRequest {
+  readonly executable: string
+  readonly prompt: string
+  readonly outputSchema: string
+  readonly model?: string
+  readonly maximumDurationMillis: number
 }
 
 /** Trusted local construction material for the sbx Review Sandbox runtime. */
@@ -225,6 +272,12 @@ export interface PrReviewSandboxSession {
     artifactId: PrReviewCommandArtifactId,
     query: string
   ) => Effect.Effect<ReadonlyArray<number>, PrReviewSandboxSessionError>
+  readonly runNativeCodexReview?: (
+    request: PrReviewNativeCodexRequest
+  ) => Effect.Effect<PrReviewSandboxCommandResult, PrReviewSandboxSessionError>
+  readonly runNativeClaudeReview?: (
+    request: PrReviewNativeClaudeRequest
+  ) => Effect.Effect<PrReviewSandboxCommandResult, PrReviewSandboxSessionError>
   readonly close: Effect.Effect<void, PrReviewSandboxSessionError>
 }
 
@@ -422,15 +475,15 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     LC_ALL: "C",
     PATH: path
   }
-
   const runControl = (
     args: ReadonlyArray<string>,
-    timeout: Duration.Input = CONTROL_TIMEOUT
+    timeout: Duration.Input = CONTROL_TIMEOUT,
+    environment: Readonly<Record<string, string>> = hostEnvironment
   ) =>
     execute(
       spawner,
       executable,
-      hostEnvironment,
+      environment,
       args,
       MAXIMUM_CONTROL_OUTPUT_BYTES,
       timeout
@@ -467,22 +520,36 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
       Effect.mapError(() => sessionError("invalid-request"))
     )
     const name = sandboxName(request.jobId, request.attemptId)
+    const nativeCodex = request.reviewExecution === "native-codex"
+    const nativeClaude = request.reviewExecution === "native-claude"
+    const nativeAgent = nativeCodex || nativeClaude
     return yield* sourceWorkspace.withSource(
       request,
       (sourceRoot) =>
         Effect.acquireUseRelease(
           runControl(
-            [
-              "create",
-              "shell",
-              sourceRoot,
-              "--clone",
-              "--name",
-              name,
-              "--quiet",
-              ...(options.template === undefined ? [] : ["--template", options.template])
-            ],
-            SOURCE_HANDOFF_TIMEOUT
+            nativeAgent
+              ? [
+                "run",
+                nativeCodex ? "codex" : "claude",
+                sourceRoot,
+                "--clone",
+                "--name",
+                name,
+                "--detached"
+              ]
+              : [
+                "create",
+                "shell",
+                sourceRoot,
+                "--clone",
+                "--name",
+                name,
+                "--quiet",
+                ...(options.template === undefined ? [] : ["--template", options.template])
+              ],
+            SOURCE_HANDOFF_TIMEOUT,
+            hostEnvironment
           ).pipe(
             Effect.flatMap((created) =>
               successful(created)
@@ -493,15 +560,17 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
           ),
           () =>
             Effect.gen(function*() {
-              const denied = yield* runControl([
-                "policy",
-                "deny",
-                "network",
-                "--sandbox",
-                name,
-                "**"
-              ])
-              if (!successful(denied)) return yield* sessionError("sandbox-unavailable")
+              if (!nativeAgent) {
+                const denied = yield* runControl([
+                  "policy",
+                  "deny",
+                  "network",
+                  "--sandbox",
+                  name,
+                  "**"
+                ])
+                if (!successful(denied)) return yield* sessionError("sandbox-unavailable")
+              }
 
               const closed = yield* Ref.make(false)
               const artifacts = yield* Ref.make(new Map<PrReviewCommandArtifactId, RetainedArtifact>())
@@ -569,6 +638,161 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   Math.min(durationMillis, maximumCommandDurationMillis)
                 )
               })
+
+              const runNativeCodexReview = nativeCodex
+                ? Effect.fn("PrReviewSandboxSession.runNativeCodexReview")(function*(
+                  unknownRequest: PrReviewNativeCodexRequest
+                ) {
+                  const nativeRequest = yield* Schema.decodeUnknownEffect(
+                    NativeCodexReviewRequest
+                  )(unknownRequest).pipe(
+                    Effect.mapError(() => sessionError("invalid-request"))
+                  )
+                  if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
+                  const schemaWritten = yield* executeContained(
+                    `umask 077 && cat > ${shellQuote(NATIVE_CODEX_SCHEMA_PATH)} && ` +
+                      `rm -f -- ${shellQuote(NATIVE_CODEX_OUTPUT_PATH)}`,
+                    maximumCommandDurationMillis,
+                    textEncoder.encode(nativeRequest.outputSchema)
+                  )
+                  if (!successful(schemaWritten)) return yield* sessionError("sandbox-unavailable")
+                  const reviewed = yield* execute(
+                    spawner,
+                    executable,
+                    hostEnvironment,
+                    [
+                      "exec",
+                      "--interactive",
+                      "--workdir",
+                      sourceRoot,
+                      name,
+                      nativeRequest.executable,
+                      "exec",
+                      "--ephemeral",
+                      "--ignore-rules",
+                      "--dangerously-bypass-approvals-and-sandbox",
+                      "-c",
+                      "project_doc_max_bytes=0",
+                      "-c",
+                      "mcp_servers={}",
+                      "--output-schema",
+                      NATIVE_CODEX_SCHEMA_PATH,
+                      "--output-last-message",
+                      NATIVE_CODEX_OUTPUT_PATH,
+                      ...(nativeRequest.model === undefined ? [] : ["--model", nativeRequest.model]),
+                      "-"
+                    ],
+                    MAXIMUM_COMMAND_OUTPUT_BYTES,
+                    Duration.millis(
+                      Math.min(
+                        nativeRequest.maximumDurationMillis,
+                        maximumSessionDurationMillis
+                      )
+                    ),
+                    textEncoder.encode(nativeRequest.prompt)
+                  )
+                  if (!successful(reviewed)) {
+                    const safeDiagnostic = new TextDecoder("utf-8", { fatal: false })
+                      .decode(reviewed.stderr)
+                      .match(/Invalid schema for response_format[^"\n]*/u)?.[0]
+                    if (safeDiagnostic !== undefined) {
+                      yield* Effect.logWarning("Native Codex rejected the response schema", {
+                        diagnostic: safeDiagnostic
+                      })
+                    }
+                    return {
+                      exitCode: reviewed.exitCode,
+                      stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
+                      stdout: yield* makeOutput(artifacts, artifactSequence, reviewed.stdout)
+                    } satisfies PrReviewSandboxCommandResult
+                  }
+                  return yield* runContainedCommand(
+                    `test -s ${shellQuote(NATIVE_CODEX_OUTPUT_PATH)} && ` +
+                      `cat -- ${shellQuote(NATIVE_CODEX_OUTPUT_PATH)}`,
+                    maximumCommandDurationMillis
+                  )
+                })
+                : undefined
+
+              const runNativeClaudeReview = nativeClaude
+                ? Effect.fn("PrReviewSandboxSession.runNativeClaudeReview")(function*(
+                  unknownRequest: PrReviewNativeClaudeRequest
+                ) {
+                  const nativeRequest = yield* Schema.decodeUnknownEffect(
+                    NativeClaudeReviewRequest
+                  )(unknownRequest).pipe(
+                    Effect.mapError(() => sessionError("invalid-request"))
+                  )
+                  if (yield* Ref.get(closed)) return yield* sessionError("session-closed")
+                  const reviewed = yield* execute(
+                    spawner,
+                    executable,
+                    hostEnvironment,
+                    [
+                      "exec",
+                      "--interactive",
+                      "--workdir",
+                      sourceRoot,
+                      name,
+                      nativeRequest.executable,
+                      "-p",
+                      "--output-format",
+                      "json",
+                      "--json-schema",
+                      nativeRequest.outputSchema,
+                      "--dangerously-skip-permissions",
+                      "--no-session-persistence",
+                      "--safe-mode",
+                      "--setting-sources",
+                      "",
+                      "--strict-mcp-config",
+                      "--mcp-config",
+                      "{\"mcpServers\":{}}",
+                      ...(nativeRequest.model === undefined ? [] : ["--model", nativeRequest.model]),
+                      "--tools",
+                      "Bash",
+                      "Glob",
+                      "Grep",
+                      "Read"
+                    ],
+                    MAXIMUM_COMMAND_OUTPUT_BYTES,
+                    Duration.millis(
+                      Math.min(
+                        nativeRequest.maximumDurationMillis,
+                        maximumSessionDurationMillis
+                      )
+                    ),
+                    textEncoder.encode(nativeRequest.prompt)
+                  )
+                  if (!successful(reviewed)) {
+                    return {
+                      exitCode: reviewed.exitCode,
+                      stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
+                      stdout: yield* makeOutput(artifacts, artifactSequence, reviewed.stdout)
+                    } satisfies PrReviewSandboxCommandResult
+                  }
+                  const envelope = yield* Schema.decodeUnknownEffect(
+                    Schema.fromJsonString(NativeClaudeReviewEnvelope),
+                    { onExcessProperty: "ignore" }
+                  )(yield* decodeUtf8(reviewed.stdout, "output-rejected")).pipe(
+                    Effect.mapError(() => sessionError("output-rejected"))
+                  )
+                  const structuredOutput = yield* Effect.try({
+                    try: () => JSON.stringify(envelope.structured_output),
+                    catch: () => sessionError("output-rejected")
+                  }).pipe(
+                    Effect.filterOrFail(
+                      (value): value is string => value !== undefined,
+                      () => sessionError("output-rejected")
+                    )
+                  )
+                  return {
+                    exitCode: reviewed.exitCode,
+                    stderr: yield* makeOutput(artifacts, artifactSequence, reviewed.stderr),
+                    stdout: yield* makeOutput(artifacts, artifactSequence, textEncoder.encode(structuredOutput))
+                  } satisfies PrReviewSandboxCommandResult
+                })
+                : undefined
 
               const safePath = (unknownPath: string) =>
                 Schema.decodeUnknownEffect(RelativeSandboxPath)(unknownPath).pipe(
@@ -661,6 +885,8 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                     }
                     return matches
                   }),
+                ...(runNativeCodexReview === undefined ? {} : { runNativeCodexReview }),
+                ...(runNativeClaudeReview === undefined ? {} : { runNativeClaudeReview }),
                 close
               }
 
@@ -672,7 +898,13 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   " && test -z \"$(git remote)\" && " +
                   "authority_keys=$(git config --local --name-only --get-regexp '.*' || true) && " +
                   "! printf '%s\\n' \"$authority_keys\" | LC_ALL=C tr '[:upper:]' '[:lower:]' | grep -E " +
-                  shellQuote(PR_REVIEW_AUTHORITY_CONFIG_PATTERN)
+                  shellQuote(PR_REVIEW_AUTHORITY_CONFIG_PATTERN) +
+                  (nativeAgent
+                    ? " && git branch --force " +
+                      shellQuote(NATIVE_CODEX_BASE_REF) +
+                      " " +
+                      shellQuote(request.baseRevision)
+                    : "")
               )
               if (prepared.exitCode !== 0) return yield* sessionError("source-unavailable")
 

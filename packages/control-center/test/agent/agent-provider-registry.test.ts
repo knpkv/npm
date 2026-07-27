@@ -7,13 +7,13 @@ import {
   type AgentRunRequest,
   type AgentRuntimeEvent
 } from "@knpkv/ai-runtime"
-import { Deferred, Duration, Effect, Fiber, Layer, Redacted, Result, Sink, Stream } from "effect"
+import { Deferred, Duration, Effect, Fiber, Layer, Redacted, Result, Schema, Sink, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
-import { AgentModelId, DurableAgentProviderId } from "../../src/api/agent.js"
+import { AgentModelId, AgentProviderCatalog, DurableAgentProviderId } from "../../src/api/agent.js"
 import { agentProviderRuntimeRegistryLayer, AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 
 const OPENAI_PROVIDER_ID = AgentProviderId.make("openai-compatible")
@@ -61,24 +61,26 @@ const versionProcessLayer = (
       const output = Stream.make(
         options.outputs?.[calls.length - 1] ?? options.output ?? `${CLI_VERSION_OUTPUT}\n`
       ).pipe(Stream.encodeText)
-      return Effect.succeed(ChildProcessSpawner.makeHandle({
-        all: output,
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
-        getInputFd: () => Sink.drain,
-        getOutputFd: () => Stream.empty,
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
-        pid: ChildProcessSpawner.ProcessId(42),
-        stderr: Stream.empty,
-        stdin: Sink.drain,
-        stdout: output,
-        unref: Effect.succeed(Effect.void)
-      }))
+      return Effect.succeed(
+        ChildProcessSpawner.makeHandle({
+          all: output,
+          exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
+          getInputFd: () => Sink.drain,
+          getOutputFd: () => Stream.empty,
+          isRunning: Effect.succeed(false),
+          kill: () => Effect.void,
+          pid: ChildProcessSpawner.ProcessId(42),
+          stderr: Stream.empty,
+          stdin: Sink.drain,
+          stdout: output,
+          unref: Effect.succeed(Effect.void)
+        })
+      )
     })
   )
 
 describe("agent provider registry", () => {
-  it.effect("advertises PR review only for a configured prompt-only provider when the worker is enabled", () =>
+  it.effect("advertises PR review only for configured runners when the worker is enabled", () =>
     Effect.gen(function*() {
       const registry = yield* AgentRuntimeRegistry
       const catalog = yield* registry.catalog()
@@ -99,14 +101,17 @@ describe("agent provider registry", () => {
           }
         ]
       )
+      assert.strictEqual(catalog.providers.at(-1)?.reviewProfile?.profileId, "openai-compatible:review-model:sbx")
     }).pipe(
-      Effect.provide(agentProviderRuntimeRegistryLayer({
-        openAiCompatible: {
-          apiUrl: API_URL_CANARY,
-          model: OPENAI_MODEL
-        },
-        prReviewEnabled: true
-      })),
+      Effect.provide(
+        agentProviderRuntimeRegistryLayer({
+          openAiCompatible: {
+            apiUrl: API_URL_CANARY,
+            model: OPENAI_MODEL
+          },
+          prReviewEnabled: true
+        })
+      ),
       Effect.provideService(
         HttpClient.HttpClient,
         HttpClient.make(() => Effect.die("catalog test must not call the provider"))
@@ -114,6 +119,140 @@ describe("agent provider registry", () => {
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))
+
+  it.effect("advertises a stable valid review profile for slash-bearing provider model names", () =>
+    Effect.gen(function*() {
+      const registry = yield* AgentRuntimeRegistry
+      const catalog = yield* registry.catalog()
+      const catalogAgain = yield* registry.catalog()
+      const openAiProvider = catalog.providers.find(
+        ({ providerId }) => providerId === DurableAgentProviderId.make("openai-compatible")
+      )
+      const openAiProviderAgain = catalogAgain.providers.find(
+        ({ providerId }) => providerId === DurableAgentProviderId.make("openai-compatible")
+      )
+
+      assert.strictEqual(
+        openAiProvider?.reviewProfile?.profileId,
+        openAiProviderAgain?.reviewProfile?.profileId
+      )
+      assert.match(
+        openAiProvider?.reviewProfile?.profileId ?? "",
+        /^openai-compatible:encoded-[0-9a-f]{64}:sbx$/u
+      )
+      assert.strictEqual(
+        openAiProvider?.reviewProfile?.label,
+        "Full-project review · openai-compatible · models/local/review-model"
+      )
+    }).pipe(
+      Effect.provide(
+        agentProviderRuntimeRegistryLayer({
+          openAiCompatible: {
+            apiUrl: API_URL_CANARY,
+            model: AgentModelId.make("models/local/review-model")
+          },
+          prReviewEnabled: true
+        })
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("catalog test must not call the provider"))
+      ),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("advertises native Codex review and bounds long Unicode profile metadata", () =>
+    Effect.gen(function*() {
+      const registry = yield* AgentRuntimeRegistry
+      const catalog = yield* registry.catalog()
+      const decoded = yield* Schema.decodeUnknownEffect(AgentProviderCatalog)(catalog)
+      const codex = decoded.providers.find(
+        ({ providerId }) => providerId === DurableAgentProviderId.make("codex")
+      )
+      const selected = yield* registry.select({
+        providerId: AgentProviderId.make("codex"),
+        model: "😀".repeat(90),
+        access: "read-only",
+        capability: "pr-review"
+      })
+
+      assert.deepStrictEqual(codex?.capabilities, ["release-chat", "pr-review"])
+      assert.strictEqual(codex?.reviewProfile?.networkAccess, "provider-enabled")
+      assert.match(
+        codex?.reviewProfile?.profileId ?? "",
+        /^codex:encoded-[0-9a-f]{64}:sbx$/u
+      )
+      assert.isAtMost(codex?.reviewProfile?.label.length ?? Number.POSITIVE_INFINITY, 200)
+      assert.strictEqual(selected.reviewExecution, "native-codex")
+      assert.strictEqual(selected.reviewExecutable, "codex-wrapper")
+      assert.strictEqual(selected.filesystemAccess, "configured-workspace")
+      assert.isUndefined(selected.languageModel)
+    }).pipe(
+      Effect.provide(
+        agentProviderRuntimeRegistryLayer({
+          codex: {
+            cwd: CWD_CANARY,
+            executable: COMMAND_CANARY,
+            model: AgentModelId.make("😀".repeat(90))
+          },
+          prReviewCodexExecutable: "codex-wrapper",
+          prReviewEnabled: true
+        })
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("native Codex selection must not call HTTP"))
+      ),
+      Effect.provide(versionProcessLayer([], { output: `${CLI_VERSION_OUTPUT}\n` })),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("advertises configured Claude as an explicit native review preset", () => {
+    const processCalls: Array<ChildProcess.Command> = []
+    return Effect.gen(function*() {
+      const registry = yield* AgentRuntimeRegistry
+      const catalog = yield* registry.catalog()
+      const claude = catalog.providers.find(
+        ({ providerId }) => providerId === DurableAgentProviderId.make("claude")
+      )
+      const selected = yield* registry.select({
+        providerId: AgentProviderId.make("claude"),
+        model: "default",
+        access: "read-only",
+        capability: "pr-review"
+      })
+
+      assert.deepStrictEqual(claude?.capabilities, ["release-chat", "pr-review"])
+      assert.strictEqual(claude?.reviewProfile?.profileId, "claude:default:sbx")
+      assert.strictEqual(claude?.reviewProfile?.networkAccess, "provider-enabled")
+      assert.strictEqual(selected.reviewExecution, "native-claude")
+      assert.strictEqual(selected.reviewExecutable, "claude-wrapper")
+      assert.strictEqual(selected.filesystemAccess, "configured-workspace")
+      assert.isUndefined(selected.languageModel)
+      assert.isUndefined(selected.runtimeMetadata)
+      assert.strictEqual(processCalls.length, 0)
+    }).pipe(
+      Effect.provide(
+        agentProviderRuntimeRegistryLayer({
+          claude: {
+            cwd: CWD_CANARY,
+            executable: "./bin/claude-canary"
+          },
+          prReviewClaudeExecutable: "claude-wrapper",
+          prReviewEnabled: true
+        })
+      ),
+      Effect.provideService(
+        HttpClient.HttpClient,
+        HttpClient.make(() => Effect.die("native Claude selection must not call HTTP"))
+      ),
+      Effect.provide(versionProcessLayer(processCalls, { output: "2.1.195 (Claude Code)\n" })),
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    )
+  })
 
   it.effect("routes an explicit OpenAI-compatible selection and redacts provider administration", () => {
     let providerCalls = 0
@@ -140,11 +279,13 @@ describe("agent provider registry", () => {
               object: "chat.completion",
               model: OPENAI_MODEL,
               created: 1,
-              choices: [{
-                index: 0,
-                finish_reason: "stop",
-                message: { role: "assistant", content: "Provider answer" }
-              }],
+              choices: [
+                {
+                  index: 0,
+                  finish_reason: "stop",
+                  message: { role: "assistant", content: "Provider answer" }
+                }
+              ],
               usage: {
                 prompt_tokens: 8,
                 completion_tokens: 2,
@@ -210,30 +351,38 @@ describe("agent provider registry", () => {
       assert.notInclude(publicJson, COMMAND_CANARY)
       assert.notInclude(publicJson, CWD_CANARY)
 
-      const unavailable = yield* registry.select({
-        providerId: AgentProviderId.make("claude"),
-        model: "review-model",
-        access: "read-only",
-        capability: "release-chat"
-      }).pipe(Effect.result)
-      const wrongModel = yield* registry.select({
-        providerId: OPENAI_PROVIDER_ID,
-        model: "unregistered-model",
-        access: "read-only",
-        capability: "release-chat"
-      }).pipe(Effect.result)
-      const unsafeProfile = yield* registry.select({
-        providerId: OPENAI_PROVIDER_ID,
-        model: OPENAI_MODEL,
-        access: "workspace-write",
-        capability: "release-chat"
-      }).pipe(Effect.result)
-      const reviewWithoutWorker = yield* registry.select({
-        providerId: OPENAI_PROVIDER_ID,
-        model: OPENAI_MODEL,
-        access: "read-only",
-        capability: "pr-review"
-      }).pipe(Effect.result)
+      const unavailable = yield* registry
+        .select({
+          providerId: AgentProviderId.make("claude"),
+          model: "review-model",
+          access: "read-only",
+          capability: "release-chat"
+        })
+        .pipe(Effect.result)
+      const wrongModel = yield* registry
+        .select({
+          providerId: OPENAI_PROVIDER_ID,
+          model: "unregistered-model",
+          access: "read-only",
+          capability: "release-chat"
+        })
+        .pipe(Effect.result)
+      const unsafeProfile = yield* registry
+        .select({
+          providerId: OPENAI_PROVIDER_ID,
+          model: OPENAI_MODEL,
+          access: "workspace-write",
+          capability: "release-chat"
+        })
+        .pipe(Effect.result)
+      const reviewWithoutWorker = yield* registry
+        .select({
+          providerId: OPENAI_PROVIDER_ID,
+          model: OPENAI_MODEL,
+          access: "read-only",
+          capability: "pr-review"
+        })
+        .pipe(Effect.result)
       assert.isTrue(Result.isFailure(unavailable))
       assert.isTrue(Result.isFailure(wrongModel))
       assert.isTrue(Result.isFailure(unsafeProfile))
@@ -310,9 +459,11 @@ describe("agent provider registry", () => {
     }).pipe(
       Effect.provide(registryLayer),
       Effect.provideService(HttpClient.HttpClient, providerClient),
-      Effect.provide(versionProcessLayer(processCalls, {
-        outputs: [`${CLI_VERSION_OUTPUT}\n`, "codex-cli 1.2.4\n"]
-      })),
+      Effect.provide(
+        versionProcessLayer(processCalls, {
+          outputs: [`${CLI_VERSION_OUTPUT}\n`, "codex-cli 1.2.4\n"]
+        })
+      ),
       Effect.provide(NodeServices.layer),
       Effect.scoped
     )
@@ -324,9 +475,7 @@ describe("agent provider registry", () => {
       let providerCalls = 0
       const providerClient = HttpClient.make(() => {
         providerCalls += 1
-        return Deferred.succeed(requestStarted, undefined).pipe(
-          Effect.andThen(Effect.never)
-        )
+        return Deferred.succeed(requestStarted, undefined).pipe(Effect.andThen(Effect.never))
       })
       const registryLayer = agentProviderRuntimeRegistryLayer({
         openAiCompatible: {
@@ -344,14 +493,8 @@ describe("agent provider registry", () => {
           access: "read-only",
           capability: "release-chat"
         })
-        return yield* selected.runtime.run(runRequest(selected.model)).pipe(
-          Stream.runCollect,
-          Effect.result
-        )
-      }).pipe(
-        Effect.provide(registryLayer),
-        Effect.provideService(HttpClient.HttpClient, providerClient)
-      )
+        return yield* selected.runtime.run(runRequest(selected.model)).pipe(Stream.runCollect, Effect.result)
+      }).pipe(Effect.provide(registryLayer), Effect.provideService(HttpClient.HttpClient, providerClient))
       const fiber = yield* Effect.forkChild(execution)
       yield* Deferred.await(requestStarted)
       yield* TestClock.adjust(Duration.millis(10))
@@ -368,29 +511,30 @@ describe("agent provider registry", () => {
           assert.notInclude(result.failure.message, API_URL_CANARY)
         }
       }
-    }).pipe(
-      Effect.provide(NodeServices.layer),
-      Effect.scoped
-    ))
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("classifies unavailable CLI metadata as retryable and invalid output as configuration", () =>
     Effect.gen(function*() {
       const selectCodex = (options: { readonly exitCode?: number; readonly output?: string }) =>
         Effect.gen(function*() {
           const registry = yield* AgentRuntimeRegistry
-          return yield* registry.select({
-            providerId: AgentProviderId.make("codex"),
-            model: "configured-default",
-            access: "read-only",
-            capability: "release-chat"
-          }).pipe(Effect.result)
+          return yield* registry
+            .select({
+              providerId: AgentProviderId.make("codex"),
+              model: "configured-default",
+              access: "read-only",
+              capability: "release-chat"
+            })
+            .pipe(Effect.result)
         }).pipe(
-          Effect.provide(agentProviderRuntimeRegistryLayer({
-            codex: {
-              cwd: CWD_CANARY,
-              executable: COMMAND_CANARY
-            }
-          })),
+          Effect.provide(
+            agentProviderRuntimeRegistryLayer({
+              codex: {
+                cwd: CWD_CANARY,
+                executable: COMMAND_CANARY
+              }
+            })
+          ),
           Effect.provideService(
             HttpClient.HttpClient,
             HttpClient.make(() => Effect.die("CLI metadata selection must not call HTTP"))
