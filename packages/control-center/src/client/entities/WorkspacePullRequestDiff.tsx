@@ -4,6 +4,7 @@ import {
   DiffWorkbench,
   type RlyDiffFile,
   type RlyDiffFileContent,
+  type RlyDiffFindingFilter,
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
@@ -106,6 +107,17 @@ type SuggestionStateFilter = "all" | PrReviewSuggestionState
 
 const ignoreSessionExpiration = (_sessionKey: string): void => undefined
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
+const matchesFindingFilter = (suggestion: PrReviewSuggestion, filter: RlyDiffFindingFilter): boolean => {
+  switch (filter) {
+    case "all":
+    case "agent":
+      return true
+    case "human":
+      return false
+    case "unresolved":
+      return suggestion.state !== "dismissed" && suggestion.state !== "resolved"
+  }
+}
 
 const explicitContent = (entry: CompleteDiffInventoryEntry): RlyDiffFileContent =>
   entry.binary
@@ -189,6 +201,7 @@ export const WorkspacePullRequestDiff = ({
   const [contentRetryKey, setContentRetryKey] = useState(0)
   const [layout, setLayout] = useState<RlyDiffLayout>("split")
   const [isWrapped, setIsWrapped] = useState(false)
+  const [findingFilter, setFindingFilter] = useState<RlyDiffFindingFilter>("agent")
   const [severityFilter, setSeverityFilter] = useState<SuggestionSeverityFilter>("all")
   const [suggestionStateFilter, setSuggestionStateFilter] = useState<SuggestionStateFilter>("all")
   const [focusRequest, setFocusRequest] = useState<{
@@ -200,6 +213,7 @@ export const WorkspacePullRequestDiff = ({
   const viewerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
+    setFindingFilter("agent")
     setSeverityFilter("all")
     setSuggestionStateFilter("all")
   }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId])
@@ -343,10 +357,11 @@ export const WorkspacePullRequestDiff = ({
     () =>
       suggestions.filter(
         (suggestion) =>
+          matchesFindingFilter(suggestion, findingFilter) &&
           (severityFilter === "all" || suggestion.severity === severityFilter) &&
           (suggestionStateFilter === "all" || suggestion.state === suggestionStateFilter)
       ),
-    [severityFilter, suggestionStateFilter, suggestions]
+    [findingFilter, severityFilter, suggestionStateFilter, suggestions]
   )
   const navigateToLine = useCallback((fileId: string, lineNumber: number, side: "additions" | "deletions"): void => {
     setFocusRequest((current) => ({
@@ -491,12 +506,12 @@ export const WorkspacePullRequestDiff = ({
         findings={findings}
         header={
           <DiffHeader
-            findingFilter="agent"
+            findingFilter={findingFilter}
             heading={heading}
             indexedCount={files.length}
             isWrapped={isWrapped}
             layout={layout}
-            onFindingFilterChange={() => undefined}
+            onFindingFilterChange={setFindingFilter}
             onLayoutChange={setLayout}
             onWrapChange={setIsWrapped}
             totalCount={files.length}

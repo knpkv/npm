@@ -40,7 +40,9 @@ export const ReviewSuggestionPublicationSurface = ({
           return (
             <div className={styles.publishedComment} role="status">
               <small>
-                {receiptConflict ? "Published comment · receipt verification conflict" : "Published Review Comment"}
+                {receiptConflict
+                  ? "Approved comment · receipt verification conflict"
+                  : "Approved · Published to CodeCommit"}
               </small>
               <strong>{anchorLabel(publication.publication.anchor)}</strong>
               <Text>{publication.publication.receipt.safeSummary}</Text>
@@ -74,10 +76,10 @@ export const ReviewSuggestionPublicationSurface = ({
         {preview === null ? null : (
           <Dialog.Content
             className={styles.publicationDialog}
-            description="Review the exact AWS identity, revision, anchor, and editable comment before publishing."
+            description="Approve this finding after reviewing the exact AWS identity, revision, anchor, and comment."
             initialFocusRef={editorRef}
             size="wide"
-            title="Post review suggestion"
+            title="Approve finding"
           >
             <div className={styles.publicationDialogBody}>
               <small className={styles.publicationEyebrow}>Human-confirmed provider action</small>
@@ -124,7 +126,7 @@ export const ReviewSuggestionPublicationSurface = ({
                   disabled={publication._tag === "publishing" || content.trim().length === 0}
                   onClick={() => onPublish(`${content}\n\n${preview.publicationFooter}`)}
                 >
-                  {publication._tag === "publishing" ? "Publishing…" : "Post to CodeCommit"}
+                  {publication._tag === "publishing" ? "Publishing…" : "Approve & post to CodeCommit"}
                 </Button>
               </div>
             </div>

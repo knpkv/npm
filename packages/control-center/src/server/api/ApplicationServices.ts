@@ -9,6 +9,8 @@ import type {
   AgentPrompt,
   AgentProvider,
   AgentProviderCatalog,
+  DismissReviewSuggestionRequest,
+  DismissReviewSuggestionResponse,
   EditReviewSuggestionRequest,
   EditReviewSuggestionResponse,
   EnqueuePullRequestReviewRequest,
@@ -564,6 +566,20 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly session: SessionSummary
   }) => Effect.Effect<
     EditReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
+  readonly dismissSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: DismissReviewSuggestionRequest
+    readonly session: SessionSummary
+  }) => Effect.Effect<
+    DismissReviewSuggestionResponse,
     | ApplicationConflict
     | ApplicationInvalidRequest
     | ApplicationResourceNotFound

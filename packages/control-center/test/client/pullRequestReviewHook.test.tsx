@@ -71,6 +71,13 @@ const REVIEW_PROFILE: ReviewAgentProfile = {
   networkAccess: "blocked",
   sandbox: "sbx"
 }
+const CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("claude:default:sbx"),
+  label: "Full-project review · claude · default",
+  budgetMillis: 1_200_000,
+  networkAccess: "provider-enabled",
+  sandbox: "sbx"
+}
 const TARGETED_PROMPT = DurableAgentPrompt.make("Re-check transaction ownership.")
 const EMPTY_THREAD = PullRequestReviewThreadPage.make({
   events: [],
@@ -367,12 +374,14 @@ const ReviewThreadHarness = ({
   entityId = ENTITY_ID,
   headRevision = HEAD_A,
   onSessionExpired = ignoreSessionExpired,
+  providerId,
   sessionKey = "session-a",
   transport
 }: {
   readonly entityId?: EntityId
   readonly headRevision?: string
   readonly onSessionExpired?: (sessionKey: string) => void
+  readonly providerId?: DurableAgentProviderId
   readonly sessionKey?: string
   readonly transport: PullRequestReviewTransport
 }): ReactElement => {
@@ -398,7 +407,7 @@ const ReviewThreadHarness = ({
           : controller.state._tag}
       </span>
       <button data-load-earlier onClick={controller.loadEarlier} />
-      <button data-start onClick={() => controller.start(TARGETED_PROMPT)} />
+      <button data-start onClick={() => controller.start(TARGETED_PROMPT, providerId)} />
     </>
   )
 }
@@ -1195,7 +1204,7 @@ describe("usePullRequestReview", () => {
     expect(transport.loadThread).toHaveBeenCalledTimes(2)
   })
 
-  it("loads the durable thread and forwards a targeted request to enqueue", async () => {
+  it("loads the durable thread and forwards an explicit provider preset to enqueue", async () => {
     const thread = PullRequestReviewThreadPage.make({
       events: [
         {
@@ -1223,6 +1232,13 @@ describe("usePullRequestReview", () => {
               capabilities: ["pr-review"],
               health: "available",
               reviewProfile: REVIEW_PROFILE
+            },
+            {
+              providerId: DurableAgentProviderId.make("claude"),
+              models: [AgentModelId.make("default")],
+              capabilities: ["pr-review"],
+              health: "available",
+              reviewProfile: CLAUDE_REVIEW_PROFILE
             }
           ]
         }),
@@ -1232,14 +1248,21 @@ describe("usePullRequestReview", () => {
     document.body.append(host)
     mountedRoot = createRoot(host)
 
-    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () =>
+      mountedRoot?.render(
+        <ReviewThreadHarness providerId={DurableAgentProviderId.make("claude")} transport={transport} />
+      )
+    )
     expect(host.querySelector("[data-thread]")?.textContent).toBe("1")
     await act(async () => host.querySelector<HTMLButtonElement>("[data-start]")?.click())
 
     expect(transport.loadThread).toHaveBeenCalledWith(ENTITY_ID, null, expect.any(AbortSignal))
     expect(transport.enqueue).toHaveBeenCalledWith(
       ENTITY_ID,
-      expect.objectContaining({ reviewProfile: REVIEW_PROFILE }),
+      expect.objectContaining({
+        providerId: DurableAgentProviderId.make("claude"),
+        reviewProfile: CLAUDE_REVIEW_PROFILE
+      }),
       TARGETED_PROMPT,
       expect.any(AbortSignal)
     )

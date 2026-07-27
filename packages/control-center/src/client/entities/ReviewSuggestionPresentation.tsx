@@ -220,7 +220,7 @@ export const ReviewSuggestionCard = ({
                 })
               }
             >
-              {isPreviewing ? "Preparing preview…" : "Post comment"}
+              {isPreviewing ? "Preparing approval…" : "Review & approve"}
             </Button>
           ) : null}
         </div>

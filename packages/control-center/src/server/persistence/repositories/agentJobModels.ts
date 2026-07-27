@@ -359,6 +359,7 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   expectedRevisionId: PrReviewSuggestionRevisionId,
   expectedSequence: PrReviewSuggestionRevisionSequence,
   edit: PrReviewSuggestionEdit,
+  state: Schema.optionalKey(Schema.Literal("dismissed")),
   author: PrReviewSuggestionRevisionAuthor,
   createdAt: UtcTimestamp
 })

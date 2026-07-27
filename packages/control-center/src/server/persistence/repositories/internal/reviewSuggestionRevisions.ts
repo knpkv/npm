@@ -68,7 +68,8 @@ export const ReviewSuggestionRevisedPayload = Schema.Struct({
   revisionId: PrReviewSuggestionRevision.fields.revisionId,
   sequence: PrReviewSuggestionRevision.fields.sequence,
   authorKind: Schema.Literals(["operator", "agent"]),
-  validationState: Schema.Literals(["validated", "requires-revalidation"])
+  validationState: Schema.Literals(["validated", "requires-revalidation"]),
+  suggestionState: Schema.optionalKey(PrReviewSuggestion.fields.state)
 })
 
 interface SourceJob {
@@ -554,7 +555,7 @@ export const makeReviewSuggestionRevisionOperations = <
         )(request.edit).pipe(
           Effect.mapError(() => operationFailure("agent-job.encode-requested-review-edit"))
         )
-        if (currentEditJson === requestedEditJson) return current
+        if (currentEditJson === requestedEditJson && request.state === undefined) return current
         const activePublication = yield* sql`SELECT 1
           FROM agent_review_suggestion_publications
           WHERE workspace_id = ${request.workspaceId}
@@ -607,7 +608,7 @@ export const makeReviewSuggestionRevisionOperations = <
           Schema.toType(PrReviewSuggestion)
         )({
           suggestionId: request.suggestionId,
-          state: current.suggestion.state,
+          state: request.state ?? current.suggestion.state,
           ...request.edit
         }).pipe(
           Effect.mapError(() => operationFailure("agent-job.review-revision-suggestion-invalid"))
@@ -654,7 +655,8 @@ export const makeReviewSuggestionRevisionOperations = <
             revisionId,
             sequence,
             authorKind: request.author._tag,
-            validationState: validation._tag
+            validationState: validation._tag,
+            suggestionState: suggestion.state
           },
           payloadSchema: ReviewSuggestionRevisedPayload,
           occurredAt: request.createdAt

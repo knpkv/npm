@@ -193,13 +193,53 @@ describe("VersionedReviewSuggestionCard", () => {
       },
       onPreviewPublication
     )
-    await click("Post comment")
+    await click("Review & approve")
 
     expect(onPreviewPublication).toHaveBeenCalledWith({
       jobId: JOB_ID,
       revisionId: original.current.revisionId,
       suggestionId: SUGGESTION_ID
     })
+  })
+
+  it("requires explicit confirmation, then keeps a dismissed finding local", async () => {
+    const original = revisionPage(1, SUGGESTION.title)
+    const dismissedSuggestion = PrReviewSuggestion.make({
+      ...SUGGESTION,
+      state: "dismissed"
+    })
+    const dismissed = revisionPage(2, SUGGESTION.title, "validated", dismissedSuggestion)
+    const dismiss = vi.fn(() => Promise.resolve(dismissed.current))
+    const onPreviewPublication = vi.fn()
+    const host = await renderCard(
+      {
+        dismiss,
+        load: () => Promise.resolve(original),
+        edit: () => Promise.reject(new Error("Unexpected edit"))
+      },
+      onPreviewPublication
+    )
+
+    await click("Dismiss")
+    expect(dismiss).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain("It will remain in revision history")
+
+    await click("Dismiss finding")
+    expect(dismiss).toHaveBeenCalledWith(
+      expect.objectContaining({
+        entityId: ENTITY_ID,
+        jobId: JOB_ID,
+        suggestionId: SUGGESTION_ID
+      }),
+      {
+        expectedRevisionId: original.current.revisionId,
+        expectedSequence: original.current.sequence
+      },
+      expect.any(AbortSignal)
+    )
+    expect(host.textContent).toContain("Dismissed")
+    expect(host.textContent).not.toContain("Review & approve")
+    expect(onPreviewPublication).not.toHaveBeenCalled()
   })
 
   it("removes mutation and publication controls when the parent lifecycle becomes published", async () => {
@@ -211,7 +251,7 @@ describe("VersionedReviewSuggestionCard", () => {
     const host = await renderCard(transport)
     await act(async () => undefined)
     expect(host.textContent).toContain("Draft")
-    expect(host.textContent).toContain("Post comment")
+    expect(host.textContent).toContain("Review & approve")
     await act(async () =>
       root?.render(
         <PortalProvider>
@@ -233,7 +273,9 @@ describe("VersionedReviewSuggestionCard", () => {
     )
 
     expect(host.textContent).toContain("Published")
-    expect([...host.querySelectorAll("button")].some(({ textContent }) => textContent === "Post comment")).toBe(false)
+    expect([...host.querySelectorAll("button")].some(({ textContent }) => textContent === "Review & approve")).toBe(
+      false
+    )
     expect([...host.querySelectorAll("button")].some(({ textContent }) => textContent === "Edit")).toBe(false)
     expect(host.textContent).toContain("History")
   })
@@ -275,7 +317,7 @@ describe("VersionedReviewSuggestionCard", () => {
     expect(host.textContent).toContain("Needs revalidation")
     expect(host.textContent).toContain("needs agent revalidation before it can be posted")
     const publish = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Post comment"
+      ({ textContent }) => textContent === "Review & approve"
     )
     expect(publish?.disabled).toBe(true)
     await click("History")

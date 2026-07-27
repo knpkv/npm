@@ -45,6 +45,7 @@ import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 import {
   type PublishReviewSuggestionCommand,
+  type ReplayReviewSuggestionPublicationCommand,
   ReviewSuggestionPublicationGateway,
   ReviewSuggestionPublicationGatewayError,
   type ReviewSuggestionPublicationTarget
@@ -61,12 +62,16 @@ const mapFailure = Effect.catch((failure) =>
   isGatewayFailure(failure) ? Effect.fail(failure) : Effect.fail(unavailable())
 )
 
+type HumanReviewPublicationSession = SessionSummary & {
+  readonly actor: Extract<SessionSummary["actor"], { readonly _tag: "human" }>
+}
+
 /** Pure fail-closed preflight used before acquiring any provider proposal capability. */
 export const reviewPublicationSessionIsAuthorized = (
   session: SessionSummary,
   workspaceId: ReviewSuggestionPublicationTarget["workspaceId"],
   checkedAt: DateTime.Utc
-): boolean =>
+): session is HumanReviewPublicationSession =>
   session.actor._tag === "human" &&
   session.workspaceId === workspaceId &&
   session.permission === "workspace-owner" &&
@@ -139,7 +144,9 @@ const makeGateway = Effect.gen(function*() {
       )
     }))
 
-  const identity = Effect.fn("ReviewSuggestionPublicationGateway.identity")(function*(target) {
+  const identity = Effect.fn("ReviewSuggestionPublicationGateway.identity")(function*(
+    target: ReviewSuggestionPublicationTarget
+  ) {
     return yield* withProposalLease(
       target,
       (connection, runtimeAuthorityToken) =>
@@ -184,7 +191,9 @@ const makeGateway = Effect.gen(function*() {
           : unavailable()
       )
 
-  const replay = Effect.fn("ReviewSuggestionPublicationGateway.replay")(function*(command) {
+  const replay = Effect.fn("ReviewSuggestionPublicationGateway.replay")(function*(
+    command: ReplayReviewSuggestionPublicationCommand
+  ) {
     const checkedAt = yield* DateTime.now
     if (
       !reviewPublicationSessionIsAuthorized(
@@ -238,7 +247,9 @@ const makeGateway = Effect.gen(function*() {
     return yield* publishedResult(record, authority.connectedIdentity)
   })
 
-  const publish = Effect.fn("ReviewSuggestionPublicationGateway.publish")(function*(command) {
+  const publish = Effect.fn("ReviewSuggestionPublicationGateway.publish")(function*(
+    command: PublishReviewSuggestionCommand
+  ) {
     const checkedAt = yield* DateTime.now
     if (
       !reviewPublicationSessionIsAuthorized(
@@ -248,6 +259,7 @@ const makeGateway = Effect.gen(function*() {
       )
     ) return yield* conflict()
     if (command.suggestion.state !== "draft") return yield* conflict()
+    const authorizedSession = command.session
 
     const prepared = yield* withProposalLease(
       command.target,
@@ -306,8 +318,8 @@ const makeGateway = Effect.gen(function*() {
 
     const cause = {
       _tag: "human",
-      actor: command.session.actor,
-      sessionId: command.session.sessionId
+      actor: authorizedSession.actor,
+      sessionId: authorizedSession.sessionId
     } satisfies GovernedActionTransitionCause
     const prepareAuthorization = Effect.fn(
       "ReviewSuggestionPublicationGateway.prepareAuthorization"
@@ -324,8 +336,8 @@ const makeGateway = Effect.gen(function*() {
       )
       const authorizationAuditId = DomainEventId.make(yield* cryptoService.randomUUIDv7)
       const sessionExpiresAt = DateTime.min(
-        command.session.idleExpiresAt,
-        command.session.absoluteExpiresAt
+        authorizedSession.idleExpiresAt,
+        authorizedSession.absoluteExpiresAt
       )
       const expiresAt = DateTime.min(
         DateTime.addDuration(authorizedAt, Duration.minutes(5)),
@@ -347,9 +359,9 @@ const makeGateway = Effect.gen(function*() {
         policyDigest: envelope.policy.policyDigest,
         expectedRevision: envelope.proposal.request.expectedRevision,
         capabilityVersion: envelope.capability.version,
-        actor: command.session.actor,
-        sessionId: command.session.sessionId,
-        sessionPermission: command.session.permission,
+        actor: authorizedSession.actor,
+        sessionId: authorizedSession.sessionId,
+        sessionPermission: authorizedSession.permission,
         sessionExpiresAt,
         requiredPermission: envelope.policy.requiredPermission,
         authorizedAt,

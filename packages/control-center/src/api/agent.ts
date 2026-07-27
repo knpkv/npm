@@ -492,7 +492,8 @@ const PullRequestReviewSuggestionRevisedEvent = Schema.TaggedStruct(
     revisionId: PrReviewSuggestionRevisionId,
     sequence: PrReviewSuggestionRevisionSequence,
     authorKind: Schema.Literals(["operator", "agent"]),
-    validationState: Schema.Literals(["validated", "requires-revalidation"])
+    validationState: Schema.Literals(["validated", "requires-revalidation"]),
+    suggestionState: Schema.optionalKey(PrReviewSuggestion.fields.state)
   }
 )
 
@@ -577,6 +578,21 @@ export const EditReviewSuggestionResponse = PrReviewSuggestionRevision
 
 /** Decoded manual suggestion-edit result. */
 export type EditReviewSuggestionResponse = typeof EditReviewSuggestionResponse.Type
+
+/** Optimistic concurrency boundary for one explicit human dismissal. */
+export const DismissReviewSuggestionRequest = Schema.Struct({
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence
+})
+
+/** Decoded human dismissal request. */
+export type DismissReviewSuggestionRequest = typeof DismissReviewSuggestionRequest.Type
+
+/** Durable human-authored revision carrying the dismissed lifecycle state. */
+export const DismissReviewSuggestionResponse = PrReviewSuggestionRevision
+
+/** Decoded durable dismissal result. */
+export type DismissReviewSuggestionResponse = typeof DismissReviewSuggestionResponse.Type
 
 /** Canonical positive revision cursor decoded from an HTTP query string. */
 export const ReviewSuggestionRevisionSequenceFromString = CanonicalNonNegativeIntegerFromString.pipe(
@@ -887,6 +903,32 @@ const editReviewSuggestion = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const dismissReviewSuggestion = HttpApiEndpoint.post(
+  "dismissReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: DismissReviewSuggestionRequest,
+    success: DismissReviewSuggestionResponse,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const previewReviewSuggestionPublication = HttpApiEndpoint.get(
   "previewReviewSuggestionPublication",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/publication-preview",
@@ -945,6 +987,7 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(enqueuePullRequestReview)
   .add(reviewSuggestionRevisions)
   .add(editReviewSuggestion)
+  .add(dismissReviewSuggestion)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)
   .prefix("/api/v1/agent")

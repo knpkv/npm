@@ -50,6 +50,8 @@ export type PullRequestReviewControllerState =
     readonly action: "idle" | "starting" | "failed"
     readonly historyAction: "idle" | "loading" | "failed"
     readonly provider: ReviewProviderSelection | null
+    /** Ordered launch presets; `provider` remains the default for older callers. */
+    readonly providerPresets?: ReadonlyArray<ReviewProviderSelection>
     readonly review: PullRequestReviewState
     readonly thread?: PullRequestReviewThread
   } & PullRequestReviewScope)
@@ -117,7 +119,8 @@ export interface PullRequestReviewTransport {
 
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
 
-const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelection | null => {
+const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
+  const eligible = new Array<ReviewProviderSelection>()
   for (const provider of catalog.providers) {
     const model = provider.models[0]
     if (
@@ -126,10 +129,10 @@ const eligibleProvider = (catalog: AgentProviderCatalog): ReviewProviderSelectio
       provider.reviewProfile !== undefined &&
       model
     ) {
-      return { providerId: provider.providerId, model, reviewProfile: provider.reviewProfile }
+      eligible.push({ providerId: provider.providerId, model, reviewProfile: provider.reviewProfile })
     }
   }
-  return null
+  return eligible
 }
 
 /** Generated-client transport for the authenticated immutable-review contract. */
@@ -225,7 +228,10 @@ export const usePullRequestReview = (
   readonly publication: PullRequestReviewPublicationState
   readonly publishSuggestion: (finalContent: ReviewSuggestionPublicationContent) => void
   readonly retry: () => void
-  readonly start: (prompt?: DurableAgentPrompt) => void
+  readonly start: (
+    prompt?: DurableAgentPrompt,
+    providerId?: ReviewProviderSelection["providerId"]
+  ) => void
   readonly state: PullRequestReviewControllerState
 } => {
   const [requestRevision, setRequestRevision] = useState(0)
@@ -272,6 +278,7 @@ export const usePullRequestReview = (
     ).then(
       ({ catalog, review, thread }) => {
         if (!abort.signal.aborted) {
+          const providerPresets = eligibleProviders(catalog)
           setState(
             matchesScope(review, scope)
               ? {
@@ -279,7 +286,8 @@ export const usePullRequestReview = (
                 ...scope,
                 action: "idle",
                 historyAction: "idle",
-                provider: eligibleProvider(catalog),
+                provider: providerPresets[0] ?? null,
+                providerPresets,
                 review,
                 thread
               }
@@ -413,9 +421,14 @@ export const usePullRequestReview = (
     )
   }, [onSessionExpired, state, transport])
 
-  const start = useCallback((prompt?: DurableAgentPrompt) => {
+  const start = useCallback((
+    prompt?: DurableAgentPrompt,
+    providerId?: ReviewProviderSelection["providerId"]
+  ) => {
     if (state._tag !== "ready" || state.review._tag === "unavailable") return
-    const provider = state.provider
+    const provider = providerId === undefined
+      ? state.provider
+      : state.providerPresets?.find((candidate) => candidate.providerId === providerId) ?? null
     if (provider === null) return
     const current = state
     mutationAbort.current?.abort()
