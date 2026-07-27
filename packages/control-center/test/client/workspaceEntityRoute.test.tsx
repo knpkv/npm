@@ -1391,8 +1391,46 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Retry can duplicate capture")
     expect(host.textContent).toContain("src/capture.ts:42")
     expect(host.textContent).toContain("Prevention proposal · separate review required")
-    expect(host.textContent).toContain("Agent advice only. A person must still approve or request changes.")
+    expect(host.textContent).toContain(
+      "Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally."
+    )
     expect(host.textContent).toContain("Human review requested")
+  })
+
+  it("filters semantic findings with the Human, Agent, and Unresolved controls", async () => {
+    const host = await renderView(
+      () => undefined,
+      pullRequestState,
+      () => undefined,
+      completedPullRequestReviewState
+    )
+    const findingFilter = host.querySelector<HTMLElement>('[aria-label="Finding filter"]')
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (findingFilter === null || semanticFindings === null) {
+      throw new Error("Expected the pull-request finding filters and semantic findings")
+    }
+    const filterButton = (label: string): HTMLButtonElement => {
+      const button = [...findingFilter.querySelectorAll<HTMLButtonElement>("button")].find(
+        (candidate) => candidate.textContent === label
+      )
+      if (button === undefined) throw new Error(`Expected the ${label} finding filter`)
+      return button
+    }
+
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+
+    await act(async () => filterButton("Human").click())
+    expect(filterButton("Human").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).not.toContain("Reuse the original idempotency key")
+    expect(semanticFindings.textContent).toContain("No validated review suggestions are attached to this revision.")
+
+    await act(async () => filterButton("Agent").click())
+    expect(filterButton("Agent").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+
+    await act(async () => filterButton("Unresolved").click())
+    expect(filterButton("Unresolved").getAttribute("aria-pressed")).toBe("true")
+    expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
   })
 
   it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {

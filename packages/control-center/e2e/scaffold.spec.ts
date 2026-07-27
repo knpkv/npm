@@ -36,7 +36,8 @@ test("renders the private browser application boundary", async ({ page }) => {
     await expect(page.getByRole("link", { name })).toBeFocused()
   }
   await page.getByRole("link", { name: "Releases" }).click()
-  await expect(page.getByRole("heading", { level: 1, name: "Releases" })).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+  await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.getByRole("link", { name: "Ask Relay" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Ask in context." })).toBeVisible()
   await expect(page.getByText("Current context")).toBeVisible()
