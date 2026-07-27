@@ -121,8 +121,12 @@ describe("PrReviewSandboxSessions", () => {
       yield* sessions.withSession(request, () => Effect.void)
 
       assert.isTrue(calls.length > 0)
-      assert.isTrue(calls.every(({ args }) => !args.includes("CODEX_API_KEY")))
-      assert.isTrue(calls.every(({ args }) => !args.includes("ANTHROPIC_API_KEY")))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes("CODEX_API_KEY")))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes("ANTHROPIC_API_KEY")))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes(CODEX_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes(ANTHROPIC_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ options }) => !JSON.stringify(options.env ?? {}).includes(CODEX_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ options }) => !JSON.stringify(options.env ?? {}).includes(ANTHROPIC_API_KEY_CANARY)))
       assert.isTrue(calls.every(({ options }) => options.env?.CODEX_API_KEY === undefined))
       assert.isTrue(calls.every(({ options }) => options.env?.ANTHROPIC_API_KEY === undefined))
     }).pipe(
@@ -196,11 +200,12 @@ describe("PrReviewSandboxSessions", () => {
         ),
         ["exec"]
       )
-      assert.notInclude(native?.args ?? [], "CODEX_API_KEY")
-      assert.notInclude(native?.args ?? [], CODEX_API_KEY_CANARY)
+      assert.notInclude((native?.args ?? []).join("\0"), "CODEX_API_KEY")
+      assert.notInclude((native?.args ?? []).join("\0"), CODEX_API_KEY_CANARY)
       assert.notInclude(native?.args ?? [], "AWS_SECRET_ACCESS_KEY")
       assert.strictEqual(native?.options.extendEnv, false)
-      assert.notProperty(native?.options.env ?? {}, "CODEX_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), "CODEX_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), CODEX_API_KEY_CANARY)
       assert.notProperty(native?.options.env ?? {}, "AWS_SECRET_ACCESS_KEY")
       assert.isTrue(calls.every(({ options }) => options.env?.CODEX_API_KEY === undefined))
       assert.isTrue(
@@ -286,12 +291,13 @@ describe("PrReviewSandboxSessions", () => {
       assert.strictEqual(native?.args[settingSources + 1], "")
       assert.include(native?.args ?? [], "--strict-mcp-config")
       assert.include(native?.args ?? [], "{\"mcpServers\":{}}")
-      assert.include(native?.args ?? [], "Bash")
-      assert.include(native?.args ?? [], "Read")
-      assert.notInclude(native?.args ?? [], "ANTHROPIC_API_KEY")
-      assert.notInclude(native?.args ?? [], ANTHROPIC_API_KEY_CANARY)
+      const tools = native?.args.indexOf("--tools") ?? -1
+      assert.strictEqual(native?.args[tools + 1], "Bash,Glob,Grep,Read")
+      assert.notInclude((native?.args ?? []).join("\0"), "ANTHROPIC_API_KEY")
+      assert.notInclude((native?.args ?? []).join("\0"), ANTHROPIC_API_KEY_CANARY)
       assert.notInclude(native?.args ?? [], "AWS_SECRET_ACCESS_KEY")
-      assert.notProperty(native?.options.env ?? {}, "ANTHROPIC_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), "ANTHROPIC_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), ANTHROPIC_API_KEY_CANARY)
       assert.notProperty(native?.options.env ?? {}, "AWS_SECRET_ACCESS_KEY")
       assert.isTrue(calls.every(({ options }) => options.env?.ANTHROPIC_API_KEY === undefined))
       assert.isTrue(

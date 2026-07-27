@@ -750,10 +750,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       "{\"mcpServers\":{}}",
                       ...(nativeRequest.model === undefined ? [] : ["--model", nativeRequest.model]),
                       "--tools",
-                      "Bash",
-                      "Glob",
-                      "Grep",
-                      "Read"
+                      "Bash,Glob,Grep,Read"
                     ],
                     MAXIMUM_COMMAND_OUTPUT_BYTES,
                     Duration.millis(
