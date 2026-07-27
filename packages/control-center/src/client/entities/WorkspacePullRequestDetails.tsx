@@ -1,8 +1,10 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
+import * as Match from "effect/Match"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { type ReactElement, type ReactNode, lazy, Suspense, useCallback, useMemo, useState } from "react"
 
-import type { DurableAgentPrompt } from "../../api/agent.js"
+import type { DurableAgentPrompt, PullRequestReviewState } from "../../api/agent.js"
 import type { PrReviewSuggestion } from "../../domain/prReview.js"
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
@@ -16,6 +18,17 @@ import { WorkspacePullRequestDiff } from "./WorkspacePullRequestDiff.js"
 import { WorkspaceRichText } from "./WorkspaceRichText.js"
 
 const PullRequestReviewPanel = lazy(() => import("./PullRequestReviewPanel.js"))
+
+type CompletedPullRequestReview = Extract<PullRequestReviewState, { readonly _tag: "completed" }>
+type CompletedPullRequestReviewResult =
+  AsyncResult.Initial<CompletedPullRequestReview> | AsyncResult.Success<CompletedPullRequestReview>
+
+const completedReviewResult = Match.type<PullRequestReviewControllerState>().pipe(
+  Match.when({ _tag: "ready", review: { _tag: "completed" } }, ({ review }): CompletedPullRequestReviewResult =>
+    AsyncResult.success(review)
+  ),
+  Match.orElse((): CompletedPullRequestReviewResult => AsyncResult.initial())
+)
 
 const Section = ({
   children,
@@ -86,8 +99,10 @@ export const WorkspacePullRequestDetails = ({
   readonly reviewers: ReadonlyArray<RlyPerson>
   readonly sessionKey: string | null
 }): ReactElement => {
-  const completedReview =
-    reviewState._tag === "ready" && reviewState.review._tag === "completed" ? reviewState.review : null
+  const completedReview = AsyncResult.builder(completedReviewResult(reviewState))
+    .onInitial(() => null)
+    .onSuccess((review) => review)
+    .exhaustive()
   const reviewJobId = completedReview?.jobId ?? null
   const reportSuggestions = completedReview?.report.suggestions ?? []
   const [suggestionOverrides, setSuggestionOverrides] = useState<{
