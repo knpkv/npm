@@ -270,8 +270,8 @@ const EntityContent = ({
   reviewRetry,
   reviewStart,
   reviewState,
-  reviewSuggestionRevisionTransport,
   reviewSuggestionPublish,
+  reviewSuggestionRevisionTransport,
   sessionKey,
   stale
 }: {
@@ -380,8 +380,8 @@ export const WorkspaceEntityView = ({
   reviewRetry = ignoreAction,
   reviewStart = ignoreAction,
   reviewState = { _tag: "idle" },
-  reviewSuggestionRevisionTransport,
   reviewSuggestionPublish = ignoreAction,
+  reviewSuggestionRevisionTransport,
   sessionKey = null,
   state,
   workspaceId

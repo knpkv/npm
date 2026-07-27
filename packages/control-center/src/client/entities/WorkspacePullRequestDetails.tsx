@@ -65,8 +65,8 @@ export const WorkspacePullRequestDetails = ({
   pullRequest,
   reviewCanEnqueue,
   reviewPublication,
-  reviewSuggestionRevisionTransport,
   reviewState,
+  reviewSuggestionRevisionTransport,
   reviewers,
   sessionKey
 }: {
