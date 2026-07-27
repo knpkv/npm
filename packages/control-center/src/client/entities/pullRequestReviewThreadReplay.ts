@@ -399,12 +399,17 @@ export const loadPullRequestReviewSnapshot = async (
   readonly review: PullRequestReviewState
   readonly thread: PullRequestReviewThread
 }> => {
+  const catalogPromise = canEnqueue
+    ? transport.providers(signal).catch((failure: unknown) => {
+      if (signal.aborted) throw failure
+      Effect.runFork(Effect.logWarning("Pull-request review provider catalog load failed", failure))
+      return { providers: [] } satisfies AgentProviderCatalog
+    })
+    : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
   const [review, initialThread, catalog] = await Promise.all([
     transport.load(entityId, signal),
     continuePullRequestReviewThread(transport, entityId, signal, previous),
-    canEnqueue
-      ? transport.providers(signal)
-      : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
+    catalogPromise
   ])
   const thread = review._tag === "completed" || review._tag === "failed"
     ? await continuePullRequestReviewThread(transport, entityId, signal, initialThread)

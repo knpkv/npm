@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import type {
@@ -119,6 +120,14 @@ export interface PullRequestReviewTransport {
 }
 
 const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
+const isTransientSnapshotFailure = (failure: unknown): boolean =>
+  Predicate.isTagged(failure, "RequestTimedOutApiError") ||
+  Predicate.isTagged(failure, "RateLimitedApiError") ||
+  Predicate.isTagged(failure, "ServiceUnavailableApiError") ||
+  (
+    HttpClientError.isHttpClientError(failure) &&
+    failure.reason._tag === "TransportError"
+  )
 
 const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
   const eligible = new Array<ReviewProviderSelection>()
@@ -246,6 +255,7 @@ export const usePullRequestReview = (
   const historyAbort = useRef<AbortController | null>(null)
   const mutationAbort = useRef<AbortController | null>(null)
   const publicationAbort = useRef<AbortController | null>(null)
+  const automaticRetryScope = useRef<PullRequestReviewScope | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
   const latestThread = useRef<PullRequestReviewThread | null>(null)
   const scope = useMemo(
@@ -284,6 +294,7 @@ export const usePullRequestReview = (
     ).then(
       ({ catalog, review, thread }) => {
         if (!abort.signal.aborted) {
+          automaticRetryScope.current = null
           const providerPresets = eligibleProviders(catalog)
           setState(
             matchesScope(review, scope)
@@ -303,7 +314,30 @@ export const usePullRequestReview = (
       },
       (failure) => {
         if (abort.signal.aborted) return
-        if (isUnauthorizedFailure(failure)) onSessionExpired(sessionKey)
+        if (isUnauthorizedFailure(failure)) {
+          onSessionExpired(sessionKey)
+          setState({ _tag: "failed", ...scope })
+          return
+        }
+        if (
+          isTransientSnapshotFailure(failure) &&
+          (
+            automaticRetryScope.current === null ||
+            !sameReviewScope(automaticRetryScope.current, scope)
+          )
+        ) {
+          automaticRetryScope.current = scope
+          Effect.runFork(Effect.logWarning("Pull-request review snapshot load failed; retrying once", failure))
+          Effect.runPromise(Effect.sleep("1 second"), { signal: abort.signal }).then(
+            () => {
+              if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
+            },
+            (_retryFailure: unknown) => {
+              if (!abort.signal.aborted) setState({ _tag: "failed", ...scope })
+            }
+          )
+          return
+        }
         setState({ _tag: "failed", ...scope })
       }
     )
@@ -598,7 +632,10 @@ export const usePullRequestReview = (
     previewPublication,
     publication,
     publishSuggestion,
-    retry: useCallback(() => setRequestRevision((revision) => revision + 1), []),
+    retry: useCallback(() => {
+      automaticRetryScope.current = null
+      setRequestRevision((revision) => revision + 1)
+    }, []),
     start,
     state: currentState
   }
