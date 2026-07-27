@@ -9,6 +9,7 @@ import { JobId, PluginConnectionId, WorkspaceId } from "../../src/domain/identif
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   codeCommitPrReviewSourceResolverLayer,
+  drainPrReviewProcessDiagnostics,
   PrReviewSourceResolver,
   PrReviewSourceWorkspace,
   prReviewSourceWorkspaceLayer,
@@ -70,6 +71,11 @@ const runGit = (args: ReadonlyArray<string>): Effect.Effect<
   )
 
 describe("PR review source workspace", () => {
+  it.effect("drains noisy successful Git diagnostics without retaining them", () =>
+    drainPrReviewProcessDiagnostics(
+      Stream.make(new Uint8Array(16_384))
+    ))
+
   it("classifies authority-bearing Git configuration without rejecting inert local keys", () => {
     for (
       const invalid of [
@@ -160,13 +166,16 @@ describe("PR review source workspace", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-fixture-" })
-        const repository = path.join(fixture, "repository")
-        const workspaceRoot = path.join(fixture, "workspaces")
+        const canonicalFixture = yield* fileSystem.realPath(fixture)
+        const repository = path.join(canonicalFixture, "repository")
+        const workspaceRoot = path.join(canonicalFixture, "workspaces")
         yield* fileSystem.makeDirectory(repository)
         yield* fileSystem.makeDirectory(workspaceRoot)
         yield* runGit(["-C", repository, "init", "--quiet"])
+        yield* fileSystem.makeDirectory(path.join(repository, ".opencode"))
+        yield* fileSystem.symlink("../.agents/skills", path.join(repository, ".opencode", "skills"))
         yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 1\n")
-        yield* runGit(["-C", repository, "add", "--", "review.ts"])
+        yield* runGit(["-C", repository, "add", "--", ".opencode/skills", "review.ts"])
         yield* runGit(["-C", repository, "commit", "--quiet", "-m", "base"])
         const baseRevision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
         yield* fileSystem.writeFileString(path.join(repository, "review.ts"), "export const value = 2\n")
@@ -207,6 +216,10 @@ describe("PR review source workspace", () => {
               Effect.gen(function*() {
                 assert.strictEqual(sourceRoot, materializedRoot)
                 assert.isTrue(yield* fileSystem.exists(path.join(sourceRoot, "review.ts")))
+                assert.strictEqual(
+                  yield* fileSystem.readLink(path.join(sourceRoot, ".opencode", "skills")),
+                  "../.agents/skills"
+                )
                 const remotes = yield* runGit(["-C", sourceRoot, "remote"])
                 assert.strictEqual(remotes, "")
                 const configuration = yield* fileSystem.readFileString(
@@ -228,6 +241,68 @@ describe("PR review source workspace", () => {
         )
         assert.strictEqual(observed.content, "export const value = 2\n")
         assert.isFalse(yield* fileSystem.exists(materializedRoot))
+      })
+    ).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("rejects a source symlink that escapes the immutable checkout", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const fixture = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-source-symlink-" })
+        const canonicalFixture = yield* fileSystem.realPath(fixture)
+        const repository = path.join(canonicalFixture, "repository")
+        const workspaceRoot = path.join(canonicalFixture, "workspaces")
+        yield* fileSystem.makeDirectory(repository)
+        yield* fileSystem.makeDirectory(workspaceRoot)
+        yield* fileSystem.makeDirectory(path.join(repository, ".opencode"))
+        yield* runGit(["-C", repository, "init", "--quiet"])
+        yield* fileSystem.symlink("../../outside", path.join(repository, ".opencode", "skills"))
+        yield* runGit(["-C", repository, "add", "--", ".opencode/skills"])
+        yield* runGit(["-C", repository, "commit", "--quiet", "-m", "escaping symlink"])
+        const revision = yield* runGit(["-C", repository, "rev-parse", "HEAD"])
+        const resolver = Layer.succeed(
+          PrReviewSourceResolver,
+          PrReviewSourceResolver.of({
+            resolve: () =>
+              Effect.succeed({
+                repositoryUrl: repository,
+                profile: "unused-test-profile",
+                region: "eu-central-1"
+              })
+          })
+        )
+        let callbackCalled = false
+        const observed = yield* Effect.gen(function*() {
+          const workspace = yield* PrReviewSourceWorkspace
+          return yield* workspace.withSource(
+            {
+              workspaceId: WORKSPACE_ID,
+              jobId: JOB_ID,
+              repository: "control-center",
+              baseRevision: revision,
+              headRevision: revision
+            },
+            () =>
+              Effect.sync(() => {
+                callbackCalled = true
+              })
+          )
+        }).pipe(
+          Effect.provide(
+            prReviewSourceWorkspaceLayer({ workspaceRoot }).pipe(
+              Layer.provide(resolver),
+              Layer.provide(inactiveLeaseGuard)
+            )
+          ),
+          Effect.result
+        )
+
+        assert.isTrue(Result.isFailure(observed))
+        if (Result.isFailure(observed)) {
+          assert.strictEqual(observed.failure.reason, "source-rejected")
+        }
+        assert.isFalse(callbackCalled)
       })
     ).pipe(Effect.provide(NodeServices.layer)))
 

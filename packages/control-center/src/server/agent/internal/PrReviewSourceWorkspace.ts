@@ -202,6 +202,15 @@ const collectBounded = (
     Effect.mapError(() => sourceError("source-unavailable"))
   )
 
+/** @internal */
+export const drainPrReviewProcessDiagnostics = (
+  stream: Stream.Stream<Uint8Array, unknown>
+): Effect.Effect<void, PrReviewSourceError> =>
+  stream.pipe(
+    Stream.runDrain,
+    Effect.mapError(() => sourceError("source-unavailable"))
+  )
+
 const command = (
   args: ReadonlyArray<string>,
   location: PrReviewSourceLocation,
@@ -244,7 +253,7 @@ const execute = Effect.fn("PrReviewSourceWorkspace.execute")(function*(
       const { exitCode, stdout } = yield* Effect.all({
         exitCode: handle.exitCode.pipe(Effect.mapError(() => sourceError("source-unavailable"))),
         stdout: collectBounded(handle.stdout, MAXIMUM_PROCESS_OUTPUT_BYTES),
-        stderr: collectBounded(handle.stderr, MAXIMUM_PROCESS_OUTPUT_BYTES)
+        stderr: drainPrReviewProcessDiagnostics(handle.stderr)
       }, { concurrency: "unbounded" })
       return { exitCode, stdout } satisfies ProcessResult
     })
@@ -422,6 +431,23 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
         )
       ) {
         const child = path.join(directory, entry)
+        entries += 1
+        if (entries > maximumSourceEntries) return yield* sourceError("source-rejected")
+        const link = yield* fileSystem.readLink(child).pipe(Effect.result)
+        if (Result.isSuccess(link)) {
+          const target = path.resolve(path.dirname(child), link.success)
+          const relativeTarget = path.relative(sourceRoot, target)
+          if (
+            relativeTarget === ".." ||
+            relativeTarget.startsWith(`..${path.sep}`) ||
+            path.isAbsolute(relativeTarget)
+          ) {
+            return yield* sourceError("source-rejected")
+          }
+          bytes += new TextEncoder().encode(link.success).byteLength
+          if (bytes > maximumSourceBytes) return yield* sourceError("source-rejected")
+          continue
+        }
         const canonicalChild = yield* fileSystem.realPath(child).pipe(
           Effect.mapError(() => sourceError("source-unavailable"))
         )
@@ -436,8 +462,6 @@ const makeWorkspace = Effect.fn("PrReviewSourceWorkspace.make")(function*(
         const info = yield* fileSystem.stat(canonicalChild).pipe(
           Effect.mapError(() => sourceError("source-unavailable"))
         )
-        entries += 1
-        if (entries > maximumSourceEntries) return yield* sourceError("source-rejected")
         if (info.type === "Directory") {
           pending.push(canonicalChild)
         } else {
