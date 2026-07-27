@@ -26,6 +26,7 @@ export const VersionedReviewSuggestionCard = ({
   isPreviewing,
   jobId,
   onPreviewPublication,
+  onSuggestionRevisionAccepted,
   revisionTransport = browserReviewSuggestionRevisionTransport,
   sessionKey,
   suggestion
@@ -35,6 +36,7 @@ export const VersionedReviewSuggestionCard = ({
   readonly isPreviewing: boolean
   readonly jobId: JobId
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
+  readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly sessionKey: string
   readonly suggestion: PrReviewSuggestion
@@ -48,7 +50,7 @@ export const VersionedReviewSuggestionCard = ({
     }),
     [entityId, jobId, sessionKey, suggestion.suggestionId]
   )
-  const controller = useReviewSuggestionRevisions(scope, revisionTransport)
+  const controller = useReviewSuggestionRevisions(scope, revisionTransport, onSuggestionRevisionAccepted)
   const [dialogMode, setDialogMode] = useState<"edit" | "history">("history")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dismissOpen, setDismissOpen] = useState(false)

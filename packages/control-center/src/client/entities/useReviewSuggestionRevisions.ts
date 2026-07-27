@@ -12,7 +12,7 @@ import type {
 } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId, JobId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestionId } from "../../domain/prReview.js"
+import type { PrReviewSuggestion, PrReviewSuggestionId } from "../../domain/prReview.js"
 import {
   type PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionPageSize,
@@ -46,6 +46,8 @@ export interface ReviewSuggestionRevisionTransport {
     signal: AbortSignal
   ) => Promise<ReviewSuggestionRevisionPage>
 }
+
+export type ReviewSuggestionRevisionAccepted = (suggestion: PrReviewSuggestion) => void
 
 export type ReviewSuggestionRevisionState =
   | { readonly _tag: "idle" }
@@ -178,11 +180,13 @@ const saveOutcome = (
 ): SaveOutcome => ({ _tag, page })
 
 const conflictFailure = Predicate.isTagged("ConflictApiError")
+const ignoreAcceptedRevision = (_suggestion: PrReviewSuggestion): void => undefined
 
 /** Scope-safe browser controller for one stable suggestion's immutable revisions. */
 export const useReviewSuggestionRevisions = (
   scope: ReviewSuggestionRevisionScope | null,
-  transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport
+  transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport,
+  onAccepted: ReviewSuggestionRevisionAccepted = ignoreAcceptedRevision
 ): {
   readonly dismiss: () => void
   readonly loadEarlier: () => void
@@ -198,7 +202,9 @@ export const useReviewSuggestionRevisions = (
   const activeAbort = useRef<AbortController | null>(null)
   const loadingEarlierRef = useRef(false)
   const latestScope = useRef(scope)
+  const latestOnAccepted = useRef(onAccepted)
   latestScope.current = scope
+  latestOnAccepted.current = onAccepted
 
   useEffect(() => {
     activeAbort.current?.abort()
@@ -286,6 +292,7 @@ export const useReviewSuggestionRevisions = (
             ? { _tag: "failed", draft: null, page: outcome.page }
             : { _tag: "ready", page: outcome.page }
         )
+        if (outcome._tag !== "conflict") latestOnAccepted.current(outcome.page.current.suggestion)
       },
       () => {
         if (
@@ -322,6 +329,7 @@ export const useReviewSuggestionRevisions = (
           _tag: "ready",
           page: pageWithAcceptedRevision(retained, accepted)
         })
+        latestOnAccepted.current(accepted.suggestion)
       },
       () => {
         if (

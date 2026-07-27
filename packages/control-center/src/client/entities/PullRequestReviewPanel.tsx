@@ -7,6 +7,7 @@ import {
   type DurableAgentPrompt,
   type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
+import type { PrReviewSuggestion } from "../../domain/prReview.js"
 import { ReviewNotes } from "./ReviewSuggestionPresentation.js"
 import { VersionedReviewSuggestionCard } from "./VersionedReviewSuggestionCard.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
@@ -117,9 +118,11 @@ export const PullRequestReviewPanel = ({
   onPublishSuggestion,
   onRetry,
   onStart,
+  onSuggestionRevisionAccepted,
   publication,
   revisionTransport,
-  state
+  state,
+  suggestions
 }: {
   readonly canEnqueue: boolean
   readonly onCancelPublication: () => void
@@ -128,9 +131,11 @@ export const PullRequestReviewPanel = ({
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
   readonly onStart: (prompt?: DurableAgentPrompt, providerId?: DurableAgentProviderId) => void
+  readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
   readonly publication: PullRequestReviewPublicationState
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly state: PullRequestReviewControllerState
+  readonly suggestions?: ReadonlyArray<PrReviewSuggestion>
 }): ReactElement => {
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
@@ -470,11 +475,11 @@ export const PullRequestReviewPanel = ({
         {review.report.completion.status === "unable-to-conclude" ? (
           <Text>{review.report.completion.reason}</Text>
         ) : null}
-        {review.report.suggestions.length === 0 ? (
+        {(suggestions ?? review.report.suggestions).length === 0 ? (
           <span>No validated suggestions were retained for this exact head.</span>
         ) : (
           <ol className={styles.reviewFindings}>
-            {review.report.suggestions.map((suggestion) => (
+            {(suggestions ?? review.report.suggestions).map((suggestion) => (
               <li key={suggestion.suggestionId}>
                 <VersionedReviewSuggestionCard
                   canEdit={canEnqueue}
@@ -484,6 +489,7 @@ export const PullRequestReviewPanel = ({
                   }
                   jobId={review.jobId}
                   onPreviewPublication={onPreviewPublication}
+                  {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
                   {...(revisionTransport === undefined ? {} : { revisionTransport })}
                   sessionKey={state.sessionKey}
                   suggestion={suggestion}

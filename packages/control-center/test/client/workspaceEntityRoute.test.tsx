@@ -20,13 +20,24 @@ import {
   PullRequestReviewState,
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
-import { RelationshipId, ReleaseId } from "../../src/domain/identifiers.js"
+import {
+  JobId,
+  PersonId,
+  PrReviewSuggestionRevisionId,
+  RelationshipId,
+  ReleaseId
+} from "../../src/domain/identifiers.js"
 import { PrReviewSubject } from "../../src/domain/prReview.js"
+import {
+  PrReviewSuggestionRevisionPage,
+  PrReviewSuggestionRevisionSequence
+} from "../../src/domain/prReviewRevision.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
+import type { ReviewSuggestionRevisionTransport } from "../../src/client/entities/useReviewSuggestionRevisions.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
 import { releaseWorksetFixture, WORKSET_RELEASE_ID, WORKSET_WORKSPACE_ID } from "../fixtures/releaseWorkset.js"
@@ -675,12 +686,15 @@ const pullRequestReviewState = {
   review: new PullRequestReviewNotStarted({ subject: pullRequestReviewSubject })
 } satisfies PullRequestReviewControllerState
 
+const REVIEW_JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+const REVIEW_OPERATOR_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
+
 const completedPullRequestReviewState = {
   ...pullRequestReviewState,
   review: Schema.decodeUnknownSync(PullRequestReviewState)({
     _tag: "completed",
     subject: pullRequestReviewSubject,
-    jobId: "01890f6f-6d6a-7cc0-98d2-000000000099",
+    jobId: REVIEW_JOB_ID,
     providerId: "openai-compatible",
     model: "review-model",
     reviewProfile: pullRequestReviewState.provider.reviewProfile,
@@ -736,6 +750,41 @@ const completedPullRequestReviewState = {
   })
 } satisfies PullRequestReviewControllerState
 
+const completedReview = completedPullRequestReviewState.review
+if (completedReview._tag !== "completed") throw new Error("Expected the completed review fixture")
+const reviewSuggestion = completedReview.report.suggestions[0]
+if (reviewSuggestion === undefined) throw new Error("Expected a review suggestion fixture")
+
+const reviewSuggestionRevisionPage = (sequence: 1 | 2, state: "dismissed" | "draft") => {
+  const originalRevisionId = PrReviewSuggestionRevisionId.make(`sha256:${"2".repeat(64)}`)
+  const revisionId = sequence === 1 ? originalRevisionId : PrReviewSuggestionRevisionId.make(`sha256:${"3".repeat(64)}`)
+  const revision = {
+    revisionId,
+    sequence: PrReviewSuggestionRevisionSequence.make(sequence),
+    predecessorRevisionId: sequence === 1 ? null : originalRevisionId,
+    sourceJobId: REVIEW_JOB_ID,
+    subject: pullRequestReviewSubject,
+    suggestion: { ...reviewSuggestion, state },
+    validation: {
+      _tag: "validated",
+      reviewedHead: pullRequestReviewSubject.headRevision,
+      validatingJobId: REVIEW_JOB_ID,
+      sourceRevisionId: revisionId
+    },
+    author: {
+      _tag: "operator",
+      personId: REVIEW_OPERATOR_ID
+    },
+    createdAt: "2026-07-27T14:00:00.000Z"
+  }
+  return Schema.decodeUnknownSync(PrReviewSuggestionRevisionPage)({
+    current: revision,
+    revisions: [revision],
+    hasMore: false,
+    nextBeforeSequence: null
+  })
+}
+
 const pipelineState = {
   _tag: "ready",
   entityId: pipelineInspection.entity.projection.entityId,
@@ -775,7 +824,8 @@ const renderView = async (
   onAskAgent: () => void,
   viewState: WorkspaceEntityState = state,
   onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
-  reviewState: PullRequestReviewControllerState = pullRequestReviewState
+  reviewState: PullRequestReviewControllerState = pullRequestReviewState,
+  reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -796,6 +846,7 @@ const renderView = async (
               ? reviewState
               : { _tag: "idle" }
           }
+          {...(reviewSuggestionRevisionTransport === undefined ? {} : { reviewSuggestionRevisionTransport })}
           state={viewState}
           workspaceId={WORKSET_WORKSPACE_ID}
         />
@@ -1431,6 +1482,51 @@ describe("canonical workspace entity", () => {
     await act(async () => filterButton("Unresolved").click())
     expect(filterButton("Unresolved").getAttribute("aria-pressed")).toBe("true")
     expect(semanticFindings.textContent).toContain("Reuse the original idempotency key")
+  })
+
+  it("removes a dismissed finding from the shared unresolved diff presentation", async () => {
+    const draftPage = reviewSuggestionRevisionPage(1, "draft")
+    const dismissedPage = reviewSuggestionRevisionPage(2, "dismissed")
+    const dismiss = vi.fn(() => Promise.resolve(dismissedPage.current))
+    const revisionTransport: ReviewSuggestionRevisionTransport = {
+      dismiss,
+      edit: () => Promise.reject(new Error("Unexpected edit")),
+      load: () => Promise.resolve(draftPage)
+    }
+    const host = await renderView(
+      () => undefined,
+      pullRequestState,
+      () => undefined,
+      completedPullRequestReviewState,
+      revisionTransport
+    )
+    await act(async () => undefined)
+    const findingFilter = host.querySelector<HTMLElement>('[aria-label="Finding filter"]')
+    const semanticFindings = host.querySelector<HTMLElement>('aside[aria-label="Semantic findings"]')
+    if (findingFilter === null || semanticFindings === null) {
+      throw new Error("Expected the pull-request finding filters and semantic findings")
+    }
+    const unresolved = [...findingFilter.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Unresolved"
+    )
+    if (unresolved === undefined) throw new Error("Expected the unresolved finding filter")
+    await act(async () => unresolved.click())
+    expect(semanticFindings.textContent).toContain(reviewSuggestion.title)
+
+    const dismissButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Dismiss"
+    )
+    if (dismissButton === undefined) throw new Error("Expected the finding dismissal action")
+    await act(async () => dismissButton.click())
+    const confirmDismissal = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Dismiss finding"
+    )
+    if (confirmDismissal === undefined) throw new Error("Expected the finding dismissal confirmation")
+    await act(async () => confirmDismissal.click())
+
+    expect(dismiss).toHaveBeenCalledOnce()
+    expect(semanticFindings.textContent).not.toContain(reviewSuggestion.title)
+    expect(semanticFindings.textContent).toContain("No validated review suggestions are attached to this revision.")
   })
 
   it("renders the complete CodePipeline execution without exposing provider artifact locations", async () => {

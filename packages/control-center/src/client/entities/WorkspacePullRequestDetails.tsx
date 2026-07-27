@@ -1,9 +1,11 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
-import { type ReactElement, type ReactNode, lazy, Suspense } from "react"
+import { type ReactElement, type ReactNode, lazy, Suspense, useCallback, useMemo, useState } from "react"
 
 import type { DurableAgentPrompt } from "../../api/agent.js"
+import type { PrReviewSuggestion } from "../../domain/prReview.js"
 import type { WorkspacePullRequestPresentation } from "./presentWorkspacePullRequest.js"
+import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import type {
   PullRequestReviewControllerState,
   PullRequestReviewPublicationState,
@@ -63,6 +65,7 @@ export const WorkspacePullRequestDetails = ({
   pullRequest,
   reviewCanEnqueue,
   reviewPublication,
+  reviewSuggestionRevisionTransport,
   reviewState,
   reviewers,
   sessionKey
@@ -78,156 +81,189 @@ export const WorkspacePullRequestDetails = ({
   readonly pullRequest: WorkspacePullRequestPresentation
   readonly reviewCanEnqueue: boolean
   readonly reviewPublication: PullRequestReviewPublicationState
+  readonly reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
   readonly reviewState: PullRequestReviewControllerState
   readonly reviewers: ReadonlyArray<RlyPerson>
   readonly sessionKey: string | null
-}): ReactElement => (
-  <article className={styles.document} data-workspace-pull-request-detail>
-    <div className={styles.revisionCard}>
-      <div className={styles.branchPair}>
-        <span>
-          <small>Head</small>
-          <strong>{pullRequest.sourceBranch}</strong>
-        </span>
-        <span aria-hidden="true" className={styles.direction}>
-          →
-        </span>
-        <span>
-          <small>Base</small>
-          <strong>{pullRequest.targetBranch}</strong>
-        </span>
+}): ReactElement => {
+  const completedReview =
+    reviewState._tag === "ready" && reviewState.review._tag === "completed" ? reviewState.review : null
+  const reviewJobId = completedReview?.jobId ?? null
+  const reportSuggestions = completedReview?.report.suggestions ?? []
+  const [suggestionOverrides, setSuggestionOverrides] = useState<{
+    readonly jobId: string | null
+    readonly suggestions: ReadonlyMap<string, PrReviewSuggestion>
+  }>(() => ({ jobId: reviewJobId, suggestions: new Map() }))
+  const presentedSuggestions = useMemo(() => {
+    if (suggestionOverrides.jobId !== reviewJobId) return reportSuggestions
+    return reportSuggestions.map((suggestion) =>
+      suggestion.state === "published" || suggestion.state === "resolved"
+        ? suggestion
+        : (suggestionOverrides.suggestions.get(suggestion.suggestionId) ?? suggestion)
+    )
+  }, [reportSuggestions, reviewJobId, suggestionOverrides])
+  const onSuggestionRevisionAccepted = useCallback(
+    (suggestion: PrReviewSuggestion): void => {
+      if (reviewJobId === null) return
+      setSuggestionOverrides((current) => {
+        const suggestions =
+          current.jobId === reviewJobId ? new Map(current.suggestions) : new Map<string, PrReviewSuggestion>()
+        suggestions.set(suggestion.suggestionId, suggestion)
+        return { jobId: reviewJobId, suggestions }
+      })
+    },
+    [reviewJobId]
+  )
+
+  return (
+    <article className={styles.document} data-workspace-pull-request-detail>
+      <div className={styles.revisionCard}>
+        <div className={styles.branchPair}>
+          <span>
+            <small>Head</small>
+            <strong>{pullRequest.sourceBranch}</strong>
+          </span>
+          <span aria-hidden="true" className={styles.direction}>
+            →
+          </span>
+          <span>
+            <small>Base</small>
+            <strong>{pullRequest.targetBranch}</strong>
+          </span>
+        </div>
+        <div className={styles.commitPair}>
+          <code title={pullRequest.headRevision}>{pullRequest.headRevision}</code>
+          <span>against</span>
+          <code title={pullRequest.baseRevision ?? undefined}>
+            {pullRequest.baseRevision ?? "Base revision unavailable"}
+          </code>
+        </div>
+        <dl className={styles.revisionMeta}>
+          <div>
+            <dt>Created</dt>
+            <dd>
+              {pullRequest.createdAt === null ? (
+                "Not synchronized"
+              ) : (
+                <time dateTime={pullRequest.createdAt.dateTime}>{pullRequest.createdAt.label}</time>
+              )}
+            </dd>
+          </div>
+          <div>
+            <dt>Merge base</dt>
+            <dd>{pullRequest.mergeBaseRevision ?? "Not synchronized"}</dd>
+          </div>
+          <div>
+            <dt>Last activity</dt>
+            <dd>
+              {pullRequest.updatedAt === null ? (
+                "Not synchronized"
+              ) : (
+                <time dateTime={pullRequest.updatedAt.dateTime}>{pullRequest.updatedAt.label}</time>
+              )}
+            </dd>
+          </div>
+        </dl>
       </div>
-      <div className={styles.commitPair}>
-        <code title={pullRequest.headRevision}>{pullRequest.headRevision}</code>
-        <span>against</span>
-        <code title={pullRequest.baseRevision ?? undefined}>
-          {pullRequest.baseRevision ?? "Base revision unavailable"}
-        </code>
-      </div>
-      <dl className={styles.revisionMeta}>
-        <div>
-          <dt>Created</dt>
-          <dd>
-            {pullRequest.createdAt === null ? (
-              "Not synchronized"
+
+      <Section heading="Description" meta="What this revision changes">
+        {pullRequest.description === null ? (
+          <Text tone="secondary">No description was synchronized from CodeCommit.</Text>
+        ) : (
+          <WorkspaceRichText className={styles.description} value={pullRequest.description} />
+        )}
+      </Section>
+
+      <Section heading="People" meta="Author, reviewers, and approvers">
+        <div className={styles.peopleGroups}>
+          <div>
+            <Text tone="secondary" variant="meta">
+              Author
+            </Text>
+            {pullRequest.author === null ? (
+              <Text tone="secondary">No author identity was synchronized.</Text>
             ) : (
-              <time dateTime={pullRequest.createdAt.dateTime}>{pullRequest.createdAt.label}</time>
+              <Person person={pullRequest.author} />
             )}
-          </dd>
+          </div>
+          <div>
+            <Text tone="secondary" variant="meta">
+              Reviewers
+            </Text>
+            <People empty="No reviewer is assigned in the canonical workspace." people={reviewers} />
+          </div>
+          <div>
+            <Text tone="secondary" variant="meta">
+              Approvers
+            </Text>
+            <People empty="No approver is assigned in the canonical workspace." people={approvers} />
+          </div>
         </div>
-        <div>
-          <dt>Merge base</dt>
-          <dd>{pullRequest.mergeBaseRevision ?? "Not synchronized"}</dd>
-        </div>
-        <div>
-          <dt>Last activity</dt>
-          <dd>
-            {pullRequest.updatedAt === null ? (
-              "Not synchronized"
-            ) : (
-              <time dateTime={pullRequest.updatedAt.dateTime}>{pullRequest.updatedAt.label}</time>
-            )}
-          </dd>
-        </div>
-      </dl>
-    </div>
+      </Section>
 
-    <Section heading="Description" meta="What this revision changes">
-      {pullRequest.description === null ? (
-        <Text tone="secondary">No description was synchronized from CodeCommit.</Text>
-      ) : (
-        <WorkspaceRichText className={styles.description} value={pullRequest.description} />
-      )}
-    </Section>
+      <Section heading="Review" meta="Human decisions stay separate from agent advice">
+        <div className={styles.reviewLanes}>
+          <div>
+            <small>Human decision</small>
+            <strong>{pullRequest.reviewLabel}</strong>
+            <span>Only provider and workspace evidence can change this state.</span>
+          </div>
+          <div>
+            <small>Relay recommendation</small>
+            <Suspense fallback={<span>Loading review tools…</span>}>
+              <PullRequestReviewPanel
+                canEnqueue={reviewCanEnqueue}
+                onCancelPublication={onReviewPublicationCancel}
+                onLoadEarlier={onReviewLoadEarlier}
+                onPreviewPublication={onReviewPublicationPreview}
+                onPublishSuggestion={onReviewSuggestionPublish}
+                onRetry={onReviewRetry}
+                onStart={onReviewStart}
+                onSuggestionRevisionAccepted={onSuggestionRevisionAccepted}
+                publication={reviewPublication}
+                {...(reviewSuggestionRevisionTransport === undefined
+                  ? {}
+                  : { revisionTransport: reviewSuggestionRevisionTransport })}
+                state={reviewState}
+                suggestions={presentedSuggestions}
+              />
+            </Suspense>
+          </div>
+        </div>
+      </Section>
 
-    <Section heading="People" meta="Author, reviewers, and approvers">
-      <div className={styles.peopleGroups}>
-        <div>
-          <Text tone="secondary" variant="meta">
-            Author
-          </Text>
-          {pullRequest.author === null ? (
-            <Text tone="secondary">No author identity was synchronized.</Text>
-          ) : (
-            <Person person={pullRequest.author} />
-          )}
-        </div>
-        <div>
-          <Text tone="secondary" variant="meta">
-            Reviewers
-          </Text>
-          <People empty="No reviewer is assigned in the canonical workspace." people={reviewers} />
-        </div>
-        <div>
-          <Text tone="secondary" variant="meta">
-            Approvers
-          </Text>
-          <People empty="No approver is assigned in the canonical workspace." people={approvers} />
-        </div>
-      </div>
-    </Section>
+      <Section heading="Delivery evidence" meta="Connected work around this exact head">
+        <dl className={styles.deliveryCounts}>
+          <div>
+            <dt>Jira items</dt>
+            <dd>{pullRequest.issueCountLabel}</dd>
+          </div>
+          <div>
+            <dt>Pipeline runs</dt>
+            <dd>{pullRequest.pipelineCountLabel}</dd>
+          </div>
+          <div>
+            <dt>Releases</dt>
+            <dd>{pullRequest.releaseCountLabel}</dd>
+          </div>
+        </dl>
+        <Text tone="secondary">The delivery relationships below explain every linked item and its evidence.</Text>
+      </Section>
 
-    <Section heading="Review" meta="Human decisions stay separate from agent advice">
-      <div className={styles.reviewLanes}>
-        <div>
-          <small>Human decision</small>
-          <strong>{pullRequest.reviewLabel}</strong>
-          <span>Only provider and workspace evidence can change this state.</span>
-        </div>
-        <div>
-          <small>Relay recommendation</small>
-          <Suspense fallback={<span>Loading review tools…</span>}>
-            <PullRequestReviewPanel
-              canEnqueue={reviewCanEnqueue}
-              onCancelPublication={onReviewPublicationCancel}
-              onLoadEarlier={onReviewLoadEarlier}
-              onPreviewPublication={onReviewPublicationPreview}
-              onPublishSuggestion={onReviewSuggestionPublish}
-              onRetry={onReviewRetry}
-              onStart={onReviewStart}
-              publication={reviewPublication}
-              state={reviewState}
-            />
-          </Suspense>
-        </div>
-      </div>
-    </Section>
-
-    <Section heading="Delivery evidence" meta="Connected work around this exact head">
-      <dl className={styles.deliveryCounts}>
-        <div>
-          <dt>Jira items</dt>
-          <dd>{pullRequest.issueCountLabel}</dd>
-        </div>
-        <div>
-          <dt>Pipeline runs</dt>
-          <dd>{pullRequest.pipelineCountLabel}</dd>
-        </div>
-        <div>
-          <dt>Releases</dt>
-          <dd>{pullRequest.releaseCountLabel}</dd>
-        </div>
-      </dl>
-      <Text tone="secondary">The delivery relationships below explain every linked item and its evidence.</Text>
-    </Section>
-
-    <Section heading="Files" meta="Complete immutable diff">
-      <WorkspacePullRequestDiff
-        heading={`Pull request ${pullRequest.headRevision.slice(0, 12)}`}
-        onSessionExpired={onSessionExpired}
-        suggestions={
-          reviewState._tag === "ready" && reviewState.review._tag === "completed"
-            ? reviewState.review.report.suggestions
-            : []
-        }
-        scope={pullRequest.diffScope}
-        sessionKey={sessionKey}
-      />
-      {pullRequest.filesHref === null ? null : (
-        <a className={styles.filesLink} href={pullRequest.filesHref} rel="noreferrer" target="_blank">
-          Open this revision in CodeCommit
-        </a>
-      )}
-    </Section>
-  </article>
-)
+      <Section heading="Files" meta="Complete immutable diff">
+        <WorkspacePullRequestDiff
+          heading={`Pull request ${pullRequest.headRevision.slice(0, 12)}`}
+          onSessionExpired={onSessionExpired}
+          suggestions={presentedSuggestions}
+          scope={pullRequest.diffScope}
+          sessionKey={sessionKey}
+        />
+        {pullRequest.filesHref === null ? null : (
+          <a className={styles.filesLink} href={pullRequest.filesHref} rel="noreferrer" target="_blank">
+            Open this revision in CodeCommit
+          </a>
+        )}
+      </Section>
+    </article>
+  )
+}
