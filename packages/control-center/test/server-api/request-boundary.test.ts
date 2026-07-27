@@ -35,6 +35,8 @@ const schemaDefect = (kind: HttpApiError.HttpApiSchemaError["kind"]) =>
 const webHandlerLayer = Layer.mergeAll(
   HttpRouter.add("POST", "/api/v1/session/pair", HttpServerResponse.text("ok")),
   HttpRouter.add("GET", "/api/ping", HttpServerResponse.text("pong")),
+  HttpRouter.add("GET", "/api/v1/agent/providers", HttpServerResponse.text("providers")),
+  HttpRouter.add("POST", "/api/v1/agent/releases/release-1/jobs", HttpServerResponse.text("job")),
   HttpRouter.add("GET", "/api/schema-request", schemaDefect("Payload")),
   HttpRouter.add("POST", "/api/schema-response", schemaDefect("Body")),
   HttpRouter.add(
@@ -142,6 +144,38 @@ describe("API request boundary", () => {
       assert.strictEqual(firstApiResponse.status, 200)
       assert.strictEqual(firstApiResponse.headers.get("cache-control"), "no-store")
       assert.strictEqual(secondApiResponse.status, 429)
+    } finally {
+      await webHandler.dispose()
+    }
+  })
+
+  it("budgets safe agent reads separately from agent mutations", async () => {
+    const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
+    try {
+      const request = (path: string, method: "GET" | "POST", correlationId: string) =>
+        webHandler.handler(
+          new Request(`http://127.0.0.1:4173${path}`, {
+            method,
+            headers: { "x-correlation-id": correlationId }
+          })
+        )
+      const firstRead = await request("/api/v1/agent/providers", "GET", "agent-read-1")
+      const firstMutation = await request(
+        "/api/v1/agent/releases/release-1/jobs",
+        "POST",
+        "agent-mutation-1"
+      )
+      const secondRead = await request("/api/v1/agent/providers", "GET", "agent-read-2")
+      const secondMutation = await request(
+        "/api/v1/agent/releases/release-1/jobs",
+        "POST",
+        "agent-mutation-2"
+      )
+
+      assert.strictEqual(firstRead.status, 200)
+      assert.strictEqual(firstMutation.status, 200)
+      assert.strictEqual(secondRead.status, 429)
+      assert.strictEqual(secondMutation.status, 429)
     } finally {
       await webHandler.dispose()
     }
