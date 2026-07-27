@@ -340,6 +340,18 @@ const reviewProviderCatalog = Schema.encodeSync(AgentProviderCatalog)(
     ]
   })
 )
+const releaseAgentProviderCatalog = Schema.encodeSync(AgentProviderCatalog)(
+  Schema.decodeUnknownSync(AgentProviderCatalog)({
+    providers: [
+      {
+        providerId: "codex",
+        models: ["codex"],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available"
+      }
+    ]
+  })
+)
 
 const unauthorizedBody = {
   _tag: "UnauthorizedApiError",
@@ -392,6 +404,13 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   })
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
+  })
+  await context.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify(releaseAgentProviderCatalog),
+      contentType: "application/json",
+      status: 200
+    })
   })
   await context.route("**/api/v1/items/*", async (route) => {
     await route.fulfill({
@@ -854,7 +873,9 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
-  await expect(page.getByText("Agent advice only. A person must still approve or request changes.")).toBeVisible()
+  await expect(
+    page.getByText("Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.")
+  ).toBeVisible()
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {
@@ -983,7 +1004,8 @@ test("keeps one human-first Relay thread per canonical release", async ({ page }
   )
   await page.getByRole("button", { name: "Ask Relay" }).click()
   await expect(page.getByText("Approval is current. Production deployment evidence is still missing.")).toBeVisible()
-  await expect(page.getByText("Local codex")).toBeVisible()
+  await expect(page.getByText("Preset codex")).toBeVisible()
+  await expect(page.getByText("Last answer codex")).toBeVisible()
 
   await page.reload()
   const restoredMessages = page.getByLabel("Release thread messages")
