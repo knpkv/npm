@@ -52,13 +52,24 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const CanonicalAgent = ({ runTurn }: { readonly runTurn?: ReleaseAgentTurn }) => (
+const CanonicalAgent = ({
+  availableProviders,
+  runTurn
+}: {
+  readonly availableProviders?: ReadonlyArray<"claude" | "codex">
+  readonly runTurn?: ReleaseAgentTurn
+}) => (
   <MemoryRouter initialEntries={[agentPath]}>
     <Routes>
       <Route element={<Outlet context={readyContext} />}>
         <Route
           path="/w/:workspaceId/releases/:releaseId/agent"
-          element={<AgentPage {...(runTurn === undefined ? {} : { runTurn })} />}
+          element={
+            <AgentPage
+              {...(availableProviders === undefined ? {} : { availableProviders })}
+              {...(runTurn === undefined ? {} : { runTurn })}
+            />
+          }
         />
       </Route>
     </Routes>
@@ -152,6 +163,31 @@ describe("AgentPage context", () => {
     expect(markup).toContain(`href="/w/${snapshot.workspaceId}/releases/${releaseId}"`)
   })
 
+  it("disables an unavailable provider preset instead of letting the turn fail after submit", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    mountedRoot = root
+    await act(async () =>
+      root.render(
+        <CanonicalAgent
+          availableProviders={["codex"]}
+          runTurn={async () => Promise.reject(new Error("Unexpected turn"))}
+        />
+      )
+    )
+
+    const codex = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Run with Codex") === true
+    )
+    const claude = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Run with Claude") === true
+    )
+    expect(codex?.disabled).toBe(false)
+    expect(claude?.disabled).toBe(true)
+    expect(claude?.textContent).toContain("Not configured")
+  })
+
   it("keeps a local release thread and sends only exact identity, bounded history, and the prompt", async () => {
     const currentRelease = snapshot.releases[0]
     if (currentRelease === undefined) throw new Error("Expected a release turn fixture")
@@ -159,9 +195,9 @@ describe("AgentPage context", () => {
       ...currentRelease,
       version: ReleaseVersion.make("2.18.0-rc.2")
     })
-    const runTurn = vi.fn<ReleaseAgentTurn>(async () => ({
+    const runTurn = vi.fn<ReleaseAgentTurn>(async (input) => ({
       eventCursor: EventCursor.make(11),
-      provider: "codex",
+      provider: input.provider,
       release: answerRelease,
       reply: "Production evidence is missing."
     }))
@@ -172,7 +208,7 @@ describe("AgentPage context", () => {
     await act(async () => root.render(<CanonicalAgent runTurn={runTurn} />))
 
     const suggestion = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Which evidence is still missing?"
+      (button) => button.textContent?.includes("Which evidence is still missing?") === true
     )
     if (suggestion === undefined) throw new Error("Expected an agent suggestion")
     await act(async () => suggestion.click())
@@ -187,12 +223,14 @@ describe("AgentPage context", () => {
     expect(runTurn.mock.calls[0]?.[0]).toEqual({
       history: [],
       prompt: "Which evidence is still missing?",
+      provider: "codex",
       releaseId,
       workspaceId: snapshot.workspaceId
     })
     expect(host.textContent).toContain("Which evidence is still missing?")
     expect(host.textContent).toContain("Production evidence is missing.")
-    expect(host.textContent).toContain("Local codex")
+    expect(host.textContent).toContain("Preset codex")
+    expect(host.textContent).toContain("Last answer codex")
     expect(host.textContent).toContain("Answered from payments-api 2.18.0-rc.2 · Copper Finch · snapshot 11")
 
     await act(async () => root.unmount())
@@ -202,8 +240,13 @@ describe("AgentPage context", () => {
     await act(async () => restoredRoot.render(<CanonicalAgent runTurn={runTurn} />))
     expect(host.textContent).toContain("Which evidence is still missing?")
     expect(host.textContent).toContain("Production evidence is missing.")
+    const claudePreset = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent?.includes("Run with Claude") === true
+    )
+    if (claudePreset === undefined) throw new Error("Expected a Claude run preset")
+    await act(async () => claudePreset.click())
     const nextSuggestion = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Write a concise release summary."
+      (button) => button.textContent?.includes("Write a concise release summary.") === true
     )
     if (nextSuggestion === undefined) throw new Error("Expected a restored-thread suggestion")
     await act(async () => nextSuggestion.click())
@@ -212,6 +255,7 @@ describe("AgentPage context", () => {
     if (restoredForm === null || restoredForm === undefined) throw new Error("Expected the restored thread form")
     await act(async () => restoredForm.requestSubmit())
     expect(runTurn).toHaveBeenCalledTimes(2)
+    expect(runTurn.mock.calls[1]?.[0].provider).toBe("claude")
     expect(host.textContent).toContain("Write a concise release summary.")
 
     await act(async () => restoredRoot.unmount())
@@ -233,7 +277,7 @@ describe("AgentPage context", () => {
     await act(async () => root.render(<CanonicalAgent runTurn={runTurn} />))
 
     const suggestion = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "What blocks this release?"
+      (button) => button.textContent?.includes("What blocks this release?") === true
     )
     if (suggestion === undefined) throw new Error("Expected an agent suggestion")
     await act(async () => suggestion.click())

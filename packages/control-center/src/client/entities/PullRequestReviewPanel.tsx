@@ -1,8 +1,9 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
-import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useState } from "react"
+import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react"
 
 import {
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
+  type DurableAgentProviderId,
   type DurableAgentPrompt,
   type PullRequestReviewThreadEvent
 } from "../../api/agent.js"
@@ -56,6 +57,24 @@ const formatBudget = (budgetMillis: number): string => {
   return `${String(minutes)} minute${minutes === 1 ? "" : "s"}`
 }
 
+const REVIEW_PROMPT_TEMPLATES: ReadonlyArray<{
+  readonly label: string
+  readonly prompt: string
+}> = [
+  {
+    label: "Correctness",
+    prompt: "Review correctness, regressions, error handling, and boundary conditions."
+  },
+  {
+    label: "Security",
+    prompt: "Review authorization, credential handling, unsafe input, and privilege boundaries."
+  },
+  {
+    label: "Tests",
+    prompt: "Review test coverage, failure paths, race conditions, and missing regression guardrails."
+  }
+]
+
 const ReviewSuggestionPublicationSurface = lazy(() => import("./ReviewSuggestionPublicationSurface.js"))
 
 const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null => {
@@ -73,7 +92,9 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
     case "review-report":
       return `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
     case "suggestion-revised":
-      return `Suggestion revision ${String(event.sequence)} · ${event.validationState === "validated" ? "validated" : "needs revalidation"}`
+      return event.suggestionState === "dismissed"
+        ? `Suggestion revision ${String(event.sequence)} · dismissed by operator`
+        : `Suggestion revision ${String(event.sequence)} · ${event.validationState === "validated" ? "validated" : "needs revalidation"}`
     case "suggestion-published":
       return "Suggestion published to CodeCommit"
     case "run-completed":
@@ -106,7 +127,7 @@ export const PullRequestReviewPanel = ({
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onPublishSuggestion: (finalContent: string) => void
   readonly onRetry: () => void
-  readonly onStart: (prompt?: DurableAgentPrompt) => void
+  readonly onStart: (prompt?: DurableAgentPrompt, providerId?: DurableAgentProviderId) => void
   readonly publication: PullRequestReviewPublicationState
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly state: PullRequestReviewControllerState
@@ -114,6 +135,13 @@ export const PullRequestReviewPanel = ({
   const [launchOpen, setLaunchOpen] = useState(false)
   const [request, setRequest] = useState("")
   const [submittedRequest, setSubmittedRequest] = useState<string | null>(null)
+  const [selectedProviderId, setSelectedProviderId] = useState<DurableAgentProviderId | null>(null)
+  const providerPresets = useMemo(
+    () => (state._tag === "ready" ? (state.providerPresets ?? (state.provider === null ? [] : [state.provider])) : []),
+    [state]
+  )
+  const selectedProvider =
+    providerPresets.find(({ providerId }) => providerId === selectedProviderId) ?? providerPresets[0] ?? null
   const requestScope =
     state._tag === "idle"
       ? null
@@ -122,7 +150,17 @@ export const PullRequestReviewPanel = ({
     setLaunchOpen(false)
     setRequest("")
     setSubmittedRequest(null)
+    setSelectedProviderId(null)
   }, [requestScope])
+  useEffect(() => {
+    if (providerPresets.length === 0) {
+      setSelectedProviderId(null)
+      return
+    }
+    if (!providerPresets.some(({ providerId }) => providerId === selectedProviderId)) {
+      setSelectedProviderId(providerPresets[0]?.providerId ?? null)
+    }
+  }, [providerPresets, selectedProviderId])
   useEffect(() => {
     if (submittedRequest === null || state._tag !== "ready") return
     if (state.action === "failed") return
@@ -135,15 +173,17 @@ export const PullRequestReviewPanel = ({
     setLaunchOpen(open)
   }, [])
   const submitFullReview = useCallback((): void => {
+    if (selectedProvider === null) return
     setSubmittedRequest(null)
-    onStart()
-  }, [onStart])
+    onStart(undefined, selectedProvider.providerId)
+  }, [onStart, selectedProvider])
   const submitTargetedReview = useCallback((): void => {
     const prompt = request.trim()
     if (prompt.length === 0 || state._tag !== "ready" || state.action === "starting") return
     setSubmittedRequest(prompt)
-    onStart(prompt)
-  }, [onStart, request, state])
+    if (selectedProvider === null) return
+    onStart(prompt, selectedProvider.providerId)
+  }, [onStart, request, selectedProvider, state])
   const handleComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
     if (event.key !== "Enter" || (!event.metaKey && !event.ctrlKey)) return
     event.preventDefault()
@@ -230,6 +270,39 @@ export const PullRequestReviewPanel = ({
       {canEnqueue && state.provider !== null && review._tag !== "pending" && review._tag !== "unavailable" ? (
         <div className={styles.reviewThreadComposer}>
           <label htmlFor="review-thread-request">Ask Relay about this pull request</label>
+          {providerPresets.length > 1 ? (
+            <div aria-label="Targeted review agent presets" className={styles.reviewPresetList} role="radiogroup">
+              {providerPresets.map((preset) => (
+                <button
+                  aria-checked={preset.providerId === selectedProvider?.providerId}
+                  key={preset.providerId}
+                  onClick={() => setSelectedProviderId(preset.providerId)}
+                  role="radio"
+                  type="button"
+                >
+                  <strong>
+                    {preset.providerId === "codex"
+                      ? "Codex review"
+                      : preset.providerId === "claude"
+                        ? "Claude review"
+                        : preset.providerId}
+                  </strong>
+                  <span>{preset.model}</span>
+                </button>
+              ))}
+            </div>
+          ) : selectedProvider === null ? null : (
+            <span className={styles.reviewSelectedPreset}>
+              Review with {selectedProvider.providerId} · {selectedProvider.model}
+            </span>
+          )}
+          <div aria-label="Review prompt templates" className={styles.reviewTemplateList}>
+            {REVIEW_PROMPT_TEMPLATES.map((template) => (
+              <Button key={template.label} onClick={() => setRequest(template.prompt)}>
+                {template.label}
+              </Button>
+            ))}
+          </div>
           <textarea
             aria-describedby="review-thread-request-help review-thread-request-count"
             id="review-thread-request"
@@ -266,7 +339,7 @@ export const PullRequestReviewPanel = ({
       </>
     )
   const reviewLaunch = (headRevision: string, triggerLabel: string): ReactElement | null =>
-    state.provider === null ? null : (
+    selectedProvider === null ? null : (
       <Dialog.Root onOpenChange={changeLaunchOpen} open={launchOpen}>
         <Dialog.Trigger disabled={state.action === "starting"}>
           {state.action === "starting" ? "Starting review…" : triggerLabel}
@@ -278,6 +351,28 @@ export const PullRequestReviewPanel = ({
         >
           <div className={styles.reviewLaunchBody}>
             <small className={styles.reviewLaunchEyebrow}>Read-only agent run</small>
+            {providerPresets.length > 1 ? (
+              <div aria-label="Review agent presets" className={styles.reviewPresetList} role="radiogroup">
+                {providerPresets.map((preset) => (
+                  <button
+                    aria-checked={preset.providerId === selectedProvider.providerId}
+                    key={preset.providerId}
+                    onClick={() => setSelectedProviderId(preset.providerId)}
+                    role="radio"
+                    type="button"
+                  >
+                    <strong>
+                      {preset.providerId === "codex"
+                        ? "Codex review"
+                        : preset.providerId === "claude"
+                          ? "Claude review"
+                          : preset.providerId}
+                    </strong>
+                    <span>{preset.model}</span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <dl className={styles.reviewLaunchFacts}>
               <div>
                 <dt>Exact head</dt>
@@ -287,15 +382,19 @@ export const PullRequestReviewPanel = ({
               </div>
               <div>
                 <dt>Review profile</dt>
-                <dd>{state.provider.reviewProfile.label}</dd>
+                <dd>{selectedProvider.reviewProfile.label}</dd>
               </div>
               <div>
                 <dt>Time budget</dt>
-                <dd>{formatBudget(state.provider.reviewProfile.budgetMillis)}</dd>
+                <dd>{formatBudget(selectedProvider.reviewProfile.budgetMillis)}</dd>
               </div>
               <div>
                 <dt>Runtime</dt>
-                <dd>Network blocked · sbx</dd>
+                <dd>
+                  {selectedProvider.reviewProfile.networkAccess === "blocked"
+                    ? "Network blocked · sbx"
+                    : "Provider connection enabled · sbx"}
+                </dd>
               </div>
             </dl>
             <div className={styles.reviewLaunchActions}>
@@ -328,7 +427,10 @@ export const PullRequestReviewPanel = ({
           Relay is using {review.providerId} · {review.model}. This page updates automatically.
         </span>
         <span>
-          {review.reviewProfile.label} · {formatBudget(review.reviewProfile.budgetMillis)} · network blocked · sbx
+          {review.reviewProfile.label} · {formatBudget(review.reviewProfile.budgetMillis)} ·{" "}
+          {review.reviewProfile.networkAccess === "blocked"
+            ? "network blocked · sbx"
+            : "provider connection enabled · sbx"}
         </span>
         {review.activity.events.length === 0 ? null : (
           <ol aria-label="Live review activity">
@@ -391,7 +493,7 @@ export const PullRequestReviewPanel = ({
           </ol>
         )}
         <ReviewNotes notes={review.report.notes} />
-        <span>Agent advice only. A person must still approve or request changes.</span>
+        <span>Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.</span>
       </>
     )
   }

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   AgentModelId,
+  DurableAgentPrompt,
   DurableAgentProviderId,
   MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH,
   PublishedReviewComment,
@@ -361,6 +362,37 @@ const PENDING_REVIEW = new PullRequestReviewPending({
   requestedAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("2026-07-24T15:00:00.000Z"),
   state: "queued"
 })
+const NATIVE_PENDING_REVIEW = new PullRequestReviewPending({
+  ...PENDING_REVIEW,
+  providerId: DurableAgentProviderId.make("codex"),
+  model: AgentModelId.make("configured-default"),
+  reviewProfile: {
+    profileId: ReviewAgentProfileId.make("codex:configured-default:sbx"),
+    label: "Full-project review · codex · configured-default",
+    budgetMillis: 1_200_000,
+    networkAccess: "provider-enabled",
+    sandbox: "sbx"
+  }
+})
+type ReviewProviderSelection = NonNullable<
+  Extract<PullRequestReviewControllerState, { readonly _tag: "ready" }>["provider"]
+>
+const CODEX_REVIEW_PRESET: ReviewProviderSelection = {
+  providerId: DurableAgentProviderId.make("codex"),
+  model: AgentModelId.make("configured-default"),
+  reviewProfile: NATIVE_PENDING_REVIEW.reviewProfile
+}
+const CLAUDE_REVIEW_PRESET: ReviewProviderSelection = {
+  providerId: DurableAgentProviderId.make("claude"),
+  model: AgentModelId.make("default"),
+  reviewProfile: {
+    profileId: ReviewAgentProfileId.make("claude:default:sbx"),
+    label: "Full-project review · claude · default",
+    budgetMillis: 1_200_000,
+    networkAccess: "provider-enabled",
+    sandbox: "sbx"
+  }
+}
 const FAILED_REVIEW = new PullRequestReviewFailed({
   subject: SUBJECT,
   jobId: JOB_ID,
@@ -426,6 +458,94 @@ afterEach(async () => {
 })
 
 describe("PullRequestReviewPanel", () => {
+  it("reports the native Codex provider connection while a review is pending", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={() => undefined}
+          publication={{ _tag: "idle" }}
+          state={{ ...REVIEW_STATE, review: NATIVE_PENDING_REVIEW }}
+        />
+      )
+    )
+
+    expect(host.textContent).toContain("provider connection enabled · sbx")
+    expect(host.textContent).not.toContain("network blocked · sbx")
+  })
+
+  it("offers explicit Codex and Claude review presets with reusable prompt templates", async () => {
+    const onStart = vi.fn()
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    const state = {
+      ...REFRESHED_NOT_STARTED_STATE,
+      provider: CODEX_REVIEW_PRESET,
+      providerPresets: [CODEX_REVIEW_PRESET, CLAUDE_REVIEW_PRESET]
+    } satisfies PullRequestReviewControllerState
+
+    await act(async () =>
+      root?.render(
+        <PullRequestReviewPanel
+          canEnqueue
+          onCancelPublication={() => undefined}
+          onPreviewPublication={() => undefined}
+          onPublishSuggestion={() => undefined}
+          onRetry={() => undefined}
+          onStart={onStart}
+          publication={{ _tag: "idle" }}
+          state={state}
+        />
+      )
+    )
+
+    const targetedClaudePreset = [...host.querySelectorAll<HTMLButtonElement>("[role=radio]")].find(
+      ({ textContent }) => textContent?.includes("Claude review") === true
+    )
+    if (targetedClaudePreset === undefined) throw new Error("Expected targeted Claude review preset")
+    await act(async () => targetedClaudePreset.click())
+    expect(targetedClaudePreset.getAttribute("aria-checked")).toBe("true")
+    const securityTemplate = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Security"
+    )
+    if (securityTemplate === undefined) throw new Error("Expected security review template")
+    await act(async () => securityTemplate.click())
+    expect(host.querySelector<HTMLTextAreaElement>("#review-thread-request")?.value).toBe(
+      "Review authorization, credential handling, unsafe input, and privilege boundaries."
+    )
+    const startTargeted = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Start targeted review"
+    )
+    if (startTargeted === undefined) throw new Error("Expected targeted-review confirmation")
+    await act(async () => startTargeted.click())
+    expect(onStart).toHaveBeenCalledWith(
+      DurableAgentPrompt.make("Review authorization, credential handling, unsafe input, and privilege boundaries."),
+      DurableAgentProviderId.make("claude")
+    )
+
+    const launch = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Review exact head"
+    )
+    if (launch === undefined) throw new Error("Expected review launch action")
+    await act(async () => launch.click())
+    expect(host.querySelector("[role=dialog]")?.textContent).toContain("Full-project review · claude · default")
+    const startFull = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Start full review"
+    )
+    if (startFull === undefined) throw new Error("Expected full-review confirmation")
+    await act(async () => startFull.click())
+    expect(onStart).toHaveBeenCalledWith(undefined, DurableAgentProviderId.make("claude"))
+  })
+
   it("does not offer a targeted run when the current pull request is unavailable", async () => {
     const host = document.createElement("div")
     document.body.append(host)
@@ -494,7 +614,10 @@ describe("PullRequestReviewPanel", () => {
       textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
     )
 
-    expect(onStart).toHaveBeenCalledWith("Re-check the transaction boundary.")
+    expect(onStart).toHaveBeenCalledWith(
+      "Re-check the transaction boundary.",
+      DurableAgentProviderId.make("openai-compatible")
+    )
     expect(textarea.value).toBe("Re-check the transaction boundary.")
     await act(async () =>
       root?.render(
@@ -695,7 +818,7 @@ describe("PullRequestReviewPanel", () => {
     if (startFullReview === undefined) throw new Error("Expected full-review confirmation")
     await act(async () => startFullReview.click())
 
-    expect(onStart).toHaveBeenLastCalledWith()
+    expect(onStart).toHaveBeenLastCalledWith(undefined, DurableAgentProviderId.make("openai-compatible"))
     expect(host.querySelectorAll("[role=alert]")).toHaveLength(1)
     expect(host.querySelector("[role=alert]")?.textContent).toContain("A new full review could not be started")
     expect(host.textContent).not.toContain("Targeted review did not start")
@@ -859,7 +982,7 @@ describe("PullRequestReviewPanel", () => {
     )
     if (start === undefined) throw new Error("Expected full-review confirmation")
     await act(async () => start.click())
-    expect(onStart).toHaveBeenCalledWith()
+    expect(onStart).toHaveBeenCalledWith(undefined, DurableAgentProviderId.make("openai-compatible"))
 
     await act(async () => render("failed"))
 
@@ -935,7 +1058,7 @@ describe("PullRequestReviewPanel", () => {
     expect(resolvedSuggestion).toBeDefined()
     expect(
       [...(resolvedSuggestion?.querySelectorAll("button") ?? [])].some(
-        ({ textContent }) => textContent === "Post comment"
+        ({ textContent }) => textContent === "Review & approve"
       )
     ).toBe(false)
   })
@@ -1000,7 +1123,7 @@ describe("PullRequestReviewPanel", () => {
       textContent?.includes("Centralize the authorization policy")
     )
     const publish = [...(fileSuggestion?.querySelectorAll<HTMLButtonElement>("button") ?? [])].find(
-      ({ textContent }) => textContent === "Post comment"
+      ({ textContent }) => textContent === "Review & approve"
     )
     if (publish === undefined) throw new Error("Expected file-suggestion publication action")
     await act(async () => publish.click())
@@ -1110,7 +1233,7 @@ describe("PullRequestReviewPanel", () => {
 
     await render({ _tag: "idle" })
     const postComment = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Post comment"
+      ({ textContent }) => textContent === "Review & approve"
     )
     if (postComment === undefined) throw new Error("Expected a publication preview action")
     await act(async () => {
@@ -1142,7 +1265,7 @@ describe("PullRequestReviewPanel", () => {
       textarea.dispatchEvent(new Event("input", { bubbles: true }))
     })
     const confirm = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      ({ textContent }) => textContent === "Post to CodeCommit"
+      ({ textContent }) => textContent === "Approve & post to CodeCommit"
     )
     if (confirm === undefined) throw new Error("Expected explicit publication confirmation")
     await act(async () => confirm.click())
@@ -1206,7 +1329,7 @@ describe("PullRequestReviewPanel", () => {
     )
     await act(async () => vi.dynamicImportSettled())
 
-    expect(host.textContent).toContain("Published Review Comment")
+    expect(host.textContent).toContain("Approved · Published to CodeCommit")
     expect(host.textContent).toContain(RECEIPT.safeSummary)
     expect(host.textContent).toContain(RECEIPT.providerOperationId)
     expect(host.textContent).toContain(`${ANCHOR_PATH}:${String(ANCHOR_LINE)}`)
@@ -1296,7 +1419,7 @@ describe("PullRequestReviewPanel", () => {
     await act(async () => vi.dynamicImportSettled())
 
     expect(host.textContent).toContain("Agent review not run")
-    expect(host.textContent).toContain("Published Review Comment")
+    expect(host.textContent).toContain("Approved · Published to CodeCommit")
     expect(host.textContent).toContain(RECEIPT.providerOperationId)
     expect(host.textContent).toContain("The comment was published against a head that is no longer current.")
     expect(host.querySelectorAll("[role=status]")).toHaveLength(1)

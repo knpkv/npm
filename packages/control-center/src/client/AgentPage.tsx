@@ -20,7 +20,7 @@ import {
   writeReleaseAgentThread
 } from "./releases/releaseAgentThreadStorage.js"
 import type { WorkspaceReleaseOutletContext } from "./releases/WorkspaceReleaseLayout.js"
-import { runBrowserReleaseAgentTurn } from "./releases/releaseAgentTransport.js"
+import { loadBrowserReleaseAgentPresets, runBrowserReleaseAgentTurn } from "./releases/releaseAgentTransport.js"
 import styles from "./AgentPage.module.css"
 
 export interface ReleaseAgentHistoryMessage {
@@ -31,6 +31,7 @@ export interface ReleaseAgentHistoryMessage {
 export interface ReleaseAgentTurnInput {
   readonly history: ReadonlyArray<ReleaseAgentHistoryMessage>
   readonly prompt: string
+  readonly provider: "claude" | "codex"
   readonly releaseId: ReleaseId
   readonly workspaceId: WorkspaceId
 }
@@ -50,6 +51,8 @@ export type ReleaseAgentTurn = (
 export interface AgentPageProps {
   /** Application-owned local runtime boundary. Omit it to render an honest unavailable state. */
   readonly runTurn?: ReleaseAgentTurn
+  /** Configured local presets. Omit only at deterministic/test boundaries. */
+  readonly availableProviders?: ReadonlyArray<"claude" | "codex">
 }
 
 interface AgentPageContext {
@@ -273,10 +276,30 @@ const failurePanel = (failure: TurnFailure): ReactElement => {
   }
 }
 
-const SUGGESTIONS: ReadonlyArray<string> = [
-  "What blocks this release?",
-  "Write a concise release summary.",
-  "Which evidence is still missing?"
+const RUN_PRESETS: ReadonlyArray<{
+  readonly description: string
+  readonly label: string
+  readonly provider: "claude" | "codex"
+}> = [
+  {
+    description: "Fast, repository-aware release work with the configured Codex CLI.",
+    label: "Run with Codex",
+    provider: "codex"
+  },
+  {
+    description: "Use the configured Claude CLI for a second agent perspective.",
+    label: "Run with Claude",
+    provider: "claude"
+  }
+]
+
+const PROMPT_TEMPLATES: ReadonlyArray<{
+  readonly label: string
+  readonly prompt: string
+}> = [
+  { label: "Release blockers", prompt: "What blocks this release?" },
+  { label: "Release summary", prompt: "Write a concise release summary." },
+  { label: "Missing evidence", prompt: "Which evidence is still missing?" }
 ]
 
 const MAXIMUM_HISTORY_MESSAGES = 12
@@ -345,13 +368,15 @@ const ReleaseAgentComposer = ({
   isRunning,
   onPromptChange,
   onSubmit,
-  prompt
+  prompt,
+  provider
 }: {
   readonly disabled: boolean
   readonly isRunning: boolean
   readonly onPromptChange: (prompt: string) => void
   readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void
   readonly prompt: string
+  readonly provider: "claude" | "codex"
 }): ReactElement => (
   <form className={styles.composer} onSubmit={onSubmit}>
     <Field label="What do you need?">
@@ -376,22 +401,25 @@ const ReleaseAgentComposer = ({
       type="submit"
       variant="primary"
     >
-      Ask Relay
+      {`Ask Relay with ${provider === "codex" ? "Codex" : "Claude"}`}
     </Button>
   </form>
 )
 
 const ReleaseAgentRoom = ({
+  availableProviders,
   release,
   runTurn,
   workspaceId
 }: {
   readonly release: PortfolioReleasePresentation
   readonly runTurn: ReleaseAgentTurn | undefined
+  readonly availableProviders: ReadonlyArray<"claude" | "codex"> | undefined
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
   const location = useLocation()
   const [prompt, setPrompt] = useState("")
+  const [provider, setProvider] = useState<"claude" | "codex">("codex")
   const [messages, setMessages] = useState<ReadonlyArray<LocalThreadMessage>>(() => readReleaseAgentThread(release.id))
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
@@ -416,11 +444,18 @@ const ReleaseAgentRoom = ({
   const threadMessages = useMemo(() => presentMessages(messages), [messages])
   const lastProvider = [...messages].reverse().find((message) => message.provider !== undefined)?.provider
   const runtimeUnavailable = runTurn === undefined
+  const selectedProviderUnavailable = availableProviders !== undefined && !availableProviders.includes(provider)
+
+  useEffect(() => {
+    if (availableProviders === undefined || availableProviders.includes(provider)) return
+    const fallback = availableProviders[0]
+    if (fallback !== undefined) setProvider(fallback)
+  }, [availableProviders, provider])
 
   const onSubmit = (event: FormEvent<HTMLFormElement>): void => {
     event.preventDefault()
     const submittedPrompt = prompt.trim()
-    if (submittedPrompt.length === 0 || runTurn === undefined || isRunning) return
+    if (submittedPrompt.length === 0 || runTurn === undefined || selectedProviderUnavailable || isRunning) return
     const history = boundedReleaseAgentHistory(messages)
     const humanMessage = {
       ...timestamp(),
@@ -438,7 +473,7 @@ const ReleaseAgentRoom = ({
     setAnnouncement("Relay is reading the release context.")
 
     runTurn(
-      { history, prompt: submittedPrompt, releaseId: release.id, workspaceId },
+      { history, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
       { signal: abortController.signal }
     )
       .then(
@@ -527,20 +562,47 @@ const ReleaseAgentRoom = ({
         )}
       </section>
 
-      <section aria-labelledby="agent-starters" className={styles.starters}>
-        <Text as="h2" id="agent-starters" tone="secondary" variant="label">
-          Start with one question
+      <section aria-labelledby="agent-presets" className={styles.starters}>
+        <Text as="h2" id="agent-presets" tone="secondary" variant="label">
+          Agent preset
         </Text>
-        <div className={styles.suggestionList}>
-          {SUGGESTIONS.map((suggestion) => (
+        <div aria-label="Agent presets" className={styles.presetList} role="radiogroup">
+          {RUN_PRESETS.map((preset) => (
             <button
-              className={styles.suggestion}
-              disabled={runtimeUnavailable || isRunning}
-              key={suggestion}
-              onClick={() => setPrompt(suggestion)}
+              aria-checked={provider === preset.provider}
+              className={styles.preset}
+              disabled={
+                runtimeUnavailable ||
+                isRunning ||
+                (availableProviders !== undefined && !availableProviders.includes(preset.provider))
+              }
+              key={preset.provider}
+              onClick={() => setProvider(preset.provider)}
+              role="radio"
               type="button"
             >
-              {suggestion}
+              <strong>{preset.label}</strong>
+              <span>{preset.description}</span>
+              {availableProviders !== undefined && !availableProviders.includes(preset.provider) ? (
+                <small>Not configured</small>
+              ) : null}
+            </button>
+          ))}
+        </div>
+        <Text as="h2" id="agent-starters" tone="secondary" variant="label">
+          Prompt templates
+        </Text>
+        <div className={styles.suggestionList}>
+          {PROMPT_TEMPLATES.map((template) => (
+            <button
+              className={styles.suggestion}
+              disabled={runtimeUnavailable || selectedProviderUnavailable || isRunning}
+              key={template.label}
+              onClick={() => setPrompt(template.prompt)}
+              type="button"
+            >
+              <strong>{template.label}</strong>
+              <span>{template.prompt}</span>
             </button>
           ))}
         </div>
@@ -551,6 +613,12 @@ const ReleaseAgentRoom = ({
           description="Connect the server to a local Codex or Claude runner. Provider credentials and repository access stay server-side; this tab stores its bounded thread locally."
           title="Local agent not connected"
         />
+      ) : selectedProviderUnavailable ? (
+        <StatePanel
+          description="Choose a configured Codex or Claude preset before starting this turn."
+          title="Selected agent is not configured"
+          tone="caution"
+        />
       ) : null}
       {failure === null ? null : <div className={styles.failure}>{failurePanel(failure)}</div>}
 
@@ -559,11 +627,12 @@ const ReleaseAgentRoom = ({
         className={styles.thread}
         composer={
           <ReleaseAgentComposer
-            disabled={runtimeUnavailable}
+            disabled={runtimeUnavailable || selectedProviderUnavailable}
             isRunning={isRunning}
             onPromptChange={setPrompt}
             onSubmit={onSubmit}
             prompt={prompt}
+            provider={provider}
           />
         }
         context={
@@ -571,7 +640,8 @@ const ReleaseAgentRoom = ({
             <strong>{release.serviceName}</strong>
             <span>{release.version}</span>
             <span>{release.relay.codename}</span>
-            {lastProvider === undefined ? null : <span>Local {lastProvider}</span>}
+            <span>Preset {provider}</span>
+            {lastProvider === undefined ? null : <span>Last answer {lastProvider}</span>}
           </div>
         }
         emptyLabel="Ask one useful question. Relay will answer only for this release."
@@ -653,7 +723,7 @@ const LegacyAgentPage = (): ReactElement => {
 }
 
 /** Render an exact release-owned local agent thread, with a safe legacy context preview. */
-export const AgentPage = ({ runTurn }: AgentPageProps): ReactElement => {
+export const AgentPage = ({ availableProviders, runTurn }: AgentPageProps): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext | null>()
   const params = useParams()
   const workspaceId = decodeWorkspaceRouteId(params.workspaceId)
@@ -691,8 +761,31 @@ export const AgentPage = ({ runTurn }: AgentPageProps): ReactElement => {
       </section>
     )
   }
-  return <ReleaseAgentRoom key={release.id} release={release} runTurn={runTurn} workspaceId={workspaceId} />
+  return (
+    <ReleaseAgentRoom
+      availableProviders={availableProviders}
+      key={release.id}
+      release={release}
+      runTurn={runTurn}
+      workspaceId={workspaceId}
+    />
+  )
 }
 
 /** Route entry wired to the authenticated Control Center release-agent API. */
-export const ConnectedAgentPage = (): ReactElement => <AgentPage runTurn={runBrowserReleaseAgentTurn} />
+export const ConnectedAgentPage = (): ReactElement => {
+  const [availableProviders, setAvailableProviders] = useState<ReadonlyArray<"claude" | "codex">>([])
+  useEffect(() => {
+    const abort = new AbortController()
+    loadBrowserReleaseAgentPresets(abort.signal).then(
+      (providers) => {
+        if (!abort.signal.aborted) setAvailableProviders(providers)
+      },
+      () => {
+        if (!abort.signal.aborted) setAvailableProviders([])
+      }
+    )
+    return () => abort.abort()
+  }, [])
+  return <AgentPage availableProviders={availableProviders} runTurn={runBrowserReleaseAgentTurn} />
+}
