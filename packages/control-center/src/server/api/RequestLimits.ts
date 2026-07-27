@@ -139,7 +139,7 @@ export const withRequestTimeout = <A, E, R>(
 ): Effect.Effect<A, E | RequestTimeLimitExceeded, R | RequestLimitPolicy> =>
   Effect.flatMap(RequestLimitPolicy, (policy) =>
     Effect.timeoutOrElse(effect, {
-      duration: profile === "agent"
+      duration: profile === "agent" || profile === "agent-read"
         ? policy.agentTimeout
         : profile === "synchronization"
         ? policy.synchronizationTimeout
