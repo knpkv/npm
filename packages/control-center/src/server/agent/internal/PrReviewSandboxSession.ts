@@ -670,6 +670,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                       "exec",
                       "--ephemeral",
                       "--ignore-rules",
+                      "--ignore-user-config",
                       "--dangerously-bypass-approvals-and-sandbox",
                       "-c",
                       "project_doc_max_bytes=0",

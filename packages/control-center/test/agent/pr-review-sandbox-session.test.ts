@@ -186,6 +186,8 @@ describe("PrReviewSandboxSessions", () => {
       )
       assert.include(native?.args ?? [], "--interactive")
       assert.include(native?.args ?? [], "--dangerously-bypass-approvals-and-sandbox")
+      const ignoreRules = native?.args.indexOf("--ignore-rules") ?? -1
+      assert.strictEqual(native?.args[ignoreRules + 1], "--ignore-user-config")
       assert.include(native?.args ?? [], "project_doc_max_bytes=0")
       assert.include(native?.args ?? [], "mcp_servers={}")
       assert.include(native?.args ?? [], "--output-schema")
