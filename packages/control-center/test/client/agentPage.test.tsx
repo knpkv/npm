@@ -7,7 +7,13 @@ import { MemoryRouter, Outlet, Route, Routes } from "react-router"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PortfolioReleaseSummary } from "../../src/api/portfolio.js"
-import { AgentPage, boundedReleaseAgentHistory, type ReleaseAgentTurn } from "../../src/client/AgentPage.js"
+import {
+  AgentPage,
+  boundedReleaseAgentHistory,
+  ConnectedAgentPage,
+  type ReleaseAgentPresetLoader,
+  type ReleaseAgentTurn
+} from "../../src/client/AgentPage.js"
 import { presentPortfolio } from "../../src/client/portfolio/presentPortfolio.js"
 import type { WorkspaceReleaseOutletContext } from "../../src/client/releases/WorkspaceReleaseLayout.js"
 import { EventCursor } from "../../src/domain/identifiers.js"
@@ -70,6 +76,19 @@ const CanonicalAgent = ({
               {...(runTurn === undefined ? {} : { runTurn })}
             />
           }
+        />
+      </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+const ConnectedCanonicalAgent = ({ loadPresets }: { readonly loadPresets: ReleaseAgentPresetLoader }) => (
+  <MemoryRouter initialEntries={[agentPath]}>
+    <Routes>
+      <Route element={<Outlet context={readyContext} />}>
+        <Route
+          path="/w/:workspaceId/releases/:releaseId/agent"
+          element={<ConnectedAgentPage loadPresets={loadPresets} runTurn={async () => Promise.reject()} />}
         />
       </Route>
     </Routes>
@@ -186,6 +205,47 @@ describe("AgentPage context", () => {
     expect(codex?.disabled).toBe(false)
     expect(claude?.disabled).toBe(true)
     expect(claude?.textContent).toContain("Not configured")
+  })
+
+  it("keeps a failed provider discovery retryable and enables the recovered catalog", async () => {
+    const loadPresets = vi
+      .fn<ReleaseAgentPresetLoader>()
+      .mockRejectedValueOnce(new Error("Temporary catalog failure"))
+      .mockResolvedValueOnce(["codex"])
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<ConnectedCanonicalAgent loadPresets={loadPresets} />))
+
+    expect(host.textContent).toContain("Agent presets could not be refreshed")
+    expect(host.textContent).not.toContain("Selected agent is not configured")
+    const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Retry agent presets"
+    )
+    if (retry === undefined) throw new Error("Expected the provider-catalog retry")
+    await act(async () => retry.click())
+
+    const codex = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Run with Codex") === true
+    )
+    expect(loadPresets).toHaveBeenCalledTimes(2)
+    expect(host.textContent).not.toContain("Agent presets could not be refreshed")
+    expect(codex?.disabled).toBe(false)
+  })
+
+  it("keeps a successfully loaded empty provider catalog definitive", async () => {
+    const loadPresets = vi.fn<ReleaseAgentPresetLoader>().mockResolvedValue([])
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<ConnectedCanonicalAgent loadPresets={loadPresets} />))
+
+    const providerButtons = [...host.querySelectorAll<HTMLButtonElement>("[role='radio']")]
+    expect(loadPresets).toHaveBeenCalledOnce()
+    expect(providerButtons).toHaveLength(2)
+    expect(providerButtons.every(({ disabled }) => disabled)).toBe(true)
+    expect(host.textContent).toContain("Selected agent is not configured")
+    expect(host.textContent).not.toContain("Retry agent presets")
   })
 
   it("keeps a local release thread and sends only exact identity, bounded history, and the prompt", async () => {

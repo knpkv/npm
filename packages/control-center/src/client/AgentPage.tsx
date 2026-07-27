@@ -48,6 +48,8 @@ export type ReleaseAgentTurn = (
   options: { readonly signal: AbortSignal }
 ) => Promise<ReleaseAgentTurnResult>
 
+export type ReleaseAgentPresetLoader = (signal: AbortSignal) => Promise<ReadonlyArray<"claude" | "codex">>
+
 export interface AgentPageProps {
   /** Application-owned local runtime boundary. Omit it to render an honest unavailable state. */
   readonly runTurn?: ReleaseAgentTurn
@@ -772,25 +774,48 @@ export const AgentPage = ({ availableProviders, runTurn }: AgentPageProps): Reac
   )
 }
 
+type ProviderCatalogState =
+  | { readonly _tag: "loading" }
+  | { readonly _tag: "ready"; readonly providers: ReadonlyArray<"claude" | "codex"> }
+  | { readonly _tag: "failed" }
+
 /** Route entry wired to the authenticated Control Center release-agent API. */
-export const ConnectedAgentPage = (): ReactElement => {
-  const [availableProviders, setAvailableProviders] = useState<ReadonlyArray<"claude" | "codex"> | undefined>(undefined)
+export const ConnectedAgentPage = ({
+  loadPresets = loadBrowserReleaseAgentPresets,
+  runTurn = runBrowserReleaseAgentTurn
+}: {
+  readonly loadPresets?: ReleaseAgentPresetLoader
+  readonly runTurn?: ReleaseAgentTurn
+} = {}): ReactElement => {
+  const [catalog, setCatalog] = useState<ProviderCatalogState>({ _tag: "loading" })
+  const [catalogRequest, setCatalogRequest] = useState(0)
   useEffect(() => {
     const abort = new AbortController()
-    loadBrowserReleaseAgentPresets(abort.signal).then(
+    setCatalog({ _tag: "loading" })
+    loadPresets(abort.signal).then(
       (providers) => {
-        if (!abort.signal.aborted) setAvailableProviders(providers)
+        if (!abort.signal.aborted) setCatalog({ _tag: "ready", providers })
       },
       () => {
-        if (!abort.signal.aborted) setAvailableProviders([])
+        if (!abort.signal.aborted) setCatalog({ _tag: "failed" })
       }
     )
     return () => abort.abort()
-  }, [])
+  }, [catalogRequest, loadPresets])
+  const availableProviders = catalog._tag === "ready" ? catalog.providers : undefined
   return (
-    <AgentPage
-      {...(availableProviders === undefined ? {} : { availableProviders })}
-      runTurn={runBrowserReleaseAgentTurn}
-    />
+    <>
+      {catalog._tag === "failed" ? (
+        <section className={styles.state}>
+          <StatePanel
+            action={<Button onClick={() => setCatalogRequest((request) => request + 1)}>Retry agent presets</Button>}
+            description="Relay could not confirm the configured local runners. You can retry without leaving this release."
+            title="Agent presets could not be refreshed"
+            tone="caution"
+          />
+        </section>
+      ) : null}
+      <AgentPage {...(availableProviders === undefined ? {} : { availableProviders })} runTurn={runTurn} />
+    </>
   )
 }
