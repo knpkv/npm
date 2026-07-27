@@ -784,6 +784,8 @@ responsible complete review. Suggestions already supported by exact evidence may
 still be returned in that state.
 `.trim()
 
+const NATIVE_REVIEW_POST_PROCESSING_RESERVE_MILLIS = 30_000
+
 const NATIVE_REVIEW_INSTRUCTIONS = `
 Review the complete immutable project in this disposable review sandbox. The trusted
 base is the Git ref control-center-review-base and the reviewed head is HEAD. Inspect
@@ -950,7 +952,10 @@ const makeExecutor = Effect.gen(function*() {
                 executable: selected.reviewExecutable,
                 prompt: nativePrompt,
                 outputSchema,
-                maximumDurationMillis: persistedProfile.budgetMillis,
+                maximumDurationMillis: Math.max(
+                  1,
+                  persistedProfile.budgetMillis - NATIVE_REVIEW_POST_PROCESSING_RESERVE_MILLIS
+                ),
                 ...(String(selected.model) === "configured-default" || String(selected.model) === "default"
                   ? {}
                   : { model: String(selected.model) })
