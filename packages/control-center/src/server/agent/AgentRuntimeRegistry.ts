@@ -146,6 +146,14 @@ const unavailableCatalogEntry = (providerId: "codex" | "claude" | "openai-compat
   health: "not-configured"
 })
 
+const truncateAtCodePointBoundary = (value: string, maximumLength: number): string => {
+  const prefix = value.slice(0, maximumLength)
+  const finalCodeUnit = prefix.charCodeAt(prefix.length - 1)
+  return finalCodeUnit >= 0xD800 && finalCodeUnit <= 0xDBFF
+    ? prefix.slice(0, -1)
+    : prefix
+}
+
 const reviewProfileIdentity = Effect.fn("AgentRuntimeRegistry.reviewProfileIdentity")(function*(
   cryptoService: Crypto.Crypto,
   providerId: "codex" | "claude" | "openai-compatible",
@@ -172,7 +180,12 @@ const reviewProfileIdentity = Effect.fn("AgentRuntimeRegistry.reviewProfileIdent
   return {
     label: fullLabel.length <= MAXIMUM_REVIEW_PROFILE_LABEL_LENGTH
       ? fullLabel
-      : `${fullLabel.slice(0, MAXIMUM_REVIEW_PROFILE_LABEL_LENGTH - labelSuffix.length)}${labelSuffix}`,
+      : `${
+        truncateAtCodePointBoundary(
+          fullLabel,
+          MAXIMUM_REVIEW_PROFILE_LABEL_LENGTH - labelSuffix.length
+        )
+      }${labelSuffix}`,
     profileId: ReviewAgentProfileId.make(`${providerId}:${component}:sbx`)
   }
 })

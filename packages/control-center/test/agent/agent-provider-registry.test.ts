@@ -211,6 +211,7 @@ describe("agent provider registry", () => {
 
   it.effect("advertises configured Claude as an explicit native review preset", () => {
     const processCalls: Array<ChildProcess.Command> = []
+    const model = AgentModelId.make("😀".repeat(90))
     return Effect.gen(function*() {
       const registry = yield* AgentRuntimeRegistry
       const catalog = yield* registry.catalog()
@@ -219,13 +220,19 @@ describe("agent provider registry", () => {
       )
       const selected = yield* registry.select({
         providerId: AgentProviderId.make("claude"),
-        model: "default",
+        model,
         access: "read-only",
         capability: "pr-review"
       })
 
       assert.deepStrictEqual(claude?.capabilities, ["release-chat", "pr-review"])
-      assert.strictEqual(claude?.reviewProfile?.profileId, "claude:default:sbx")
+      assert.match(claude?.reviewProfile?.profileId ?? "", /^claude:encoded-[0-9a-f]{64}:sbx$/u)
+      assert.isFalse(
+        [...(claude?.reviewProfile?.label ?? "")].some((character) => {
+          const codeUnit = character.charCodeAt(0)
+          return character.length === 1 && codeUnit >= 0xD800 && codeUnit <= 0xDFFF
+        })
+      )
       assert.strictEqual(claude?.reviewProfile?.networkAccess, "provider-enabled")
       assert.strictEqual(selected.reviewExecution, "native-claude")
       assert.strictEqual(selected.reviewExecutable, "claude-wrapper")
@@ -238,7 +245,8 @@ describe("agent provider registry", () => {
         agentProviderRuntimeRegistryLayer({
           claude: {
             cwd: CWD_CANARY,
-            executable: "./bin/claude-canary"
+            executable: "./bin/claude-canary",
+            model
           },
           prReviewClaudeExecutable: "claude-wrapper",
           prReviewEnabled: true
