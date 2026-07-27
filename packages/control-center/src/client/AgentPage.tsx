@@ -787,5 +787,10 @@ export const ConnectedAgentPage = (): ReactElement => {
     )
     return () => abort.abort()
   }, [])
-  return <AgentPage availableProviders={availableProviders} runTurn={runBrowserReleaseAgentTurn} />
+  return (
+    <AgentPage
+      {...(availableProviders === undefined ? {} : { availableProviders })}
+      runTurn={runBrowserReleaseAgentTurn}
+    />
+  )
 }
