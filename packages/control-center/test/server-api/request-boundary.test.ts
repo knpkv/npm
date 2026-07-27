@@ -43,6 +43,11 @@ const webHandlerLayer = Layer.mergeAll(
   HttpRouter.add("POST", "/api/v1/session/pair", HttpServerResponse.text("ok")),
   HttpRouter.add("GET", "/api/ping", HttpServerResponse.text("pong")),
   HttpRouter.add("GET", "/api/v1/agent/providers", HttpServerResponse.text("providers")),
+  HttpRouter.add(
+    "GET",
+    "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+    HttpServerResponse.text("preview")
+  ),
   HttpRouter.add("POST", "/api/v1/agent/releases/release-1/jobs", HttpServerResponse.text("job")),
   HttpRouter.add("GET", "/api/schema-request", schemaDefect("Payload")),
   HttpRouter.add("POST", "/api/schema-response", schemaDefect("Body")),
@@ -166,12 +171,17 @@ describe("API request boundary", () => {
             headers: { "x-correlation-id": correlationId }
           })
         )
-      const firstRead = await request("/api/v1/agent/providers", "GET", "agent-read-1")
       const firstMutation = await request(
         "/api/v1/agent/releases/release-1/jobs",
         "POST",
         "agent-mutation-1"
       )
+      const publicationPreview = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+        "GET",
+        "publication-preview"
+      )
+      const firstRead = await request("/api/v1/agent/providers", "GET", "agent-read-1")
       const secondRead = await request("/api/v1/agent/providers", "GET", "agent-read-2")
       const firstOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-1")
       const secondOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-2")
@@ -181,8 +191,9 @@ describe("API request boundary", () => {
         "agent-mutation-2"
       )
 
-      assert.strictEqual(firstRead.status, 200)
       assert.strictEqual(firstMutation.status, 200)
+      assert.strictEqual(publicationPreview.status, 429)
+      assert.strictEqual(firstRead.status, 200)
       assert.strictEqual(secondRead.status, 429)
       assert.strictEqual(firstOrdinaryRead.status, 200)
       assert.strictEqual(secondOrdinaryRead.status, 429)
