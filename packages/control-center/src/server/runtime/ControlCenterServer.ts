@@ -134,6 +134,10 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly workspaceRoot: string
   readonly sbxExecutable?: string
   readonly sbxTemplate?: string
+  /** Codex executable available inside the native review sandbox. */
+  readonly codexExecutable?: string
+  /** Claude executable available inside the native review sandbox. */
+  readonly claudeExecutable?: string
   readonly reviewBudgetMillis?: number
   readonly leaseOwner: AgentLeaseOwner
   readonly leaseDuration?: Duration.Input
@@ -185,7 +189,7 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
 export class PrReviewWorkerConfigurationError extends Schema.TaggedErrorClass<
   PrReviewWorkerConfigurationError
 >()("PrReviewWorkerConfigurationError", {
-  diagnosticCode: Schema.Literal("prompt-only-provider-required")
+  diagnosticCode: Schema.Literal("review-provider-required")
 }) {}
 
 /** Failures that can prevent the runtime from acquiring or listening. */
@@ -352,6 +356,12 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           ? {}
           : {
             prReviewEnabled: true,
+            ...(options.prReviewWorker.codexExecutable === undefined
+              ? {}
+              : { prReviewCodexExecutable: options.prReviewWorker.codexExecutable }),
+            ...(options.prReviewWorker.claudeExecutable === undefined
+              ? {}
+              : { prReviewClaudeExecutable: options.prReviewWorker.claudeExecutable }),
             ...(options.prReviewWorker.reviewBudgetMillis === undefined
               ? {}
               : { prReviewBudgetMillis: options.prReviewWorker.reviewBudgetMillis })
@@ -426,11 +436,17 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   const prReviewWorker = options.prReviewWorker === undefined || options.prReviewWorker === null
     ? Layer.empty
-    : options.releaseAgent?.openAiCompatible === undefined
+    : options.releaseAgent === undefined ||
+        options.releaseAgent === null ||
+        (
+          options.releaseAgent.openAiCompatible === undefined &&
+          !options.releaseAgent.enabledProviders.includes("codex") &&
+          !options.releaseAgent.enabledProviders.includes("claude")
+        )
     ? Layer.effectDiscard(
       Effect.fail(
         new PrReviewWorkerConfigurationError({
-          diagnosticCode: "prompt-only-provider-required"
+          diagnosticCode: "review-provider-required"
         })
       )
     )

@@ -47,6 +47,7 @@ import {
   PrReviewSuggestionId
 } from "../../domain/prReview.js"
 import {
+  PrReviewSuggestionEdit,
   PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevision,
   PrReviewSuggestionRevisionPageSize,
@@ -106,7 +107,8 @@ const ReviewThreadRevisionPayload = Schema.Struct({
   revisionId: Schema.String,
   sequence: Schema.Int,
   authorKind: Schema.Literals(["operator", "agent"]),
-  validationState: Schema.Literals(["validated", "requires-revalidation"])
+  validationState: Schema.Literals(["validated", "requires-revalidation"]),
+  suggestionState: Schema.optionalKey(PrReviewSuggestion.fields.state)
 })
 const ReviewThreadCancellationPayload = Schema.Struct({ requestedAt: UtcTimestamp })
 
@@ -212,7 +214,7 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
         event.payload
       )
       return yield* Schema.decodeUnknownEffect(
-        PullRequestReviewThreadEvent
+        Schema.toType(PullRequestReviewThreadEvent)
       )({
         _tag: "suggestion-revised",
         ...common,
@@ -471,13 +473,16 @@ const makePullRequestReviews = Effect.gen(function*() {
     ) {
       return yield* new ApplicationInvalidRequest()
     }
-    const revision = persisted.suggestion.state === selected.suggestion.state
+    const selectedState = persisted.suggestion.state === "dismissed"
+      ? "dismissed"
+      : selected.suggestion.state
+    const revision = persisted.suggestion.state === selectedState
       ? persisted
       : new PrReviewSuggestionRevision({
         ...persisted,
         suggestion: PrReviewSuggestion.make({
           ...persisted.suggestion,
-          state: selected.suggestion.state
+          state: selectedState
         })
       })
     return { latest: selected.latest, revision }
@@ -524,13 +529,16 @@ const makePullRequestReviews = Effect.gen(function*() {
     ) {
       return yield* new ApplicationInvalidRequest()
     }
-    const current = persisted.suggestion.state === selected.suggestion.state
+    const selectedState = persisted.suggestion.state === "dismissed"
+      ? "dismissed"
+      : selected.suggestion.state
+    const current = persisted.suggestion.state === selectedState
       ? persisted
       : new PrReviewSuggestionRevision({
         ...persisted,
         suggestion: PrReviewSuggestion.make({
           ...persisted.suggestion,
-          state: selected.suggestion.state
+          state: selectedState
         })
       })
     return {
@@ -809,10 +817,14 @@ const makePullRequestReviews = Effect.gen(function*() {
       if (reviewProfile === undefined) {
         return yield* new ApplicationInvalidRequest()
       }
-      if (
-        selected.filesystemAccess !== "none" ||
-        selected.languageModel === undefined
-      ) return yield* unavailable()
+      const supportedReviewRunner = (selected.reviewExecution === "effect-ai" &&
+        selected.filesystemAccess === "none" &&
+        selected.languageModel !== undefined &&
+        reviewProfile.networkAccess === "blocked") ||
+        ((selected.reviewExecution === "native-codex" || selected.reviewExecution === "native-claude") &&
+          selected.reviewExecutable !== undefined &&
+          reviewProfile.networkAccess === "provider-enabled")
+      if (!supportedReviewRunner) return yield* unavailable()
 
       const jobId = yield* cryptoService.randomUUIDv7.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
@@ -916,6 +928,50 @@ const makePullRequestReviews = Effect.gen(function*() {
         expectedRevisionId: input.request.expectedRevisionId,
         expectedSequence: input.request.expectedSequence,
         edit: input.request.edit,
+        author: PrReviewSuggestionOperatorAuthor.make({
+          personId: input.session.actor.personId
+        }),
+        createdAt: yield* DateTime.now
+      }).pipe(Effect.mapError(mapPersistenceWriteError))
+    }),
+    dismissSuggestion: Effect.fn(
+      "PullRequestReviews.dismissSuggestion"
+    )(function*(input) {
+      if (
+        input.session.workspaceId !== input.workspaceId ||
+        input.session.actor._tag !== "human" ||
+        input.session.permission !== "workspace-owner"
+      ) {
+        return yield* new ApplicationInvalidRequest()
+      }
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") {
+        return yield* new ApplicationInvalidRequest()
+      }
+      const page = yield* revisionHistory(
+        input.workspaceId,
+        target,
+        input.jobId,
+        input.suggestionId,
+        null,
+        PrReviewSuggestionRevisionPageSize.make(1)
+      )
+      if (page.current.suggestion.state !== "draft") {
+        return yield* new ApplicationInvalidRequest()
+      }
+      const edit = yield* Schema.decodeUnknownEffect(
+        Schema.toType(PrReviewSuggestionEdit)
+      )(page.current.suggestion).pipe(
+        Effect.mapError(() => new ApplicationInvalidRequest())
+      )
+      return yield* persistence.agentJobs.appendReviewSuggestionRevision({
+        workspaceId: input.workspaceId,
+        jobId: input.jobId,
+        suggestionId: input.suggestionId,
+        expectedRevisionId: input.request.expectedRevisionId,
+        expectedSequence: input.request.expectedSequence,
+        edit,
+        state: "dismissed",
         author: PrReviewSuggestionOperatorAuthor.make({
           personId: input.session.actor.personId
         }),

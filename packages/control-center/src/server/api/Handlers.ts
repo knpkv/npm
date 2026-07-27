@@ -1087,6 +1087,29 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
           }))
+        .handle("dismissReviewSuggestion", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (
+              session.actor._tag !== "human" ||
+              session.permission !== "workspace-owner"
+            ) {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            return yield* reviews.dismissSuggestion({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              jobId: params.jobId,
+              suggestionId: params.suggestionId,
+              request: payload,
+              session
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("previewReviewSuggestionPublication", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

@@ -32,6 +32,7 @@
 .reviewStatus,
 .reviewLaunchDialog,
 .reviewLaunchBody,
+.reviewPresetList,
 .reviewLaunchFacts,
 .reviewLaunchFacts > div,
 .reviewLaunchActions,
@@ -242,6 +243,35 @@
 .reviewLaunchBody,
 .publicationDialogBody {
   gap: var(--rly-space-24);
+}
+
+.reviewPresetList {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rly-space-8);
+}
+
+.reviewPresetList button {
+  display: grid;
+  gap: var(--rly-space-4);
+  padding: var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+  text-align: start;
+}
+
+.reviewPresetList button[aria-checked="true"] {
+  border-color: var(--rly-color-agent);
+  background: var(--rly-color-surface-2);
+  box-shadow: inset 0 0 0 1px var(--rly-color-agent);
+}
+
+.reviewPresetList span {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
 }
 
 .reviewLaunchEyebrow,
@@ -746,6 +776,22 @@
 .reviewThreadComposer label {
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
+}
+
+.reviewTemplateList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.reviewTemplateList button {
+  justify-self: auto;
+}
+
+.reviewSelectedPreset {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
 }
 
 .reviewThreadComposer textarea {

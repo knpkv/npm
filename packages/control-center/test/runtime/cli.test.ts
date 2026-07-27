@@ -104,20 +104,28 @@ const withWriteAll = (
 })
 
 describe("Control Center CLI", () => {
-  it("rejects a review budget longer than its sbx lifetime and defaults blank optional values", () => {
+  it("rejects short or overlong review budgets and defaults blank optional values", () => {
     assert.isTrue(
       Result.isFailure(
         Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
-          budgetMillis: 1_201,
-          maximumSandboxDurationMillis: 1_200
+          budgetMillis: 30_000,
+          maximumSandboxDurationMillis: 60_000
+        })
+      )
+    )
+    assert.isTrue(
+      Result.isFailure(
+        Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
+          budgetMillis: 60_001,
+          maximumSandboxDurationMillis: 60_000
         })
       )
     )
     assert.isTrue(
       Result.isSuccess(
         Schema.decodeUnknownResult(PrReviewTimingConfiguration)({
-          budgetMillis: 1_200,
-          maximumSandboxDurationMillis: 1_200
+          budgetMillis: 60_000,
+          maximumSandboxDurationMillis: 60_000
         })
       )
     )

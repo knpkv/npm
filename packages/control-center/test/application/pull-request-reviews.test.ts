@@ -45,6 +45,7 @@ import { PrReviewPath, PrReviewReport, PrReviewSuggestion, PrReviewSuggestionId 
 import {
   PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
+  PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevision,
   PrReviewSuggestionRevisionPage,
   PrReviewSuggestionRevisionPageSize,
@@ -111,11 +112,20 @@ const REVIEW_REVISION_ID = PrReviewSuggestionRevisionId.make(
 )
 const MODEL = AgentModelId.make("review-model")
 const PROVIDER_ID = DurableAgentProviderId.make("openai-compatible")
+const CLAUDE_MODEL = AgentModelId.make("default")
+const CLAUDE_PROVIDER_ID = DurableAgentProviderId.make("claude")
 const REVIEW_PROFILE: ReviewAgentProfile = {
   profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
   label: "Full-project review · openai-compatible · review-model",
   budgetMillis: 1_200_000,
   networkAccess: "blocked",
+  sandbox: "sbx"
+}
+const CLAUDE_REVIEW_PROFILE: ReviewAgentProfile = {
+  profileId: ReviewAgentProfileId.make("claude:default:sbx"),
+  label: "Full-project review · claude · default",
+  budgetMillis: 1_200_000,
+  networkAccess: "provider-enabled",
   sandbox: "sbx"
 }
 const LANGUAGE_MODEL = Effect.runSync(
@@ -374,6 +384,7 @@ const registry = AgentRuntimeRegistry.of({
         model: MODEL,
         runtime,
         filesystemAccess: "none",
+        reviewExecution: "effect-ai",
         languageModel: LANGUAGE_MODEL
       })
       : Effect.fail(
@@ -389,6 +400,36 @@ const registry = AgentRuntimeRegistry.of({
 const localRegistry = AgentRuntimeRegistry.of({
   ...registry,
   select: () => Effect.succeed({ model: MODEL, runtime, filesystemAccess: "configured-workspace" })
+})
+
+const nativeClaudeRegistry = AgentRuntimeRegistry.of({
+  catalog: () =>
+    Effect.succeed({
+      providers: [{
+        providerId: CLAUDE_PROVIDER_ID,
+        models: [CLAUDE_MODEL],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available",
+        reviewProfile: CLAUDE_REVIEW_PROFILE
+      }]
+    }),
+  select: ({ access, model, providerId }) =>
+    access === "read-only" && model === CLAUDE_MODEL && providerId === "claude"
+      ? Effect.succeed({
+        model: CLAUDE_MODEL,
+        runtime,
+        filesystemAccess: "configured-workspace",
+        reviewExecution: "native-claude",
+        reviewExecutable: "claude"
+      })
+      : Effect.fail(
+        new AgentProviderError({
+          providerId,
+          phase: "configuration",
+          message: "Unavailable native Claude test selection.",
+          retryable: false
+        })
+      )
 })
 
 const reviewDisabledRegistry = AgentRuntimeRegistry.of({
@@ -423,7 +464,8 @@ const withService = <Success, Failure>(
     enqueueInput: Ref.Ref<unknown>,
     publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>,
     publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>,
-    publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>
+    publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>,
+    revisionInputs: Ref.Ref<ReadonlyArray<unknown>>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
@@ -434,7 +476,8 @@ const withService = <Success, Failure>(
   releasePublication: Persistence["Service"]["agentJobs"]["releaseReviewSuggestionPublication"] = () =>
     Effect.succeed(undefined),
   publishPublication?: ReviewSuggestionPublicationGateway["Service"]["publish"],
-  latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"]
+  latestReviewOverride?: Persistence["Service"]["agentJobs"]["latestReview"],
+  appendRevision?: Persistence["Service"]["agentJobs"]["appendReviewSuggestionRevision"]
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-reviews-")
@@ -446,6 +489,7 @@ const withService = <Success, Failure>(
       const publicationFailure = yield* Ref.make<
         null | ReviewSuggestionPublicationGatewayError["reason"]
       >(null)
+      const revisionInputs = yield* Ref.make<ReadonlyArray<unknown>>([])
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
@@ -454,6 +498,12 @@ const withService = <Success, Failure>(
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
           latestReview: resolveLatestReview,
+          appendReviewSuggestionRevision: (input) =>
+            Ref.update(revisionInputs, (inputs) => [...inputs, input]).pipe(
+              Effect.andThen(
+                (appendRevision ?? persistence.agentJobs.appendReviewSuggestionRevision)(input)
+              )
+            ),
           reviewSuggestionRevisions: (input) =>
             Effect.gen(function*() {
               const selected = yield* resolveLatestReview({
@@ -588,7 +638,8 @@ const withService = <Success, Failure>(
         enqueueInput,
         publicationCommands,
         publicationAuthority,
-        publicationFailure
+        publicationFailure,
+        revisionInputs
       )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
@@ -871,6 +922,43 @@ describe("pull request reviews", () => {
       })
     ))
 
+  it.effect("admits an advertised native Claude review before durable enqueue", () =>
+    withService(
+      (service, enqueueInput) =>
+        Effect.gen(function*() {
+          const accepted = yield* service.enqueue({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            request: {
+              providerId: CLAUDE_PROVIDER_ID,
+              model: CLAUDE_MODEL,
+              profile: "read-only",
+              reviewProfileId: CLAUDE_REVIEW_PROFILE.profileId
+            }
+          })
+
+          assert.strictEqual(accepted._tag, "pending")
+          const persisted = yield* Ref.get(enqueueInput)
+          assert.isNotNull(persisted)
+          if (typeof persisted !== "object" || persisted === null || !("task" in persisted)) {
+            return yield* Effect.die("native Claude review enqueue input was not captured")
+          }
+          assert.deepStrictEqual(persisted.task, {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
+            reviewProfile: CLAUDE_REVIEW_PROFILE,
+            subject: {
+              providerId: "codecommit",
+              repository: "control-center",
+              pullRequestId: "212",
+              baseRevision: "1".repeat(40),
+              headRevision: "2".repeat(40)
+            }
+          })
+        }),
+      nativeClaudeRegistry
+    ))
+
   it.effect("rejects local workspace-capable providers before durable enqueue", () =>
     withService(
       (service, enqueueInput) =>
@@ -1041,6 +1129,66 @@ describe("pull request reviews", () => {
       registry,
       Option.some(completedReview)
     ))
+
+  it.effect("records a human dismissal without calling the CodeCommit publication gateway", () => {
+    const dismissedRevision = new PrReviewSuggestionRevision({
+      revisionId: PrReviewSuggestionRevisionId.make(`sha256:${"6".repeat(64)}`),
+      sequence: PrReviewSuggestionRevisionSequence.make(2),
+      predecessorRevisionId: REVIEW_REVISION_ID,
+      sourceJobId: REVIEW_JOB_ID,
+      subject: reviewReport.subject,
+      suggestion: PrReviewSuggestion.make({
+        ...reviewReport.suggestions[0]!,
+        state: "dismissed"
+      }),
+      validation: new PrReviewSuggestionValidated({
+        reviewedHead: reviewReport.subject.headRevision,
+        validatingJobId: REVIEW_JOB_ID,
+        sourceRevisionId: REVIEW_REVISION_ID
+      }),
+      author: PrReviewSuggestionOperatorAuthor.make({
+        personId: OPERATOR_ID
+      }),
+      createdAt: PUBLISHED_TIMESTAMP
+    })
+    return withService(
+      (service, _enqueueInput, publicationCommands, _authority, _failure, revisionInputs) =>
+        Effect.gen(function*() {
+          const dismissed = yield* service.dismissSuggestion({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            request: {
+              expectedRevisionId: REVIEW_REVISION_ID,
+              expectedSequence: PrReviewSuggestionRevisionSequence.make(1)
+            },
+            session: HUMAN_SESSION
+          })
+
+          assert.strictEqual(dismissed.suggestion.state, "dismissed")
+          assert.deepStrictEqual(yield* Ref.get(publicationCommands), [])
+          const inputs = yield* Ref.get(revisionInputs)
+          assert.strictEqual(inputs.length, 1)
+          assert.deepInclude(inputs[0], {
+            workspaceId: WORKSPACE_ID,
+            jobId: REVIEW_JOB_ID,
+            suggestionId: SUGGESTION_ID,
+            expectedRevisionId: REVIEW_REVISION_ID,
+            expectedSequence: PrReviewSuggestionRevisionSequence.make(1),
+            state: "dismissed"
+          })
+        }),
+      registry,
+      Option.some(completedReview),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => Effect.succeed(dismissedRevision)
+    )
+  })
 
   it.effect("reserves one edited body before allowing the provider call", () =>
     Effect.gen(function*() {
@@ -1908,6 +2056,38 @@ describe("pull request reviews", () => {
           history.revisions.map(({ sequence }) => sequence),
           [2, 1]
         )
+
+        const replay = yield* service.thread({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          after: ReleaseAgentThreadCursor.make(0),
+          limit: 128
+        })
+        const revisionEvents = replay.events.filter(
+          (
+            event
+          ): event is Extract<
+            (typeof replay.events)[number],
+            { readonly _tag: "suggestion-revised" }
+          > => event._tag === "suggestion-revised"
+        )
+        assert.deepStrictEqual(
+          revisionEvents.map(({ sequence }) => sequence),
+          [
+            PrReviewSuggestionRevisionSequence.make(2),
+            PrReviewSuggestionRevisionSequence.make(3)
+          ]
+        )
+        assert.deepInclude(revisionEvents[0], {
+          suggestionId: SUGGESTION_ID,
+          authorKind: "operator",
+          validationState: "validated"
+        })
+        assert.deepInclude(revisionEvents[1], {
+          suggestionId: SUGGESTION_ID,
+          authorKind: "operator",
+          validationState: "requires-revalidation"
+        })
       })
     ))
 

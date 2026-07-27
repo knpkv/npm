@@ -4,13 +4,15 @@ import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import type {
+  DismissReviewSuggestionRequest,
+  DismissReviewSuggestionResponse,
   EditReviewSuggestionRequest,
   EditReviewSuggestionResponse,
   ReviewSuggestionRevisionPage
 } from "../../api/agent.js"
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId, JobId } from "../../domain/identifiers.js"
-import type { PrReviewSuggestionId } from "../../domain/prReview.js"
+import type { PrReviewSuggestion, PrReviewSuggestionId } from "../../domain/prReview.js"
 import {
   type PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionPageSize,
@@ -28,6 +30,11 @@ export interface ReviewSuggestionRevisionScope {
 }
 
 export interface ReviewSuggestionRevisionTransport {
+  readonly dismiss?: (
+    scope: ReviewSuggestionRevisionScope,
+    request: DismissReviewSuggestionRequest,
+    signal: AbortSignal
+  ) => Promise<DismissReviewSuggestionResponse>
   readonly edit: (
     scope: ReviewSuggestionRevisionScope,
     request: EditReviewSuggestionRequest,
@@ -40,10 +47,13 @@ export interface ReviewSuggestionRevisionTransport {
   ) => Promise<ReviewSuggestionRevisionPage>
 }
 
+export type ReviewSuggestionRevisionAccepted = (suggestion: PrReviewSuggestion) => void
+
 export type ReviewSuggestionRevisionState =
   | { readonly _tag: "idle" }
   | { readonly _tag: "loading" }
   | { readonly _tag: "ready"; readonly page: ReviewSuggestionRevisionPage }
+  | { readonly _tag: "dismissing"; readonly page: ReviewSuggestionRevisionPage }
   | {
     readonly _tag: "saving"
     readonly draft: PrReviewSuggestionEdit
@@ -61,6 +71,21 @@ export type ReviewSuggestionRevisionState =
   }
 
 export const browserReviewSuggestionRevisionTransport: ReviewSuggestionRevisionTransport = {
+  dismiss: (scope, request, signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeAuthenticatedMutationClient
+        return yield* client.agent.dismissReviewSuggestion({
+          params: {
+            entityId: scope.entityId,
+            jobId: scope.jobId,
+            suggestionId: scope.suggestionId
+          },
+          payload: request
+        })
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    ),
   edit: (scope, request, signal) =>
     Effect.runPromise(
       Effect.gen(function*() {
@@ -155,12 +180,15 @@ const saveOutcome = (
 ): SaveOutcome => ({ _tag, page })
 
 const conflictFailure = Predicate.isTagged("ConflictApiError")
+const ignoreAcceptedRevision = (_suggestion: PrReviewSuggestion): void => undefined
 
 /** Scope-safe browser controller for one stable suggestion's immutable revisions. */
 export const useReviewSuggestionRevisions = (
   scope: ReviewSuggestionRevisionScope | null,
-  transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport
+  transport: ReviewSuggestionRevisionTransport = browserReviewSuggestionRevisionTransport,
+  onAccepted: ReviewSuggestionRevisionAccepted = ignoreAcceptedRevision
 ): {
+  readonly dismiss: () => void
   readonly loadEarlier: () => void
   readonly loadingEarlier: boolean
   readonly resolveConflict: () => void
@@ -174,7 +202,9 @@ export const useReviewSuggestionRevisions = (
   const activeAbort = useRef<AbortController | null>(null)
   const loadingEarlierRef = useRef(false)
   const latestScope = useRef(scope)
+  const latestOnAccepted = useRef(onAccepted)
   latestScope.current = scope
+  latestOnAccepted.current = onAccepted
 
   useEffect(() => {
     activeAbort.current?.abort()
@@ -262,6 +292,7 @@ export const useReviewSuggestionRevisions = (
             ? { _tag: "failed", draft: null, page: outcome.page }
             : { _tag: "ready", page: outcome.page }
         )
+        if (outcome._tag !== "conflict") latestOnAccepted.current(outcome.page.current.suggestion)
       },
       () => {
         if (
@@ -270,6 +301,43 @@ export const useReviewSuggestionRevisions = (
           !sameScope(latestScope.current, current)
         ) return
         setState({ _tag: "failed", draft, page: retained })
+      }
+    )
+  }, [scope, state, transport])
+
+  const dismiss = useCallback((): void => {
+    if (scope === null || state._tag !== "ready" || transport.dismiss === undefined) return
+    const current = scope
+    const retained = state.page
+    activeAbort.current?.abort()
+    loadingEarlierRef.current = false
+    setLoadingEarlier(false)
+    const abort = new AbortController()
+    activeAbort.current = abort
+    setState({ _tag: "dismissing", page: retained })
+    transport.dismiss(current, {
+      expectedRevisionId: retained.current.revisionId,
+      expectedSequence: retained.current.sequence
+    }, abort.signal).then(
+      (accepted) => {
+        if (
+          abort.signal.aborted ||
+          latestScope.current === null ||
+          !sameScope(latestScope.current, current)
+        ) return
+        setState({
+          _tag: "ready",
+          page: pageWithAcceptedRevision(retained, accepted)
+        })
+        latestOnAccepted.current(accepted.suggestion)
+      },
+      () => {
+        if (
+          abort.signal.aborted ||
+          latestScope.current === null ||
+          !sameScope(latestScope.current, current)
+        ) return
+        setState({ _tag: "failed", draft: null, page: retained })
       }
     )
   }, [scope, state, transport])
@@ -328,6 +396,7 @@ export const useReviewSuggestionRevisions = (
   }, [scope, state, transport])
 
   return useMemo(() => ({
+    dismiss,
     loadEarlier,
     loadingEarlier,
     resolveConflict: () =>
@@ -350,5 +419,5 @@ export const useReviewSuggestionRevisions = (
     },
     save,
     state
-  }), [loadEarlier, loadingEarlier, save, state])
+  }), [dismiss, loadEarlier, loadingEarlier, save, state])
 }

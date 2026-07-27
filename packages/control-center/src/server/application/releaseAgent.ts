@@ -108,10 +108,8 @@ ${prompt}
 const resolveProvider = (
   options: ReleaseAgentRuntimeOptions,
   requested: AgentProvider
-): AgentProvider | undefined => {
-  if (options.enabledProviders.some((enabled) => enabled === requested)) return requested
-  return options.enabledProviders.length === 1 ? options.enabledProviders[0] : undefined
-}
+): AgentProvider | undefined =>
+  options.enabledProviders.some((enabled) => enabled === requested) ? requested : undefined
 
 /** Build the release-agent application service around local, ephemeral CLI invocations. */
 export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(function*(

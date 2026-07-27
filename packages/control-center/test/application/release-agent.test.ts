@@ -95,4 +95,29 @@ describe("release agent application", () => {
       NodeFileSystem.layer
     ]))
   })
+
+  it.effect("does not substitute another enabled provider for the requested provider", () => {
+    const calls: Array<ChildProcess.Command> = []
+    return Effect.gen(function*() {
+      const snapshot = makeNodePortfolioSnapshot()
+      const release = snapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+
+      const agent = yield* makeReleaseAgentTurns({ cwd: "/workspace", enabledProviders: ["codex"] })
+      const result = yield* Effect.result(agent.runTurn({
+        history: [],
+        prompt: "Can this ship?",
+        provider: "claude",
+        releaseId: release.releaseId,
+        workspaceId: snapshot.workspaceId
+      }))
+
+      assert.isTrue(result._tag === "Failure" && result.failure._tag === "ApplicationServiceUnavailable")
+      assert.strictEqual(calls.length, 0)
+    }).pipe(Effect.provide([
+      Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),
+      fakeProcessLayer(calls),
+      NodeFileSystem.layer
+    ]))
+  })
 })

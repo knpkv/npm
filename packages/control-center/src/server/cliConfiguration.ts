@@ -8,6 +8,7 @@ import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
+import { MINIMUM_PR_REVIEW_BUDGET_MILLIS } from "./agent/PrReviewTiming.js"
 import {
   boundDataRootMarkerContent as boundMarkerContent,
   type ControlCenterDataPaths,
@@ -35,14 +36,18 @@ import { PersistenceConfigError } from "./persistence/errors.js"
 export { decodeControlCenterDataPaths }
 export type { ControlCenterDataPaths }
 
-const PrReviewDurationMillis = Schema.Int.check(
+const PrReviewBudgetMillis = Schema.Int.check(
+  Schema.isBetween({ minimum: MINIMUM_PR_REVIEW_BUDGET_MILLIS, maximum: 1_800_000 })
+)
+
+const PrReviewSandboxDurationMillis = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 1_800_000 })
 )
 
 /** Cross-field timing contract for one Review Agent Profile and its sbx lifetime. */
 export const PrReviewTimingConfiguration = Schema.Struct({
-  budgetMillis: PrReviewDurationMillis,
-  maximumSandboxDurationMillis: PrReviewDurationMillis
+  budgetMillis: PrReviewBudgetMillis,
+  maximumSandboxDurationMillis: PrReviewSandboxDurationMillis
 }).check(
   Schema.makeFilter(
     ({ budgetMillis, maximumSandboxDurationMillis }) => budgetMillis <= maximumSandboxDurationMillis,

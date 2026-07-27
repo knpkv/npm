@@ -1,4 +1,4 @@
-import { Button } from "@knpkv/rly/primitives"
+import { Button, Dialog, Text } from "@knpkv/rly/primitives"
 import * as DateTime from "effect/DateTime"
 import { type ReactElement, useMemo, useState } from "react"
 
@@ -26,6 +26,7 @@ export const VersionedReviewSuggestionCard = ({
   isPreviewing,
   jobId,
   onPreviewPublication,
+  onSuggestionRevisionAccepted,
   revisionTransport = browserReviewSuggestionRevisionTransport,
   sessionKey,
   suggestion
@@ -35,6 +36,7 @@ export const VersionedReviewSuggestionCard = ({
   readonly isPreviewing: boolean
   readonly jobId: JobId
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
+  readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
   readonly revisionTransport?: ReviewSuggestionRevisionTransport
   readonly sessionKey: string
   readonly suggestion: PrReviewSuggestion
@@ -48,11 +50,15 @@ export const VersionedReviewSuggestionCard = ({
     }),
     [entityId, jobId, sessionKey, suggestion.suggestionId]
   )
-  const controller = useReviewSuggestionRevisions(scope, revisionTransport)
+  const controller = useReviewSuggestionRevisions(scope, revisionTransport, onSuggestionRevisionAccepted)
   const [dialogMode, setDialogMode] = useState<"edit" | "history">("history")
   const [dialogOpen, setDialogOpen] = useState(false)
+  const [dismissOpen, setDismissOpen] = useState(false)
   const page =
-    controller.state._tag === "ready" || controller.state._tag === "saving" || controller.state._tag === "conflict"
+    controller.state._tag === "ready" ||
+    controller.state._tag === "dismissing" ||
+    controller.state._tag === "saving" ||
+    controller.state._tag === "conflict"
       ? controller.state.page
       : controller.state._tag === "failed"
         ? controller.state.page
@@ -62,8 +68,14 @@ export const VersionedReviewSuggestionCard = ({
       ? controller.state.draft
       : null
   const current = page?.current
-  const presentedSuggestion = current === undefined ? suggestion : { ...current.suggestion, state: suggestion.state }
-  const suggestionCanMutate = canEdit && presentedSuggestion.state === "draft"
+  const presentedSuggestion: PrReviewSuggestion =
+    current === undefined
+      ? suggestion
+      : {
+          ...current.suggestion,
+          state: suggestion.state === "published" ? "published" : current.suggestion.state
+        }
+  const suggestionCanMutate = canEdit && presentedSuggestion.state === "draft" && controller.state._tag !== "dismissing"
   const validationBlocked = current?.validation._tag === "requires-revalidation"
   const publicationBlockedReason =
     controller.state._tag === "loading"
@@ -90,6 +102,16 @@ export const VersionedReviewSuggestionCard = ({
             {suggestionCanMutate ? (
               <Button disabled={page === null} onClick={() => openDialog("edit")} variant="quiet">
                 Edit
+              </Button>
+            ) : null}
+            {suggestionCanMutate ? (
+              <Button disabled={page === null} onClick={() => setDismissOpen(true)} variant="quiet">
+                Dismiss
+              </Button>
+            ) : null}
+            {controller.state._tag === "dismissing" ? (
+              <Button disabled variant="quiet">
+                Dismissing…
               </Button>
             ) : null}
             {controller.state._tag === "failed" ? (
@@ -142,6 +164,26 @@ export const VersionedReviewSuggestionCard = ({
           saving={controller.state._tag === "saving"}
         />
       )}
+      <Dialog.Root onOpenChange={setDismissOpen} open={dismissOpen}>
+        <Dialog.Content
+          description="Dismiss this finding for the reviewed head. It will remain in revision history and will not be posted to CodeCommit."
+          size="default"
+          title="Dismiss finding?"
+        >
+          <Text>This records your decision without changing the pull request or publishing a comment.</Text>
+          <div className={styles.publicationActions}>
+            <Dialog.Close>Keep finding</Dialog.Close>
+            <Button
+              onClick={() => {
+                setDismissOpen(false)
+                controller.dismiss()
+              }}
+            >
+              Dismiss finding
+            </Button>
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   )
 }

@@ -1,10 +1,14 @@
 import { createBrowserRouter } from "react-router"
 import { AppShell } from "./AppShell.js"
-import { NotFoundPage, ReleasesPage } from "./Pages.js"
 
 const overviewRoute = async () => {
   const module = await import("./portfolio/PortfolioOverview.js")
   return { Component: module.PortfolioOverview }
+}
+
+const notFoundRoute = async () => {
+  const module = await import("./Pages.js")
+  return { Component: module.NotFoundPage }
 }
 
 const pairRoute = async () => {
@@ -83,7 +87,7 @@ export const router = createBrowserRouter([
     element: <AppShell />,
     children: [
       { index: true, lazy: overviewRoute },
-      { path: "releases", element: <ReleasesPage /> },
+      { path: "releases", lazy: overviewRoute },
       { path: "services", lazy: servicesRoute },
       { path: "services/oauth/atlassian/callback", lazy: atlassianOAuthCallbackRoute },
       { path: "agent", lazy: agentRoute },
@@ -104,7 +108,7 @@ export const router = createBrowserRouter([
           { path: "*", lazy: workspaceNotFoundRoute }
         ]
       },
-      { path: "*", element: <NotFoundPage /> }
+      { path: "*", lazy: notFoundRoute }
     ]
   }
 ])

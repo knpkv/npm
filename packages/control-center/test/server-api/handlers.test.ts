@@ -389,6 +389,7 @@ const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
   enqueue: () => Effect.die("not used"),
   revisions: () => Effect.die("not used"),
   editSuggestion: () => Effect.die("not used"),
+  dismissSuggestion: () => Effect.die("not used"),
   previewPublication: () => Effect.die("not used"),
   publishSuggestion: () => Effect.die("not used")
 })
@@ -1603,8 +1604,10 @@ describe("Control Center API handlers", () => {
       )
       yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["timeline"])
-        yield* client.timeline.exportCsv({ query: { actor: "agent", limit: 25 } })
-        yield* client.timeline.exportJson({ query: { limit: 10 } })
+        const csv = yield* client.timeline.exportCsv({ query: { actor: "agent", limit: 25 } })
+        const json = yield* client.timeline.exportJson({ query: { limit: 10 } })
+        yield* Stream.runDrain(csv)
+        yield* Stream.runDrain(json)
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -2021,6 +2024,16 @@ describe("Control Center API handlers", () => {
           title: "Decode every response"
         })
       })
+      const dismissedRevision = PrReviewSuggestionRevision.make({
+        ...editedRevision,
+        revisionId: PrReviewSuggestionRevisionId.make(`sha256:${"7".repeat(64)}`),
+        sequence: PrReviewSuggestionRevisionSequence.make(3),
+        predecessorRevisionId: editedRevisionId,
+        suggestion: PrReviewSuggestion.make({
+          ...editedRevision.suggestion,
+          state: "dismissed"
+        })
+      })
       const received = yield* Ref.make<ReadonlyArray<unknown>>([])
       const reviewProfile: ReviewAgentProfile = {
         profileId: ReviewAgentProfileId.make("openai-compatible:review-model:sbx"),
@@ -2083,6 +2096,10 @@ describe("Control Center API handlers", () => {
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(editedRevision)
           ),
+        dismissSuggestion: (input) =>
+          Ref.update(received, (items) => [...items, input]).pipe(
+            Effect.as(dismissedRevision)
+          ),
         previewPublication: () => Effect.die("not used"),
         publishSuggestion: () => Effect.die("not used")
       })
@@ -2137,6 +2154,13 @@ describe("Control Center API handlers", () => {
             })
           }
         })
+        const dismissed = yield* client.agent.dismissReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: editedRevisionId,
+            expectedSequence: editedRevision.sequence
+          }
+        })
         const accepted = yield* client.agent.enqueuePullRequestReview({
           params: { entityId },
           payload: {
@@ -2151,6 +2175,7 @@ describe("Control Center API handlers", () => {
           accepted,
           conflictingCursors,
           current,
+          dismissed,
           earlierThread,
           edited,
           invalidRevisionCursor,
@@ -2175,6 +2200,7 @@ describe("Control Center API handlers", () => {
         )
       }
       assert.strictEqual(result.edited.revisionId, editedRevisionId)
+      assert.strictEqual(result.dismissed.suggestion.state, "dismissed")
       assert.isTrue(Result.isFailure(result.conflictingCursors))
       if (Result.isFailure(result.conflictingCursors)) {
         assert.strictEqual(result.conflictingCursors.failure._tag, "InvalidRequestApiError")
@@ -2225,6 +2251,17 @@ describe("Control Center API handlers", () => {
               ...suggestion,
               title: "Decode every response"
             })
+          },
+          session
+        },
+        {
+          workspaceId: session.workspaceId,
+          entityId,
+          jobId,
+          suggestionId,
+          request: {
+            expectedRevisionId: editedRevisionId,
+            expectedSequence: editedRevision.sequence
           },
           session
         },
@@ -2335,6 +2372,7 @@ describe("Control Center API handlers", () => {
         enqueue: () => Effect.die("not used"),
         revisions: () => Effect.die("not used"),
         editSuggestion: () => Effect.die("not used"),
+        dismissSuggestion: () => Effect.die("not used"),
         previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),
         publishSuggestion: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(published))
       })

@@ -73,7 +73,10 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
       const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
       if (Result.isSuccess(resolved) && resolved.success === recoveryDirectory) return alias
     }
-    return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-owner-mismatch" })
+    // macOS exposes directory descriptors through /dev/fd but does not allow
+    // child traversal through that alias. The owner-only canonical path remains
+    // guarded by descriptor/path identity checks before and after every write.
+    return recoveryDirectory
   })
 
   const verifyProcessOwnership = Effect.fn("TerminalRecovery.verifyProcessOwnership")(function*() {
@@ -92,12 +95,15 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           const alias = yield* resolveDirectoryAlias(directory.fd)
           const assertIdentity = Effect.gen(function*() {
             const current = yield* directory.stat.pipe(Effect.result)
-            const resolved = yield* fileSystem.realPath(alias).pipe(Effect.result)
+            const aliasInfo = yield* fileSystem.stat(alias).pipe(Effect.result)
+            const pathInfo = yield* fileSystem.stat(recoveryDirectory).pipe(Effect.result)
             if (
               Result.isFailure(current) ||
-              Result.isFailure(resolved) ||
-              resolved.success !== recoveryDirectory ||
-              !verifyDirectoryInfo(current.success)
+              Result.isFailure(aliasInfo) ||
+              Result.isFailure(pathInfo) ||
+              !verifyDirectoryInfo(current.success) ||
+              !sameIdentity(current.success, aliasInfo.success) ||
+              !sameIdentity(current.success, pathInfo.success)
             ) {
               return yield* new TerminalRecoveryRefusedError({ reason: "data-directory-owner-mismatch" })
             }

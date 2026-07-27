@@ -17,6 +17,14 @@ pnpm --filter @knpkv/control-center test:e2e
 
 Development binds to `127.0.0.1:5173` by default. A LAN bind must opt into the security policy described below; a wildcard host alone is rejected.
 
+### Release-cycle traceability
+
+End-to-end release verification should carry the Jira work-item key in the branch name, commit subject,
+and pull-request title. Add a Changesets entry for the affected package, attach the Jira work item to its
+target fix version, and synchronize the configured Jira and source-control providers after the feature and
+Version pull requests merge. The Releases view can then verify the issue, pull request, and published
+delivery evidence as one connected release.
+
 ### Distribution JavaScript budgets
 
 `validate:dist` checks every emitted client and server `.js` file independently using its raw byte length and deterministic level-9 gzip byte length. Source maps, the Vite manifest, and `build-graph.json` are build metadata and are not runtime JavaScript artifacts.
@@ -111,10 +119,43 @@ identifiers, and `available` / `not-configured` health. The enqueue contract acc
 `read-only` safe profile. OpenAI-compatible generation has an interruptible two-minute deadline; tests
 may inject a shorter deadline without using host timers.
 
-Immutable CodeCommit review execution is a separate opt-in worker. It requires an OpenAI-compatible
-Effect AI provider, the `sbx` CLI, `git`, the AWS CLI credential helper, and an enabled CodeCommit
-connection whose repository matches the review subject. Review commands run only inside a disposable
-sbx shell sandbox with network access denied:
+The release thread exposes explicit **Run with Codex** and **Run with Claude** presets plus bounded
+release prompt templates. The selected provider is sent with every turn; Control Center never silently
+substitutes another local runner.
+
+Immutable CodeCommit review execution is a separate opt-in worker. It supports the authenticated Codex
+or Claude CLI running natively in its matching agent sandbox, or an OpenAI-compatible Effect AI model
+using the typed shell-sandbox toolkit. All modes require the `sbx` CLI, `git`, the AWS CLI credential
+helper, and an enabled CodeCommit connection whose repository matches the review subject.
+
+Native Codex review:
+
+```sh
+CONTROL_CENTER_AGENT_PROVIDERS=codex \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
+CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
+CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE=codex \
+pnpm --filter @knpkv/control-center start
+```
+
+Native Claude review:
+
+```sh
+CONTROL_CENTER_AGENT_PROVIDERS=claude \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
+CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
+CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE=claude \
+pnpm --filter @knpkv/control-center start
+```
+
+To offer both review presets, configure `CONTROL_CENTER_AGENT_PROVIDERS=codex,claude` and authenticate
+both CLIs. The review launch dialog then offers **Codex review** and **Claude review** without changing
+the immutable head. Correctness, Security, and Tests templates populate the targeted-review request and
+remain editable before enqueue.
+
+OpenAI-compatible typed-tool review:
 
 ```sh
 CONTROL_CENTER_AGENT_OPENAI_API_URL=http://127.0.0.1:11434/v1 \
@@ -126,24 +167,37 @@ pnpm --filter @knpkv/control-center start
 ```
 
 When `CONTROL_CENTER_PR_REVIEW_SBX_ENABLED` is false or absent, the worker is disabled and no provider
-advertises `pr-review`. Enabling it without an OpenAI-compatible provider fails startup.
-`CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE` defaults to `sbx`; the template is optional. For each durable
-claim the worker resolves exactly one enabled CodeCommit connection, clones the exact head into a
-private data-root workspace, and hands that checkout to one named sbx sandbox. It then denies all
-sandbox network access, strips Git remotes and credential helpers, and verifies the full head object ID
-before exposing the typed review tools. Startup removes only `cc-pr-review-*` crash leftovers. While a
-review is running, the worker renews its durable lease and observes cancellation; cancellation
+advertises `pr-review`. Enabling it without Codex, Claude, or an OpenAI-compatible provider fails startup.
+`CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE` defaults to `sbx`; the optional template applies to the
+typed shell-sandbox path. `CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE` and
+`CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE` default to `codex` and `claude` and name the executable
+inside the corresponding agent sandbox; the host-only `CONTROL_CENTER_AGENT_*_EXECUTABLE` settings do
+not cross that boundary. Ambient provider credential environment variables are never forwarded into
+the review sandbox; authentication is owned by the selected `sbx run codex` or `sbx run claude`
+connection. For each durable claim the worker resolves exactly one enabled CodeCommit
+connection, clones the exact head into a private data-root workspace, and hands that checkout to one
+named sbx sandbox. It strips Git remotes and credential helpers and verifies the full head object ID
+before review. The typed-tool path denies all sandbox network access. Native CLI review instead enables
+only the selected provider connection, disables session persistence and unrelated MCP configuration,
+and uses only the disposable clone. Codex disables project-document and exec-policy loading from the
+reviewed head; Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
+review content rather than executable instructions, and safe mode disables automatic project-memory
+discovery. Every path validates structured output and exact
+diff evidence on the trusted host. Startup removes only
+`cc-pr-review-*` crash leftovers. While a review is running, the worker renews its durable lease and
+observes cancellation; cancellation
 interrupts the scoped checkout, sandbox, and model work before durably completing the job as cancelled.
 `CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS` and
 `CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` both default to 1,200,000 milliseconds. The maximum
 session duration should be at least the selected Review Agent Profile budget.
 
-The launch dialog shows the exact head, selected Review Agent Profile, budget, blocked-network policy,
-and sbx runtime before enqueue. The selected model explores the complete project exclusively through
-the Review Sandbox tools. Local CLI selection first reads a bounded, credential-free `--version`
-response and fails closed when the configured executable cannot identify itself. The safe runtime
-implementation and version are retained with the run-started event and shown in the Review Thread;
-executable paths and inherited credentials are excluded. Only schema-valid suggestions whose path, range, and excerpt match immutable
+The launch dialog shows the exact head, selected Review Agent Profile, budget, network policy, and sbx
+runtime before enqueue. The selected model explores the complete project inside the Review Sandbox.
+Release-chat CLI selection first reads a bounded, credential-free `--version` response and fails closed
+when the configured host executable cannot identify itself. Native review selection is independent of
+that host executable because its CLI lives inside the matching sbx agent image. Safe runtime metadata,
+when available, is retained with the run-started event and shown in the Review Thread; executable paths
+and inherited credentials are excluded. Only schema-valid suggestions whose path, range, and excerpt match immutable
 diff evidence are retained; line suggestions use added lines, while file suggestions may use deleted
 base-side lines for deletion-only changes. Investigation remains live activity. A suggestion has one host-resolved line,
 file, or whole-change anchor, with repeated occurrences grouped as Related Locations. File anchors use

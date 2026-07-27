@@ -16,7 +16,7 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
     payload: {
       history: input.history,
       prompt: input.prompt,
-      provider: "codex"
+      provider: input.provider
     }
   })
   if (response.releaseId !== input.releaseId || response.release.releaseId !== input.releaseId) {
@@ -30,6 +30,29 @@ const runTurnEffect = Effect.fn("ReleaseAgentTransport.runTurn")(function*(
   }
 })
 
-/** Browser transport for the default read-only Codex release agent. */
+const loadPresetsEffect = Effect.fn("ReleaseAgentTransport.loadPresets")(function*() {
+  const client = yield* makeAuthenticatedMutationClient
+  const catalog = yield* client.agent.providers()
+  const presets = new Array<"claude" | "codex">()
+  for (const provider of catalog.providers) {
+    const providerId = String(provider.providerId)
+    if (
+      provider.health === "available" &&
+      provider.capabilities.includes("release-chat") &&
+      (providerId === "codex" || providerId === "claude")
+    ) {
+      presets.push(providerId)
+    }
+  }
+  return presets
+})
+
+/** Browser transport for the selected read-only local release-agent preset. */
 export const runBrowserReleaseAgentTurn: ReleaseAgentTurn = (input, { signal }) =>
   Effect.runPromise(runTurnEffect(input).pipe(Effect.provide(FetchHttpClient.layer)), { signal })
+
+/** Load only configured local release-agent presets from the redacted catalog. */
+export const loadBrowserReleaseAgentPresets = (
+  signal: AbortSignal
+): Promise<ReadonlyArray<"claude" | "codex">> =>
+  Effect.runPromise(loadPresetsEffect().pipe(Effect.provide(FetchHttpClient.layer)), { signal })

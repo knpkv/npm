@@ -337,6 +337,83 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("records dismissal as an immutable operator revision and blocks later edits", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = yield* currentSuggestionRevision(suggestion.suggestionId)
+        const edit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)(suggestion)
+
+        const dismissed = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit,
+          state: "dismissed",
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T3
+        })
+
+        assert.strictEqual(dismissed.sequence, 2)
+        assert.strictEqual(dismissed.suggestion.state, "dismissed")
+        assert.strictEqual(dismissed.author._tag, "operator")
+        const reloaded = yield* currentSuggestionRevision(suggestion.suggestionId)
+        assert.strictEqual(reloaded.revisionId, dismissed.revisionId)
+        assert.strictEqual(reloaded.suggestion.state, "dismissed")
+        const projectedReport = yield* jobs.reviewResult({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID
+        })
+        assert.strictEqual(
+          projectedReport.report.suggestions[0]?.state,
+          "dismissed"
+        )
+
+        const laterEdit = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: dismissed.revisionId,
+          expectedSequence: dismissed.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "This edit must remain blocked"
+          }),
+          author: PrReviewSuggestionOperatorAuthor.make({
+            personId: PERSON_ID
+          }),
+          createdAt: T4
+        }).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(laterEdit))
+        if (Result.isFailure(laterEdit)) {
+          assert.instanceOf(laterEdit.failure, AgentJobInputError)
+          assert.strictEqual(laterEdit.failure.reason, "invalid-transition")
+        }
+
+        const thread = yield* jobs.reviewThreadTail({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_CONNECTION_ID,
+          subject,
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        const dismissalEvent = thread.events.find(
+          ({ eventKind }) => eventKind === "review-suggestion-revised"
+        )
+        assert.deepInclude(dismissalEvent?.payload, {
+          suggestionId: suggestion.suggestionId,
+          suggestionState: "dismissed"
+        })
+      })
+    ))
+
   it.effect("appends edits immutably and pages prior revisions newest first", () =>
     withRepository(
       Effect.gen(function*() {

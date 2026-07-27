@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Result, Sink, Stream } from "effect"
+import * as ConfigProvider from "effect/ConfigProvider"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
@@ -17,6 +18,8 @@ const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const SOURCE_ROOT = "/private/review-source"
 const SANDBOX_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
+const CODEX_API_KEY_CANARY = "codex-api-key-canary"
+const ANTHROPIC_API_KEY_CANARY = "anthropic-api-key-canary"
 const encoder = new TextEncoder()
 
 interface FakeResponse {
@@ -111,6 +114,270 @@ const request = {
 }
 
 describe("PrReviewSandboxSessions", () => {
+  it.effect("keeps native agent credentials out of typed-tool review sandboxes", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      yield* sessions.withSession(request, () => Effect.void)
+
+      assert.isTrue(calls.length > 0)
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes("CODEX_API_KEY")))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes("ANTHROPIC_API_KEY")))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes(CODEX_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ args }) => !args.join("\0").includes(ANTHROPIC_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ options }) => !JSON.stringify(options.env ?? {}).includes(CODEX_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ options }) => !JSON.stringify(options.env ?? {}).includes(ANTHROPIC_API_KEY_CANARY)))
+      assert.isTrue(calls.every(({ options }) => options.env?.CODEX_API_KEY === undefined))
+      assert.isTrue(calls.every(({ options }) => options.env?.ANTHROPIC_API_KEY === undefined))
+    }).pipe(
+      Effect.provide(testLayer(calls)),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({
+          ANTHROPIC_API_KEY: ANTHROPIC_API_KEY_CANARY,
+          CODEX_API_KEY: CODEX_API_KEY_CANARY,
+          HOME: "/home/test",
+          PATH: "/usr/local/bin:/usr/bin:/bin"
+        })
+      )
+    )
+  })
+
+  it.effect("runs native Codex review in the exact cloned sbx workspace", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const report = JSON.stringify({
+      schemaVersion: 3,
+      completion: { status: "complete" },
+      suggestions: [],
+      notes: []
+    })
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const reviewed = yield* sessions.withSession(
+        { ...request, reviewExecution: "native-codex" },
+        (session) =>
+          session.runNativeCodexReview === undefined
+            ? Effect.die("native Codex review runner was not attached")
+            : session.runNativeCodexReview({
+              executable: "codex-wrapper",
+              prompt: "Review the exact base and head.",
+              outputSchema: "{\"type\":\"object\"}",
+              maximumDurationMillis: 1_800_000
+            })
+      )
+
+      assert.strictEqual(reviewed.exitCode, 0)
+      assert.strictEqual(reviewed.stdout.text, report)
+      const create = calls.find(({ args }) => args[0] === "run")
+      assert.deepStrictEqual(create?.args, [
+        "run",
+        "codex",
+        SOURCE_ROOT,
+        "--clone",
+        "--name",
+        SANDBOX_NAME,
+        "--detached"
+      ])
+      assert.isFalse(calls.some(({ args }) => args[0] === "policy"))
+      const native = calls.find(({ args }) =>
+        args[0] === "exec" &&
+        args.includes("codex-wrapper") &&
+        args.includes("--output-schema")
+      )
+      assert.include(native?.args ?? [], "--interactive")
+      assert.include(native?.args ?? [], "--dangerously-bypass-approvals-and-sandbox")
+      const ignoreRules = native?.args.indexOf("--ignore-rules") ?? -1
+      assert.strictEqual(native?.args[ignoreRules + 1], "--ignore-user-config")
+      assert.include(native?.args ?? [], "project_doc_max_bytes=0")
+      assert.include(native?.args ?? [], "mcp_servers={}")
+      assert.include(native?.args ?? [], "--output-schema")
+      assert.include(native?.args ?? [], "--output-last-message")
+      assert.notInclude(native?.args ?? [], "review")
+      assert.notInclude(native?.args ?? [], "--base")
+      assert.strictEqual(native?.args.at(-1), "-")
+      assert.deepStrictEqual(
+        native?.args.slice(
+          (native?.args.indexOf("codex-wrapper") ?? -1) + 1,
+          (native?.args.indexOf("codex-wrapper") ?? -1) + 2
+        ),
+        ["exec"]
+      )
+      assert.notInclude((native?.args ?? []).join("\0"), "CODEX_API_KEY")
+      assert.notInclude((native?.args ?? []).join("\0"), CODEX_API_KEY_CANARY)
+      assert.notInclude(native?.args ?? [], "AWS_SECRET_ACCESS_KEY")
+      assert.strictEqual(native?.options.extendEnv, false)
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), "CODEX_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), CODEX_API_KEY_CANARY)
+      assert.notProperty(native?.options.env ?? {}, "AWS_SECRET_ACCESS_KEY")
+      assert.isTrue(calls.every(({ options }) => options.env?.CODEX_API_KEY === undefined))
+      assert.isTrue(
+        calls.some(({ args }) => args.at(-1)?.includes("git branch --force 'control-center-review-base'") === true)
+      )
+    }).pipe(
+      Effect.provide(testLayer(calls, [
+        {
+          matches: ({ args }) =>
+            args.at(-1)?.startsWith("umask 077 && cat > '/tmp/control-center-review-schema.json'") === true,
+          response: {}
+        },
+        {
+          matches: ({ args }) =>
+            args[0] === "exec" &&
+            args.includes("codex-wrapper") &&
+            args.includes("--output-schema"),
+          response: {}
+        },
+        {
+          matches: ({ args }) => args.at(-1)?.startsWith("test -s '/tmp/control-center-review-output.json'") === true,
+          response: { stdout: report }
+        }
+      ])),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({
+          AWS_SECRET_ACCESS_KEY: "must-not-cross-review-boundary",
+          CODEX_API_KEY: CODEX_API_KEY_CANARY,
+          HOME: "/home/test",
+          PATH: "/usr/local/bin:/usr/bin:/bin"
+        })
+      )
+    )
+  })
+
+  it.effect("runs native Claude review and unwraps its validated structured output", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    const report = {
+      schemaVersion: 3,
+      completion: { status: "complete" },
+      suggestions: [],
+      notes: []
+    }
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const reviewed = yield* sessions.withSession(
+        { ...request, reviewExecution: "native-claude" },
+        (session) =>
+          session.runNativeClaudeReview === undefined
+            ? Effect.die("native Claude review runner was not attached")
+            : session.runNativeClaudeReview({
+              executable: "claude-wrapper",
+              prompt: "Review the exact base and head.",
+              outputSchema: "{\"type\":\"object\"}",
+              maximumDurationMillis: 1_800_000
+            })
+      )
+
+      assert.strictEqual(reviewed.exitCode, 0)
+      assert.strictEqual(reviewed.stdout.text, JSON.stringify(report))
+      const create = calls.find(({ args }) => args[0] === "run")
+      assert.deepStrictEqual(create?.args, [
+        "run",
+        "claude",
+        SOURCE_ROOT,
+        "--clone",
+        "--name",
+        SANDBOX_NAME,
+        "--detached"
+      ])
+      assert.isFalse(calls.some(({ args }) => args[0] === "policy"))
+      const native = calls.find(({ args }) =>
+        args[0] === "exec" &&
+        args.includes("claude-wrapper") &&
+        args.includes("--json-schema")
+      )
+      assert.include(native?.args ?? [], "--interactive")
+      assert.include(native?.args ?? [], "--dangerously-skip-permissions")
+      assert.include(native?.args ?? [], "--no-session-persistence")
+      assert.include(native?.args ?? [], "--safe-mode")
+      const settingSources = native?.args.indexOf("--setting-sources") ?? -1
+      assert.strictEqual(native?.args[settingSources + 1], "")
+      assert.include(native?.args ?? [], "--strict-mcp-config")
+      assert.include(native?.args ?? [], "{\"mcpServers\":{}}")
+      const tools = native?.args.indexOf("--tools") ?? -1
+      assert.strictEqual(native?.args[tools + 1], "Bash,Glob,Grep,Read")
+      assert.notInclude((native?.args ?? []).join("\0"), "ANTHROPIC_API_KEY")
+      assert.notInclude((native?.args ?? []).join("\0"), ANTHROPIC_API_KEY_CANARY)
+      assert.notInclude(native?.args ?? [], "AWS_SECRET_ACCESS_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), "ANTHROPIC_API_KEY")
+      assert.notInclude(JSON.stringify(native?.options.env ?? {}), ANTHROPIC_API_KEY_CANARY)
+      assert.notProperty(native?.options.env ?? {}, "AWS_SECRET_ACCESS_KEY")
+      assert.isTrue(calls.every(({ options }) => options.env?.ANTHROPIC_API_KEY === undefined))
+      assert.isTrue(
+        calls.some(({ args }) => args.at(-1)?.includes("git branch --force 'control-center-review-base'") === true)
+      )
+    }).pipe(
+      Effect.provide(testLayer(calls, [{
+        matches: ({ args }) =>
+          args[0] === "exec" &&
+          args.includes("claude-wrapper") &&
+          args.includes("--json-schema"),
+        response: {
+          stdout: JSON.stringify({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            structured_output: report
+          })
+        }
+      }])),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({
+          ANTHROPIC_API_KEY: ANTHROPIC_API_KEY_CANARY,
+          AWS_SECRET_ACCESS_KEY: "must-not-cross-review-boundary",
+          HOME: "/home/test",
+          PATH: "/usr/local/bin:/usr/bin:/bin"
+        })
+      )
+    )
+  })
+
+  it.effect("rejects a successful-looking Claude envelope without validated structured output", () => {
+    const calls: Array<ChildProcess.StandardCommand> = []
+    return Effect.gen(function*() {
+      const sessions = yield* PrReviewSandboxSessions
+      const result = yield* sessions.withSession(
+        { ...request, reviewExecution: "native-claude" },
+        (session) =>
+          session.runNativeClaudeReview === undefined
+            ? Effect.die("native Claude review runner was not attached")
+            : session.runNativeClaudeReview({
+              executable: "claude-wrapper",
+              prompt: "Review the exact base and head.",
+              outputSchema: "{\"type\":\"object\"}",
+              maximumDurationMillis: 120_000
+            })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure.reason, "output-rejected")
+      }
+    }).pipe(
+      Effect.provide(testLayer(calls, [{
+        matches: ({ args }) =>
+          args[0] === "exec" &&
+          args.includes("claude-wrapper") &&
+          args.includes("--json-schema"),
+        response: {
+          stdout: JSON.stringify({
+            type: "result",
+            subtype: "success",
+            is_error: false,
+            result: "unvalidated free-form output"
+          })
+        }
+      }])),
+      Effect.provideService(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown({
+          HOME: "/home/test",
+          PATH: "/usr/local/bin:/usr/bin:/bin"
+        })
+      )
+    )
+  })
+
   it.effect("creates one cloned sbx sandbox, blocks its network, and exposes only contained commands", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const largeOutput = "🙂".repeat(10_000)
