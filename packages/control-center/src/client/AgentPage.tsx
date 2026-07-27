@@ -55,6 +55,8 @@ export interface AgentPageProps {
   readonly runTurn?: ReleaseAgentTurn
   /** Configured local presets. Omit only at deterministic/test boundaries. */
   readonly availableProviders?: ReadonlyArray<"claude" | "codex">
+  /** Whether the connected route is still establishing a trustworthy provider catalog. */
+  readonly providerCatalogPending?: boolean
 }
 
 interface AgentPageContext {
@@ -410,6 +412,7 @@ const ReleaseAgentComposer = ({
 
 const ReleaseAgentRoom = ({
   availableProviders,
+  providerCatalogPending,
   release,
   runTurn,
   workspaceId
@@ -417,6 +420,7 @@ const ReleaseAgentRoom = ({
   readonly release: PortfolioReleasePresentation
   readonly runTurn: ReleaseAgentTurn | undefined
   readonly availableProviders: ReadonlyArray<"claude" | "codex"> | undefined
+  readonly providerCatalogPending: boolean
   readonly workspaceId: WorkspaceId
 }): ReactElement => {
   const location = useLocation()
@@ -446,7 +450,8 @@ const ReleaseAgentRoom = ({
   const threadMessages = useMemo(() => presentMessages(messages), [messages])
   const lastProvider = [...messages].reverse().find((message) => message.provider !== undefined)?.provider
   const runtimeUnavailable = runTurn === undefined
-  const selectedProviderUnavailable = availableProviders !== undefined && !availableProviders.includes(provider)
+  const selectedProviderUnavailable =
+    providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
 
   useEffect(() => {
     if (availableProviders === undefined || availableProviders.includes(provider)) return
@@ -576,6 +581,7 @@ const ReleaseAgentRoom = ({
               disabled={
                 runtimeUnavailable ||
                 isRunning ||
+                providerCatalogPending ||
                 (availableProviders !== undefined && !availableProviders.includes(preset.provider))
               }
               key={preset.provider}
@@ -615,7 +621,7 @@ const ReleaseAgentRoom = ({
           description="Connect the server to a local Codex or Claude runner. Provider credentials and repository access stay server-side; this tab stores its bounded thread locally."
           title="Local agent not connected"
         />
-      ) : selectedProviderUnavailable ? (
+      ) : providerCatalogPending ? null : selectedProviderUnavailable ? (
         <StatePanel
           description="Choose a configured Codex or Claude preset before starting this turn."
           title="Selected agent is not configured"
@@ -725,7 +731,11 @@ const LegacyAgentPage = (): ReactElement => {
 }
 
 /** Render an exact release-owned local agent thread, with a safe legacy context preview. */
-export const AgentPage = ({ availableProviders, runTurn }: AgentPageProps): ReactElement => {
+export const AgentPage = ({
+  availableProviders,
+  providerCatalogPending = false,
+  runTurn
+}: AgentPageProps): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext | null>()
   const params = useParams()
   const workspaceId = decodeWorkspaceRouteId(params.workspaceId)
@@ -767,6 +777,7 @@ export const AgentPage = ({ availableProviders, runTurn }: AgentPageProps): Reac
     <ReleaseAgentRoom
       availableProviders={availableProviders}
       key={release.id}
+      providerCatalogPending={providerCatalogPending}
       release={release}
       runTurn={runTurn}
       workspaceId={workspaceId}
@@ -815,7 +826,11 @@ export const ConnectedAgentPage = ({
           />
         </section>
       ) : null}
-      <AgentPage {...(availableProviders === undefined ? {} : { availableProviders })} runTurn={runTurn} />
+      <AgentPage
+        {...(availableProviders === undefined ? {} : { availableProviders })}
+        providerCatalogPending={catalog._tag !== "ready"}
+        runTurn={runTurn}
+      />
     </>
   )
 }

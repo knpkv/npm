@@ -219,6 +219,8 @@ describe("AgentPage context", () => {
 
     expect(host.textContent).toContain("Agent presets could not be refreshed")
     expect(host.textContent).not.toContain("Selected agent is not configured")
+    expect([...host.querySelectorAll<HTMLButtonElement>("[role='radio']")].every(({ disabled }) => disabled)).toBe(true)
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(true)
     const retry = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "Retry agent presets"
     )
@@ -231,6 +233,36 @@ describe("AgentPage context", () => {
     expect(loadPresets).toHaveBeenCalledTimes(2)
     expect(host.textContent).not.toContain("Agent presets could not be refreshed")
     expect(codex?.disabled).toBe(false)
+  })
+
+  it("keeps presets and submission disabled while provider discovery is pending", async () => {
+    const loadPresets = vi.fn<ReleaseAgentPresetLoader>(() => new Promise(() => undefined))
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<ConnectedCanonicalAgent loadPresets={loadPresets} />))
+
+    expect([...host.querySelectorAll<HTMLButtonElement>("[role='radio']")].every(({ disabled }) => disabled)).toBe(true)
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(true)
+    expect(host.textContent).not.toContain("Not configured")
+  })
+
+  it("enables only the provider returned by connected discovery", async () => {
+    const loadPresets = vi.fn<ReleaseAgentPresetLoader>().mockResolvedValue(["claude"])
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<ConnectedCanonicalAgent loadPresets={loadPresets} />))
+
+    const codex = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Run with Codex") === true
+    )
+    const claude = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Run with Claude") === true
+    )
+    expect(codex?.disabled).toBe(true)
+    expect(claude?.disabled).toBe(false)
+    expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false)
   })
 
   it("keeps a successfully loaded empty provider catalog definitive", async () => {
