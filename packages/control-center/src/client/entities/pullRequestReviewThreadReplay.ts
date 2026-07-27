@@ -1,7 +1,6 @@
 /** Bounded browser replay for a durable pull-request review thread. @module */
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
-import * as Predicate from "effect/Predicate"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import type {
@@ -13,6 +12,10 @@ import type {
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { EntityId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
+import {
+  isRecoverablePullRequestReviewFailure,
+  isUnauthorizedPullRequestReviewFailure
+} from "./pullRequestReviewFailures.js"
 import type {
   PullRequestReviewControllerState,
   PullRequestReviewScope,
@@ -372,7 +375,7 @@ export const loadEarlierPullRequestReviewThreadIntoState = (
         latestScope.current === null ||
         !sameReviewScope(latestScope.current, current)
       ) return
-      if (Predicate.isTagged("UnauthorizedApiError")(failure)) {
+      if (isUnauthorizedPullRequestReviewFailure(failure)) {
         onSessionExpired(current.sessionKey)
       }
       Effect.runFork(Effect.logError("Pull-request review history load failed", failure))
@@ -396,17 +399,27 @@ export const loadPullRequestReviewSnapshot = async (
   target: PullRequestReviewThreadRef
 ): Promise<{
   readonly catalog: AgentProviderCatalog
+  readonly catalogNeedsRetry: boolean
   readonly review: PullRequestReviewState
   readonly thread: PullRequestReviewThread
 }> => {
   const catalogPromise = canEnqueue
-    ? transport.providers(signal).catch((failure: unknown) => {
-      if (signal.aborted) throw failure
-      Effect.runFork(Effect.logWarning("Pull-request review provider catalog load failed", failure))
-      return { providers: [] } satisfies AgentProviderCatalog
+    ? transport.providers(signal).then(
+      (catalog) => ({ catalog, needsRetry: false }),
+      (failure: unknown) => {
+        if (signal.aborted || !isRecoverablePullRequestReviewFailure(failure)) throw failure
+        Effect.runFork(Effect.logWarning("Pull-request review provider catalog load failed", failure))
+        return {
+          catalog: { providers: [] } satisfies AgentProviderCatalog,
+          needsRetry: true
+        }
+      }
+    )
+    : Promise.resolve({
+      catalog: { providers: [] } satisfies AgentProviderCatalog,
+      needsRetry: false
     })
-    : Promise.resolve({ providers: [] } satisfies AgentProviderCatalog)
-  const [review, initialThread, catalog] = await Promise.all([
+  const [review, initialThread, catalogResult] = await Promise.all([
     transport.load(entityId, signal),
     continuePullRequestReviewThread(transport, entityId, signal, previous),
     catalogPromise
@@ -414,7 +427,12 @@ export const loadPullRequestReviewSnapshot = async (
   const thread = review._tag === "completed" || review._tag === "failed"
     ? await continuePullRequestReviewThread(transport, entityId, signal, initialThread)
     : initialThread
-  return { catalog, review, thread: installNewestThread(target, thread, signal) }
+  return {
+    catalog: catalogResult.catalog,
+    catalogNeedsRetry: catalogResult.needsRetry,
+    review,
+    thread: installNewestThread(target, thread, signal)
+  }
 }
 
 /** Continue a visible thread while retaining diagnostics for non-fatal refresh failures. */
