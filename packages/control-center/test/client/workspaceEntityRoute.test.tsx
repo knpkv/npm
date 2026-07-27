@@ -27,7 +27,7 @@ import {
   RelationshipId,
   ReleaseId
 } from "../../src/domain/identifiers.js"
-import { PrReviewSubject } from "../../src/domain/prReview.js"
+import { type PrReviewSuggestion, PrReviewSubject } from "../../src/domain/prReview.js"
 import {
   PrReviewSuggestionRevisionPage,
   PrReviewSuggestionRevisionSequence
@@ -795,9 +795,9 @@ const publishedPullRequestReviewState = {
     ...completedReview,
     report: {
       ...completedReview.report,
-      suggestions: completedReview.report.suggestions.map((suggestion) => ({
+      suggestions: completedReview.report.suggestions.map((suggestion): PrReviewSuggestion => ({
         ...suggestion,
-        state: "published" as const
+        state: "published"
       }))
     }
   }
