@@ -58,6 +58,12 @@ const formatBudget = (budgetMillis: number): string => {
   return `${String(minutes)} minute${minutes === 1 ? "" : "s"}`
 }
 
+const providerName = (
+  provider: NonNullable<Extract<PullRequestReviewControllerState, { readonly _tag: "ready" }>["provider"]>
+): string => provider.displayName ?? provider.providerId
+
+const providerReviewLabel = (provider: Parameters<typeof providerName>[0]): string => `${providerName(provider)} review`
+
 const REVIEW_PROMPT_TEMPLATES: ReadonlyArray<{
   readonly label: string
   readonly prompt: string
@@ -285,20 +291,14 @@ export const PullRequestReviewPanel = ({
                   role="radio"
                   type="button"
                 >
-                  <strong>
-                    {preset.providerId === "codex"
-                      ? "Codex review"
-                      : preset.providerId === "claude"
-                        ? "Claude review"
-                        : preset.providerId}
-                  </strong>
+                  <strong>{providerReviewLabel(preset)}</strong>
                   <span>{preset.model}</span>
                 </button>
               ))}
             </div>
           ) : selectedProvider === null ? null : (
             <span className={styles.reviewSelectedPreset}>
-              Review with {selectedProvider.providerId} · {selectedProvider.model}
+              Review with {providerName(selectedProvider)} · {selectedProvider.model}
             </span>
           )}
           <div aria-label="Review prompt templates" className={styles.reviewTemplateList}>
@@ -366,13 +366,7 @@ export const PullRequestReviewPanel = ({
                     role="radio"
                     type="button"
                   >
-                    <strong>
-                      {preset.providerId === "codex"
-                        ? "Codex review"
-                        : preset.providerId === "claude"
-                          ? "Claude review"
-                          : preset.providerId}
-                    </strong>
+                    <strong>{providerReviewLabel(preset)}</strong>
                     <span>{preset.model}</span>
                   </button>
                 ))}

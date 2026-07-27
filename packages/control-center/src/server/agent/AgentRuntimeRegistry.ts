@@ -49,6 +49,12 @@ const DEFAULT_PR_REVIEW_BUDGET_MILLIS = 1_200_000
 const REVIEW_PROFILE_COMPONENT_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u
 const ENCODED_REVIEW_PROFILE_COMPONENT_PREFIX = "encoded-"
 const MAXIMUM_REVIEW_PROFILE_LABEL_LENGTH = 200
+type FixedProviderId = "claude" | "codex" | "openai-compatible"
+const PROVIDER_DISPLAY_NAMES: Readonly<Record<FixedProviderId, string>> = {
+  claude: "Claude",
+  codex: "Codex",
+  "openai-compatible": "OpenAI-compatible"
+}
 /** Persisted provider selection presented to the server-owned registry. */
 export interface AgentRuntimeSelection {
   readonly providerId: AgentProviderId
@@ -139,8 +145,9 @@ interface GeneratedText {
   }
 }
 
-const unavailableCatalogEntry = (providerId: "codex" | "claude" | "openai-compatible"): AgentProviderCatalogEntry => ({
+const unavailableCatalogEntry = (providerId: FixedProviderId): AgentProviderCatalogEntry => ({
   providerId: DurableAgentProviderId.make(providerId),
+  displayName: PROVIDER_DISPLAY_NAMES[providerId],
   models: [],
   capabilities: ["release-chat"],
   health: "not-configured"
@@ -156,7 +163,7 @@ const truncateAtCodePointBoundary = (value: string, maximumLength: number): stri
 
 const reviewProfileIdentity = Effect.fn("AgentRuntimeRegistry.reviewProfileIdentity")(function*(
   cryptoService: Crypto.Crypto,
-  providerId: "codex" | "claude" | "openai-compatible",
+  providerId: FixedProviderId,
   model: AgentModelId
 ) {
   const fullLabel = `Full-project review · ${providerId} · ${model}`
@@ -192,7 +199,7 @@ const reviewProfileIdentity = Effect.fn("AgentRuntimeRegistry.reviewProfileIdent
 
 const availableCatalogEntry = Effect.fn("AgentRuntimeRegistry.availableCatalogEntry")(function*(
   cryptoService: Crypto.Crypto,
-  providerId: "codex" | "claude" | "openai-compatible",
+  providerId: FixedProviderId,
   model: AgentModelId,
   capabilities: AgentProviderCatalogEntry["capabilities"] = ["release-chat"],
   reviewBudgetMillis?: number,
@@ -203,6 +210,7 @@ const availableCatalogEntry = Effect.fn("AgentRuntimeRegistry.availableCatalogEn
     : yield* reviewProfileIdentity(cryptoService, providerId, model)
   return {
     providerId: DurableAgentProviderId.make(providerId),
+    displayName: PROVIDER_DISPLAY_NAMES[providerId],
     models: [model],
     capabilities,
     health: "available",

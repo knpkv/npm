@@ -1,3 +1,5 @@
+import * as DateTime from "effect/DateTime"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
@@ -14,7 +16,12 @@ import type {
   ReviewSuggestionPublicationPreview,
   ReviewSuggestionPublicationSelection
 } from "../../api/agent.js"
+import type { RateLimitedApiError } from "../../api/errors.js"
 import type { EntityId } from "../../domain/identifiers.js"
+import {
+  isRecoverablePullRequestReviewFailure,
+  isUnauthorizedPullRequestReviewFailure
+} from "./pullRequestReviewFailures.js"
 import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
 
 const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
@@ -22,7 +29,23 @@ const generatedClientTransport = pullRequestReviewBrowser.then(
   ({ generatedClientPullRequestReviewTransport }) => generatedClientPullRequestReviewTransport
 )
 
+const isRateLimitedReviewFailure = (failure: unknown): failure is RateLimitedApiError =>
+  Predicate.isTagged(failure, "RateLimitedApiError")
+
+const waitBeforeAutomaticReviewRetry = (failure?: unknown): Effect.Effect<void> => {
+  if (!isRateLimitedReviewFailure(failure)) return Effect.sleep(Duration.seconds(1))
+  const retryAt = failure.retryAt
+  if (retryAt === null) return Effect.sleep(Duration.seconds(2))
+  return Effect.flatMap(DateTime.now, (now) =>
+    Effect.sleep(
+      Duration.millis(
+        Math.max(0, DateTime.toEpochMillis(retryAt) - DateTime.toEpochMillis(now))
+      )
+    ))
+}
+
 interface ReviewProviderSelection {
+  readonly displayName?: NonNullable<AgentProviderCatalogEntry["displayName"]>
   readonly model: AgentProviderCatalogEntry["models"][number]
   readonly providerId: AgentProviderCatalogEntry["providerId"]
   readonly reviewProfile: NonNullable<AgentProviderCatalogEntry["reviewProfile"]>
@@ -117,8 +140,6 @@ export interface PullRequestReviewTransport {
   ) => Promise<PublishedReviewComment>
 }
 
-const isUnauthorizedFailure = Predicate.isTagged("UnauthorizedApiError")
-
 const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
   const eligible = new Array<ReviewProviderSelection>()
   for (const provider of catalog.providers) {
@@ -129,7 +150,12 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
       provider.reviewProfile !== undefined &&
       model
     ) {
-      eligible.push({ providerId: provider.providerId, model, reviewProfile: provider.reviewProfile })
+      eligible.push({
+        providerId: provider.providerId,
+        model,
+        reviewProfile: provider.reviewProfile,
+        ...(provider.displayName === undefined ? {} : { displayName: provider.displayName })
+      })
     }
   }
   return eligible
@@ -240,6 +266,7 @@ export const usePullRequestReview = (
   const historyAbort = useRef<AbortController | null>(null)
   const mutationAbort = useRef<AbortController | null>(null)
   const publicationAbort = useRef<AbortController | null>(null)
+  const automaticRetryScope = useRef<PullRequestReviewScope | null>(null)
   const latestScope = useRef<PullRequestReviewScope | null>(null)
   const latestThread = useRef<PullRequestReviewThread | null>(null)
   const scope = useMemo(
@@ -264,7 +291,28 @@ export const usePullRequestReview = (
     const scope = { baseRevision, entityId, headRevision, sessionKey } satisfies PullRequestReviewScope
     const previousThread = latestThread.current ?? undefined
     const abort = new AbortController()
-    setState({ _tag: "loading", ...scope })
+    const scheduleAutomaticRetry = (message: string, failure?: unknown): boolean => {
+      if (
+        automaticRetryScope.current !== null &&
+        sameReviewScope(automaticRetryScope.current, scope)
+      ) return false
+      automaticRetryScope.current = scope
+      Effect.runFork(Effect.logWarning(message, failure))
+      Effect.runPromise(waitBeforeAutomaticReviewRetry(failure), { signal: abort.signal }).then(
+        () => {
+          if (!abort.signal.aborted) setRequestRevision((revision) => revision + 1)
+        },
+        (_retryFailure: unknown) => {
+          if (!abort.signal.aborted) setState({ _tag: "failed", ...scope })
+        }
+      )
+      return true
+    }
+    setState((current) =>
+      current._tag === "ready" && sameReviewScope(current, scope)
+        ? current
+        : { _tag: "loading", ...scope }
+    )
     pullRequestReviewBrowser.then(
       ({ loadPullRequestReviewSnapshot }) =>
         loadPullRequestReviewSnapshot(
@@ -276,8 +324,9 @@ export const usePullRequestReview = (
           latestThread
         )
     ).then(
-      ({ catalog, review, thread }) => {
+      ({ catalog, catalogNeedsRetry, review, thread }) => {
         if (!abort.signal.aborted) {
+          if (!catalogNeedsRetry) automaticRetryScope.current = null
           const providerPresets = eligibleProviders(catalog)
           setState(
             matchesScope(review, scope)
@@ -293,11 +342,27 @@ export const usePullRequestReview = (
               }
               : { _tag: "failed", ...scope }
           )
+          if (catalogNeedsRetry) {
+            scheduleAutomaticRetry("Pull-request review provider catalog unavailable; retrying once")
+          }
         }
       },
       (failure) => {
         if (abort.signal.aborted) return
-        if (isUnauthorizedFailure(failure)) onSessionExpired(sessionKey)
+        if (isUnauthorizedPullRequestReviewFailure(failure)) {
+          onSessionExpired(sessionKey)
+          setState({ _tag: "failed", ...scope })
+          return
+        }
+        if (
+          isRecoverablePullRequestReviewFailure(failure) &&
+          scheduleAutomaticRetry(
+            "Pull-request review snapshot load failed; retrying once",
+            failure
+          )
+        ) {
+          return
+        }
         setState({ _tag: "failed", ...scope })
       }
     )
@@ -456,7 +521,7 @@ export const usePullRequestReview = (
       },
       (failure) => {
         if (abort.signal.aborted) return
-        if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
+        if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
         setState((latest) =>
           latest._tag === "ready" && sameReviewScope(latest, current)
             ? { ...latest, action: "failed" }
@@ -491,7 +556,7 @@ export const usePullRequestReview = (
       },
       (failure) => {
         if (abort.signal.aborted) return
-        if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
+        if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
         setPublication({ _tag: "failed", preview: null, selection })
       }
     )
@@ -568,7 +633,7 @@ export const usePullRequestReview = (
       },
       (failure) => {
         if (abort.signal.aborted) return
-        if (isUnauthorizedFailure(failure)) onSessionExpired(current.sessionKey)
+        if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
         setPublication({ _tag: "failed", preview, selection })
       }
     )
@@ -592,7 +657,10 @@ export const usePullRequestReview = (
     previewPublication,
     publication,
     publishSuggestion,
-    retry: useCallback(() => setRequestRevision((revision) => revision + 1), []),
+    retry: useCallback(() => {
+      automaticRetryScope.current = null
+      setRequestRevision((revision) => revision + 1)
+    }, []),
     start,
     state: currentState
   }

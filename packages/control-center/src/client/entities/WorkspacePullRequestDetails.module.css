@@ -180,7 +180,7 @@
 
 .reviewLanes {
   gap: var(--rly-space-16);
-  grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+  grid-template-columns: minmax(13rem, 0.44fr) minmax(var(--rly-space-0), 1.56fr);
 }
 
 .reviewLanes > div {

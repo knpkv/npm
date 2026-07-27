@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Schema from "effect/Schema"
 
 import {
+  type AgentProviderCatalog,
   AgentModelId,
   DurableAgentPrompt,
   DurableAgentProviderId,
@@ -1266,6 +1267,197 @@ describe("usePullRequestReview", () => {
       TARGETED_PROMPT,
       expect.any(AbortSignal)
     )
+  })
+
+  it("keeps the durable review available when provider catalog retries remain unavailable", async () => {
+    vi.useFakeTimers()
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.reject({ _tag: "ServiceUnavailableApiError" })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.providers).toHaveBeenCalledTimes(2)
+  })
+
+  it("restores provider actions after a transient catalog read failure", async () => {
+    vi.useFakeTimers()
+    const providerReads: Array<Promise<AgentProviderCatalog>> = [
+      Promise.reject({ _tag: "ServiceUnavailableApiError" }),
+      Promise.resolve({
+        providers: [
+          {
+            providerId: DurableAgentProviderId.make("openai-compatible"),
+            models: [AgentModelId.make("review-model")],
+            capabilities: ["pr-review"],
+            health: "available",
+            reviewProfile: REVIEW_PROFILE
+          }
+        ]
+      })
+    ]
+    const transport = {
+      enqueue: vi.fn((_entityId, _provider, _prompt, _signal) => Promise.resolve(reviewFor(BASE_A, HEAD_A))),
+      load: vi.fn(() => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => providerReads.shift() ?? Promise.reject(new Error("Unexpected provider catalog read"))),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-start]")?.click())
+    expect(transport.enqueue).not.toHaveBeenCalled()
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-start]")?.click())
+
+    expect(transport.providers).toHaveBeenCalledTimes(2)
+    expect(transport.enqueue).toHaveBeenCalledOnce()
+  })
+
+  it.each([
+    {
+      failure: { _tag: "UnauthorizedApiError" },
+      expectedSessionExpirations: 1
+    },
+    {
+      failure: new Error("Invalid provider catalog response"),
+      expectedSessionExpirations: 0
+    }
+  ])(
+    "fails a non-recoverable provider catalog read without masking session expiry",
+    async ({ expectedSessionExpirations, failure }) => {
+      const onSessionExpired = vi.fn()
+      const transport = {
+        enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+        load: vi.fn(() => Promise.resolve(completedReviewFor(BASE_A, HEAD_A))),
+        loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+        previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+        providers: vi.fn(() => Promise.reject(failure)),
+        publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+      } satisfies PullRequestReviewTransport
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+
+      await act(async () =>
+        mountedRoot?.render(<ReviewThreadHarness onSessionExpired={onSessionExpired} transport={transport} />)
+      )
+
+      expect(host.querySelector("[data-thread]")?.textContent).toBe("failed")
+      expect(onSessionExpired).toHaveBeenCalledTimes(expectedSessionExpirations)
+      if (expectedSessionExpirations === 1) {
+        expect(onSessionExpired).toHaveBeenCalledWith("session-a")
+      }
+    }
+  )
+
+  it("recovers from one transient durable review read failure without showing a terminal failure", async () => {
+    vi.useFakeTimers()
+    const reviewReads = [
+      Promise.reject({ _tag: "ServiceUnavailableApiError" }),
+      Promise.resolve(completedReviewFor(BASE_A, HEAD_A))
+    ]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => reviewReads.shift() ?? Promise.reject(new Error("Unexpected review read"))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.resolve({ providers: [] })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("loading")
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.load).toHaveBeenCalledTimes(2)
+  })
+
+  it("waits until the advertised rate-limit retry instant", async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    const reviewReads = [
+      Promise.reject({
+        _tag: "RateLimitedApiError",
+        retryAt: Schema.decodeSync(Schema.DateTimeUtcFromString)("1970-01-01T00:00:05.000Z")
+      }),
+      Promise.resolve(completedReviewFor(BASE_A, HEAD_A))
+    ]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => reviewReads.shift() ?? Promise.reject(new Error("Unexpected review read"))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.resolve({ providers: [] })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () => vi.advanceTimersByTimeAsync(4_999))
+
+    expect(transport.load).toHaveBeenCalledOnce()
+
+    await act(async () => vi.advanceTimersByTimeAsync(1))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.load).toHaveBeenCalledTimes(2)
+  })
+
+  it("backs off long enough to replenish a three-read retry batch", async () => {
+    vi.useFakeTimers()
+    const reviewReads = [
+      Promise.reject({ _tag: "RateLimitedApiError", retryAt: null }),
+      Promise.resolve(reviewFor(BASE_A, HEAD_A))
+    ]
+    const transport = {
+      enqueue: () => Promise.reject(new Error("Unexpected review enqueue")),
+      load: vi.fn(() => reviewReads.shift() ?? Promise.reject(new Error("Unexpected review read"))),
+      loadThread: vi.fn(() => Promise.resolve(EMPTY_THREAD)),
+      previewPublication: () => Promise.reject(new Error("Unexpected publication preview")),
+      providers: vi.fn(() => Promise.resolve({ providers: [] })),
+      publishSuggestion: () => Promise.reject(new Error("Unexpected suggestion publication"))
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () => mountedRoot?.render(<ReviewThreadHarness transport={transport} />))
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(transport.load).toHaveBeenCalledOnce()
+    expect(transport.loadThread).toHaveBeenCalledOnce()
+    expect(transport.providers).toHaveBeenCalledOnce()
+
+    await act(async () => vi.advanceTimersByTimeAsync(1_000))
+
+    expect(host.querySelector("[data-thread]")?.textContent).toBe("0")
+    expect(transport.load).toHaveBeenCalledTimes(2)
+    expect(transport.loadThread).toHaveBeenCalledTimes(2)
+    expect(transport.providers).toHaveBeenCalledTimes(2)
   })
 
   it.each([
