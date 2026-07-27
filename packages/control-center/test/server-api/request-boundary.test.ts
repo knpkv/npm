@@ -164,7 +164,7 @@ describe("API request boundary", () => {
   it("isolates safe agent reads from ordinary reads and agent mutations", async () => {
     const webHandler = HttpRouter.toWebHandler(webHandlerLayer, { disableLogger: true })
     try {
-      const request = (path: string, method: "GET" | "POST", correlationId: string) =>
+      const request = (path: string, method: "GET" | "HEAD" | "POST", correlationId: string) =>
         webHandler.handler(
           new Request(`http://127.0.0.1:4173${path}`, {
             method,
@@ -181,6 +181,16 @@ describe("API request boundary", () => {
         "GET",
         "publication-preview"
       )
+      const publicationPreviewWithQuery = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview?refresh=true",
+        "GET",
+        "publication-preview-query"
+      )
+      const publicationPreviewHead = await request(
+        "/api/v1/agent/pull-requests/entity/reviews/job/suggestions/suggestion/publication-preview",
+        "HEAD",
+        "publication-preview-head"
+      )
       const firstRead = await request("/api/v1/agent/providers", "GET", "agent-read-1")
       const secondRead = await request("/api/v1/agent/providers", "GET", "agent-read-2")
       const firstOrdinaryRead = await request("/api/ping", "GET", "ordinary-read-1")
@@ -193,6 +203,8 @@ describe("API request boundary", () => {
 
       assert.strictEqual(firstMutation.status, 200)
       assert.strictEqual(publicationPreview.status, 429)
+      assert.strictEqual(publicationPreviewWithQuery.status, 429)
+      assert.strictEqual(publicationPreviewHead.status, 429)
       assert.strictEqual(firstRead.status, 200)
       assert.strictEqual(secondRead.status, 429)
       assert.strictEqual(firstOrdinaryRead.status, 200)
