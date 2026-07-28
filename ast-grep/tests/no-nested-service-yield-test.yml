@@ -1,0 +1,12 @@
+id: no-nested-service-yield
+valid:
+  - |
+    Effect.gen(function*() {
+      const repository = yield* GovernedActionRepository
+      return yield* repository.read(reference)
+    })
+invalid:
+  - |
+    Effect.gen(function*() {
+      return yield* (yield* GovernedActionRepository).read(reference)
+    })

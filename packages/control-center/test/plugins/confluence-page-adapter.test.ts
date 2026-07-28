@@ -139,6 +139,7 @@ const defaultClient = (overrides: Partial<ConfluencePageClientShape> = {}): Conf
   }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", commitHash: "commit", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(currentPage),
+  getPageVersion: () => Effect.succeed(currentPage.version),
   updatePage: () => Effect.die("unused updatePage"),
   getSpacePages: () => Effect.succeed({ results: [currentPage] }),
   getPageAttachments: () => Effect.succeed({ results: [] }),
@@ -215,8 +216,45 @@ const normalizedAttributes = (
 
 const jsonBytes = (value: unknown): number => new TextEncoder().encode(JSON.stringify(value)).byteLength
 
+const isTaggedFailure = (
+  value: unknown
+): value is {
+  readonly _tag: string
+  readonly diagnosticCode?: string
+  readonly operation?: string
+} =>
+  typeof value === "object" &&
+  value !== null &&
+  "_tag" in value &&
+  typeof value._tag === "string"
+
+const expectFailureTag = <A>(
+  exit: Exit.Exit<A, unknown>,
+  expectedTag: string,
+  diagnosticCode?: string
+): void => {
+  assert.isTrue(Exit.isFailure(exit))
+  if (!Exit.isFailure(exit)) return
+  const failure = Cause.findErrorOption(exit.cause)
+  assert.isTrue(Option.isSome(failure))
+  if (Option.isNone(failure)) return
+  assert.isTrue(isTaggedFailure(failure.value))
+  if (!isTaggedFailure(failure.value)) return
+  assert.strictEqual(failure.value._tag, expectedTag)
+  if (diagnosticCode !== undefined) {
+    assert.strictEqual(failure.value.diagnosticCode, diagnosticCode)
+  }
+}
+
+const expectConfigurationFailure = <A>(
+  exit: Exit.Exit<A, unknown>,
+  diagnosticCode: string
+): void => {
+  expectFailureTag(exit, "PluginConfigurationFailure", diagnosticCode)
+}
+
 describe("Confluence page adapter", () => {
-  it.effect("publishes the frozen ADF payload at exactly the next Confluence version", () =>
+  it.effect("publishes the frozen ADF payload and accepts a provider-normalized marker suffix", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
       const updates: Array<Parameters<ConfluencePageClientShape["updatePage"]>[1]> = []
@@ -230,7 +268,7 @@ describe("Confluence page adapter", () => {
               version: {
                 ...currentPage.version,
                 number: update.version,
-                message: update.versionMessage
+                message: update.versionMessage.replace("Publish the approved rollout", "Publish")
               },
               body: {
                 atlas_doc_format: {
@@ -268,6 +306,61 @@ describe("Confluence page adapter", () => {
       })
     }))
 
+  it.effect("keeps retryable publication failures in the typed failure channel", () =>
+    Effect.gen(function*() {
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const authorized = authorize(proposal)
+      const cases = [
+        { reason: "authentication", expectedTag: "PluginAuthenticationFailure" },
+        { reason: "rate-limit", expectedTag: "PluginRateLimitFailure" }
+      ] satisfies ReadonlyArray<{
+        readonly reason: "authentication" | "rate-limit"
+        readonly expectedTag: string
+      }>
+      for (const { expectedTag, reason } of cases) {
+        const adapter = yield* makeAdapter(defaultClient({
+          updatePage: () =>
+            Effect.fail(
+              new ConfluencePageClientFailure({
+                operation: "confluence-page-update",
+                reason,
+                retryAfterSeconds: reason === "rate-limit" ? 30 : null
+              })
+            )
+        }))
+        const exit = yield* adapter.executor.executeAuthorizedAction(authorized).pipe(Effect.exit)
+        expectFailureTag(exit, expectedTag)
+      }
+    }))
+
+  it.effect("records an invalid provider update as a confirmed rejection without reconciliation reads", () =>
+    Effect.gen(function*() {
+      const reconciliationReads = yield* Ref.make(0)
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const adapter = yield* makeAdapter(defaultClient({
+        getPageVersion: () =>
+          Ref.update(reconciliationReads, (count) => count + 1).pipe(Effect.as(currentPage.version)),
+        updatePage: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-update",
+              reason: "invalid-request",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+
+      const dispatched = yield* adapter.executor.executeAuthorizedAction(authorize(proposal))
+
+      assert.strictEqual(dispatched._tag, "confirmed")
+      if (dispatched._tag === "confirmed") {
+        assert.strictEqual(dispatched.receipt.status, "failed")
+      }
+      assert.strictEqual(yield* Ref.get(reconciliationReads), 0)
+    }))
+
   it.effect("blocks a stale authorized revision before any provider mutation", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
@@ -299,17 +392,7 @@ describe("Confluence page adapter", () => {
           expectedRevision: "03"
         })
       ).pipe(Effect.exit)
-      assert.isTrue(Exit.isFailure(invalidProposal))
-      if (Exit.isFailure(invalidProposal)) {
-        const failure = Cause.findErrorOption(invalidProposal.cause)
-        assert.isTrue(Option.isSome(failure))
-        if (Option.isSome(failure)) {
-          assert.strictEqual(failure.value._tag, "PluginConfigurationFailure")
-          if (failure.value._tag === "PluginConfigurationFailure") {
-            assert.strictEqual(failure.value.diagnosticCode, "confluence-action-revision-invalid")
-          }
-        }
-      }
+      expectConfigurationFailure(invalidProposal, "confluence-action-revision-invalid")
 
       const invalidReconciliation = yield* adapter.executor.reconcile(
         Schema.decodeUnknownSync(PluginActionReconciliationRequestV1)({
@@ -318,31 +401,20 @@ describe("Confluence page adapter", () => {
           payloadDigest: "a".repeat(64)
         })
       ).pipe(Effect.exit)
-      assert.isTrue(Exit.isFailure(invalidReconciliation))
-      if (Exit.isFailure(invalidReconciliation)) {
-        const failure = Cause.findErrorOption(invalidReconciliation.cause)
-        assert.isTrue(Option.isSome(failure))
-        if (Option.isSome(failure)) {
-          assert.strictEqual(failure.value._tag, "PluginConfigurationFailure")
-          if (failure.value._tag === "PluginConfigurationFailure") {
-            assert.strictEqual(failure.value.diagnosticCode, "confluence-reconciliation-key-invalid")
-          }
-        }
-      }
+      expectConfigurationFailure(invalidReconciliation, "confluence-reconciliation-key-invalid")
       assert.strictEqual(yield* Ref.get(providerReads), 0)
     }))
 
-  it.effect("reconciles an ambiguous publication from its attributable version marker without replay", () =>
+  it.effect("reconciles an old ambiguous publication by exact version without replay or a bounded scan", () =>
     Effect.gen(function*() {
-      let versionMarker = ""
+      const versionMarker = yield* Ref.make("")
+      const exactVersionReads = yield* Ref.make(0)
       const proposalAdapter = yield* makeAdapter(defaultClient())
       const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
       const authorized = authorize(proposal)
       const ambiguousAdapter = yield* makeAdapter(defaultClient({
         updatePage: (_pageId, update) =>
-          Effect.sync(() => {
-            versionMarker = update.versionMessage
-          }).pipe(
+          Ref.set(versionMarker, update.versionMessage).pipe(
             Effect.andThen(Effect.fail(
               new ConfluencePageClientFailure({
                 operation: "confluence-page-update",
@@ -369,13 +441,12 @@ describe("Confluence page adapter", () => {
               version: { ...currentPage.version, number: 5, message: "Later publication" }
             })
           ),
-        getPageVersions: () =>
-          Effect.succeed({
-            results: [
-              { ...currentPage.version, number: 5, message: "Later publication" },
-              { ...currentPage.version, number: 4, message: versionMarker }
-            ]
-          }),
+        getPageVersion: (_pageId, version) =>
+          Ref.update(exactVersionReads, (count) => count + 1).pipe(
+            Effect.andThen(Ref.get(versionMarker)),
+            Effect.map((marker) => ({ ...currentPage.version, number: version, message: marker }))
+          ),
+        getPageVersions: () => Effect.die("reconciliation must not walk bounded history"),
         updatePage: () => Effect.die("reconciliation must not replay the mutation")
       }))
       const reconciled = yield* reconciliationAdapter.executor.reconcile(
@@ -389,6 +460,78 @@ describe("Confluence page adapter", () => {
 
       assert.strictEqual(reconciled._tag, "succeeded")
       assert.strictEqual(yield* Ref.get(reconciliationReads), 1)
+      assert.strictEqual(yield* Ref.get(exactVersionReads), 1)
+    }))
+
+  it.effect("fails reconciliation when the exact authorized revision does not exist", () =>
+    Effect.gen(function*() {
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const authorized = authorize(proposal)
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.succeed({
+            ...currentPage,
+            version: { ...currentPage.version, number: 5, message: "Later publication" }
+          }),
+        getPageVersion: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-version",
+              reason: "not-found",
+              retryAfterSeconds: null
+            })
+          ),
+        getPageVersions: () => Effect.die("reconciliation must not walk bounded history"),
+        updatePage: () => Effect.die("reconciliation must not replay the mutation")
+      }))
+
+      const reconciled = yield* adapter.executor.reconcile(
+        Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+          reconciliationKey: "cfpg:v1:42:4",
+          idempotencyKey: authorized.idempotencyKey,
+          payloadDigest: authorized.payloadDigest,
+          authorizedAction: authorized
+        })
+      )
+
+      assert.strictEqual(reconciled._tag, "failed")
+      if (reconciled._tag === "failed") {
+        assert.strictEqual(reconciled.receipt.status, "failed")
+      }
+    }))
+
+  it.effect("fails reconciliation when the exact revision belongs to another publication", () =>
+    Effect.gen(function*() {
+      const proposalAdapter = yield* makeAdapter(defaultClient())
+      const proposal = yield* proposalAdapter.connection.proposeAction(actionRequest)
+      const authorized = authorize(proposal)
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.succeed({
+            ...currentPage,
+            version: { ...currentPage.version, number: 5, message: "Later publication" }
+          }),
+        getPageVersion: (_pageId, version) =>
+          Effect.succeed({
+            ...currentPage.version,
+            number: version,
+            message: "Different publication"
+          }),
+        getPageVersions: () => Effect.die("reconciliation must not walk bounded history"),
+        updatePage: () => Effect.die("reconciliation must not replay the mutation")
+      }))
+
+      const reconciled = yield* adapter.executor.reconcile(
+        Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
+          reconciliationKey: "cfpg:v1:42:4",
+          idempotencyKey: authorized.idempotencyKey,
+          payloadDigest: authorized.payloadDigest,
+          authorizedAction: authorized
+        })
+      )
+
+      assert.strictEqual(reconciled._tag, "failed")
     }))
 
   it("accepts only HTTPS Confluence Cloud tenant root URLs", () => {
@@ -1905,6 +2048,25 @@ describe("Confluence page adapter", () => {
 
       assert.isTrue(Result.isFailure(outcome))
       if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "PluginAuthorizationFailure")
+    }))
+
+  it.effect("maps provider conflicts consistently across read and governed proposal paths", () =>
+    Effect.gen(function*() {
+      const adapter = yield* makeAdapter(defaultClient({
+        getPage: () =>
+          Effect.fail(
+            new ConfluencePageClientFailure({
+              operation: "confluence-page-read",
+              reason: "conflict",
+              retryAfterSeconds: null
+            })
+          )
+      }))
+      const read = yield* adapter.connection.readEntity(request).pipe(Effect.exit)
+      const proposal = yield* adapter.connection.proposeAction(actionRequest).pipe(Effect.exit)
+
+      expectFailureTag(read, "PluginConflictFailure", "confluence-page-version-conflict")
+      expectFailureTag(proposal, "PluginConflictFailure", "confluence-page-version-conflict")
     }))
 
   it.effect("returns an authoritative missing result for a provider 404", () =>

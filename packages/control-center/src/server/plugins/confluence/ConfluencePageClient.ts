@@ -34,6 +34,7 @@ export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<Conflue
       "authentication",
       "authorization",
       "conflict",
+      "invalid-request",
       "not-found",
       "rate-limit",
       "timeout",
@@ -49,6 +50,10 @@ export interface ConfluencePageClientShape {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getPageVersion: (
+    pageId: string,
+    version: number
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly updatePage: (
     pageId: string,
     input: {
@@ -110,6 +115,8 @@ const translateFailure = (operation: string, cause: unknown): ConfluencePageClie
     ? "authorization"
     : status === 409
     ? "conflict"
+    : status === 400
+    ? "invalid-request"
     : status === 404
     ? "not-found"
     : status === 429
@@ -158,6 +165,11 @@ export const makeConfluencePageClient = (
         Effect.flatMap(HttpClientResponse.filterStatusOk),
         Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluencePage))
       )
+    ),
+  getPageVersion: (pageId, version) =>
+    bounded(
+      "confluence-page-version",
+      api.v2.getPageVersionDetails(pageId, String(version), undefined)
     ),
   updatePage: (pageId, input) =>
     bounded(

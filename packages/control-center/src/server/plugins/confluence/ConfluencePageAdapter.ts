@@ -33,6 +33,7 @@ import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
@@ -202,7 +203,14 @@ const toPluginFailure = Effect.fn("ConfluencePage.toPluginFailure")(function*(
     case "authorization":
       return new PluginAuthorizationFailure({ operation: failure.operation })
     case "conflict":
-      return new PluginConfigurationFailure({ diagnosticCode: "confluence-page-version-conflict" })
+      return new PluginConflictFailure({
+        operation: failure.operation,
+        diagnosticCode: "confluence-page-version-conflict"
+      })
+    case "invalid-request":
+      return new PluginConfigurationFailure({
+        diagnosticCode: "confluence-page-request-invalid"
+      })
     case "not-found":
       return new PluginOutageFailure({ operation: failure.operation })
     case "timeout":

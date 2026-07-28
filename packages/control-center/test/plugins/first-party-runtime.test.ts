@@ -509,7 +509,8 @@ describe("first-party plugin runtime", () => {
             actionId: GOVERNED_ACTION
           })
         }).pipe(Effect.provide(engineLayer))
-        const governedRecord = yield* (yield* GovernedActionRepository).read({
+        const governedActionRepository = yield* GovernedActionRepository
+        const governedRecord = yield* governedActionRepository.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
         })
@@ -860,9 +861,7 @@ describe("first-party plugin runtime", () => {
         )
 
         const registry = yield* PluginRuntimeRegistry
-        const authority = yield* Effect.gen(function*() {
-          return yield* PluginRuntimeAuthority
-        }).pipe(
+        const authority = yield* PluginRuntimeAuthority.pipe(
           Effect.provide(registry.layer(pluginRuntimeKey({
             workspaceId: GOVERNED_WORKSPACE,
             pluginConnectionId: GOVERNED_CONNECTION
@@ -896,7 +895,8 @@ describe("first-party plugin runtime", () => {
             Layer.provide(executors)
           ))
         )
-        const record = yield* (yield* GovernedActionRepository).read({
+        const governedActionRepository = yield* GovernedActionRepository
+        const record = yield* governedActionRepository.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
         })
@@ -2061,7 +2061,8 @@ describe("first-party plugin runtime", () => {
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
         })
-        const governedRecord = yield* (yield* GovernedActionRepository).read({
+        const governedActionRepository = yield* GovernedActionRepository
+        const governedRecord = yield* governedActionRepository.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: GOVERNED_ACTION
         })

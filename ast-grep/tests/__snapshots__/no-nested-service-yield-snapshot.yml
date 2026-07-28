@@ -1,0 +1,18 @@
+id: no-nested-service-yield
+snapshots:
+  ? |
+    Effect.gen(function*() {
+      return yield* (yield* GovernedActionRepository).read(reference)
+    })
+  : labels:
+      - source: yield* (yield* GovernedActionRepository).read(reference)
+        style: primary
+        start: 34
+        end: 90
+      - source: |-
+          Effect.gen(function*() {
+            return yield* (yield* GovernedActionRepository).read(reference)
+          })
+        style: secondary
+        start: 0
+        end: 93

@@ -204,6 +204,7 @@ const confluenceClient = (overrides: Partial<ConfluencePageClientShape> = {}): C
   getCurrentUser: Effect.succeed({ accountId: "account-author", displayName: "Avery" }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(confluencePage),
+  getPageVersion: () => Effect.succeed(confluencePage.version),
   updatePage: () => Effect.die("unused updatePage"),
   getSpacePages: () => Effect.succeed({ results: [confluencePage] }),
   getPageAttachments: () => Effect.succeed({ results: [] }),

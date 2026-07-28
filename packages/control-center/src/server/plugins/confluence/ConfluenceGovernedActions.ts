@@ -36,13 +36,11 @@ import {
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
-import { decodeConfluenceNextCursor } from "./ConfluenceCursor.js"
 import { type ConfluencePageClientFailure, type ConfluencePageClientShape } from "./ConfluencePageClient.js"
-import { RawConfluenceCurrentUser, RawConfluencePage, RawConfluenceVersionPage } from "./ConfluencePageSchemas.js"
+import { RawConfluenceCurrentUser, RawConfluencePage, RawConfluenceVersion } from "./ConfluencePageSchemas.js"
 
 const ACTION_KIND = "update-page"
 const ENTITY_TYPE = "page"
-const MAXIMUM_HISTORY_PAGES = 5
 const PageId = Schema.String.check(
   Schema.isPattern(/^[1-9][0-9]{0,63}$/u, { expected: "a positive decimal Confluence page id" })
 )
@@ -132,6 +130,10 @@ const clientFailure = Effect.fn("ConfluenceGovernedActions.clientFailure")(funct
       return new PluginConflictFailure({
         operation: failure.operation,
         diagnosticCode: "confluence-page-version-conflict"
+      })
+    case "invalid-request":
+      return new PluginConfigurationFailure({
+        diagnosticCode: "confluence-page-request-invalid"
       })
     case "not-found":
       return new PluginConflictFailure({
@@ -289,40 +291,23 @@ const decodeReconciliationKey = (
   )
 }
 
-type VersionMarkerSearchResult =
-  | { readonly found: true; readonly message: string }
-  | { readonly found: false; readonly complete: boolean }
-
-const findVersionMessage = Effect.fn("ConfluenceGovernedActions.findVersionMessage")(function*(
+const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")(function*(
   client: ConfluencePageClientShape,
   pageId: string,
   targetVersion: number
-): Effect.fn.Return<VersionMarkerSearchResult, PluginFailure> {
-  const seen = new Set<string>()
-  let cursor: string | null = null
-  for (let pageNumber = 0; pageNumber < MAXIMUM_HISTORY_PAGES; pageNumber++) {
-    const raw: unknown = yield* safeProviderCall(client.getPageVersions(pageId, cursor))
-    const page: typeof RawConfluenceVersionPage.Type = yield* Schema.decodeUnknownEffect(
-      RawConfluenceVersionPage
-    )(raw).pipe(
-      Effect.mapError(() => malformed("confluence-page-versions", "confluence-version-page-invalid"))
-    )
-    const found = (page.results ?? []).find(({ number }) => number === targetVersion)
-    if (found !== undefined) return { found: true, message: found.message ?? "" }
-    const next: string | null = yield* decodeConfluenceNextCursor(
-      "confluence-page-versions",
-      "confluence-version-cursor",
-      page._links?.next,
-      2_048
-    )
-    if (next === null) return { found: false, complete: true }
-    if (seen.has(next)) {
-      return yield* malformed("confluence-page-versions", "confluence-version-cursor-loop")
-    }
-    seen.add(next)
-    cursor = next
+): Effect.fn.Return<typeof RawConfluenceVersion.Type | null, PluginFailure> {
+  const result = yield* client.getPageVersion(pageId, targetVersion).pipe(Effect.result)
+  if (Result.isFailure(result)) {
+    if (result.failure.reason === "not-found") return null
+    return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
   }
-  return { found: false, complete: false }
+  const version = yield* Schema.decodeUnknownEffect(RawConfluenceVersion)(result.success).pipe(
+    Effect.mapError(() => malformed("confluence-page-version", "confluence-version-invalid"))
+  )
+  if (version.number !== targetVersion) {
+    return yield* malformed("confluence-page-version", "confluence-version-identity-mismatch")
+  }
+  return version
 })
 
 /** Build the governed Confluence proposal and executor surfaces. @internal */
@@ -500,6 +485,12 @@ export const makeConfluenceGovernedActions = (
           reconciliationKey: locator
         })
       }
+      if (
+        result.failure.reason !== "not-found" &&
+        result.failure.reason !== "invalid-request"
+      ) {
+        return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
+      }
       return {
         _tag: "confirmed",
         receipt: {
@@ -529,7 +520,7 @@ export const makeConfluenceGovernedActions = (
     if (
       page.version.number !== payload.targetVersion ||
       page.title !== payload.title ||
-      page.version.message !== marker
+      !hasVersionMarker(page.version.message ?? "", request.idempotencyKey, request.payloadDigest)
     ) {
       return yield* new PluginUnknownOutcomeFailure({
         operation: "execute-authorized-action",
@@ -579,14 +570,24 @@ export const makeConfluenceGovernedActions = (
     if (current.version.number < locator.targetVersion) {
       return { _tag: "pending", checkedAt }
     }
-    const historical: VersionMarkerSearchResult = current.version.number === locator.targetVersion
-      ? { found: true, message: current.version.message ?? "" }
-      : yield* findVersionMessage(input.client, locator.pageId, locator.targetVersion)
-    if (!historical.found) {
-      return { _tag: "pending", checkedAt }
+    const historical = current.version.number === locator.targetVersion
+      ? current.version
+      : yield* readExactVersion(input.client, locator.pageId, locator.targetVersion)
+    if (historical === null) {
+      return {
+        _tag: "failed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(
+            `reconciliation:${locator.pageId}:v${locator.targetVersion}`
+          ),
+          safeSummary: "The authorized Confluence revision was superseded by another publication",
+          observedAt: checkedAt
+        }
+      }
     }
     const succeeded = hasVersionMarker(
-      historical.message,
+      historical.message ?? "",
       request.idempotencyKey,
       PluginActionPayloadDigest.make(request.payloadDigest)
     )
