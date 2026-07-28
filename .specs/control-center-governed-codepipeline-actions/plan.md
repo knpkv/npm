@@ -62,7 +62,7 @@
 - [x] Run package build/tests, full repository gates, and packed-package checks.
 - [x] Run independent subagent specification and standards reviews.
 - [x] Implement every confirmed finding and its durable prevention guardrail.
-- [ ] Open the PR only with no remaining local findings.
+- [x] Open the PR only with no remaining local findings.
 - [ ] Clear exact-head CI, CodeRabbit, Codex, and unresolved-thread gates.
 
 ## Risk mitigation
