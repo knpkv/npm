@@ -156,6 +156,7 @@ const codePipelineFixture = defineFixture({
   actionKind: "pipeline.retry",
   payload: {
     retryOf: "execution-failed-1",
+    pipelineRevision: "7:2026-07-15T09:40:00.000Z",
     sourceRevisions: [{
       actionName: "Checkout",
       revisionType: "COMMIT_ID",

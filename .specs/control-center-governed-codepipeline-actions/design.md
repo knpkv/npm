@@ -8,8 +8,8 @@ three layers gain narrow responsibilities:
 1. `CodePipelineReadProvider` owns credentials and direct AWS calls.
 2. `CodePipelineReadClient` Schema-decodes provider data into bounded internal
    models.
-3. `CodePipelinePluginDefinition` normalizes entities and wires a new
-   `CodePipelineGovernedActions` module.
+3. `CodePipelinePluginDefinition` normalizes entities and owns the private
+   governed-action lifecycle under the same runtime identity.
 
 The host plugin contract gains a vendor-neutral optional pipeline read surface:
 
@@ -40,11 +40,19 @@ proposal -> authorization -> durable preparation -> final preflight
 - `CodePipelineReadProvider.ts`: pipeline state, CloudWatch log, S3 range, and
   mutation operations.
 - `CodePipelineReadClient.ts`: decoded state/read/write models and helpers.
-- `CodePipelineGovernedActions.ts`: canonical proposals, preflight, dispatch,
-  cancellation policy, and reconciliation.
+- `CodePipelinePluginDefinition.ts`: canonical proposals, preflight, dispatch,
+  cancellation policy, and reconciliation remain one private subsystem.
 - `api/codepipeline.ts`, application service, and handlers: authenticated
   workspace read endpoints.
 - first-party runtime registry: executable CodePipeline runtime wiring.
+
+The governed-action subsystem intentionally remains inside the deep plugin
+definition module. Proposal normalization, exact snapshot loading, runtime
+identity verification, token hashing, idempotent dispatch replay, and
+reconciliation all share private state. Extracting them would expose a broad
+parameter seam with no independent consumer and make those invariants easier to
+split accidentally; the exported definition remains the single narrow
+interface.
 
 ## Action model
 
@@ -161,8 +169,8 @@ const connection = Context.get(
 ## Security decisions
 
 - No provider URL or provider storage coordinate enters API schemas.
-- Approval token exists only in canonical action payloads protected by the
-  governed-action authorization boundary.
+- Only a one-way approval-token digest enters the canonical action payload;
+  the raw token remains ephemeral provider state.
 - Provider-call code never logs inputs, credentials, responses, or causes.
 - Artifact responses force download and disable caching/sniffing.
 - Log messages are treated as provider content, bounded as untrusted text, and

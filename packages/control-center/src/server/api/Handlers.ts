@@ -1252,6 +1252,7 @@ export const codePipelineHandlersLayer = HttpApiBuilder.group(
   "codepipeline",
   (handlers) =>
     Effect.gen(function*() {
+      const reads = yield* Effect.serviceOption(CodePipelineReads)
       const mapReadErrors = <A, R>(
         effect: Effect.Effect<
           A,
@@ -1273,7 +1274,6 @@ export const codePipelineHandlersLayer = HttpApiBuilder.group(
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
-            const reads = yield* Effect.serviceOption(CodePipelineReads)
             if (Option.isNone(reads)) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }
@@ -1287,7 +1287,6 @@ export const codePipelineHandlersLayer = HttpApiBuilder.group(
           Effect.gen(function*() {
             const session = yield* CurrentSession
             yield* requireWorkspaceRead(session)
-            const reads = yield* Effect.serviceOption(CodePipelineReads)
             if (Option.isNone(reads)) {
               return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             }

@@ -36,6 +36,42 @@ import {
 
 const RETRY_DELAY_SECONDS = 30
 
+interface ArtifactBodyCollection {
+  readonly chunks: Array<Uint8Array>
+  readonly total: number
+}
+
+/** Collect one provider body while stopping consumption at the authorized range bound. @internal */
+export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.collectBoundedArtifactBody")(
+  function*<Error>(body: Stream.Stream<Uint8Array, Error>, maximumBytes: number): Effect.fn.Return<
+    Uint8Array,
+    Error | PluginMalformedResponseFailure
+  > {
+    const collected = yield* Stream.runFoldEffect(
+      body,
+      (): ArtifactBodyCollection => ({ chunks: [], total: 0 }),
+      (state, chunk) => {
+        const total = state.total + chunk.byteLength
+        return total > maximumBytes
+          ? Effect.fail(
+            new PluginMalformedResponseFailure({
+              operation: "codepipeline-get-artifact",
+              diagnosticCode: "codepipeline-artifact-range-exceeded"
+            })
+          )
+          : Effect.succeed({ chunks: [...state.chunks, chunk], total })
+      }
+    )
+    const bytes = new Uint8Array(collected.total)
+    let offset = 0
+    for (const chunk of collected.chunks) {
+      bytes.set(chunk, offset)
+      offset += chunk.byteLength
+    }
+    return bytes
+  }
+)
+
 /** Secret-free AWS coordinates shared by every provider request. @internal */
 export interface CodePipelineAwsAccount {
   readonly profile: string
@@ -402,24 +438,27 @@ export const CodePipelineReadProviderLive = Layer.effect(
               Bucket: request.bucket,
               Key: request.key,
               Range: `bytes=${request.offset}-${request.offset + request.length - 1}`
-            }).pipe(
-              Effect.flatMap((response) =>
-                response.Body === undefined
-                  ? Effect.succeed({
-                    bytes: new Uint8Array(),
+            })
+          ).pipe(
+            Effect.flatMap((response) =>
+              response.Body === undefined
+                ? Effect.succeed({
+                  bytes: new Uint8Array(),
+                  contentLength: response.ContentLength,
+                  contentRange: response.ContentRange
+                })
+                : collectBoundedArtifactBody(
+                  response.Body.pipe(
+                    Stream.mapError(() => new PluginOutageFailure({ operation: "codepipeline-get-artifact" }))
+                  ),
+                  request.length
+                ).pipe(
+                  Effect.map((bytes) => ({
+                    bytes,
                     contentLength: response.ContentLength,
                     contentRange: response.ContentRange
-                  })
-                  : Stream.runCollect(response.Body).pipe(
-                    Effect.map((chunks) => ({
-                      bytes: Uint8Array.from(
-                        Array.from(chunks).flatMap((chunk) => Array.from(chunk))
-                      ),
-                      contentLength: response.ContentLength,
-                      contentRange: response.ContentRange
-                    }))
-                  )
-              )
+                  }))
+                )
             )
           )
         ),

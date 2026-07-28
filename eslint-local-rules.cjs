@@ -708,6 +708,20 @@ const isAllowedHttpHandlerRequestService = ({ definition, importedName }) =>
     (allowed) => importSource(definition) === allowed.source && importedName === allowed.importedName
   )
 
+const optionalServiceReference = (context, expression) => {
+  if (expression.type !== "CallExpression" || expression.arguments.length === 0) return undefined
+  const callee = importReference(context, expression.callee)
+  if (
+    callee === undefined ||
+    callee.importedName !== "serviceOption" ||
+    !["effect", "effect/Effect"].includes(importSource(callee.definition))
+  ) {
+    return undefined
+  }
+  const service = expression.arguments[0]
+  return service.type === "SpreadElement" ? undefined : importReference(context, service)
+}
+
 const isHttpHandleCallback = (node) => {
   if (node.type !== "ArrowFunctionExpression" && node.type !== "FunctionExpression") return false
   const parent = node.parent
@@ -980,7 +994,7 @@ module.exports = {
       return {
         YieldExpression(node) {
           if (node.argument === null) return
-          const reference = importReference(context, node.argument)
+          const reference = importReference(context, node.argument) ?? optionalServiceReference(context, node.argument)
           if (reference === undefined || isAllowedHttpHandlerRequestService(reference)) return
           if (!context.sourceCode.getAncestors(node).some(isHttpHandleCallback)) return
           context.report({

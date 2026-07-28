@@ -1705,6 +1705,7 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(CodePipelineReads, codePipelineReads),
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,

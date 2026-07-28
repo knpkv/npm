@@ -60,8 +60,8 @@
 - [x] Run focused tests after each layer.
 - [x] Run Prettier, Effect static checks, ESLint, and TypeScript.
 - [x] Run package build/tests, full repository gates, and packed-package checks.
-- [ ] Run independent subagent specification and standards reviews.
-- [ ] Implement every confirmed finding and its durable prevention guardrail.
+- [x] Run independent subagent specification and standards reviews.
+- [x] Implement every confirmed finding and its durable prevention guardrail.
 - [ ] Open the PR only with no remaining local findings.
 - [ ] Clear exact-head CI, CodeRabbit, Codex, and unresolved-thread gates.
 

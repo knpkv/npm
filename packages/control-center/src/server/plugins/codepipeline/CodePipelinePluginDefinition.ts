@@ -1,9 +1,8 @@
 /**
  * Production AWS CodePipeline read adapter for one configured pipeline.
  *
- * The MVP negotiates only entity reads and incremental synchronization. Start,
- * stop, approval, retry, log-content, and artifact-content capabilities remain
- * outside the public contract until their governed execution paths exist.
+ * Entity synchronization, bounded evidence reads, and governed pipeline
+ * mutations share this adapter's exact pipeline and AWS identity boundary.
  *
  * @internal
  */
@@ -19,6 +18,7 @@ import * as Stream from "effect/Stream"
 import * as SynchronizedRef from "effect/SynchronizedRef"
 
 import { PluginHealth } from "../../../domain/freshness.js"
+import type { PluginPayloadJson } from "../../../domain/plugins/bounds.js"
 import {
   type AuthorizedPluginActionV1,
   NormalizedPluginEventV1,
@@ -58,6 +58,7 @@ import { definePluginV1 } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import {
+  CodePipelineAccountIdentity,
   type CodePipelineActionExecution,
   type CodePipelineExecutionSnapshot,
   type CodePipelinePipeline,
@@ -68,6 +69,9 @@ import type { CodePipelineProviderFailure } from "./CodePipelineReadProvider.js"
 const EXECUTION_STREAM_KEY = "executions"
 const COMPLETE_CHECKPOINT = "complete"
 const NEXT_CHECKPOINT_PREFIX = "next:"
+const LOG_CURSOR_SEPARATOR = ":"
+const MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH = 3_900
+const utf8Encoder = new TextEncoder()
 
 const AwsProfile = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
 const AwsRegion = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
@@ -105,11 +109,24 @@ const ApprovalActionPayload = Schema.Struct({
   actionName: ActionIdentifier,
   actionExecutionId: ActionIdentifier,
   summary: ActionSummary,
-  actionRevision: Schema.optionalKey(Revision)
+  actionRevision: Schema.optionalKey(Revision),
+  approvalStatus: Schema.optionalKey(Schema.Literals(["Approved", "Rejected"])),
+  approvalTokenDigest: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128))
+  )
 })
 const RetryActionPayload = Schema.Struct({
   retryOf: ActionIdentifier,
-  sourceRevisions: Schema.Array(SourceRevision).check(Schema.isNonEmpty(), Schema.isMaxLength(50))
+  sourceRevisions: Schema.Array(SourceRevision).check(Schema.isNonEmpty(), Schema.isMaxLength(50)),
+  pipelineRevision: Schema.optionalKey(Revision)
+})
+const LogCursorParts = Schema.Struct({
+  scope: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128)),
+  token: Schema.String.check(
+    Schema.isTrimmed(),
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH)
+  )
 })
 
 type CodePipelineActionKind =
@@ -138,7 +155,9 @@ export const CodePipelinePluginConfiguration = Schema.Struct({
   actionPageSize: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 })),
   maximumActionPages: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 5 })),
   maximumActionsPerExecution: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 200 })),
-  operationTimeoutMillis: Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 120_000 }))
+  maximumLogBytes: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 1024 * 1024 })),
+  operationTimeoutMillis: Schema.Int.check(Schema.isBetween({ minimum: 1_000, maximum: 120_000 })),
+  runtimeIdentity: Schema.optionalKey(CodePipelineAccountIdentity)
 })
 
 type CodePipelineConfiguration = typeof CodePipelinePluginConfiguration.Type
@@ -209,6 +228,15 @@ const descriptor = {
     },
     {
       _tag: "integer",
+      key: "maximumLogBytes",
+      label: "Log page bytes",
+      description: "Maximum aggregate UTF-8 message bytes returned by one log page.",
+      required: true,
+      minimum: 1,
+      maximum: 1024 * 1024
+    },
+    {
+      _tag: "integer",
       key: "operationTimeoutMillis",
       label: "Request timeout",
       description: "Maximum milliseconds for credential and CodePipeline provider requests.",
@@ -231,6 +259,9 @@ const descriptor = {
     requirement: "required"
   }))
 } satisfies unknown
+
+/** Current CodePipeline descriptor snapshot used by first-party runtime compatibility checks. @internal */
+export const codePipelinePluginDescriptor = descriptor
 
 const unsupported = (capabilityId: "action.cancel") =>
   new PluginUnsupportedCapabilityFailure({
@@ -658,10 +689,11 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           )
       )
     )
-  const runtimeIdentity = yield* actionProvider(
-    "runtime-identity",
-    readClient.discoverAccount(awsAccount)
-  )
+  const runtimeIdentity = configuration.runtimeIdentity ??
+    (yield* actionProvider(
+      "runtime-identity",
+      readClient.discoverAccount(awsAccount)
+    ))
   const actionActorIdentity = yield* decodeOutput("codepipeline-action-actor", PluginActionActorIdentityV1, {
     providerId: "codepipeline",
     providerAccountId: runtimeIdentity.accountId,
@@ -690,6 +722,43 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       Effect.mapError(() => new PluginOutageFailure({ operation: "codepipeline-client-token" }))
     )
     return `cc-${digest}`
+  })
+  const privateDigest = (operation: string, value: typeof PluginPayloadJson.Type) =>
+    digestGovernedActionPayload(value).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError(() => new PluginOutageFailure({ operation }))
+    )
+  const approvalTokenDigest = (token: string) =>
+    privateDigest("codepipeline-approval-token-digest", { approvalToken: token })
+  const logCursorScope = (action: CodePipelineActionExecution) =>
+    privateDigest("codepipeline-log-cursor-scope", {
+      executionId: action.executionId,
+      actionExecutionId: action.actionExecutionId,
+      logStreamArn: action.logStreamArn
+    })
+  const decodeLogCursor = Effect.fn("CodePipelinePlugin.decodeLogCursor")(function*(
+    cursor: string,
+    expectedScope: string
+  ) {
+    const separator = cursor.indexOf(LOG_CURSOR_SEPARATOR)
+    const decoded = yield* Schema.decodeUnknownEffect(LogCursorParts)({
+      scope: separator < 0 ? "" : cursor.slice(0, separator),
+      token: separator < 0 ? "" : cursor.slice(separator + LOG_CURSOR_SEPARATOR.length)
+    }).pipe(
+      Effect.mapError(() =>
+        new PluginConflictFailure({
+          operation: "pipeline-logs",
+          diagnosticCode: "codepipeline-log-cursor-invalid"
+        })
+      )
+    )
+    if (decoded.scope !== expectedScope) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-cursor-scope-mismatch"
+      })
+    }
+    return decoded.token
   })
 
   const loadSnapshot = (executionId: string) =>
@@ -955,23 +1024,39 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         diagnosticCode: "codepipeline-log-stream-unavailable"
       })
     }
+    const cursorScope = yield* logCursorScope(action)
+    const providerCursor = request.cursor === null
+      ? null
+      : yield* decodeLogCursor(request.cursor, cursorScope)
     const page = yield* actionProvider(
       "pipeline-logs",
       readClient.getLogPage({
         account: awsAccount,
         logGroupName: action.logStreamArn.slice(markerIndex + marker.length, streamIndex),
         logStreamName: action.logStreamArn.slice(streamIndex + streamMarker.length),
-        nextToken: request.cursor,
+        nextToken: providerCursor,
         limit: request.limit
       })
     )
+    const messageBytes = page.events.reduce(
+      (total, event) => total + utf8Encoder.encode(event.message).byteLength,
+      0
+    )
+    if (messageBytes > configuration.maximumLogBytes) {
+      return yield* new PluginMalformedResponseFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-page-byte-bound-exceeded"
+      })
+    }
     return yield* decodeOutput("pipeline-logs", PluginPipelineLogPageV1, {
       events: page.events.map((event) => ({
         timestamp: formatDate(event.timestamp),
         ingestionTimestamp: event.ingestionTimestamp === null ? null : formatDate(event.ingestionTimestamp),
         message: event.message
       })),
-      nextCursor: page.nextToken
+      nextCursor: page.nextToken === null
+        ? null
+        : `${cursorScope}${LOG_CURSOR_SEPARATOR}${page.nextToken}`
     })
   })
 
@@ -1032,18 +1117,40 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     pipeline: CodePipelinePipeline,
     snapshot: CodePipelineExecutionSnapshot
   ) {
-    const sourceRevisions = snapshot.execution.artifactRevisions.flatMap((revision) =>
-      revision.name === null || revision.revisionId === null
+    const sourceActions = pipeline.stages.flatMap(({ actions }) =>
+      actions.filter((action) => action.actionType.category === "Source")
+    )
+    if (
+      sourceActions.length === 0 ||
+      new Set(sourceActions.map(({ name }) => name)).size !== sourceActions.length
+    ) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-source-action-set-invalid"
+      })
+    }
+    const sourceRevisions = sourceActions.flatMap((action) => {
+      const revision = snapshot.execution.artifactRevisions.find(
+        (candidate) =>
+          candidate.name !== null &&
+          action.outputArtifactNames.includes(candidate.name)
+      )
+      return revision?.revisionId === null || revision === undefined
         ? []
         : [{
-          actionName: revision.name,
-          revisionType: sourceRevisionType(pipeline, revision.name),
+          actionName: action.name,
+          revisionType: sourceRevisionType(pipeline, action.name),
           revisionValue: revision.revisionId
         }]
-    )
+    })
+    if (sourceRevisions.length !== sourceActions.length) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-retry-source-revision-incomplete"
+      })
+    }
     return yield* decodeOutput("codepipeline-retry-payload", RetryActionPayload, {
       retryOf: snapshot.execution.executionId,
-      sourceRevisions
+      pipelineRevision: pipelineRevision(pipeline),
+      sourceRevisions: [...sourceRevisions].sort((left, right) => left.actionName.localeCompare(right.actionName))
     })
   })
 
@@ -1084,15 +1191,19 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             })
           )
         )
-        const sourceNames = new Set(
-          pipeline.stages.flatMap(({ actions }) =>
-            actions.filter(({ actionType }) => actionType.category === "Source").map(({ name }) => name)
-          )
+        const sourceActionNames = pipeline.stages.flatMap(({ actions }) =>
+          actions.filter(({ actionType }) => actionType.category === "Source").map(({ name }) => name)
         )
-        if (payload.sourceRevisions.some(({ actionName }) => !sourceNames.has(actionName))) {
+        const sourceNames = new Set(sourceActionNames)
+        if (
+          sourceNames.size === 0 ||
+          sourceNames.size !== sourceActionNames.length ||
+          payload.sourceRevisions.length !== sourceNames.size ||
+          payload.sourceRevisions.some(({ actionName }) => !sourceNames.has(actionName))
+        ) {
           return yield* new PluginConflictFailure({
             operation: "propose-action",
-            diagnosticCode: "codepipeline-start-source-invalid"
+            diagnosticCode: "codepipeline-start-source-set-invalid"
           })
         }
         return {
@@ -1192,7 +1303,15 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-approval-not-pending"
           })
         }
-        return { ...payload, actionRevision: actionRevision(action) }
+        const approvalStatus: "Approved" | "Rejected" = request.actionKind === "pipeline.approve"
+          ? "Approved"
+          : "Rejected"
+        return {
+          ...payload,
+          actionRevision: actionRevision(action),
+          approvalStatus,
+          approvalTokenDigest: yield* approvalTokenDigest(current.token)
+        }
       }
       case "pipeline.retry": {
         if (request.target.entityType !== "pipeline-execution") {
@@ -1370,6 +1489,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           actionRequest.target.entityType !== "pipeline-execution" ||
           actionRequest.expectedRevision !== revision ||
           payload.actionRevision === undefined ||
+          payload.approvalStatus === undefined ||
+          payload.approvalStatus !==
+            (actionRequest.actionKind === "pipeline.approve" ? "Approved" : "Rejected") ||
+          payload.approvalTokenDigest === undefined ||
           action === undefined ||
           payload.actionRevision !== actionRevision(action)
         ) {
@@ -1403,13 +1526,19 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-approval-not-pending"
           })
         }
+        if ((yield* approvalTokenDigest(current.token)) !== payload.approvalTokenDigest) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-approval-token-changed"
+          })
+        }
         return {
           _tag: "approval",
           stageName: payload.stageName,
           actionName: payload.actionName,
           actionExecutionId: payload.actionExecutionId,
           token: current.token,
-          status: actionRequest.actionKind === "pipeline.approve" ? "Approved" : "Rejected",
+          status: payload.approvalStatus,
           summary: payload.summary,
           checkedRevision: revision
         }
@@ -1428,7 +1557,9 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         if (
           payload.retryOf !== actionRequest.target.vendorImmutableId ||
           !["Failed", "Stopped", "Cancelled", "Abandoned", "Superseded"].includes(snapshot.execution.status) ||
-          revision !== actionRequest.expectedRevision
+          revision !== actionRequest.expectedRevision ||
+          payload.pipelineRevision === undefined ||
+          payload.pipelineRevision !== pipelineRevision(pipeline)
         ) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
@@ -1676,12 +1807,15 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       if (["InProgress", "Stopping"].includes(snapshot.execution.status)) {
         return { _tag: "pending", checkedAt }
       }
+      const succeeded = ["Stopped", "Abandoned"].includes(snapshot.execution.status)
       return {
-        _tag: "succeeded",
+        _tag: succeeded ? "succeeded" : "failed",
         receipt: {
-          status: "succeeded",
+          status: succeeded ? "succeeded" : "failed",
           providerOperationId: PluginProviderOperationId.make(executionId),
-          safeSummary: `Pipeline execution ${executionId} is ${snapshot.execution.status}`,
+          safeSummary: succeeded
+            ? `Pipeline execution ${executionId} is ${snapshot.execution.status}`
+            : `Stop did not produce a stopped execution; ${executionId} is ${snapshot.execution.status}`,
           observedAt: checkedAt
         }
       }
@@ -1703,13 +1837,22 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     const current = state.actions.find(
       (candidate) => candidate.actionExecutionId === payload.actionExecutionId
     )
-    if (current?.status === "InProgress") return { _tag: "pending", checkedAt }
+    if (current === undefined || current.status === "InProgress") return { _tag: "pending", checkedAt }
+    if (payload.approvalStatus === undefined) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-reconciliation-approval-status-missing"
+      })
+    }
+    const expectedStatus = payload.approvalStatus === "Approved" ? "Succeeded" : "Failed"
+    const succeeded = current.status === expectedStatus
     return {
-      _tag: "succeeded",
+      _tag: succeeded ? "succeeded" : "failed",
       receipt: {
-        status: "succeeded",
+        status: succeeded ? "succeeded" : "failed",
         providerOperationId: PluginProviderOperationId.make(`approval:${payload.actionExecutionId}`),
-        safeSummary: `Manual pipeline action ${payload.actionExecutionId} is no longer pending`,
+        safeSummary: succeeded
+          ? `Manual pipeline action ${payload.actionExecutionId} completed as ${payload.approvalStatus}`
+          : `Manual pipeline action ${payload.actionExecutionId} ended with status ${current.status}`,
         observedAt: checkedAt
       }
     }

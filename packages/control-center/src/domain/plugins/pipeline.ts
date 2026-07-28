@@ -12,6 +12,8 @@ const boundedOpaque = (name: string, maximum: number) =>
 const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const MaximumArtifactRangeBytes = 1024 * 1024
+const MaximumLogPageBytes = 1024 * 1024
+const utf8Encoder = new TextEncoder()
 
 /** Exact provider action selected for a bounded pipeline evidence read. */
 export const PluginPipelineActionReferenceV1 = Schema.Struct({
@@ -41,7 +43,13 @@ export const PluginPipelineLogEventV1 = Schema.Struct({
 /** Bounded pipeline action log page with an opaque continuation cursor. */
 export const PluginPipelineLogPageV1 = Schema.Struct({
   events: Schema.Array(PluginPipelineLogEventV1).check(
-    Schema.makeFilter((events) => events.length <= 100, { expected: "at most 100 pipeline log events" })
+    Schema.makeFilter((events) => events.length <= 100, { expected: "at most 100 pipeline log events" }),
+    Schema.makeFilter(
+      (events) =>
+        events.reduce((total, event) => total + utf8Encoder.encode(event.message).byteLength, 0) <=
+          MaximumLogPageBytes,
+      { expected: `at most ${MaximumLogPageBytes} UTF-8 log message bytes` }
+    )
   ),
   nextCursor: Schema.NullOr(boundedOpaque("PluginPipelineLogCursor", 4_096))
 })

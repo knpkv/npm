@@ -111,6 +111,7 @@ const codePipelineSetupIsValid = (values: ReadonlyArray<CreatePluginConnectionVa
       actionPageSize: configured.get("actionPageSize"),
       maximumActionPages: configured.get("maximumActionPages"),
       maximumActionsPerExecution: configured.get("maximumActionsPerExecution"),
+      maximumLogBytes: configured.get("maximumLogBytes"),
       operationTimeoutMillis: configured.get("operationTimeoutMillis")
     })
   )
@@ -170,6 +171,11 @@ const codePipelineFields = [
     defaultValue: "100",
     minimum: 1,
     maximum: 200
+  }),
+  field("maximumLogBytes", "Log page bytes", "Maximum UTF-8 message bytes returned per log page.", "integer", {
+    defaultValue: "262144",
+    minimum: 1,
+    maximum: 1024 * 1024
   }),
   field("operationTimeoutMillis", "Request timeout", "Provider request timeout in milliseconds.", "integer", {
     defaultValue: "30000",

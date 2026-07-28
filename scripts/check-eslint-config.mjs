@@ -913,6 +913,7 @@ await assertRuleDiagnostics({
     import { FutureStableService } from "./FutureService.js"
     import * as Services from "./FutureServices.js"
     const AliasedStableService = FutureStableService
+    const optionalService = Effect.serviceOption
     handlers
       .handle("first", () => Effect.gen(function*() {
         const auth = yield* Auth
@@ -933,8 +934,14 @@ await assertRuleDiagnostics({
       .handle("alias", () => Effect.gen(function*() {
         return yield* AliasedStableService
       }))
+      .handle("optional", () => Effect.gen(function*() {
+        return yield* Effect.serviceOption(PluginAdministration)
+      }))
+      .handle("optional-alias", () => Effect.gen(function*() {
+        return yield* optionalService(FutureStableService)
+      }))
   `,
-  expected: 5,
+  expected: 7,
   filePath: "packages/control-center/src/server/api/Handlers.ts",
   ruleId: "local-rules/no-stable-service-yield-in-http-handler"
 })
@@ -950,11 +957,12 @@ await assertRuleDiagnostics({
     Effect.gen(function*() {
       const auth = yield* Auth
       const plugins = yield* PluginAdministration
+      const optionalPlugins = yield* Effect.serviceOption(PluginAdministration)
       return handlers.handle("first", () => Effect.gen(function*() {
         const session = yield* RequestSession
         const aliasedSession = yield* AliasedRequestSession
         const namespaceSession = yield* SessionServices.CurrentSession
-        return { aliasedSession, auth, namespaceSession, plugins, session }
+        return { aliasedSession, auth, namespaceSession, optionalPlugins, plugins, session }
       }))
     })
   `,

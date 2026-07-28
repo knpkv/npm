@@ -247,7 +247,7 @@ const RawLogPage = Schema.Struct({
     })).check(Schema.isMaxLength(100))
   ),
   nextForwardToken: Schema.optionalKey(
-    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(3_900))
   )
 })
 
@@ -447,7 +447,7 @@ export const CodePipelineLogPage = Schema.Struct({
     ingestionTimestamp: Schema.NullOr(Schema.Date),
     message: Schema.String.check(Schema.isMaxLength(16_384))
   })).check(Schema.isMaxLength(100)),
-  nextToken: Schema.NullOr(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)))
+  nextToken: Schema.NullOr(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(3_900)))
 })
 /** @internal */
 export type CodePipelineLogPage = typeof CodePipelineLogPage.Type
@@ -822,15 +822,31 @@ export class CodePipelineReadClient extends Context.Service<
         if (response.bytes.byteLength > request.length) {
           return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-range-exceeded")
         }
-        const totalFromRange = response.contentRange === undefined
+        const rangeMatch = response.contentRange === undefined
           ? null
-          : /^bytes \d+-\d+\/(\d+)$/u.exec(response.contentRange)?.[1] ?? null
-        if (totalFromRange === null) {
+          : /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.contentRange)
+        if (rangeMatch === null) {
           return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-content-range-invalid")
+        }
+        const rangeStart = Number(rangeMatch[1])
+        const rangeEnd = Number(rangeMatch[2])
+        const totalBytes = Number(rangeMatch[3])
+        if (
+          !Number.isSafeInteger(rangeStart) ||
+          !Number.isSafeInteger(rangeEnd) ||
+          !Number.isSafeInteger(totalBytes) ||
+          rangeStart !== request.offset ||
+          rangeEnd < rangeStart ||
+          rangeEnd - rangeStart + 1 !== response.bytes.byteLength ||
+          rangeEnd >= request.offset + request.length ||
+          totalBytes <= rangeEnd ||
+          (response.contentLength !== undefined && response.contentLength !== response.bytes.byteLength)
+        ) {
+          return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-content-range-mismatch")
         }
         return yield* decodeModel("codepipeline-get-artifact", CodePipelineArtifactRange, {
           bytesBase64: Encoding.encodeBase64(response.bytes),
-          totalBytes: Number(totalFromRange)
+          totalBytes
         })
       })
 
