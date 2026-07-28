@@ -1,12 +1,12 @@
-/** Negotiated definition for the read-only Confluence page adapter. @module */
+/** Negotiated definition for Confluence page reads, sync, and governed publication. @module */
 
 import { pluginCapabilityCodecsV1 } from "../PluginCapabilityCodecs.js"
 import { definePluginV1 } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import { acquireConfluencePageAdapter, ConfluencePageAdapterConfiguration } from "./ConfluencePageAdapter.js"
 
-/** Stable descriptor advertised by the first production Confluence slice. */
-export const confluencePagePluginDescriptor = {
+/** Historical read-only descriptor retained for already accepted connections. @internal */
+export const historicalConfluenceReadPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.confluence",
@@ -82,6 +82,31 @@ export const confluencePagePluginDescriptor = {
   }]
 } satisfies unknown
 
+/** Stable descriptor advertised by the governed Confluence publication slice. */
+export const confluencePagePluginDescriptor = {
+  ...historicalConfluenceReadPluginDescriptor,
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  configurationFields: [...historicalConfluenceReadPluginDescriptor.configurationFields],
+  capabilities: [
+    ...historicalConfluenceReadPluginDescriptor.capabilities,
+    {
+      capabilityId: "action.propose",
+      supportedVersions: [1],
+      requirement: "required"
+    },
+    {
+      capabilityId: "action.execute",
+      supportedVersions: [1],
+      requirement: "required"
+    },
+    {
+      capabilityId: "action.reconcile",
+      supportedVersions: [1],
+      requirement: "required"
+    }
+  ]
+} satisfies unknown
+
 /**
  * Definition consumed by a scoped runtime registry after it supplies an
  * authenticated API client and the owning package's ADF converter.
@@ -91,7 +116,10 @@ export const confluencePagePluginDefinition: PluginDefinitionV1 = definePluginV1
   configurationSchema: ConfluencePageAdapterConfiguration,
   capabilityCodecs: {
     entityRead: pluginCapabilityCodecsV1.entityRead,
-    syncIncremental: pluginCapabilityCodecsV1.syncIncremental
+    syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
+    actionPropose: pluginCapabilityCodecsV1.actionPropose,
+    actionExecute: pluginCapabilityCodecsV1.actionExecute,
+    actionReconcile: pluginCapabilityCodecsV1.actionReconcile
   },
   make: ({ configuration, descriptor }) => acquireConfluencePageAdapter(configuration, descriptor)
 })

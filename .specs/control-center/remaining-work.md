@@ -38,7 +38,7 @@ slice must leave an explicit extension seam and must not advertise capabilities 
 | D01–D09 delivery core                   | Complete MVP  | Replace fixture-only facts with synchronized provider facts                                                                         |
 | I01/I03 CodeCommit                      | Partial       | Read/sync/inventory exist; complete diff content, reviews, checks, history, and governed writes do not                              |
 | I04/I05 Jira                            | Partial       | Bounded issue detail exists; project sync and governed edits/comments/transitions do not                                            |
-| I06/I07 Confluence                      | Partial       | Bounded page detail exists; space sync, activity, and governed update/publish do not                                                |
+| I06/I07 Confluence                      | Partial       | Bounded page detail, space sync, and governed update/publish exist; activity remains incomplete                                     |
 | I08/I09 Clockify                        | Partial       | Bounded time-entry read/sync exists; people, Jira association, rollups, correction, and approval do not                             |
 | I10 CodePipeline                        | Partial       | Bounded execution sync exists; logs, artifact proxy, retry/deploy actions, and reconciliation do not                                |
 | I11 provider administration             | MVP           | Connection ownership/setup is usable; sync controls, recovery, permissions, and richer account editing remain                       |
@@ -178,6 +178,8 @@ slice must leave an explicit extension seam and must not advertise capabilities 
   evidence failures make zero provider calls.
 
 #### M3.3 — Confluence actions
+
+**Status: complete.**
 
 - Add optimistic page update/publish with safe content conversion, revision-bound receipts, and
   reconciliation.

@@ -62,7 +62,10 @@ import {
   codeCommitPluginDefinition,
   codeCommitPluginDescriptor
 } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
-import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import {
+  confluencePagePluginDescriptor,
+  historicalConfluenceReadPluginDescriptor
+} from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
 import {
   historicalActionCodeCommitDescriptor,
@@ -737,6 +740,181 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("executes an authorized Confluence publication through the production registry exactly once", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      ))
+      const readCalls = yield* Ref.make(0)
+      const mutationCalls = yield* Ref.make(0)
+      const httpClient = HttpClient.make((request) =>
+        Effect.gen(function*() {
+          const currentPage = {
+            id: "42",
+            status: "current",
+            title: "Payments release runbook",
+            spaceId: "space-payments",
+            createdAt: "2026-07-15T09:00:00.000Z",
+            version: {
+              number: 3,
+              createdAt: "2026-07-15T09:50:00.000Z",
+              message: "Initial publication"
+            }
+          }
+          if (request.method === "GET" && request.url.endsWith("/wiki/api/v2/pages/42")) {
+            yield* Ref.update(readCalls, (count) => count + 1)
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify(currentPage), {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          if (request.method === "PUT" && request.url.endsWith("/wiki/api/v2/pages/42")) {
+            yield* Ref.update(mutationCalls, (count) => count + 1)
+            if (request.body._tag !== "Uint8Array") return yield* Effect.die("missing Confluence update body")
+            const payload = Schema.decodeUnknownSync(Schema.Struct({
+              title: Schema.String,
+              version: Schema.Struct({
+                number: Schema.Int,
+                message: Schema.String
+              })
+            }))(JSON.parse(new TextDecoder().decode(request.body.body)))
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(
+                JSON.stringify({
+                  ...currentPage,
+                  title: payload.title,
+                  version: {
+                    ...currentPage.version,
+                    number: payload.version.number,
+                    message: payload.version.message,
+                    createdAt: "2026-07-15T10:02:00.000Z"
+                  }
+                }),
+                {
+                  status: 200,
+                  headers: { "content-type": "application/json" }
+                }
+              )
+            )
+          }
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response(JSON.stringify({ message: "unexpected request" }), {
+              status: 500,
+              headers: { "content-type": "application/json" }
+            })
+          )
+        })
+      )
+      const config = yield* makePersistenceTestConfig("control-center-first-party-confluence-governed-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, httpClient)
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        const secretStore = yield* SecretStore
+        yield* seedGovernedActionAuthorityRoots("confluence")
+        const apiTokenRef = yield* secretStore.create(new TextEncoder().encode("atlassian-token"))
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "secret-reference", key: "apiToken", ref: apiTokenRef },
+          { _tag: "text", key: "authMode", value: "api-token" },
+          { _tag: "text", key: "email", value: "owner@example.com" },
+          { _tag: "text", key: "probePageId", value: "42" },
+          { _tag: "url", key: "siteBaseUrl", value: "https://acme.atlassian.net/" },
+          { _tag: "text", key: "siteId", value: "site-acme" },
+          { _tag: "text", key: "spaceId", value: "space-payments" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "confluence",
+          confluencePagePluginDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const authority = yield* Effect.gen(function*() {
+          return yield* PluginRuntimeAuthority
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authority,
+          seedAuthorityRoots: false,
+          variant: "confluence"
+        })
+        yield* seedGovernedActionCurrentInputs("confluence")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(
+          Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+            Layer.provide(store),
+            Layer.provide(executors)
+          ))
+        )
+        const record = yield* (yield* GovernedActionRepository).read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "succeeded" })
+        assert.strictEqual(record.head.state, "succeeded")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        if (record.head.lineage._tag === "terminal") {
+          assert.strictEqual(record.head.lineage.receipt.status, "succeeded")
+        }
+        assert.strictEqual(yield* Ref.get(readCalls), 1)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      }).pipe(
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it("keeps the historical Confluence descriptor independent of future current fields", () => {
     const futureCurrent = {
       ...confluencePagePluginDescriptor,
@@ -759,6 +937,14 @@ describe("first-party plugin runtime", () => {
       supportedVersions: [1],
       requirement: "required"
     }])
+    assert.deepStrictEqual(
+      historicalConfluenceReadPluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental"]
+    )
+    assert.deepStrictEqual(
+      confluencePagePluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
+    )
   })
 
   it("keeps the historical CodeCommit descriptor independent of future current fields", () => {

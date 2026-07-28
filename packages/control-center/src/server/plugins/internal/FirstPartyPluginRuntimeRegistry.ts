@@ -48,7 +48,8 @@ import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePage
 import { confluencePageClientLayer } from "../confluence/ConfluencePageClient.js"
 import {
   confluencePagePluginDefinition,
-  confluencePagePluginDescriptor
+  confluencePagePluginDescriptor,
+  historicalConfluenceReadPluginDescriptor
 } from "../confluence/ConfluencePagePluginDefinition.js"
 import { PluginConfigurationFailure, PluginUnsupportedCapabilityFailure } from "../failures.js"
 import {
@@ -358,7 +359,7 @@ const historicalJiraDescriptors = [
   jiraDescriptorSnapshot([jiraWebBaseUrlField, jiraSiteIdField, ...jiraOAuthFields, ...jiraReaderFields])
 ]
 
-const historicalConfluenceDescriptors = [{
+const historicalConfluenceDescriptors = [historicalConfluenceReadPluginDescriptor, {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.confluence",

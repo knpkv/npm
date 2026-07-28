@@ -38,7 +38,7 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
-export type GovernedActionFixtureVariant = "jira" | "codecommit"
+export type GovernedActionFixtureVariant = "jira" | "codecommit" | "confluence"
 
 const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
 
@@ -51,6 +51,22 @@ const codeCommitFixture = defineFixture({
   sourceUrl: "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/17",
   displayKey: "17",
   title: "Registry wiring",
+  pluginId: "dev.knpkv.codecommit",
+  pluginAdapterVersion: { major: 0, minor: 1, patch: 0 },
+  idempotencyKey: "governed-action:codecommit:17:comment:1",
+  proposalKey: "comment:codecommit:17",
+  actionKind: "comment",
+  payload: {
+    _tag: "comment",
+    sourceCommit: "head-commit-17",
+    destinationCommit: "base-commit-17",
+    destinationReference: "refs/heads/main",
+    content: "Registry wiring check.",
+    clientRequestToken: "1".repeat(64)
+  },
+  actionSummary: "Comment on CodeCommit pull request 17",
+  impactSummary: "Posts one review comment",
+  correlationId: "action:codecommit:17:comment",
   details: {
     _tag: "pull-request",
     repository: "payments-api",
@@ -70,6 +86,15 @@ const jiraFixture = defineFixture({
   sourceUrl: "https://jira.example/browse/PAY-42",
   displayKey: "PAY-42",
   title: "Ship guarded refunds",
+  pluginId: "dev.knpkv.jira",
+  pluginAdapterVersion: { major: 1, minor: 2, patch: 3 },
+  idempotencyKey: "governed-action:PAY-42:done:1",
+  proposalKey: "transition:PAY-42:done",
+  actionKind: "transition",
+  payload: { fields: { resolution: null, status: "Done" }, notify: true },
+  actionSummary: "Move PAY-42 to Done",
+  impactSummary: "Changes the issue workflow state",
+  correlationId: "action:PAY-42:done",
   details: {
     _tag: "issue",
     key: "PAY-42",
@@ -79,8 +104,47 @@ const jiraFixture = defineFixture({
   }
 })
 
+const confluenceFixture = defineFixture({
+  providerId: "confluence",
+  connectionName: "Payments Confluence",
+  entityType: "page",
+  vendorImmutableId: "42",
+  sourceRevision: "3",
+  sourceUrl: "https://acme.atlassian.net/wiki/spaces/PAY/pages/42",
+  displayKey: "42",
+  title: "Payments release runbook",
+  pluginId: "dev.knpkv.confluence",
+  pluginAdapterVersion: { major: 0, minor: 2, patch: 0 },
+  idempotencyKey: "governed-action:confluence:42:update-page:1",
+  proposalKey: "cfpg:42:3:authorized",
+  actionKind: "update-page",
+  payload: {
+    _tag: "update-page",
+    pageId: "42",
+    spaceId: "space-payments",
+    title: "Payments release runbook v2",
+    adf: "{\"content\":[],\"type\":\"doc\",\"version\":1}",
+    expectedVersion: 3,
+    targetVersion: 4,
+    versionMessage: "Publish the approved rollout"
+  },
+  actionSummary: "Publish Confluence page 42 as version 4",
+  impactSummary: "Replaces the published page title and body at the authorized revision",
+  correlationId: "action:confluence:42:update-page",
+  details: {
+    _tag: "page",
+    spaceKey: "PAY",
+    revision: "3",
+    status: "current"
+  }
+})
+
 const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
-  variant === "codecommit" ? codeCommitFixture : jiraFixture
+  variant === "codecommit"
+    ? codeCommitFixture
+    : variant === "confluence"
+    ? confluenceFixture
+    : jiraFixture
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
@@ -237,18 +301,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
 }) {
   const variant = options?.variant ?? "jira"
   const fixture = fixtureVariant(variant)
-  const payload = decodePayload(
-    variant === "codecommit"
-      ? {
-        _tag: "comment",
-        sourceCommit: "head-commit-17",
-        destinationCommit: "base-commit-17",
-        destinationReference: "refs/heads/main",
-        content: "Registry wiring check.",
-        clientRequestToken: "1".repeat(64)
-      }
-      : { fields: { resolution: null, status: "Done" }, notify: true }
-  )
+  const payload = decodePayload(fixture.payload)
   const payloadDigest = yield* digestGovernedActionPayload(payload)
   const evidence = decodeEvidence({
     workspaceId: WORKSPACE_ID,
@@ -266,26 +319,22 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
     actionId: ACTION_ID,
-    idempotencyKey: variant === "codecommit"
-      ? "governed-action:codecommit:17:comment:1"
-      : "governed-action:PAY-42:done:1",
+    idempotencyKey: fixture.idempotencyKey,
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest ?? `sha256:${"a".repeat(64)}`,
-    pluginId: variant === "codecommit" ? "dev.knpkv.codecommit" : "dev.knpkv.jira",
+    pluginId: fixture.pluginId,
     pluginContractVersion: { major: 1, minor: 0, patch: 0 },
-    pluginAdapterVersion: variant === "codecommit"
-      ? { major: 0, minor: 1, patch: 0 }
-      : { major: 1, minor: 2, patch: 3 },
+    pluginAdapterVersion: fixture.pluginAdapterVersion,
     providerId: fixture.providerId,
     capability: { capabilityId: "action.execute", version: 1 },
     targetEntityId: ENTITY_ID,
     proposal: {
-      proposalKey: variant === "codecommit" ? "comment:codecommit:17" : "transition:PAY-42:done",
+      proposalKey: fixture.proposalKey,
       capabilityVersion: 1,
       request: {
-        actionKind: variant === "codecommit" ? "comment" : "transition",
+        actionKind: fixture.actionKind,
         target: {
           entityType: fixture.entityType,
           vendorImmutableId: fixture.vendorImmutableId
@@ -295,10 +344,10 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
         evidenceIds: ["provider-evidence-1"]
       },
       payloadDigest,
-      summary: variant === "codecommit" ? "Comment on CodeCommit pull request 17" : "Move PAY-42 to Done",
+      summary: fixture.actionSummary,
       impact: {
         level: "medium",
-        summary: variant === "codecommit" ? "Posts one review comment" : "Changes the issue workflow state"
+        summary: fixture.impactSummary
       },
       proposedAt: PROPOSED_AT
     },
@@ -312,7 +361,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     },
     proposalExpiresAt: "2026-07-15T10:10:00.000Z",
     causationId: null,
-    correlationId: variant === "codecommit" ? "action:codecommit:17:comment" : "action:PAY-42:done"
+    correlationId: fixture.correlationId
   })
   return (yield* makeGovernedActionEnvelope(material)).envelope
 })

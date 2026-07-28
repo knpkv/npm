@@ -1,10 +1,11 @@
 /**
- * Narrow Confluence read boundary used by the Control Center adapter.
+ * Narrow Confluence transport boundary used by the Control Center adapter.
  *
- * The generated API owns most HTTP request and wire-schema decoding. This
- * module keeps the watcher read narrow because Atlassian can return redacted
+ * The generated API owns most HTTP request and wire-schema decoding. It keeps
+ * watcher reads narrow because Atlassian can return redacted
  * identities and numeric content IDs that its generated schema rejects. It
- * translates the open error surface into a small, secret-free transport model.
+ * also owns the revision-guarded page update and translates the open error
+ * surface into a small, secret-free transport model.
  *
  * @module
  */
@@ -24,7 +25,7 @@ import { RawConfluencePage, RawConfluenceSpacePage, RawConfluenceWatcherPage } f
 
 const Operation = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
-/** Secret-free failure emitted by the live Confluence read boundary. @internal */
+/** Secret-free failure emitted by the live Confluence transport boundary. @internal */
 export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<ConfluencePageClientFailure>()(
   "ConfluencePageClientFailure",
   {
@@ -32,6 +33,7 @@ export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<Conflue
     reason: Schema.Literals([
       "authentication",
       "authorization",
+      "conflict",
       "not-found",
       "rate-limit",
       "timeout",
@@ -42,11 +44,20 @@ export class ConfluencePageClientFailure extends Schema.TaggedErrorClass<Conflue
   }
 ) {}
 
-/** Minimal provider reads needed for the first Confluence page vertical slice. @internal */
+/** Minimal provider operations needed for the Confluence page vertical slice. @internal */
 export interface ConfluencePageClientShape {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly updatePage: (
+    pageId: string,
+    input: {
+      readonly title: string
+      readonly adf: string
+      readonly version: number
+      readonly versionMessage: string
+    }
+  ) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSpacePages: (
     spaceId: string,
     cursor: string | null
@@ -68,7 +79,7 @@ export interface ConfluencePageClientShape {
   ) => Effect.Effect<unknown, ConfluencePageClientFailure>
 }
 
-/** Injectable Confluence page-read client. @internal */
+/** Injectable Confluence page client. @internal */
 export class ConfluencePageClient extends Context.Service<ConfluencePageClient, ConfluencePageClientShape>()(
   "@knpkv/control-center/internal/ConfluencePageClient"
 ) {}
@@ -97,6 +108,8 @@ const translateFailure = (operation: string, cause: unknown): ConfluencePageClie
     ? "authentication"
     : status === 403
     ? "authorization"
+    : status === 409
+    ? "conflict"
     : status === 404
     ? "not-found"
     : status === 429
@@ -139,6 +152,30 @@ export const makeConfluencePageClient = (
             "body-format": "atlas_doc_format",
             "include-version": true,
             status: ["current"]
+          })
+        )
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluencePage))
+      )
+    ),
+  updatePage: (pageId, input) =>
+    bounded(
+      "confluence-page-update",
+      api.v2.httpClient.execute(
+        HttpClientRequest.put(`/pages/${encodeURIComponent(pageId)}`).pipe(
+          HttpClientRequest.bodyJsonUnsafe({
+            id: pageId,
+            status: "current",
+            title: input.title,
+            body: {
+              representation: "atlas_doc_format",
+              value: input.adf
+            },
+            version: {
+              number: input.version,
+              message: input.versionMessage
+            }
           })
         )
       ).pipe(
@@ -208,7 +245,7 @@ export const makeConfluencePageClient = (
     )
 })
 
-/** Production page-read boundary backed by the supported generated API client. @internal */
+/** Production page boundary backed by the supported generated API client. @internal */
 export const confluencePageClientLayer: Layer.Layer<
   ConfluencePageClient,
   never,
