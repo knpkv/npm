@@ -21,7 +21,12 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
-import { RawConfluencePage, RawConfluenceSpacePage, RawConfluenceWatcherPage } from "./ConfluencePageSchemas.js"
+import {
+  RawConfluenceDraftPage,
+  RawConfluencePage,
+  RawConfluenceSpacePage,
+  RawConfluenceWatcherPage
+} from "./ConfluencePageSchemas.js"
 
 const Operation = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 
@@ -50,6 +55,7 @@ export interface ConfluencePageClientShape {
   readonly getCurrentUser: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getSystemInfo: Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPage: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
+  readonly getPageDraft: (pageId: string) => Effect.Effect<unknown, ConfluencePageClientFailure>
   readonly getPageVersion: (
     pageId: string,
     version: number
@@ -164,6 +170,21 @@ export const makeConfluencePageClient = (
       ).pipe(
         Effect.flatMap(HttpClientResponse.filterStatusOk),
         Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluencePage))
+      )
+    ),
+  getPageDraft: (pageId) =>
+    bounded(
+      "confluence-page-draft-read",
+      api.v2.httpClient.execute(
+        HttpClientRequest.get(`/pages/${encodeURIComponent(pageId)}`).pipe(
+          HttpClientRequest.setUrlParams({
+            "get-draft": true,
+            status: ["draft"]
+          })
+        )
+      ).pipe(
+        Effect.flatMap(HttpClientResponse.filterStatusOk),
+        Effect.flatMap(HttpClientResponse.schemaBodyJson(RawConfluenceDraftPage))
       )
     ),
   getPageVersion: (pageId, version) =>

@@ -48,6 +48,16 @@ export const RawConfluencePage = Schema.Struct({
 /** Decoded current Confluence page. @internal */
 export type RawConfluencePage = typeof RawConfluencePage.Type
 
+/** Required subset of a visible Confluence page draft. @internal */
+export const RawConfluenceDraftPage = Schema.Struct({
+  id: boundedString(512),
+  status: Schema.Literal("draft"),
+  spaceId: boundedString(512)
+})
+
+/** Decoded Confluence page draft. @internal */
+export type RawConfluenceDraftPage = typeof RawConfluenceDraftPage.Type
+
 /** One bounded page of current pages from exactly one configured space. @internal */
 export const RawConfluenceSpacePage = Schema.Struct({
   results: Schema.optionalKey(Schema.Array(RawConfluencePage).check(Schema.isMaxLength(25))),

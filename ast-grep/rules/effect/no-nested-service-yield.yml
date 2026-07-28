@@ -15,7 +15,8 @@ files:
   - "packages/**/src/**/*.ts"
   - "packages/**/src/**/*.tsx"
   - "packages/**/scripts/**/*.ts"
-  - "packages/control-center/test/plugins/first-party-runtime.test.ts"
+  - "packages/**/test/**/*.ts"
+  - "packages/**/test/**/*.tsx"
   - "scripts/**/*.ts"
 
 ignores:

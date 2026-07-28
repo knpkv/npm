@@ -145,7 +145,8 @@ describe("PR review source workspace", () => {
           0,
           CREATED_AT
         )
-        const location = yield* (yield* PrReviewSourceResolver).resolve({
+        const sourceResolver = yield* PrReviewSourceResolver
+        const location = yield* sourceResolver.resolve({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           repository: "control-center",

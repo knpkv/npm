@@ -143,6 +143,29 @@ describe("Confluence page client", () => {
     }).pipe(Effect.provide(pageClientLayer(version, requests)))
   })
 
+  it.effect("requests the visible draft without loading the published body", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const draft = {
+      id: "42",
+      status: "draft",
+      spaceId: "space-payments"
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.getPageDraft("42")
+
+      assert.deepStrictEqual(result, draft)
+      assert.strictEqual(requests[0]?.url, "https://acme.atlassian.net/wiki/api/v2/pages/42")
+      assert.deepStrictEqual(
+        new Map(requests[0]?.urlParams ?? []),
+        new Map([
+          ["get-draft", "true"],
+          ["status", "draft"]
+        ])
+      )
+    }).pipe(Effect.provide(pageClientLayer(draft, requests)))
+  })
+
   it.effect("accepts a space homepage whose provider parent id is null", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const page = {

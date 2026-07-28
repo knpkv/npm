@@ -762,6 +762,19 @@ describe("first-party plugin runtime", () => {
               message: "Initial publication"
             }
           }
+          if (
+            request.method === "GET" &&
+            request.url.endsWith("/wiki/api/v2/pages/42") &&
+            new Map(request.urlParams).get("get-draft") === "true"
+          ) {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ message: "No draft" }), {
+                status: 404,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
           if (request.method === "GET" && request.url.endsWith("/wiki/api/v2/pages/42")) {
             yield* Ref.update(readCalls, (count) => count + 1)
             return HttpClientResponse.fromWeb(

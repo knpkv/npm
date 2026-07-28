@@ -37,7 +37,12 @@ import {
 } from "../failures.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import { type ConfluencePageClientFailure, type ConfluencePageClientShape } from "./ConfluencePageClient.js"
-import { RawConfluenceCurrentUser, RawConfluencePage, RawConfluenceVersion } from "./ConfluencePageSchemas.js"
+import {
+  RawConfluenceCurrentUser,
+  RawConfluenceDraftPage,
+  RawConfluencePage,
+  RawConfluenceVersion
+} from "./ConfluencePageSchemas.js"
 
 const ACTION_KIND = "update-page"
 const ENTITY_TYPE = "page"
@@ -46,6 +51,7 @@ const PageId = Schema.String.check(
 )
 const PageTitle = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
 const VersionNumber = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 2_147_483_646 }))
+const TargetVersionNumber = Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 2_147_483_647 }))
 const VersionNumberFromString = Schema.String.check(
   Schema.isMaxLength(10),
   Schema.isPattern(/^[1-9][0-9]*$/u, { expected: "a canonical positive Confluence version" })
@@ -55,11 +61,20 @@ const VersionNumberFromString = Schema.String.check(
     encode: SchemaGetter.transform((value) => String(value))
   })
 )
+const TargetVersionNumberFromString = Schema.String.check(
+  Schema.isMaxLength(10),
+  Schema.isPattern(/^[1-9][0-9]*$/u, { expected: "a canonical positive Confluence target version" })
+).pipe(
+  Schema.decodeTo(TargetVersionNumber, {
+    decode: SchemaGetter.transform((value) => Number(value)),
+    encode: SchemaGetter.transform((value) => String(value))
+  })
+)
 const ReconciliationLocator = Schema.TemplateLiteralParser([
   "cfpg:v1:",
   PageId,
   ":",
-  VersionNumberFromString
+  TargetVersionNumberFromString
 ])
 const VersionMessage = Schema.String.check(Schema.isMaxLength(1_000))
 const AdfDocument = Schema.Struct({
@@ -78,7 +93,7 @@ const UpdatePageActionPayload = Schema.TaggedStruct(ACTION_KIND, {
   title: PageTitle,
   adf: Schema.String.check(Schema.isMaxLength(1_048_576)),
   expectedVersion: VersionNumber,
-  targetVersion: Schema.Int.check(Schema.isBetween({ minimum: 2, maximum: 2_147_483_647 })),
+  targetVersion: TargetVersionNumber,
   versionMessage: VersionMessage
 }).check(
   Schema.makeFilter(
@@ -291,14 +306,18 @@ const decodeReconciliationKey = (
   )
 }
 
+type ExactVersionRead =
+  | { readonly _tag: "found"; readonly version: typeof RawConfluenceVersion.Type }
+  | { readonly _tag: "unknown" }
+
 const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")(function*(
   client: ConfluencePageClientShape,
   pageId: string,
   targetVersion: number
-): Effect.fn.Return<typeof RawConfluenceVersion.Type | null, PluginFailure> {
+): Effect.fn.Return<ExactVersionRead, PluginFailure> {
   const result = yield* client.getPageVersion(pageId, targetVersion).pipe(Effect.result)
   if (Result.isFailure(result)) {
-    if (result.failure.reason === "not-found") return null
+    if (result.failure.reason === "not-found") return { _tag: "unknown" }
     return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
   }
   const version = yield* Schema.decodeUnknownEffect(RawConfluenceVersion)(result.success).pipe(
@@ -307,7 +326,26 @@ const readExactVersion = Effect.fn("ConfluenceGovernedActions.readExactVersion")
   if (version.number !== targetVersion) {
     return yield* malformed("confluence-page-version", "confluence-version-identity-mismatch")
   }
-  return version
+  return { _tag: "found", version }
+})
+
+const hasVisibleDraft = Effect.fn("ConfluenceGovernedActions.hasVisibleDraft")(function*(
+  client: ConfluencePageClientShape,
+  pageId: string,
+  spaceId: string
+): Effect.fn.Return<boolean, PluginFailure> {
+  const result = yield* client.getPageDraft(pageId).pipe(Effect.result)
+  if (Result.isFailure(result)) {
+    if (result.failure.reason === "not-found") return false
+    return yield* clientFailure(result.failure).pipe(Effect.flatMap(Effect.fail))
+  }
+  const draft = yield* Schema.decodeUnknownEffect(RawConfluenceDraftPage)(result.success).pipe(
+    Effect.mapError(() => malformed("confluence-page-draft-read", "confluence-page-draft-invalid"))
+  )
+  if (draft.id !== pageId || draft.spaceId !== spaceId) {
+    return yield* malformed("confluence-page-draft-read", "confluence-page-draft-scope-mismatch")
+  }
+  return true
 })
 
 /** Build the governed Confluence proposal and executor surfaces. @internal */
@@ -441,21 +479,25 @@ export const makeConfluenceGovernedActions = (
       payload.pageId,
       input.spaceId
     )
-    return yield* output(
-      "preflight",
-      PluginActionPreflightV1,
-      page.version.number === payload.expectedVersion
-        ? {
-          _tag: "ready",
-          checkedRevision: Revision.make(String(page.version.number)),
-          checkedAt
-        }
-        : {
-          _tag: "blocked",
-          reasons: ["Confluence page revision changed after authorization"],
-          checkedAt
-        }
-    )
+    if (page.version.number !== payload.expectedVersion) {
+      return yield* output("preflight", PluginActionPreflightV1, {
+        _tag: "blocked",
+        reasons: ["Confluence page revision changed after authorization"],
+        checkedAt
+      })
+    }
+    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+      return yield* output("preflight", PluginActionPreflightV1, {
+        _tag: "blocked",
+        reasons: ["Confluence page has an unpublished draft that this publication could overwrite"],
+        checkedAt
+      })
+    }
+    return yield* output("preflight", PluginActionPreflightV1, {
+      _tag: "ready",
+      checkedRevision: Revision.make(String(page.version.number)),
+      checkedAt
+    })
   })
 
   const executeAuthorizedAction = Effect.fn("ConfluenceGovernedActions.execute")(function*(
@@ -466,6 +508,12 @@ export const makeConfluenceGovernedActions = (
     )
     const locator = reconciliationKey(payload)
     const marker = versionMarker(request.idempotencyKey, request.payloadDigest, payload.versionMessage)
+    if (yield* hasVisibleDraft(input.client, payload.pageId, input.spaceId)) {
+      return yield* new PluginConflictFailure({
+        operation: "execute-authorized-action",
+        diagnosticCode: "confluence-page-draft-present"
+      })
+    }
     const result = yield* input.client.updatePage(payload.pageId, {
       title: payload.title,
       adf: payload.adf,
@@ -563,31 +611,33 @@ export const makeConfluenceGovernedActions = (
         diagnosticCode: "confluence-reconciliation-locator-mismatch"
       })
     }
-    const current = yield* safeProviderCall(input.client.getPage(locator.pageId)).pipe(
-      Effect.flatMap((raw) => decodePage("confluence-reconcile-page", raw, locator.pageId, input.spaceId))
-    )
+    const currentResult = yield* input.client.getPage(locator.pageId).pipe(Effect.result)
     const checkedAt = yield* DateTime.now
+    if (Result.isFailure(currentResult)) {
+      if (currentResult.failure.reason === "not-found") return { _tag: "pending", checkedAt }
+      return yield* clientFailure(currentResult.failure).pipe(Effect.flatMap(Effect.fail))
+    }
+    const current = yield* decodePage(
+      "confluence-reconcile-page",
+      currentResult.success,
+      locator.pageId,
+      input.spaceId
+    )
     if (current.version.number < locator.targetVersion) {
       return { _tag: "pending", checkedAt }
     }
-    const historical = current.version.number === locator.targetVersion
+    let historical = current.version.number === locator.targetVersion &&
+        current.version.message !== undefined
       ? current.version
-      : yield* readExactVersion(input.client, locator.pageId, locator.targetVersion)
+      : null
     if (historical === null) {
-      return {
-        _tag: "failed",
-        receipt: {
-          status: "failed",
-          providerOperationId: PluginProviderOperationId.make(
-            `reconciliation:${locator.pageId}:v${locator.targetVersion}`
-          ),
-          safeSummary: "The authorized Confluence revision was superseded by another publication",
-          observedAt: checkedAt
-        }
-      }
+      const exact = yield* readExactVersion(input.client, locator.pageId, locator.targetVersion)
+      if (exact._tag === "unknown") return { _tag: "pending", checkedAt }
+      historical = exact.version
     }
+    if (historical.message === undefined) return { _tag: "pending", checkedAt }
     const succeeded = hasVersionMarker(
-      historical.message ?? "",
+      historical.message,
       request.idempotencyKey,
       PluginActionPayloadDigest.make(request.payloadDigest)
     )
