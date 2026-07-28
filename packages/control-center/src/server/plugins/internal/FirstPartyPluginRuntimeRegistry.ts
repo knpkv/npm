@@ -43,7 +43,7 @@ import {
   codeCommitPluginDescriptor
 } from "../codecommit/CodeCommitPluginDefinition.js"
 import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
-import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
+import { CodePipelineReadClient, type CodePipelineReadClientService } from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
 import { confluencePageClientLayer } from "../confluence/ConfluencePageClient.js"
 import {
@@ -1010,7 +1010,10 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
   }
 })
 
-const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(loaded: LoadedRuntime) {
+const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(
+  loaded: LoadedRuntime,
+  client: CodePipelineReadClientService | undefined
+) {
   const expectedKeys = new Set([
     "actionPageSize",
     "maximumActionPages",
@@ -1037,14 +1040,19 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
   return {
     credentialGeneration: `${profile}\0${region}`,
     layer: buildPluginDefinitionLayer(codePipelinePluginDefinition, configuration).pipe(
-      Layer.provide(CodePipelineReadClient.live)
+      Layer.provide(
+        client === undefined
+          ? CodePipelineReadClient.live
+          : Layer.succeed(CodePipelineReadClient, client)
+      )
     )
   }
 })
 
 const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
   loaded: LoadedRuntime,
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   switch (loaded.runtime.providerId) {
     case "jira":
@@ -1056,12 +1064,13 @@ const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(functio
     case "codecommit":
       return yield* codeCommitLayer(loaded, codeCommitClients)
     case "codepipeline":
-      return yield* codePipelineLayer(loaded)
+      return yield* codePipelineLayer(loaded, codePipelineClient)
   }
 })
 
 const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*(
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
@@ -1086,7 +1095,7 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded, codeCommitClients)
+          const provider = yield* providerLayer(loaded, codeCommitClients, codePipelineClient)
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
           return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
@@ -1100,7 +1109,8 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
 
 /** Injectable first-party registry used to verify complete owning-package runtime wiring. @internal */
 export const makeFirstPartyPluginRuntimeRegistry = (
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient?: CodePipelineReadClientService
 ): Layer.Layer<
   PluginRuntimeRegistry,
   never,
@@ -1111,7 +1121,7 @@ export const makeFirstPartyPluginRuntimeRegistry = (
   | FileSystem.FileSystem
   | Path.Path
   | PluginRuntimeAuthoritySource
-> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
+> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients, codePipelineClient))
 
 /** Production registry for the fixed first-party provider catalog. @internal */
 export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)

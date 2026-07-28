@@ -16,7 +16,9 @@ import {
   type NegotiatedPluginDescriptorV1,
   PluginActionActorIdentityV1,
   type PluginCapabilityId,
-  PluginDiscoveryV1
+  PluginDiscoveryV1,
+  type PluginPipelineArtifactRangeRequestV1,
+  type PluginPipelineArtifactRangeV1
 } from "../../domain/plugins/index.js"
 import {
   PluginConfigurationFailure,
@@ -27,7 +29,12 @@ import {
 import { AuthorizedPluginExecutor } from "./internal/AuthorizedPluginExecutor.js"
 import { hasPluginCapability, negotiatePluginDescriptorV1 } from "./negotiation.js"
 import type { PluginCapabilityCodecsV1 } from "./PluginCapabilityCodecs.js"
-import { PluginConnection, type PluginConnectionV1, type PluginDiffReaderV1 } from "./PluginConnection.js"
+import {
+  PluginConnection,
+  type PluginConnectionV1,
+  type PluginDiffReaderV1,
+  type PluginPipelineReaderV1
+} from "./PluginConnection.js"
 import { makePluginDefinitionV1, type PluginDefinitionV1 } from "./PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "./PluginExecutor.js"
 import { retryPluginOperation, retryPluginStream } from "./retryPolicy.js"
@@ -95,6 +102,10 @@ const validateCapabilityCodecs = Effect.fn("PluginDefinition.validateCapabilityC
           return capability.version === 2 ? codecs.diffInventoryV2 : codecs.diffInventory
         case "diff.content":
           return capability.version === 2 ? codecs.diffContentV2 : codecs.diffContent
+        case "pipeline.logs":
+          return codecs.pipelineLogs
+        case "pipeline.artifact":
+          return codecs.pipelineArtifact
       }
     })()
     if (registered === undefined || registered.version !== capability.version) {
@@ -149,6 +160,25 @@ const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContent
   return response
 })
 
+const validatePipelineArtifactRange = Effect.fn("PluginDefinition.validatePipelineArtifactRange")(function*(
+  request: PluginPipelineArtifactRangeRequestV1,
+  response: PluginPipelineArtifactRangeV1
+) {
+  const decoded = Encoding.decodeBase64(response.bytesBase64)
+  if (
+    Result.isFailure(decoded) ||
+    decoded.success.byteLength > request.length ||
+    request.offset > response.totalBytes ||
+    request.offset + decoded.success.byteLength > response.totalBytes
+  ) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "pipeline-artifact",
+      diagnosticCode: "plugin-pipeline-artifact-range-invalid"
+    })
+  }
+  return response
+})
+
 const requireCapability = (
   descriptor: NegotiatedPluginDescriptorV1,
   capabilityId: PluginCapabilityId,
@@ -187,11 +217,15 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
   const diffContent = codecs.diffContent
   const diffInventoryV2 = codecs.diffInventoryV2
   const diffContentV2 = codecs.diffContentV2
+  const pipelineLogs = codecs.pipelineLogs
+  const pipelineArtifact = codecs.pipelineArtifact
 
   const requiresDiff = hasPluginCapability(descriptor, "diff.inventory", 1) ||
     hasPluginCapability(descriptor, "diff.content", 1) ||
     hasPluginCapability(descriptor, "diff.inventory", 2) ||
     hasPluginCapability(descriptor, "diff.content", 2)
+  const requiresPipeline = hasPluginCapability(descriptor, "pipeline.logs", 1) ||
+    hasPluginCapability(descriptor, "pipeline.artifact", 1)
   if (requiresDiff && Option.isNone(services.connection.diff)) {
     return yield* new PluginConfigurationFailure({
       diagnosticCode: "plugin-negotiated-diff-implementation-missing"
@@ -214,6 +248,14 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
         diagnosticCode: "plugin-negotiated-diff-content-v2-implementation-missing"
       })
     }
+  }
+  if (
+    requiresPipeline &&
+    (services.connection.pipeline === undefined || Option.isNone(services.connection.pipeline))
+  ) {
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "plugin-negotiated-pipeline-implementation-missing"
+    })
   }
 
   const connection: PluginConnectionV1 = {
@@ -363,6 +405,49 @@ const wrapAdapterServices = Effect.fn("PluginDefinition.wrapAdapterServices")(fu
               )
           })
       }))
+      : Option.none(),
+    pipeline: requiresPipeline
+      ? Option.map(
+        services.connection.pipeline ?? Option.none(),
+        (pipeline): PluginPipelineReaderV1 => ({
+          readLogPage: (request) =>
+            withCapability(
+              descriptor,
+              "pipeline.logs",
+              pipelineLogs === undefined
+                ? Effect.fail(missingCapabilityCodec("pipeline.logs"))
+                : decodeBoundary("pipeline-logs", "input", pipelineLogs.input, request).pipe(
+                  Effect.flatMap((decoded) =>
+                    retryPluginOperation({
+                      operation: pipeline.readLogPage(decoded),
+                      safety: "safe-read"
+                    })
+                  ),
+                  Effect.flatMap((page) => decodeBoundary("pipeline-logs", "output", pipelineLogs.output, page))
+                )
+            ),
+          readArtifactRange: (request) =>
+            withCapability(
+              descriptor,
+              "pipeline.artifact",
+              pipelineArtifact === undefined
+                ? Effect.fail(missingCapabilityCodec("pipeline.artifact"))
+                : decodeBoundary("pipeline-artifact", "input", pipelineArtifact.input, request).pipe(
+                  Effect.flatMap((decodedRequest) =>
+                    retryPluginOperation({
+                      operation: pipeline.readArtifactRange(decodedRequest),
+                      safety: "safe-read"
+                    }).pipe(
+                      Effect.flatMap((range) =>
+                        decodeBoundary("pipeline-artifact", "output", pipelineArtifact.output, range)
+                      ),
+                      Effect.flatMap((range) => validatePipelineArtifactRange(decodedRequest, range))
+                    )
+                  )
+                )
+            )
+        })
+      )
       : Option.none(),
     proposeAction: (request) =>
       withCapability(

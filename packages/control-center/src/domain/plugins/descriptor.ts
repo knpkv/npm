@@ -37,7 +37,9 @@ export const PluginCapabilityId = Schema.Literals([
   "action.cancel",
   "action.reconcile",
   "diff.inventory",
-  "diff.content"
+  "diff.content",
+  "pipeline.logs",
+  "pipeline.artifact"
 ]).annotate({ identifier: "PluginCapabilityId" })
 
 /** Decoded plugin capability identity. */

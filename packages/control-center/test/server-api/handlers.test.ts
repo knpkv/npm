@@ -80,6 +80,7 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -1681,10 +1682,20 @@ describe("Control Center API handlers", () => {
       testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const codePipelineReads = CodePipelineReads.of({
+      logs: () => Effect.die("not used"),
+      artifact: () =>
+        Effect.succeed({
+          body: Stream.make(new Uint8Array([1, 2, 3])),
+          contentLength: 3,
+          filename: "BuildOutput.zip"
+        })
+    })
     const bind = await Effect.runPromise(decodeBindConfig({}))
     const requestContext = Context.empty().pipe(
       Context.add(Auth, authentication),
       Context.add(ApiBindConfiguration, bind),
+      Context.add(CodePipelineReads, codePipelineReads),
       Context.add(MediaReads, media),
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
@@ -1716,9 +1727,37 @@ describe("Control Center API handlers", () => {
           origin: "http://127.0.0.1:4173"
         }
       })
+    const artifactRequest = new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        cookie: `cc_session=${"ab".repeat(32)}`,
+        host: "127.0.0.1:4173",
+        origin: "http://127.0.0.1:4173"
+      },
+      body: JSON.stringify({
+        pluginConnectionId: codeCommitPluginConnectionId,
+        request: {
+          action: {
+            entity: {
+              entityType: "aws.codepipeline.action",
+              vendorImmutableId: "execution-1#action-1"
+            },
+            executionId: "execution-1",
+            actionExecutionId: "action-1",
+            expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+          },
+          direction: "output",
+          artifactName: "BuildOutput",
+          offset: 0,
+          length: 3
+        }
+      })
+    })
     try {
       const csvResponse = await webHandler.handler(request("csv"), requestContext)
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
+      const artifactResponse = await webHandler.handler(artifactRequest, requestContext)
 
       assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
       assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")
@@ -1736,6 +1775,15 @@ describe("Control Center API handlers", () => {
         metadata: { eventCount: 0, eventLimit: 25, truncated: false },
         events: []
       })
+      assert.strictEqual(artifactResponse.headers.get("content-type"), "application/octet-stream")
+      assert.strictEqual(
+        artifactResponse.headers.get("content-disposition"),
+        "attachment; filename=\"BuildOutput.zip\""
+      )
+      assert.strictEqual(artifactResponse.headers.get("content-length"), "3")
+      assert.strictEqual(artifactResponse.headers.get("cache-control"), "private, no-store")
+      assert.strictEqual(artifactResponse.headers.get("x-content-type-options"), "nosniff")
+      assert.deepStrictEqual(new Uint8Array(await artifactResponse.arrayBuffer()), new Uint8Array([1, 2, 3]))
     } finally {
       await webHandler.dispose()
     }

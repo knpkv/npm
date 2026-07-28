@@ -7,26 +7,49 @@
  *
  * @internal
  */
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as SynchronizedRef from "effect/SynchronizedRef"
 
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
+  type AuthorizedPluginActionV1,
   NormalizedPluginEventV1,
+  PluginActionActorIdentityV1,
+  type PluginActionDispatchResultV1,
+  PluginActionPreflightV1,
+  PluginActionProposalV1,
+  PluginActionReconciliationKey,
+  type PluginActionReconciliationRequestV1,
+  type PluginActionReconciliationResultV1,
   PluginDiscoveryV1,
+  type PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineArtifactRangeV1,
+  type PluginPipelineLogPageRequestV1,
+  PluginPipelineLogPageV1,
+  PluginProviderOperationId,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
+  type ProposePluginActionRequestV1,
   type ReadPluginEntityRequestV1,
   ReadPluginEntityResultV1
 } from "../../../domain/plugins/index.js"
+import { Revision } from "../../../domain/sourceRevision.js"
+import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
+  PluginOutageFailure,
+  PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
 import { pluginCapabilityCodecsV1 } from "../PluginCapabilityCodecs.js"
@@ -40,6 +63,7 @@ import {
   type CodePipelinePipeline,
   CodePipelineReadClient
 } from "./CodePipelineReadClient.js"
+import type { CodePipelineProviderFailure } from "./CodePipelineReadProvider.js"
 
 const EXECUTION_STREAM_KEY = "executions"
 const COMPLETE_CHECKPOINT = "complete"
@@ -48,6 +72,62 @@ const NEXT_CHECKPOINT_PREFIX = "next:"
 const AwsProfile = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
 const AwsRegion = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const PipelineName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+const ActionIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
+const ActionSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+const SourceRevisionType = Schema.Literals([
+  "COMMIT_ID",
+  "IMAGE_DIGEST",
+  "S3_OBJECT_VERSION_ID",
+  "S3_OBJECT_KEY"
+])
+const SourceRevision = Schema.Struct({
+  actionName: ActionIdentifier,
+  revisionType: SourceRevisionType,
+  revisionValue: ActionIdentifier
+})
+const StartActionPayload = Schema.Struct({
+  sourceRevisions: Schema.Array(SourceRevision).check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(50),
+    Schema.makeFilter(
+      (revisions) => new Set(revisions.map(({ actionName }) => actionName)).size === revisions.length,
+      { expected: "unique source action names" }
+    )
+  ),
+  pipelineRevision: Schema.optionalKey(Revision)
+})
+const StopActionPayload = Schema.Struct({
+  mode: Schema.Literals(["wait", "abandon"]),
+  reason: ActionSummary
+})
+const ApprovalActionPayload = Schema.Struct({
+  stageName: ActionIdentifier,
+  actionName: ActionIdentifier,
+  actionExecutionId: ActionIdentifier,
+  summary: ActionSummary,
+  actionRevision: Schema.optionalKey(Revision)
+})
+const RetryActionPayload = Schema.Struct({
+  retryOf: ActionIdentifier,
+  sourceRevisions: Schema.Array(SourceRevision).check(Schema.isNonEmpty(), Schema.isMaxLength(50))
+})
+
+type CodePipelineActionKind =
+  | "pipeline.start"
+  | "pipeline.stop"
+  | "pipeline.approve"
+  | "pipeline.reject"
+  | "pipeline.retry"
+
+const ACTION_KINDS: ReadonlySet<string> = new Set([
+  "pipeline.start",
+  "pipeline.stop",
+  "pipeline.approve",
+  "pipeline.reject",
+  "pipeline.retry"
+])
+
+const isActionKind = (value: string): value is CodePipelineActionKind => ACTION_KINDS.has(value)
 
 /** Secret-free production adapter configuration. @internal */
 export const CodePipelinePluginConfiguration = Schema.Struct({
@@ -137,16 +217,22 @@ const descriptor = {
       maximum: 120_000
     }
   ],
-  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+  capabilities: [
+    "entity.read",
+    "sync.incremental",
+    "action.propose",
+    "action.execute",
+    "action.reconcile",
+    "pipeline.logs",
+    "pipeline.artifact"
+  ].map((capabilityId) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
   }))
 } satisfies unknown
 
-const unsupported = (
-  capabilityId: "action.propose" | "action.execute" | "action.cancel" | "action.reconcile"
-) =>
+const unsupported = (capabilityId: "action.cancel") =>
   new PluginUnsupportedCapabilityFailure({
     capabilityId,
     requestedVersion: 1,
@@ -243,6 +329,54 @@ const actionObservedAt = (action: CodePipelineActionExecution, fallback: string)
 
 const actionRevision = (action: CodePipelineActionExecution): string =>
   `${action.status}:${action.updatedAt === null ? "undated" : formatDate(action.updatedAt)}`
+
+const pipelineRevision = (pipeline: CodePipelinePipeline): string =>
+  `${pipeline.version}:${pipeline.updatedAt === null ? "undated" : formatDate(pipeline.updatedAt)}`
+
+const executionRevision = (snapshot: CodePipelineExecutionSnapshot): string =>
+  `${snapshot.execution.pipelineVersion}:${snapshot.execution.status}:${
+    snapshot.execution.updatedAt === null
+      ? "undated"
+      : formatDate(snapshot.execution.updatedAt)
+  }`
+
+const impactFor = (
+  kind: CodePipelineActionKind,
+  payload: unknown
+): { readonly level: "low" | "medium" | "high" | "critical"; readonly summary: string } => {
+  switch (kind) {
+    case "pipeline.start":
+      return { level: "high", summary: "Starts a new execution at explicit source revisions" }
+    case "pipeline.stop":
+      return {
+        level: Schema.is(StopActionPayload)(payload) && payload.mode === "abandon"
+          ? "critical"
+          : "high",
+        summary: "Stops one in-progress pipeline execution"
+      }
+    case "pipeline.approve":
+      return { level: "high", summary: "Approves one pending manual approval action" }
+    case "pipeline.reject":
+      return { level: "high", summary: "Rejects one pending manual approval action" }
+    case "pipeline.retry":
+      return { level: "high", summary: "Starts a distinct retry execution at the original revisions" }
+  }
+}
+
+const summaryFor = (kind: CodePipelineActionKind, target: string): string => {
+  switch (kind) {
+    case "pipeline.start":
+      return `Start pipeline ${target}`
+    case "pipeline.stop":
+      return `Stop pipeline execution ${target}`
+    case "pipeline.approve":
+      return `Approve manual pipeline action ${target}`
+    case "pipeline.reject":
+      return `Reject manual pipeline action ${target}`
+    case "pipeline.retry":
+      return `Retry pipeline execution ${target} as a distinct execution`
+  }
+}
 
 const actionEvent = Effect.fn("CodePipelinePlugin.actionEvent")(function*(
   configuration: CodePipelineConfiguration,
@@ -491,13 +625,114 @@ const notFoundAsConfiguration = (operation: string) =>
 const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
   configuration: CodePipelineConfiguration,
   descriptor: PluginConnectionV1["descriptor"]
-): Effect.fn.Return<PluginConnectionV1, never, CodePipelineReadClient> {
+): Effect.fn.Return<
+  { readonly connection: PluginConnectionV1; readonly executor: AuthorizedPluginExecutorV1 },
+  PluginFailure,
+  CodePipelineReadClient | Crypto.Crypto
+> {
   const readClient = yield* CodePipelineReadClient
+  const cryptoService = yield* Crypto.Crypto
   const awsAccount = account(configuration)
+  const dispatches = yield* SynchronizedRef.make(HashMap.empty<string, {
+    readonly payloadDigest: string
+    readonly result: Result.Result<PluginActionDispatchResultV1, PluginFailure>
+  }>())
 
   const loadPipeline = readClient.getPipeline({
     account: awsAccount,
     pipelineName: configuration.pipelineName
+  })
+  const actionProvider = <A>(
+    operation: string,
+    effect: Effect.Effect<A, CodePipelineProviderFailure>
+  ): Effect.Effect<A, PluginFailure> =>
+    effect.pipe(
+      Effect.catchTag(
+        "CodePipelineProviderNotFoundFailure",
+        () =>
+          Effect.fail(
+            new PluginConflictFailure({
+              operation,
+              diagnosticCode: "codepipeline-provider-object-not-found"
+            })
+          )
+      )
+    )
+  const runtimeIdentity = yield* actionProvider(
+    "runtime-identity",
+    readClient.discoverAccount(awsAccount)
+  )
+  const actionActorIdentity = yield* decodeOutput("codepipeline-action-actor", PluginActionActorIdentityV1, {
+    providerId: "codepipeline",
+    providerAccountId: runtimeIdentity.accountId,
+    principal: runtimeIdentity.arn
+  })
+  const verifyRuntimeIdentity = Effect.fn("CodePipelinePlugin.verifyRuntimeIdentity")(function*() {
+    const current = yield* actionProvider(
+      "runtime-identity",
+      readClient.discoverAccount(awsAccount)
+    )
+    if (current.accountId !== runtimeIdentity.accountId || current.arn !== runtimeIdentity.arn) {
+      return yield* new PluginConflictFailure({
+        operation: "runtime-identity",
+        diagnosticCode: "codepipeline-runtime-identity-changed"
+      })
+    }
+  })
+  const clientRequestToken = Effect.fn("CodePipelinePlugin.clientRequestToken")(function*(
+    request: AuthorizedPluginActionV1
+  ) {
+    const digest = yield* digestGovernedActionPayload({
+      idempotencyKey: request.idempotencyKey,
+      payloadDigest: request.payloadDigest
+    }).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError(() => new PluginOutageFailure({ operation: "codepipeline-client-token" }))
+    )
+    return `cc-${digest}`
+  })
+
+  const loadSnapshot = (executionId: string) =>
+    readClient.getExecutionSnapshot({
+      account: awsAccount,
+      pipelineName: configuration.pipelineName,
+      pipelineExecutionId: executionId,
+      actionBounds: actionBounds(configuration),
+      summary: null
+    })
+
+  const exactAction = Effect.fn("CodePipelinePlugin.exactAction")(function*(
+    reference: {
+      readonly executionId: string
+      readonly actionExecutionId: string
+      readonly expectedRevision: string
+    }
+  ) {
+    const snapshot = yield* actionProvider(
+      "codepipeline-action-read",
+      loadSnapshot(reference.executionId)
+    )
+    const action = snapshot.actionCollection.actions.find(
+      (candidate) => candidate.actionExecutionId === reference.actionExecutionId
+    )
+    if (action === undefined) {
+      if (snapshot.actionCollection.truncated) {
+        return yield* new PluginConfigurationFailure({
+          diagnosticCode: "codepipeline-action-read-bound-exhausted"
+        })
+      }
+      return yield* new PluginConflictFailure({
+        operation: "codepipeline-action-read",
+        diagnosticCode: "codepipeline-action-not-found"
+      })
+    }
+    if (actionRevision(action) !== reference.expectedRevision) {
+      return yield* new PluginConflictFailure({
+        operation: "codepipeline-action-read",
+        diagnosticCode: "codepipeline-action-revision-changed"
+      })
+    }
+    return action
   })
 
   const discover = Effect.gen(function*() {
@@ -694,23 +929,814 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     })
   })
 
-  return {
+  const readLogPage = Effect.fn("CodePipelinePlugin.readLogPage")(function*(
+    request: PluginPipelineLogPageRequestV1
+  ) {
+    if (request.action.entity.entityType !== "aws.codepipeline.action") {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-target-invalid"
+      })
+    }
+    const action = yield* exactAction(request.action)
+    if (`${action.executionId}#${action.actionExecutionId}` !== request.action.entity.vendorImmutableId) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-target-mismatch"
+      })
+    }
+    const marker = ":log-group:"
+    const streamMarker = ":log-stream:"
+    const markerIndex = action.logStreamArn?.indexOf(marker) ?? -1
+    const streamIndex = action.logStreamArn?.lastIndexOf(streamMarker) ?? -1
+    if (action.logStreamArn === null || markerIndex < 0 || streamIndex <= markerIndex + marker.length) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-stream-unavailable"
+      })
+    }
+    const page = yield* actionProvider(
+      "pipeline-logs",
+      readClient.getLogPage({
+        account: awsAccount,
+        logGroupName: action.logStreamArn.slice(markerIndex + marker.length, streamIndex),
+        logStreamName: action.logStreamArn.slice(streamIndex + streamMarker.length),
+        nextToken: request.cursor,
+        limit: request.limit
+      })
+    )
+    return yield* decodeOutput("pipeline-logs", PluginPipelineLogPageV1, {
+      events: page.events.map((event) => ({
+        timestamp: formatDate(event.timestamp),
+        ingestionTimestamp: event.ingestionTimestamp === null ? null : formatDate(event.ingestionTimestamp),
+        message: event.message
+      })),
+      nextCursor: page.nextToken
+    })
+  })
+
+  const readArtifactRange = Effect.fn("CodePipelinePlugin.readArtifactRange")(function*(
+    request: PluginPipelineArtifactRangeRequestV1
+  ) {
+    if (request.action.entity.entityType !== "aws.codepipeline.action") {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-artifact",
+        diagnosticCode: "codepipeline-artifact-target-invalid"
+      })
+    }
+    const action = yield* exactAction(request.action)
+    if (`${action.executionId}#${action.actionExecutionId}` !== request.action.entity.vendorImmutableId) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-artifact",
+        diagnosticCode: "codepipeline-artifact-target-mismatch"
+      })
+    }
+    const artifacts = request.direction === "input" ? action.inputArtifacts : action.outputArtifacts
+    const artifact = artifacts.find(({ name }) => name === request.artifactName)
+    if (artifact?.bucket === null || artifact?.key === null || artifact === undefined) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-artifact",
+        diagnosticCode: "codepipeline-artifact-unavailable"
+      })
+    }
+    const range = yield* actionProvider(
+      "pipeline-artifact",
+      readClient.getArtifactRange({
+        account: awsAccount,
+        bucket: artifact.bucket,
+        key: artifact.key,
+        offset: request.offset,
+        length: request.length
+      })
+    )
+    return yield* decodeOutput("pipeline-artifact", PluginPipelineArtifactRangeV1, {
+      ...range,
+      contentType: "application/octet-stream",
+      filename: `${request.artifactName.replaceAll(/[^A-Za-z0-9._-]/gu, "_")}.zip`
+    })
+  })
+
+  const sourceRevisionType = (
+    pipeline: CodePipelinePipeline,
+    actionName: string
+  ): typeof SourceRevisionType.Type => {
+    const source = pipeline.stages
+      .flatMap(({ actions }) => actions)
+      .find((action) => action.name === actionName && action.actionType.category === "Source")
+    if (source?.actionType.provider === "ECR") return "IMAGE_DIGEST"
+    if (source?.actionType.provider === "S3") return "S3_OBJECT_VERSION_ID"
+    return "COMMIT_ID"
+  }
+
+  const retryPayload = Effect.fn("CodePipelinePlugin.retryPayload")(function*(
+    pipeline: CodePipelinePipeline,
+    snapshot: CodePipelineExecutionSnapshot
+  ) {
+    const sourceRevisions = snapshot.execution.artifactRevisions.flatMap((revision) =>
+      revision.name === null || revision.revisionId === null
+        ? []
+        : [{
+          actionName: revision.name,
+          revisionType: sourceRevisionType(pipeline, revision.name),
+          revisionValue: revision.revisionId
+        }]
+    )
+    return yield* decodeOutput("codepipeline-retry-payload", RetryActionPayload, {
+      retryOf: snapshot.execution.executionId,
+      sourceRevisions
+    })
+  })
+
+  const normalizeProposalPayload = Effect.fn("CodePipelinePlugin.normalizeProposalPayload")(function*(
+    request: ProposePluginActionRequestV1,
+    pipeline: CodePipelinePipeline
+  ) {
+    if (!isActionKind(request.actionKind)) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-proposal-action-kind-invalid"
+      })
+    }
+    switch (request.actionKind) {
+      case "pipeline.start": {
+        if (
+          request.target.entityType !== "pipeline-execution"
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-start-target-changed"
+          })
+        }
+        const snapshot = yield* actionProvider(
+          "propose-action",
+          loadSnapshot(request.target.vendorImmutableId)
+        )
+        if (request.expectedRevision !== executionRevision(snapshot)) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-start-target-changed"
+          })
+        }
+        const payload = yield* Schema.decodeUnknownEffect(StartActionPayload)(request.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConflictFailure({
+              operation: "propose-action",
+              diagnosticCode: "codepipeline-start-payload-invalid"
+            })
+          )
+        )
+        const sourceNames = new Set(
+          pipeline.stages.flatMap(({ actions }) =>
+            actions.filter(({ actionType }) => actionType.category === "Source").map(({ name }) => name)
+          )
+        )
+        if (payload.sourceRevisions.some(({ actionName }) => !sourceNames.has(actionName))) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-start-source-invalid"
+          })
+        }
+        return {
+          ...payload,
+          pipelineRevision: pipelineRevision(pipeline),
+          sourceRevisions: [...payload.sourceRevisions].sort((left, right) =>
+            left.actionName.localeCompare(right.actionName)
+          )
+        }
+      }
+      case "pipeline.stop": {
+        if (request.target.entityType !== "pipeline-execution") {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-stop-target-invalid"
+          })
+        }
+        const payload = yield* Schema.decodeUnknownEffect(StopActionPayload)(request.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConflictFailure({
+              operation: "propose-action",
+              diagnosticCode: "codepipeline-stop-payload-invalid"
+            })
+          )
+        )
+        const snapshot = yield* actionProvider(
+          "propose-action",
+          loadSnapshot(request.target.vendorImmutableId)
+        )
+        if (snapshot.execution.status !== "InProgress" || request.expectedRevision !== executionRevision(snapshot)) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-stop-execution-changed"
+          })
+        }
+        return payload
+      }
+      case "pipeline.approve":
+      case "pipeline.reject": {
+        if (request.target.entityType !== "pipeline-execution") {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-approval-target-invalid"
+          })
+        }
+        const payload = yield* Schema.decodeUnknownEffect(ApprovalActionPayload)(request.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConflictFailure({
+              operation: "propose-action",
+              diagnosticCode: "codepipeline-approval-payload-invalid"
+            })
+          )
+        )
+        const snapshot = yield* actionProvider(
+          "propose-action",
+          loadSnapshot(request.target.vendorImmutableId)
+        )
+        if (request.expectedRevision !== executionRevision(snapshot)) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-approval-target-mismatch"
+          })
+        }
+        const action = snapshot.actionCollection.actions.find(
+          (candidate) => candidate.actionExecutionId === payload.actionExecutionId
+        )
+        if (action === undefined) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-action-not-found"
+          })
+        }
+        const state = yield* actionProvider(
+          "propose-action",
+          readClient.getPipelineState({
+            account: awsAccount,
+            pipelineName: configuration.pipelineName
+          })
+        )
+        const current = state.actions.find(
+          (candidate) =>
+            candidate.stageName === payload.stageName &&
+            candidate.actionName === payload.actionName &&
+            candidate.actionExecutionId === payload.actionExecutionId
+        )
+        if (
+          action.actionType?.category !== "Approval" ||
+          action.stageName !== payload.stageName ||
+          action.actionName !== payload.actionName ||
+          action.status !== "InProgress" ||
+          current === undefined ||
+          current?.status !== "InProgress" ||
+          current.token === null
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-approval-not-pending"
+          })
+        }
+        return { ...payload, actionRevision: actionRevision(action) }
+      }
+      case "pipeline.retry": {
+        if (request.target.entityType !== "pipeline-execution") {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-retry-target-invalid"
+          })
+        }
+        const snapshot = yield* actionProvider(
+          "propose-action",
+          loadSnapshot(request.target.vendorImmutableId)
+        )
+        if (
+          !["Failed", "Stopped", "Cancelled", "Abandoned", "Superseded"].includes(snapshot.execution.status) ||
+          request.expectedRevision !== executionRevision(snapshot)
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-retry-execution-changed"
+          })
+        }
+        return yield* retryPayload(pipeline, snapshot)
+      }
+    }
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "codepipeline-proposal-action-kind-invalid"
+    })
+  })
+
+  const proposeAction = Effect.fn("CodePipelinePlugin.proposeAction")(function*(
+    request: ProposePluginActionRequestV1
+  ) {
+    if (!isActionKind(request.actionKind)) {
+      return yield* new PluginUnsupportedCapabilityFailure({
+        capabilityId: "action.propose",
+        requestedVersion: 1,
+        diagnosticCode: "codepipeline-action-kind-unsupported"
+      })
+    }
+    const pipeline = yield* actionProvider("propose-action", loadPipeline)
+    const payload = yield* normalizeProposalPayload(request, pipeline)
+    const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError(() => new PluginOutageFailure({ operation: "propose-action" }))
+    )
+    return yield* decodeOutput("propose-action", PluginActionProposalV1, {
+      proposalKey: `cp:${request.actionKind}:${request.target.vendorImmutableId}:${payloadDigest}`,
+      capabilityVersion: 1,
+      request: { ...request, payload },
+      payloadDigest,
+      summary: summaryFor(request.actionKind, request.target.vendorImmutableId),
+      impact: impactFor(request.actionKind, payload),
+      proposedAt: yield* sampledAt
+    })
+  })
+
+  type ResolvedAuthorizedAction =
+    | {
+      readonly _tag: "start"
+      readonly sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>
+      readonly checkedRevision: string
+    }
+    | {
+      readonly _tag: "stop"
+      readonly executionId: string
+      readonly abandon: boolean
+      readonly reason: string
+      readonly checkedRevision: string
+    }
+    | {
+      readonly _tag: "approval"
+      readonly stageName: string
+      readonly actionName: string
+      readonly actionExecutionId: string
+      readonly token: string
+      readonly status: "Approved" | "Rejected"
+      readonly summary: string
+      readonly checkedRevision: string
+    }
+    | {
+      readonly _tag: "retry"
+      readonly retryOf: string
+      readonly sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>
+      readonly checkedRevision: string
+    }
+
+  const resolveAuthorized = Effect.fn("CodePipelinePlugin.resolveAuthorized")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<ResolvedAuthorizedAction, PluginFailure> {
+    if (!isActionKind(request.proposal.request.actionKind)) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-authorized-action-kind-invalid"
+      })
+    }
+    const recomputed = yield* digestGovernedActionPayload(request.proposal.request.payload).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError(() => new PluginOutageFailure({ operation: "authorized-action-digest" }))
+    )
+    if (recomputed !== request.payloadDigest) {
+      return yield* new PluginConflictFailure({
+        operation: "authorized-action",
+        diagnosticCode: "codepipeline-authorized-payload-mismatch"
+      })
+    }
+    const actionRequest = request.proposal.request
+    const pipeline = yield* actionProvider("authorized-action", loadPipeline)
+    switch (actionRequest.actionKind) {
+      case "pipeline.start": {
+        const payload = yield* Schema.decodeUnknownEffect(StartActionPayload)(actionRequest.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-start-payload-invalid" })
+          )
+        )
+        const snapshot = yield* actionProvider(
+          "authorized-action",
+          loadSnapshot(actionRequest.target.vendorImmutableId)
+        )
+        const revision = executionRevision(snapshot)
+        if (
+          actionRequest.target.entityType !== "pipeline-execution" ||
+          actionRequest.expectedRevision !== revision ||
+          payload.pipelineRevision === undefined ||
+          payload.pipelineRevision !== pipelineRevision(pipeline)
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-start-target-changed"
+          })
+        }
+        return {
+          _tag: "start",
+          sourceRevisions: payload.sourceRevisions,
+          checkedRevision: revision
+        }
+      }
+      case "pipeline.stop": {
+        const payload = yield* Schema.decodeUnknownEffect(StopActionPayload)(actionRequest.payload).pipe(
+          Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "codepipeline-stop-payload-invalid" }))
+        )
+        const snapshot = yield* actionProvider(
+          "authorized-action",
+          loadSnapshot(actionRequest.target.vendorImmutableId)
+        )
+        const revision = executionRevision(snapshot)
+        if (snapshot.execution.status !== "InProgress" || revision !== actionRequest.expectedRevision) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-stop-execution-changed"
+          })
+        }
+        return {
+          _tag: "stop",
+          executionId: snapshot.execution.executionId,
+          abandon: payload.mode === "abandon",
+          reason: payload.reason,
+          checkedRevision: revision
+        }
+      }
+      case "pipeline.approve":
+      case "pipeline.reject": {
+        const payload = yield* Schema.decodeUnknownEffect(ApprovalActionPayload)(actionRequest.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-approval-payload-invalid" })
+          )
+        )
+        const snapshot = yield* actionProvider(
+          "authorized-action",
+          loadSnapshot(actionRequest.target.vendorImmutableId)
+        )
+        const revision = executionRevision(snapshot)
+        const action = snapshot.actionCollection.actions.find(
+          (candidate) => candidate.actionExecutionId === payload.actionExecutionId
+        )
+        if (
+          actionRequest.target.entityType !== "pipeline-execution" ||
+          actionRequest.expectedRevision !== revision ||
+          payload.actionRevision === undefined ||
+          action === undefined ||
+          payload.actionRevision !== actionRevision(action)
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-approval-target-mismatch"
+          })
+        }
+        const state = yield* actionProvider(
+          "authorized-action",
+          readClient.getPipelineState({
+            account: awsAccount,
+            pipelineName: configuration.pipelineName
+          })
+        )
+        const current = state.actions.find(
+          (candidate) =>
+            candidate.stageName === payload.stageName &&
+            candidate.actionName === payload.actionName &&
+            candidate.actionExecutionId === payload.actionExecutionId
+        )
+        if (
+          action.actionType?.category !== "Approval" ||
+          action.status !== "InProgress" ||
+          current === undefined ||
+          current.status !== "InProgress" ||
+          current.token === null
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-approval-not-pending"
+          })
+        }
+        return {
+          _tag: "approval",
+          stageName: payload.stageName,
+          actionName: payload.actionName,
+          actionExecutionId: payload.actionExecutionId,
+          token: current.token,
+          status: actionRequest.actionKind === "pipeline.approve" ? "Approved" : "Rejected",
+          summary: payload.summary,
+          checkedRevision: revision
+        }
+      }
+      case "pipeline.retry": {
+        const payload = yield* Schema.decodeUnknownEffect(RetryActionPayload)(actionRequest.payload).pipe(
+          Effect.mapError(() =>
+            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-retry-payload-invalid" })
+          )
+        )
+        const snapshot = yield* actionProvider(
+          "authorized-action",
+          loadSnapshot(payload.retryOf)
+        )
+        const revision = executionRevision(snapshot)
+        if (
+          payload.retryOf !== actionRequest.target.vendorImmutableId ||
+          !["Failed", "Stopped", "Cancelled", "Abandoned", "Superseded"].includes(snapshot.execution.status) ||
+          revision !== actionRequest.expectedRevision
+        ) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-retry-execution-changed"
+          })
+        }
+        const currentPayload = yield* retryPayload(pipeline, snapshot)
+        if (JSON.stringify(currentPayload.sourceRevisions) !== JSON.stringify(payload.sourceRevisions)) {
+          return yield* new PluginConflictFailure({
+            operation: "authorized-action",
+            diagnosticCode: "codepipeline-retry-revisions-changed"
+          })
+        }
+        return {
+          _tag: "retry",
+          retryOf: payload.retryOf,
+          sourceRevisions: payload.sourceRevisions,
+          checkedRevision: revision
+        }
+      }
+    }
+    return yield* new PluginConfigurationFailure({
+      diagnosticCode: "codepipeline-authorized-action-kind-invalid"
+    })
+  })
+
+  const preflight = Effect.fn("CodePipelinePlugin.preflight")(function*(request: AuthorizedPluginActionV1) {
+    yield* verifyRuntimeIdentity()
+    const resolved = yield* resolveAuthorized(request).pipe(Effect.result)
+    const checkedAt = yield* sampledAt
+    if (Result.isFailure(resolved)) {
+      if (Predicate.isTagged(resolved.failure, "PluginConflictFailure")) {
+        return yield* decodeOutput("preflight", PluginActionPreflightV1, {
+          _tag: "blocked",
+          reasons: [`CodePipeline action blocked: ${resolved.failure.diagnosticCode}`],
+          checkedAt
+        })
+      }
+      return yield* resolved.failure
+    }
+    return yield* decodeOutput("preflight", PluginActionPreflightV1, {
+      _tag: "ready",
+      checkedRevision: Revision.make(resolved.success.checkedRevision),
+      checkedAt
+    })
+  })
+
+  const dispatch = Effect.fn("CodePipelinePlugin.dispatch")(function*(
+    request: AuthorizedPluginActionV1
+  ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
+    const action = yield* resolveAuthorized(request)
+    const observedAt = yield* DateTime.now
+    const reconciliationKey = PluginActionReconciliationKey.make(
+      `codepipeline:${action._tag}:${request.payloadDigest}`
+    )
+    const result = yield* (() => {
+      switch (action._tag) {
+        case "start":
+        case "retry":
+          return Effect.flatMap(
+            clientRequestToken(request),
+            (token) =>
+              actionProvider(
+                "execute-authorized-action",
+                readClient.startPipelineExecution({
+                  account: awsAccount,
+                  pipelineName: configuration.pipelineName,
+                  clientRequestToken: token,
+                  sourceRevisions: action.sourceRevisions
+                })
+              )
+          ).pipe(Effect.map((operationId) => ({
+            operationId,
+            summary: action._tag === "retry"
+              ? `Started distinct retry execution ${operationId} for ${action.retryOf}`
+              : `Started pipeline execution ${operationId}`
+          })))
+        case "stop":
+          return actionProvider(
+            "execute-authorized-action",
+            readClient.stopPipelineExecution({
+              account: awsAccount,
+              pipelineName: configuration.pipelineName,
+              pipelineExecutionId: action.executionId,
+              abandon: action.abandon,
+              reason: action.reason
+            })
+          ).pipe(Effect.map((operationId) => ({
+            operationId,
+            summary: `Accepted stop for pipeline execution ${operationId}`
+          })))
+        case "approval":
+          return actionProvider(
+            "execute-authorized-action",
+            readClient.putApprovalResult({
+              account: awsAccount,
+              pipelineName: configuration.pipelineName,
+              stageName: action.stageName,
+              actionName: action.actionName,
+              token: action.token,
+              status: action.status,
+              summary: action.summary
+            })
+          ).pipe(Effect.as({
+            operationId: `approval:${action.actionExecutionId}`,
+            summary: `${action.status} manual pipeline action ${action.actionExecutionId}`
+          }))
+      }
+    })().pipe(Effect.result)
+    if (Result.isFailure(result)) {
+      if (
+        Predicate.isTagged(result.failure, "PluginTimeoutFailure") ||
+        Predicate.isTagged(result.failure, "PluginOutageFailure")
+      ) {
+        return yield* new PluginUnknownOutcomeFailure({
+          operation: "execute-authorized-action",
+          reconciliationKey
+        })
+      }
+      return yield* result.failure
+    }
+    const providerOperationId = PluginProviderOperationId.make(result.success.operationId)
+    return action._tag === "approval"
+      ? {
+        _tag: "confirmed",
+        receipt: {
+          status: "succeeded",
+          providerOperationId,
+          safeSummary: result.success.summary,
+          observedAt
+        }
+      }
+      : {
+        _tag: "confirmed",
+        receipt: {
+          status: "accepted",
+          providerOperationId,
+          reconciliationKey,
+          safeSummary: result.success.summary,
+          observedAt
+        }
+      }
+  })
+
+  const executeAuthorizedAction = Effect.fn("CodePipelinePlugin.executeAuthorizedAction")(function*(
+    request: AuthorizedPluginActionV1
+  ) {
+    yield* verifyRuntimeIdentity()
+    const result = yield* SynchronizedRef.modifyEffect(dispatches, (current) => {
+      const previous = HashMap.get(current, request.idempotencyKey)
+      if (Option.isSome(previous)) {
+        const replay = previous.value.payloadDigest === request.payloadDigest
+          ? previous.value.result
+          : Result.fail(
+            new PluginConflictFailure({
+              operation: "execute-authorized-action",
+              diagnosticCode: "codepipeline-idempotency-payload-mismatch"
+            })
+          )
+        const transition: readonly [typeof replay, typeof current] = [replay, current]
+        return Effect.succeed(transition)
+      }
+      return dispatch(request).pipe(
+        Effect.result,
+        Effect.map((dispatched) => {
+          const cache = Result.isSuccess(dispatched) ||
+              Predicate.isTagged(dispatched.failure, "PluginUnknownOutcomeFailure")
+            ? HashMap.set(current, request.idempotencyKey, {
+              payloadDigest: request.payloadDigest,
+              result: dispatched
+            })
+            : current
+          const transition: readonly [typeof dispatched, typeof current] = [dispatched, cache]
+          return transition
+        })
+      )
+    })
+    return Result.isSuccess(result) ? result.success : yield* result.failure
+  })
+
+  const reconcile = Effect.fn("CodePipelinePlugin.reconcile")(function*(
+    request: PluginActionReconciliationRequestV1
+  ): Effect.fn.Return<PluginActionReconciliationResultV1, PluginFailure> {
+    yield* verifyRuntimeIdentity()
+    if (request.authorizedAction === undefined) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-reconciliation-authorized-action-missing"
+      })
+    }
+    const actionKind = request.authorizedAction.proposal.request.actionKind
+    if (!isActionKind(actionKind)) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-reconciliation-action-kind-invalid"
+      })
+    }
+    const checkedAt = yield* DateTime.now
+    if (actionKind === "pipeline.start" || actionKind === "pipeline.retry") {
+      const payload = actionKind === "pipeline.start"
+        ? yield* Schema.decodeUnknownEffect(StartActionPayload)(
+          request.authorizedAction.proposal.request.payload
+        ).pipe(
+          Effect.mapError(() =>
+            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
+          )
+        )
+        : yield* Schema.decodeUnknownEffect(RetryActionPayload)(
+          request.authorizedAction.proposal.request.payload
+        ).pipe(
+          Effect.mapError(() =>
+            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
+          )
+        )
+      const token = yield* clientRequestToken(request.authorizedAction)
+      const executionId = yield* actionProvider(
+        "reconcile",
+        readClient.startPipelineExecution({
+          account: awsAccount,
+          pipelineName: configuration.pipelineName,
+          clientRequestToken: token,
+          sourceRevisions: payload.sourceRevisions
+        })
+      )
+      const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
+      if (["InProgress", "Stopping"].includes(snapshot.execution.status)) {
+        return { _tag: "pending", checkedAt }
+      }
+      const succeeded = snapshot.execution.status === "Succeeded"
+      return {
+        _tag: succeeded ? "succeeded" : "failed",
+        receipt: {
+          status: succeeded ? "succeeded" : "failed",
+          providerOperationId: PluginProviderOperationId.make(executionId),
+          safeSummary: succeeded && actionKind === "pipeline.retry"
+            ? `Distinct retry execution ${executionId} is linked to ${request.authorizedAction.proposal.request.target.vendorImmutableId}`
+            : succeeded
+            ? `Pipeline execution ${executionId} succeeded`
+            : `Pipeline execution ${executionId} ended with status ${snapshot.execution.status}`,
+          observedAt: checkedAt
+        }
+      }
+    }
+    if (actionKind === "pipeline.stop") {
+      const executionId = request.authorizedAction.proposal.request.target.vendorImmutableId
+      const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
+      if (["InProgress", "Stopping"].includes(snapshot.execution.status)) {
+        return { _tag: "pending", checkedAt }
+      }
+      return {
+        _tag: "succeeded",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: PluginProviderOperationId.make(executionId),
+          safeSummary: `Pipeline execution ${executionId} is ${snapshot.execution.status}`,
+          observedAt: checkedAt
+        }
+      }
+    }
+    const payload = yield* Schema.decodeUnknownEffect(ApprovalActionPayload)(
+      request.authorizedAction.proposal.request.payload
+    ).pipe(
+      Effect.mapError(() =>
+        new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
+      )
+    )
+    const state = yield* actionProvider(
+      "reconcile",
+      readClient.getPipelineState({
+        account: awsAccount,
+        pipelineName: configuration.pipelineName
+      })
+    )
+    const current = state.actions.find(
+      (candidate) => candidate.actionExecutionId === payload.actionExecutionId
+    )
+    if (current?.status === "InProgress") return { _tag: "pending", checkedAt }
+    return {
+      _tag: "succeeded",
+      receipt: {
+        status: "succeeded",
+        providerOperationId: PluginProviderOperationId.make(`approval:${payload.actionExecutionId}`),
+        safeSummary: `Manual pipeline action ${payload.actionExecutionId} is no longer pending`,
+        observedAt: checkedAt
+      }
+    }
+  })
+
+  const connection: PluginConnectionV1 = {
     descriptor,
+    actionActorIdentity: Effect.succeed(actionActorIdentity),
     discover,
     health,
     sync,
     readEntity,
     diff: Option.none(),
-    proposeAction: () => Effect.fail(unsupported("action.propose"))
+    pipeline: Option.some({ readLogPage, readArtifactRange }),
+    proposeAction
+  }
+
+  return {
+    connection,
+    executor: {
+      preflight,
+      executeAuthorizedAction,
+      requestCancellation: () => Effect.fail(unsupported("action.cancel")),
+      reconcile
+    }
   }
 })
-
-const executor: AuthorizedPluginExecutorV1 = {
-  preflight: () => Effect.fail(unsupported("action.execute")),
-  executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-  requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-  reconcile: () => Effect.fail(unsupported("action.reconcile"))
-}
 
 /** Requirement-preserving definition used by server composition and tests. @internal */
 export const codePipelinePluginDefinition = definePluginV1({
@@ -718,12 +1744,14 @@ export const codePipelinePluginDefinition = definePluginV1({
   configurationSchema: CodePipelinePluginConfiguration,
   capabilityCodecs: {
     entityRead: pluginCapabilityCodecsV1.entityRead,
-    syncIncremental: pluginCapabilityCodecsV1.syncIncremental
+    syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
+    actionPropose: pluginCapabilityCodecsV1.actionPropose,
+    actionExecute: pluginCapabilityCodecsV1.actionExecute,
+    actionReconcile: pluginCapabilityCodecsV1.actionReconcile,
+    pipelineLogs: pluginCapabilityCodecsV1.pipelineLogs,
+    pipelineArtifact: pluginCapabilityCodecsV1.pipelineArtifact
   },
-  make: ({ configuration, descriptor: negotiatedDescriptor }) =>
-    makeConnection(configuration, negotiatedDescriptor).pipe(
-      Effect.map((connection) => ({ connection, executor }))
-    )
+  make: ({ configuration, descriptor: negotiatedDescriptor }) => makeConnection(configuration, negotiatedDescriptor)
 })
 
 /** Opaque production CodePipeline plugin registration. */

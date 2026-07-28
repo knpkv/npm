@@ -13,6 +13,10 @@ import {
   PluginActionProposalV1,
   PluginActionReconciliationRequestV1,
   PluginActionReconciliationResultV1,
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineArtifactRangeV1,
+  PluginPipelineLogPageRequestV1,
+  PluginPipelineLogPageV1,
   PluginSyncPageV1,
   PluginSyncRequestV1,
   ProposePluginActionRequestV1,
@@ -70,6 +74,14 @@ export interface PluginCapabilityCodecsV1 {
     readonly input: typeof DiffContentRangeRequestV2
     readonly output: typeof DiffContentRangeV1
   }
+  readonly pipelineLogs?: CapabilityCodecV1 & {
+    readonly input: typeof PluginPipelineLogPageRequestV1
+    readonly output: typeof PluginPipelineLogPageV1
+  }
+  readonly pipelineArtifact?: CapabilityCodecV1 & {
+    readonly input: typeof PluginPipelineArtifactRangeRequestV1
+    readonly output: typeof PluginPipelineArtifactRangeV1
+  }
 }
 
 /** Canonical host codecs adapters explicitly register for negotiated v1 capabilities. */
@@ -124,5 +136,15 @@ export const pluginCapabilityCodecsV1 = {
     version: 2,
     input: DiffContentRangeRequestV2,
     output: DiffContentRangeV1
+  },
+  pipelineLogs: {
+    version: 1,
+    input: PluginPipelineLogPageRequestV1,
+    output: PluginPipelineLogPageV1
+  },
+  pipelineArtifact: {
+    version: 1,
+    input: PluginPipelineArtifactRangeRequestV1,
+    output: PluginPipelineArtifactRangeV1
   }
 } satisfies PluginCapabilityCodecsV1

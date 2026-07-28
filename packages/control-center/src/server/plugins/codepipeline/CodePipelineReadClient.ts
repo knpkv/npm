@@ -8,6 +8,7 @@
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
@@ -17,10 +18,16 @@ import {
   type CodePipelineProviderFailure,
   CodePipelineReadProvider,
   CodePipelineReadProviderLive,
+  type GetPipelineArtifactRangeProviderRequest,
   type GetPipelineExecutionProviderRequest,
+  type GetPipelineLogEventsProviderRequest,
   type GetPipelineProviderRequest,
+  type GetPipelineStateProviderRequest,
   type ListPipelineExecutionsProviderRequest,
-  type ListPipelinesProviderRequest
+  type ListPipelinesProviderRequest,
+  type PutPipelineApprovalProviderRequest,
+  type StartPipelineExecutionProviderRequest,
+  type StopPipelineExecutionProviderRequest
 } from "./CodePipelineReadProvider.js"
 
 const EXECUTION_PROVIDER_PAGE_LIMIT = 1
@@ -149,6 +156,7 @@ const RawExecutionOutput = Schema.Struct({
     pipelineExecutionId: Identifier,
     status: AwsStatus,
     statusSummary: Schema.optionalKey(Summary),
+    lastUpdateTime: Schema.optionalKey(Schema.Date),
     artifactRevisions: Schema.optionalKey(Schema.Array(RawArtifactRevision).check(Schema.isMaxLength(100))),
     trigger: Schema.optionalKey(Schema.Struct({
       triggerType: Schema.optionalKey(Identifier),
@@ -208,6 +216,50 @@ const RawActionPage = Schema.Struct({
   ),
   nextToken: Schema.optionalKey(ProviderPageToken)
 })
+
+const RawPipelineState = Schema.Struct({
+  pipelineName: PipelineName,
+  pipelineVersion: Schema.Int.check(Schema.isGreaterThan(0)),
+  stageStates: Schema.optionalKey(
+    Schema.Array(Schema.Struct({
+      stageName: Identifier,
+      actionStates: Schema.optionalKey(
+        Schema.Array(Schema.Struct({
+          actionName: Identifier,
+          latestExecution: Schema.optionalKey(Schema.Struct({
+            actionExecutionId: Schema.optionalKey(Identifier),
+            status: Schema.optionalKey(AwsStatus),
+            token: Schema.optionalKey(Identifier),
+            lastStatusChange: Schema.optionalKey(Schema.Date)
+          }))
+        })).check(Schema.isMaxLength(STAGE_ACTION_LIMIT))
+      )
+    })).check(Schema.isMaxLength(PIPELINE_STAGE_LIMIT))
+  )
+})
+
+const RawLogPage = Schema.Struct({
+  events: Schema.optionalKey(
+    Schema.Array(Schema.Struct({
+      timestamp: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+      message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(16_384))),
+      ingestionTime: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
+    })).check(Schema.isMaxLength(100))
+  ),
+  nextForwardToken: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
+  )
+})
+
+const RawArtifactRange = Schema.Struct({
+  bytes: Schema.Uint8Array,
+  contentLength: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  contentRange: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(256)))
+})
+
+const RawStartResult = Schema.Struct({ pipelineExecutionId: Identifier })
+const RawStopResult = Schema.Struct({ pipelineExecutionId: Identifier })
+const RawApprovalResult = Schema.Struct({ approvedAt: Schema.optionalKey(Schema.Date) })
 
 /** Secret-free AWS identity used for discovery. @internal */
 export const CodePipelineAccountIdentity = Schema.Struct({ accountId: Identifier, arn: Identifier })
@@ -305,6 +357,7 @@ export const CodePipelineExecution = Schema.Struct({
   executionId: Identifier,
   status: AwsStatus,
   statusSummary: Schema.NullOr(Summary),
+  updatedAt: Schema.NullOr(Schema.Date),
   artifactRevisions: Schema.Array(CodePipelineArtifactRevision),
   triggerType: Schema.NullOr(Identifier),
   triggerDetail: Schema.NullOr(Summary),
@@ -365,6 +418,47 @@ export const CodePipelineExecutionSnapshot = Schema.Struct({
 })
 /** @internal */
 export type CodePipelineExecutionSnapshot = typeof CodePipelineExecutionSnapshot.Type
+
+/** One decoded current action state. Approval tokens remain server-private. @internal */
+export const CodePipelineActionState = Schema.Struct({
+  stageName: Identifier,
+  actionName: Identifier,
+  actionExecutionId: Schema.NullOr(Identifier),
+  status: Schema.NullOr(AwsStatus),
+  token: Schema.NullOr(Identifier),
+  lastStatusChange: Schema.NullOr(Schema.Date)
+})
+/** @internal */
+export type CodePipelineActionState = typeof CodePipelineActionState.Type
+
+/** Current pipeline state used only for preflight and reconciliation. @internal */
+export const CodePipelinePipelineState = Schema.Struct({
+  pipelineName: PipelineName,
+  pipelineVersion: Schema.Int.check(Schema.isGreaterThan(0)),
+  actions: Schema.Array(CodePipelineActionState).check(Schema.isMaxLength(PIPELINE_STAGE_LIMIT * STAGE_ACTION_LIMIT))
+})
+/** @internal */
+export type CodePipelinePipelineState = typeof CodePipelinePipelineState.Type
+
+/** Bounded decoded CloudWatch log page. @internal */
+export const CodePipelineLogPage = Schema.Struct({
+  events: Schema.Array(Schema.Struct({
+    timestamp: Schema.Date,
+    ingestionTimestamp: Schema.NullOr(Schema.Date),
+    message: Schema.String.check(Schema.isMaxLength(16_384))
+  })).check(Schema.isMaxLength(100)),
+  nextToken: Schema.NullOr(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)))
+})
+/** @internal */
+export type CodePipelineLogPage = typeof CodePipelineLogPage.Type
+
+/** Bounded decoded S3 byte range. @internal */
+export const CodePipelineArtifactRange = Schema.Struct({
+  bytesBase64: Schema.String,
+  totalBytes: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+})
+/** @internal */
+export type CodePipelineArtifactRange = typeof CodePipelineArtifactRange.Type
 
 const malformed = (operation: string, diagnosticCode = "codepipeline-provider-response-invalid") =>
   new PluginMalformedResponseFailure({ operation, diagnosticCode })
@@ -444,6 +538,24 @@ export interface CodePipelineReadClientService {
       readonly summary: CodePipelineExecutionSummary | null
     }
   ) => Effect.Effect<CodePipelineExecutionSnapshot, CodePipelineProviderFailure>
+  readonly getPipelineState: (
+    request: GetPipelineStateProviderRequest
+  ) => Effect.Effect<CodePipelinePipelineState, CodePipelineProviderFailure>
+  readonly getLogPage: (
+    request: GetPipelineLogEventsProviderRequest
+  ) => Effect.Effect<CodePipelineLogPage, CodePipelineProviderFailure>
+  readonly getArtifactRange: (
+    request: GetPipelineArtifactRangeProviderRequest
+  ) => Effect.Effect<CodePipelineArtifactRange, CodePipelineProviderFailure>
+  readonly startPipelineExecution: (
+    request: StartPipelineExecutionProviderRequest
+  ) => Effect.Effect<string, CodePipelineProviderFailure>
+  readonly stopPipelineExecution: (
+    request: StopPipelineExecutionProviderRequest
+  ) => Effect.Effect<string, CodePipelineProviderFailure>
+  readonly putApprovalResult: (
+    request: PutPipelineApprovalProviderRequest
+  ) => Effect.Effect<Date | null, CodePipelineProviderFailure>
 }
 
 /** Injectable Schema-decoded CodePipeline read client. @internal */
@@ -642,6 +754,7 @@ export class CodePipelineReadClient extends Context.Service<
             executionId: execution.pipelineExecutionId,
             status: execution.status,
             statusSummary: execution.statusSummary ?? null,
+            updatedAt: execution.lastUpdateTime ?? null,
             artifactRevisions: (execution.artifactRevisions ?? []).map((revision) => ({
               name: revision.name ?? null,
               revisionId: revision.revisionId ?? null,
@@ -662,12 +775,104 @@ export class CodePipelineReadClient extends Context.Service<
         })
       })
 
+      const getPipelineState = Effect.fn("CodePipelineReadClient.getPipelineState")(function*(
+        request: GetPipelineStateProviderRequest
+      ) {
+        const raw = yield* provider.getPipelineState(request)
+        const response = yield* decodeProvider("codepipeline-get-state", RawPipelineState, raw)
+        if (response.pipelineName !== request.pipelineName) {
+          return yield* malformed("codepipeline-get-state", "codepipeline-state-identity-mismatch")
+        }
+        return yield* decodeModel("codepipeline-get-state", CodePipelinePipelineState, {
+          pipelineName: response.pipelineName,
+          pipelineVersion: response.pipelineVersion,
+          actions: (response.stageStates ?? []).flatMap((stage) =>
+            (stage.actionStates ?? []).map((action) => ({
+              stageName: stage.stageName,
+              actionName: action.actionName,
+              actionExecutionId: action.latestExecution?.actionExecutionId ?? null,
+              status: action.latestExecution?.status ?? null,
+              token: action.latestExecution?.token ?? null,
+              lastStatusChange: action.latestExecution?.lastStatusChange ?? null
+            }))
+          )
+        })
+      })
+
+      const getLogPage = Effect.fn("CodePipelineReadClient.getLogPage")(function*(
+        request: GetPipelineLogEventsProviderRequest
+      ) {
+        const raw = yield* provider.getLogEventsPage(request)
+        const response = yield* decodeProvider("codepipeline-get-logs", RawLogPage, raw)
+        return yield* decodeModel("codepipeline-get-logs", CodePipelineLogPage, {
+          events: (response.events ?? []).map((event) => ({
+            timestamp: new Date(event.timestamp),
+            ingestionTimestamp: event.ingestionTime === undefined ? null : new Date(event.ingestionTime),
+            message: event.message ?? ""
+          })),
+          nextToken: response.nextForwardToken === request.nextToken ? null : response.nextForwardToken ?? null
+        })
+      })
+
+      const getArtifactRange = Effect.fn("CodePipelineReadClient.getArtifactRange")(function*(
+        request: GetPipelineArtifactRangeProviderRequest
+      ) {
+        const raw = yield* provider.getArtifactRange(request)
+        const response = yield* decodeProvider("codepipeline-get-artifact", RawArtifactRange, raw)
+        if (response.bytes.byteLength > request.length) {
+          return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-range-exceeded")
+        }
+        const totalFromRange = response.contentRange === undefined
+          ? null
+          : /^bytes \d+-\d+\/(\d+)$/u.exec(response.contentRange)?.[1] ?? null
+        if (totalFromRange === null) {
+          return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-content-range-invalid")
+        }
+        return yield* decodeModel("codepipeline-get-artifact", CodePipelineArtifactRange, {
+          bytesBase64: Encoding.encodeBase64(response.bytes),
+          totalBytes: Number(totalFromRange)
+        })
+      })
+
+      const startPipelineExecution = Effect.fn("CodePipelineReadClient.startPipelineExecution")(function*(
+        request: StartPipelineExecutionProviderRequest
+      ) {
+        const raw = yield* provider.startPipelineExecution(request)
+        const response = yield* decodeProvider("codepipeline-start-execution", RawStartResult, raw)
+        return response.pipelineExecutionId
+      })
+
+      const stopPipelineExecution = Effect.fn("CodePipelineReadClient.stopPipelineExecution")(function*(
+        request: StopPipelineExecutionProviderRequest
+      ) {
+        const raw = yield* provider.stopPipelineExecution(request)
+        const response = yield* decodeProvider("codepipeline-stop-execution", RawStopResult, raw)
+        if (response.pipelineExecutionId !== request.pipelineExecutionId) {
+          return yield* malformed("codepipeline-stop-execution", "codepipeline-stop-identity-mismatch")
+        }
+        return response.pipelineExecutionId
+      })
+
+      const putApprovalResult = Effect.fn("CodePipelineReadClient.putApprovalResult")(function*(
+        request: PutPipelineApprovalProviderRequest
+      ) {
+        const raw = yield* provider.putApprovalResult(request)
+        const response = yield* decodeProvider("codepipeline-put-approval", RawApprovalResult, raw)
+        return response.approvedAt ?? null
+      })
+
       return {
         discoverAccount,
+        getArtifactRange,
         getExecutionSnapshot,
+        getLogPage,
         getPipeline,
+        getPipelineState,
         listExecutionsPage,
-        listPipelinesPage
+        listPipelinesPage,
+        putApprovalResult,
+        startPipelineExecution,
+        stopPipelineExecution
       } satisfies CodePipelineReadClientService
     })
   )

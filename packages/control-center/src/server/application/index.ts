@@ -1,5 +1,6 @@
 /** Durable application adapters for the authenticated HTTP API. @packageDocumentation */
 export { authorizedSharesLayer, makeAuthorizedShares } from "./authorizedShares.js"
+export { codePipelineReadsLayer, makeCodePipelineReads } from "./codePipelineReads.js"
 export { completeDiffReadsLayer, makeCompleteDiffReads } from "./completeDiffReads.js"
 export { deliveryGraphInspectionLayer, makeDeliveryGraphInspection } from "./deliveryGraphInspection.js"
 export { mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"

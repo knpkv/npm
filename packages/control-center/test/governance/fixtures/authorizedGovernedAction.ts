@@ -38,7 +38,7 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
-export type GovernedActionFixtureVariant = "jira" | "codecommit" | "confluence"
+export type GovernedActionFixtureVariant = "jira" | "codecommit" | "codepipeline" | "confluence"
 
 const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
 
@@ -139,12 +139,65 @@ const confluenceFixture = defineFixture({
   }
 })
 
+const codePipelineFixture = defineFixture({
+  providerId: "codepipeline",
+  connectionName: "Payments CodePipeline",
+  entityType: "pipeline-execution",
+  vendorImmutableId: "execution-failed-1",
+  sourceRevision: "7:Failed:2026-07-15T09:50:00.000Z",
+  sourceUrl:
+    "https://eu-west-1.console.aws.amazon.com/codesuite/codepipeline/pipelines/release/view?region=eu-west-1&pipeline-execution=execution-failed-1",
+  displayKey: "execution-failed-1",
+  title: "release · execution-failed-1",
+  pluginId: "dev.knpkv.aws-codepipeline",
+  pluginAdapterVersion: { major: 0, minor: 1, patch: 0 },
+  idempotencyKey: "governed-action:codepipeline:execution-failed-1:retry:1",
+  proposalKey: "pipeline.retry:execution-failed-1:7:Failed:2026-07-15T09:50:00.000Z",
+  actionKind: "pipeline.retry",
+  payload: {
+    retryOf: "execution-failed-1",
+    sourceRevisions: [{
+      actionName: "Checkout",
+      revisionType: "COMMIT_ID",
+      revisionValue: "commit-abc"
+    }]
+  },
+  actionSummary: "Retry CodePipeline execution execution-failed-1",
+  impactSummary: "Starts one new execution with the failed execution's pinned source revisions",
+  correlationId: "action:codepipeline:execution-failed-1:retry",
+  details: {
+    _tag: "pipeline-execution",
+    pipelineName: "release",
+    executionId: "execution-failed-1",
+    status: "failed",
+    triggerRevision: "commit-abc",
+    pipelineVersion: 7,
+    statusSummary: "Build failed",
+    startedAt: "2026-07-15T09:45:00.000Z",
+    updatedAt: "2026-07-15T09:50:00.000Z",
+    triggerType: "StartPipelineExecution",
+    triggerDetail: "release-operator",
+    executionMode: "SUPERSEDED",
+    executionType: "STANDARD",
+    rollbackTargetExecutionId: null,
+    sourceRevisions: [{
+      actionName: "Checkout",
+      revisionId: "commit-abc",
+      revisionSummary: "main"
+    }]
+  }
+})
+
 const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
   variant === "codecommit"
     ? codeCommitFixture
+    : variant === "codepipeline"
+    ? codePipelineFixture
     : variant === "confluence"
     ? confluenceFixture
     : jiraFixture
+
+const fixtureProjectionEntityType = (fixture: ReturnType<typeof fixtureVariant>): string => fixture.entityType
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
@@ -221,7 +274,7 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
         supersedesProjectionRevision: null,
         projectionSchemaVersion: 1,
         entityState: "present",
-        entityType: fixture.entityType,
+        entityType: fixtureProjectionEntityType(fixture),
         displayKey: fixture.displayKey,
         title: fixture.title,
         details: fixture.details
@@ -231,10 +284,10 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
     nodes: [{
       workspaceId,
       nodeId,
-      endpointKind: fixture.entityType,
+      endpointKind: fixtureProjectionEntityType(fixture),
       resolution: {
         _tag: "resolved",
-        target: { _tag: "entity", entityId, entityKind: fixture.entityType }
+        target: { _tag: "entity", entityId, entityKind: fixtureProjectionEntityType(fixture) }
       },
       createdAt: "2026-07-15T09:55:00.000Z"
     }],

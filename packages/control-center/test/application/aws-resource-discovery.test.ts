@@ -54,9 +54,15 @@ const codePipelineClient = (
 ): CodePipelineReadClientService => ({
   discoverAccount: () => Effect.die("unused"),
   getExecutionSnapshot: () => Effect.die("unused"),
+  getArtifactRange: () => Effect.die("unused"),
+  getLogPage: () => Effect.die("unused"),
   getPipeline: () => Effect.die("unused"),
+  getPipelineState: () => Effect.die("unused"),
   listExecutionsPage: () => Effect.die("unused"),
   listPipelinesPage: () => Effect.succeed(pipelinePage([])),
+  putApprovalResult: () => Effect.die("unused"),
+  startPipelineExecution: () => Effect.die("unused"),
+  stopPipelineExecution: () => Effect.die("unused"),
   ...overrides
 })
 

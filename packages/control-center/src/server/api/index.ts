@@ -5,6 +5,7 @@ export {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,

@@ -25,7 +25,12 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
+  type ApplicationConflict,
+  type ApplicationRateLimited,
+  type ApplicationResourceNotFound,
+  type ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   CompleteDiffReads,
   DeliveryGraphInspection,
   LiveEvents,
@@ -1238,5 +1243,69 @@ export const mediaHandlersLayer = HttpApiBuilder.group(
           )
           return media.body
         }))
+    })
+)
+
+/** Authenticated workspace-scoped CodePipeline log and artifact proxy handlers. */
+export const codePipelineHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "codepipeline",
+  (handlers) =>
+    Effect.gen(function*() {
+      const mapReadErrors = <A, R>(
+        effect: Effect.Effect<
+          A,
+          | ApplicationConflict
+          | ApplicationRateLimited
+          | ApplicationResourceNotFound
+          | ApplicationServiceUnavailable,
+          R
+        >
+      ) =>
+        effect.pipe(Effect.catchTags({
+          ApplicationConflict: mapApplicationConflict,
+          ApplicationRateLimited: mapApplicationRateLimited,
+          ApplicationResourceNotFound: mapApplicationNotFound,
+          ApplicationServiceUnavailable: mapApplicationUnavailable
+        }))
+      return handlers
+        .handle("logs", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const reads = yield* Effect.serviceOption(CodePipelineReads)
+            if (Option.isNone(reads)) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* mapReadErrors(reads.value.logs({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: payload.pluginConnectionId,
+              request: payload.request
+            }))
+          }))
+        .handle("artifact", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const reads = yield* Effect.serviceOption(CodePipelineReads)
+            if (Option.isNone(reads)) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const artifact = yield* mapReadErrors(reads.value.artifact({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: payload.pluginConnectionId,
+              request: payload.request
+            }))
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(HttpServerResponse.setHeaders(response, {
+                "cache-control": "private, no-store",
+                "content-disposition": `attachment; filename="${artifact.filename}"`,
+                "content-length": String(artifact.contentLength),
+                "content-type": "application/octet-stream",
+                "x-content-type-options": "nosniff"
+              }))
+            )
+            return artifact.body
+          }))
     })
 )

@@ -6,6 +6,7 @@ import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import { mutationCsrfLayer, sessionCookieAuthLayer } from "./ApiMiddleware.js"
 import {
   agentHandlersLayer,
+  codePipelineHandlersLayer,
   deliveryGraphHandlersLayer,
   diffHandlersLayer,
   liveEventHandlersLayer,
@@ -35,6 +36,7 @@ const controlCenterApiHandlersLayerWithLifecycle = Layer.mergeAll(
   timelineHandlersLayer,
   deliveryGraphHandlersLayer,
   diffHandlersLayer,
+  codePipelineHandlersLayer,
   agentHandlersLayer,
   mediaHandlersLayer,
   liveEventHandlersLayer
