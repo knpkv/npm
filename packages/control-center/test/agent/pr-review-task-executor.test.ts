@@ -1147,7 +1147,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       })
     ).pipe(
       Effect.tap(({ result }) =>
@@ -1289,7 +1290,8 @@ describe("PR review task executor", () => {
           }, reviewSubject),
           observation,
           Effect.gen(function*() {
-            return yield* (yield* PrReviewTaskExecutor).execute(actualClaim)
+            const executor = yield* PrReviewTaskExecutor
+            return yield* executor.execute(actualClaim)
           }),
           undefined,
           undefined,
@@ -1529,7 +1531,8 @@ describe("PR review task executor", () => {
       completeScript(),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(
           claim,
           (event) =>
             Effect.sync(() => {
@@ -1584,7 +1587,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       }),
       undefined,
       undefined,
@@ -1658,7 +1662,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(
           claim,
           (event) =>
             Effect.sync(() => {
@@ -1709,7 +1714,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       }),
       undefined,
       undefined,
@@ -1752,7 +1758,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       }),
       undefined,
       undefined,
@@ -1790,7 +1797,8 @@ describe("PR review task executor", () => {
       completeScript(),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       }),
       undefined,
       undefined,
@@ -1823,7 +1831,8 @@ describe("PR review task executor", () => {
       completeScript(),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       }),
       undefined,
       "const modelPatchedThis = true"
@@ -1863,7 +1872,8 @@ describe("PR review task executor", () => {
       completeScript(),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(mismatchedClaim).pipe(Effect.result)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(mismatchedClaim).pipe(Effect.result)
       })
     ).pipe(
       Effect.tap(({ result }) =>
@@ -1891,7 +1901,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim).pipe(Effect.result)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim).pipe(Effect.result)
       })
     ).pipe(
       Effect.tap(({ result }) =>
@@ -1930,7 +1941,8 @@ describe("PR review task executor", () => {
       }),
       observation,
       Effect.gen(function*() {
-        return yield* (yield* PrReviewTaskExecutor).execute(claim)
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
       })
     ).pipe(
       Effect.tap(({ result }) =>

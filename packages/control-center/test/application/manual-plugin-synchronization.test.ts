@@ -204,6 +204,16 @@ const confluenceClient = (overrides: Partial<ConfluencePageClientShape> = {}): C
   getCurrentUser: Effect.succeed({ accountId: "account-author", displayName: "Avery" }),
   getSystemInfo: Effect.succeed({ cloudId: "site-acme", siteTitle: "Acme" }),
   getPage: () => Effect.succeed(confluencePage),
+  getPageDraft: () =>
+    Effect.fail(
+      new ConfluencePageClientFailure({
+        operation: "confluence-page-draft-read",
+        reason: "not-found",
+        retryAfterSeconds: null
+      })
+    ),
+  getPageVersion: () => Effect.succeed(confluencePage.version),
+  updatePage: () => Effect.die("unused updatePage"),
   getSpacePages: () => Effect.succeed({ results: [confluencePage] }),
   getPageAttachments: () => Effect.succeed({ results: [] }),
   getPageWatchers: (_pageId, start) => Effect.succeed({ results: [], start, limit: 50, size: 0 }),

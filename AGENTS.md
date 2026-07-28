@@ -181,6 +181,12 @@ When writing Effect code:
   projection-selection policy.
 - Decode untrusted JSON/body data with Schema helpers before assigning it to a
   domain type.
+- Model provider revision and reconciliation-locator parsing as Schema
+  transformations (including template-literal parsers for structured locators);
+  reserve manual URL/cursor extraction for opaque transport pagination.
+- When advertised plugin capabilities change, update current module and service
+  documentation in the same change while keeping historical-descriptor comments
+  explicit about their older capability surface.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

@@ -14,7 +14,8 @@ import {
 
 const pageClientLayer = (
   body: unknown,
-  requests: Array<HttpClientRequest.HttpClientRequest>
+  requests: Array<HttpClientRequest.HttpClientRequest>,
+  status = 200
 ) =>
   confluencePageClientLayer.pipe(
     Layer.provide(ConfluenceApiClient.layer),
@@ -34,7 +35,7 @@ const pageClientLayer = (
           return HttpClientResponse.fromWeb(
             request,
             new Response(JSON.stringify(body), {
-              status: 200,
+              status,
               headers: { "content-type": "application/json" }
             })
           )
@@ -44,6 +45,127 @@ const pageClientLayer = (
   )
 
 describe("Confluence page client", () => {
+  it.effect("sends the authorized title, ADF, marker, and exact next version in one update", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const updated = {
+      id: "42",
+      status: "current",
+      title: "Payments release runbook v2",
+      spaceId: "space-payments",
+      createdAt: "2026-07-01T09:00:00.000Z",
+      version: {
+        number: 4,
+        createdAt: "2026-07-17T10:31:00.000Z",
+        message: "Control Center action-17 digest"
+      }
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.updatePage("42", {
+        title: updated.title,
+        adf: "{\"content\":[],\"type\":\"doc\",\"version\":1}",
+        version: 4,
+        versionMessage: updated.version.message
+      })
+
+      assert.deepStrictEqual(result, updated)
+      assert.strictEqual(requests[0]?.method, "PUT")
+      assert.strictEqual(requests[0]?.url, "https://acme.atlassian.net/wiki/api/v2/pages/42")
+      assert.strictEqual(requests[0]?.body._tag, "Uint8Array")
+      if (requests[0]?.body._tag === "Uint8Array") {
+        assert.deepStrictEqual(JSON.parse(new TextDecoder().decode(requests[0].body.body)), {
+          id: "42",
+          status: "current",
+          title: updated.title,
+          body: {
+            representation: "atlas_doc_format",
+            value: "{\"content\":[],\"type\":\"doc\",\"version\":1}"
+          },
+          version: {
+            number: 4,
+            message: updated.version.message
+          }
+        })
+      }
+    }).pipe(Effect.provide(pageClientLayer(updated, requests)))
+  })
+
+  it.effect("classifies a provider version rejection as a conflict", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const failure = yield* client.updatePage("42", {
+        title: "Payments",
+        adf: "{\"content\":[],\"type\":\"doc\",\"version\":1}",
+        version: 4,
+        versionMessage: "Control Center action-17 digest"
+      }).pipe(Effect.flip)
+
+      assert.strictEqual(failure.reason, "conflict")
+      assert.strictEqual(requests.length, 1)
+    }).pipe(Effect.provide(pageClientLayer({ message: "Conflict" }, requests, 409)))
+  })
+
+  it.effect("classifies an invalid update as a definite invalid request", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const failure = yield* client.updatePage("42", {
+        title: "Payments",
+        adf: "{\"content\":[],\"type\":\"doc\",\"version\":1}",
+        version: 4,
+        versionMessage: "Control Center action-17 digest"
+      }).pipe(Effect.flip)
+
+      assert.strictEqual(failure.reason, "invalid-request")
+      assert.strictEqual(requests.length, 1)
+    }).pipe(Effect.provide(pageClientLayer({ message: "Invalid request" }, requests, 400)))
+  })
+
+  it.effect("reads an exact historical page version without walking pagination", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const version = {
+      number: 4,
+      createdAt: "2026-07-17T10:31:00.000Z",
+      message: "Control Center action-17 digest",
+      minorEdit: false,
+      authorId: "account-owner"
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.getPageVersion("42", 4)
+
+      assert.deepStrictEqual(result, version)
+      assert.strictEqual(
+        requests[0]?.url,
+        "https://acme.atlassian.net/wiki/api/v2/pages/42/versions/4"
+      )
+    }).pipe(Effect.provide(pageClientLayer(version, requests)))
+  })
+
+  it.effect("requests the visible draft without loading the published body", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    const draft = {
+      id: "42",
+      status: "draft",
+      spaceId: "space-payments"
+    }
+    return Effect.gen(function*() {
+      const client = yield* ConfluencePageClient
+      const result = yield* client.getPageDraft("42")
+
+      assert.deepStrictEqual(result, draft)
+      assert.strictEqual(requests[0]?.url, "https://acme.atlassian.net/wiki/api/v2/pages/42")
+      assert.deepStrictEqual(
+        new Map(requests[0]?.urlParams ?? []),
+        new Map([
+          ["get-draft", "true"],
+          ["status", "draft"]
+        ])
+      )
+    }).pipe(Effect.provide(pageClientLayer(draft, requests)))
+  })
+
   it.effect("accepts a space homepage whose provider parent id is null", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const page = {

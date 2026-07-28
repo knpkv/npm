@@ -1,9 +1,9 @@
 /**
- * Production Confluence page-read normalization for the Control Center plugin contract.
+ * Production Confluence page normalization and governed publication.
  *
- * This slice offers lazy `entity.read` plus bounded space-page synchronization.
- * Provider writes, attachment bytes, watchers, and unbounded activity stay
- * unadvertised until their complete contracts and recovery behavior exist.
+ * This slice offers lazy `entity.read`, bounded space-page synchronization,
+ * and revision-guarded page publication with no-replay reconciliation.
+ * Attachment bytes and unbounded activity stay unadvertised.
  *
  * @module
  */
@@ -33,15 +33,17 @@ import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
   PluginConfigurationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
   PluginRateLimitFailure,
-  PluginTimeoutFailure,
-  PluginUnsupportedCapabilityFailure
+  PluginTimeoutFailure
 } from "../failures.js"
 import type { PluginConnectionV1 } from "../PluginConnection.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { decodeConfluenceNextCursor } from "./ConfluenceCursor.js"
+import { makeConfluenceGovernedActions } from "./ConfluenceGovernedActions.js"
 import {
   ConfluencePageClient,
   type ConfluencePageClientFailure,
@@ -200,6 +202,15 @@ const toPluginFailure = Effect.fn("ConfluencePage.toPluginFailure")(function*(
       return new PluginAuthenticationFailure({ operation: failure.operation })
     case "authorization":
       return new PluginAuthorizationFailure({ operation: failure.operation })
+    case "conflict":
+      return new PluginConflictFailure({
+        operation: failure.operation,
+        diagnosticCode: "confluence-page-version-conflict"
+      })
+    case "invalid-request":
+      return new PluginConfigurationFailure({
+        diagnosticCode: "confluence-page-request-invalid"
+      })
     case "not-found":
       return new PluginOutageFailure({ operation: failure.operation })
     case "timeout":
@@ -223,48 +234,6 @@ const providerCall = <Value>(
     Effect.catchTag("ConfluencePageClientFailure", (failure) =>
       toPluginFailure(failure).pipe(Effect.flatMap(Effect.fail)))
   )
-
-const nextCursor = (
-  page: RawConfluenceVersionPageType
-): Effect.Effect<string | null, PluginMalformedResponseFailure> => {
-  const next = page._links?.next
-  if (next === undefined) return Effect.succeed(null)
-  const encoded = /(?:[?&])cursor=([^&#]+)/u.exec(next)?.[1]
-  if (encoded === undefined) {
-    return Effect.fail(malformed("confluence-page-versions", "confluence-version-cursor-missing"))
-  }
-  return Effect.try({
-    try: () => decodeURIComponent(encoded),
-    catch: () => malformed("confluence-page-versions", "confluence-version-cursor-invalid")
-  }).pipe(
-    Effect.flatMap((cursor) =>
-      cursor.length > 0 && cursor.length <= 2_048
-        ? Effect.succeed(cursor)
-        : Effect.fail(malformed("confluence-page-versions", "confluence-version-cursor-invalid"))
-    )
-  )
-}
-
-const cursorFromNextLink = (
-  operation: string,
-  diagnosticCode: string,
-  next: string | undefined,
-  maximumLength = MAXIMUM_CHECKPOINT_LENGTH
-): Effect.Effect<string | null, PluginMalformedResponseFailure> => {
-  if (next === undefined) return Effect.succeed(null)
-  const encoded = /(?:[?&])cursor=([^&#]+)/u.exec(next)?.[1]
-  if (encoded === undefined) return Effect.fail(malformed(operation, `${diagnosticCode}-missing`))
-  return Effect.try({
-    try: () => decodeURIComponent(encoded),
-    catch: () => malformed(operation, `${diagnosticCode}-invalid`)
-  }).pipe(
-    Effect.flatMap((cursor) =>
-      cursor.length > 0 && cursor.length <= maximumLength
-        ? Effect.succeed(cursor)
-        : Effect.fail(malformed(operation, `${diagnosticCode}-invalid`))
-    )
-  )
-}
 
 interface BoundedPrefixCheckpoint {
   readonly cursor: string
@@ -494,7 +463,12 @@ const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(
     )
     for (const version of page.results ?? []) versions.push(version)
     pagesFetched += 1
-    const following: string | null = yield* nextCursor(page)
+    const following: string | null = yield* decodeConfluenceNextCursor(
+      "confluence-page-versions",
+      "confluence-version-cursor",
+      page._links?.next,
+      MAXIMUM_CHECKPOINT_LENGTH
+    )
     if (following === null) {
       complete = true
       break
@@ -797,10 +771,11 @@ const readAttachmentInventory = Effect.fn("ConfluencePage.readAttachmentInventor
         version: attachment.version?.number ?? null
       })
     }
-    const following = yield* cursorFromNextLink(
+    const following = yield* decodeConfluenceNextCursor(
       "confluence-page-attachments",
       "confluence-attachment-cursor",
-      page._links?.next
+      page._links?.next,
+      MAXIMUM_CHECKPOINT_LENGTH
     )
     if (following === null) return { attachments, complete: true, pagesFetched }
     if (seenCursors.has(following)) {
@@ -1051,7 +1026,7 @@ const readSpaceSyncPage = Effect.fn("ConfluencePage.readSpaceSyncPage")(function
   if (new Set(pages.map(({ id }) => id)).size !== pages.length) {
     return yield* malformed("confluence-space-pages", "confluence-page-identity-duplicate")
   }
-  const following = yield* cursorFromNextLink(
+  const following = yield* decodeConfluenceNextCursor(
     "confluence-space-pages",
     "confluence-space-page-cursor",
     page._links?.next,
@@ -1215,13 +1190,6 @@ const readPageEntity = Effect.fn("ConfluencePage.readEntity")(function*(
   )
 })
 
-const unsupported = (capabilityId: "action.execute" | "action.cancel" | "action.reconcile") =>
-  new PluginUnsupportedCapabilityFailure({
-    capabilityId,
-    requestedVersion: 1,
-    diagnosticCode: "confluence-read-adapter-capability-unavailable"
-  })
-
 const currentUserDisplayName = (displayName: string | null | undefined, publicName: string | undefined): string => {
   for (const candidate of [displayName, publicName]) {
     const normalized = candidate?.trim()
@@ -1237,8 +1205,24 @@ export const makeConfluencePageAdapter = (
   readonly connection: PluginConnectionV1
   readonly executor: AuthorizedPluginExecutorV1
 } => {
+  const governedActions = makeConfluenceGovernedActions({
+    client: input.client,
+    converter: input.converter,
+    cryptoService: input.cryptoService,
+    siteId: input.configuration.siteId,
+    spaceId: input.configuration.spaceId,
+    ...(input.configuration.oauthVerifiedUser === undefined
+      ? {}
+      : {
+        cachedUser: {
+          accountId: input.configuration.oauthVerifiedUser.accountId,
+          displayName: input.configuration.oauthVerifiedUser.displayName
+        }
+      })
+  })
   const connection: PluginConnectionV1 = {
     descriptor: input.descriptor,
+    actionActorIdentity: governedActions.actionActorIdentity,
     discover: Effect.gen(function*() {
       const discoveredAt = yield* DateTime.now
       const verifiedSite = input.configuration.oauthVerifiedSiteId === undefined
@@ -1356,22 +1340,9 @@ export const makeConfluencePageAdapter = (
         ? readPageEntity(input, request.vendorImmutableId)
         : DateTime.now.pipe(Effect.map((observedAt) => ({ _tag: "missing", reference: request, observedAt }))),
     diff: Option.none(),
-    proposeAction: () =>
-      Effect.fail(
-        new PluginUnsupportedCapabilityFailure({
-          capabilityId: "action.propose",
-          requestedVersion: 1,
-          diagnosticCode: "confluence-read-adapter-capability-unavailable"
-        })
-      )
+    proposeAction: governedActions.proposeAction
   }
-  const executor: AuthorizedPluginExecutorV1 = {
-    preflight: () => Effect.fail(unsupported("action.execute")),
-    executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-    requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-    reconcile: () => Effect.fail(unsupported("action.reconcile"))
-  }
-  return { connection, executor }
+  return { connection, executor: governedActions.executor }
 }
 
 /** Acquire the adapter dependencies from a future scoped runtime registry. @internal */

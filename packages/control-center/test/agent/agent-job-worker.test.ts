@@ -51,6 +51,13 @@ const PAGE_SIZE = AgentThreadEventPageSize.make(128)
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 type AgentOutputEvent = Extract<AgentRuntimeEvent, { readonly _tag: "output" }>
 
+const runWorkerOnce = Effect.fn("test.runWorkerOnce")(function*(
+  workspaceId: Parameters<AgentJobWorker["Service"]["runOnce"]>[0]
+) {
+  const worker = yield* AgentJobWorker
+  return yield* worker.runOnce(workspaceId)
+})
+
 const completedEvents: ReadonlyArray<AgentRuntimeEvent> = [
   { _tag: "started", providerRunRef: "provider-run-1", sessionRef: null },
   { _tag: "output", channel: "assistant", text: "Durable answer" },
@@ -319,7 +326,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueueReview
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const persisted = yield* jobs.reviewResult({ workspaceId: WORKSPACE_ID, jobId: JOB_ID })
         const events = yield* replay
 
@@ -378,7 +385,7 @@ describe("agent job worker", () => {
           yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
           yield* setupFoundation
           yield* enqueueReview
-          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          const fiber = yield* runWorkerOnce(WORKSPACE_ID).pipe(Effect.forkChild)
           yield* Deferred.await(started)
           yield* jobs.requestCancellation({
             workspaceId: WORKSPACE_ID,
@@ -419,7 +426,7 @@ describe("agent job worker", () => {
           yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
           yield* setupFoundation
           yield* enqueueReview
-          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          const fiber = yield* runWorkerOnce(WORKSPACE_ID).pipe(Effect.forkChild)
           yield* Deferred.await(started)
           yield* TestClock.adjust("10 seconds")
           const requestedAt = yield* DateTime.now
@@ -470,7 +477,7 @@ describe("agent job worker", () => {
           yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
           yield* setupFoundation
           yield* enqueueReview
-          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          const fiber = yield* runWorkerOnce(WORKSPACE_ID).pipe(Effect.forkChild)
           yield* Deferred.await(started)
           yield* jobs.requestCancellation({
             workspaceId: WORKSPACE_ID,
@@ -515,7 +522,7 @@ describe("agent job worker", () => {
           yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
           yield* setupFoundation
           yield* enqueueReview
-          const fiber = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID).pipe(Effect.forkChild)
+          const fiber = yield* runWorkerOnce(WORKSPACE_ID).pipe(Effect.forkChild)
           yield* Deferred.await(started)
           yield* TestClock.adjust("330 seconds")
           const secondClaimAt = yield* DateTime.now
@@ -571,7 +578,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueueReview
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const events = yield* replay
         const missing = yield* jobs
           .reviewResult({
@@ -605,7 +612,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
 
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(requests.length, 1)
@@ -632,7 +639,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue(null)
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
 
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "success" })
         assert.strictEqual(requests.length, 1)
@@ -658,7 +665,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const page = yield* replay
         const persistedOutputs = page.events
           .filter(({ eventKind }) => eventKind === "assistant-output")
@@ -691,7 +698,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const page = yield* replay
         const persistedOutputs = page.events
           .filter(({ eventKind }) => eventKind === "progress")
@@ -718,7 +725,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
           readonly leaseCount: number
           readonly outputBytes: number
@@ -750,7 +757,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
           readonly leaseCount: number
           readonly outcome: string
@@ -784,7 +791,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const observed = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const observed = yield* runWorkerOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
           readonly leaseCount: number
           readonly state: string
@@ -851,7 +858,7 @@ describe("agent job worker", () => {
         yield* setupFoundation
         yield* enqueue()
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
         const rows = yield* database.sql<{
           readonly errorJson: string
           readonly leaseCount: number
@@ -906,7 +913,7 @@ describe("agent job worker", () => {
         })
         yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.addDuration(STARTED_AT, "2 minutes")))
 
-        const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+        const result = yield* runWorkerOnce(WORKSPACE_ID)
 
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "cancelled" })
         assert.strictEqual(runtimeCalls, 0)
@@ -927,7 +934,7 @@ describe("agent job worker", () => {
         Effect.gen(function*() {
           yield* setupFoundation
           yield* enqueue()
-          const result = yield* (yield* AgentJobWorker).runOnce(WORKSPACE_ID)
+          const result = yield* runWorkerOnce(WORKSPACE_ID)
           assert.strictEqual(result._tag, "completed")
         })
       )
@@ -948,9 +955,10 @@ describe("agent job worker", () => {
               { eventKind: "job-completed", eventSequence: 6 }
             ]
           )
+          const agentJobRepository = yield* AgentJobRepository
           assert.isTrue(
             Option.isNone(
-              yield* (yield* AgentJobRepository).claimNext({
+              yield* agentJobRepository.claimNext({
                 workspaceId: WORKSPACE_ID,
                 taskTags: ["release-chat"],
                 leaseOwner: LEASE_OWNER,

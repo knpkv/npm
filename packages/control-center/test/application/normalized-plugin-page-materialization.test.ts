@@ -857,9 +857,10 @@ describe("normalized plugin page materialization", () => {
         { name: "Source", direction: "input", access: "proxy-required" },
         { name: "BuildOutput", direction: "output", access: "proxy-required" }
       ])
+      const deliveryGraphInspection = yield* makeDeliveryGraphInspection
       const serialized = JSON.stringify(
         yield* Schema.encodeEffect(WorkspaceEntityInspection)(
-          yield* (yield* makeDeliveryGraphInspection).workspaceEntity({
+          yield* deliveryGraphInspection.workspaceEntity({
             workspaceId: WORKSPACE_ID,
             entityId: projection.entityId
           })
