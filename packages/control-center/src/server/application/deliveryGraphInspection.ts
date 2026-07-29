@@ -183,16 +183,24 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
         })
       )
       : []
-    const runtime = yield* persistence.pluginRuntime.getRuntime(
-      input.workspaceId,
-      entityRecord.sourceRevision.pluginConnectionId
-    ).pipe(Effect.result)
+    const [connection, runtime] = yield* Effect.all([
+      persistence.pluginConnections.get(
+        input.workspaceId,
+        entityRecord.sourceRevision.pluginConnectionId
+      ).pipe(Effect.result),
+      persistence.pluginRuntime.getRuntime(
+        input.workspaceId,
+        entityRecord.sourceRevision.pluginConnectionId
+      ).pipe(Effect.result)
+    ])
     const negotiated = Result.isSuccess(runtime)
       ? Schema.decodeUnknownResult(Schema.fromJsonString(NegotiatedPluginDescriptorV1))(
         runtime.success.descriptorJson
       )
       : null
-    const sourceActionsAvailable = negotiated !== null &&
+    const sourceActionsAvailable = Result.isSuccess(connection) &&
+      connection.success.isEnabled &&
+      negotiated !== null &&
       Result.isSuccess(negotiated) &&
       hasPluginCapability(negotiated.success, "action.propose", 1) &&
       hasPluginCapability(negotiated.success, "action.execute", 1)
