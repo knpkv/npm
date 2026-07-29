@@ -199,7 +199,7 @@ const readSnapshot = Effect.fn("ClockifyGovernedActions.readSnapshot")(function*
   const raw = yield* withTimeout(
     "clockify-action-get-time-entry",
     input.configuration.operationTimeoutMillis,
-    input.provider.getTimeEntry(input.configuration.workspaceId, entryId)
+    input.provider.getTimeEntry(input.configuration.workspaceId, entryId, { hydrated: true })
   )
   if (Option.isNone(raw)) return yield* conflict("clockify-time-entry-missing")
   const snapshot = yield* decodeClockifyTimeEntry({
@@ -646,7 +646,7 @@ export const makeClockifyGovernedActions = (
     const raw = yield* withTimeout(
       "clockify-reconcile-get-time-entry",
       input.configuration.operationTimeoutMillis,
-      input.provider.getTimeEntry(payload.workspaceId, payload.entryId)
+      input.provider.getTimeEntry(payload.workspaceId, payload.entryId, { hydrated: true })
     )
     const checkedAt = yield* DateTime.now
     if (Option.isNone(raw)) return { _tag: "pending", checkedAt }

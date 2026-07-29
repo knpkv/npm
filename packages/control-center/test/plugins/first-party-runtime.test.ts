@@ -22,6 +22,7 @@ import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { ReviewAgentProfile, ReviewAgentProfileId, ReviewSuggestionPublicationContent } from "../../src/api/agent.js"
+import { SubmitClockifyActionRequest } from "../../src/api/deliveryGraph.js"
 import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
 import { GovernedActionUnknownOutcome } from "../../src/domain/governedAction/index.js"
 import {
@@ -3194,12 +3195,13 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("submits a Clockify approval as an approver through the production composition", () =>
+  it.effect("converges concurrent identical Clockify approvals through the production composition", () =>
     Effect.gen(function*() {
       const submittedAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       yield* TestClock.setTime(DateTime.toEpochMillis(submittedAt))
       const entryReads = yield* Ref.make(0)
       const mutations = yield* Ref.make(0)
+      const concurrentProposalReads = yield* Deferred.make<void>()
       const timeEntry = {
         id: "clockify-entry-42",
         workspaceId: "clockify-workspace",
@@ -3224,9 +3226,12 @@ describe("first-party plugin runtime", () => {
           const body = request.url.endsWith(
               "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
             )
-            ? yield* Ref.updateAndGet(entryReads, (count) => count + 1).pipe(
-              Effect.as(timeEntry)
-            )
+            ? yield* Effect.gen(function*() {
+              const readCount = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
+              if (readCount === 2) yield* Deferred.succeed(concurrentProposalReads, undefined)
+              if (readCount <= 2) yield* Deferred.await(concurrentProposalReads)
+              return timeEntry
+            })
             : request.url.endsWith("/v1/user")
             ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
             : [{ id: "clockify-workspace", name: "Delivery" }]
@@ -3335,19 +3340,36 @@ describe("first-party plugin runtime", () => {
           absoluteExpiresAt: "2026-08-15T10:00:00.000Z",
           revokedAt: null
         })
-        const result = yield* submissions.submit({
+        const request = {
           workspaceId: GOVERNED_WORKSPACE,
           entityId: EntityId.make(GOVERNED_ENTITY_ID),
-          request: {
+          request: Schema.decodeSync(SubmitClockifyActionRequest)({
             _tag: "record-approval",
             expectedRevision: Revision.make(
               "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
             ),
             decision: "approved",
             rationale: "Reviewed against the delivery record"
-          },
+          }),
           session
-        })
+        }
+        const results = yield* Effect.all(
+          [submissions.submit(request), submissions.submit(request)],
+          { concurrency: "unbounded" }
+        )
+        const result = results[0]
+        assert.strictEqual(results[1]?.actionId, result?.actionId)
+        if (result === undefined) return yield* Effect.die("expected concurrent submission result")
+        const conflictingActor = yield* submissions.submit({
+          ...request,
+          session: {
+            ...session,
+            actor: {
+              _tag: "human",
+              personId: PersonId.make("01890f6f-6d6a-7cc0-98d2-440000000099")
+            }
+          }
+        }).pipe(Effect.result)
         const forbiddenCorrection = yield* submissions.submit({
           workspaceId: GOVERNED_WORKSPACE,
           entityId: EntityId.make(GOVERNED_ENTITY_ID),
@@ -3368,11 +3390,15 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(result.state, "succeeded")
         assert.strictEqual(record.head.state, "succeeded")
         assert.strictEqual(record.envelope.policy.requiredPermission, "workspace-approver")
+        assert.isTrue(Result.isFailure(conflictingActor))
+        if (Result.isFailure(conflictingActor)) {
+          assert.strictEqual(conflictingActor.failure.reason, "conflict")
+        }
         assert.isTrue(Result.isFailure(forbiddenCorrection))
         if (Result.isFailure(forbiddenCorrection)) {
           assert.strictEqual(forbiddenCorrection.failure.reason, "forbidden")
         }
-        assert.strictEqual(yield* Ref.get(entryReads), 2)
+        assert.strictEqual(yield* Ref.get(entryReads), 4)
         assert.strictEqual(yield* Ref.get(mutations), 0)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),

@@ -1864,6 +1864,41 @@ describe("canonical workspace entity", () => {
     })
   })
 
+  it.each(["source-stale", "refreshing", "refresh-failed"] satisfies ReadonlyArray<
+    "source-stale" | "refreshing" | "refresh-failed"
+  >)("keeps Clockify mutations disabled while retained entity details are %s", async (reason) => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      {
+        ...clockifyState,
+        _tag: "stale",
+        inspection: {
+          ...clockifyState.inspection,
+          isSourceCurrent: false
+        },
+        reason
+      },
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: true }
+    )
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    const actionButtons = [...host.querySelectorAll<HTMLButtonElement>("[data-clockify-governed-actions] button")]
+
+    expect(actionInputs).toHaveLength(2)
+    expect(actionButtons).toHaveLength(3)
+    expect([...actionInputs].every(({ disabled }) => disabled)).toBe(true)
+    expect(actionButtons.every(({ disabled }) => disabled)).toBe(true)
+    await act(async () => {
+      for (const button of actionButtons) button.click()
+    })
+    expect(submitClockifyAction).not.toHaveBeenCalled()
+    expect(host.textContent).toContain(reason === "refreshing" ? "Refreshing source" : "Showing retained source data")
+  })
+
   it("mirrors the Jira issue-key request boundary in the correction input", async () => {
     const host = await renderView(
       () => undefined,

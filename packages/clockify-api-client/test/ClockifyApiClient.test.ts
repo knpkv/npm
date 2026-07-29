@@ -80,6 +80,36 @@ describe("ClockifyApiClient", () => {
     )
   })
 
+  it.effect("requests hydrated time-entry details when required by the caller", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      const entry = yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: true })
+      expect(entry.id).toBe("entry-1")
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 200,
+        body: {
+          id: "entry-1",
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          description: "Review payment safeguards",
+          billable: true,
+          customFieldValues: [],
+          projectId: "project-1",
+          taskId: "task-1",
+          tagIds: ["delivery"],
+          timeInterval: {
+            start: "2026-07-11T08:00:00Z",
+            end: "2026-07-11T09:00:00Z",
+            duration: "PT1H"
+          }
+        }
+      }, requests))
+    )
+  })
+
   it.effect("pages through the complete workspace user directory", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const firstPage = Array.from({ length: 500 }, (_, index) => ({

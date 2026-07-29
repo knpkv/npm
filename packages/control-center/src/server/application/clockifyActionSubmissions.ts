@@ -29,7 +29,7 @@ import {
   GovernedActionTransitionId,
   type WorkspaceId
 } from "../../domain/identifiers.js"
-import { ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
+import { type PluginActionProposalV1, ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
 import type { SessionSummary } from "../auth/models.js"
 import { digestGovernedActionEvidenceSet, makeGovernedActionEnvelope } from "../governance/governedActionDigests.js"
 import {
@@ -100,6 +100,16 @@ export const clockifyActionRuntimeAuthorityMatches = (
 ): boolean =>
   Number(envelope.pluginConnectionRevision) === Number(connectionRevision) &&
   envelope.pluginConnectionAuthorityDigest === runtimeAuthorityToken
+
+/** Match stable provider proposal authority while ignoring the observation timestamp of a retry. */
+export const clockifyActionProposalMatches = (
+  persisted: PluginActionProposalV1,
+  candidate: PluginActionProposalV1
+): boolean => {
+  const { proposedAt: _persistedProposedAt, ...persistedAuthority } = persisted
+  const { proposedAt: _candidateProposedAt, ...candidateAuthority } = candidate
+  return Equal.equals(persistedAuthority, candidateAuthority)
+}
 
 const makeService = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -200,11 +210,17 @@ const makeService = Effect.gen(function*() {
         ),
         mapFailure
       )
-    const prepareAuthorization = Effect.fn("ClockifyActionSubmissions.prepareAuthorization")(function*(
+    const authorizationMaterial = {
+      authorizedAt: yield* DateTime.now,
+      authorizationId: GovernedActionAuthorizationId.make(yield* cryptoService.randomUUIDv7),
+      transitionId: GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7),
+      auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
+    }
+    const prepareAuthorization = (
       envelope: GovernedActionEnvelopeV1,
       expectedHeadTransitionId: GovernedActionTransitionId
-    ) {
-      const authorizedAt = yield* DateTime.now
+    ) => {
+      const authorizedAt = authorizationMaterial.authorizedAt
       const expiresAt = DateTime.min(
         DateTime.addDuration(authorizedAt, Duration.minutes(5)),
         DateTime.min(
@@ -212,8 +228,8 @@ const makeService = Effect.gen(function*() {
           DateTime.min(session.idleExpiresAt, session.absoluteExpiresAt)
         )
       )
-      if (DateTime.Order(authorizedAt, expiresAt) >= 0) return yield* failure("conflict")
-      const authorizationId = GovernedActionAuthorizationId.make(yield* cryptoService.randomUUIDv7)
+      if (DateTime.Order(authorizedAt, expiresAt) >= 0) return Effect.fail(failure("conflict"))
+      const authorizationId = authorizationMaterial.authorizationId
       const authorization = GovernedActionAuthorizationV1.make({
         schemaVersion: 1,
         authorizationId,
@@ -237,10 +253,10 @@ const makeService = Effect.gen(function*() {
         authorizedAt,
         expiresAt
       })
-      return GovernedActionCommitInput.make({
+      return Effect.succeed(GovernedActionCommitInput.make({
         envelope,
         expectedHeadTransitionId,
-        transitionId: GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7),
+        transitionId: authorizationMaterial.transitionId,
         commandId: GovernedActionCommandId.make(`clockify:${envelope.actionId}:authorize`),
         command: { _tag: "authorize", authorizationId },
         cause,
@@ -248,9 +264,9 @@ const makeService = Effect.gen(function*() {
         causationId: null,
         correlationId: null,
         companion: { _tag: "authorization", authorization },
-        auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
-      })
-    })
+        auditEventId: authorizationMaterial.auditEventId
+      }))
+    }
     const advance = Effect.fn("ClockifyActionSubmissions.advance")(function*(actionId: GovernedActionId) {
       yield* submission.advance({ workspaceId: input.workspaceId, actionId }).pipe(mapFailure)
       const record = yield* persistence.governedActions.read({
@@ -261,40 +277,6 @@ const makeService = Effect.gen(function*() {
     })
 
     const idempotencyKey = GovernedActionIdempotencyKey.make(prepared.proposal.proposalKey)
-    const existing = yield* persistence.governedActions.readByIdempotencyKey({
-      workspaceId: input.workspaceId,
-      pluginConnectionId: source.pluginConnectionId,
-      idempotencyKey
-    }).pipe(
-      Effect.map(Option.some),
-      Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none())),
-      mapFailure
-    )
-    if (Option.isSome(existing)) {
-      const record = existing.value
-      if (
-        record.envelope.targetEntityId !== input.entityId ||
-        !Equal.equals(record.envelope.proposal, prepared.proposal) ||
-        !clockifyActionRuntimeAuthorityMatches(
-          record.envelope,
-          prepared.connectionRecord.revision,
-          prepared.runtimeAuthorityToken
-        ) ||
-        record.envelope.origin._tag !== "human" ||
-        record.envelope.origin.actor.personId !== actor.personId
-      ) return yield* failure("conflict")
-      if (record.head.state === "proposed") {
-        yield* commitCurrent(
-          persistence.governedActions.commit(
-            yield* prepareAuthorization(record.envelope, record.headTransition.transitionId)
-          )
-        )
-      } else if (!canAdvance(record.head.state)) {
-        return { actionId: record.envelope.actionId, state: record.head.state }
-      }
-      return yield* advance(record.envelope.actionId)
-    }
-
     const actionId = GovernedActionId.make(yield* cryptoService.randomUUIDv7)
     const proposalTransitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)
     const evidence: GovernedActionEvidenceSet = []
@@ -352,12 +334,59 @@ const makeService = Effect.gen(function*() {
       companion: { _tag: "none" },
       auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
     })
-    const authorization = yield* prepareAuthorization(envelope, proposalTransitionId)
-    yield* commitCurrent(Effect.gen(function*() {
+    const committed = yield* commitCurrent(Effect.gen(function*() {
+      const existing = yield* persistence.governedActions.readByIdempotencyKey({
+        workspaceId: input.workspaceId,
+        pluginConnectionId: source.pluginConnectionId,
+        idempotencyKey
+      }).pipe(
+        Effect.map(Option.some),
+        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
+      )
+      if (Option.isSome(existing)) {
+        const record = existing.value
+        if (
+          record.envelope.targetEntityId !== input.entityId ||
+          !clockifyActionProposalMatches(record.envelope.proposal, prepared.proposal) ||
+          !clockifyActionRuntimeAuthorityMatches(
+            record.envelope,
+            prepared.connectionRecord.revision,
+            prepared.runtimeAuthorityToken
+          ) ||
+          record.envelope.origin._tag !== "human" ||
+          record.envelope.origin.actor.personId !== actor.personId
+        ) return yield* failure("conflict")
+        if (record.head.state === "proposed") {
+          yield* persistence.governedActions.commit(
+            yield* prepareAuthorization(record.envelope, record.headTransition.transitionId)
+          )
+        } else if (!canAdvance(record.head.state)) {
+          return {
+            actionId: record.envelope.actionId,
+            response: Option.some({
+              actionId: record.envelope.actionId,
+              state: record.head.state
+            })
+          }
+        }
+        return {
+          actionId: record.envelope.actionId,
+          response: Option.none<SubmitClockifyActionResponse>()
+        }
+      }
+
       yield* persistence.governedActions.commit(proposal)
-      yield* persistence.governedActions.commit(authorization)
+      yield* persistence.governedActions.commit(
+        yield* prepareAuthorization(envelope, proposalTransitionId)
+      )
+      return {
+        actionId,
+        response: Option.none<SubmitClockifyActionResponse>()
+      }
     }))
-    return yield* advance(actionId)
+    return Option.isSome(committed.response)
+      ? committed.response.value
+      : yield* advance(committed.actionId)
   })
 
   return ClockifyActionSubmissions.of({ submit: (input) => submit(input).pipe(mapFailure) })

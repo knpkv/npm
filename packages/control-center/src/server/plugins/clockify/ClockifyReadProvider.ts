@@ -42,7 +42,8 @@ export interface ClockifyReadProvider {
   readonly getWorkspaces: Effect.Effect<unknown, PluginFailure>
   readonly getTimeEntry: (
     workspaceId: string,
-    timeEntryId: string
+    timeEntryId: string,
+    request?: { readonly hydrated: boolean }
   ) => Effect.Effect<Option.Option<unknown>, PluginFailure>
   readonly getTimeEntries: (
     workspaceId: string,
@@ -144,8 +145,8 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
       ? providerCall("clockify-workspace-users", client.getUser()).pipe(Effect.map((user) => [user]))
       : providerCall("clockify-workspace-users", client.getWorkspaceUsers(workspaceId)),
   getWorkspaces: providerCall("clockify-workspaces", client.getWorkspaces()),
-  getTimeEntry: (workspaceId, timeEntryId) =>
-    client.getTimeEntry(workspaceId, timeEntryId).pipe(
+  getTimeEntry: (workspaceId, timeEntryId, request) =>
+    client.getTimeEntry(workspaceId, timeEntryId, request).pipe(
       Effect.map(Option.some),
       Effect.catch((error) =>
         statusOf(error) === 404

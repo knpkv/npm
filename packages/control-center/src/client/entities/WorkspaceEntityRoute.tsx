@@ -454,6 +454,7 @@ export const WorkspaceEntityView = ({
   }
 
   const presentation = presentWorkspaceEntity(workspaceId, state.inspection)
+  const clockifyActionsCurrent = state._tag === "ready" && state.inspection.isSourceCurrent
   return (
     <LinkProvider component={WorkspaceEntityLink}>
       <EntityShell
@@ -473,8 +474,8 @@ export const WorkspaceEntityView = ({
         className={styles.shell}
         content={
           <EntityContent
-            clockifyActionCanApprove={clockifyActionCanApprove}
-            clockifyActionCanCorrect={clockifyActionCanCorrect}
+            clockifyActionCanApprove={clockifyActionsCurrent && clockifyActionCanApprove}
+            clockifyActionCanCorrect={clockifyActionsCurrent && clockifyActionCanCorrect}
             clockifyActionState={clockifyActionState}
             clockifyActionSubmit={clockifyActionSubmit}
             onSessionExpired={onSessionExpired}

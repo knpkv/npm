@@ -16,6 +16,7 @@ export type {
   AuthenticatedClockifyApi,
   CreateTimeEntryParams,
   GetTimeEntriesParams,
+  GetTimeEntryParams,
   Project,
   StopTimeEntryParams,
   Tag,

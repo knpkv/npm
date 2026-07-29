@@ -2,8 +2,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 
+import { PluginActionPayloadDigest } from "../../src/domain/plugins/index.js"
 import {
   classifyClockifyActionSubmissionFailure,
+  clockifyActionProposalMatches,
   clockifyActionRuntimeAuthorityMatches
 } from "../../src/server/application/clockifyActionSubmissions.js"
 import { PluginConflictFailure, PluginOutageFailure } from "../../src/server/plugins/failures.js"
@@ -55,6 +57,25 @@ describe("Clockify action submissions", () => {
           Number(envelope.pluginConnectionRevision),
           `sha256:${"b".repeat(64)}`
         )
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("matches retry proposals by stable authority rather than observation time", () =>
+    Effect.gen(function*() {
+      const envelope = yield* makeAuthorizedGovernedActionEnvelope({
+        variant: "clockify-approval"
+      })
+      const retry = {
+        ...envelope.proposal,
+        proposedAt: envelope.proposalExpiresAt
+      }
+
+      assert.isTrue(clockifyActionProposalMatches(envelope.proposal, retry))
+      assert.isFalse(
+        clockifyActionProposalMatches(envelope.proposal, {
+          ...retry,
+          payloadDigest: PluginActionPayloadDigest.make("b".repeat(64))
+        })
       )
     }).pipe(Effect.provide(NodeServices.layer)))
 })
