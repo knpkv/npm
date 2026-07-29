@@ -8,7 +8,7 @@ import { AtlassianOAuthGrantId, type AtlassianOAuthGrantExchangeResponse } from 
 import { useBrowserSession } from "../BrowserSession.js"
 import { forgetAtlassianOAuthSetupIntent, readAtlassianOAuthSetupIntent } from "./atlassianOAuthSetupIntentStorage.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
-import { atlassianOAuthSetupPath } from "./serviceOnboarding.js"
+import { atlassianOAuthRecoveryPath, atlassianOAuthSetupPath } from "./serviceOnboarding.js"
 import styles from "./AtlassianOAuthCallbackPage.module.css"
 
 const AuthorizationCode = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(4_096))
@@ -94,7 +94,9 @@ export const AtlassianOAuthCallbackPage = ({
         navigate(
           setupIntent === null
             ? "/services"
-            : atlassianOAuthSetupPath(setupIntent.providers, profile.profileId, setupIntent.preferredSiteId),
+            : setupIntent.recoveryConnectionId === undefined
+              ? atlassianOAuthSetupPath(setupIntent.providers, profile.profileId, setupIntent.preferredSiteId)
+              : atlassianOAuthRecoveryPath(setupIntent.recoveryConnectionId, profile.profileId),
           { replace: true }
         )
       },
@@ -109,7 +111,9 @@ export const AtlassianOAuthCallbackPage = ({
     navigate(
       setupIntent === null
         ? "/services"
-        : atlassianOAuthSetupPath(setupIntent.providers, null, setupIntent.preferredSiteId)
+        : setupIntent.recoveryConnectionId === undefined
+          ? atlassianOAuthSetupPath(setupIntent.providers, null, setupIntent.preferredSiteId)
+          : "/services"
     )
   }
 

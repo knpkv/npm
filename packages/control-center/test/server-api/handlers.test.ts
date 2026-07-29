@@ -31,6 +31,7 @@ import {
   CreatePluginConnectionResponse,
   PluginConfiguration,
   PluginConfigurationKey,
+  PluginConnectionAdministration,
   PluginConnectionSummary,
   PluginConnectionTestResult,
   PluginSynchronizationState,
@@ -1122,6 +1123,138 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result, expected)
     }))
 
+  it.effect("routes account editing and credential recovery through owner-scoped administration handlers", () =>
+    Effect.gen(function*() {
+      const connection = Schema.decodeUnknownSync(PluginConnectionSummary)({
+        pluginConnectionId,
+        providerAccountId,
+        followedResourceId: null,
+        providerId: "codecommit",
+        displayName: "Payments repository",
+        revision: 4,
+        isEnabled: true,
+        supportsSynchronization: false,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const configured = Schema.decodeUnknownSync(PluginConfiguration)({
+        pluginConnectionId,
+        revision: 7,
+        values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      })
+      const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+        connection: Schema.encodeSync(PluginConnectionSummary)(connection),
+        configuration: Schema.encodeSync(PluginConfiguration)(configured),
+        metadata: {
+          pluginConnectionId,
+          pluginId: "dev.knpkv.codecommit",
+          contractVersion: { major: 1, minor: 0, patch: 0 },
+          adapterVersion: { major: 1, minor: 0, patch: 0 },
+          configurationFields: [],
+          capabilities: []
+        },
+        credentialFields: [],
+        permissions: [],
+        schedule: { mode: "unsupported", nextRunAt: null },
+        synchronization: null,
+        diagnostics: [{
+          code: "connection-health-unverified",
+          severity: "warning",
+          summary: "The connection has not produced a current health result.",
+          observedAt: "2026-07-14T10:03:00.000Z"
+        }]
+      })
+      const renamed = Schema.decodeUnknownSync(ProviderAccountSummary)({
+        providerAccountId,
+        providerFamily: "aws",
+        providerImmutableId: "123456789012",
+        displayName: "Production AWS",
+        revision: 3,
+        resources: []
+      })
+      const test = Schema.decodeUnknownSync(PluginConnectionTestResult)({
+        _tag: "healthy",
+        pluginConnectionId,
+        providerId: "codecommit",
+        checkedAt: "2026-07-14T10:04:00.000Z",
+        latencyMilliseconds: 12,
+        identity: {
+          kind: "account",
+          label: "AWS account",
+          displayName: "Production AWS",
+          providerImmutableId: "123456789012"
+        }
+      })
+      const plugins = PluginAdministration.of({
+        administration: (input) =>
+          input.workspaceId === session.workspaceId && input.pluginConnectionId === pluginConnectionId
+            ? Effect.succeed(administration)
+            : Effect.die("administration read crossed its authenticated scope"),
+        patchProviderAccount: ({ patch, providerAccountId: requestedAccountId, workspaceId: requestedWorkspaceId }) =>
+          requestedWorkspaceId === session.workspaceId &&
+            requestedAccountId === providerAccountId &&
+            patch.expectedRevision === 2 &&
+            patch.displayName === "Production AWS"
+            ? Effect.succeed(renamed)
+            : Effect.die("account patch crossed its authenticated scope"),
+        reauthorizeConnection: ({ credentials, expectedRevision, pluginConnectionId: requestedId, workspaceId }) =>
+          workspaceId === session.workspaceId &&
+            requestedId === pluginConnectionId &&
+            expectedRevision === 7 &&
+            credentials[0]?.key === "profile" &&
+            credentials[0]?.value === "rotated"
+            ? Effect.succeed({ connection, configuration: { ...configured, revision: 8 }, test })
+            : Effect.die("reauthorization crossed its authenticated scope"),
+        revokeConnection: ({ expectedRevision, pluginConnectionId: requestedId, workspaceId }) =>
+          workspaceId === session.workspaceId && requestedId === pluginConnectionId && expectedRevision === 8
+            ? Effect.succeed({ ...connection, isEnabled: false, revision: 5 })
+            : Effect.die("revocation crossed its authenticated scope"),
+        configuration: () => Effect.die("not used"),
+        configurationMetadata: () => Effect.die("not used"),
+        health: () => Effect.die("not used"),
+        list: () => Effect.die("not used"),
+        patchConfiguration: () => Effect.die("not used"),
+        testConnection: () => Effect.die("not used")
+      })
+      const handler = pluginHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(PluginAdministration, plugins))
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["plugins"])
+        return {
+          administration: yield* client.plugins.administration({ params: { pluginConnectionId } }),
+          account: yield* client.plugins.patchProviderAccount({
+            params: { providerAccountId },
+            payload: { expectedRevision: 2, displayName: "Production AWS" }
+          }),
+          recovered: yield* client.plugins.reauthorizeConnection({
+            params: { pluginConnectionId },
+            payload: {
+              expectedRevision: 7,
+              credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
+            }
+          }),
+          revoked: yield* client.plugins.revokeConnection({
+            params: { pluginConnectionId },
+            payload: { expectedRevision: 8 }
+          })
+        }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result.administration, administration)
+      assert.deepStrictEqual(result.account, renamed)
+      assert.strictEqual(result.recovered.configuration.revision, 8)
+      assert.isFalse(result.revoked.isEnabled)
+    }))
+
   it.effect("lets an approver read synchronization state without entering mutation authorization", () =>
     Effect.gen(function*() {
       const expected = Schema.decodeSync(PluginSynchronizationState)({
@@ -1535,7 +1668,7 @@ describe("Control Center API handlers", () => {
       assert.deepStrictEqual(result.batch, { results: [{ _tag: "succeeded", response: expected }] })
     }))
 
-  it.effect("serves credential-scoped emails as redacted references while adapter values remain readable", () =>
+  it.effect("serves credential-scoped fields as redacted references while adapter values remain readable", () =>
     Effect.gen(function*() {
       const configuredAt = "2026-07-14T10:03:00.000Z"
       const jira = Schema.decodeUnknownSync(PluginConfiguration)({
@@ -1559,7 +1692,7 @@ describe("Control Center API handlers", () => {
       const codeCommit = Schema.decodeUnknownSync(PluginConfiguration)({
         pluginConnectionId: codeCommitPluginConnectionId,
         revision: 1,
-        values: [{ _tag: "text", key: "profile", value: "delivery" }],
+        values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
         updatedAt: configuredAt
       })
       const configurations = new Map([
@@ -1614,9 +1747,9 @@ describe("Control Center API handlers", () => {
         state: "configured"
       })
       assert.deepInclude(result.codeCommit.values, {
-        _tag: "text",
+        _tag: "secret-reference",
         key: PluginConfigurationKey.make("profile"),
-        value: "delivery"
+        state: "configured"
       })
     }))
 
@@ -3471,12 +3604,16 @@ describe("Control Center API handlers", () => {
       revokeSession: () => Effect.die("not used")
     })
     const plugins = PluginAdministration.of({
+      administration: () => Effect.die("non-owner reached connection administration"),
       connectAndTest: () => Effect.die("non-owner reached connection creation"),
       configuration: () => Effect.die("not used"),
       configurationMetadata: () => Effect.die("not used"),
       health: () => Effect.die("not used"),
       list: () => Effect.succeed([]),
       patchConfiguration: () => Effect.die("non-owner reached plugin mutation"),
+      patchProviderAccount: () => Effect.die("non-owner reached account mutation"),
+      reauthorizeConnection: () => Effect.die("non-owner reached credential replacement"),
+      revokeConnection: () => Effect.die("non-owner reached credential revocation"),
       setConnectionEnabled: () => Effect.die("non-owner reached connection enablement"),
       synchronizeConnection: () => Effect.die("non-owner reached manual synchronization"),
       testConnection: () => Effect.die("non-owner reached connection test")
@@ -3556,6 +3693,45 @@ describe("Control Center API handlers", () => {
         requestContext
       )
       assert.strictEqual(synchronizationResponse.status, 403)
+      const recoveryRequests = [
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/reauthorize", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1, credentials: [{ key: "profile", value: "rotated" }] })
+        }),
+        new Request("http://127.0.0.1:4173/api/v1/plugins/01890f6f-6d6a-7cc0-98d2-000000000092/revoke", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1 })
+        }),
+        new Request("http://127.0.0.1:4173/api/v1/plugins/accounts/01890f6f-6d6a-7cc0-98d2-000000000013", {
+          method: "PATCH",
+          headers: {
+            "content-type": "application/json",
+            cookie: `cc_session=${"ab".repeat(32)}`,
+            host: "127.0.0.1:4173",
+            origin: "http://127.0.0.1:4173",
+            "x-csrf-token": "cd".repeat(32)
+          },
+          body: JSON.stringify({ expectedRevision: 1, displayName: "Blocked rename" })
+        })
+      ]
+      for (const recoveryRequest of recoveryRequests) {
+        const recoveryResponse = await webHandler.handler(recoveryRequest, requestContext)
+        assert.strictEqual(recoveryResponse.status, 403)
+      }
       const createResponse = await webHandler.handler(
         new Request("http://127.0.0.1:4173/api/v1/plugins/connections", {
           method: "POST",

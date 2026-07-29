@@ -11,6 +11,7 @@ import * as Schema from "effect/Schema"
 
 import type { PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import { UtcTimestamp, type UtcTimestamp as UtcTimestampType } from "../../../domain/utcTimestamp.js"
+import { SecretRef } from "../../secrets/SecretRef.js"
 import { Database } from "../Database.js"
 import {
   PersistedRecordError,
@@ -41,6 +42,9 @@ const ConfigurationJson = Schema.fromJsonString(StoredPluginConfiguration)
 const encodeConfiguration = Schema.encodeEffect(ConfigurationJson)
 const decodeConfiguration = Schema.decodeUnknownResult(ConfigurationJson)
 const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
+const PendingSecretCleanupRow = Schema.Struct({
+  secretRef: SecretRef
+})
 
 const makePluginConfigurationRepository = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -221,7 +225,43 @@ const makePluginConfigurationRepository = Effect.gen(function*() {
     return persisted.value
   })
 
-  return { get, update }
+  const requestSecretCleanup = Effect.fn("PluginConfigurationRepository.requestSecretCleanup")(function*(
+    ref: SecretRef,
+    requestedAt: UtcTimestampType
+  ) {
+    yield* sql`INSERT INTO plugin_secret_cleanup (secret_ref, requested_at)
+      VALUES (${ref}, ${encodeTimestamp(requestedAt)})
+      ON CONFLICT(secret_ref) DO NOTHING`.pipe(
+      mapPersistenceOperation("plugin-configuration.request-secret-cleanup")
+    )
+  })
+
+  const pendingSecretCleanup = Effect.fn("PluginConfigurationRepository.pendingSecretCleanup")(function*() {
+    const rows = yield* sql<Record<string, unknown>>`SELECT secret_ref AS secretRef
+      FROM plugin_secret_cleanup
+      ORDER BY requested_at, secret_ref
+      LIMIT 100`.pipe(
+      mapPersistenceOperation("plugin-configuration.pending-secret-cleanup")
+    )
+    return yield* Schema.decodeUnknownEffect(Schema.Array(PendingSecretCleanupRow))(rows).pipe(
+      Effect.mapError(() =>
+        new PersistenceOperationError({
+          operation: "plugin-configuration.pending-secret-cleanup"
+        })
+      )
+    )
+  })
+
+  const completeSecretCleanup = Effect.fn("PluginConfigurationRepository.completeSecretCleanup")(function*(
+    ref: SecretRef
+  ) {
+    yield* sql`DELETE FROM plugin_secret_cleanup
+      WHERE secret_ref = ${ref}`.pipe(
+      mapPersistenceOperation("plugin-configuration.complete-secret-cleanup")
+    )
+  })
+
+  return { completeSecretCleanup, get, pendingSecretCleanup, requestSecretCleanup, update }
 })
 
 /** Durable plugin-configuration service with CAS updates and opaque secret references. */

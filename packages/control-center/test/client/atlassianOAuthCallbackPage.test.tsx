@@ -15,7 +15,7 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { AtlassianOAuthCallbackPage } from "../../src/client/services/AtlassianOAuthCallbackPage.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
-import { PersonId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -234,6 +234,50 @@ describe("AtlassianOAuthCallbackPage", () => {
     expect(complete).toHaveBeenCalledWith(grantId, "cloud-2", expect.any(AbortSignal))
     expect(currentLocation).toBe(
       "/services?enable=jira&atlassianProfile=account-1%40cloud-2&atlassianSite=cloud-2&atlassianProvider=jira"
+    )
+  })
+
+  it("returns completed OAuth recovery to the exact connection and pinned site", async () => {
+    const recoveryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000199")
+    const complete = vi
+      .fn<NonNullable<ConnectionTestTransport["completeAtlassianOAuthGrant"]>>()
+      .mockResolvedValue(completedProfile)
+    const transport: CallbackTransport = {
+      completeAtlassianOAuthGrant: complete,
+      exchangeAtlassianOAuthGrant: () => Promise.resolve(exchangeResponse)
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    sessionStorage.setItem(
+      oauthIntentKey(grantId),
+      JSON.stringify({
+        preferredSiteId: "cloud-2",
+        providers: ["jira"],
+        recoveryConnectionId
+      })
+    )
+
+    await act(async () => {
+      root?.render(
+        <MemoryRouter initialEntries={[`/services/oauth/atlassian/callback?state=${grantId}&code=auth-code`]}>
+          <BrowserSessionProvider>
+            <Harness transport={transport} />
+          </BrowserSessionProvider>
+        </MemoryRouter>
+      )
+    })
+    await act(async () => sessionControls?.establishSession(csrfToken, session))
+    const siteButtons = [...host.querySelectorAll<HTMLButtonElement>("button")].filter(({ textContent }) =>
+      textContent?.includes("Use this site")
+    )
+    expect(siteButtons[0]?.disabled).toBe(true)
+    expect(siteButtons[1]?.disabled).toBe(false)
+    await act(async () => siteButtons[1]?.click())
+
+    expect(complete).toHaveBeenCalledWith(grantId, "cloud-2", expect.any(AbortSignal))
+    expect(currentLocation).toBe(
+      `/services?atlassianRecoveryConnection=${recoveryConnectionId}&atlassianRecoveryProfile=account-1%40cloud-2`
     )
   })
 

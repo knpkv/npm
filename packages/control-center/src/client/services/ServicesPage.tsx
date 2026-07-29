@@ -16,16 +16,18 @@ import type {
   CreatePluginConnectionResponse,
   CreatePluginConnectionValue,
   PluginConnectionSummary,
+  PluginCredentialReplacement,
   PluginOverviewResponse,
   PluginServiceCatalogEntry
 } from "../../api/plugins.js"
-import type { PluginConnectionId } from "../../domain/identifiers.js"
+import type { PluginConnectionId, ProviderAccountId } from "../../domain/identifiers.js"
 import { firstPartyServiceIdentities, type FirstPartyServiceIdentity } from "../../domain/firstPartyServices.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { AtlassianAccountSetupForm, type AtlassianSetupIntent } from "./AtlassianAccountSetupForm.js"
 import { AwsAccountSetupForm } from "./AwsAccountSetupForm.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
+import { ConnectionAdministration, type ConnectionAdministrationViewState } from "./ConnectionAdministration.js"
 import { ConnectionSynchronization, type ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
 import { browserConnectionTestTransport, type ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
@@ -35,6 +37,8 @@ import {
   selectedAtlassianOAuthProfileId,
   selectedAtlassianOAuthProviders,
   selectedAtlassianOAuthSiteId,
+  selectedAtlassianRecoveryConnectionId,
+  selectedAtlassianRecoveryProfileId,
   selectedServiceProvider,
   servicePairingPath
 } from "./serviceOnboarding.js"
@@ -139,13 +143,17 @@ const resolvedAtlassianSetupIntent = (
 }
 
 const ConnectionCard = ({
+  administrationState,
   canConfigure,
   canTest,
   connection,
   enablementState,
   onConfigure,
+  onReauthorize,
   onRefreshSynchronization,
+  onRevoke,
   onSetEnabled,
+  onStartAtlassianOAuth,
   onSynchronize,
   onTest,
   synchronizationState,
@@ -154,10 +162,17 @@ const ConnectionCard = ({
   readonly canConfigure: boolean
   readonly canTest: boolean
   readonly connection: PluginConnectionSummary
+  readonly administrationState: ConnectionAdministrationViewState | undefined
   readonly enablementState: ConnectionEnablementState | undefined
   readonly onConfigure: () => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onReauthorize: (
+    pluginConnectionId: PluginConnectionId,
+    credentials: ReadonlyArray<PluginCredentialReplacement>
+  ) => Promise<boolean>
+  readonly onRevoke: (pluginConnectionId: PluginConnectionId) => Promise<boolean>
+  readonly onStartAtlassianOAuth: ConnectionTestTransport["startAtlassianOAuthGrant"]
   readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
   readonly synchronizationState: ConnectionSynchronizationViewState | undefined
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
@@ -184,6 +199,13 @@ const ConnectionCard = ({
         onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
         onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
         state={synchronizationState}
+      />
+      <ConnectionAdministration
+        canConfigure={canConfigure}
+        onReauthorize={(credentials) => onReauthorize(connection.pluginConnectionId, credentials)}
+        onRevoke={() => onRevoke(connection.pluginConnectionId)}
+        onStartAtlassianOAuth={onStartAtlassianOAuth}
+        state={administrationState}
       />
       <div className={styles.cardAction}>
         <Button
@@ -496,6 +518,9 @@ export const ServicesPage = ({
   const [synchronizationStates, setSynchronizationStates] = useState<
     ReadonlyMap<PluginConnectionId, ConnectionSynchronizationViewState>
   >(new Map())
+  const [administrationStates, setAdministrationStates] = useState<
+    ReadonlyMap<PluginConnectionId, ConnectionAdministrationViewState>
+  >(new Map())
   const [openProvider, setOpenProvider] = useState<ProviderId | null>(null)
   const [atlassianSetupIntent, setAtlassianSetupIntent] = useState<AtlassianSetupIntent | null>(null)
   const [submittingProvider, setSubmittingProvider] = useState<ProviderId | null>(null)
@@ -506,6 +531,35 @@ export const ServicesPage = ({
   const awsProfileRequest = useRef<AbortController | null>(null)
   const atlassianProfileRequest = useRef<AbortController | null>(null)
   const synchronizationRequests = useRef(new Map<PluginConnectionId, AbortController>())
+  const administrationRequests = useRef(new Map<PluginConnectionId, AbortController>())
+  const administrationMutations = useRef(new Map<PluginConnectionId, AbortController>())
+  const accountMutations = useRef(new Map<ProviderAccountId, AbortController>())
+
+  const refreshAdministration = useCallback(
+    (pluginConnectionId: PluginConnectionId): void => {
+      if (sessionKey === null || transport.administration === undefined) return
+      administrationRequests.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      administrationRequests.current.set(pluginConnectionId, request)
+      setAdministrationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "loading" }))
+      transport.administration(pluginConnectionId, request.signal).then(
+        (administration) => {
+          if (request.signal.aborted) return
+          administrationRequests.current.delete(pluginConnectionId)
+          setAdministrationStates((current) =>
+            new Map(current).set(pluginConnectionId, { _tag: "ready", administration })
+          )
+        },
+        (failure) => {
+          if (request.signal.aborted) return
+          administrationRequests.current.delete(pluginConnectionId)
+          if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+          setAdministrationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
+        }
+      )
+    },
+    [invalidateSession, sessionKey, transport]
+  )
 
   const refreshSynchronization = useCallback(
     (pluginConnectionId: PluginConnectionId): void => {
@@ -614,6 +668,35 @@ export const ServicesPage = ({
   }, [connectionsState, refreshSynchronization, transport.synchronization])
 
   useEffect(() => {
+    if (connectionsState._tag !== "ready" || transport.administration === undefined) return
+    const connectionIds = new Set(
+      connectionsState.overview.connections.map(({ pluginConnectionId }) => pluginConnectionId)
+    )
+    for (const [pluginConnectionId, request] of administrationRequests.current) {
+      if (connectionIds.has(pluginConnectionId)) continue
+      request.abort()
+      administrationRequests.current.delete(pluginConnectionId)
+    }
+    setAdministrationStates((current) => {
+      const next = new Map(current)
+      let changed = false
+      for (const pluginConnectionId of next.keys()) {
+        if (connectionIds.has(pluginConnectionId)) continue
+        next.delete(pluginConnectionId)
+        changed = true
+      }
+      return changed ? next : current
+    })
+    for (const pluginConnectionId of connectionIds) refreshAdministration(pluginConnectionId)
+    return () => {
+      for (const pluginConnectionId of connectionIds) {
+        administrationRequests.current.get(pluginConnectionId)?.abort()
+        administrationRequests.current.delete(pluginConnectionId)
+      }
+    }
+  }, [connectionsState, refreshAdministration, transport.administration])
+
+  useEffect(() => {
     if (sessionKey === null || (openProvider !== "codecommit" && openProvider !== "codepipeline")) return
     awsProfileRequest.current?.abort()
     const request = new AbortController()
@@ -665,6 +748,7 @@ export const ServicesPage = ({
     setTestStates(new Map())
     setEnablementStates(new Map())
     setSynchronizationStates(new Map())
+    setAdministrationStates(new Map())
     setOpenProvider(null)
     setAtlassianSetupIntent(null)
     setSubmittingProvider(null)
@@ -684,6 +768,12 @@ export const ServicesPage = ({
       synchronizationRequests.current.clear()
       for (const request of enablementRequests.current.values()) request.abort()
       enablementRequests.current.clear()
+      for (const request of administrationRequests.current.values()) request.abort()
+      administrationRequests.current.clear()
+      for (const request of administrationMutations.current.values()) request.abort()
+      administrationMutations.current.clear()
+      for (const request of accountMutations.current.values()) request.abort()
+      accountMutations.current.clear()
     }
   }, [sessionKey])
 
@@ -923,6 +1013,173 @@ export const ServicesPage = ({
     [invalidateSession, sessionKey, testConnection, transport]
   )
 
+  const reauthorizeConnection = useCallback(
+    async (
+      pluginConnectionId: PluginConnectionId,
+      credentials: ReadonlyArray<PluginCredentialReplacement>
+    ): Promise<boolean> => {
+      if (sessionKey === null || transport.reauthorize === undefined) return false
+      const administrationState = administrationStates.get(pluginConnectionId)
+      if (administrationState?._tag !== "ready") return false
+      administrationMutations.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      administrationMutations.current.set(pluginConnectionId, request)
+      try {
+        const response = await transport.reauthorize(
+          pluginConnectionId,
+          administrationState.administration.configuration.revision,
+          credentials,
+          request.signal
+        )
+        if (request.signal.aborted) return false
+        administrationMutations.current.delete(pluginConnectionId)
+        setConnectionsState((current) =>
+          current._tag === "ready"
+            ? {
+                _tag: "ready",
+                overview: {
+                  ...current.overview,
+                  connections: current.overview.connections.map((candidate) =>
+                    candidate.pluginConnectionId === pluginConnectionId ? response.connection : candidate
+                  )
+                }
+              }
+            : current
+        )
+        setTestStates((current) => new Map(current).set(pluginConnectionId, { _tag: "result", result: response.test }))
+        refreshAdministration(pluginConnectionId)
+        return true
+      } catch (failure: unknown) {
+        if (request.signal.aborted) return false
+        administrationMutations.current.delete(pluginConnectionId)
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        refreshAdministration(pluginConnectionId)
+        return false
+      }
+    },
+    [administrationStates, invalidateSession, refreshAdministration, sessionKey, transport]
+  )
+
+  useEffect(() => {
+    if (
+      connectionsState._tag !== "ready" ||
+      sessionState._tag !== "authenticated" ||
+      sessionState.session.permission !== "workspace-owner"
+    )
+      return
+    const pluginConnectionId = selectedAtlassianRecoveryConnectionId(searchParams)
+    const profileId = selectedAtlassianRecoveryProfileId(searchParams)
+    if (pluginConnectionId === null || profileId === null) return
+    const connection = connectionsState.overview.connections.find(
+      (candidate) => candidate.pluginConnectionId === pluginConnectionId
+    )
+    const administration = administrationStates.get(pluginConnectionId)
+    const oauthProfileField =
+      administration?._tag === "ready"
+        ? administration.administration.credentialFields.find(({ key }) => key === "oauthProfileId")
+        : undefined
+    if (
+      (connection?.providerId !== "jira" && connection?.providerId !== "confluence") ||
+      administration?._tag !== "ready" ||
+      oauthProfileField === undefined
+    )
+      return
+    const nextSearchParams = new URLSearchParams(searchParams)
+    nextSearchParams.delete("atlassianRecoveryConnection")
+    nextSearchParams.delete("atlassianRecoveryProfile")
+    setSearchParams(nextSearchParams, { replace: true })
+    void reauthorizeConnection(pluginConnectionId, [{ key: oauthProfileField.key, value: profileId }])
+  }, [administrationStates, connectionsState, reauthorizeConnection, searchParams, sessionState, setSearchParams])
+
+  const revokeConnection = useCallback(
+    async (pluginConnectionId: PluginConnectionId): Promise<boolean> => {
+      if (sessionKey === null || transport.revoke === undefined) return false
+      const administrationState = administrationStates.get(pluginConnectionId)
+      if (administrationState?._tag !== "ready") return false
+      administrationMutations.current.get(pluginConnectionId)?.abort()
+      const request = new AbortController()
+      administrationMutations.current.set(pluginConnectionId, request)
+      try {
+        const connection = await transport.revoke(
+          pluginConnectionId,
+          administrationState.administration.configuration.revision,
+          request.signal
+        )
+        if (request.signal.aborted) return false
+        administrationMutations.current.delete(pluginConnectionId)
+        setConnectionsState((current) =>
+          current._tag === "ready"
+            ? {
+                _tag: "ready",
+                overview: {
+                  ...current.overview,
+                  connections: current.overview.connections.map((candidate) =>
+                    candidate.pluginConnectionId === pluginConnectionId ? connection : candidate
+                  )
+                }
+              }
+            : current
+        )
+        setTestStates((current) => {
+          const next = new Map(current)
+          next.delete(pluginConnectionId)
+          return next
+        })
+        refreshAdministration(pluginConnectionId)
+        return true
+      } catch (failure: unknown) {
+        if (request.signal.aborted) return false
+        administrationMutations.current.delete(pluginConnectionId)
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        refreshAdministration(pluginConnectionId)
+        return false
+      }
+    },
+    [administrationStates, invalidateSession, refreshAdministration, sessionKey, transport]
+  )
+
+  const renameProviderAccount = useCallback(
+    async (account: PluginOverviewResponse["accounts"][number], displayName: string): Promise<boolean> => {
+      if (sessionKey === null || transport.patchAccount === undefined || displayName.length === 0) return false
+      accountMutations.current.get(account.providerAccountId)?.abort()
+      const request = new AbortController()
+      accountMutations.current.set(account.providerAccountId, request)
+      try {
+        const updated = await transport.patchAccount(
+          account.providerAccountId,
+          { expectedRevision: account.revision, displayName },
+          request.signal
+        )
+        if (request.signal.aborted) return false
+        if (accountMutations.current.get(account.providerAccountId) === request) {
+          accountMutations.current.delete(account.providerAccountId)
+        }
+        setConnectionsState((current) =>
+          current._tag === "ready"
+            ? {
+                _tag: "ready",
+                overview: {
+                  ...current.overview,
+                  accounts: current.overview.accounts.map((candidate) =>
+                    candidate.providerAccountId === updated.providerAccountId ? updated : candidate
+                  )
+                }
+              }
+            : current
+        )
+        return true
+      } catch (failure: unknown) {
+        if (request.signal.aborted) return false
+        if (accountMutations.current.get(account.providerAccountId) === request) {
+          accountMutations.current.delete(account.providerAccountId)
+        }
+        if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
+        return false
+      }
+    },
+    [invalidateSession, sessionKey, transport]
+  )
+
   const session =
     sessionState._tag === "authenticated" || sessionState._tag === "storage-unavailable" ? sessionState.session : null
   const canConfigure = sessionState._tag === "authenticated" && sessionState.session.permission === "workspace-owner"
@@ -999,6 +1256,7 @@ export const ServicesPage = ({
                 {connectionsState.overview.accounts.map((account) => (
                   <ProviderAccountCard
                     account={account}
+                    administrationStates={administrationStates}
                     canConfigure={canConfigure}
                     connections={connectionsState.overview.connections}
                     enablementStates={enablementStates}
@@ -1016,6 +1274,10 @@ export const ServicesPage = ({
                     }}
                     onSetEnabled={setConnectionEnabled}
                     onRefreshSynchronization={refreshSynchronization}
+                    onReauthorize={reauthorizeConnection}
+                    onRename={(displayName) => renameProviderAccount(account, displayName)}
+                    onRevoke={revokeConnection}
+                    onStartAtlassianOAuth={transport.startAtlassianOAuthGrant}
                     onSynchronize={synchronizeConnection}
                     synchronizationStates={synchronizationStates}
                     onTest={testConnection}
@@ -1052,6 +1314,7 @@ export const ServicesPage = ({
               )
               const cards = standaloneConnections.map((connection) => (
                 <ConnectionCard
+                  administrationState={administrationStates.get(connection.pluginConnectionId)}
                   canConfigure={canConfigure}
                   canTest={canConfigure}
                   connection={connection}
@@ -1065,6 +1328,9 @@ export const ServicesPage = ({
                   }}
                   onSetEnabled={setConnectionEnabled}
                   onRefreshSynchronization={refreshSynchronization}
+                  onReauthorize={reauthorizeConnection}
+                  onRevoke={revokeConnection}
+                  onStartAtlassianOAuth={transport.startAtlassianOAuthGrant}
                   onSynchronize={synchronizeConnection}
                   onTest={testConnection}
                   synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}

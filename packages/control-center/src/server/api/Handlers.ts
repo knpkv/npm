@@ -322,6 +322,28 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               )
             return { catalog: listFirstPartyServiceMetadata(), connections, accounts }
           }))
+        .handle("patchProviderAccount", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const patchProviderAccount = plugins.patchProviderAccount
+            if (patchProviderAccount === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* patchProviderAccount({
+              workspaceId: session.workspaceId,
+              providerAccountId: params.providerAccountId,
+              patch: payload
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
         .handle("discoverAwsProfiles", () =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
@@ -548,6 +570,69 @@ export const pluginHandlersLayer = HttpApiBuilder.group(
               pluginConnectionId: params.pluginConnectionId,
               workspaceId: session.workspaceId
             }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("administration", ({ params }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const administration = plugins.administration
+            if (administration === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* administration({
+              pluginConnectionId: params.pluginConnectionId,
+              workspaceId: session.workspaceId
+            }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("reauthorizeConnection", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const reauthorizeConnection = plugins.reauthorizeConnection
+            if (reauthorizeConnection === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* reauthorizeConnection({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: params.pluginConnectionId,
+              expectedRevision: payload.expectedRevision,
+              credentials: payload.credentials
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
+              ApplicationRateLimited: mapApplicationRateLimited,
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+          }))
+        .handle("revokeConnection", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (session.permission !== "workspace-owner") {
+              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+            }
+            const revokeConnection = plugins.revokeConnection
+            if (revokeConnection === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* revokeConnection({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: params.pluginConnectionId,
+              expectedRevision: payload.expectedRevision
+            }).pipe(Effect.catchTags({
+              ApplicationConflict: mapApplicationConflict,
               ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationRateLimited: mapApplicationRateLimited,
               ApplicationResourceNotFound: mapApplicationNotFound,

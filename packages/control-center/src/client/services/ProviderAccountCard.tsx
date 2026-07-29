@@ -1,12 +1,14 @@
 import { ServiceMark } from "@knpkv/rly/patterns"
-import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import { type ReactElement, useEffect, useRef } from "react"
+import { Button, Field, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { type FormEvent, type ReactElement, useEffect, useRef, useState } from "react"
 
-import type { PluginConnectionSummary, ProviderAccountSummary } from "../../api/plugins.js"
+import type { PluginConnectionSummary, PluginCredentialReplacement, ProviderAccountSummary } from "../../api/plugins.js"
 import type { PluginConnectionId } from "../../domain/identifiers.js"
 import type { ProviderId } from "../../domain/sourceRevision.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
+import { ConnectionAdministration, type ConnectionAdministrationViewState } from "./ConnectionAdministration.js"
 import { ConnectionSynchronization, type ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
+import type { ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import styles from "./ServicesPage.module.css"
 
@@ -54,11 +56,15 @@ const resourceSummaryContent = (
 )
 
 const ConnectedProviderResource = ({
+  administrationState,
   canConfigure,
   connection,
   enablementState,
+  onReauthorize,
   onRefreshSynchronization,
+  onRevoke,
   onSetEnabled,
+  onStartAtlassianOAuth,
   onSynchronize,
   onTest,
   resource,
@@ -69,12 +75,19 @@ const ConnectedProviderResource = ({
   readonly connection: PluginConnectionSummary
   readonly enablementState: ConnectionEnablementState | undefined
   readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onReauthorize: (
+    pluginConnectionId: PluginConnectionId,
+    credentials: ReadonlyArray<PluginCredentialReplacement>
+  ) => Promise<boolean>
+  readonly onRevoke: (pluginConnectionId: PluginConnectionId) => Promise<boolean>
+  readonly onStartAtlassianOAuth: ConnectionTestTransport["startAtlassianOAuthGrant"]
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly resource: ProviderAccountSummary["resources"][number]
   readonly synchronizationState: ConnectionSynchronizationViewState | undefined
   readonly testState: ConnectionTestState | undefined
+  readonly administrationState: ConnectionAdministrationViewState | undefined
 }): ReactElement => {
   const status = connectionStatus(connection, testState)
   const isTesting = testState?._tag === "testing"
@@ -100,6 +113,13 @@ const ConnectedProviderResource = ({
           onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
           onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
           state={synchronizationState}
+        />
+        <ConnectionAdministration
+          canConfigure={canConfigure}
+          onReauthorize={(credentials) => onReauthorize(connection.pluginConnectionId, credentials)}
+          onRevoke={() => onRevoke(connection.pluginConnectionId)}
+          onStartAtlassianOAuth={onStartAtlassianOAuth}
+          state={administrationState}
         />
         <div className={styles.resourceActions}>
           <Button
@@ -132,12 +152,17 @@ const ConnectedProviderResource = ({
 /** Compact account-level view of independently actionable provider resources. */
 export const ProviderAccountCard = ({
   account,
+  administrationStates,
   canConfigure,
   connections,
   enablementStates,
   onAdd,
+  onReauthorize,
   onRefreshSynchronization,
+  onRename,
+  onRevoke,
   onSetEnabled,
+  onStartAtlassianOAuth,
   onSynchronize,
   onTest,
   synchronizationStates,
@@ -146,98 +171,177 @@ export const ProviderAccountCard = ({
   readonly account: ProviderAccountSummary
   readonly canConfigure: boolean
   readonly connections: ReadonlyArray<PluginConnectionSummary>
+  readonly administrationStates: ReadonlyMap<PluginConnectionId, ConnectionAdministrationViewState>
   readonly enablementStates: ReadonlyMap<PluginConnectionId, ConnectionEnablementState>
   readonly onAdd: (providerId: ProviderId, providerImmutableId: string) => void
   readonly onSetEnabled: (pluginConnectionId: PluginConnectionId, isEnabled: boolean) => void
   readonly onRefreshSynchronization: (pluginConnectionId: PluginConnectionId) => void
+  readonly onReauthorize: (
+    pluginConnectionId: PluginConnectionId,
+    credentials: ReadonlyArray<PluginCredentialReplacement>
+  ) => Promise<boolean>
+  readonly onRename: (displayName: string) => Promise<boolean>
+  readonly onRevoke: (pluginConnectionId: PluginConnectionId) => Promise<boolean>
+  readonly onStartAtlassianOAuth: ConnectionTestTransport["startAtlassianOAuthGrant"]
   readonly onSynchronize: (pluginConnectionId: PluginConnectionId) => void
   readonly synchronizationStates: ReadonlyMap<PluginConnectionId, ConnectionSynchronizationViewState>
   readonly onTest: (pluginConnectionId: PluginConnectionId) => void
   readonly testStates: ReadonlyMap<PluginConnectionId, ConnectionTestState>
-}): ReactElement => (
-  <Surface as="article" className={styles.accountCard} padding="default" shape="grouped">
-    <div className={styles.accountHeading}>
-      <div className={styles.accountIdentity}>
-        <Text as="h2" variant="section-title">
-          {account.providerFamily === "aws"
-            ? "AWS account"
-            : account.providerFamily === "atlassian"
-              ? "Atlassian site"
-              : "Provider account"}{" "}
-          {account.displayName}
-        </Text>
-        <Text className={styles.identifier} tone="secondary" variant="meta">
-          Verified identity · {account.providerImmutableId}
-        </Text>
+}): ReactElement => {
+  const [isEditing, setIsEditing] = useState(false)
+  const [displayName, setDisplayName] = useState(account.displayName)
+  const [renameState, setRenameState] = useState<"idle" | "saving" | "failed">("idle")
+
+  useEffect(() => setDisplayName(account.displayName), [account.displayName])
+
+  const rename = (event: FormEvent<HTMLFormElement>): void => {
+    event.preventDefault()
+    setRenameState("saving")
+    void onRename(displayName.trim()).then((succeeded) => {
+      setRenameState(succeeded ? "idle" : "failed")
+      if (succeeded) setIsEditing(false)
+    })
+  }
+
+  return (
+    <Surface as="article" className={styles.accountCard} padding="default" shape="grouped">
+      <div className={styles.accountHeading}>
+        <div className={styles.accountIdentity}>
+          <Text as="h2" variant="section-title">
+            {account.providerFamily === "aws"
+              ? "AWS account"
+              : account.providerFamily === "atlassian"
+                ? "Atlassian site"
+                : "Provider account"}{" "}
+            {account.displayName}
+          </Text>
+          <Text className={styles.identifier} tone="secondary" variant="meta">
+            Verified identity · {account.providerImmutableId}
+          </Text>
+        </div>
+        <StateLabel
+          label={`${account.resources.length} ${account.resources.length === 1 ? "resource" : "resources"}`}
+          size="compact"
+          tone="positive"
+        />
       </div>
-      <StateLabel
-        label={`${account.resources.length} ${account.resources.length === 1 ? "resource" : "resources"}`}
-        size="compact"
-        tone="positive"
-      />
-    </div>
-    <div className={styles.resourceList}>
-      {account.resources.map((resource) => {
-        const connection = connections.find((candidate) => candidate.followedResourceId === resource.followedResourceId)
-        const testState = connection === undefined ? undefined : testStates.get(connection.pluginConnectionId)
-        const enablementState =
-          connection === undefined ? undefined : enablementStates.get(connection.pluginConnectionId)
-        const status: ReturnType<typeof connectionStatus> =
-          connection === undefined ? { label: "Followed", tone: "neutral" } : connectionStatus(connection, testState)
-        if (connection === undefined) {
-          return (
-            <div className={styles.resource} data-status-tone={status.tone} key={resource.followedResourceId}>
-              <div className={styles.resourceSummary}>{resourceSummaryContent(resource, status, false)}</div>
+      {canConfigure ? (
+        isEditing ? (
+          <form className={styles.accountEdit} onSubmit={rename}>
+            <Field label="Account display name" required size="compact">
+              {(controlProps) => (
+                <input
+                  {...controlProps}
+                  maxLength={200}
+                  onChange={(event) => setDisplayName(event.currentTarget.value)}
+                  value={displayName}
+                />
+              )}
+            </Field>
+            <div className={styles.resourceActions}>
+              <Button loading={renameState === "saving"} type="submit" variant="secondary">
+                Save account name
+              </Button>
+              <Button
+                disabled={renameState === "saving"}
+                onClick={() => {
+                  setDisplayName(account.displayName)
+                  setIsEditing(false)
+                  setRenameState("idle")
+                }}
+                type="button"
+                variant="quiet"
+              >
+                Cancel
+              </Button>
             </div>
-          )
-        }
-        return (
-          <ConnectedProviderResource
-            canConfigure={canConfigure}
-            connection={connection}
-            enablementState={enablementState}
-            key={resource.followedResourceId}
-            onRefreshSynchronization={onRefreshSynchronization}
-            onSetEnabled={onSetEnabled}
-            onSynchronize={onSynchronize}
-            onTest={onTest}
-            resource={resource}
-            synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}
-            testState={testState}
-          />
+            {renameState === "failed" ? (
+              <Text className={styles.setupError} role="alert" variant="body">
+                The account changed elsewhere. Refresh and try again.
+              </Text>
+            ) : null}
+          </form>
+        ) : (
+          <div className={styles.accountEditAction}>
+            <Button onClick={() => setIsEditing(true)} variant="quiet">
+              Edit account name
+            </Button>
+          </div>
         )
-      })}
-    </div>
-    {account.providerFamily === "aws" ? (
-      <div className={styles.accountActions}>
-        <Button
-          disabled={!canConfigure}
-          onClick={() => onAdd("codecommit", account.providerImmutableId)}
-          variant="secondary"
-        >
-          Add repository
-        </Button>
-        <Button
-          disabled={!canConfigure}
-          onClick={() => onAdd("codepipeline", account.providerImmutableId)}
-          variant="secondary"
-        >
-          Add pipeline
-        </Button>
+      ) : null}
+      <div className={styles.resourceList}>
+        {account.resources.map((resource) => {
+          const connection = connections.find(
+            (candidate) => candidate.followedResourceId === resource.followedResourceId
+          )
+          const testState = connection === undefined ? undefined : testStates.get(connection.pluginConnectionId)
+          const enablementState =
+            connection === undefined ? undefined : enablementStates.get(connection.pluginConnectionId)
+          const status: ReturnType<typeof connectionStatus> =
+            connection === undefined ? { label: "Followed", tone: "neutral" } : connectionStatus(connection, testState)
+          if (connection === undefined) {
+            return (
+              <div className={styles.resource} data-status-tone={status.tone} key={resource.followedResourceId}>
+                <div className={styles.resourceSummary}>{resourceSummaryContent(resource, status, false)}</div>
+              </div>
+            )
+          }
+          return (
+            <ConnectedProviderResource
+              canConfigure={canConfigure}
+              connection={connection}
+              administrationState={administrationStates.get(connection.pluginConnectionId)}
+              enablementState={enablementState}
+              key={resource.followedResourceId}
+              onRefreshSynchronization={onRefreshSynchronization}
+              onReauthorize={onReauthorize}
+              onRevoke={onRevoke}
+              onStartAtlassianOAuth={onStartAtlassianOAuth}
+              onSetEnabled={onSetEnabled}
+              onSynchronize={onSynchronize}
+              onTest={onTest}
+              resource={resource}
+              synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}
+              testState={testState}
+            />
+          )
+        })}
       </div>
-    ) : account.providerFamily === "atlassian" ? (
-      <div className={styles.accountActions}>
-        <Button disabled={!canConfigure} onClick={() => onAdd("jira", account.providerImmutableId)} variant="secondary">
-          Add Jira project
-        </Button>
-        <Button
-          disabled={!canConfigure}
-          onClick={() => onAdd("confluence", account.providerImmutableId)}
-          variant="secondary"
-        >
-          Add Confluence space
-        </Button>
-      </div>
-    ) : null}
-  </Surface>
-)
+      {account.providerFamily === "aws" ? (
+        <div className={styles.accountActions}>
+          <Button
+            disabled={!canConfigure}
+            onClick={() => onAdd("codecommit", account.providerImmutableId)}
+            variant="secondary"
+          >
+            Add repository
+          </Button>
+          <Button
+            disabled={!canConfigure}
+            onClick={() => onAdd("codepipeline", account.providerImmutableId)}
+            variant="secondary"
+          >
+            Add pipeline
+          </Button>
+        </div>
+      ) : account.providerFamily === "atlassian" ? (
+        <div className={styles.accountActions}>
+          <Button
+            disabled={!canConfigure}
+            onClick={() => onAdd("jira", account.providerImmutableId)}
+            variant="secondary"
+          >
+            Add Jira project
+          </Button>
+          <Button
+            disabled={!canConfigure}
+            onClick={() => onAdd("confluence", account.providerImmutableId)}
+            variant="secondary"
+          >
+            Add Confluence space
+          </Button>
+        </div>
+      ) : null}
+    </Surface>
+  )
+}

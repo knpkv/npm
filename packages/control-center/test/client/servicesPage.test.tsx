@@ -13,14 +13,17 @@ import {
   type AtlassianOAuthProviderIntent,
   CreatePluginConnectionResponse,
   CreatePluginConnectionsResponse,
+  PluginConnectionAdministration,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  type PluginCredentialReplacement,
   PluginOverviewResponse,
   PluginSynchronizationState
 } from "../../src/api/plugins.js"
 import { UnauthorizedApiError } from "../../src/api/errors.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
+import { ConnectionAdministration } from "../../src/client/services/ConnectionAdministration.js"
 import type { ConnectionTestTransport } from "../../src/client/services/connectionTestTransport.js"
 import { ServicesPage } from "../../src/client/services/ServicesPage.js"
 import {
@@ -333,6 +336,274 @@ const successfulAwsCreate = (
   })
 
 describe("ServicesPage connection tests", () => {
+  it("preserves opaque secret bytes and trims textual credential locators", async () => {
+    const onReauthorize = vi
+      .fn<(credentials: ReadonlyArray<PluginCredentialReplacement>) => Promise<boolean>>()
+      .mockResolvedValue(true)
+    const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+      connection: Schema.encodeSync(PluginConnectionSummary)(connection),
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 1,
+        values: [
+          { _tag: "secret-reference", key: "apiToken", state: "configured" },
+          { _tag: "secret-reference", key: "profile", state: "configured" }
+        ],
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      metadata: {
+        pluginConnectionId: connection.pluginConnectionId,
+        pluginId: "dev.knpkv.jira.read",
+        contractVersion: { major: 1, minor: 0, patch: 0 },
+        adapterVersion: { major: 1, minor: 0, patch: 0 },
+        configurationFields: [],
+        capabilities: []
+      },
+      credentialFields: [
+        {
+          key: "apiToken",
+          label: "API token",
+          description: "Opaque token.",
+          kind: "secret",
+          scope: "credential",
+          required: true,
+          defaultValue: null,
+          isReadOnly: false,
+          minimum: null,
+          maximum: null
+        },
+        {
+          key: "profile",
+          label: "Profile",
+          description: "Machine-local profile locator.",
+          kind: "text",
+          scope: "credential",
+          required: true,
+          defaultValue: null,
+          isReadOnly: false,
+          minimum: null,
+          maximum: null
+        }
+      ],
+      permissions: [],
+      schedule: { mode: "manual", nextRunAt: null },
+      synchronization: null,
+      diagnostics: []
+    })
+    const host = document.createElement("div")
+    document.body.append(host)
+    root = createRoot(host)
+    await act(async () =>
+      root?.render(
+        <ConnectionAdministration
+          canConfigure
+          onReauthorize={onReauthorize}
+          onRevoke={() => Promise.resolve(true)}
+          onStartAtlassianOAuth={undefined}
+          state={{ _tag: "ready", administration }}
+        />
+      )
+    )
+    const inputs = [...host.querySelectorAll<HTMLInputElement>('input[type="password"]')]
+    if (inputs[0] === undefined || inputs[1] === undefined) {
+      throw new Error("Expected both credential recovery fields")
+    }
+    await setControlValue(inputs[0], "  opaque token bytes  ")
+    await setControlValue(inputs[1], "  delivery-profile  ")
+    await act(async () => host.querySelector<HTMLFormElement>("form")?.requestSubmit())
+    expect(onReauthorize).toHaveBeenCalledWith([
+      { key: "apiToken", value: "  opaque token bytes  " },
+      { key: "profile", value: "delivery-profile" }
+    ])
+  })
+
+  it("applies a completed OAuth recovery profile to the exact returned connection", async () => {
+    const recoveredProfile = "account-1@cloud-1"
+    const administration = Schema.decodeUnknownSync(PluginConnectionAdministration)({
+      connection: Schema.encodeSync(PluginConnectionSummary)(connection),
+      configuration: {
+        pluginConnectionId: connection.pluginConnectionId,
+        revision: 3,
+        values: [
+          { _tag: "text", key: "authMode", value: "oauth" },
+          { _tag: "text", key: "siteId", value: "cloud-1" },
+          { _tag: "secret-reference", key: "oauthProfileId", state: "configured" }
+        ],
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      },
+      metadata: {
+        pluginConnectionId: connection.pluginConnectionId,
+        pluginId: "dev.knpkv.jira.read",
+        contractVersion: { major: 1, minor: 0, patch: 0 },
+        adapterVersion: { major: 1, minor: 0, patch: 0 },
+        configurationFields: [],
+        capabilities: []
+      },
+      credentialFields: [
+        {
+          key: "oauthProfileId",
+          label: "OAuth profile",
+          description: "Machine-local OAuth profile.",
+          kind: "text",
+          scope: "credential",
+          required: true,
+          defaultValue: null,
+          isReadOnly: false,
+          minimum: null,
+          maximum: null
+        }
+      ],
+      permissions: [],
+      schedule: { mode: "manual", nextRunAt: null },
+      synchronization: null,
+      diagnostics: [
+        {
+          code: "connection-authentication-failed",
+          severity: "critical",
+          summary: "The stored OAuth profile has expired.",
+          observedAt: "2026-07-14T10:00:00.000Z"
+        }
+      ]
+    })
+    const reauthorize = vi.fn<NonNullable<ConnectionTestTransport["reauthorize"]>>().mockResolvedValue(
+      Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+        connection: Schema.encodeSync(PluginConnectionSummary)(connection),
+        configuration: {
+          pluginConnectionId: connection.pluginConnectionId,
+          revision: 4,
+          values: [
+            { _tag: "text", key: "authMode", value: "oauth" },
+            { _tag: "text", key: "siteId", value: "cloud-1" },
+            { _tag: "secret-reference", key: "oauthProfileId", state: "configured" }
+          ],
+          updatedAt: "2026-07-14T10:05:00.000Z"
+        },
+        test: {
+          _tag: "healthy",
+          pluginConnectionId: connection.pluginConnectionId,
+          providerId: "jira",
+          checkedAt: "2026-07-14T10:05:00.000Z",
+          latencyMilliseconds: 10,
+          identity: {
+            kind: "workspace",
+            label: "Atlassian site",
+            displayName: "Acme Europe",
+            providerImmutableId: "cloud-1"
+          }
+        }
+      })
+    )
+    const transport: ConnectionTestTransport = {
+      administration: () => Promise.resolve(administration),
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(overview),
+      reauthorize,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    await renderServices(
+      transport,
+      `/services?atlassianRecoveryConnection=${connection.pluginConnectionId}` +
+        `&atlassianRecoveryProfile=${encodeURIComponent(recoveredProfile)}`
+    )
+    await act(async () => undefined)
+
+    expect(reauthorize).toHaveBeenCalledWith(
+      connection.pluginConnectionId,
+      3,
+      [{ key: "oauthProfileId", value: recoveredProfile }],
+      expect.any(AbortSignal)
+    )
+    expect(currentLocation).toBe("/services")
+  })
+
+  it("keeps provider-account renames independent across account cards", async () => {
+    const firstAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000201")
+    const secondAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000202")
+    const twoAccountOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: overview.catalog,
+      connections: [],
+      accounts: [
+        {
+          providerAccountId: firstAccountId,
+          providerFamily: "aws",
+          displayName: "First account",
+          providerImmutableId: "111111111111",
+          revision: 1,
+          resources: []
+        },
+        {
+          providerAccountId: secondAccountId,
+          providerFamily: "aws",
+          displayName: "Second account",
+          providerImmutableId: "222222222222",
+          revision: 4,
+          resources: []
+        }
+      ]
+    })
+    const resolvers = new Map<ProviderAccountId, () => void>()
+    const signals = new Map<ProviderAccountId, AbortSignal>()
+    const patchAccount = vi.fn<NonNullable<ConnectionTestTransport["patchAccount"]>>(
+      (providerAccountId, patch, signal) => {
+        signals.set(providerAccountId, signal)
+        return new Promise<void>((resolve) => {
+          resolvers.set(providerAccountId, resolve)
+        }).then(() => {
+          const account = twoAccountOverview.accounts.find(
+            (candidate) => candidate.providerAccountId === providerAccountId
+          )
+          if (account === undefined) throw new Error("Unknown provider account")
+          return { ...account, displayName: patch.displayName, revision: patch.expectedRevision + 1 }
+        })
+      }
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(twoAccountOverview),
+      patchAccount,
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    const accountCards = [...host.querySelectorAll<HTMLElement>("article")]
+    const firstCard = accountCards.find(({ textContent }) => textContent?.includes("First account"))
+    const secondCard = accountCards.find(({ textContent }) => textContent?.includes("Second account"))
+    if (firstCard === undefined || secondCard === undefined) throw new Error("Expected both provider-account cards")
+    const firstEdit = [...firstCard.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Edit account name"
+    )
+    const secondEdit = [...secondCard.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Edit account name"
+    )
+    await act(async () => {
+      firstEdit?.click()
+      secondEdit?.click()
+    })
+    const firstInput = firstCard.querySelector<HTMLInputElement>("input")
+    const secondInput = secondCard.querySelector<HTMLInputElement>("input")
+    if (firstInput === null || secondInput === null) throw new Error("Expected both account-name fields")
+    await setControlValue(firstInput, "Primary account")
+    await setControlValue(secondInput, "Secondary account")
+    await act(async () => {
+      firstCard.querySelector<HTMLFormElement>("form")?.requestSubmit()
+      secondCard.querySelector<HTMLFormElement>("form")?.requestSubmit()
+    })
+
+    expect(patchAccount).toHaveBeenCalledTimes(2)
+    expect(signals.get(firstAccountId)?.aborted).toBe(false)
+    expect(signals.get(secondAccountId)?.aborted).toBe(false)
+    await act(async () => {
+      resolvers.get(secondAccountId)?.()
+      resolvers.get(firstAccountId)?.()
+      await Promise.resolve()
+    })
+    expect(host.textContent).toContain("AWS account Primary account")
+    expect(host.textContent).toContain("AWS account Secondary account")
+  })
+
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
@@ -510,6 +781,7 @@ describe("ServicesPage connection tests", () => {
           providerFamily: "aws",
           displayName: "123456789012",
           providerImmutableId: "123456789012",
+          revision: 2,
           resources: [
             {
               followedResourceId: repositoryId,
@@ -553,10 +825,111 @@ describe("ServicesPage connection tests", () => {
         })
       )
     )
+    const administration = vi.fn<NonNullable<ConnectionTestTransport["administration"]>>((requestedId) => {
+      const requestedConnection = awsOverview.connections.find(
+        ({ pluginConnectionId }) => pluginConnectionId === requestedId
+      )
+      if (requestedConnection === undefined) return Promise.reject(new Error("unknown connection"))
+      return Promise.resolve(
+        Schema.decodeUnknownSync(PluginConnectionAdministration)({
+          connection: Schema.encodeSync(PluginConnectionSummary)(requestedConnection),
+          configuration: {
+            pluginConnectionId: requestedId,
+            revision: 1,
+            values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
+            updatedAt: "2026-07-14T10:00:00.000Z"
+          },
+          metadata: {
+            pluginConnectionId: requestedId,
+            pluginId:
+              requestedConnection.providerId === "codecommit" ? "dev.knpkv.codecommit" : "dev.knpkv.codepipeline",
+            contractVersion: { major: 1, minor: 0, patch: 0 },
+            adapterVersion: { major: 1, minor: 0, patch: 0 },
+            configurationFields: [],
+            capabilities: [{ capabilityId: "entity.read", version: 1 }]
+          },
+          credentialFields: [
+            {
+              key: "profile",
+              label: "AWS profile",
+              description: "Machine-local AWS profile.",
+              kind: "text",
+              scope: "credential",
+              required: true,
+              defaultValue: null,
+              isReadOnly: false,
+              minimum: null,
+              maximum: null
+            }
+          ],
+          permissions: [{ capabilityId: "entity.read", version: 1, state: "available" }],
+          schedule: { mode: "manual", nextRunAt: null },
+          synchronization: null,
+          diagnostics: [
+            {
+              code: "connection-healthy",
+              severity: "information",
+              summary: "The provider connection is healthy.",
+              observedAt: "2026-07-14T10:00:00.000Z"
+            }
+          ]
+        })
+      )
+    })
+    const patchAccount = vi.fn<NonNullable<ConnectionTestTransport["patchAccount"]>>((requestedAccountId, patch) =>
+      Promise.resolve({
+        ...awsOverview.accounts[0]!,
+        providerAccountId: requestedAccountId,
+        displayName: patch.displayName,
+        revision: patch.expectedRevision + 1
+      })
+    )
+    const reauthorize = vi.fn<NonNullable<ConnectionTestTransport["reauthorize"]>>((requestedId, expectedRevision) => {
+      const requestedConnection = awsOverview.connections.find(
+        ({ pluginConnectionId }) => pluginConnectionId === requestedId
+      )
+      if (requestedConnection === undefined) return Promise.reject(new Error("unknown connection"))
+      return Promise.resolve(
+        Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+          connection: requestedConnection,
+          configuration: {
+            pluginConnectionId: requestedId,
+            revision: expectedRevision + 1,
+            values: [{ _tag: "secret-reference", key: "profile", state: "configured" }],
+            updatedAt: "2026-07-14T10:04:00.000Z"
+          },
+          test: {
+            _tag: "healthy",
+            pluginConnectionId: requestedId,
+            providerId: requestedConnection.providerId,
+            checkedAt: "2026-07-14T10:04:00.000Z",
+            latencyMilliseconds: 9,
+            identity: {
+              kind: "account",
+              label: "AWS account",
+              displayName: "Production account",
+              providerImmutableId: "123456789012"
+            }
+          }
+        })
+      )
+    })
+    const revoke = vi.fn<NonNullable<ConnectionTestTransport["revoke"]>>((requestedId) => {
+      const requestedConnection = awsOverview.connections.find(
+        ({ pluginConnectionId }) => pluginConnectionId === requestedId
+      )
+      return requestedConnection === undefined
+        ? Promise.reject(new Error("unknown connection"))
+        : Promise.resolve({ ...requestedConnection, isEnabled: false })
+    })
     const transport: ConnectionTestTransport = {
+      administration,
       create: vi.fn(),
       overview: () => Promise.resolve(awsOverview),
       makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      patchAccount,
+      reauthorize,
+      revoke,
       setEnabled: vi.fn(),
       test
     }
@@ -588,14 +961,52 @@ describe("ServicesPage connection tests", () => {
     expect(unconnectedResource?.querySelector("summary")).toBeNull()
     expect(unconnectedResource?.textContent).not.toContain("Controls")
     expect([...host.querySelectorAll("button")].map(({ textContent }) => textContent)).toEqual(
-      expect.arrayContaining(["Add repository", "Add pipeline"])
+      expect.arrayContaining(["Add repository", "Add pipeline", "Edit account name"])
     )
+    expect(host.textContent).toContain("Permissions")
+    expect(host.textContent).toContain("entity.read v1")
+    expect(host.textContent).toContain("Manual synchronization")
+    expect(host.textContent).toContain("The provider connection is healthy.")
+
+    const editAccount = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Edit account name"
+    )
+    await act(async () => editAccount?.click())
+    const accountName = [...host.querySelectorAll<HTMLInputElement>("input")].find(
+      ({ value }) => value === "123456789012"
+    )
+    if (accountName === undefined) throw new Error("Expected the account display-name field")
+    await setControlValue(accountName, "Production AWS")
+    const saveAccount = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Save account name"
+    )
+    await act(async () => saveAccount?.click())
+    expect(patchAccount).toHaveBeenCalledWith(
+      accountId,
+      { expectedRevision: 2, displayName: "Production AWS" },
+      expect.any(AbortSignal)
+    )
+    expect(host.textContent).toContain("AWS account Production AWS")
 
     expect(repositoryResource).toBeDefined()
     pipelineResource?.removeAttribute("open")
     expect(pipelineResource?.open).toBe(false)
     if (repositoryResource === undefined) throw new Error("Expected the repository resource")
     repositoryResource.open = true
+    const profile = repositoryResource.querySelector<HTMLInputElement>('input[type="password"]')
+    if (profile === null) throw new Error("Expected the machine-local profile recovery field")
+    await setControlValue(profile, "rotated-profile")
+    const replaceCredentials = [...repositoryResource.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Replace credentials and test"
+    )
+    await act(async () => replaceCredentials?.click())
+    expect(reauthorize).toHaveBeenCalledWith(
+      repositoryConnectionId,
+      1,
+      [{ key: "profile", value: "rotated-profile" }],
+      expect.any(AbortSignal)
+    )
+    expect(repositoryResource.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe("")
     const testButton = [...repositoryResource.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "Test"
     )
@@ -605,6 +1016,11 @@ describe("ServicesPage connection tests", () => {
     expect(repositoryResource.open).toBe(true)
     expect(repositoryResource.textContent).toContain("Connection healthy")
     expect(pipelineResource?.open).toBe(false)
+    const revokeCredentials = [...repositoryResource.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Revoke credentials"
+    )
+    await act(async () => revokeCredentials?.click())
+    expect(revoke).toHaveBeenCalledWith(repositoryConnectionId, 1, expect.any(AbortSignal))
   })
 
   it("pins account-card Confluence setup to the owning Atlassian site", async () => {

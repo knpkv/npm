@@ -233,6 +233,11 @@
     },
     {
       "type": "table",
+      "name": "plugin_secret_cleanup",
+      "sql": "CREATE TABLE plugin_secret_cleanup (\n    secret_ref TEXT PRIMARY KEY CHECK(\n      length(secret_ref) = 71 AND substr(secret_ref, 1, 7) = 'secret_' AND\n      substr(secret_ref, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    requested_at TEXT NOT NULL,\n    FOREIGN KEY (secret_ref) REFERENCES plugin_secret_bindings(secret_ref)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "plugin_sync_attempt_completions",
       "sql": "CREATE TABLE plugin_sync_attempt_completions (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    stream_key TEXT NOT NULL CHECK(length(stream_key) BETWEEN 1 AND 100),\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence >= 1),\n    outcome TEXT NOT NULL CHECK(outcome IN ('synchronized', 'source-unavailable', 'interrupted')),\n    ending_revision INTEGER NOT NULL CHECK(ending_revision >= 0),\n    pages_committed INTEGER NOT NULL CHECK(pages_committed >= 0),\n    completed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, plugin_connection_id, stream_key, attempt_sequence),\n    FOREIGN KEY (workspace_id, plugin_connection_id, stream_key, attempt_sequence)\n      REFERENCES plugin_sync_attempts(workspace_id, plugin_connection_id, stream_key, attempt_sequence)\n  )"
     },

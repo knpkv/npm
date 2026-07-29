@@ -822,8 +822,8 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   expectedCloudId?: string
 ) {
   if (authMode === "oauth") {
-    const profileId = yield* textValue(loaded.configuration, "oauthProfileId")
-    const profile = yield* loadAtlassianProfile(provider, profileId).pipe(
+    const profileCredential = yield* credentialTextValue(loaded.configuration, "oauthProfileId")
+    const profile = yield* loadAtlassianProfile(provider, profileCredential.value).pipe(
       Effect.provide(HomeDirectoryLive),
       Effect.mapError(() => configurationFailure("plugin-oauth-profile-unavailable"))
     )
@@ -1096,10 +1096,10 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
 ) {
   const expectedKeys = new Set(["profile", "region", "repositoryName"])
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const profile = yield* textValue(loaded.configuration, "profile")
+  const profile = yield* credentialTextValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
   const configuration = yield* Schema.decodeUnknownEffect(CodeCommitPluginConfiguration)({
-    profile,
+    profile: profile.value,
     region,
     repositoryName: yield* textValue(loaded.configuration, "repositoryName")
   }).pipe(Effect.mapError(() => configurationFailure("plugin-configuration-schema-invalid")))
@@ -1111,7 +1111,7 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
     Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
   )
   return {
-    credentialGeneration: `${profile}\0${region}\0${identity.accountId}\0${identity.arn}`,
+    credentialGeneration: `${profile.generation}\0${region}\0${identity.accountId}\0${identity.arn}`,
     layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
       codeCommitPluginDefinition,
       { ...configuration, runtimeIdentity: identity },
@@ -1136,10 +1136,10 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
   ])
   if (loaded.descriptorGeneration === "current") expectedKeys.add("maximumLogBytes")
   yield* requireExactKeys(loaded.configuration, expectedKeys)
-  const profile = yield* textValue(loaded.configuration, "profile")
+  const profile = yield* credentialTextValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
   const configuration = {
-    profile,
+    profile: profile.value,
     region,
     pipelineName: yield* textValue(loaded.configuration, "pipelineName"),
     maximumExecutionPages: yield* integerValue(loaded.configuration, "maximumExecutionPages"),
@@ -1170,7 +1170,7 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
     arn: canonicalCodePipelinePrincipalArn(identity.arn)
   }
   return {
-    credentialGeneration: `${profile}\0${region}\0${canonicalIdentity.accountId}\0${canonicalIdentity.arn}`,
+    credentialGeneration: `${profile.generation}\0${region}\0${canonicalIdentity.accountId}\0${canonicalIdentity.arn}`,
     layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
       codePipelinePluginDefinition,
       { ...configuration, runtimeIdentity: canonicalIdentity },

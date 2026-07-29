@@ -488,8 +488,23 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("plugin-connection.update", pluginConnections.updateMetadata(...args))
     },
     pluginConfigurations: {
+      completeSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["completeSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.complete-secret-cleanup",
+          pluginConfigurations.completeSecretCleanup(...args)
+        ),
       get: (...args: Parameters<PluginConfigurationRepositoryService["get"]>) =>
         publicOperation("plugin-configuration.get", pluginConfigurations.get(...args)),
+      pendingSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["pendingSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.pending-secret-cleanup",
+          pluginConfigurations.pendingSecretCleanup(...args)
+        ),
+      requestSecretCleanup: (...args: Parameters<PluginConfigurationRepositoryService["requestSecretCleanup"]>) =>
+        publicOperation(
+          "plugin-configuration.request-secret-cleanup",
+          pluginConfigurations.requestSecretCleanup(...args)
+        ),
       update: (...args: Parameters<PluginConfigurationRepositoryService["update"]>) =>
         publicOperation("plugin-configuration.update", pluginConfigurations.update(...args))
     },

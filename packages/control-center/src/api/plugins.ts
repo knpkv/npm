@@ -8,6 +8,7 @@ import { PluginFailureClass, PluginHealth } from "../domain/freshness.js"
 import { FollowedResourceId, PluginConnectionId, ProviderAccountId } from "../domain/identifiers.js"
 import {
   NegotiatedPluginCapabilityV1,
+  PluginCapabilityId,
   PluginConfigurationFieldV1,
   PluginId,
   SemanticVersion
@@ -217,6 +218,12 @@ export const ProviderAccountSummary = Schema.Struct({
   providerFamily: Schema.Literals(["aws", "atlassian", "clockify"]),
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   providerImmutableId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  revision: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))).pipe(
+    Schema.decodeTo(Schema.Int.check(Schema.isGreaterThan(0)), {
+      decode: SchemaGetter.withDefault(Effect.succeed(1)),
+      encode: SchemaGetter.required()
+    })
+  ),
   resources: Schema.Array(FollowedResourceSummary).check(
     Schema.makeFilter((resources) => resources.length <= MAXIMUM_FOLLOWED_RESOURCES, {
       expected: `at most ${MAXIMUM_FOLLOWED_RESOURCES} followed resources per provider account`
@@ -676,6 +683,113 @@ export const PluginConfigurationMetadata = Schema.Struct({
 /** Decoded secret-free plugin configuration metadata. */
 export type PluginConfigurationMetadata = typeof PluginConfigurationMetadata.Type
 
+/** Safe operator-facing severity for one connection diagnostic. */
+export const PluginAdministrationDiagnosticSeverity = Schema.Literals(["information", "warning", "critical"])
+
+/** One bounded diagnostic derived from redacted durable/runtime state. */
+export const PluginAdministrationDiagnostic = Schema.Struct({
+  code: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
+  severity: PluginAdministrationDiagnosticSeverity,
+  summary: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
+  observedAt: Schema.NullOr(UtcTimestamp)
+}).annotate({ identifier: "PluginAdministrationDiagnostic" })
+
+/** Decoded safe connection diagnostic. */
+export type PluginAdministrationDiagnostic = typeof PluginAdministrationDiagnostic.Type
+
+/** Provider operation made available by the negotiated connection contract. */
+export const PluginConnectionPermission = Schema.Struct({
+  capabilityId: PluginCapabilityId,
+  version: Schema.Int.check(Schema.isGreaterThan(0)),
+  state: Schema.Literals(["available", "disabled"])
+}).annotate({ identifier: "PluginConnectionPermission" })
+
+/** Decoded connection permission. */
+export type PluginConnectionPermission = typeof PluginConnectionPermission.Type
+
+/** Current scheduling contract for one connection. Workspace cadence remains a workspace setting. */
+export const PluginSynchronizationSchedule = Schema.Struct({
+  mode: Schema.Literals(["manual", "unsupported"]),
+  nextRunAt: Schema.Null
+}).annotate({ identifier: "PluginSynchronizationSchedule" })
+
+/** Secret-free owner/read model for ongoing connection administration and recovery. */
+export const PluginConnectionAdministration = Schema.Struct({
+  connection: PluginConnectionSummary,
+  configuration: PluginConfiguration,
+  metadata: PluginConfigurationMetadata,
+  credentialFields: Schema.Array(PluginServiceCatalogField).check(
+    Schema.makeFilter((fields) => fields.length <= MAXIMUM_CONFIGURATION_VALUES, {
+      expected: `at most ${MAXIMUM_CONFIGURATION_VALUES} credential fields`
+    })
+  ),
+  permissions: Schema.Array(PluginConnectionPermission).check(
+    Schema.makeFilter((permissions) => permissions.length <= 32, {
+      expected: "at most 32 connection permissions"
+    })
+  ),
+  schedule: PluginSynchronizationSchedule,
+  synchronization: Schema.NullOr(PluginSynchronizationState),
+  diagnostics: Schema.Array(PluginAdministrationDiagnostic).check(
+    Schema.makeFilter((diagnostics) => diagnostics.length <= 16, {
+      expected: "at most 16 connection diagnostics"
+    })
+  )
+}).annotate({ identifier: "PluginConnectionAdministration" })
+
+/** Decoded secret-free connection administration read model. */
+export type PluginConnectionAdministration = typeof PluginConnectionAdministration.Type
+
+/** Compare-and-swap account label edit; provider identity remains immutable. */
+export const PatchProviderAccountRequest = Schema.Struct({
+  expectedRevision: Schema.Int.check(Schema.isGreaterThan(0)),
+  displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+}).annotate({ identifier: "PatchProviderAccountRequest" })
+
+/** Decoded provider-account metadata patch. */
+export type PatchProviderAccountRequest = typeof PatchProviderAccountRequest.Type
+
+/** One replacement for a machine-local credential/profile field. */
+export const PluginCredentialReplacement = Schema.Struct({
+  key: PluginConfigurationKey,
+  value: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(MAXIMUM_SECRET_VALUE_LENGTH),
+    Schema.makeFilter((value) => value.trim().length > 0, {
+      expected: "a non-whitespace credential value"
+    })
+  )
+}).annotate({ identifier: "PluginCredentialReplacement" })
+
+/** A raw credential supplied only to the secret-store replacement boundary. */
+export type PluginCredentialReplacement = typeof PluginCredentialReplacement.Type
+
+/** Replace selected credential/profile fields at an exact configuration revision. */
+export const ReauthorizePluginConnectionRequest = Schema.Struct({
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  credentials: Schema.Array(PluginCredentialReplacement).check(
+    Schema.isNonEmpty(),
+    Schema.makeFilter((credentials) => credentials.length <= MAXIMUM_CONFIGURATION_VALUES, {
+      expected: `at most ${MAXIMUM_CONFIGURATION_VALUES} credential replacements`
+    }),
+    Schema.makeFilter(
+      (credentials) => new Set(credentials.map(({ key }) => key)).size === credentials.length,
+      { expected: "unique credential keys" }
+    )
+  )
+}).annotate({ identifier: "ReauthorizePluginConnectionRequest" })
+
+/** Decoded credential/profile recovery request. */
+export type ReauthorizePluginConnectionRequest = typeof ReauthorizePluginConnectionRequest.Type
+
+/** Revoke every credential/profile field and disable a connection at an exact revision. */
+export const RevokePluginConnectionRequest = Schema.Struct({
+  expectedRevision: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+}).annotate({ identifier: "RevokePluginConnectionRequest" })
+
+/** Decoded connection credential revocation request. */
+export type RevokePluginConnectionRequest = typeof RevokePluginConnectionRequest.Type
+
 const pluginReadErrors = [
   UnauthorizedApiError,
   ForbiddenApiError,
@@ -779,6 +893,15 @@ const setConnectionEnabled = HttpApiEndpoint.patch("setConnectionEnabled", "/con
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const patchProviderAccount = HttpApiEndpoint.patch("patchProviderAccount", "/accounts/:providerAccountId", {
+  params: Schema.Struct({ providerAccountId: ProviderAccountId }),
+  payload: PatchProviderAccountRequest,
+  success: ProviderAccountSummary,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const health = HttpApiEndpoint.get("health", "/:pluginConnectionId/health", {
   params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
   success: PluginHealthResponse,
@@ -823,11 +946,35 @@ const configuration = HttpApiEndpoint.get("configuration", "/:pluginConnectionId
   error: [...pluginReadErrors, NotFoundApiError]
 }).middleware(SessionCookieAuth)
 
+const administration = HttpApiEndpoint.get("administration", "/:pluginConnectionId/administration", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  success: PluginConnectionAdministration,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError]
+}).middleware(SessionCookieAuth)
+
 const patchConfiguration = HttpApiEndpoint.patch("patchConfiguration", "/:pluginConnectionId/configuration", {
   params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
   payload: PatchPluginConfigurationRequest,
   success: PluginConfiguration,
   error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const reauthorizeConnection = HttpApiEndpoint.post("reauthorizeConnection", "/:pluginConnectionId/reauthorize", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  payload: ReauthorizePluginConnectionRequest,
+  success: CreatePluginConnectionResponse,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError, PayloadTooLargeApiError]
+})
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const revokeConnection = HttpApiEndpoint.post("revokeConnection", "/:pluginConnectionId/revoke", {
+  params: Schema.Struct({ pluginConnectionId: PluginConnectionId }),
+  payload: RevokePluginConnectionRequest,
+  success: PluginConnectionSummary,
+  error: [...pluginReadErrors, InvalidRequestApiError, NotFoundApiError, ConflictApiError]
 })
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
@@ -846,13 +993,17 @@ export class PluginsApiGroup extends HttpApiGroup.make("plugins")
     createConnection,
     createConnections,
     setConnectionEnabled,
+    patchProviderAccount,
     health,
     testConnection,
     synchronization,
     synchronizeConnection,
     configurationMetadata,
     configuration,
-    patchConfiguration
+    administration,
+    patchConfiguration,
+    reauthorizeConnection,
+    revokeConnection
   )
   .prefix("/api/v1/plugins")
 {}

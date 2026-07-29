@@ -24,7 +24,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import { ReviewAgentProfile, ReviewAgentProfileId, ReviewSuggestionPublicationContent } from "../../src/api/agent.js"
 import { SubmitClockifyActionRequest } from "../../src/api/deliveryGraph.js"
-import { PatchPluginConfigurationRequest } from "../../src/api/plugins.js"
+import { PluginConfigurationKey } from "../../src/api/plugins.js"
 import { GovernedActionUnknownOutcome } from "../../src/domain/governedAction/index.js"
 import {
   EntityId,
@@ -2698,20 +2698,15 @@ describe("first-party plugin runtime", () => {
         assert.deepStrictEqual(yield* Ref.get(discoveredProfiles), ["production"])
         assert.deepStrictEqual(yield* Ref.get(changedFileProfiles), ["production", "production"])
 
-        const patch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
-          expectedRevision: 1,
-          values: [
-            { _tag: "text", key: "profile", value: "rotated" },
-            { _tag: "text", key: "region", value: "eu-west-1" },
-            { _tag: "text", key: "repositoryName", value: "payments-api" }
-          ]
-        })
-        const updated = yield* administration.patchConfiguration({
+        const reauthorize = administration.reauthorizeConnection
+        assert.isDefined(reauthorize)
+        const updated = yield* reauthorize({
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
-          patch
+          expectedRevision: 1,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
         })
-        assert.strictEqual(updated.revision, 2)
+        assert.strictEqual(updated.configuration.revision, 2)
 
         const third = yield* reads.inventory(request)
         assert.deepStrictEqual(third, first)
@@ -2719,7 +2714,7 @@ describe("first-party plugin runtime", () => {
           discoveredProfiles: yield* Ref.get(discoveredProfiles),
           changedFileProfiles: yield* Ref.get(changedFileProfiles)
         }, {
-          discoveredProfiles: ["production", "rotated"],
+          discoveredProfiles: ["production", "rotated", "rotated", "rotated", "rotated"],
           changedFileProfiles: ["production", "production", "rotated"]
         })
 
@@ -2802,20 +2797,13 @@ describe("first-party plugin runtime", () => {
           }).pipe(Effect.result)
         )
         yield* Deferred.await(proposalReadStarted)
-        const racePatch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
-          expectedRevision: 2,
-          values: [
-            { _tag: "text", key: "profile", value: "race-rotated" },
-            { _tag: "text", key: "region", value: "eu-west-1" },
-            { _tag: "text", key: "repositoryName", value: "payments-api" }
-          ]
-        })
-        const raceUpdated = yield* administration.patchConfiguration({
+        const raceUpdated = yield* reauthorize({
           workspaceId: WORKSPACE_ID,
           pluginConnectionId: CONNECTION_ID,
-          patch: racePatch
+          expectedRevision: 2,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "race-rotated" }]
         })
-        assert.strictEqual(raceUpdated.revision, 3)
+        assert.strictEqual(raceUpdated.configuration.revision, 3)
         yield* Ref.set(pauseProposalRead, false)
         yield* Deferred.succeed(resumeProposalRead, undefined)
         const publicationResult = yield* Fiber.join(publication)
@@ -2867,20 +2855,13 @@ describe("first-party plugin runtime", () => {
         yield* executorMap.contextEffectForAuthority(governedScope, authorityA)
         assert.strictEqual(yield* Ref.get(providerMutations), 0)
 
-        const governedPatch = Schema.decodeUnknownSync(PatchPluginConfigurationRequest)({
-          expectedRevision: 1,
-          values: [
-            { _tag: "text", key: "profile", value: "rotated" },
-            { _tag: "text", key: "region", value: "eu-west-1" },
-            { _tag: "text", key: "repositoryName", value: "payments-api" }
-          ]
-        })
-        const governedUpdated = yield* administration.patchConfiguration({
+        const governedUpdated = yield* reauthorize({
           workspaceId: GOVERNED_WORKSPACE,
           pluginConnectionId: GOVERNED_CONNECTION,
-          patch: governedPatch
+          expectedRevision: 1,
+          credentials: [{ key: PluginConfigurationKey.make("profile"), value: "rotated" }]
         })
-        assert.strictEqual(governedUpdated.revision, 2)
+        assert.strictEqual(governedUpdated.configuration.revision, 2)
         const authorityB = Schema.decodeSync(PluginRuntimeAuthorityToken)(
           (yield* connectionMap.proposalContextEffect(governedScope)).runtimeAuthorityToken
         )
