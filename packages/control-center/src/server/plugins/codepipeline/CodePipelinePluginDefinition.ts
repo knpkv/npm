@@ -1202,7 +1202,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     const range = yield* actionProvider(
       "pipeline-artifact",
       readClient.getArtifactRange({
-        account: awsAccount,
+        account: action.region === null ? awsAccount : { ...awsAccount, region: action.region },
         bucket: artifact.bucket,
         key: artifact.key,
         offset: request.offset,
@@ -1840,6 +1840,19 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           operation: "execute-authorized-action",
           reconciliationKey
         })
+      }
+      if (Predicate.isTagged(result.failure, "PluginConflictFailure")) {
+        return {
+          _tag: "confirmed",
+          receipt: {
+            status: "failed",
+            providerOperationId: PluginProviderOperationId.make(
+              `rejected:${action._tag}:${request.payloadDigest}`
+            ),
+            safeSummary: "CodePipeline rejected the authorized action without applying it",
+            observedAt
+          }
+        }
       }
       return yield* result.failure
     }

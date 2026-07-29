@@ -44,6 +44,7 @@ import {
   PluginConflictFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
+  PluginRateLimitFailure,
   PluginTimeoutFailure,
   PluginUnknownOutcomeFailure
 } from "../../src/server/plugins/failures.js"
@@ -880,6 +881,18 @@ describe("CodePipelinePlugin", () => {
         "codepipeline-head-artifact",
         { _tag: "AccessDenied" }
       ).pipe(Effect.flip)
+      const slowedHead = yield* mapCodePipelineAwsFailure(
+        "codepipeline-head-artifact",
+        { _tag: "SlowDown" }
+      ).pipe(Effect.flip)
+      const slowedGet = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-artifact",
+        { _tag: "SlowDown" }
+      ).pipe(Effect.flip)
+      const requestLimited = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-artifact",
+        { _tag: "RequestLimitExceeded" }
+      ).pipe(Effect.flip)
 
       assert.instanceOf(requestTimeout, PluginTimeoutFailure)
       assert.instanceOf(requestExpired, PluginTimeoutFailure)
@@ -890,6 +903,9 @@ describe("CodePipelinePlugin", () => {
       assert.instanceOf(readValidation, PluginOutageFailure)
       assert.strictEqual(missingArtifact._tag, "CodePipelineProviderNotFoundFailure")
       assert.instanceOf(deniedArtifact, PluginAuthorizationFailure)
+      assert.instanceOf(slowedHead, PluginRateLimitFailure)
+      assert.instanceOf(slowedGet, PluginRateLimitFailure)
+      assert.instanceOf(requestLimited, PluginRateLimitFailure)
     }))
 
   it.effect("structurally redacts decoded approval tokens in private pipeline state", () =>
@@ -1558,6 +1574,65 @@ describe("CodePipelinePlugin", () => {
         if (Predicate.isTagged(dispatched.failure, "PluginUnknownOutcomeFailure")) {
           assert.match(dispatched.failure.reconciliationKey ?? "", /^codepipeline:start:/u)
         }
+      }
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+    }))
+
+  it.effect("confirms deterministic mutation rejection as a failed no-write receipt", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const rejection = yield* mapCodePipelineAwsFailure(
+        "codepipeline-start-execution",
+        { _tag: "ValidationException" }
+      ).pipe(Effect.flip)
+      const provider = baseProvider({
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(Effect.fail(rejection))
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              },
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "Checkout",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-abc"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-release-deterministic-rejection",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-deterministic-rejection",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          const first = yield* executor.executeAuthorizedAction(authorized)
+          const replay = yield* executor.executeAuthorizedAction(authorized)
+          return { first, replay }
+        })
+      )
+
+      assert.deepStrictEqual(result.first, result.replay)
+      assert.strictEqual(result.first._tag, "confirmed")
+      if (result.first._tag === "confirmed") {
+        assert.strictEqual(result.first.receipt.status, "failed")
+        assert.include(result.first.receipt.safeSummary, "without applying")
       }
       assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
@@ -2542,7 +2617,7 @@ describe("CodePipelinePlugin", () => {
         "arn:aws:sts::123456789012:assumed-role/control-center/connection-session"
       )
       const logCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string, string]>>([])
-      const artifactCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
+      const artifactCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string, string]>>([])
       const provider = baseProvider({
         getCallerIdentity: () =>
           Ref.get(identityArn).pipe(
@@ -2568,7 +2643,11 @@ describe("CodePipelinePlugin", () => {
           ),
         getArtifactRange: (request) =>
           Ref.update(artifactCoordinates, (current) => {
-            const coordinates: readonly [string, string] = [request.bucket, request.key]
+            const coordinates: readonly [string, string, string] = [
+              request.account.region,
+              request.bucket,
+              request.key
+            ]
             return [...current, coordinates]
           }).pipe(
             Effect.as({
@@ -2644,7 +2723,7 @@ describe("CodePipelinePlugin", () => {
         ["eu-west-1", "/aws/codebuild/release", "build"]
       ])
       assert.deepStrictEqual(yield* Ref.get(artifactCoordinates), [
-        ["artifacts", "build.zip"]
+        ["eu-west-1", "artifacts", "build.zip"]
       ])
       assert.strictEqual(result.logs.events[0]?.message, "build completed")
       assert.strictEqual(result.artifact.bytesBase64, "AQID")
@@ -2665,6 +2744,69 @@ describe("CodePipelinePlugin", () => {
       assert.notInclude(serialized, "build.zip")
       assert.notInclude(serialized, "arn:aws")
       assert.notInclude(serialized, "https://")
+    }))
+
+  it.effect("routes action artifacts through the validated action region", () =>
+    Effect.gen(function*() {
+      const regions = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        listActionExecutionsPage: (request) => {
+          const output = actionOutput(
+            request.pipelineExecutionId,
+            `${request.pipelineExecutionId}-action-1`,
+            "Compile",
+            "Succeeded"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((action) => ({
+              ...action,
+              input: {
+                ...action.input,
+                region: "us-west-2"
+              }
+            }))
+          })
+        },
+        getArtifactRange: (request) =>
+          Ref.update(regions, (current) => [...current, request.account.region]).pipe(
+            Effect.as({
+              bytes: Uint8Array.from([1, 2, 3]),
+              contentLength: 3,
+              contentRange: "bytes 0-2/9"
+            })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* pipeline.value.readArtifactRange(
+            Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+              action: {
+                entity: {
+                  entityType: "aws.codepipeline.action",
+                  vendorImmutableId: "execution-1842#execution-1842-action-1"
+                },
+                executionId: "execution-1842",
+                actionExecutionId: "execution-1842-action-1",
+                expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+              },
+              direction: "output",
+              artifactName: "BuildOutput",
+              offset: 0,
+              length: 3
+            })
+          )
+        })
+      )
+
+      assert.strictEqual(result.bytesBase64, "AQID")
+      assert.deepStrictEqual(yield* Ref.get(regions), ["us-west-2"])
     }))
 
   it.effect("routes action logs to the validated action ARN region", () =>

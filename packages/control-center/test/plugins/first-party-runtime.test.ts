@@ -82,6 +82,7 @@ import {
   confluencePagePluginDescriptor,
   historicalConfluenceReadPluginDescriptor
 } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { PluginConflictFailure } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
 import {
@@ -963,7 +964,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("executes an authorized CodePipeline retry through the production registry exactly once", () =>
+  it.effect("folds a deterministic CodePipeline rejection through the production registry exactly once", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(
         Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
@@ -1101,7 +1102,14 @@ describe("first-party plugin runtime", () => {
           ),
         startPipelineExecution: () =>
           Ref.update(mutationCalls, (count) => count + 1).pipe(
-            Effect.as("execution-retry-1")
+            Effect.andThen(
+              Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-provider-state-conflict"
+                })
+              )
+            )
           ),
         stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
         putApprovalResult: () => Effect.die("unused putApprovalResult")
@@ -1201,13 +1209,13 @@ describe("first-party plugin runtime", () => {
           actionId: GOVERNED_ACTION
         })
 
-        assert.deepStrictEqual(execution, { _tag: "advanced", state: "started" })
-        assert.strictEqual(record.head.state, "started")
-        assert.strictEqual(record.head.lineage._tag, "accepted")
-        if (record.head.lineage._tag === "accepted") {
-          assert.strictEqual(record.head.lineage.receipt.status, "accepted")
-          assert.strictEqual(record.head.lineage.receipt.providerOperationId, "execution-retry-1")
-          assert.include(record.head.lineage.receipt.safeSummary, "execution-failed-1")
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "failed" })
+        assert.strictEqual(record.head.state, "failed")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        if (record.head.lineage._tag === "terminal") {
+          assert.strictEqual(record.head.lineage.receipt.status, "failed")
+          assert.include(record.head.lineage.receipt.providerOperationId, "rejected:retry:")
+          assert.include(record.head.lineage.receipt.safeSummary, "without applying")
         }
         const stableAuthority = yield* PluginRuntimeAuthority.pipe(
           Effect.provide(registry.layer(pluginRuntimeKey({

@@ -308,7 +308,7 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
       diagnosticCode: "codepipeline-provider-state-conflict"
     })
   }
-  if (hasTag(cause, ["ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded"])) {
+  if (hasTag(cause, ["SlowDown", "ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded"])) {
     const retryAt = DateTime.add(yield* DateTime.now, { seconds: RETRY_DELAY_SECONDS })
     return yield* new PluginRateLimitFailure({ operation, retryAt })
   }
