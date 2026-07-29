@@ -1020,6 +1020,7 @@ describe("first-party plugin runtime", () => {
               providerPageLimit: 1
             }),
           listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+          findActionExecution: () => Effect.die("unused findActionExecution"),
           getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
           getPipelineState: () => Effect.die("unused getPipelineState"),
           getLogPage: () => Effect.die("unused getLogPage"),
@@ -1318,6 +1319,7 @@ describe("first-party plugin runtime", () => {
         getPipeline: () => Effect.succeed(pipeline),
         listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
         listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
         getExecutionSnapshot: () => Effect.succeed(snapshot),
         getPipelineState: () => Effect.die("unused getPipelineState"),
         getLogPage: () =>
@@ -1576,6 +1578,7 @@ describe("first-party plugin runtime", () => {
         getPipeline: () => Effect.die("unused getPipeline"),
         listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
         listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
         getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
         getPipelineState: () => Effect.die("unused getPipelineState"),
         getLogPage: () => Effect.die("unused getLogPage"),

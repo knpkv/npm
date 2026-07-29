@@ -14,6 +14,12 @@ const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const MaximumArtifactRangeBytes = 1024 * 1024
 const MaximumLogPageBytes = 1024 * 1024
 const utf8Encoder = new TextEncoder()
+const Utf8BoundedLogMessage = Schema.String.check(
+  Schema.makeFilter(
+    (message) => utf8Encoder.encode(message).byteLength <= MaximumLogPageBytes,
+    { expected: `at most ${MaximumLogPageBytes} UTF-8 log message bytes` }
+  )
+)
 
 /** Exact provider action selected for a bounded pipeline evidence read. */
 export const PluginPipelineActionReferenceV1 = Schema.Struct({
@@ -37,7 +43,7 @@ export const PluginPipelineLogPageRequestV1 = Schema.Struct({
 export const PluginPipelineLogEventV1 = Schema.Struct({
   timestamp: UtcTimestamp,
   ingestionTimestamp: Schema.NullOr(UtcTimestamp),
-  message: Schema.String.check(Schema.isMaxLength(16_384))
+  message: Utf8BoundedLogMessage
 })
 
 /** Bounded pipeline action log page with an opaque continuation cursor. */

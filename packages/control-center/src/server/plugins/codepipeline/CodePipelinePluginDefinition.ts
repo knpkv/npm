@@ -1959,7 +1959,17 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     })().pipe(Effect.result)
     if (Result.isFailure(result)) {
       if (Predicate.isTagged(result.failure, "CodePipelinePreDispatchTimeoutFailure")) {
-        return yield* new PluginTimeoutFailure({ operation: result.failure.operation })
+        return {
+          _tag: "confirmed",
+          receipt: {
+            status: "failed",
+            providerOperationId: PluginProviderOperationId.make(
+              `not-dispatched:${action._tag}:${request.payloadDigest}`
+            ),
+            safeSummary: "CodePipeline credentials timed out before the authorized action reached AWS",
+            observedAt
+          }
+        }
       }
       if (
         Predicate.isTagged(result.failure, "PluginTimeoutFailure") ||
@@ -2151,15 +2161,22 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       )
     )
     const executionId = request.authorizedAction.proposal.request.target.vendorImmutableId
-    const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
-    const current = snapshot.actionCollection.actions.find(
-      (candidate) =>
-        candidate.executionId === executionId &&
-        candidate.stageName === payload.stageName &&
-        candidate.actionName === payload.actionName &&
-        candidate.actionExecutionId === payload.actionExecutionId
+    const lookup = yield* actionProvider(
+      "reconcile",
+      readClient.findActionExecution({
+        account: awsAccount,
+        pipelineName: configuration.pipelineName,
+        pipelineExecutionId: executionId,
+        actionExecutionId: payload.actionExecutionId,
+        actionBounds: actionBounds(configuration)
+      })
     )
-    if (current === undefined && snapshot.actionCollection.truncated) return { _tag: "pending", checkedAt }
+    const current = lookup.action === null ||
+        lookup.action.stageName !== payload.stageName ||
+        lookup.action.actionName !== payload.actionName
+      ? undefined
+      : lookup.action
+    if (current === undefined && lookup.truncated) return { _tag: "pending", checkedAt }
     if (payload.approvalStatus === undefined) {
       return yield* new PluginConfigurationFailure({
         diagnosticCode: "codepipeline-reconciliation-approval-status-missing"

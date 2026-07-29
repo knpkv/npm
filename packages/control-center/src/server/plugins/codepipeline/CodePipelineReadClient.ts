@@ -37,8 +37,10 @@ const ACTION_PROVIDER_PAGE_LIMIT = 100
 const PIPELINE_STAGE_LIMIT = 50
 const STAGE_ACTION_LIMIT = 50
 const PROVIDER_PAGE_TOKEN_LIMIT = 2_048
+const MAXIMUM_LOG_EVENT_BYTES = 1024 * 1024
 // Plugin checkpoints allow 2,048 characters and execution sync prefixes provider cursors with `next:`.
 const CHECKPOINT_PROVIDER_TOKEN_LIMIT = 2_043
+const utf8Encoder = new TextEncoder()
 
 const Identifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const PipelineName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
@@ -54,6 +56,12 @@ const CheckpointProviderPageToken = Schema.String.check(
   Schema.isMaxLength(CHECKPOINT_PROVIDER_TOKEN_LIMIT)
 )
 const AwsStatus = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
+const Utf8BoundedLogMessage = Schema.String.check(
+  Schema.makeFilter(
+    (message) => utf8Encoder.encode(message).byteLength <= MAXIMUM_LOG_EVENT_BYTES,
+    { expected: `at most ${MAXIMUM_LOG_EVENT_BYTES} UTF-8 log message bytes` }
+  )
+)
 
 const RawCallerIdentity = Schema.Struct({
   Account: Identifier,
@@ -262,7 +270,7 @@ const RawLogPage = Schema.Struct({
   events: Schema.optionalKey(
     Schema.Array(Schema.Struct({
       timestamp: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
-      message: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(16_384))),
+      message: Schema.optionalKey(Utf8BoundedLogMessage),
       ingestionTime: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)))
     })).check(Schema.isMaxLength(100))
   ),
@@ -473,6 +481,15 @@ export const CodePipelineActionCollection = Schema.Struct({
 /** @internal */
 export type CodePipelineActionCollection = typeof CodePipelineActionCollection.Type
 
+/** Result of a bounded exact action-history lookup. @internal */
+export const CodePipelineActionLookup = Schema.Struct({
+  action: Schema.NullOr(CodePipelineActionExecution),
+  truncated: Schema.Boolean,
+  pagesRead: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), Schema.isLessThanOrEqualTo(5))
+})
+/** @internal */
+export type CodePipelineActionLookup = typeof CodePipelineActionLookup.Type
+
 /** Execution detail and its bounded action history. @internal */
 export const CodePipelineExecutionSnapshot = Schema.Struct({
   execution: CodePipelineExecution,
@@ -513,7 +530,7 @@ export const CodePipelineLogPage = Schema.Struct({
   events: Schema.Array(Schema.Struct({
     timestamp: Schema.Date,
     ingestionTimestamp: Schema.NullOr(Schema.Date),
-    message: Schema.String.check(Schema.isMaxLength(16_384))
+    message: Utf8BoundedLogMessage
   })).check(Schema.isMaxLength(100)),
   nextToken: Schema.NullOr(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(3_900)))
 })
@@ -606,6 +623,12 @@ export interface CodePipelineReadClientService {
       readonly summary: CodePipelineExecutionSummary | null
     }
   ) => Effect.Effect<CodePipelineExecutionSnapshot, CodePipelineProviderFailure>
+  readonly findActionExecution: (
+    request: GetPipelineExecutionProviderRequest & {
+      readonly actionExecutionId: string
+      readonly actionBounds: CodePipelineActionReadBounds
+    }
+  ) => Effect.Effect<CodePipelineActionLookup, CodePipelineProviderFailure>
   readonly getPipelineState: (
     request: GetPipelineStateProviderRequest
   ) => Effect.Effect<CodePipelinePipelineState, CodePipelineProviderFailure>
@@ -793,6 +816,76 @@ export class CodePipelineReadClient extends Context.Service<
         })
       })
 
+      const findActionExecution = Effect.fn("CodePipelineReadClient.findActionExecution")(function*(
+        request: GetPipelineExecutionProviderRequest & {
+          readonly actionExecutionId: string
+          readonly actionBounds: CodePipelineActionReadBounds
+        }
+      ): Effect.fn.Return<CodePipelineActionLookup, CodePipelineProviderFailure> {
+        const actionIds = new Set<string>()
+        const seenTokens = new Set<string>()
+        let nextToken: string | null = null
+        let pagesRead = 0
+
+        while (pagesRead < request.actionBounds.maximumPages) {
+          const maximumResults = Math.min(
+            ACTION_PROVIDER_PAGE_LIMIT,
+            request.actionBounds.pageSize
+          )
+          const raw: unknown = yield* provider.listActionExecutionsPage({
+            ...request,
+            maximumResults,
+            nextToken
+          })
+          const response: typeof RawActionPage.Type = yield* decodeProvider(
+            "codepipeline-find-action",
+            RawActionPage,
+            raw
+          )
+          const details: ReadonlyArray<typeof RawActionDetail.Type> = response.actionExecutionDetails ?? []
+          if (details.length > maximumResults) {
+            return yield* malformed("codepipeline-find-action", "codepipeline-action-page-limit-exceeded")
+          }
+          const normalized = yield* Effect.forEach(details, (action) => normalizeAction(action))
+          for (const action of normalized) {
+            if (action.executionId !== request.pipelineExecutionId) {
+              return yield* malformed("codepipeline-find-action", "codepipeline-action-execution-mismatch")
+            }
+            if (actionIds.has(action.actionExecutionId)) {
+              return yield* malformed("codepipeline-find-action", "codepipeline-action-identity-duplicate")
+            }
+            actionIds.add(action.actionExecutionId)
+          }
+          pagesRead += 1
+          const found = normalized.find(({ actionExecutionId }) => actionExecutionId === request.actionExecutionId)
+          if (found !== undefined) {
+            return yield* decodeModel("codepipeline-find-action", CodePipelineActionLookup, {
+              action: found,
+              truncated: false,
+              pagesRead
+            })
+          }
+          const followingToken: string | null = response.nextToken ?? null
+          if (followingToken === null) {
+            return yield* decodeModel("codepipeline-find-action", CodePipelineActionLookup, {
+              action: null,
+              truncated: false,
+              pagesRead
+            })
+          }
+          if (seenTokens.has(followingToken) || followingToken === nextToken) {
+            return yield* malformed("codepipeline-find-action", "codepipeline-action-cursor-repeated")
+          }
+          seenTokens.add(followingToken)
+          nextToken = followingToken
+        }
+        return yield* decodeModel("codepipeline-find-action", CodePipelineActionLookup, {
+          action: null,
+          truncated: true,
+          pagesRead
+        })
+      })
+
       const getExecutionSnapshot = Effect.fn("CodePipelineReadClient.getExecutionSnapshot")(function*(
         request: GetPipelineExecutionProviderRequest & {
           readonly actionBounds: CodePipelineActionReadBounds
@@ -976,6 +1069,7 @@ export class CodePipelineReadClient extends Context.Service<
 
       return {
         discoverAccount,
+        findActionExecution,
         getArtifactRange,
         getExecutionSnapshot,
         getLogPage,

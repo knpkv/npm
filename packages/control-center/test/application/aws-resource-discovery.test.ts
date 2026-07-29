@@ -53,6 +53,7 @@ const codePipelineClient = (
   overrides: Partial<CodePipelineReadClientService> = {}
 ): CodePipelineReadClientService => ({
   discoverAccount: () => Effect.die("unused"),
+  findActionExecution: () => Effect.die("unused"),
   getExecutionSnapshot: () => Effect.die("unused"),
   getArtifactRange: () => Effect.die("unused"),
   getLogPage: () => Effect.die("unused"),

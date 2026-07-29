@@ -2916,10 +2916,13 @@ describe("CodePipelinePlugin", () => {
         true
       )
 
-      assert.isTrue(Result.isFailure(beforeDispatch))
-      if (Result.isFailure(beforeDispatch)) {
-        assert.instanceOf(beforeDispatch.failure, PluginTimeoutFailure)
-        assert.isFalse(Predicate.isTagged(beforeDispatch.failure, "PluginUnknownOutcomeFailure"))
+      assert.isTrue(Result.isSuccess(beforeDispatch))
+      if (Result.isSuccess(beforeDispatch)) {
+        assert.strictEqual(beforeDispatch.success._tag, "confirmed")
+        if (beforeDispatch.success._tag === "confirmed") {
+          assert.strictEqual(beforeDispatch.success.receipt.status, "failed")
+          assert.match(beforeDispatch.success.receipt.providerOperationId, /^not-dispatched:stop:/u)
+        }
       }
       assert.isTrue(Result.isFailure(onWire))
       if (Result.isFailure(onWire)) {
@@ -2934,23 +2937,33 @@ describe("CodePipelinePlugin", () => {
   it.effect("reconciles an ambiguous approval from its exact execution history", () =>
     Effect.gen(function*() {
       const currentState = yield* Ref.make<"pending" | "missing">("pending")
-      const historicalState = yield* Ref.make<"InProgress" | "Succeeded" | "Truncated">("InProgress")
+      const historicalState = yield* Ref.make<"InProgress" | "PagedSucceeded">("InProgress")
+      const historyCursors = yield* Ref.make<ReadonlyArray<string | null>>([])
       const provider = baseProvider({
         getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "InProgress")),
         listActionExecutionsPage: (request) =>
-          Ref.get(historicalState).pipe(
-            Effect.map((status) => {
-              if (status === "Truncated") {
+          Effect.all([
+            Ref.update(historyCursors, (current) => [...current, request.nextToken]),
+            Ref.get(historicalState)
+          ]).pipe(
+            Effect.map(([, status]) => {
+              if (status === "PagedSucceeded" && request.nextToken === null) {
+                const output = actionOutput(
+                  request.pipelineExecutionId,
+                  `${request.pipelineExecutionId}-newer-action`,
+                  "AfterApproval",
+                  "Succeeded"
+                )
                 return {
-                  actionExecutionDetails: [],
-                  nextToken: request.nextToken === null ? "approval-history-page-2" : "approval-history-page-3"
+                  ...output,
+                  nextToken: "approval-history-page-2"
                 }
               }
               const output = actionOutput(
                 request.pipelineExecutionId,
                 `${request.pipelineExecutionId}-approval-1`,
                 "ReleaseApproval",
-                status
+                status === "PagedSucceeded" ? "Succeeded" : status
               )
               return {
                 ...output,
@@ -3035,18 +3048,17 @@ describe("CodePipelinePlugin", () => {
             authorizedAction: authorized
           }
           const pending = yield* executor.reconcile(reconciliation)
-          yield* Ref.set(historicalState, "Truncated")
-          const truncated = yield* executor.reconcile(reconciliation)
           yield* Ref.set(currentState, "missing")
-          yield* Ref.set(historicalState, "Succeeded")
+          yield* Ref.set(historicalState, "PagedSucceeded")
           const succeededFromHistory = yield* executor.reconcile(reconciliation)
-          return { pending, succeededFromHistory, truncated }
-        })
+          return { pending, succeededFromHistory }
+        }),
+        { ...configuration, maximumActionsPerExecution: 1 }
       )
 
       assert.strictEqual(result.pending._tag, "pending")
-      assert.strictEqual(result.truncated._tag, "pending")
       assert.strictEqual(result.succeededFromHistory._tag, "succeeded")
+      assert.include(yield* Ref.get(historyCursors), "approval-history-page-2")
     }))
 
   it.effect("revalidates action identity before bounded logs and artifact bytes leave the plugin", () =>
@@ -3612,6 +3624,67 @@ describe("CodePipelinePlugin", () => {
       }
       assert.deepStrictEqual(yield* Ref.get(providerCursors), [null, null, null, null])
       assert.deepStrictEqual(yield* Ref.get(providerLimits), [100, 100, 100, 100])
+    }))
+
+  it.effect("accepts UTF-8 log events up to the configured and absolute byte ceilings", () =>
+    Effect.gen(function*() {
+      const request = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+        action: {
+          entity: {
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "execution-1842#execution-1842-action-1"
+          },
+          executionId: "execution-1842",
+          actionExecutionId: "execution-1842-action-1",
+          expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+        },
+        cursor: null,
+        limit: 1
+      })
+      const read = (message: string, maximumLogBytes: number) =>
+        runWithProvider(
+          baseProvider({
+            getLogEventsPage: () => Effect.succeed({ events: [{ timestamp: 1, message }] })
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const pipeline = connection.pipeline
+            if (pipeline === undefined || Option.isNone(pipeline)) {
+              return yield* Effect.die("pipeline reader missing")
+            }
+            return yield* pipeline.value.readLogPage(request)
+          }),
+          { ...configuration, maximumLogBytes }
+        )
+
+      const previousBoundary = "x".repeat(16_384)
+      const largeAscii = "x".repeat(20 * 1024)
+      const largeMultibyte = "é".repeat(10 * 1024)
+      const valid = yield* Effect.all([
+        read(previousBoundary, 32 * 1024),
+        read(largeAscii, 32 * 1024),
+        read(largeMultibyte, 32 * 1024)
+      ])
+      const aboveConfigured = yield* read("x".repeat(32 * 1024 + 1), 32 * 1024).pipe(Effect.result)
+      const aboveProvider = yield* read("x".repeat(1024 * 1024 + 1), 1024 * 1024).pipe(Effect.result)
+
+      assert.deepStrictEqual(valid.map(({ events }) => events[0]?.message.length), [
+        previousBoundary.length,
+        largeAscii.length,
+        largeMultibyte.length
+      ])
+      assert.isTrue(Result.isFailure(aboveConfigured))
+      if (Result.isFailure(aboveConfigured)) {
+        assert.instanceOf(aboveConfigured.failure, PluginMalformedResponseFailure)
+        assert.strictEqual(
+          aboveConfigured.failure.diagnosticCode,
+          "codepipeline-log-event-byte-bound-exceeded"
+        )
+      }
+      assert.isTrue(Result.isFailure(aboveProvider))
+      if (Result.isFailure(aboveProvider)) {
+        assert.instanceOf(aboveProvider.failure, PluginMalformedResponseFailure)
+      }
     }))
 
   it.effect("rejects out-of-range bounds before any provider call", () =>
