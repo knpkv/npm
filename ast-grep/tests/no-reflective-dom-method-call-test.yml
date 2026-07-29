@@ -1,0 +1,6 @@
+id: no-reflective-dom-method-call
+valid:
+  - line.replaceWith(line.cloneNode(true))
+  - Reflect.getMetadata(key, target)
+invalid:
+  - Reflect.apply(Reflect.get(line, "cloneNode"), line, [true])

@@ -6,6 +6,7 @@ import { cssClass } from "../internal/component.js"
 import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "./annotation.js"
 import styles from "./DiffCodeView.module.css"
 import { parseDiffFilePair, validateDiffCodeItem } from "./parse-diff.js"
+import { renderedDiffLine } from "./rendered-line.js"
 import { ensureRlyDiffThemes, RLY_DIFF_THEMES } from "./themes.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle, RlyDiffCodeViewProps } from "./types.js"
 import { useDiffWorkerState } from "./worker-pool.js"
@@ -71,11 +72,13 @@ const joinClassNames = (className: string | undefined): string =>
 
 const keepRenderedDiffKeyboardAccessible = (
   node: HTMLElement,
+  itemId: string,
   phase: "mount" | "unmount" | "update",
   scrollable: boolean
 ): void => {
   if (phase === "unmount") return
   const root = node.shadowRoot
+  node.dataset.rlyDiffItem = itemId
   node.style.setProperty("--diffs-selection-number-fg", "var(--rly-color-text-1)")
   if (scrollable) {
     for (const region of root?.querySelectorAll<HTMLElement>("code[data-code]") ?? []) {
@@ -106,6 +109,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
     expandContext = false,
     initialItems,
     mode = "split",
+    onItemRender,
     onSelectedLinesChange,
     selectedLines,
     virtualization = "buffered",
@@ -121,6 +125,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
   ensureRlyDiffThemes()
 
   const workerState = useDiffWorkerState()
+  const rendererContainerRef = useRef<HTMLDivElement>(null)
   const rendererRef = useRef<CodeViewHandle<AnnotationMetadata>>(null)
   const annotationsRef = useRef(annotations)
   const previousAnnotationsRef = useRef(annotations)
@@ -159,6 +164,17 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
         })
         rendererRef.current?.addItems(rendererItems)
       },
+      focusLine(target) {
+        const container = rendererContainerRef.current?.querySelector<HTMLElement>(
+          `diffs-container[data-rly-diff-item="${CSS.escape(target.id)}"]`
+        )
+        if (container === null || container === undefined) return false
+        const line = renderedDiffLine(container, target)
+        if (line === null) return false
+        line.tabIndex = -1
+        line.focus({ preventScroll: true })
+        return container.shadowRoot?.activeElement === line
+      },
       scrollTo(target) {
         rendererRef.current?.scrollTo(target)
       },
@@ -189,6 +205,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
         key={workerState.status}
         ref={rendererRef}
         className={cssClass(styles, "viewer")}
+        containerRef={rendererContainerRef}
         disableWorkerPool={workerState.status !== "worker"}
         initialItems={rendererItems}
         {...(onSelectedLinesChange === undefined ? {} : { onSelectedLinesChange })}
@@ -203,7 +220,10 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
           expansionLineCount: contextLines,
           hunkSeparators: "line-info-basic",
           layout: { gap: 8, paddingBottom: 8, paddingTop: 8 },
-          onPostRender: (node, _instance, phase) => keepRenderedDiffKeyboardAccessible(node, phase, !wrap),
+          onPostRender: (node, _instance, phase, context) => {
+            keepRenderedDiffKeyboardAccessible(node, context.item.id, phase, !wrap)
+            if (phase !== "unmount") onItemRender?.(context.item.id, workerState.status)
+          },
           overflow: wrap ? "wrap" : "scroll",
           stickyHeaders: true,
           theme: RLY_DIFF_THEMES

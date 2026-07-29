@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-blob-byte-removal
+language: tsx
+severity: error
+message: "Authorize reproducible storage metadata through ContentStore before removing blob bytes"
+
+rule:
+  pattern: $STORE.removeAuthorizedBytes($$$ARGS)
+
+files:
+  - "packages/control-center/src/**/*.ts"
+
+ignores:
+  - "packages/control-center/src/server/persistence/ContentStore.ts"
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  BlobStore deliberately has no SQL dependency. ContentStore is the single
+  authorization boundary that verifies reproducible-cache metadata before it
+  delegates to the raw byte-removal primitive.

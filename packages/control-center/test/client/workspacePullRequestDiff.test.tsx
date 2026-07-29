@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import type { RlyDiffCodeViewHandle } from "@knpkv/rly/diff"
 import * as Schema from "effect/Schema"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
@@ -15,6 +16,7 @@ import { PluginConnectionId } from "../../src/domain/identifiers.js"
 import { PluginRelativePathV1 } from "../../src/domain/plugins/events.js"
 import { PrReviewSuggestion } from "../../src/domain/prReview.js"
 import { Revision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
+import { DiffLineFocus } from "../../src/client/entities/DiffLineFocus.js"
 import {
   browserWorkspacePullRequestDiffTransport,
   WorkspacePullRequestDiff,
@@ -28,9 +30,41 @@ const roots: Array<ReturnType<typeof createRoot>> = []
 
 const flushLazyDiffViewer = async (): Promise<void> => {
   await act(async () => {
-    await import("@knpkv/rly/diff/bounded")
+    await import("@knpkv/rly/diff")
     await vi.dynamicImportSettled()
+    await new Promise((resolve) => window.setTimeout(resolve, 60))
   })
+}
+
+const fullDiffText = (host: HTMLElement): string =>
+  [...host.querySelectorAll<HTMLElement>("diffs-container")]
+    .map((container) => container.shadowRoot?.textContent ?? "")
+    .join("")
+
+const fullDiffLine = (host: HTMLElement, lineNumber: number, side: "additions" | "deletions"): HTMLElement | null => {
+  const sideContainer = side === "additions" ? "data-additions" : "data-deletions"
+  const lineType = side === "additions" ? "change-addition" : "change-deletion"
+  for (const container of host.querySelectorAll<HTMLElement>("diffs-container")) {
+    const line =
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-code][${sideContainer}] [data-line="${String(lineNumber)}"]`
+      ) ??
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-line="${String(lineNumber)}"][data-line-type="${lineType}"]`
+      ) ??
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-code][${sideContainer}] [data-alt-line="${String(lineNumber)}"]`
+      )
+    if (line !== null && line !== undefined) return line
+  }
+  return null
+}
+
+const expectShadowFocused = (target: HTMLElement | null): void => {
+  expect(target).not.toBeNull()
+  const root = target?.getRootNode()
+  if (root === undefined || !("activeElement" in root)) throw new Error("Expected a shadow-root focus owner")
+  expect(root.activeElement).toBe(target)
 }
 
 afterEach(async () => {
@@ -487,7 +521,107 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
   })
 
-  it("renders bounded content through the complete line diff viewer", async () => {
+  it("shows every lazily loaded text item in all-files mode without hydrating untouched inventory", async () => {
+    const content = vi.fn(
+      async (
+        _scope: WorkspacePullRequestDiffScope,
+        entry: Pick<CompleteDiffInventoryEntry, "anchor" | "path" | "previousPath" | "status">,
+        side: "before" | "after"
+      ): Promise<CompleteDiffContentRange> => {
+        const text = `${side}:${String(entry.path)}`
+        return {
+          bytesBase64: btoa(text),
+          totalBytes: text.length,
+          unavailableReason: null
+        }
+      }
+    )
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: fileAnchor,
+            path: PluginRelativePathV1.make("src/file.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: otherFileAnchor,
+            path: PluginRelativePathV1.make("src/other.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: binaryFileAnchor,
+            path: PluginRelativePathV1.make("src/binary.bin"),
+            previousPath: null,
+            status: "modified",
+            binary: true,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: generatedFileAnchor,
+            path: PluginRelativePathV1.make("src/generated.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: true,
+            oversized: false
+          }
+        ]
+      }),
+      content
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(<WorkspacePullRequestDiff heading="PR 184" scope={scope} transport={transport} />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+    expect(content).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+    expect(content).toHaveBeenCalledTimes(4)
+
+    const showAll = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Show all files"
+    )
+    if (showAll === undefined) throw new Error("Expected the all-files workbench control")
+    await act(async () => {
+      showAll.click()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    expect(content).toHaveBeenCalledTimes(4)
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${fileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${otherFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`[data-rly-diff-file-id="${binaryFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`[data-rly-diff-file-id="${generatedFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${binaryFileAnchor}"]`)).toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${generatedFileAnchor}"]`)).toBeNull()
+  })
+
+  it("renders complete content synchronously when worker acceleration is unavailable", async () => {
+    vi.stubGlobal("Worker", undefined)
     const transport: WorkspacePullRequestDiffTransport = {
       inventory: async (): Promise<CompleteDiffInventory> => ({
         ready: true,
@@ -528,8 +662,9 @@ describe("WorkspacePullRequestDiff", () => {
 
     expect(host.querySelector("[data-rly-diff-workbench-slot='viewer']")).not.toBeNull()
     expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
-    expect(host.textContent).toContain("answer = 42")
-    expect(host.textContent).toContain("answer = 43")
+    expect(fullDiffText(host)).toContain("answer = 42")
+    expect(fullDiffText(host)).toContain("answer = 43")
+    expect(host.textContent).toContain("Worker acceleration is unavailable")
     expect(host.textContent).toContain("P2 · Keep the supported invariant")
     expect(host.textContent).toContain("Impact:")
     expect(host.textContent).toContain("Recommendation:")
@@ -599,6 +734,13 @@ describe("WorkspacePullRequestDiff", () => {
     })
     await flushLazyDiffViewer()
 
+    const stackedLayout = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Stacked"
+    )
+    if (stackedLayout === undefined) throw new Error("Expected stacked diff layout control")
+    await act(async () => stackedLayout.click())
+    await flushLazyDiffViewer()
+
     const relatedLocation = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "src/other.ts:8"
     )
@@ -613,11 +755,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(
       host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
     ).toBe("true")
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
-    )
-    expect(target).not.toBeNull()
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 8, "additions"))
   })
 
   it("navigates line-suggestion related locations only when their diff content is actionable", async () => {
@@ -720,10 +858,7 @@ describe("WorkspacePullRequestDiff", () => {
     })
     await flushLazyDiffViewer()
 
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
-    )
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 8, "additions"))
   })
 
   it("attaches a BEFORE file anchor to the previous path of a rename", async () => {
@@ -784,10 +919,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(
       host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
     ).toBe("true")
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="1"][data-rly-diff-line-side="deletions"]`
-    )
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 1, "deletions"))
   })
 
   it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {
@@ -814,5 +946,137 @@ describe("WorkspacePullRequestDiff", () => {
       "1 validated review suggestion is not attached because the anchor path is absent from this diff inventory."
     )
     expect(host.textContent).toContain("P2 · Keep the supported invariant")
+  })
+})
+
+describe("DiffLineFocus ownership", () => {
+  const viewer = (focusLine: () => boolean): RlyDiffCodeViewHandle => ({
+    addItems: vi.fn(),
+    focusLine: vi.fn(focusLine),
+    scrollTo: vi.fn(),
+    updateItem: vi.fn(() => false)
+  })
+
+  it("becomes idle when the requested line is absent", async () => {
+    const callbacks: Array<FrameRequestCallback> = []
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
+    )
+    vi.stubGlobal("cancelAnimationFrame", vi.fn())
+    const viewerRoot = document.createElement("div")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => false)
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={999}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+      await Promise.resolve()
+    })
+    while (callbacks.length > 0) callbacks.shift()?.(0)
+
+    const attemptsWhenIdle = vi.mocked(handle.focusLine).mock.calls.length
+    expect(attemptsWhenIdle).toBeGreaterThan(0)
+    expect(callbacks).toHaveLength(0)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(handle.focusLine).toHaveBeenCalledTimes(attemptsWhenIdle)
+  })
+
+  it("reclaims renderer-owned focus until the user moves to another control", async () => {
+    const viewerRoot = document.createElement("div")
+    const container = document.createElement("diffs-container")
+    const shadow = container.shadowRoot
+    if (shadow === null) throw new Error("Expected the diff container shadow root")
+    const line = document.createElement("span")
+    line.tabIndex = -1
+    shadow.append(line)
+    viewerRoot.append(container)
+    const toolbar = document.createElement("button")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, toolbar, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => {
+      const renderedLine = shadow.querySelector<HTMLElement>("span")
+      if (renderedLine === null) return false
+      renderedLine.focus()
+      return true
+    })
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={1}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+    })
+    expectShadowFocused(line)
+    const replacement = document.createElement("span")
+    replacement.tabIndex = -1
+    shadow.replaceChildren(replacement)
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+    expectShadowFocused(replacement)
+    expect(handle.focusLine).toHaveBeenCalledTimes(2)
+
+    toolbar.focus()
+    shadow.replaceChildren(document.createElement("span"))
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+
+    expect(document.activeElement).toBe(toolbar)
+    expect(handle.focusLine).toHaveBeenCalledTimes(2)
+  })
+
+  it("relinquishes a pending request when the user focuses another control", async () => {
+    const viewerRoot = document.createElement("div")
+    const toolbar = document.createElement("button")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, toolbar, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => false)
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={1}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+    })
+    const attemptsBeforeUserFocus = vi.mocked(handle.focusLine).mock.calls.length
+    toolbar.focus()
+    viewerRoot.append(document.createElement("diffs-container"))
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+
+    expect(document.activeElement).toBe(toolbar)
+    expect(handle.focusLine).toHaveBeenCalledTimes(attemptsBeforeUserFocus)
   })
 })

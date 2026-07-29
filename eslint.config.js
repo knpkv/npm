@@ -187,6 +187,18 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/control-center/{src,test,e2e}/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/no-invalid-branded-uuid-literal": "error"
+    }
+  },
+  {
+    files: ["packages/control-center/e2e/**/*.spec.ts"],
+    rules: {
+      "local-rules/require-playwright-clock-before-navigation": "error"
+    }
+  },
+  {
     files: [
       "packages/control-center/src/server/auth/Auth.ts",
       "packages/control-center/src/server/auth/TerminalRecovery.ts",

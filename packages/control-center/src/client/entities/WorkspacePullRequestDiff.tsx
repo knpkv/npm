@@ -8,12 +8,18 @@ import {
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
-import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
+import type {
+  RlyDiffCodeAnnotation,
+  RlyDiffCodeItem,
+  RlyDiffRendererGeneration,
+  RlyDiffCodeViewHandle,
+  RlyDiffCodeViewProps
+} from "@knpkv/rly/diff"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { forwardRef, lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
@@ -22,9 +28,14 @@ import type { PrReviewSuggestion, PrReviewSuggestionState } from "../../domain/p
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import styles from "./WorkspacePullRequestDiff.module.css"
 
-const BoundedDiffCodeView = lazy(async () => {
-  const module = await import("@knpkv/rly/diff/bounded")
-  return { default: module.BoundedDiffCodeView }
+const CompleteDiffCodeView = lazy(async () => {
+  const module = await import("@knpkv/rly/diff")
+  const Viewer = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>((props, ref): ReactElement => (
+    <module.DiffWorkerProvider poolSize={2}>
+      <module.DiffCodeView {...props} ref={ref} />
+    </module.DiffWorkerProvider>
+  ))
+  return { default: Viewer }
 })
 const DiffLineFocus = lazy(async () => {
   const module = await import("./DiffLineFocus.js")
@@ -194,6 +205,10 @@ export const WorkspacePullRequestDiff = ({
   readonly suggestions?: ReadonlyArray<PrReviewSuggestion>
   readonly transport?: WorkspacePullRequestDiffTransport
 }): ReactElement => {
+  const onSessionExpiredRef = useRef(onSessionExpired)
+  const scopeRef = useRef(scope)
+  onSessionExpiredRef.current = onSessionExpired
+  scopeRef.current = scope
   const [inventoryState, setInventoryState] = useState<InventoryLoadState>({ _tag: "loading" })
   const [selectedFileId, setSelectedFileId] = useState<string>()
   const [contentStates, setContentStates] = useState<ReadonlyMap<string, RlyDiffFileContent>>(new Map())
@@ -211,6 +226,14 @@ export const WorkspacePullRequestDiff = ({
     readonly side: "additions" | "deletions"
   }>()
   const viewerRef = useRef<HTMLDivElement>(null)
+  const allFilesTargetRef = useRef<string | undefined>(undefined)
+  const appliedAllFilesGenerationsRef = useRef<Set<RlyDiffRendererGeneration>>(new Set())
+  const diffCodeViewRef = useRef<RlyDiffCodeViewHandle | null>(null)
+  const [diffCodeView, setDiffCodeView] = useState<RlyDiffCodeViewHandle | null>(null)
+  const attachDiffCodeView = useCallback((viewer: RlyDiffCodeViewHandle | null): void => {
+    diffCodeViewRef.current = viewer
+    setDiffCodeView(viewer)
+  }, [])
 
   useEffect(() => {
     setFindingFilter("agent")
@@ -226,7 +249,9 @@ export const WorkspacePullRequestDiff = ({
     setLoadedText(new Map())
     setContentRetryKey(0)
     setFocusRequest(undefined)
-    transport.inventory(scope, abort.signal).then(
+    allFilesTargetRef.current = undefined
+    appliedAllFilesGenerationsRef.current.clear()
+    transport.inventory(scopeRef.current, abort.signal).then(
       (inventory) => {
         if (abort.signal.aborted) return
         setInventoryState({ _tag: "ready", inventory })
@@ -235,14 +260,14 @@ export const WorkspacePullRequestDiff = ({
       (failure) => {
         if (abort.signal.aborted) return
         if (sessionKey !== null && isUnauthorizedFailure(failure)) {
-          onSessionExpired(sessionKey)
+          onSessionExpiredRef.current(sessionKey)
           return
         }
         setInventoryState({ _tag: "failed" })
       }
     )
     return () => abort.abort()
-  }, [onSessionExpired, scope.pluginConnectionId, scope.revision, scope.vendorImmutableId, sessionKey, transport])
+  }, [scope.pluginConnectionId, scope.revision, scope.vendorImmutableId, sessionKey, transport])
 
   const entries = inventoryState._tag === "ready" ? inventoryState.inventory.entries : []
   const selectedEntry = entries.find(({ anchor }) => anchor === selectedFileId)
@@ -263,8 +288,8 @@ export const WorkspacePullRequestDiff = ({
       })
     )
     Promise.all([
-      transport.content(scope, selectedEntry, "before", abort.signal),
-      transport.content(scope, selectedEntry, "after", abort.signal)
+      transport.content(scopeRef.current, selectedEntry, "before", abort.signal),
+      transport.content(scopeRef.current, selectedEntry, "after", abort.signal)
     ]).then(
       ([before, after]) => {
         if (abort.signal.aborted) return
@@ -300,7 +325,7 @@ export const WorkspacePullRequestDiff = ({
       (failure) => {
         if (abort.signal.aborted) return
         if (sessionKey !== null && isUnauthorizedFailure(failure)) {
-          onSessionExpired(sessionKey)
+          onSessionExpiredRef.current(sessionKey)
           return
         }
         setContentStates((current) =>
@@ -312,7 +337,7 @@ export const WorkspacePullRequestDiff = ({
       }
     )
     return () => abort.abort()
-  }, [contentRetryKey, loadedText, onSessionExpired, scope, selectedEntry, sessionKey, transport])
+  }, [contentRetryKey, loadedText, selectedEntry, sessionKey, transport])
 
   const files = useMemo(
     () => entries.map((entry) => toFile(entry, contentStates.get(entry.anchor) ?? explicitContent(entry))),
@@ -331,28 +356,54 @@ export const WorkspacePullRequestDiff = ({
             state: "error"
           }
         : { files, state: "ready" }
-  const selectedText = selectedFileId === undefined ? undefined : loadedText.get(selectedFileId)
-  const selectedCodeItems = useMemo<ReadonlyArray<RlyDiffCodeItem>>(
+  const loadedCodeItems = useMemo<ReadonlyArray<RlyDiffCodeItem>>(
     () =>
-      selectedEntry === undefined || selectedText === undefined
-        ? []
-        : [
-            {
-              id: selectedEntry.anchor,
-              before: {
-                cacheKey: `${scope.revision}:${selectedEntry.anchor}:before`,
-                contents: selectedText.before,
-                name: selectedEntry.previousPath ?? selectedEntry.path
-              },
-              after: {
-                cacheKey: `${scope.revision}:${selectedEntry.anchor}:after`,
-                contents: selectedText.after,
-                name: selectedEntry.path
+      entries.flatMap((entry) => {
+        const text = loadedText.get(entry.anchor)
+        return text === undefined
+          ? []
+          : [
+              {
+                id: entry.anchor,
+                before: {
+                  cacheKey: `${scope.revision}:${entry.anchor}:before`,
+                  contents: text.before,
+                  name: entry.previousPath ?? entry.path
+                },
+                after: {
+                  cacheKey: `${scope.revision}:${entry.anchor}:after`,
+                  contents: text.after,
+                  name: entry.path
+                }
               }
-            }
-          ],
-    [scope.revision, selectedEntry, selectedText]
+            ]
+      }),
+    [entries, loadedText, scope.revision]
   )
+  const visibleCodeItems =
+    selectedFileId === undefined ? loadedCodeItems : loadedCodeItems.filter(({ id }) => id === selectedFileId)
+  useEffect(() => {
+    if (selectedFileId !== undefined || diffCodeView === null || allFilesTargetRef.current === undefined) return
+    diffCodeView.scrollTo({
+      align: "start",
+      id: allFilesTargetRef.current,
+      type: "item"
+    })
+  }, [diffCodeView, selectedFileId])
+  const onDiffItemRender = useCallback((itemId: string, generation: RlyDiffRendererGeneration): void => {
+    const target = allFilesTargetRef.current
+    if (target === undefined || appliedAllFilesGenerationsRef.current.has(generation)) return
+    diffCodeViewRef.current?.scrollTo({
+      align: "start",
+      id: target,
+      type: "item"
+    })
+    if (itemId !== target) return
+    viewerRef.current
+      ?.querySelector(`diffs-container[data-rly-diff-item="${CSS.escape(target)}"]`)
+      ?.scrollIntoView({ block: "nearest" })
+    appliedAllFilesGenerationsRef.current.add(generation)
+  }, [])
   const visibleSuggestions = useMemo(
     () =>
       suggestions.filter(
@@ -364,6 +415,8 @@ export const WorkspacePullRequestDiff = ({
     [findingFilter, severityFilter, suggestionStateFilter, suggestions]
   )
   const navigateToLine = useCallback((fileId: string, lineNumber: number, side: "additions" | "deletions"): void => {
+    allFilesTargetRef.current = undefined
+    appliedAllFilesGenerationsRef.current.clear()
     setFocusRequest((current) => ({
       fileId,
       lineNumber,
@@ -523,6 +576,8 @@ export const WorkspacePullRequestDiff = ({
             data={inventory}
             heading="Complete file inventory"
             onSelectedFileChange={(fileId) => {
+              allFilesTargetRef.current = undefined
+              appliedAllFilesGenerationsRef.current.clear()
               if (contentStates.get(fileId)?.state === "error") {
                 setContentStates((current) => {
                   const next = new Map(current)
@@ -537,7 +592,11 @@ export const WorkspacePullRequestDiff = ({
           />
         }
         label={`Complete diff for ${heading}`}
-        onShowAllFiles={() => setSelectedFileId(undefined)}
+        onShowAllFiles={() => {
+          allFilesTargetRef.current = visibleCodeItems[0]?.id ?? loadedCodeItems.at(-1)?.id
+          appliedAllFilesGenerationsRef.current.clear()
+          setSelectedFileId(undefined)
+        }}
         scope={
           selectedEntry === undefined
             ? { label: "All changed files", mode: "all-files" }
@@ -545,28 +604,34 @@ export const WorkspacePullRequestDiff = ({
         }
         statusNotice={
           selectedEntry === undefined
-            ? "Select a supported file to load its content."
-            : selectedText === undefined
+            ? loadedCodeItems.length === 0
+              ? "Select a supported file to load its content."
+              : `Showing ${String(loadedCodeItems.length)} lazily loaded ${
+                  loadedCodeItems.length === 1 ? "file" : "files"
+                }.`
+            : visibleCodeItems.length === 0
               ? contentStates.get(selectedEntry.anchor)?.state === "loading"
                 ? "Loading this file only."
                 : "Content is not rendered for this file."
               : undefined
         }
         viewer={
-          selectedEntry === undefined || selectedText === undefined ? (
+          visibleCodeItems.length === 0 ? (
             "Select a supported text file to render its change."
           ) : (
             <div className={styles.viewerTarget} ref={viewerRef}>
               <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-                <BoundedDiffCodeView
+                <CompleteDiffCodeView
                   annotations={annotations}
-                  key={selectedEntry.anchor}
-                  initialItems={selectedCodeItems}
+                  key={selectedFileId ?? "all-files"}
+                  initialItems={visibleCodeItems}
                   mode={layout}
+                  onItemRender={onDiffItemRender}
+                  ref={attachDiffCodeView}
                   wrap={isWrapped}
                 />
               </Suspense>
-              {focusRequest === undefined || focusRequest.fileId !== selectedEntry.anchor ? null : (
+              {focusRequest === undefined || focusRequest.fileId !== selectedFileId ? null : (
                 <Suspense fallback={null}>
                   <DiffLineFocus
                     fileId={focusRequest.fileId}
@@ -574,6 +639,7 @@ export const WorkspacePullRequestDiff = ({
                     lineNumber={focusRequest.lineNumber}
                     root={viewerRef}
                     side={focusRequest.side}
+                    viewer={diffCodeView}
                   />
                 </Suspense>
               )}

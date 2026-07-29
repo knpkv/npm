@@ -12,7 +12,8 @@ import {
   type BlobStoreError,
   BlobStoreInputError,
   blobStoreIoError,
-  BlobTooLargeError
+  BlobTooLargeError,
+  BlobUnexpectedEofError
 } from "./BlobStoreError.js"
 import type { BlobRange, BlobRangeRead, BlobReadStream, BlobVerification } from "./BlobStoreTypes.js"
 import { makeOpenedBlobReader } from "./OpenedBlob.js"
@@ -42,6 +43,12 @@ export interface BlobPutResult {
 }
 
 interface BlobStoreService {
+  /** Reconfirm a just-published canonical object while its SQL owner holds the cleanup lock. */
+  readonly assertPublished: (
+    workspaceId: WorkspaceId,
+    digest: BlobDigest,
+    expectedBytes: number
+  ) => Effect.Effect<void, BlobStoreError>
   readonly put: (
     workspaceId: WorkspaceId,
     bytes: Uint8Array,
@@ -67,6 +74,11 @@ interface BlobStoreService {
     workspaceId: WorkspaceId,
     bytes: Uint8Array
   ) => Effect.Effect<BlobPutResult, BlobStoreError>
+  /** Remove bytes only after ContentStore has authorized the persisted storage class. */
+  readonly removeAuthorizedBytes: (
+    workspaceId: WorkspaceId,
+    digest: BlobDigest
+  ) => Effect.Effect<void, BlobStoreError>
   readonly verify: (
     workspaceId: WorkspaceId,
     digest: BlobDigest
@@ -373,6 +385,26 @@ export const makeBlobStore: (
     }
   })
 
+  const assertPublished = Effect.fn("BlobStore.assertPublished")(function*(
+    workspaceId: WorkspaceId,
+    digest: BlobDigest,
+    expectedBytes: number
+  ) {
+    const decodedExpectedBytes = yield* decodeInput(
+      "assert published blob",
+      NonNegativeSafeInteger,
+      expectedBytes
+    )
+    const located = yield* locate("assert published blob", workspaceId, digest)
+    if (located.sizeBytes !== decodedExpectedBytes) {
+      return yield* new BlobUnexpectedEofError({
+        operation: "assert published blob",
+        expectedBytes: decodedExpectedBytes,
+        actualBytes: located.sizeBytes
+      })
+    }
+  })
+
   const publish = makeBlobPublisher(fs, path, cryptoService)
 
   const put = Effect.fn("BlobStore.put")(function*(
@@ -527,6 +559,24 @@ export const makeBlobStore: (
     }
   })
 
+  const removeAuthorizedBytes = Effect.fn("BlobStore.removeAuthorizedBytes")(function*(
+    workspaceId: WorkspaceId,
+    digest: BlobDigest
+  ) {
+    const reference = yield* decodeReference("remove reproducible blob", workspaceId, digest)
+    yield* Effect.scoped(
+      Effect.gen(function*() {
+        const pinned = yield* pinDirectory(fs, path, reference.derived.objectDirectory)
+        yield* pinned.assertIdentity
+        yield* fs.remove(path.join(pinned.path, reference.digest), { force: true }).pipe(
+          Effect.mapError((cause) => blobStoreIoError("remove reproducible blob", cause))
+        )
+        yield* pinned.sync
+        yield* pinned.assertIdentity
+      })
+    )
+  })
+
   const readAll = Effect.fn("BlobStore.readAll")(function*(
     workspaceId: WorkspaceId,
     digest: BlobDigest,
@@ -631,5 +681,14 @@ export const makeBlobStore: (
     }
   })
 
-  return BlobStore.of({ put, readAll, readRange, readStream, repairReproducible, verify })
+  return BlobStore.of({
+    assertPublished,
+    put,
+    readAll,
+    readRange,
+    readStream,
+    removeAuthorizedBytes,
+    repairReproducible,
+    verify
+  })
 })

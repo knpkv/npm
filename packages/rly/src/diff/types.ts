@@ -71,9 +71,17 @@ export type RlyDiffCodeScrollTarget =
 /** Stable imperative operations exposed by DiffCodeView. */
 export interface RlyDiffCodeViewHandle {
   addItems(items: ReadonlyArray<RlyDiffCodeItem>): void
+  focusLine(
+    target: Extract<RlyDiffCodeScrollTarget, { readonly type: "line" }> & {
+      readonly side: "additions" | "deletions"
+    }
+  ): boolean
   scrollTo(target: RlyDiffCodeScrollTarget): void
   updateItem(item: RlyDiffCodeItem): boolean
 }
+
+/** Renderer lifecycle generation used to replay virtual item ownership after worker transitions. */
+export type RlyDiffRendererGeneration = "fallback" | "main-thread" | "worker"
 
 /** Controlled presentation options for the pinned diff renderer adapter. */
 export interface RlyDiffCodeViewProps {
@@ -84,6 +92,7 @@ export interface RlyDiffCodeViewProps {
   readonly expandContext?: boolean
   readonly initialItems: ReadonlyArray<RlyDiffCodeItem>
   readonly mode?: "split" | "stacked"
+  readonly onItemRender?: (itemId: string, generation: RlyDiffRendererGeneration) => void
   readonly onSelectedLinesChange?: (selection: RlyDiffCodeSelection | null) => void
   readonly selectedLines?: RlyDiffCodeSelection | null
   readonly virtualization?: "buffered" | "strict"

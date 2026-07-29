@@ -243,6 +243,7 @@ export const componentManifest = {
         { kind: "type", name: "RlyDiffCodeSelection" },
         { kind: "type", name: "RlyDiffCodeViewHandle" },
         { kind: "type", name: "RlyDiffCodeViewProps" },
+        { kind: "type", name: "RlyDiffRendererGeneration" },
         { kind: "type", name: "RlyDiffTextFile" }
       ],
       name: "DiffCodeTypes",

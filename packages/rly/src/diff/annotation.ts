@@ -1,6 +1,7 @@
 "use client"
 
 import { createElement, type KeyboardEvent, type ReactElement, useRef } from "react"
+import { renderedDiffLine } from "./rendered-line.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeAnnotationLocation } from "./types.js"
 
 interface DiffCodeAnnotationProps {
@@ -11,18 +12,7 @@ interface DiffCodeAnnotationProps {
 
 const pierreLine = (annotationNode: HTMLDivElement, location: RlyDiffCodeAnnotationLocation): HTMLElement | null => {
   const item = annotationNode.closest("diffs-container")
-  const root = item?.shadowRoot
-  if (root === null || root === undefined) return null
-
-  const sideContainer = location.side === "additions" ? "data-additions" : "data-deletions"
-  const type = location.side === "additions" ? "change-addition" : "change-deletion"
-  return (
-    root.querySelector<HTMLElement>(`[${sideContainer}] [data-line="${location.lineNumber}"]`) ??
-      root.querySelector<HTMLElement>(`[data-line="${location.lineNumber}"][data-line-type="${type}"]`) ??
-      root.querySelector<HTMLElement>(`[${sideContainer}] [data-alt-line="${location.lineNumber}"]`) ??
-      root.querySelector<HTMLElement>(`[${sideContainer}][data-line="${location.lineNumber}"]`) ??
-      root.querySelector<HTMLElement>(`[${sideContainer}][data-alt-line="${location.lineNumber}"]`)
-  )
+  return item === null ? null : renderedDiffLine(item, location)
 }
 
 const focusLine = (annotationNode: HTMLDivElement, location: RlyDiffCodeAnnotationLocation): void => {
