@@ -5,7 +5,8 @@
 - **FR1.1 — Log selection.** The system SHALL read log events only for an
   action belonging to the configured pipeline and exact execution.
 - **FR1.2 — Log bounds.** One request SHALL return at most the configured event
-  and UTF-8 byte bounds plus an opaque continuation cursor.
+  and UTF-8 byte bounds plus an opaque continuation cursor. Aggregate provider
+  pages SHALL continue losslessly from an intra-page event offset.
 - **FR1.3 — Artifact selection.** The system SHALL resolve one input or output
   artifact from the exact reviewed action and proxy only the requested bounded
   byte range.
@@ -16,10 +17,12 @@
   and SHALL carry an ordered, unique set of explicit source-action revisions
   whose revision types match their declared source providers.
 - **FR1.6 — Stop proposal.** A stop proposal SHALL bind the execution ID,
-  current execution revision, reason, and explicit wait/abandon mode.
+  current execution revision, pipeline definition revision, provider-bounded
+  reason, and explicit wait/abandon mode.
 - **FR1.7 — Approval proposal.** An approval proposal SHALL bind the execution,
   stage, action, one-way digest of the one-time approval token, result, summary,
-  and action revision. The raw token SHALL remain ephemeral.
+  action revision, and pipeline definition revision. The raw token SHALL remain
+  ephemeral.
 - **FR1.8 — Retry proposal.** A retry proposal SHALL capture the original
   execution, its exact source revisions, and a distinct-execution `retryOf`
   relationship.
@@ -35,7 +38,8 @@
   return a reconciliation locator.
 - **FR1.13 — Reconciliation.** Reconciliation SHALL use provider state or the
   same provider-enforced idempotency token and SHALL never create a second
-  logical execution.
+  logical execution. Every non-null reconciliation locator SHALL decode and
+  match the authorized action kind and payload digest before provider access.
 - **FR1.14 — Zero unintended writes.** Denial, expiry, stale evidence, changed
   payload, invalid scope, failed durable intent, and blocked preflight SHALL
   make zero AWS mutation calls.
@@ -75,7 +79,8 @@
 ## DR4.x — Data requirements
 
 - **DR4.1 — Log cursor.** A log cursor SHALL be opaque, bounded, and valid only
-  for the selected action/log stream.
+  for the selected action/log stream. It MAY retain a provider token and
+  intra-provider-page event offset needed for lossless bounded delivery.
 - **DR4.2 — Artifact locator.** Browser inputs SHALL contain execution, action,
   direction, artifact name, expected revision, offset, and length—not bucket,
   key, ARN, credentials, or URL.

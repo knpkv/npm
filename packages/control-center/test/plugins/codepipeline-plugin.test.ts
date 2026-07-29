@@ -15,6 +15,7 @@ import * as TestClock from "effect/testing/TestClock"
 
 import {
   AuthorizedPluginActionV1,
+  PluginActionReconciliationKey,
   PluginPipelineArtifactRangeRequestV1,
   PluginPipelineLogPageRequestV1,
   PluginSyncRequestV1,
@@ -801,11 +802,26 @@ describe("CodePipelinePlugin", () => {
         "codepipeline-put-approval",
         { _tag: "InvalidApprovalTokenException" }
       ).pipe(Effect.flip)
+      const invalidMutation = yield* mapCodePipelineAwsFailure(
+        "codepipeline-start-execution",
+        { _tag: "ValidationException" }
+      ).pipe(Effect.flip)
+      const unstoppability = yield* mapCodePipelineAwsFailure(
+        "codepipeline-stop-execution",
+        { _tag: "PipelineExecutionNotStoppableException" }
+      ).pipe(Effect.flip)
+      const readValidation = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline",
+        { _tag: "ValidationException" }
+      ).pipe(Effect.flip)
 
       assert.instanceOf(requestTimeout, PluginTimeoutFailure)
       assert.instanceOf(requestExpired, PluginTimeoutFailure)
       assert.instanceOf(outage, PluginOutageFailure)
       assert.instanceOf(conflict, PluginConflictFailure)
+      assert.instanceOf(invalidMutation, PluginConflictFailure)
+      assert.instanceOf(unstoppability, PluginConflictFailure)
+      assert.instanceOf(readValidation, PluginOutageFailure)
     }))
 
   it.effect("Schema-rejects malformed AWS output before normalization", () =>
@@ -1371,6 +1387,91 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(observedTokens[0], observedTokens[1])
     }))
 
+  it.effect("binds non-null reconciliation locators before provider access and permits null started intents", () =>
+    Effect.gen(function*() {
+      const identityCalls = yield* Ref.make(0)
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getCallerIdentity: () =>
+          Ref.update(identityCalls, (count) => count + 1).pipe(
+            Effect.as({ Account: "123456789012", Arn: "arn:aws:iam::123456789012:user/test" })
+          ),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ pipelineExecutionId: "execution-reconciled-null-locator" })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              },
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "Checkout",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-abc"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-reconciliation-locator",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-reconciliation-locator",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          const baselineIdentityCalls = yield* Ref.get(identityCalls)
+          const request = {
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          }
+          const wrongKind = yield* executor.reconcile({
+            ...request,
+            reconciliationKey: PluginActionReconciliationKey.make(
+              `codepipeline:retry:${authorized.payloadDigest}`
+            )
+          }).pipe(Effect.result)
+          const wrongDigest = yield* executor.reconcile({
+            ...request,
+            reconciliationKey: PluginActionReconciliationKey.make(
+              `codepipeline:start:${"0".repeat(64)}`
+            )
+          }).pipe(Effect.result)
+          const identityCallsAfterInvalid = yield* Ref.get(identityCalls)
+          const nullLocator = yield* executor.reconcile({
+            ...request,
+            reconciliationKey: null
+          })
+          return {
+            baselineIdentityCalls,
+            identityCallsAfterInvalid,
+            nullLocator,
+            wrongDigest,
+            wrongKind
+          }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result.wrongKind))
+      assert.isTrue(Result.isFailure(result.wrongDigest))
+      assert.strictEqual(result.identityCallsAfterInvalid, result.baselineIdentityCalls)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      assert.strictEqual(result.nullLocator._tag, "succeeded")
+    }))
+
   it.effect("rejects ambiguous start reconciliation after the authorized pipeline revision moves", () =>
     Effect.gen(function*() {
       const pipelineVersion = yield* Ref.make(7)
@@ -1446,6 +1547,110 @@ describe("CodePipelinePlugin", () => {
         }
       }
       assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+    }))
+
+  it.effect("enforces exact CodePipeline text limits before authorizing stop and approval actions", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "InProgress")),
+        listActionExecutionsPage: (request) => {
+          const output = actionOutput(
+            request.pipelineExecutionId,
+            `${request.pipelineExecutionId}-approval-1`,
+            "ReleaseApproval",
+            "InProgress"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((detail) => ({
+              ...detail,
+              input: {
+                ...detail.input,
+                actionTypeId: {
+                  category: "Approval",
+                  owner: "AWS",
+                  provider: "Manual",
+                  version: "1"
+                }
+              }
+            }))
+          })
+        },
+        getPipelineState: () =>
+          Effect.succeed({
+            pipelineName: "release",
+            pipelineVersion: 7,
+            stageStates: [{
+              stageName: "Build",
+              actionStates: [{
+                actionName: "ReleaseApproval",
+                latestExecution: {
+                  actionExecutionId: "execution-1842-approval-1",
+                  status: "InProgress",
+                  token: "approval-token"
+                }
+              }]
+            }]
+          }),
+        stopPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ pipelineExecutionId: "execution-1842" })
+          ),
+        putApprovalResult: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ approvedAt: new Date("2026-07-16T09:10:00.000Z") })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const stopRequest = (reason: string) =>
+            connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.stop",
+                target: {
+                  entityType: "pipeline-execution",
+                  vendorImmutableId: "execution-1842"
+                },
+                expectedRevision: "7:InProgress:2026-07-16T09:05:00.000Z",
+                payload: { mode: "wait", reason },
+                evidenceIds: []
+              })
+            )
+          const approvalRequest = (summary: string) =>
+            connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.approve",
+                target: {
+                  entityType: "pipeline-execution",
+                  vendorImmutableId: "execution-1842"
+                },
+                expectedRevision: "7:InProgress:2026-07-16T09:05:00.000Z",
+                payload: {
+                  stageName: "Build",
+                  actionName: "ReleaseApproval",
+                  actionExecutionId: "execution-1842-approval-1",
+                  summary
+                },
+                evidenceIds: []
+              })
+            )
+          return {
+            invalidApproval: yield* approvalRequest("a".repeat(513)).pipe(Effect.result),
+            invalidStop: yield* stopRequest("s".repeat(201)).pipe(Effect.result),
+            validApproval: yield* approvalRequest("a".repeat(512)),
+            validStop: yield* stopRequest("s".repeat(200))
+          }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result.invalidStop))
+      assert.isTrue(Result.isFailure(result.invalidApproval))
+      assert.include(JSON.stringify(result.validStop.request.payload), "s".repeat(200))
+      assert.include(JSON.stringify(result.validApproval.request.payload), "a".repeat(512))
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
   it.effect("keeps the one-time approval token private while dispatching it exactly once", () =>
@@ -1630,6 +1835,139 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(yield* Ref.get(approvalCalls), 0)
       assert.notInclude(result.serializedProposal, "approval-token-a")
       assert.notInclude(result.serializedProposal, "approval-token-b")
+    }))
+
+  it.effect("blocks stop and approval when the authorized pipeline revision advances", () =>
+    Effect.gen(function*() {
+      const pipelineVersion = yield* Ref.make(7)
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getPipeline: () =>
+          Ref.get(pipelineVersion).pipe(
+            Effect.map((version) => ({
+              ...pipelineOutput,
+              pipeline: { ...pipelineOutput.pipeline, version }
+            }))
+          ),
+        getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "InProgress")),
+        listActionExecutionsPage: (request) => {
+          const output = actionOutput(
+            request.pipelineExecutionId,
+            `${request.pipelineExecutionId}-approval-1`,
+            "ReleaseApproval",
+            "InProgress"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((detail) => ({
+              ...detail,
+              input: {
+                ...detail.input,
+                actionTypeId: {
+                  category: "Approval",
+                  owner: "AWS",
+                  provider: "Manual",
+                  version: "1"
+                }
+              }
+            }))
+          })
+        },
+        getPipelineState: () =>
+          Effect.succeed({
+            pipelineName: "release",
+            pipelineVersion: 7,
+            stageStates: [{
+              stageName: "Build",
+              actionStates: [{
+                actionName: "ReleaseApproval",
+                latestExecution: {
+                  actionExecutionId: "execution-1842-approval-1",
+                  status: "InProgress",
+                  token: "approval-token-stable"
+                }
+              }]
+            }]
+          }),
+        stopPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ pipelineExecutionId: "execution-1842" })
+          ),
+        putApprovalResult: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ approvedAt: new Date("2026-07-16T09:10:00.000Z") })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const stopProposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.stop",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-1842"
+              },
+              expectedRevision: "7:InProgress:2026-07-16T09:05:00.000Z",
+              payload: { mode: "wait", reason: "Stop after review" },
+              evidenceIds: []
+            })
+          )
+          const approvalProposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.approve",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-1842"
+              },
+              expectedRevision: "7:InProgress:2026-07-16T09:05:00.000Z",
+              payload: {
+                stageName: "Build",
+                actionName: "ReleaseApproval",
+                actionExecutionId: "execution-1842-approval-1",
+                summary: "Approve after review"
+              },
+              evidenceIds: []
+            })
+          )
+          const authorize = (
+            proposal: typeof stopProposal,
+            idempotencyKey: string,
+            authorizationId: string
+          ) =>
+            Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+              proposal,
+              idempotencyKey,
+              payloadDigest: proposal.payloadDigest,
+              authorizationId,
+              authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+              expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+            })
+          const stop = authorize(stopProposal, "stop-pipeline-revision", "authorization-stop-pipeline-revision")
+          const approval = authorize(
+            approvalProposal,
+            "approval-pipeline-revision",
+            "authorization-approval-pipeline-revision"
+          )
+          const unchangedStop = yield* executor.preflight(stop)
+          const unchangedApproval = yield* executor.preflight(approval)
+          yield* Ref.set(pipelineVersion, 8)
+          return {
+            advancedApproval: yield* executor.preflight(approval),
+            advancedStop: yield* executor.preflight(stop),
+            unchangedApproval,
+            unchangedStop
+          }
+        })
+      )
+
+      assert.strictEqual(result.unchangedStop._tag, "ready")
+      assert.strictEqual(result.unchangedApproval._tag, "ready")
+      assert.strictEqual(result.advancedStop._tag, "blocked")
+      assert.strictEqual(result.advancedApproval._tag, "blocked")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
   it.effect("starts one distinct retry execution and preserves retry lineage in the receipt", () =>
@@ -2313,52 +2651,86 @@ describe("CodePipelinePlugin", () => {
       }
     }))
 
-  it.effect("enforces the configured aggregate UTF-8 log byte bound", () =>
+  it.effect("paginates an oversized provider log page without dropping events", () =>
     Effect.gen(function*() {
+      const providerCursors = yield* Ref.make<ReadonlyArray<string | null>>([])
       const provider = baseProvider({
-        getLogEventsPage: () =>
-          Effect.succeed({
-            events: [{ timestamp: 1, message: "éé" }]
-          })
+        getLogEventsPage: (request) =>
+          Ref.update(providerCursors, (current) => [...current, request.nextToken]).pipe(
+            Effect.as({
+              events: [
+                { timestamp: 1, message: "éé" },
+                { timestamp: 2, message: "öö" }
+              ]
+            })
+          )
       })
-      const read = Effect.gen(function*() {
-        const connection = yield* PluginConnection
-        const pipeline = connection.pipeline
-        if (pipeline === undefined || Option.isNone(pipeline)) {
-          return yield* Effect.die("pipeline reader missing")
-        }
-        return yield* pipeline.value.readLogPage(
-          Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
-            action: {
-              entity: {
-                entityType: "aws.codepipeline.action",
-                vendorImmutableId: "execution-1842#execution-1842-action-1"
-              },
-              executionId: "execution-1842",
-              actionExecutionId: "execution-1842-action-1",
-              expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
-            },
-            cursor: null,
-            limit: 10
-          })
-        )
+      const request = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+        action: {
+          entity: {
+            entityType: "aws.codepipeline.action",
+            vendorImmutableId: "execution-1842#execution-1842-action-1"
+          },
+          executionId: "execution-1842",
+          actionExecutionId: "execution-1842-action-1",
+          expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+        },
+        cursor: null,
+        limit: 10
       })
-      const rejected = yield* runWithProvider(
+      const paginated = yield* runWithProvider(
         provider,
-        read,
-        { ...configuration, maximumLogBytes: 3 }
-      ).pipe(Effect.result)
-      const accepted = yield* runWithProvider(
-        provider,
-        read,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          const first = yield* pipeline.value.readLogPage(request)
+          if (first.nextCursor === null) return yield* Effect.die("expected an intra-page cursor")
+          const second = yield* pipeline.value.readLogPage({
+            ...request,
+            cursor: first.nextCursor
+          })
+          return { first, second }
+        }),
         { ...configuration, maximumLogBytes: 4 }
       )
+      const exact = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* pipeline.value.readLogPage(request)
+        }),
+        { ...configuration, maximumLogBytes: 8 }
+      )
+      const oversizedSingle = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* pipeline.value.readLogPage(request)
+        }),
+        { ...configuration, maximumLogBytes: 3 }
+      ).pipe(Effect.result)
 
-      assert.isTrue(Result.isFailure(rejected))
-      if (Result.isFailure(rejected)) {
-        assert.instanceOf(rejected.failure, PluginMalformedResponseFailure)
+      assert.deepStrictEqual(paginated.first.events.map(({ message }) => message), ["éé"])
+      assert.deepStrictEqual(paginated.second.events.map(({ message }) => message), ["öö"])
+      assert.strictEqual(paginated.second.nextCursor, null)
+      assert.deepStrictEqual(exact.events.map(({ message }) => message), ["éé", "öö"])
+      assert.strictEqual(exact.nextCursor, null)
+      assert.isTrue(Result.isFailure(oversizedSingle))
+      if (Result.isFailure(oversizedSingle)) {
+        assert.instanceOf(oversizedSingle.failure, PluginMalformedResponseFailure)
       }
-      assert.strictEqual(accepted.events[0]?.message, "éé")
+      assert.deepStrictEqual(yield* Ref.get(providerCursors), [null, null, null, null])
     }))
 
   it.effect("rejects out-of-range bounds before any provider call", () =>

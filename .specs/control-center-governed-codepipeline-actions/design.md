@@ -72,17 +72,20 @@ unrecognized source providers fail closed.
 ### Stop
 
 The request targets an execution and carries `mode: "wait" | "abandon"` plus a
-bounded reason. Proposal/preflight require the exact execution revision and
-`InProgress` status. Abandon has critical impact; wait has high impact.
+provider-bounded 200-character reason. Proposal/preflight require the exact
+execution revision, pipeline definition revision, and `InProgress` status.
+Abandon has critical impact; wait has high impact.
 
 ### Manual approval
 
-The request targets an action and carries Approved/Rejected plus a bounded
-summary. Proposal loads the action and current pipeline state, verifies that it
-is a pending Approval action, and freezes only a one-way digest of the one-time
-token. The raw token remains ephemeral and never enters the canonical payload,
-summaries, or receipts. Preflight reloads the token and repeats its digest and
-revision check. AWS validates the token atomically at dispatch.
+The request targets an action and carries Approved/Rejected plus a
+provider-bounded 512-character summary. Proposal loads the action and current
+pipeline state, verifies that it is a pending Approval action, and freezes the
+pipeline definition revision plus only a one-way digest of the one-time token.
+The raw token remains ephemeral and never enters the canonical payload,
+summaries, or receipts. Preflight reloads the token and repeats its digest,
+action revision, and pipeline revision checks. AWS validates the token
+atomically at dispatch.
 
 ### Retry
 
@@ -102,7 +105,11 @@ revision, cursor, and requested limit. The plugin reloads the exact action,
 validates its log-stream ARN, then calls CloudWatch Logs with configured hard
 bounds. Returned events contain timestamp, ingestion timestamp, and bounded
 message text. The cursor is opaque to the browser and scoped by the request
-identity.
+identity. When a valid provider page exceeds the configured aggregate byte
+bound, the cursor carries a private provider token and event offset so later
+requests re-read and continue that page without dropping events. A single
+provider event larger than the configured byte bound is rejected explicitly
+rather than truncated.
 
 ### Artifacts
 
@@ -124,6 +131,8 @@ events or leave the server.
 - Known AWS semantic rejections return confirmed failed receipts.
 - Timeouts/outages after mutation dispatch return unknown outcomes with a safe
   reconciliation key.
+- Non-null reconciliation keys are Schema-decoded and matched to the authorized
+  action kind and payload digest before any provider identity or state read.
 - Start/retry reconciliation reuses the exact AWS idempotency token; this may
   repeat the transport request but cannot create a second logical execution.
 - Stop and approval reconcile from execution/action state without replay.

@@ -241,6 +241,12 @@ const AwsCredentialIdentity = Schema.Struct({
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
   tags.some((tag) => Predicate.isTagged(cause, tag))
 
+const deterministicMutationRejectionTags: Readonly<Record<string, ReadonlyArray<string>>> = {
+  "codepipeline-start-execution": ["ValidationException"],
+  "codepipeline-stop-execution": ["PipelineExecutionNotStoppableException", "ValidationException"],
+  "codepipeline-put-approval": ["ValidationException"]
+}
+
 /** Map provider failures without exposing raw AWS causes. @internal */
 export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.mapAwsFailure")(function*(
   operation: string,
@@ -278,7 +284,8 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
       "ConflictException",
       "InvalidApprovalTokenException",
       "StageNotFoundException"
-    ])
+    ]) ||
+    hasTag(cause, deterministicMutationRejectionTags[operation] ?? [])
   ) {
     return yield* new PluginConflictFailure({
       operation,

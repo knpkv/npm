@@ -24,6 +24,7 @@ import {
   NormalizedPluginEventV1,
   PluginActionActorIdentityV1,
   type PluginActionDispatchResultV1,
+  PluginActionPayloadDigest,
   PluginActionPreflightV1,
   PluginActionProposalV1,
   PluginActionReconciliationKey,
@@ -117,7 +118,8 @@ const AwsProfile = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), 
 const AwsRegion = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const PipelineName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const ActionIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
-const ActionSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+const StopReason = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+const ApprovalSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const SourceRevisionType = Schema.Literals([
   "COMMIT_ID",
   "IMAGE_DIGEST",
@@ -142,13 +144,15 @@ const StartActionPayload = Schema.Struct({
 })
 const StopActionPayload = Schema.Struct({
   mode: Schema.Literals(["wait", "abandon"]),
-  reason: ActionSummary
+  reason: StopReason,
+  pipelineRevision: Schema.optionalKey(Revision)
 })
 const ApprovalActionPayload = Schema.Struct({
   stageName: ActionIdentifier,
   actionName: ActionIdentifier,
   actionExecutionId: ActionIdentifier,
-  summary: ActionSummary,
+  summary: ApprovalSummary,
+  pipelineRevision: Schema.optionalKey(Revision),
   actionRevision: Schema.optionalKey(Revision),
   approvalStatus: Schema.optionalKey(Schema.Literals(["Approved", "Rejected"])),
   approvalTokenDigest: Schema.optionalKey(
@@ -162,10 +166,13 @@ const RetryActionPayload = Schema.Struct({
 })
 const LogCursorParts = Schema.Struct({
   scope: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(128)),
-  token: Schema.String.check(
-    Schema.isTrimmed(),
-    Schema.isNonEmpty(),
-    Schema.isMaxLength(MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH)
+  eventOffset: Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  token: Schema.NullOr(
+    Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH)
+    )
   )
 })
 
@@ -185,6 +192,30 @@ const ACTION_KINDS: ReadonlySet<string> = new Set([
 ])
 
 const isActionKind = (value: string): value is CodePipelineActionKind => ACTION_KINDS.has(value)
+
+const ReconciliationActionKind = Schema.Literals(["start", "stop", "approval", "retry"])
+const ReconciliationLocator = Schema.TemplateLiteralParser([
+  "codepipeline:",
+  ReconciliationActionKind,
+  ":",
+  PluginActionPayloadDigest
+])
+
+const reconciliationActionKind = (
+  actionKind: CodePipelineActionKind
+): typeof ReconciliationActionKind.Type => {
+  switch (actionKind) {
+    case "pipeline.start":
+      return "start"
+    case "pipeline.stop":
+      return "stop"
+    case "pipeline.approve":
+    case "pipeline.reject":
+      return "approval"
+    case "pipeline.retry":
+      return "retry"
+  }
+}
 
 /** Secret-free production adapter configuration. @internal */
 export const CodePipelinePluginConfiguration = Schema.Struct({
@@ -779,14 +810,28 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       actionExecutionId: action.actionExecutionId,
       logStreamArn: action.logStreamArn
     })
+  const encodeLogCursor = (
+    scope: string,
+    eventOffset: number,
+    token: string | null
+  ): string => `${scope}${LOG_CURSOR_SEPARATOR}${eventOffset}${LOG_CURSOR_SEPARATOR}${token ?? ""}`
   const decodeLogCursor = Effect.fn("CodePipelinePlugin.decodeLogCursor")(function*(
     cursor: string,
     expectedScope: string
   ) {
-    const separator = cursor.indexOf(LOG_CURSOR_SEPARATOR)
+    const scopeSeparator = cursor.indexOf(LOG_CURSOR_SEPARATOR)
+    const offsetSeparator = scopeSeparator < 0
+      ? -1
+      : cursor.indexOf(LOG_CURSOR_SEPARATOR, scopeSeparator + LOG_CURSOR_SEPARATOR.length)
+    const token = offsetSeparator < 0
+      ? null
+      : cursor.slice(offsetSeparator + LOG_CURSOR_SEPARATOR.length)
     const decoded = yield* Schema.decodeUnknownEffect(LogCursorParts)({
-      scope: separator < 0 ? "" : cursor.slice(0, separator),
-      token: separator < 0 ? "" : cursor.slice(separator + LOG_CURSOR_SEPARATOR.length)
+      scope: scopeSeparator < 0 ? "" : cursor.slice(0, scopeSeparator),
+      eventOffset: scopeSeparator < 0 || offsetSeparator < 0
+        ? -1
+        : Number(cursor.slice(scopeSeparator + LOG_CURSOR_SEPARATOR.length, offsetSeparator)),
+      token: token === "" ? null : token
     }).pipe(
       Effect.mapError(() =>
         new PluginConflictFailure({
@@ -801,7 +846,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         diagnosticCode: "codepipeline-log-cursor-scope-mismatch"
       })
     }
-    return decoded.token
+    return {
+      eventOffset: decoded.eventOffset,
+      providerCursor: decoded.token
+    }
   })
 
   const loadSnapshot = (executionId: string) =>
@@ -1072,8 +1120,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       })
     }
     const cursorScope = yield* logCursorScope(action)
-    const providerCursor = request.cursor === null
-      ? null
+    const cursor = request.cursor === null
+      ? { eventOffset: 0, providerCursor: null }
       : yield* decodeLogCursor(request.cursor, cursorScope)
     const page = yield* actionProvider(
       "pipeline-logs",
@@ -1081,29 +1129,48 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         account: { ...awsAccount, region: coordinates.region },
         logGroupName: coordinates.logGroupName,
         logStreamName: coordinates.logStreamName,
-        nextToken: providerCursor,
+        nextToken: cursor.providerCursor,
         limit: request.limit
       })
     )
-    const messageBytes = page.events.reduce(
-      (total, event) => total + utf8Encoder.encode(event.message).byteLength,
-      0
-    )
-    if (messageBytes > configuration.maximumLogBytes) {
+    if (cursor.eventOffset > page.events.length) {
+      return yield* new PluginConflictFailure({
+        operation: "pipeline-logs",
+        diagnosticCode: "codepipeline-log-cursor-offset-invalid"
+      })
+    }
+    const events = []
+    let messageBytes = 0
+    for (const event of page.events.slice(cursor.eventOffset)) {
+      const eventBytes = utf8Encoder.encode(event.message).byteLength
+      if (eventBytes > configuration.maximumLogBytes && events.length === 0) {
+        return yield* new PluginMalformedResponseFailure({
+          operation: "pipeline-logs",
+          diagnosticCode: "codepipeline-log-event-byte-bound-exceeded"
+        })
+      }
+      if (messageBytes + eventBytes > configuration.maximumLogBytes) break
+      events.push(event)
+      messageBytes += eventBytes
+    }
+    const nextEventOffset = cursor.eventOffset + events.length
+    if (events.length === 0 && nextEventOffset < page.events.length) {
       return yield* new PluginMalformedResponseFailure({
         operation: "pipeline-logs",
-        diagnosticCode: "codepipeline-log-page-byte-bound-exceeded"
+        diagnosticCode: "codepipeline-log-event-byte-bound-exceeded"
       })
     }
     return yield* decodeOutput("pipeline-logs", PluginPipelineLogPageV1, {
-      events: page.events.map((event) => ({
+      events: events.map((event) => ({
         timestamp: formatDate(event.timestamp),
         ingestionTimestamp: event.ingestionTimestamp === null ? null : formatDate(event.ingestionTimestamp),
         message: event.message
       })),
-      nextCursor: page.nextToken === null
+      nextCursor: nextEventOffset < page.events.length
+        ? encodeLogCursor(cursorScope, nextEventOffset, cursor.providerCursor)
+        : page.nextToken === null
         ? null
-        : `${cursorScope}${LOG_CURSOR_SEPARATOR}${page.nextToken}`
+        : encodeLogCursor(cursorScope, 0, page.nextToken)
     })
   })
 
@@ -1314,7 +1381,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-stop-execution-changed"
           })
         }
-        return payload
+        return {
+          ...payload,
+          pipelineRevision: pipelineRevision(pipeline)
+        }
       }
       case "pipeline.approve":
       case "pipeline.reject": {
@@ -1385,7 +1455,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           ...payload,
           actionRevision: actionRevision(action),
           approvalStatus,
-          approvalTokenDigest: yield* approvalTokenDigest(current.token)
+          approvalTokenDigest: yield* approvalTokenDigest(current.token),
+          pipelineRevision: pipelineRevision(pipeline)
         }
       }
       case "pipeline.retry": {
@@ -1529,7 +1600,12 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           loadSnapshot(actionRequest.target.vendorImmutableId)
         )
         const revision = executionRevision(snapshot)
-        if (snapshot.execution.status !== "InProgress" || revision !== actionRequest.expectedRevision) {
+        if (
+          snapshot.execution.status !== "InProgress" ||
+          revision !== actionRequest.expectedRevision ||
+          payload.pipelineRevision === undefined ||
+          payload.pipelineRevision !== pipelineRevision(pipeline)
+        ) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
             diagnosticCode: "codepipeline-stop-execution-changed"
@@ -1561,6 +1637,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         if (
           actionRequest.target.entityType !== "pipeline-execution" ||
           actionRequest.expectedRevision !== revision ||
+          payload.pipelineRevision === undefined ||
+          payload.pipelineRevision !== pipelineRevision(pipeline) ||
           payload.actionRevision === undefined ||
           payload.approvalStatus === undefined ||
           payload.approvalStatus !==
@@ -1816,7 +1894,6 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
   const reconcile = Effect.fn("CodePipelinePlugin.reconcile")(function*(
     request: PluginActionReconciliationRequestV1
   ): Effect.fn.Return<PluginActionReconciliationResultV1, PluginFailure> {
-    yield* verifyRuntimeIdentity()
     if (request.authorizedAction === undefined) {
       return yield* new PluginConfigurationFailure({
         diagnosticCode: "codepipeline-reconciliation-authorized-action-missing"
@@ -1828,6 +1905,28 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         diagnosticCode: "codepipeline-reconciliation-action-kind-invalid"
       })
     }
+    if (request.reconciliationKey !== null) {
+      const locator = yield* Schema.decodeUnknownEffect(ReconciliationLocator)(
+        request.reconciliationKey
+      ).pipe(
+        Effect.mapError(() =>
+          new PluginConfigurationFailure({
+            diagnosticCode: "codepipeline-reconciliation-key-invalid"
+          })
+        )
+      )
+      const [, locatorKind, , locatorDigest] = locator
+      if (
+        locatorKind !== reconciliationActionKind(actionKind) ||
+        locatorDigest !== request.authorizedAction.payloadDigest
+      ) {
+        return yield* new PluginConflictFailure({
+          operation: "reconcile",
+          diagnosticCode: "codepipeline-reconciliation-key-mismatch"
+        })
+      }
+    }
+    yield* verifyRuntimeIdentity()
     const checkedAt = yield* DateTime.now
     if (actionKind === "pipeline.start" || actionKind === "pipeline.retry") {
       const resolved = yield* resolveAuthorized(request.authorizedAction)
