@@ -12,6 +12,7 @@ import { makeGovernedActionExecutionRecordReconciliation } from "../../src/serve
 import { makeGovernedActionExecutionRecordRecoveryUnavailable } from "../../src/server/governance/internal/execution-store/record-recovery-unavailable.js"
 import { Database } from "../../src/server/persistence/Database.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
+import { AUTHORIZED_AT } from "./fixtures/authorizedGovernedAction.js"
 import {
   ACTION,
   claimStartedRecovery,
@@ -116,6 +117,57 @@ describe("governed action reconciliation outcomes", () => {
         })
       })))
   }
+
+  it.effect("accepts an authorization-based reconciliation receipt at the exact durable authorization time", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+
+      assert.strictEqual(
+        yield* recorder.recordReconciliation({
+          recoveryToken: recovery.recoveryToken,
+          result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+            _tag: "succeeded",
+            receipt: {
+              status: "succeeded",
+              providerOperationId: "control-center-authorization-outcome",
+              observationBasis: "authorization",
+              safeSummary: "Recovered the authorized local decision",
+              observedAt: AUTHORIZED_AT
+            }
+          }),
+          observedAt: receivedAt
+        }),
+        "succeeded"
+      )
+    })))
+
+  it.effect("rejects an authorization-based reconciliation receipt at a different post-claim time", () =>
+    withBegin(Effect.gen(function*() {
+      const recovery = yield* claimStartedRecovery()
+      const receivedAt = DateTime.add(recovery.reconciliationDeadline, { seconds: -1 })
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const recorder = yield* makeGovernedActionExecutionRecordReconciliation
+      const mismatch = yield* recorder.recordReconciliation({
+        recoveryToken: recovery.recoveryToken,
+        result: Schema.decodeUnknownSync(PluginActionReconciliationResultV1)({
+          _tag: "succeeded",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "control-center-authorization-outcome",
+            observationBasis: "authorization",
+            safeSummary: "Recovered the authorized local decision",
+            observedAt: DateTime.formatIso(receivedAt)
+          }
+        }),
+        observedAt: receivedAt
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(mismatch))
+      if (Result.isFailure(mismatch)) assert.strictEqual(mismatch.failure.reason, "conflict")
+    })))
 
   for (const fixture of cases) {
     it.effect(`folds ${fixture.name} after cancellation without losing cancellation intent`, () =>

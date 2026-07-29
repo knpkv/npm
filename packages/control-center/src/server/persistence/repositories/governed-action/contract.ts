@@ -15,11 +15,13 @@ import {
 } from "../../../../domain/governedAction/index.js"
 import {
   DomainEventId,
+  EntityId,
   GovernedActionId,
   GovernedActionTransitionId,
   PluginConnectionId,
   WorkspaceId
 } from "../../../../domain/identifiers.js"
+import { ProviderId, Revision } from "../../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 
 /** Immutable identity of the audit record paired with one action transition. */
@@ -210,6 +212,19 @@ export const GovernedActionIdempotencyReadInput = Schema.Struct({
 
 /** Decoded governed-action idempotency lookup. */
 export type GovernedActionIdempotencyReadInput = typeof GovernedActionIdempotencyReadInput.Type
+
+/** Bounded newest-first terminal action lookup for one exact workspace entity. */
+export const GovernedActionTargetReadInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  providerId: ProviderId,
+  targetEntityId: EntityId,
+  actionKind: GovernedActionEnvelopeV1.fields.proposal.fields.request.fields.actionKind,
+  expectedRevision: Schema.optionalKey(Revision),
+  limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
+})
+
+/** Decoded newest terminal target lookup. */
+export type GovernedActionTargetReadInput = typeof GovernedActionTargetReadInput.Type
 
 /** Trusted governed action reconstructed from its immutable ordered history. */
 export const GovernedActionRecord = Schema.Struct({

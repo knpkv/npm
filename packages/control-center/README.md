@@ -374,9 +374,9 @@ An `update-page` proposal accepts bounded Markdown, converts it through the owni
 
 Unbounded watcher/activity history, authoritative deletion evidence, scheduled or webhook synchronization, and content search remain deferred to later Confluence milestones.
 
-### Clockify time-entry reader
+### Clockify time-entry integration
 
-`makeClockifyReadPluginRuntime` from `@knpkv/control-center/server` builds the first production Clockify adapter around the shared Schema-validated `ClockifyApiClient`. It negotiates only `entity.read` for `clockify.time-entry` and bounded `sync.incremental` snapshots on the `time-entries` stream. Credentials remain in the externally supplied client layer.
+`makeClockifyReadPluginRuntime` from `@knpkv/control-center/server` builds the production Clockify adapter around the shared Schema-validated `ClockifyApiClient`. The current descriptor negotiates `entity.read`, bounded `sync.incremental` snapshots on the `time-entries` stream, and governed `action.propose`, `action.execute`, and `action.reconcile` capabilities. Credentials remain in the externally supplied client layer.
 
 The secret-free configuration names the root Clockify web URL, immutable workspace ID, comma-separated user IDs, page size, maximum pages, maximum concurrency, and per-request timeout. At most ten users are accepted, and user count multiplied by page size may not exceed 100 normalized entries in one aggregated provider page. Sync reads one page per configured user with bounded concurrency, stops at the configured provider-page limit, and deterministically splits normalized output so every emitted `PluginSyncPageV1` remains within its 1 MiB UTF-8 envelope. A full final provider page uses a scope-bound `bounded:<page>:<digest>` checkpoint rather than claiming provider exhaustion.
 
@@ -384,7 +384,11 @@ Clockify's time-entry endpoint exposes offset pages but no stable snapshot curso
 
 Every provider response is decoded again at the adapter boundary before it becomes a normalized event. Time-entry facts preserve the configured workspace, provider user, project/task/tag IDs, billable and lock state, interval timestamps, provider duration, and explicit running/completed state. Provider interval timestamps supply source freshness; authentication, authorization, rate-limit, timeout, malformed-response, and outage failures remain in the closed plugin taxonomy.
 
-This MVP is intentionally read-only. Workspace people, Jira-key association evidence, duration rollups, approval state, corrections, governed execution, cancellation, and ambiguous-outcome reconciliation remain deferred to I08/I09 rather than being represented as supported capabilities.
+Each governed Clockify proposal freezes a durable `Schema.TaggedStruct` payload. Both action variants bind the replay identity fields `workspaceId`, `userId`, `entryId`, and `expectedRevision`. `correct-association` additionally records `desiredRevision`, `jiraIssueKey`, `originalDescription`, `correctedDescription`, `start`, `end`, `duration`, `projectId`, `taskId`, `tagIds`, `customFields`, `billable`, and `entryType`; `record-approval` records `decision` and `rationale`.
+
+`correct-association` replaces at most one supported leading Jira marker with the reviewed canonical `[KEY]` marker. It binds the exact normalized source revision and preservation fields, then sends Clockify a complete replacement containing the frozen start, end, project, task, tags, custom fields, billable state, supported entry type, and corrected description. Normal synchronization appends the successor entity and evidence revisions so relationship inference and rollups converge without rewriting history. Clockify exposes no conditional update or idempotency token for this operation, so dispatch performs a final reread, recognizes an already-visible desired state as a replay, and makes one initial update attempt. Only a confirmed rate-limit response with a retry instant no more than five seconds away permits one bounded second attempt; ambiguous responses become reconciliation-only work. Reconciliation rereads exact provider state and never replays the mutation; identity drift becomes a terminal failed reconciliation while unrelated malformed provider data remains a typed adapter failure.
+
+`record-approval` is Control Center-owned. It records an `approved` or `rejected` decision in the durable governed-action ledger without calling a Clockify approval endpoint or changing the provider entry. Entity inspection accepts only the latest fully verified successful approval for the exact current Clockify source revision and displays the durable decision time; a later provider revision returns to pending while the historical action remains auditable. Post-dispatch cancellation is unsupported. The frozen `0.1.0` descriptor remains accepted as read-only, while the current `0.2.0` generation owns correction and approval.
 
 ## Persistence boundary
 
@@ -464,7 +468,7 @@ Provisioning must persist the descriptor-advertised keys with the exact value ki
 | Confluence   | `siteBaseUrl` (url), `email` (text), `apiToken` (secret reference), `siteId`, `spaceId`, `probePageId` (text)                                                                                    |
 | Clockify     | `apiKey` (secret reference), `webBaseUrl` (url), `workspaceId`, `userIds` (text), `pageSize`, `maximumPages`, `maximumConcurrency`, `operationTimeoutMillis` (integer)                           |
 
-The production runtime registry preserves historical read-only descriptors while installing the action-capable CodeCommit, CodePipeline, and Confluence executors only for descriptors that negotiated those capabilities. Historical read-only descriptor generations remain read-only. Composition coverage crosses the durable governed-action store, runtime authority, executor projection, and provider boundary and asserts a single provider mutation.
+The production runtime registry preserves historical read-only descriptors while installing the action-capable CodeCommit, CodePipeline, Confluence, and Clockify executors only for descriptors that negotiated those capabilities. Historical read-only descriptor generations remain read-only. Composition coverage crosses the durable governed-action store, runtime authority, executor projection, and provider boundary and asserts a single provider mutation.
 
 The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.
 

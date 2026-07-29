@@ -3,6 +3,7 @@ import * as Context from "effect/Context"
 import type * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import type { Role } from "../../domain/actors.js"
 import type { GovernedActionPolicyBinding } from "../../domain/governedAction/index.js"
 import type { GovernedActionId, PluginConnectionId, WorkspaceId } from "../../domain/identifiers.js"
 
@@ -50,5 +51,8 @@ export class GovernedActionPolicyBindingSource extends Context.Service<
   GovernedActionPolicyBindingSource,
   {
     readonly current: Effect.Effect<GovernedActionPolicyBinding, GovernedActionSubmissionUnavailable>
+    readonly forPermission: (
+      requiredPermission: Role
+    ) => Effect.Effect<GovernedActionPolicyBinding, GovernedActionSubmissionUnavailable>
   }
 >()("@knpkv/control-center/server/governance/GovernedActionPolicyBindingSource") {}

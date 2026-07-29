@@ -10,16 +10,14 @@ import { GovernedActionId, WorkspaceId } from "../../../../domain/identifiers.js
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
-import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
 import { makeGovernedActionExecutionProviderOutcomeFolder } from "./provider-outcome-fold.js"
-import { governedActionReconciliationKey } from "./reconciliation-locator.js"
 import {
   encodeReconciliationInboxOutcome,
   type ReconciliationInboxOutcome,
-  reconciliationInboxOutcomeCommand,
   reconciliationInboxOutcomeKind,
   reconciliationInboxOutcomeObservedAt,
+  reconciliationInboxOutcomeUsesAuthorizationObservation,
   ReconciliationResultKind
 } from "./reconciliation-outcome.js"
 import {
@@ -95,12 +93,6 @@ const existingMatches = (
   existing.outcomeJson === expected.outcomeJson &&
   existing.outcomeDigest === expected.outcomeDigest &&
   DateTime.Order(existing.observedAt, expected.observedAt) === 0
-
-const isRecoverableState = (state: string): boolean =>
-  state === "started" ||
-  state === "cancel-requested" ||
-  state === "unknown" ||
-  state === "cancel-requested-unknown"
 
 /** Build the durable append-then-fold boundary shared by reconciliation-side outcomes. */
 export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(function*() {
@@ -205,26 +197,25 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
           }
         }
 
+        const commandDigest = yield* folder.prepareExpectedCommand(input.operation, {
+          _tag: "reconciliation",
+          workspaceId: claim.workspaceId,
+          actionId: claim.actionId,
+          outcome: input.outcome,
+          observedAt: outcomeObservedAt
+        })
         if (
           DateTime.Order(input.receivedAt, now) > 0 ||
           DateTime.Order(outcomeObservedAt, input.receivedAt) > 0 ||
-          DateTime.Order(outcomeObservedAt, claim.claimedAt) < 0 ||
+          (
+            !reconciliationInboxOutcomeUsesAuthorizationObservation(input.outcome) &&
+            DateTime.Order(outcomeObservedAt, claim.claimedAt) < 0
+          ) ||
           claim.expiredAt !== null ||
           DateTime.Order(input.receivedAt, claim.leaseExpiresAt) >= 0 ||
           claim.claimSequence !== claim.latestClaimSequence
         ) return yield* storeError(input.operation, "conflict")
 
-        const record = yield* transaction.read({ workspaceId: claim.workspaceId, actionId: claim.actionId })
-        if (!isRecoverableState(record.head.state)) return yield* storeError(input.operation, "conflict")
-        const command = reconciliationInboxOutcomeCommand(
-          input.outcome,
-          governedActionReconciliationKey(record),
-          outcomeObservedAt
-        )
-        const commandDigest = yield* digestGovernedActionTransitionCommand(command).pipe(
-          Effect.provideService(Crypto.Crypto, cryptoService),
-          Effect.mapError(mapFailure)
-        )
         const outcomeId = yield* cryptoService.randomUUIDv7
         yield* sql`INSERT INTO governed_action_provider_outcomes (
           workspace_id, action_id, outcome_id, source_kind, permit_token_digest,

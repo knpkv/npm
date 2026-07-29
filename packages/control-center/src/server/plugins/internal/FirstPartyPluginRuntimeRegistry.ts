@@ -33,6 +33,7 @@ import { SecretStore } from "../../secrets/SecretStore.js"
 import { loadAtlassianProfile } from "../atlassian/AtlassianProfiles.js"
 import { AtlassianBasicAuthEmail } from "../AtlassianBasicAuth.js"
 import {
+  clockifyReadOnlyPluginDescriptor,
   ClockifyReadPluginConfiguration,
   clockifyReadPluginDescriptor,
   makeClockifyReadPluginRuntime
@@ -125,6 +126,7 @@ interface LoadedRuntime {
     | "current"
     | "compatible-atlassian"
     | "compatible-codecommit"
+    | "compatible-clockify"
     | "compatible-codepipeline"
     | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
@@ -679,6 +681,9 @@ const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => 
   if (providerId === "codepipeline") {
     return [codePipelinePluginDescriptor, historicalReadOnlyCodePipelineDescriptor]
   }
+  if (providerId === "clockify") {
+    return [clockifyReadPluginDescriptor, clockifyReadOnlyPluginDescriptor]
+  }
   return [expectedDescriptor(providerId)]
 }
 
@@ -726,6 +731,8 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
       ? "compatible-codecommit"
       : connection.providerId === "codepipeline"
       ? "compatible-codepipeline"
+      : connection.providerId === "clockify"
+      ? "compatible-clockify"
       : connection.providerId === "jira" && (descriptorGeneration === 1 || descriptorGeneration === 2)
       ? "compatible-atlassian"
       : "legacy-atlassian",
@@ -985,7 +992,15 @@ const clockifyLayer = Effect.fn("FirstPartyPluginRuntime.clockifyLayer")(functio
     }))
   )
   const plugin = Layer.unwrap(
-    makeClockifyReadPluginRuntime(configurationInput).pipe(Effect.map(({ layer }) => layer))
+    makeClockifyReadPluginRuntime(configurationInput).pipe(
+      Effect.map(({ definition }) =>
+        buildPluginDefinitionLayerFromNegotiatedDescriptor(
+          definition,
+          configurationInput,
+          loaded.descriptor
+        )
+      )
+    )
   ).pipe(Layer.provide(client))
   return { credentialGeneration: apiKeyRef, layer: plugin }
 })

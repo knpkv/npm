@@ -1,5 +1,9 @@
 /** Durable application adapters for the authenticated HTTP API. @packageDocumentation */
 export { authorizedSharesLayer, makeAuthorizedShares } from "./authorizedShares.js"
+export {
+  clockifyActionSubmissionsLayer,
+  clockifyActionSubmissionsUnavailableLayer
+} from "./clockifyActionSubmissions.js"
 export { codePipelineReadsLayer, makeCodePipelineReads } from "./codePipelineReads.js"
 export { completeDiffReadsLayer, makeCompleteDiffReads } from "./completeDiffReads.js"
 export { deliveryGraphInspectionLayer, makeDeliveryGraphInspection } from "./deliveryGraphInspection.js"

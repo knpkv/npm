@@ -80,6 +80,57 @@ describe("ClockifyApiClient", () => {
     )
   })
 
+  it.effect("requests hydrated time-entry details when required by the caller", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      const entry = yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: true })
+      yield* client.getTimeEntry("workspace-1", "entry-1")
+      yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: false })
+      expect(entry.id).toBe("entry-1")
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[1]?.urlParams ?? []).has("hydrated")).toBe(false)
+      expect(new Map(requests[2]?.urlParams ?? []).get("hydrated")).toBe("false")
+    }).pipe(
+      Effect.provide(clientLayer({
+        status: 200,
+        body: {
+          id: "entry-1",
+          workspaceId: "workspace-1",
+          userId: "user-1",
+          description: "Review payment safeguards",
+          billable: true,
+          customFieldValues: [],
+          projectId: "project-1",
+          taskId: "task-1",
+          tagIds: ["delivery"],
+          timeInterval: {
+            start: "2026-07-11T08:00:00Z",
+            end: "2026-07-11T09:00:00Z",
+            duration: "PT1H"
+          }
+        }
+      }, requests))
+    )
+  })
+
+  it.effect("forwards hydration when listing canonical time-entry snapshots", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      yield* client.getTimeEntries("workspace-1", "user-1", {
+        hydrated: true,
+        page: 2,
+        pageSize: 10
+      })
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("2")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page-size")).toBe("10")
+    }).pipe(
+      Effect.provide(clientLayer({ status: 200, body: [] }, requests))
+    )
+  })
+
   it.effect("pages through the complete workspace user directory", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const firstPage = Array.from({ length: 500 }, (_, index) => ({

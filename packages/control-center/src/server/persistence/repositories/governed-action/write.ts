@@ -443,6 +443,13 @@ const makeGovernedActionTransactionWriter = Effect.gen(function*() {
           ${input.envelope.providerId}, ${input.envelope.targetEntityId}, ${input.envelope.idempotencyKey},
           ${input.envelope.envelopeDigest}, ${envelopeJson}, NULL, NULL, NULL, NULL, NULL, NULL,
           NULL, NULL, ${occurredAt}, ${occurredAt})`
+        yield* sql`INSERT INTO governed_action_target_dimensions (
+          workspace_id, action_id, action_kind, expected_revision
+        ) VALUES (
+          ${input.envelope.workspaceId}, ${input.envelope.actionId},
+          ${input.envelope.proposal.request.actionKind},
+          ${input.envelope.proposal.request.expectedRevision}
+        )`
       } else {
         yield* verifyRootIdentity(input, envelopeJson, root).pipe(captureMalformedGovernedActionRow(root))
         if (input.command._tag === "propose") return yield* inputError("conflicting-action-identity")

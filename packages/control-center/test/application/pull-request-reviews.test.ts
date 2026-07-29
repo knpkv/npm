@@ -181,6 +181,7 @@ const release = Schema.decodeSync(Release)({
 })
 
 const inspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  clockifyApproval: null,
   entity: {
     canonicalReleaseId: RELEASE_ID,
     owners: [],

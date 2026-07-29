@@ -11,6 +11,7 @@ import {
   governedActionAuthorizationMismatches
 } from "../../../../domain/governedAction/index.js"
 import { GovernedActionId } from "../../../../domain/identifiers.js"
+import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { digestGovernedActionPolicyEvaluation } from "../../../governance/governedActionDigests.js"
 import { Database } from "../../Database.js"
 import { PersistedRecordError, RecordNotFoundError } from "../../errors.js"
@@ -26,7 +27,12 @@ import {
   type GovernedActionQuarantineRecordKind,
   governedActionRecordError
 } from "./codec.js"
-import type { GovernedActionIdempotencyReadInput, GovernedActionReadInput, GovernedActionRecord } from "./contract.js"
+import type {
+  GovernedActionIdempotencyReadInput,
+  GovernedActionReadInput,
+  GovernedActionRecord,
+  GovernedActionTargetReadInput
+} from "./contract.js"
 import { captureMalformedGovernedActionRow } from "./quarantine.js"
 import {
   GovernedActionAttemptRow,
@@ -38,6 +44,12 @@ import {
 } from "./rows.js"
 
 const MAXIMUM_GOVERNED_ACTION_TRANSITIONS = 1_000
+const TERMINAL_TARGET_PAGE_SIZE = 100
+
+const GovernedActionTargetCandidateIdentity = Schema.Struct({
+  actionId: GovernedActionId,
+  sortAt: UtcTimestamp
+})
 
 const malformed = (
   request: GovernedActionReadInput,
@@ -79,6 +91,43 @@ const failMalformed = (
   row: unknown,
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
+
+/** Order verified target candidates by terminal observation and enforce local approval provenance. @internal */
+export const selectLatestTerminalByTarget = (
+  request: GovernedActionTargetReadInput,
+  candidates: ReadonlyArray<GovernedActionRecord>
+): ReadonlyArray<GovernedActionRecord> =>
+  candidates.filter(({ authorization, envelope, head }) =>
+    envelope.proposal.request.actionKind === request.actionKind &&
+    (
+      request.expectedRevision === undefined ||
+      envelope.proposal.request.expectedRevision === request.expectedRevision
+    ) &&
+    (
+      request.actionKind !== "record-approval" ||
+      (
+        authorization !== null &&
+        head.lineage._tag === "terminal" &&
+        head.lineage.receipt.observationBasis === "authorization" &&
+        DateTime.Order(head.lineage.receipt.observedAt, authorization.authorizedAt) === 0
+      )
+    )
+  ).sort((left, right) => {
+    if (left.head.lineage._tag !== "terminal" || right.head.lineage._tag !== "terminal") return 0
+    const newestFirst = DateTime.Order(
+      right.head.lineage.receipt.observedAt,
+      left.head.lineage.receipt.observedAt
+    )
+    return newestFirst !== 0
+      ? newestFirst
+      : right.envelope.actionId.localeCompare(left.envelope.actionId)
+  }).slice(0, request.limit)
+
+/** Decide whether verified candidates satisfy a bounded target read without another SQL page. @internal */
+export const hasEnoughTerminalByTargetCandidates = (
+  request: GovernedActionTargetReadInput,
+  candidates: ReadonlyArray<GovernedActionRecord>
+): boolean => selectLatestTerminalByTarget(request, candidates).length >= request.limit
 
 /** @internal Decode the unique action identity returned by an idempotency lookup. */
 export const decodeGovernedActionIdempotencyRows = Effect.fn(
@@ -506,5 +555,135 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     return yield* read({ workspaceId: request.workspaceId, actionId })
   })
 
-  return { read, readByIdempotencyKey }
+  const readLatestTerminalByTarget = Effect.fn(
+    "GovernedActionReader.readLatestTerminalByTarget"
+  )(function*(request: GovernedActionTargetReadInput) {
+    const candidates: Array<GovernedActionRecord> = []
+    const expectedRevision = request.expectedRevision ?? null
+    let cursor: typeof GovernedActionTargetCandidateIdentity.Type | null = null
+    while (!hasEnoughTerminalByTargetCandidates(request, candidates)) {
+      const rows: ReadonlyArray<Record<string, unknown>> = request.actionKind === "record-approval"
+        ? cursor === null
+          ? yield* sql<Record<string, unknown>>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+          : yield* sql<Record<string, unknown>>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
+              AND (
+                COALESCE(authorization.authorized_at, action.updated_at) < ${DateTime.formatIso(cursor.sortAt)}
+                OR (
+                  COALESCE(authorization.authorized_at, action.updated_at) = ${DateTime.formatIso(cursor.sortAt)}
+                  AND action.action_id < ${cursor.actionId}
+                )
+              )
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+        : cursor === null
+        ? yield* sql<Record<string, unknown>>`SELECT
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
+            AND (
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+          ORDER BY action.updated_at DESC, action.action_id DESC
+          LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+        : yield* sql<Record<string, unknown>>`SELECT
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
+            AND (
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+            AND (
+              action.updated_at < ${DateTime.formatIso(cursor.sortAt)}
+              OR (
+                action.updated_at = ${DateTime.formatIso(cursor.sortAt)}
+                AND action.action_id < ${cursor.actionId}
+              )
+            )
+          ORDER BY action.updated_at DESC, action.action_id DESC
+          LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+      const identities: ReadonlyArray<typeof GovernedActionTargetCandidateIdentity.Type> = yield* Schema
+        .decodeUnknownEffect(
+          Schema.Array(GovernedActionTargetCandidateIdentity).check(
+            Schema.isMaxLength(TERMINAL_TARGET_PAGE_SIZE)
+          )
+        )(rows).pipe(
+          Effect.mapError(() =>
+            new PersistedRecordError({
+              workspaceId: request.workspaceId,
+              recordKind: "governed-action",
+              recordKey: request.targetEntityId,
+              diagnosticCode: "governed-action-schema-invalid"
+            })
+          )
+        )
+      const verifiedPage = yield* Effect.forEach(
+        identities,
+        ({ actionId }) => read({ workspaceId: request.workspaceId, actionId })
+      )
+      for (const candidate of verifiedPage) candidates.push(candidate)
+      if (identities.length < TERMINAL_TARGET_PAGE_SIZE) break
+      cursor = identities[identities.length - 1] ?? null
+    }
+    return selectLatestTerminalByTarget(request, candidates)
+  })
+
+  return { read, readByIdempotencyKey, readLatestTerminalByTarget }
 })

@@ -15,7 +15,9 @@ import {
   GovernedActionTransitionCause,
   GovernedActionTransitionCommand
 } from "../../src/domain/governedAction/index.js"
+import { GovernedActionId } from "../../src/domain/identifiers.js"
 import { PluginPayloadJson } from "../../src/domain/plugins/bounds.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   digestGovernedActionAuthorization,
@@ -32,9 +34,14 @@ import {
   GovernedActionCommitCompanion,
   GovernedActionCommitInput,
   GovernedActionIdempotencyReadInput,
-  GovernedActionInputError
+  GovernedActionInputError,
+  GovernedActionTargetReadInput
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
-import { decodeGovernedActionIdempotencyRows } from "../../src/server/persistence/repositories/governed-action/read.js"
+import {
+  decodeGovernedActionIdempotencyRows,
+  hasEnoughTerminalByTargetCandidates,
+  selectLatestTerminalByTarget
+} from "../../src/server/persistence/repositories/governed-action/read.js"
 import {
   makeGovernedActionTransactionWrite,
   makeGovernedActionWrite
@@ -124,8 +131,12 @@ const seedAuthorityRoots = Effect.fn("GovernedActionRepositoryTest.seedRoots")(f
 const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(function*(
   actionId: string,
   options?: {
+    readonly actionKind?: string
     readonly evidenceCurrentUntil?: string
+    readonly expectedRevision?: string
+    readonly idempotencyKey?: string
     readonly policyId?: string
+    readonly proposalKey?: string
     readonly proposalExpiresAt?: string
   }
 ) {
@@ -148,7 +159,7 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
   const materialWithoutEvidenceDigest = {
     schemaVersion: 1,
     actionId,
-    idempotencyKey: "governed-action:PAY-42:done:1",
+    idempotencyKey: options?.idempotencyKey ?? "governed-action:PAY-42:done:1",
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
@@ -160,12 +171,12 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
     capability: { capabilityId: "action.execute", version: 1 },
     targetEntityId: ENTITY_ID,
     proposal: {
-      proposalKey: "transition:PAY-42:done",
+      proposalKey: options?.proposalKey ?? "transition:PAY-42:done",
       capabilityVersion: 1,
       request: {
-        actionKind: "transition",
+        actionKind: options?.actionKind ?? "transition",
         target: { entityType: "issue", vendorImmutableId: "PAY-42" },
-        expectedRevision: "1",
+        expectedRevision: options?.expectedRevision ?? "1",
         payload,
         evidenceIds: ["provider-evidence-1"]
       },
@@ -232,7 +243,7 @@ const makeDenialInput = (
 ) =>
   decodeCommit({
     ...Schema.encodeSync(GovernedActionCommitInput)(proposal),
-    expectedHeadTransitionId: PROPOSAL_TRANSITION_ID,
+    expectedHeadTransitionId: proposal.transitionId,
     transitionId: DENIAL_TRANSITION_ID,
     commandId: "command:PAY-42:deny",
     command,
@@ -242,10 +253,16 @@ const makeDenialInput = (
     auditEventId: DENIAL_AUDIT_ID
   })
 
-const makeAuthorization = (envelope: GovernedActionEnvelope) =>
+const makeAuthorization = (
+  envelope: GovernedActionEnvelope,
+  options?: {
+    readonly authorizationId?: string
+    readonly authorizedAt?: string
+  }
+) =>
   decodeAuthorization({
     schemaVersion: 1,
-    authorizationId: AUTHORIZATION_ID,
+    authorizationId: options?.authorizationId ?? AUTHORIZATION_ID,
     actionId: envelope.actionId,
     workspaceId: envelope.workspaceId,
     pluginConnectionId: envelope.pluginConnectionId,
@@ -263,12 +280,16 @@ const makeAuthorization = (envelope: GovernedActionEnvelope) =>
     sessionPermission: "workspace-owner",
     sessionExpiresAt: "2026-07-15T11:00:00.000Z",
     requiredPermission: envelope.policy.requiredPermission,
-    authorizedAt: "2026-07-15T10:01:00.000Z",
+    authorizedAt: options?.authorizedAt ?? "2026-07-15T10:01:00.000Z",
     expiresAt: "2026-07-15T10:05:00.000Z"
   })
 
 const makeDispatchCompanion = Effect.fn("GovernedActionRepositoryTest.makeDispatchCompanion")(function*(
-  envelope: GovernedActionEnvelope
+  envelope: GovernedActionEnvelope,
+  options?: {
+    readonly attemptId?: string
+    readonly authorizationId?: string
+  }
 ) {
   const policyEvaluation = decodePolicyEvaluation({
     schemaVersion: 1,
@@ -283,8 +304,8 @@ const makeDispatchCompanion = Effect.fn("GovernedActionRepositoryTest.makeDispat
   })
   const attempt = decodeAttempt({
     schemaVersion: 1,
-    attemptId: ATTEMPT_ID,
-    authorizationId: AUTHORIZATION_ID,
+    attemptId: options?.attemptId ?? ATTEMPT_ID,
+    authorizationId: options?.authorizationId ?? AUTHORIZATION_ID,
     actionId: envelope.actionId,
     workspaceId: envelope.workspaceId,
     pluginConnectionId: envelope.pluginConnectionId,
@@ -305,21 +326,26 @@ const makeDispatchCompanion = Effect.fn("GovernedActionRepositoryTest.makeDispat
 
 const makeAuthorizationInput = (
   proposal: ReturnType<typeof makeProposalInput>,
-  authorization: typeof GovernedActionAuthorizationV1.Type
+  authorization: typeof GovernedActionAuthorizationV1.Type,
+  options?: {
+    readonly auditEventId?: string
+    readonly commandId?: string
+    readonly transitionId?: string
+  }
 ) =>
   decodeCommit({
     ...Schema.encodeSync(GovernedActionCommitInput)(proposal),
-    expectedHeadTransitionId: PROPOSAL_TRANSITION_ID,
-    transitionId: AUTHORIZATION_TRANSITION_ID,
-    commandId: "command:PAY-42:authorize",
-    command: { _tag: "authorize", authorizationId: AUTHORIZATION_ID },
+    expectedHeadTransitionId: proposal.transitionId,
+    transitionId: options?.transitionId ?? AUTHORIZATION_TRANSITION_ID,
+    commandId: options?.commandId ?? "command:PAY-42:authorize",
+    command: { _tag: "authorize", authorizationId: authorization.authorizationId },
     cause: humanCause,
-    occurredAt: "2026-07-15T10:01:00.000Z",
+    occurredAt: Schema.encodeSync(UtcTimestamp)(authorization.authorizedAt),
     companion: {
       _tag: "authorization",
       authorization: Schema.encodeSync(GovernedActionAuthorizationV1)(authorization)
     },
-    auditEventId: AUTHORIZATION_AUDIT_ID
+    auditEventId: options?.auditEventId ?? AUTHORIZATION_AUDIT_ID
   })
 
 const makeStartInput = (
@@ -327,14 +353,19 @@ const makeStartInput = (
   companion: {
     readonly attempt: typeof GovernedActionAttemptV1.Type
     readonly policyEvaluation: typeof GovernedActionPolicyEvaluationV1.Type
+  },
+  options?: {
+    readonly auditEventId?: string
+    readonly commandId?: string
+    readonly transitionId?: string
   }
 ) =>
   decodeCommit({
     ...Schema.encodeSync(GovernedActionCommitInput)(authorizationInput),
-    expectedHeadTransitionId: AUTHORIZATION_TRANSITION_ID,
-    transitionId: START_TRANSITION_ID,
-    commandId: "command:PAY-42:start",
-    command: { _tag: "start", attemptId: ATTEMPT_ID },
+    expectedHeadTransitionId: authorizationInput.transitionId,
+    transitionId: options?.transitionId ?? START_TRANSITION_ID,
+    commandId: options?.commandId ?? "command:PAY-42:start",
+    command: { _tag: "start", attemptId: companion.attempt.attemptId },
     cause: { _tag: "system", component: "governed-action-engine" },
     occurredAt: "2026-07-15T10:02:00.000Z",
     companion: {
@@ -342,7 +373,7 @@ const makeStartInput = (
       attempt: Schema.encodeSync(GovernedActionAttemptV1)(companion.attempt),
       policyEvaluation: Schema.encodeSync(GovernedActionPolicyEvaluationV1)(companion.policyEvaluation)
     },
-    auditEventId: START_AUDIT_ID
+    auditEventId: options?.auditEventId ?? START_AUDIT_ID
   })
 
 interface LedgerCounts {
@@ -1104,6 +1135,372 @@ describe("governed action writer", () => {
             : assert.fail("Expected succeeded command")
         }
       })
+      const matching = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "transition",
+        limit: 20
+      })
+      const differentKind = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "record-approval",
+        limit: 20
+      })
+      assert.deepStrictEqual(matching.map(({ envelope }) => envelope.actionId), [ACTION_ID])
+      assert.deepStrictEqual(differentKind, [])
+      if (record.authorization === null || record.head.lineage._tag !== "terminal") {
+        return yield* Effect.die("expected verified terminal action with authorization")
+      }
+      const authorization = record.authorization
+      const terminalLineage = record.head.lineage
+      const approvalRequest = Schema.decodeUnknownSync(GovernedActionTargetReadInput)({
+        workspaceId: envelope.workspaceId,
+        providerId: envelope.providerId,
+        targetEntityId: envelope.targetEntityId,
+        actionKind: "record-approval",
+        limit: 20
+      })
+      const providerReceipt = {
+        observedAt: terminalLineage.receipt.observedAt,
+        providerOperationId: terminalLineage.receipt.providerOperationId,
+        safeSummary: terminalLineage.receipt.safeSummary,
+        status: terminalLineage.receipt.status
+      }
+      const makeApprovalCandidate = (
+        actionId: typeof record.envelope.actionId,
+        authorizedAt: string,
+        observationBasis: "authorization" | null = "authorization"
+      ): typeof record => ({
+        ...record,
+        authorization: {
+          ...authorization,
+          authorizedAt: decodeTimestamp(authorizedAt)
+        },
+        envelope: {
+          ...record.envelope,
+          actionId,
+          proposal: {
+            ...record.envelope.proposal,
+            request: {
+              ...record.envelope.proposal.request,
+              actionKind: approvalRequest.actionKind
+            }
+          }
+        },
+        head: {
+          ...record.head,
+          lineage: {
+            ...terminalLineage,
+            receipt: {
+              ...(observationBasis === null
+                ? providerReceipt
+                : { ...terminalLineage.receipt, observationBasis }),
+              observedAt: decodeTimestamp(authorizedAt)
+            }
+          }
+        }
+      })
+      const olderApproval = makeApprovalCandidate(
+        record.envelope.actionId,
+        "2026-07-15T10:01:00.000Z"
+      )
+      const newerActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000097")
+      const tieActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000098")
+      const newerApproval = makeApprovalCandidate(
+        newerActionId,
+        "2026-07-15T10:02:00.000Z"
+      )
+      const tieApproval = makeApprovalCandidate(
+        tieActionId,
+        "2026-07-15T10:02:00.000Z"
+      )
+      const providerObserved = makeApprovalCandidate(
+        GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000099"),
+        "2026-07-15T10:03:00.000Z",
+        null
+      )
+      if (providerObserved.head.lineage._tag !== "terminal") {
+        return yield* Effect.die("expected terminal provider-observed fixture")
+      }
+      assert.isUndefined(providerObserved.head.lineage.receipt.observationBasis)
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [
+          olderApproval,
+          providerObserved,
+          newerApproval
+        ]).map(({ envelope: selected }) => selected.actionId),
+        [newerActionId, record.envelope.actionId]
+      )
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [newerApproval, tieApproval])
+          .map(({ envelope: selected }) => selected.actionId),
+        [tieActionId, newerActionId]
+      )
+      const newerNonMatching = Array.from({ length: 100 }, (_, index) => ({
+        ...record,
+        envelope: {
+          ...record.envelope,
+          actionId: GovernedActionId.make(
+            `01890f6f-6d6a-7cc0-98d2-33${String(index).padStart(10, "0")}`
+          )
+        }
+      }))
+      assert.isFalse(
+        hasEnoughTerminalByTargetCandidates(approvalRequest, newerNonMatching),
+        "a full SQL page of other action kinds must not stop target pagination"
+      )
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [
+          ...newerNonMatching,
+          olderApproval
+        ]).map(({ envelope: selected }) => selected.actionId),
+        [record.envelope.actionId],
+        "an older matching approval on the next page remains visible"
+      )
+
+      const quarantine = yield* QuarantineRepository
+      yield* sql`DROP TRIGGER governed_action_head_exact_update`
+      yield* sql`DROP TRIGGER governed_action_identity_immutable`
+      yield* sql`UPDATE governed_actions
+        SET envelope_json = 'not-json'
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND action_id = ${ACTION_ID}`
+      const corrupted = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "record-approval",
+        limit: 20
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isSuccess(corrupted))
+      if (Result.isSuccess(corrupted)) assert.deepStrictEqual(corrupted.success, [])
+      const quarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(quarantined, 0)
+    })))
+
+  it.effect("pages approvals by durable authorization time before applying the limit", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const { sql } = yield* Database
+      const fixtureId = (group: string, index: number): string =>
+        `01890f6f-6d6a-7cc0-98d2-${group}${index.toString(16).padStart(10, "0")}`
+      const commitTerminalAction = Effect.fn("GovernedActionRepositoryTest.commitTerminalAction")(function*(
+        index: number,
+        authorizedAt: string,
+        terminalAt: string,
+        actionKind = "record-approval",
+        expectedRevision = "matching-revision"
+      ) {
+        const actionId = fixtureId("40", index)
+        const authorizationId = fixtureId("43", index)
+        const envelope = yield* makeEnvelope(actionId, {
+          actionKind,
+          expectedRevision,
+          idempotencyKey: `governed-action:PAY-42:approval:${String(index)}`,
+          proposalKey: `approval:PAY-42:${String(index)}`
+        })
+        const proposal = makeProposalInput(envelope, {
+          transitionId: fixtureId("41", index),
+          auditEventId: fixtureId("42", index),
+          commandId: `command:PAY-42:approval:${String(index)}:propose`
+        })
+        yield* repository.commit(proposal)
+        const authorization = makeAuthorization(envelope, {
+          authorizationId,
+          authorizedAt
+        })
+        const authorizationInput = makeAuthorizationInput(proposal, authorization, {
+          transitionId: fixtureId("44", index),
+          auditEventId: fixtureId("45", index),
+          commandId: `command:PAY-42:approval:${String(index)}:authorize`
+        })
+        yield* repository.commit(authorizationInput)
+        const companion = yield* makeDispatchCompanion(envelope, {
+          attemptId: fixtureId("46", index),
+          authorizationId
+        })
+        const startInput = makeStartInput(authorizationInput, companion, {
+          transitionId: fixtureId("47", index),
+          auditEventId: fixtureId("48", index),
+          commandId: `command:PAY-42:approval:${String(index)}:start`
+        })
+        yield* repository.commit(startInput)
+        yield* repository.commit(decodeCommit({
+          ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
+          expectedHeadTransitionId: startInput.transitionId,
+          transitionId: fixtureId("49", index),
+          commandId: `command:PAY-42:approval:${String(index)}:succeed`,
+          command: {
+            _tag: "recordSucceeded",
+            receipt: {
+              observationBasis: "authorization",
+              providerOperationId: `control-center-approval-${String(index)}`,
+              status: "succeeded",
+              safeSummary: "Control Center approval recorded",
+              observedAt: authorizedAt
+            },
+            source: { _tag: "direct" }
+          },
+          cause: { _tag: "system", component: "governed-action-engine" },
+          occurredAt: terminalAt,
+          companion: { _tag: "none" },
+          auditEventId: fixtureId("4a", index)
+        }))
+        return envelope.actionId
+      })
+
+      for (let index = 0; index < 20; index++) {
+        yield* commitTerminalAction(
+          index,
+          `2026-07-15T10:01:${String(index).padStart(2, "0")}.000Z`,
+          `2026-07-15T10:20:${String(index).padStart(2, "0")}.000Z`,
+          "record-approval",
+          "other-revision"
+        )
+      }
+      let corruptedUnrelatedActionId: GovernedActionId | undefined
+      for (let index = 20; index < 100; index++) {
+        const actionId = yield* commitTerminalAction(
+          index,
+          "2026-07-15T10:01:40.000Z",
+          "2026-07-15T10:20:30.000Z",
+          "transition",
+          "other-revision"
+        )
+        if (index === 20) corruptedUnrelatedActionId = actionId
+      }
+      if (corruptedUnrelatedActionId === undefined) {
+        return yield* Effect.die("expected an unrelated governed-action fixture")
+      }
+      yield* sql`DROP TRIGGER governed_action_transitions_no_update`
+      yield* sql`UPDATE governed_action_transitions
+        SET transition_json = ${JSON.stringify({ malformed: true })}
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND action_id = ${corruptedUnrelatedActionId}`
+      const latestAuthorizedActionId = yield* commitTerminalAction(
+        100,
+        "2026-07-15T10:00:30.000Z",
+        "2026-07-15T10:03:00.000Z"
+      )
+      const selected = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "record-approval",
+        expectedRevision: Revision.make("matching-revision"),
+        limit: 20
+      })
+
+      assert.lengthOf(selected, 1)
+      assert.strictEqual(selected[0]?.envelope.actionId, latestAuthorizedActionId)
+    })))
+
+  it.effect("physically binds authorization-based provider outcomes to their terminal receipt", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      const proposal = makeProposalInput(envelope)
+      yield* repository.commit(proposal)
+      const authorizationInput = makeAuthorizationInput(proposal, makeAuthorization(envelope))
+      yield* repository.commit(authorizationInput)
+      yield* repository.commit(
+        makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
+      )
+
+      const { sql } = yield* Database
+      const permitTokenDigest = "d".repeat(64)
+      yield* sql`INSERT INTO governed_action_execution_leases (
+        workspace_id, action_id, attempt_id, start_transition_id,
+        permit_token_digest, runtime_authority_token, recovery_capability_version,
+        created_at, dispatch_deadline, lease_expires_at, recovery_eligible_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID}, ${START_TRANSITION_ID},
+        ${permitTokenDigest}, ${`sha256:${"d".repeat(64)}`}, 1,
+        '2026-07-15T10:02:00.000Z', '2026-07-15T10:02:10.000Z',
+        '2026-07-15T10:02:20.000Z', '2026-07-15T10:02:30.000Z'
+      )`
+
+      const insertOutcome = (
+        outcomeId: string,
+        resultKind: string,
+        outcome: unknown,
+        observedAt: string
+      ) =>
+        sql`INSERT INTO governed_action_provider_outcomes (
+        workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+        recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+        outcome_digest, expected_command_digest, observed_at, received_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, ${outcomeId}, 'dispatch', ${permitTokenDigest},
+        NULL, ${resultKind}, 1, ${JSON.stringify(outcome)}, ${"e".repeat(64)},
+        ${`sha256:${"f".repeat(64)}`}, ${observedAt}, '2026-07-15T10:02:02.000Z'
+      )`
+      const authorizationReceipt = {
+        _tag: "confirmed",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: "control-center-authorization-outcome",
+          observationBasis: "authorization",
+          safeSummary: "Recorded the authorized local decision",
+          observedAt: "2026-07-15T10:01:00.000Z"
+        }
+      }
+
+      const nonTerminal = yield* insertOutcome(
+        "forged-non-terminal-authorization-observation",
+        "manual-unknown",
+        authorizationReceipt,
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedStatus = yield* insertOutcome(
+        "forged-authorization-observation-status",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: { ...authorizationReceipt.receipt, status: "failed" }
+        },
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedReceiptTime = yield* insertOutcome(
+        "forged-authorization-observation-receipt-time",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: {
+            ...authorizationReceipt.receipt,
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        },
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedAuthorizationTime = yield* insertOutcome(
+        "forged-authorization-observation-durable-time",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: {
+            ...authorizationReceipt.receipt,
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        },
+        "2026-07-15T10:02:01.000Z"
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(nonTerminal))
+      assert.isTrue(Result.isFailure(mismatchedStatus))
+      assert.isTrue(Result.isFailure(mismatchedReceiptTime))
+      assert.isTrue(Result.isFailure(mismatchedAuthorizationTime))
+      yield* insertOutcome(
+        "valid-authorization-observation",
+        "succeeded",
+        authorizationReceipt,
+        "2026-07-15T10:01:00.000Z"
+      )
     })))
 
   it.effect("quarantines invalid stored authorization before start on read and exact replay", () =>

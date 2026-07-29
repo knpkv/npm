@@ -190,7 +190,10 @@ When writing Effect code:
   reserve manual URL/cursor extraction for opaque transport pagination.
 - When advertised plugin capabilities change, update current module and service
   documentation in the same change while keeping historical-descriptor comments
-  explicit about their older capability surface.
+  explicit about their older capability surface. Check the plugin's `index.ts`,
+  every ancestor barrel that exports it, public runtime JSDoc, and package README
+  section; retained public identifiers and historical documentation still require
+  compatibility judgment. Generated and vendor barrels are excluded.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

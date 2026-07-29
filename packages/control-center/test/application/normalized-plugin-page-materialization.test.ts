@@ -29,6 +29,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -755,7 +756,8 @@ const setup = Effect.gen(function*() {
 
 const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
   pluginConnectionId: PluginConnectionId,
-  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence"
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence",
+  pluginDescriptor: unknown = descriptorFor(providerId)
 ) {
   const persistence = yield* Persistence
   yield* persistence.pluginConnections.create(WORKSPACE_ID, {
@@ -769,7 +771,7 @@ const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setup
     WORKSPACE_ID,
     pluginConnectionId,
     providerId,
-    descriptorFor(providerId),
+    pluginDescriptor,
     0,
     T0
   )
@@ -1870,7 +1872,7 @@ describe("normalized plugin page materialization", () => {
             projectionRevision: 1,
             sourceEntityRevision: 1,
             supersedesProjectionRevision: null,
-            projectionSchemaVersion: 1,
+            projectionSchemaVersion: 3,
             entityState: "present",
             entityType: "time-entry",
             displayKey: "time-entry-backfill",
@@ -1906,6 +1908,7 @@ describe("normalized plugin page materialization", () => {
           attributes: {
             description: longTimeEntryDescription,
             billable: true,
+            locked: true,
             approvalState: "approved",
             projectId: "payments",
             userId: "clockify-user-avery",
@@ -1947,7 +1950,7 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backfilled time entry")
       }
       assert.strictEqual(timeEntryProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 3)
+      assert.strictEqual(timeEntryProjection.value.projection.projectionSchemaVersion, 4)
       assert.strictEqual(timeEntryProjection.value.projection.sourceEntityRevision, 1)
       if (timeEntryProjection.value.projection.details._tag !== "time-entry") {
         return yield* Effect.die("expected time-entry backfill details")
@@ -1955,6 +1958,7 @@ describe("normalized plugin page materialization", () => {
       assert.deepInclude(timeEntryProjection.value.projection.details, {
         description: longTimeEntryDescription,
         durationMinutes: 45,
+        locked: true,
         projectId: "payments",
         userId: "clockify-user-avery"
       })
@@ -2139,7 +2143,7 @@ describe("normalized plugin page materialization", () => {
       }
       assert.strictEqual(correctedProjection.value.projection.title, "Older entry")
       assert.strictEqual(correctedProjection.value.projection.projectionRevision, 2)
-      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 3)
+      assert.strictEqual(correctedProjection.value.projection.projectionSchemaVersion, 4)
       assert.strictEqual(
         (yield* persistence.entities.get(WORKSPACE_ID, newerTimeEntryEntityId)).sourceRevision.revision,
         "time-entry-revision-1"
@@ -2260,6 +2264,82 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backward Clockify interval failure")
       }
       assert.strictEqual(failure.diagnosticCode, "normalized-time-entry-timestamp-invalid")
+    })))
+
+  it.effect("projects Clockify action availability from the negotiated source descriptor", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000259")
+      const sourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "clockify",
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        vendorImmutableId: "time-entry-capabilities",
+        revision: "clockify-capabilities-revision",
+        sourceUrl: "https://app.clockify.me/tracker",
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId,
+        entityType: "time-entry",
+        sourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 3,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-capabilities",
+            title: "Capability projection",
+            details: {
+              _tag: "time-entry",
+              durationMinutes: 60,
+              billable: true,
+              approvalState: "pending"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const inspection = yield* makeDeliveryGraphInspection
+      const historical = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isFalse(historical.sourceActionsAvailable)
+
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        clockifyReadPluginDescriptor,
+        1,
+        T3
+      )
+      const current = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isTrue(current.sourceActionsAvailable)
+
+      const connection = yield* persistence.pluginConnections.get(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID)
+      yield* persistence.pluginConnections.updateMetadata(WORKSPACE_ID, CLOCKIFY_PLUGIN_ID, {
+        displayName: connection.displayName,
+        isEnabled: false,
+        expectedRevision: connection.revision,
+        updatedAt: T4
+      })
+      const disabled = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isFalse(disabled.sourceActionsAvailable)
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>
@@ -2783,6 +2863,7 @@ describe("normalized plugin page materialization", () => {
         durationMinutes: 45,
         billable: true,
         approvalState: "approved",
+        locked: true,
         projectId: "project-payments",
         userId: "clockify-user-mina"
       })
@@ -3084,6 +3165,182 @@ describe("normalized plugin page materialization", () => {
         (yield* persistence.people.getPerson(WORKSPACE_ID, discoveredContributor.assignment.actor.personId)).person
           .displayName,
         "Morgan Lee"
+      )
+    })))
+
+  it.effect("converges corrected Clockify association while preserving prior projection and relationship history", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const synchronize = (
+        pluginConnectionId: PluginConnectionId,
+        providerId: "clockify" | "jira",
+        expectedRevision: number,
+        committedAt: UtcTimestamp,
+        page: typeof PluginSyncPageV1.Type
+      ) =>
+        materializeNormalizedPluginPage({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId,
+          providerId,
+          streamKey: firstPartyStream(providerId),
+          expectedRevision,
+          committedAt,
+          successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+        }, page)
+
+      yield* synchronize(PLUGIN_ID, "jira", 0, T3, inferenceJiraReleasePage)
+      yield* synchronize(CLOCKIFY_PLUGIN_ID, "clockify", 0, T3, clockifyRelationshipPage)
+      const release = (yield* persistence.releases.list(WORKSPACE_ID, 10))[0]?.release
+      if (release === undefined) return yield* Effect.die("expected synchronized release")
+      const initial = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (initial._tag !== "releaseSlice") return yield* Effect.die("expected initial release slice")
+      const initialTimeEntry = initial.value.entityProjections.find(
+        ({ projection }) => projection.details._tag === "time-entry"
+      )?.projection
+      if (initialTimeEntry?.details._tag !== "time-entry") {
+        return yield* Effect.die("expected initial time entry")
+      }
+      const originalTracking = initial.value.relationships.find(
+        ({ kind, lifecycle }) => kind === "tracks-time-for" && lifecycle._tag === "inferred"
+      )
+      if (originalTracking === undefined) return yield* Effect.die("expected original time association")
+
+      const correctedIssuePage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "jira-corrected-association",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "jira-inference-issue-ops-99",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          entityType: "jira.issue",
+          vendorImmutableId: "issue-ops-99",
+          sourceUrl: "https://jira.example/browse/OPS-99",
+          title: "OPS-99 · Review payment safeguards",
+          attributes: { key: "OPS-99", status: { name: "Ready" } }
+        }, {
+          _tag: "AppendEvidence",
+          eventId: "jira-inference-ops-99-fix-version-evidence",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          evidenceId: "jira:issue:issue-ops-99:fix-version:2026.29",
+          subject: { entityType: "jira.issue", vendorImmutableId: "issue-ops-99" },
+          evidenceType: "relationship-observed",
+          summary: "Jira fix version 2026.29",
+          capturedAt: "2026-07-19T09:05:00.000Z",
+          data: { predicate: "relationship-observed", value: { _tag: "state", value: "2026.29" } }
+        }, {
+          _tag: "ProposeRelationship",
+          eventId: "jira-inference-release-contains-ops-99",
+          observedAt: "2026-07-19T09:05:00.000Z",
+          revision: "issue-ops-99-revision-1",
+          relationshipId: "jira-version:2026.29:contains:issue-ops-99",
+          from: { entityType: "release", vendorImmutableId: "jira-version:2026.29" },
+          to: { entityType: "jira.issue", vendorImmutableId: "issue-ops-99" },
+          relationshipType: "contains",
+          confidence: 1,
+          evidenceIds: ["jira:issue:issue-ops-99:fix-version:2026.29"]
+        }]
+      })
+      yield* synchronize(PLUGIN_ID, "jira", 1, T4, correctedIssuePage)
+      const correctedClockifyPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "clockify-corrected-association",
+        hasMore: false,
+        events: [{
+          _tag: "UpsertEntity",
+          eventId: "clockify-time-1-corrected",
+          observedAt: "2026-07-19T09:02:30.000Z",
+          revision: "time-1-corrected-revision",
+          entityType: "clockify.time-entry",
+          vendorImmutableId: "time-1",
+          sourceUrl: "https://app.clockify.me/tracker",
+          title: "[OPS-99] review and rollout",
+          attributes: {
+            billable: true,
+            description: "[OPS-99] review and rollout",
+            projectId: "project-payments",
+            taskId: "task-review",
+            userId: "clockify-user-mina",
+            locked: true,
+            entryType: "REGULAR",
+            tagIds: ["release", "review"],
+            interval: {
+              start: "2026-07-19T08:17:30.000Z",
+              end: "2026-07-19T09:02:30.000Z",
+              duration: "PT45M",
+              state: "completed"
+            }
+          }
+        }]
+      })
+      yield* synchronize(CLOCKIFY_PLUGIN_ID, "clockify", 1, T5, correctedClockifyPage)
+
+      const converged = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "releaseSlice",
+        releaseId: release.id,
+        environmentId: null,
+        limit: 100
+      })
+      if (converged._tag !== "releaseSlice") return yield* Effect.die("expected converged release slice")
+      const currentTracking = converged.value.relationships.filter(
+        ({ kind, lifecycle }) =>
+          kind === "tracks-time-for" &&
+          lifecycle._tag !== "rejected" &&
+          lifecycle._tag !== "superseded"
+      )
+      assert.lengthOf(currentTracking, 1)
+      const targetNode = converged.value.nodes.find(({ nodeId }) => nodeId === currentTracking[0]?.targetNodeId)
+      if (targetNode?.resolution._tag !== "resolved" || targetNode.resolution.target._tag !== "entity") {
+        return yield* Effect.die("expected corrected issue target")
+      }
+      const targetEntityId = targetNode.resolution.target.entityId
+      const targetProjection = converged.value.entityProjections.find(
+        ({ projection }) => projection.entityId === targetEntityId
+      )?.projection
+      if (targetProjection?.details._tag !== "issue") return yield* Effect.die("expected corrected issue")
+      assert.strictEqual(targetProjection.details.key, "OPS-99")
+
+      const currentTimeEntry = converged.value.entityProjections.find(
+        ({ projection }) => projection.entityId === initialTimeEntry.entityId
+      )?.projection
+      if (currentTimeEntry?.details._tag !== "time-entry") {
+        return yield* Effect.die("expected corrected time entry projection")
+      }
+      assert.strictEqual(currentTimeEntry.details.description, "[OPS-99] review and rollout")
+      assert.strictEqual(currentTimeEntry.projectionRevision, 2)
+      const originalProjection = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "entityProjection",
+        entityId: initialTimeEntry.entityId,
+        revision: 1
+      })
+      if (
+        originalProjection._tag !== "entityProjection" ||
+        originalProjection.value.projection.details._tag !== "time-entry"
+      ) return yield* Effect.die("expected original time entry projection")
+      assert.strictEqual(
+        originalProjection.value.projection.details.description,
+        "PAY-42 review and rollout"
+      )
+      const originalRelationshipHistory = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+        _tag: "relationshipHistory",
+        relationshipId: originalTracking.relationshipId,
+        limit: 10
+      })
+      if (originalRelationshipHistory._tag !== "relationshipHistory") {
+        return yield* Effect.die("expected original relationship history")
+      }
+      assert.strictEqual(originalRelationshipHistory.value[0]?.lifecycle._tag, "superseded")
+      assert.isTrue(
+        originalRelationshipHistory.value.some(
+          ({ evidenceClaimIds, lifecycle }) => lifecycle._tag === "inferred" && evidenceClaimIds.length > 0
+        )
       )
     })))
 

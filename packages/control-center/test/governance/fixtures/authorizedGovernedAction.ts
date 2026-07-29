@@ -44,6 +44,8 @@ export type GovernedActionFixtureVariant =
   | "codepipeline"
   | "codepipeline-start"
   | "confluence"
+  | "clockify-approval"
+  | "clockify-correction"
 
 const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
 
@@ -144,6 +146,93 @@ const confluenceFixture = defineFixture({
   }
 })
 
+const clockifyApprovalFixture = defineFixture({
+  providerId: "clockify",
+  connectionName: "Payments Clockify",
+  entityType: "time-entry",
+  vendorImmutableId: "clockify-entry-42",
+  sourceRevision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+  sourceUrl: "https://app.clockify.me/tracker",
+  displayKey: "clockify-entry-42",
+  title: "Review payment safeguards",
+  pluginId: "dev.knpkv.clockify.read",
+  pluginAdapterVersion: { major: 0, minor: 2, patch: 0 },
+  idempotencyKey: "governed-action:clockify:entry-42:approval:1",
+  proposalKey: "clockify:record-approval:authorized",
+  actionKind: "record-approval",
+  payload: {
+    _tag: "record-approval",
+    workspaceId: "clockify-workspace",
+    userId: "user-1",
+    entryId: "clockify-entry-42",
+    expectedRevision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+    decision: "approved",
+    rationale: "Reviewed against the delivery record"
+  },
+  actionSummary: "Record Control Center approval for Clockify entry clockify-entry-42",
+  impactSummary: "Records a revision-scoped Control Center decision without changing Clockify",
+  correlationId: "action:clockify:entry-42:approval",
+  details: {
+    _tag: "time-entry",
+    durationMinutes: 60,
+    billable: true,
+    approvalState: "not-required",
+    description: "Review payment safeguards",
+    userId: "user-1",
+    startedAt: "2026-07-15T08:00:00.000Z",
+    endedAt: "2026-07-15T09:00:00.000Z"
+  }
+})
+
+const clockifyCorrectionFixture = defineFixture({
+  providerId: "clockify",
+  connectionName: "Payments Clockify",
+  entityType: "time-entry",
+  vendorImmutableId: "clockify-entry-42",
+  sourceRevision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+  sourceUrl: "https://app.clockify.me/tracker",
+  displayKey: "clockify-entry-42",
+  title: "Review payment safeguards",
+  pluginId: "dev.knpkv.clockify.read",
+  pluginAdapterVersion: { major: 0, minor: 2, patch: 0 },
+  idempotencyKey: "governed-action:clockify:entry-42:correction:1",
+  proposalKey: "clockify:correct-association:authorized",
+  actionKind: "correct-association",
+  payload: {
+    _tag: "correct-association",
+    workspaceId: "clockify-workspace",
+    userId: "user-1",
+    entryId: "clockify-entry-42",
+    expectedRevision: "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b",
+    desiredRevision: "a7a7e535ab79a0f2df8217f7bf2f38309d8024896f9877eda1f7466001a35fd7",
+    jiraIssueKey: "OPS-42",
+    originalDescription: "Review payment safeguards",
+    correctedDescription: "[OPS-42] Review payment safeguards",
+    customFields: [],
+    start: "2026-07-15T08:00:00.000Z",
+    end: "2026-07-15T09:00:00.000Z",
+    duration: "PT1H",
+    projectId: null,
+    taskId: null,
+    tagIds: [],
+    billable: true,
+    entryType: "REGULAR"
+  },
+  actionSummary: "Correct Clockify entry clockify-entry-42 association to OPS-42",
+  impactSummary: "Replaces the reviewed leading Jira marker while preserving all other fields",
+  correlationId: "action:clockify:entry-42:correction",
+  details: {
+    _tag: "time-entry",
+    durationMinutes: 60,
+    billable: true,
+    approvalState: "not-required",
+    description: "Review payment safeguards",
+    userId: "user-1",
+    startedAt: "2026-07-15T08:00:00.000Z",
+    endedAt: "2026-07-15T09:00:00.000Z"
+  }
+})
+
 const codePipelineFixture = defineFixture({
   providerId: "codepipeline",
   connectionName: "Payments CodePipeline",
@@ -233,6 +322,10 @@ const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
     ? codePipelineFixture
     : variant === "confluence"
     ? confluenceFixture
+    : variant === "clockify-approval"
+    ? clockifyApprovalFixture
+    : variant === "clockify-correction"
+    ? clockifyCorrectionFixture
     : jiraFixture
 
 const fixtureProjectionEntityType = (fixture: ReturnType<typeof fixtureVariant>): string => fixture.entityType

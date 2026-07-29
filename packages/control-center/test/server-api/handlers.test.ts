@@ -73,6 +73,7 @@ import {
   PrReviewSuggestionValidated
 } from "../../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
@@ -107,6 +108,10 @@ import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
 } from "../../src/server/api/LiveStreamAdmission.js"
+import {
+  ClockifyActionSubmissionError,
+  ClockifyActionSubmissions
+} from "../../src/server/application/clockifyActionSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -201,6 +206,7 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
   }
 })
 const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  clockifyApproval: null,
   entity: {
     canonicalReleaseId: null,
     owners: [],
@@ -451,6 +457,125 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("submits an exact-revision Clockify approval through the authenticated product boundary", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const applications = Layer.mergeAll(
+        deliveryGraphApplicationLayer,
+        Layer.succeed(ClockifyActionSubmissions, {
+          submit: (input) => Ref.set(received, input).pipe(Effect.as({ actionId, state: "succeeded" }))
+        })
+      )
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(applications)
+      )
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, { actionId, state: "succeeded" })
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        entityId: sharedEntityId,
+        request: {
+          _tag: "record-approval",
+          expectedRevision,
+          decision: "approved",
+          rationale: "Reviewed against the delivery record"
+        }
+      })
+    }))
+
+  it.effect("maps Clockify submission failures through the documented HTTP contract", () =>
+    Effect.gen(function*() {
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const request = Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      })
+      const attempt = (reason: ClockifyActionSubmissionError["reason"]) => {
+        const applications = Layer.mergeAll(
+          deliveryGraphApplicationLayer,
+          Layer.succeed(ClockifyActionSubmissions, {
+            submit: () => Effect.fail(new ClockifyActionSubmissionError({ reason }))
+          })
+        )
+        const handler = deliveryGraphHandlersLayer.pipe(
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(applications)
+        )
+        return request.pipe(
+          Effect.provide([
+            NodeHttpServer.layerHttpServices,
+            mutationMiddlewareLayer,
+            sessionMiddlewareLayer,
+            handler
+          ]),
+          Effect.result
+        )
+      }
+
+      const conflict = yield* attempt("conflict")
+      const forbidden = yield* attempt("forbidden")
+      const invalid = yield* attempt("invalid-request")
+      const unavailable = yield* attempt("unavailable")
+      const missingService = yield* request.pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          deliveryGraphHandlersTestLayer
+        ]),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(conflict))
+      assert.isTrue(Result.isFailure(forbidden))
+      assert.isTrue(Result.isFailure(invalid))
+      assert.isTrue(Result.isFailure(unavailable))
+      assert.isTrue(Result.isFailure(missingService))
+      if (
+        Result.isFailure(conflict) &&
+        Result.isFailure(forbidden) &&
+        Result.isFailure(invalid) &&
+        Result.isFailure(unavailable) &&
+        Result.isFailure(missingService)
+      ) {
+        assert.strictEqual(conflict.failure._tag, "ConflictApiError")
+        assert.strictEqual(forbidden.failure._tag, "ForbiddenApiError")
+        assert.strictEqual(invalid.failure._tag, "InvalidRequestApiError")
+        assert.strictEqual(unavailable.failure._tag, "ServiceUnavailableApiError")
+        assert.strictEqual(missingService.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("creates an exact share from session-derived human owner authority", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<

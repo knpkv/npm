@@ -741,6 +741,183 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-structured-reconciliation-key-schema": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require Schema parsing before comparing structured plugin reconciliation keys",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        rawStructuredLocator:
+          "Parse colon-delimited reconciliation locators with Schema.TemplateLiteralParser before comparing request fields."
+      }
+    },
+    create(context) {
+      const filename = context.filename.replaceAll("\\", "/")
+      if (!filename.includes("/server/plugins/") || /\/(?:fake|generated|vendor)\//u.test(filename)) {
+        return {}
+      }
+
+      const structuredKeyConstructors = []
+      const localDefinitions = new Map()
+      let comparesRequestKey = false
+      const isReconciliationKeyImport = (identifier) => {
+        const definition = importedBinding(context, identifier)
+        return (
+          definition?.node.type === "ImportSpecifier" &&
+          staticPropertyName(definition.node.imported) === "PluginActionReconciliationKey"
+        )
+      }
+      const isRequestReconciliationKey = (expression) =>
+        expression.type === "MemberExpression" && staticPropertyName(expression.property) === "reconciliationKey"
+      const isNullLiteral = (expression) => expression.type === "Literal" && expression.value === null
+      const returnedExpressions = (expression) => {
+        if (expression.type === "ArrowFunctionExpression" && expression.body.type !== "BlockStatement") {
+          return [expression.body]
+        }
+        if (
+          (expression.type === "ArrowFunctionExpression" ||
+            expression.type === "FunctionExpression" ||
+            expression.type === "FunctionDeclaration") &&
+          expression.body.type === "BlockStatement"
+        ) {
+          const returns = []
+          const collectReturns = (node) => {
+            if (node.type === "ReturnStatement") {
+              if (node.argument !== null) returns.push(node.argument)
+              return
+            }
+            if (
+              node !== expression.body &&
+              (node.type === "ArrowFunctionExpression" ||
+                node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration")
+            )
+              return
+            for (const key of context.sourceCode.visitorKeys[node.type] ?? []) {
+              const child = node[key]
+              if (Array.isArray(child)) {
+                for (const entry of child) {
+                  if (entry !== null) collectReturns(entry)
+                }
+              } else if (child !== null && child !== undefined) {
+                collectReturns(child)
+              }
+            }
+          }
+          collectReturns(expression.body)
+          return returns
+        }
+        return null
+      }
+      const isTemplateLiteralParserSchema = (expression, visited = new Set()) => {
+        const unwrapped = unwrapTypeExpression(expression)
+        if (visited.has(unwrapped)) return false
+        visited.add(unwrapped)
+        if (unwrapped.type === "Identifier") {
+          const definition = localDefinitions.get(unwrapped.name)
+          return definition !== undefined && isTemplateLiteralParserSchema(definition, visited)
+        }
+        return (
+          unwrapped.type === "CallExpression" &&
+          unwrapped.callee.type === "MemberExpression" &&
+          staticPropertyName(unwrapped.callee.property) === "TemplateLiteralParser" &&
+          isSchemaModule(context, unwrapped.callee.object)
+        )
+      }
+      const containsStructuredLocator = (expression, visited = new Set()) => {
+        if (expression === null || expression === undefined || visited.has(expression)) return false
+        visited.add(expression)
+        const returned = returnedExpressions(expression)
+        if (returned !== null) {
+          return returned.some((candidate) => containsStructuredLocator(candidate, new Set(visited)))
+        }
+        if (expression.type === "TemplateLiteral") {
+          return expression.quasis.some((quasi) => quasi.value.raw.includes(":"))
+        }
+        if (expression.type === "Literal") {
+          return typeof expression.value === "string" && expression.value.includes(":")
+        }
+        if (expression.type === "BinaryExpression" && expression.operator === "+") {
+          return (
+            containsStructuredLocator(expression.left, visited) || containsStructuredLocator(expression.right, visited)
+          )
+        }
+        if (expression.type === "Identifier") {
+          return containsStructuredLocator(localDefinitions.get(expression.name), visited)
+        }
+        if (expression.type === "CallExpression") {
+          if (
+            expression.callee.type === "CallExpression" &&
+            expression.callee.callee.type === "MemberExpression" &&
+            isSchemaModule(context, expression.callee.callee.object) &&
+            ["encode", "encodeSync"].includes(staticPropertyName(expression.callee.callee.property))
+          ) {
+            const schema = expression.callee.arguments[0]
+            if (schema !== undefined && schema.type !== "SpreadElement" && isTemplateLiteralParserSchema(schema)) {
+              return false
+            }
+          }
+          if (
+            expression.callee.type === "Identifier" &&
+            containsStructuredLocator(localDefinitions.get(expression.callee.name), visited)
+          ) {
+            return true
+          }
+          return expression.arguments.some(
+            (argument) => argument.type !== "SpreadElement" && containsStructuredLocator(argument, visited)
+          )
+        }
+        return false
+      }
+
+      return {
+        FunctionDeclaration(node) {
+          if (node.id !== null) localDefinitions.set(node.id.name, node)
+        },
+        VariableDeclarator(node) {
+          if (node.id.type === "Identifier" && node.init !== null) {
+            localDefinitions.set(node.id.name, node.init)
+          }
+        },
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            staticPropertyName(node.callee.property) !== "make" ||
+            node.callee.object.type !== "Identifier" ||
+            !isReconciliationKeyImport(node.callee.object) ||
+            node.arguments.length !== 1
+          ) {
+            return
+          }
+          const argument = node.arguments[0]
+          if (argument.type !== "SpreadElement") {
+            structuredKeyConstructors.push({ argument, node })
+          }
+        },
+        BinaryExpression(node) {
+          if (
+            ["==", "===", "!=", "!=="].includes(node.operator) &&
+            ((isRequestReconciliationKey(node.left) && !isNullLiteral(node.right)) ||
+              (isRequestReconciliationKey(node.right) && !isNullLiteral(node.left)))
+          ) {
+            comparesRequestKey = true
+          }
+        },
+        "Program:exit"() {
+          if (!comparesRequestKey) return
+          for (const { argument, node } of structuredKeyConstructors) {
+            if (containsStructuredLocator(argument)) {
+              context.report({ node, messageId: "rawStructuredLocator" })
+            }
+          }
+        }
+      }
+    }
+  },
   "require-bounded-base64-schema": {
     meta: {
       type: "problem",

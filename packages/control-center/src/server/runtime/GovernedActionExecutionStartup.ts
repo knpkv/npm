@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
+import type { Role } from "../../domain/actors.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import {
   GovernedActionPolicyBindingSource,
@@ -22,7 +23,7 @@ import type { GovernedActionExecutionStoreError } from "../governance/internal/G
 import {
   type GovernedActionPolicyCatalogInvalid,
   GovernedActionPolicyEvaluator,
-  makeBuiltInGovernedActionPolicyDefinition
+  makeBuiltInGovernedActionPolicyDefinitions
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
 import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPluginExecutorMap.js"
@@ -116,8 +117,21 @@ export const governedActionSubmissionLayer = Layer.effect(
 /** Expose only the immutable server-owned policy binding to proposal constructors. */
 export const governedActionPolicyBindingSourceLayer = Layer.effect(
   GovernedActionPolicyBindingSource,
-  makeBuiltInGovernedActionPolicyDefinition().pipe(
-    Effect.map(({ binding }) => ({ current: Effect.succeed(binding) })),
+  makeBuiltInGovernedActionPolicyDefinitions().pipe(
+    Effect.map((definitions) => {
+      const forPermission = (requiredPermission: Role) => {
+        const definition = definitions.find(
+          ({ binding }) => binding.requiredPermission === requiredPermission
+        )
+        return definition === undefined
+          ? Effect.fail(submissionUnavailable())
+          : Effect.succeed(definition.binding)
+      }
+      return {
+        current: forPermission("workspace-owner"),
+        forPermission
+      }
+    }),
     Effect.catch(() => Effect.fail(submissionUnavailable()))
   )
 )

@@ -179,6 +179,20 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(jsonExportPath.get)
     assert.isDefined(jsonExportPath.get.responses["200"]?.content?.["application/json; charset=utf-8"])
 
+    const submitClockifyActionPath = specification.paths["/api/v1/items/{entityId}/clockify-actions"]
+    assert.isDefined(submitClockifyActionPath)
+    assert.isDefined(submitClockifyActionPath.post)
+    assert.deepStrictEqual(Object.keys(submitClockifyActionPath.post.responses), [
+      "200",
+      "400",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "503"
+    ])
+
     const diffInventoryPath =
       specification.paths["/api/v1/diffs/{pluginConnectionId}/pull-requests/{vendorImmutableId}/inventory"]
     assert.isDefined(diffInventoryPath)
@@ -392,6 +406,7 @@ describe("ControlCenterApi contract", () => {
       [
         ["workspaceEntityProjections", "GET", "/api/v1/items"],
         ["workspaceEntity", "GET", "/api/v1/items/:entityId"],
+        ["submitClockifyAction", "POST", "/api/v1/items/:entityId/clockify-actions"],
         ["releaseSlice", "GET", "/api/v1/relationships/releases/:releaseId"],
         ["repairCandidates", "GET", "/api/v1/relationships/releases/:releaseId/repair-candidates"],
         [
@@ -562,6 +577,7 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(DeliveryGraphApiGroup.endpoints), {
       workspaceEntityProjections: [SessionCookieAuth.key],
       workspaceEntity: [SessionCookieAuth.key],
+      submitClockifyAction: [SessionCookieAuth.key, SessionMutationAuth.key],
       releaseSlice: [SessionCookieAuth.key],
       repairCandidates: [SessionCookieAuth.key],
       repairProposalDraft: [SessionCookieAuth.key],

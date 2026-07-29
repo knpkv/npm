@@ -1,5 +1,5 @@
 /**
- * Production Clockify read boundary.
+ * Production Clockify boundary for bounded reads and governed correction writes.
  *
  * The shared client owns authenticated request construction and generated
  * OpenAPI decoding. This boundary keeps its raw failures and response shapes
@@ -7,7 +7,7 @@
  *
  * @internal
  */
-import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
+import type { ClockifyApiClientShape, UpdateTimeEntryParams } from "@knpkv/clockify-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -18,6 +18,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
@@ -31,7 +32,7 @@ export interface ClockifyTimeEntryPageRequest {
   readonly pageSize: number
 }
 
-/** Narrow provider surface required by the production Clockify reader. @internal */
+/** Narrow provider surface required by the production Clockify integration. @internal */
 export interface ClockifyReadProvider {
   readonly getCurrentUser: Effect.Effect<unknown, PluginFailure>
   readonly getWorkspaceUsers: (
@@ -41,12 +42,18 @@ export interface ClockifyReadProvider {
   readonly getWorkspaces: Effect.Effect<unknown, PluginFailure>
   readonly getTimeEntry: (
     workspaceId: string,
-    timeEntryId: string
+    timeEntryId: string,
+    request?: { readonly hydrated: boolean }
   ) => Effect.Effect<Option.Option<unknown>, PluginFailure>
   readonly getTimeEntries: (
     workspaceId: string,
     userId: string,
     request: ClockifyTimeEntryPageRequest
+  ) => Effect.Effect<unknown, PluginFailure>
+  readonly updateTimeEntry: (
+    workspaceId: string,
+    timeEntryId: string,
+    request: UpdateTimeEntryParams
   ) => Effect.Effect<unknown, PluginFailure>
 }
 
@@ -108,6 +115,23 @@ const providerCall = <Value, Error>(
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> => Effect.catch(effect, (error) => mapFailure(operation, error))
 
+const mutationCall = <Value, Error>(
+  operation: string,
+  diagnosticCode: string,
+  effect: Effect.Effect<Value, Error>
+): Effect.Effect<Value, PluginFailure> =>
+  Effect.catch(effect, (error) => {
+    const status = statusOf(error)
+    return status === 400 || status === 404 || status === 409 || status === 422
+      ? Effect.fail(
+        new PluginConflictFailure({
+          operation,
+          diagnosticCode
+        })
+      )
+      : mapFailure(operation, error)
+  })
+
 /** Build the production provider boundary from the shared Clockify client. @internal */
 export const makeClockifyReadProvider = (client: ClockifyApiClientShape): ClockifyReadProvider => ({
   getCurrentUser: providerCall("clockify-current-user", client.getUser()),
@@ -121,8 +145,8 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
       ? providerCall("clockify-workspace-users", client.getUser()).pipe(Effect.map((user) => [user]))
       : providerCall("clockify-workspace-users", client.getWorkspaceUsers(workspaceId)),
   getWorkspaces: providerCall("clockify-workspaces", client.getWorkspaces()),
-  getTimeEntry: (workspaceId, timeEntryId) =>
-    client.getTimeEntry(workspaceId, timeEntryId).pipe(
+  getTimeEntry: (workspaceId, timeEntryId, request) =>
+    client.getTimeEntry(workspaceId, timeEntryId, request).pipe(
       Effect.map(Option.some),
       Effect.catch((error) =>
         statusOf(error) === 404
@@ -134,8 +158,15 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
     providerCall(
       "clockify-get-time-entries",
       client.getTimeEntries(workspaceId, userId, {
+        hydrated: true,
         page: request.page,
         pageSize: request.pageSize
       })
+    ),
+  updateTimeEntry: (workspaceId, timeEntryId, request) =>
+    mutationCall(
+      "clockify-update-time-entry",
+      "clockify-time-entry-update-rejected",
+      client.updateTimeEntry(workspaceId, timeEntryId, request)
     )
 })

@@ -40,8 +40,13 @@ export type AuthenticatedClockifyApi = Omit<Generated.ClockifyApi, "uploadImage"
 export interface GetTimeEntriesParams {
   readonly start?: string | undefined
   readonly end?: string | undefined
+  readonly hydrated?: boolean | undefined
   readonly page?: number | undefined
   readonly pageSize?: number | undefined
+}
+
+export interface GetTimeEntryParams {
+  readonly hydrated?: boolean | undefined
 }
 
 export interface ClockifyApiClientShape {
@@ -86,7 +91,8 @@ export interface ClockifyApiClientShape {
   ) => Effect.Effect<Generated.GetTags200[number] | Generated.CreateNewTag201, ClockifyClientError>
   readonly getTimeEntry: (
     workspaceId: string,
-    timeEntryId: string
+    timeEntryId: string,
+    params?: GetTimeEntryParams
   ) => Effect.Effect<Generated.GetTimeEntry200, ClockifyClientError>
   readonly deleteTimeEntry: (workspaceId: string, timeEntryId: string) => Effect.Effect<void, ClockifyClientError>
   readonly updateTimeEntry: (
@@ -183,6 +189,7 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
               params: {
                 ...(params?.start !== undefined ? { start: params.start } : {}),
                 ...(params?.end !== undefined ? { end: params.end } : {}),
+                ...(params?.hydrated === undefined ? {} : { hydrated: params.hydrated }),
                 ...(params?.page !== undefined ? { page: params.page } : {}),
                 ...(params?.pageSize !== undefined ? { "page-size": params.pageSize } : {})
               }
@@ -202,7 +209,12 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
                   : Effect.succeed(existing)
               })
             ),
-          getTimeEntry: (workspaceId, timeEntryId) => api.getTimeEntry(workspaceId, timeEntryId, undefined),
+          getTimeEntry: (workspaceId, timeEntryId, params) =>
+            api.getTimeEntry(workspaceId, timeEntryId, {
+              params: {
+                ...(params?.hydrated === undefined ? {} : { hydrated: params.hydrated })
+              }
+            }),
           deleteTimeEntry: (workspaceId, timeEntryId) => api.deleteTimeEntry(workspaceId, timeEntryId, undefined),
           updateTimeEntry: (workspaceId, timeEntryId, payload) =>
             api.updateTimeEntry(workspaceId, timeEntryId, { payload })

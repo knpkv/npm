@@ -167,6 +167,58 @@ describe("governed action dispatch outcomes", () => {
       })))
   }
 
+  it.effect("accepts only the exact durable authorization time for authorization-based receipts", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const receivedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const dispatch = yield* makeGovernedActionExecutionRecordDispatch
+      const exact = Schema.decodeUnknownSync(PluginActionDispatchResultV1)({
+        _tag: "confirmed",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: "control-center-authorization-outcome",
+          observationBasis: "authorization",
+          safeSummary: "Recorded the authorized local decision",
+          observedAt: "2026-07-15T10:01:00.000Z"
+        }
+      })
+
+      assert.strictEqual(
+        yield* dispatch.recordDispatch({
+          permitToken: permitted.permitToken,
+          result: exact,
+          observedAt: receivedAt
+        }),
+        "succeeded"
+      )
+    })))
+
+  it.effect("rejects an authorization-based receipt at a different post-dispatch time", () =>
+    withBegin(Effect.gen(function*() {
+      const permitted = yield* beginAuthorizedDispatch()
+      const receivedAt = Schema.decodeUnknownSync(UtcTimestamp)("2026-07-15T10:02:02.000Z")
+      yield* TestClock.setTime(DateTime.toEpochMillis(receivedAt))
+      const dispatch = yield* makeGovernedActionExecutionRecordDispatch
+      const mismatch = yield* dispatch.recordDispatch({
+        permitToken: permitted.permitToken,
+        result: Schema.decodeUnknownSync(PluginActionDispatchResultV1)({
+          _tag: "confirmed",
+          receipt: {
+            status: "succeeded",
+            providerOperationId: "control-center-authorization-outcome",
+            observationBasis: "authorization",
+            safeSummary: "Recorded the authorized local decision",
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        }),
+        observedAt: receivedAt
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(mismatch))
+      if (Result.isFailure(mismatch)) assert.strictEqual(mismatch.failure.reason, "conflict")
+    })))
+
   it.effect("rejects a changed result under an already-folded permit", () =>
     withBegin(Effect.gen(function*() {
       const permitted = yield* beginAuthorizedDispatch()
