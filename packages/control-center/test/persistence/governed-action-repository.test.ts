@@ -1137,6 +1137,12 @@ describe("governed action writer", () => {
         actionKind: "record-approval",
         limit: 20
       })
+      const providerReceipt = {
+        observedAt: terminalLineage.receipt.observedAt,
+        providerOperationId: terminalLineage.receipt.providerOperationId,
+        safeSummary: terminalLineage.receipt.safeSummary,
+        status: terminalLineage.receipt.status
+      }
       const makeApprovalCandidate = (
         actionId: typeof record.envelope.actionId,
         authorizedAt: string,
@@ -1163,8 +1169,9 @@ describe("governed action writer", () => {
           lineage: {
             ...terminalLineage,
             receipt: {
-              ...terminalLineage.receipt,
-              ...(observationBasis === null ? {} : { observationBasis }),
+              ...(observationBasis === null
+                ? providerReceipt
+                : { ...terminalLineage.receipt, observationBasis }),
               observedAt: decodeTimestamp(authorizedAt)
             }
           }
@@ -1189,6 +1196,10 @@ describe("governed action writer", () => {
         "2026-07-15T10:03:00.000Z",
         null
       )
+      if (providerObserved.head.lineage._tag !== "terminal") {
+        return yield* Effect.die("expected terminal provider-observed fixture")
+      }
+      assert.isUndefined(providerObserved.head.lineage.receipt.observationBasis)
       assert.deepStrictEqual(
         selectLatestTerminalByTarget(approvalRequest, [
           olderApproval,
