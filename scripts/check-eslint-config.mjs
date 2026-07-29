@@ -85,12 +85,66 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    test("unawaited clock", async ({ page }) => {
+      page.clock.install()
+      await page.goto("/work")
+      await page.clock.runFor(1_000)
+    })
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-unawaited-invalid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    test("mixed clock installs", async ({ page }) => {
+      page.clock.install()
+      await page.clock.install()
+      await page.goto("/work")
+      await page.clock.runFor(1_000)
+    })
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-mixed-invalid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import { WorkspaceId } from "../../src/domain/identifiers.js"
     WorkspaceId.make("00000000-0000-4000-8000-000000000000")
     WorkspaceId.make("not-a-uuid")
   `,
   expected: 2,
   filePath: "packages/control-center/test/eslint-branded-uuid-invalid.ts",
+  ruleId: "local-rules/no-invalid-branded-uuid-literal"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Identifiers from "../../src/domain/identifiers.js"
+    Identifiers.WorkspaceId.make("00000000-0000-4000-8000-000000000000")
+    Identifiers["WorkspaceId"].make("not-a-uuid")
+    Identifiers.WorkspaceId.make("00000000-0000-7000-8000-000000000000")
+  `,
+  expected: 2,
+  filePath: "packages/control-center/test/eslint-branded-uuid-namespace-invalid.ts",
+  ruleId: "local-rules/no-invalid-branded-uuid-literal"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Identifiers from "../../src/domain/identifiers.js"
+    const WorkspaceId = "WorkspaceId"
+    const make = "make"
+    Identifiers[WorkspaceId].make("00000000-0000-4000-8000-000000000000")
+    Identifiers.WorkspaceId[make]("00000000-0000-4000-8000-000000000000")
+    const acceptsShadowedNamespace = (Identifiers) =>
+      Identifiers.WorkspaceId.make("00000000-0000-4000-8000-000000000000")
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-branded-uuid-namespace-valid.ts",
   ruleId: "local-rules/no-invalid-branded-uuid-literal"
 })
 

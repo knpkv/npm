@@ -1404,6 +1404,7 @@ module.exports = {
       },
       schema: [],
       messages: {
+        awaitClockInstall: "Await {{page}}.clock.install() directly before navigating {{page}}.",
         lateClock: "Call {{page}}.clock.install() before this test's first {{page}}.goto()."
       }
     },
@@ -1459,10 +1460,23 @@ module.exports = {
                 candidatePage !== undefined && enclosingFunction(candidate) === owner && samePage(page, candidatePage)
               )
             })
-            const installedBeforeNavigation = installs.some(
+            const installsBeforeNavigation = installs.filter(
               (candidate) => (candidate.range?.[0] ?? 0) < firstNavigation
             )
-            if (!installedBeforeNavigation) {
+            const awaitedInstallsBeforeNavigation = installsBeforeNavigation.filter(
+              (candidate) => candidate.parent?.type === "AwaitExpression" && candidate.parent.argument === candidate
+            )
+            const unawaitedInstallsBeforeNavigation = installsBeforeNavigation.filter(
+              (candidate) => !awaitedInstallsBeforeNavigation.includes(candidate)
+            )
+            for (const unawaitedInstall of unawaitedInstallsBeforeNavigation) {
+              context.report({
+                data: { page: page.name },
+                messageId: "awaitClockInstall",
+                node: unawaitedInstall
+              })
+            }
+            if (awaitedInstallsBeforeNavigation.length === 0 && unawaitedInstallsBeforeNavigation.length === 0) {
               context.report({
                 data: { page: page.name },
                 messageId: "lateClock",
@@ -1518,12 +1532,42 @@ module.exports = {
         "ShareId",
         "WorkspaceId"
       ])
+      const staticMemberName = (node) =>
+        node.computed
+          ? node.property.type === "Literal" && typeof node.property.value === "string"
+            ? node.property.value
+            : undefined
+          : node.property.type === "Identifier"
+            ? node.property.name
+            : undefined
+      const identifierFactory = (node) => {
+        if (node.type === "Identifier") {
+          const definition = importedBinding(context, node)
+          const importedName =
+            definition?.node.type === "ImportSpecifier" ? staticPropertyName(definition.node.imported) : undefined
+          return {
+            definition,
+            identifier: importedName
+          }
+        }
+        if (
+          node.type === "MemberExpression" &&
+          node.object.type === "Identifier" &&
+          staticMemberName(node) !== undefined
+        ) {
+          const definition = importedBinding(context, node.object)
+          return {
+            definition,
+            identifier: definition?.node.type === "ImportNamespaceSpecifier" ? staticMemberName(node) : undefined
+          }
+        }
+        return {}
+      }
       return {
         CallExpression(node) {
           if (
             node.callee.type !== "MemberExpression" ||
-            staticPropertyName(node.callee.property) !== "make" ||
-            node.callee.object.type !== "Identifier" ||
+            staticMemberName(node.callee) !== "make" ||
             node.arguments.length === 0 ||
             node.arguments[0].type !== "Literal" ||
             typeof node.arguments[0].value !== "string" ||
@@ -1531,21 +1575,19 @@ module.exports = {
           ) {
             return
           }
-          const definition = importedBinding(context, node.callee.object)
-          const importedName =
-            definition?.node.type === "ImportSpecifier" ? staticPropertyName(definition.node.imported) : undefined
+          const { definition, identifier } = identifierFactory(node.callee.object)
           const source = importSource(definition)
           if (
             !isValueImport(definition) ||
-            importedName === undefined ||
-            !uuid7Identifiers.has(importedName) ||
+            identifier === undefined ||
+            !uuid7Identifiers.has(identifier) ||
             typeof source !== "string" ||
             !source.endsWith("/domain/identifiers.js")
           ) {
             return
           }
           context.report({
-            data: { identifier: importedName },
+            data: { identifier },
             messageId: "invalidUuid",
             node
           })
