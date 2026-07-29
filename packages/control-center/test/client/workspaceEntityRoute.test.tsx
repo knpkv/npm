@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   ReleaseDeliveryGraphInspection,
+  SubmitClockifyActionResponse,
   WorkspaceEntityInspection,
   type WorkspaceEntityInspection as Inspection
 } from "../../src/api/deliveryGraph.js"
@@ -21,6 +22,8 @@ import {
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import {
+  EntityId,
+  GovernedActionId,
   JobId,
   PersonId,
   PrReviewSuggestionRevisionId,
@@ -38,6 +41,10 @@ import { presentWorkspacePipelineExecution } from "../../src/client/entities/pre
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
 import { WorkspaceEntityView } from "../../src/client/entities/WorkspaceEntityRoute.js"
 import type { PullRequestReviewControllerState } from "../../src/client/entities/usePullRequestReview.js"
+import {
+  type ClockifyActionSubmissionTransport,
+  useClockifyActionSubmission
+} from "../../src/client/entities/useClockifyActionSubmission.js"
 import type { ReviewSuggestionRevisionTransport } from "../../src/client/entities/useReviewSuggestionRevisions.js"
 import type { WorkspaceEntityState } from "../../src/client/entities/useWorkspaceEntity.js"
 import { workspaceEntityAgentPath } from "../../src/client/items/workspaceEntityRoutes.js"
@@ -852,7 +859,14 @@ const renderView = async (
   onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
   reviewState: PullRequestReviewControllerState = pullRequestReviewState,
   reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport,
-  clockifyActionSubmit?: ComponentProps<typeof WorkspaceEntityView>["clockifyActionSubmit"]
+  clockifyActionSubmit?: ComponentProps<typeof WorkspaceEntityView>["clockifyActionSubmit"],
+  clockifyPermissions: {
+    readonly canApprove: boolean
+    readonly canCorrect: boolean
+  } = {
+    canApprove: clockifyActionSubmit !== undefined,
+    canCorrect: clockifyActionSubmit !== undefined
+  }
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -861,7 +875,8 @@ const renderView = async (
     <PortalProvider>
       <MemoryRouter>
         <WorkspaceEntityView
-          clockifyActionCanSubmit={clockifyActionSubmit !== undefined}
+          clockifyActionCanApprove={clockifyPermissions.canApprove}
+          clockifyActionCanCorrect={clockifyPermissions.canCorrect}
           {...(clockifyActionSubmit === undefined ? {} : { clockifyActionSubmit })}
           onAskAgent={onAskAgent}
           originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
@@ -913,6 +928,44 @@ const PullRequestLifecycleHarness = ({
         />
       </MemoryRouter>
     </PortalProvider>
+  )
+}
+
+const ClockifySubmissionHarness = ({
+  entityId,
+  transport
+}: {
+  readonly entityId: EntityId
+  readonly transport: ClockifyActionSubmissionTransport
+}): ReactElement => {
+  const submission = useClockifyActionSubmission(
+    entityId,
+    "session-a",
+    () => undefined,
+    () => undefined,
+    transport
+  )
+  return (
+    <>
+      <button
+        onClick={() =>
+          submission.submit({
+            _tag: "record-approval",
+            expectedRevision: Revision.make("clockify-revision-4"),
+            decision: "approved",
+            rationale: "Reviewed"
+          })
+        }
+        type="button"
+      >
+        Submit approval
+      </button>
+      <output data-clockify-submission-state>
+        {submission.state._tag === "succeeded"
+          ? `${submission.state._tag}:${submission.state.result.actionId}`
+          : submission.state._tag}
+      </output>
+    </>
   )
 }
 
@@ -1764,6 +1817,110 @@ describe("canonical workspace entity", () => {
     expect(runningHost.textContent).toContain("Timer running")
     expect(runningPresentation.clockifyTimeEntry?.lockLabel).toBe("Unlocked")
     expect(runningHost.textContent).toContain("Control Center approval: Approved")
+  })
+
+  it("allows approvers to decide Clockify revisions without granting correction access", async () => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      clockifyState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: false }
+    )
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    const jiraIssueKey = actionInputs[0]
+    const rationale = actionInputs[1]
+    if (jiraIssueKey === undefined || rationale === undefined) {
+      throw new Error("Expected Clockify governed action inputs")
+    }
+    expect(jiraIssueKey.disabled).toBe(true)
+    expect(rationale.disabled).toBe(false)
+    const correction = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Correct association"
+    )
+    const approve = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Approve revision"
+    )
+    if (correction === undefined || approve === undefined) {
+      throw new Error("Expected Clockify governed action controls")
+    }
+    expect(correction.disabled).toBe(true)
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    await act(async () => {
+      valueSetter.call(rationale, "Reviewed by the workspace approver")
+      rationale.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(approve.disabled).toBe(false)
+    await act(async () => approve.click())
+    expect(submitClockifyAction).toHaveBeenCalledWith({
+      _tag: "record-approval",
+      expectedRevision: clockifyInspection.source.revision,
+      decision: "approved",
+      rationale: "Reviewed by the workspace approver"
+    })
+  })
+
+  it("aborts and ignores a superseded Clockify submission when the entity changes", async () => {
+    const entityA = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000001")
+    const entityB = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000002")
+    const resultA = Schema.decodeSync(SubmitClockifyActionResponse)({
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-550000000011"),
+      state: "succeeded"
+    })
+    const resultB = Schema.decodeSync(SubmitClockifyActionResponse)({
+      actionId: GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-550000000012"),
+      state: "authorized"
+    })
+    let resolveA: ((result: typeof resultA) => void) | undefined
+    let signalA: AbortSignal | undefined
+    const pendingA = new Promise<typeof resultA>((resolve) => {
+      resolveA = resolve
+    })
+    const transport = {
+      submit: (entityId, _request, signal) => {
+        if (entityId === entityA) {
+          signalA = signal
+          return pendingA
+        }
+        return Promise.resolve(resultB)
+      }
+    } satisfies ClockifyActionSubmissionTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    const renderHarness = async (entityId: EntityId): Promise<void> => {
+      await act(async () =>
+        mountedRoot?.render(<ClockifySubmissionHarness entityId={entityId} transport={transport} />)
+      )
+    }
+    const stateText = (): string | null => host.querySelector("[data-clockify-submission-state]")?.textContent ?? null
+    const submit = (): HTMLButtonElement => {
+      const button = host.querySelector<HTMLButtonElement>("button")
+      if (button === null) throw new Error("Expected the Clockify submission action")
+      return button
+    }
+
+    await renderHarness(entityA)
+    await act(async () => submit().click())
+    expect(stateText()).toBe("submitting")
+    await renderHarness(entityA)
+    expect(stateText()).toBe("submitting")
+    expect(signalA?.aborted).toBe(false)
+
+    await renderHarness(entityB)
+    expect(stateText()).toBe("idle")
+    expect(signalA?.aborted).toBe(true)
+    await act(async () => submit().click())
+    expect(stateText()).toBe(`succeeded:${resultB.actionId}`)
+
+    const completeA = resolveA
+    if (completeA === undefined) throw new Error("Expected the first submission resolver")
+    await act(async () => completeA(resultA))
+    expect(stateText()).toBe(`succeeded:${resultB.actionId}`)
   })
 
   it("renders the full Clockify source description", async () => {

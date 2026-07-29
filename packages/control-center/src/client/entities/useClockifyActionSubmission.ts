@@ -54,7 +54,15 @@ export const useClockifyActionSubmission = (
 } => {
   const [state, setState] = useState<ClockifyActionSubmissionState>({ _tag: "idle" })
   const active = useRef<AbortController | null>(null)
-  useEffect(() => () => active.current?.abort(), [])
+  useEffect(() => {
+    active.current?.abort()
+    active.current = null
+    setState({ _tag: "idle" })
+    return () => {
+      active.current?.abort()
+      active.current = null
+    }
+  }, [entityId, sessionKey])
   return {
     state,
     submit: useCallback((request) => {
@@ -64,11 +72,13 @@ export const useClockifyActionSubmission = (
       setState({ _tag: "submitting" })
       transport.submit(entityId, request, abort.signal).then(
         (result) => {
+          if (active.current !== abort) return
           active.current = null
           setState({ _tag: "succeeded", result })
           onSucceeded()
         },
         (error) => {
+          if (active.current !== abort) return
           active.current = null
           if (Predicate.isTagged("UnauthorizedApiError")(error)) onSessionExpired(sessionKey)
           if (!abort.signal.aborted) setState({ _tag: "failed" })

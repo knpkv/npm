@@ -1275,19 +1275,17 @@ describe("governed action writer", () => {
         actionKind: "record-approval",
         limit: 20
       }).pipe(Effect.result)
-      assert.isTrue(Result.isFailure(corrupted))
-      if (Result.isFailure(corrupted)) {
-        assert.isTrue(Schema.is(PersistedRecordError)(corrupted.failure))
-      }
+      assert.isTrue(Result.isSuccess(corrupted))
+      if (Result.isSuccess(corrupted)) assert.deepStrictEqual(corrupted.success, [])
       const quarantined = yield* quarantine.list(envelope.workspaceId)
-      assert.lengthOf(quarantined, 1)
-      assert.notInclude(JSON.stringify(quarantined), "not-json")
+      assert.lengthOf(quarantined, 0)
     })))
 
   it.effect("pages approvals by durable authorization time before applying the limit", () =>
     withRepository(Effect.gen(function*() {
       yield* seedAuthorityRoots()
       const repository = yield* GovernedActionRepository
+      const { sql } = yield* Database
       const fixtureId = (group: string, index: number): string =>
         `01890f6f-6d6a-7cc0-98d2-${group}${index.toString(16).padStart(10, "0")}`
       const commitTerminalAction = Effect.fn("GovernedActionRepositoryTest.commitTerminalAction")(function*(
@@ -1364,15 +1362,25 @@ describe("governed action writer", () => {
           "other-revision"
         )
       }
+      let corruptedUnrelatedActionId: GovernedActionId | undefined
       for (let index = 20; index < 100; index++) {
-        yield* commitTerminalAction(
+        const actionId = yield* commitTerminalAction(
           index,
           "2026-07-15T10:01:40.000Z",
           "2026-07-15T10:20:30.000Z",
           "transition",
           "other-revision"
         )
+        if (index === 20) corruptedUnrelatedActionId = actionId
       }
+      if (corruptedUnrelatedActionId === undefined) {
+        return yield* Effect.die("expected an unrelated governed-action fixture")
+      }
+      yield* sql`DROP TRIGGER governed_action_transitions_no_update`
+      yield* sql`UPDATE governed_action_transitions
+        SET transition_json = ${JSON.stringify({ malformed: true })}
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND action_id = ${corruptedUnrelatedActionId}`
       const latestAuthorizedActionId = yield* commitTerminalAction(
         100,
         "2026-07-15T10:00:30.000Z",

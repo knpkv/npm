@@ -51,6 +51,19 @@ export const BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL = Schema.decodeUnknownSync
   rules: ["permission-grants", "workspace-match"]
 })
 
+/** Built-in policy for actions that an exact workspace approver or owner may authorize. */
+export const BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL = Schema.decodeUnknownSync(
+  GovernedActionPolicyMaterialV1
+)({
+  schemaVersion: 1,
+  policyId: "plugin.action.execute.workspace-approver",
+  policyVersion: 1,
+  requiredPermission: "workspace-approver",
+  evaluator: "human-session-policy",
+  evaluatorVersion: 1,
+  rules: ["permission-grants", "workspace-match"]
+})
+
 export interface GovernedActionPolicyDefinition {
   readonly binding: GovernedActionPolicyBindingType
   readonly enabled: boolean
@@ -152,6 +165,16 @@ export const makeBuiltInGovernedActionPolicyDefinition = Effect.fn(
   return yield* makeGovernedActionPolicyDefinition(BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL, true)
 })
 
+/** Construct every built-in policy entry used by the live evaluator and proposal source. */
+export const makeBuiltInGovernedActionPolicyDefinitions = Effect.fn(
+  "GovernedActionPolicyEvaluator.makeBuiltInDefinitions"
+)(function*() {
+  return yield* Effect.all([
+    makeBuiltInGovernedActionPolicyDefinition(),
+    makeGovernedActionPolicyDefinition(BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL, true)
+  ])
+})
+
 /** Build the policy evaluator from a versioned server-owned catalog. */
 export const makeGovernedActionPolicyEvaluator = Effect.fn(
   "GovernedActionPolicyEvaluator.make"
@@ -202,8 +225,8 @@ export const makeGovernedActionPolicyEvaluator = Effect.fn(
 })
 
 const makeLiveEvaluator = Effect.gen(function*() {
-  const definition = yield* makeBuiltInGovernedActionPolicyDefinition()
-  return yield* makeGovernedActionPolicyEvaluator([definition])
+  const definitions = yield* makeBuiltInGovernedActionPolicyDefinitions()
+  return yield* makeGovernedActionPolicyEvaluator(definitions)
 })
 
 /** Server-only fresh policy evaluator; persisted workspace-policy adapters replace this at I12. */

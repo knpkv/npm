@@ -559,6 +559,7 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     "GovernedActionReader.readLatestTerminalByTarget"
   )(function*(request: GovernedActionTargetReadInput) {
     const candidates: Array<GovernedActionRecord> = []
+    const expectedRevision = request.expectedRevision ?? null
     let cursor: typeof GovernedActionTargetCandidateIdentity.Type | null = null
     while (!hasEnoughTerminalByTargetCandidates(request, candidates)) {
       const rows: ReadonlyArray<Record<string, unknown>> = request.actionKind === "record-approval"
@@ -567,6 +568,9 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               action.action_id AS actionId,
               COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
             FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
             LEFT JOIN governed_action_authorizations AS authorization
               ON authorization.workspace_id = action.workspace_id
               AND authorization.action_id = action.action_id
@@ -574,6 +578,11 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               AND action.provider_id = ${request.providerId}
               AND action.target_entity_id = ${request.targetEntityId}
               AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
             ORDER BY
               COALESCE(authorization.authorized_at, action.updated_at) DESC,
               action.action_id DESC
@@ -582,6 +591,9 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               action.action_id AS actionId,
               COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
             FROM governed_actions AS action
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
             LEFT JOIN governed_action_authorizations AS authorization
               ON authorization.workspace_id = action.workspace_id
               AND authorization.action_id = action.action_id
@@ -589,6 +601,11 @@ export const makeGovernedActionRead = Effect.gen(function*() {
               AND action.provider_id = ${request.providerId}
               AND action.target_entity_id = ${request.targetEntityId}
               AND action.terminal_status = 'succeeded'
+              AND dimensions.action_kind = ${request.actionKind}
+              AND (
+                ${expectedRevision} IS NULL OR
+                dimensions.expected_revision = ${expectedRevision}
+              )
               AND (
                 COALESCE(authorization.authorized_at, action.updated_at) < ${DateTime.formatIso(cursor.sortAt)}
                 OR (
@@ -602,29 +619,45 @@ export const makeGovernedActionRead = Effect.gen(function*() {
             LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
         : cursor === null
         ? yield* sql<Record<string, unknown>>`SELECT
-            action_id AS actionId, updated_at AS sortAt
-          FROM governed_actions
-          WHERE workspace_id = ${request.workspaceId}
-            AND provider_id = ${request.providerId}
-            AND target_entity_id = ${request.targetEntityId}
-            AND terminal_status = 'succeeded'
-          ORDER BY updated_at DESC, action_id DESC
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
+            AND (
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+          ORDER BY action.updated_at DESC, action.action_id DESC
           LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
         : yield* sql<Record<string, unknown>>`SELECT
-            action_id AS actionId, updated_at AS sortAt
-          FROM governed_actions
-          WHERE workspace_id = ${request.workspaceId}
-            AND provider_id = ${request.providerId}
-            AND target_entity_id = ${request.targetEntityId}
-            AND terminal_status = 'succeeded'
+            action.action_id AS actionId, action.updated_at AS sortAt
+          FROM governed_actions AS action
+          JOIN governed_action_target_dimensions AS dimensions
+            ON dimensions.workspace_id = action.workspace_id
+            AND dimensions.action_id = action.action_id
+          WHERE action.workspace_id = ${request.workspaceId}
+            AND action.provider_id = ${request.providerId}
+            AND action.target_entity_id = ${request.targetEntityId}
+            AND action.terminal_status = 'succeeded'
+            AND dimensions.action_kind = ${request.actionKind}
             AND (
-              updated_at < ${DateTime.formatIso(cursor.sortAt)}
+              ${expectedRevision} IS NULL OR
+              dimensions.expected_revision = ${expectedRevision}
+            )
+            AND (
+              action.updated_at < ${DateTime.formatIso(cursor.sortAt)}
               OR (
-                updated_at = ${DateTime.formatIso(cursor.sortAt)}
-                AND action_id < ${cursor.actionId}
+                action.updated_at = ${DateTime.formatIso(cursor.sortAt)}
+                AND action.action_id < ${cursor.actionId}
               )
             )
-          ORDER BY updated_at DESC, action_id DESC
+          ORDER BY action.updated_at DESC, action.action_id DESC
           LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
       const identities: ReadonlyArray<typeof GovernedActionTargetCandidateIdentity.Type> = yield* Schema
         .decodeUnknownEffect(

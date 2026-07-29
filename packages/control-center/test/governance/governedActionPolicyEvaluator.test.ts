@@ -16,10 +16,12 @@ import {
   makeGovernedActionEnvelope
 } from "../../src/server/governance/governedActionDigests.js"
 import {
+  BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL,
   BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL,
   type GovernedActionPolicyDefinition,
   GovernedActionPolicyMaterialV1,
   makeBuiltInGovernedActionPolicyDefinition,
+  makeBuiltInGovernedActionPolicyDefinitions,
   makeGovernedActionPolicyDefinition,
   makeGovernedActionPolicyEvaluator
 } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
@@ -91,6 +93,45 @@ const replaceEvidence = Effect.fn("GovernedActionPolicyEvaluatorTest.replaceEvid
 })
 
 describe("governed action policy evaluator", () => {
+  it.effect("binds approval actions to a policy granted to approvers and owners", () =>
+    Effect.gen(function*() {
+      const { input } = yield* makeInput()
+      const definitions = yield* makeBuiltInGovernedActionPolicyDefinitions()
+      const approverDefinition = definitions.find(
+        ({ binding }) => binding.requiredPermission === "workspace-approver"
+      )
+      if (approverDefinition === undefined) {
+        return yield* Effect.die("expected the built-in approver policy")
+      }
+      assert.deepStrictEqual(
+        approverDefinition.material,
+        BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL
+      )
+      const material = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)({
+        ...Schema.encodeSync(GovernedActionEnvelopeMaterialV1)(input.envelope),
+        policy: approverDefinition.binding
+      })
+      const envelope = (yield* makeGovernedActionEnvelope(material)).envelope
+      const evaluator = yield* makeGovernedActionPolicyEvaluator(definitions)
+      const approverSession = decodeSession({
+        ...Schema.encodeSync(SessionSummary)(input.session),
+        permission: "workspace-approver"
+      })
+
+      assert.strictEqual(
+        (yield* evaluator.evaluate({
+          ...input,
+          envelope,
+          session: approverSession
+        })).decision,
+        "allowed"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate({ ...input, envelope })).decision,
+        "allowed"
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("allows the exact immutable evidence set at a later trusted instant", () =>
     Effect.gen(function*() {
       const { definition, input } = yield* makeInput()

@@ -31,22 +31,25 @@ const Section = ({
 
 /** Render one immutable Clockify entry and its Control Center-owned approval. */
 export const WorkspaceClockifyTimeEntryDetails = ({
-  canSubmit = false,
+  canApprove = false,
+  canCorrect = false,
   onSubmit,
   submission = { _tag: "idle" },
   timeEntry
 }: {
-  readonly canSubmit?: boolean
+  readonly canApprove?: boolean
+  readonly canCorrect?: boolean
   readonly onSubmit?: (request: SubmitClockifyActionRequest) => void
   readonly submission?: ClockifyActionSubmissionState
   readonly timeEntry: WorkspaceClockifyTimeEntryPresentation
 }): ReactElement => {
   const [jiraIssueKey, setJiraIssueKey] = useState("")
   const [rationale, setRationale] = useState("")
-  const disabled = !canSubmit || onSubmit === undefined || submission._tag === "submitting"
+  const correctionDisabled = !canCorrect || onSubmit === undefined || submission._tag === "submitting"
+  const approvalDisabled = !canApprove || onSubmit === undefined || submission._tag === "submitting"
   const submitCorrection = (event: FormEvent): void => {
     event.preventDefault()
-    if (!disabled)
+    if (!correctionDisabled)
       onSubmit({
         _tag: "correct-association",
         expectedRevision: timeEntry.sourceRevision,
@@ -160,21 +163,21 @@ export const WorkspaceClockifyTimeEntryDetails = ({
           <label>
             Jira issue key
             <input
-              disabled={disabled}
+              disabled={correctionDisabled}
               onChange={(event) => setJiraIssueKey(event.currentTarget.value)}
               pattern="[A-Z][A-Z0-9]*-[1-9][0-9]*"
               required
               value={jiraIssueKey}
             />
           </label>
-          <button disabled={disabled} type="submit">
+          <button disabled={correctionDisabled} type="submit">
             Correct association
           </button>
         </form>
         <label>
           Approval rationale
           <input
-            disabled={disabled}
+            disabled={approvalDisabled}
             maxLength={1_000}
             onChange={(event) => setRationale(event.currentTarget.value)}
             required
@@ -182,7 +185,7 @@ export const WorkspaceClockifyTimeEntryDetails = ({
           />
         </label>
         <button
-          disabled={disabled || rationale.trim().length === 0}
+          disabled={approvalDisabled || rationale.trim().length === 0}
           onClick={() =>
             onSubmit?.({
               _tag: "record-approval",
@@ -196,7 +199,7 @@ export const WorkspaceClockifyTimeEntryDetails = ({
           Approve revision
         </button>
         <button
-          disabled={disabled || rationale.trim().length === 0}
+          disabled={approvalDisabled || rationale.trim().length === 0}
           onClick={() =>
             onSubmit?.({
               _tag: "record-approval",

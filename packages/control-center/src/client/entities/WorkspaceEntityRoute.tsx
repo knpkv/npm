@@ -261,7 +261,8 @@ const staleMessage = (state: Extract<WorkspaceEntityState, { readonly _tag: "sta
 }
 
 const EntityContent = ({
-  clockifyActionCanSubmit,
+  clockifyActionCanApprove,
+  clockifyActionCanCorrect,
   clockifyActionState,
   clockifyActionSubmit,
   onSessionExpired,
@@ -280,7 +281,8 @@ const EntityContent = ({
   sessionKey,
   stale
 }: {
-  readonly clockifyActionCanSubmit: boolean
+  readonly clockifyActionCanApprove: boolean
+  readonly clockifyActionCanCorrect: boolean
   readonly clockifyActionState: ClockifyActionSubmissionState
   readonly clockifyActionSubmit: (request: SubmitClockifyActionRequest) => void
   readonly onSessionExpired: (sessionKey: string) => void
@@ -314,7 +316,8 @@ const EntityContent = ({
     ))}
     {presentation.clockifyTimeEntry === null ? null : (
       <WorkspaceClockifyTimeEntryDetails
-        canSubmit={clockifyActionCanSubmit}
+        canApprove={clockifyActionCanApprove}
+        canCorrect={clockifyActionCanCorrect}
         onSubmit={clockifyActionSubmit}
         submission={clockifyActionState}
         timeEntry={presentation.clockifyTimeEntry}
@@ -353,7 +356,8 @@ const EntityContent = ({
 )
 
 interface WorkspaceEntityViewProps {
-  readonly clockifyActionCanSubmit?: boolean
+  readonly clockifyActionCanApprove?: boolean
+  readonly clockifyActionCanCorrect?: boolean
   readonly clockifyActionState?: ClockifyActionSubmissionState
   readonly clockifyActionSubmit?: (request: SubmitClockifyActionRequest) => void
   readonly onAskAgent: () => void
@@ -382,7 +386,8 @@ const ignoreAction = (): void => undefined
 
 /** Pure state renderer for the canonical entity route. */
 export const WorkspaceEntityView = ({
-  clockifyActionCanSubmit = false,
+  clockifyActionCanApprove = false,
+  clockifyActionCanCorrect = false,
   clockifyActionState = { _tag: "idle" },
   clockifyActionSubmit = ignoreAction,
   onAskAgent,
@@ -468,7 +473,8 @@ export const WorkspaceEntityView = ({
         className={styles.shell}
         content={
           <EntityContent
-            clockifyActionCanSubmit={clockifyActionCanSubmit}
+            clockifyActionCanApprove={clockifyActionCanApprove}
+            clockifyActionCanCorrect={clockifyActionCanCorrect}
             clockifyActionState={clockifyActionState}
             clockifyActionSubmit={clockifyActionSubmit}
             onSessionExpired={onSessionExpired}
@@ -570,7 +576,12 @@ const ConnectedWorkspaceEntity = ({
   )
   return (
     <WorkspaceEntityView
-      clockifyActionCanSubmit={
+      clockifyActionCanApprove={
+        browserSession.state._tag === "authenticated" &&
+        (browserSession.state.session.permission === "workspace-owner" ||
+          browserSession.state.session.permission === "workspace-approver")
+      }
+      clockifyActionCanCorrect={
         browserSession.state._tag === "authenticated" && browserSession.state.session.permission === "workspace-owner"
       }
       clockifyActionState={clockifyActions.state}

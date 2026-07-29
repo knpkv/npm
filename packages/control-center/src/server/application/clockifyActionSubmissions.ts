@@ -37,8 +37,10 @@ import {
   GovernedActionProposalAuthority,
   GovernedActionSubmission
 } from "../governance/GovernedActionSubmission.js"
+import { RecordNotFoundError } from "../persistence/errors.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { GovernedActionCommitInput } from "../persistence/repositories/governedActionRepository.js"
+import { PluginConflictFailure } from "../plugins/failures.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 
@@ -67,10 +69,20 @@ export class ClockifyActionSubmissions extends Context.Service<
 
 const failure = (reason: ClockifyActionSubmissionError["reason"]) => new ClockifyActionSubmissionError({ reason })
 
+/** Stable HTTP-facing classification for typed provider and persistence failures. */
+export const classifyClockifyActionSubmissionFailure = (
+  cause: unknown
+): ClockifyActionSubmissionError["reason"] =>
+  Schema.is(ClockifyActionSubmissionError)(cause)
+    ? cause.reason
+    : Schema.is(PluginConflictFailure)(cause) || Schema.is(RecordNotFoundError)(cause)
+    ? "conflict"
+    : "unavailable"
+
 const mapFailure = Effect.catch((cause) =>
   Schema.is(ClockifyActionSubmissionError)(cause)
     ? Effect.fail(cause)
-    : Effect.fail(failure("unavailable"))
+    : Effect.fail(failure(classifyClockifyActionSubmissionFailure(cause)))
 )
 
 const canAdvance = (state: string): boolean =>
@@ -79,6 +91,15 @@ const canAdvance = (state: string): boolean =>
   state === "unknown" ||
   state === "cancel-requested" ||
   state === "cancel-requested-unknown"
+
+/** Require an idempotent proposal retry to remain on its original runtime generation. */
+export const clockifyActionRuntimeAuthorityMatches = (
+  envelope: GovernedActionEnvelopeV1,
+  connectionRevision: number,
+  runtimeAuthorityToken: string
+): boolean =>
+  Number(envelope.pluginConnectionRevision) === Number(connectionRevision) &&
+  envelope.pluginConnectionAuthorityDigest === runtimeAuthorityToken
 
 const makeService = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -172,7 +193,13 @@ const makeService = Effect.gen(function*() {
           runtimeAuthorityToken: prepared.runtimeAuthorityToken
         },
         () => effect
-      ).pipe(mapFailure)
+      ).pipe(
+        Effect.catchTag(
+          "GovernedActionSubmissionUnavailable",
+          () => Effect.fail(failure("conflict"))
+        ),
+        mapFailure
+      )
     const prepareAuthorization = Effect.fn("ClockifyActionSubmissions.prepareAuthorization")(function*(
       envelope: GovernedActionEnvelopeV1,
       expectedHeadTransitionId: GovernedActionTransitionId
@@ -248,6 +275,11 @@ const makeService = Effect.gen(function*() {
       if (
         record.envelope.targetEntityId !== input.entityId ||
         !Equal.equals(record.envelope.proposal, prepared.proposal) ||
+        !clockifyActionRuntimeAuthorityMatches(
+          record.envelope,
+          prepared.connectionRecord.revision,
+          prepared.runtimeAuthorityToken
+        ) ||
         record.envelope.origin._tag !== "human" ||
         record.envelope.origin.actor.personId !== actor.personId
       ) return yield* failure("conflict")
@@ -269,7 +301,11 @@ const makeService = Effect.gen(function*() {
     const evidenceSetDigest = yield* digestGovernedActionEvidenceSet(evidence).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService)
     )
-    const policy = yield* policies.current.pipe(mapFailure)
+    const policy = yield* policies.forPermission(
+      input.request._tag === "correct-association"
+        ? "workspace-owner"
+        : "workspace-approver"
+    ).pipe(mapFailure)
     const material = GovernedActionEnvelopeMaterialV1.make({
       schemaVersion: 1,
       actionId,

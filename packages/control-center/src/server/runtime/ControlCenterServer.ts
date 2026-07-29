@@ -548,6 +548,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   return {
     application: routes.pipe(Layer.provideMerge(runtimeServices)),
     applicationServices,
+    clockifyActionSubmissions,
     firstPartyGovernedActionExecutors,
     firstPartyGovernedActionStartup,
     firstPartyRuntime,
