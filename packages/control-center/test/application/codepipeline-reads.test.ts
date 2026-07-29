@@ -103,6 +103,7 @@ describe("CodePipelineReads", () => {
 
   it.effect("returns artifact bytes without exposing provider coordinates", () =>
     Effect.gen(function*() {
+      const providerRanges = yield* Ref.make<ReadonlyArray<{ readonly length: number; readonly offset: number }>>([])
       const connection: PluginConnectionV1 = {
         descriptor,
         discover: Effect.die("not used"),
@@ -112,13 +113,16 @@ describe("CodePipelineReads", () => {
         diff: Option.none(),
         pipeline: Option.some({
           readLogPage: () => Effect.die("not used"),
-          readArtifactRange: () =>
-            Effect.succeed({
+          readArtifactRange: (request) =>
+            Ref.update(providerRanges, (ranges) => [...ranges, {
+              length: request.length,
+              offset: request.offset
+            }]).pipe(Effect.as({
               bytesBase64: "AQID",
               totalBytes: 9,
               contentType: "application/octet-stream",
               filename: "BuildOutput.zip"
-            })
+            }))
         }),
         proposeAction: () => Effect.die("not used")
       }
@@ -144,6 +148,7 @@ describe("CodePipelineReads", () => {
       assert.strictEqual(artifact.filename, "BuildOutput.zip")
       assert.strictEqual(artifact.offset, 3)
       assert.strictEqual(artifact.totalBytes, 9)
+      assert.deepStrictEqual(yield* Ref.get(providerRanges), [{ length: 3, offset: 3 }])
       assert.deepStrictEqual(Array.from(chunks[0] ?? []), [1, 2, 3])
       assert.deepStrictEqual(
         Object.keys(artifact).sort(),

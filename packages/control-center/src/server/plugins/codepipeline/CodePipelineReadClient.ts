@@ -10,6 +10,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 
 import { PluginMalformedResponseFailure } from "../failures.js"
@@ -444,7 +445,12 @@ export const CodePipelineActionState = Schema.Struct({
   actionName: Identifier,
   actionExecutionId: Schema.NullOr(Identifier),
   status: Schema.NullOr(AwsStatus),
-  token: Schema.NullOr(Identifier),
+  token: Schema.NullOr(
+    Schema.RedactedFromValue(Identifier, {
+      label: "codepipeline-approval-token",
+      disallowEncode: true
+    })
+  ),
   lastStatusChange: Schema.NullOr(Schema.Date)
 })
 /** @internal */
@@ -812,7 +818,9 @@ export class CodePipelineReadClient extends Context.Service<
               actionName: action.actionName,
               actionExecutionId: action.latestExecution?.actionExecutionId ?? null,
               status: action.latestExecution?.status ?? null,
-              token: action.latestExecution?.token ?? null,
+              token: action.latestExecution?.token === undefined
+                ? null
+                : Redacted.make(action.latestExecution.token, { label: "codepipeline-approval-token" }),
               lastStatusChange: action.latestExecution?.lastStatusChange ?? null
             }))
           )

@@ -12,6 +12,7 @@ import * as Effect from "effect/Effect"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -1455,7 +1456,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           ...payload,
           actionRevision: actionRevision(action),
           approvalStatus,
-          approvalTokenDigest: yield* approvalTokenDigest(current.token),
+          approvalTokenDigest: yield* approvalTokenDigest(Redacted.value(current.token)),
           pipelineRevision: pipelineRevision(pipeline)
         }
       }
@@ -1677,7 +1678,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-approval-not-pending"
           })
         }
-        if ((yield* approvalTokenDigest(current.token)) !== payload.approvalTokenDigest) {
+        const token = Redacted.value(current.token)
+        if ((yield* approvalTokenDigest(token)) !== payload.approvalTokenDigest) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
             diagnosticCode: "codepipeline-approval-token-changed"
@@ -1688,7 +1690,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           stageName: payload.stageName,
           actionName: payload.actionName,
           actionExecutionId: payload.actionExecutionId,
-          token: current.token,
+          token,
           status: payload.approvalStatus,
           summary: payload.summary,
           checkedRevision: revision
@@ -1718,7 +1720,15 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           })
         }
         const currentPayload = yield* retryPayload(pipeline, snapshot)
-        if (JSON.stringify(currentPayload.sourceRevisions) !== JSON.stringify(payload.sourceRevisions)) {
+        const sameSourceRevisions = currentPayload.sourceRevisions.length === payload.sourceRevisions.length &&
+          currentPayload.sourceRevisions.every((expected, index) => {
+            const actual = payload.sourceRevisions[index]
+            return actual !== undefined &&
+              actual.actionName === expected.actionName &&
+              actual.revisionType === expected.revisionType &&
+              actual.revisionValue === expected.revisionValue
+          })
+        if (!sameSourceRevisions) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
             diagnosticCode: "codepipeline-retry-revisions-changed"

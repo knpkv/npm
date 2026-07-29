@@ -7,6 +7,7 @@ import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
+import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -609,6 +610,7 @@ describe("CodePipelinePlugin", () => {
         })
       )
       assert.strictEqual(directExecution._tag, "found")
+      assert.strictEqual(synchronizedExecution?._tag, "UpsertEntity")
       if (
         directExecution._tag === "found" &&
         directExecution.event._tag === "UpsertEntity" &&
@@ -823,6 +825,53 @@ describe("CodePipelinePlugin", () => {
       assert.instanceOf(unstoppability, PluginConflictFailure)
       assert.instanceOf(readValidation, PluginOutageFailure)
     }))
+
+  it.effect("structurally redacts decoded approval tokens in private pipeline state", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const state = yield* client.getPipelineState({
+        account: {
+          profile: configuration.profile,
+          region: configuration.region,
+          operationTimeoutMillis: configuration.operationTimeoutMillis
+        },
+        pipelineName: configuration.pipelineName
+      })
+      const token = state.actions[0]?.token
+
+      assert.isNotNull(token)
+      if (token !== undefined && token !== null) {
+        assert.strictEqual(Redacted.value(token), "approval-token-private")
+      }
+      assert.notInclude(JSON.stringify(state), "approval-token-private")
+      assert.notInclude(String(token), "approval-token-private")
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(Layer.succeed(
+            CodePipelineReadProvider,
+            baseProvider({
+              getPipelineState: () =>
+                Effect.succeed({
+                  pipelineName: "release",
+                  pipelineVersion: 7,
+                  stageStates: [{
+                    stageName: "Build",
+                    actionStates: [{
+                      actionName: "ReleaseApproval",
+                      latestExecution: {
+                        actionExecutionId: "approval-action",
+                        status: "InProgress",
+                        token: "approval-token-private"
+                      }
+                    }]
+                  }]
+                })
+            })
+          ))
+        )
+      )
+    ))
 
   it.effect("Schema-rejects malformed AWS output before normalization", () =>
     Effect.gen(function*() {
@@ -1105,6 +1154,12 @@ describe("CodePipelinePlugin", () => {
       ).pipe(Effect.result)
 
       assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginConflictFailure)
+        if (Predicate.isTagged(result.failure, "PluginConflictFailure")) {
+          assert.strictEqual(result.failure.diagnosticCode, "codepipeline-start-source-set-invalid")
+        }
+      }
       assert.strictEqual(yield* Ref.get(mutationCalls), 0)
     }))
 
@@ -2567,6 +2622,12 @@ describe("CodePipelinePlugin", () => {
       )
 
       assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginConflictFailure)
+        if (Predicate.isTagged(result.failure, "PluginConflictFailure")) {
+          assert.strictEqual(result.failure.diagnosticCode, "codepipeline-log-stream-unavailable")
+        }
+      }
       assert.strictEqual(yield* Ref.get(providerCalls), 0)
     }))
 
