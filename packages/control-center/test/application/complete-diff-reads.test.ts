@@ -24,8 +24,9 @@ import {
   makeCompleteDiffReads
 } from "../../src/server/application/completeDiffReads.js"
 import type { PutContentResult } from "../../src/server/persistence/ContentStore.js"
-import { ReproducibleContentUnavailableError } from "../../src/server/persistence/errors.js"
+import { PersistenceOperationError, ReproducibleContentUnavailableError } from "../../src/server/persistence/errors.js"
 import { ContentBlobDigest } from "../../src/server/persistence/repositories/models.js"
+import { PluginConflictFailure } from "../../src/server/plugins/failures.js"
 import {
   PluginConnection,
   type PluginConnectionV1,
@@ -183,11 +184,9 @@ describe("CompleteDiffReads", () => {
       const persistence: DiffContentCachePersistence = {
         diffContentCache: {
           get: () => Ref.get(cacheDigest),
-          put: (_key, nextDigest) => Ref.set(cacheDigest, Option.some(nextDigest))
-        },
-        content: {
-          put: (_workspaceId, input) =>
+          putContent: (_key, input) =>
             Effect.all([
+              Ref.set(cacheDigest, Option.some(digest)),
               Ref.set(cacheBytes, input.bytes),
               Ref.update(putCalls, (count) => count + 1)
             ]).pipe(
@@ -205,7 +204,9 @@ describe("CompleteDiffReads", () => {
                   stored: true
                 } satisfies PutContentResult
               )
-            ),
+            )
+        },
+        content: {
           readAll: () => Ref.get(cacheBytes)
         }
       }
@@ -263,11 +264,9 @@ describe("CompleteDiffReads", () => {
       const persistence: DiffContentCachePersistence = {
         diffContentCache: {
           get: () => Ref.get(cacheDigest),
-          put: (_key, nextDigest) => Ref.set(cacheDigest, Option.some(nextDigest))
-        },
-        content: {
-          put: (_workspaceId, input) =>
+          putContent: (_key, input) =>
             Effect.all([
+              Ref.set(cacheDigest, Option.some(digest)),
               Ref.set(broken, false),
               Ref.update(putCalls, (count) => count + 1)
             ]).pipe(
@@ -285,7 +284,9 @@ describe("CompleteDiffReads", () => {
                   stored: true
                 } satisfies PutContentResult
               )
-            ),
+            )
+        },
+        content: {
           readAll: () =>
             Ref.get(broken).pipe(
               Effect.flatMap((isBroken) =>
@@ -336,6 +337,140 @@ describe("CompleteDiffReads", () => {
       assert.strictEqual(yield* Ref.get(providerCalls), 1)
       assert.strictEqual(yield* Ref.get(putCalls), 1)
       assert.isFalse(yield* Ref.get(broken))
+    }))
+
+  it.effect("serves healthy provider bytes when optional cache operations fail", () =>
+    Effect.gen(function*() {
+      const failureModes: ReadonlyArray<"cache-get" | "content-put" | "cache-put"> = [
+        "cache-get",
+        "content-put",
+        "cache-put"
+      ]
+      for (const failureMode of failureModes) {
+        const providerCalls = yield* Ref.make(0)
+        const digest = ContentBlobDigest.make("d".repeat(64))
+        const persistenceFailure = new PersistenceOperationError({
+          operation: `diff-cache-${failureMode}`
+        })
+        const persistence: DiffContentCachePersistence = {
+          diffContentCache: {
+            get: () =>
+              failureMode === "cache-get"
+                ? Effect.fail(persistenceFailure)
+                : Effect.succeed(Option.none()),
+            putContent: (_key, input) =>
+              failureMode === "cache-put" || failureMode === "content-put"
+                ? Effect.fail(persistenceFailure)
+                : Effect.succeed(
+                  {
+                    metadata: {
+                      workspaceId,
+                      digest,
+                      storageClass: "reproducible-cache",
+                      mimeType: input.mimeType,
+                      byteLength: input.bytes.byteLength,
+                      createdAt: input.createdAt,
+                      lastVerifiedAt: null
+                    },
+                    stored: true
+                  } satisfies PutContentResult
+                )
+          },
+          content: {
+            readAll: () => Effect.die("unused")
+          }
+        }
+        const connection = baseConnection(Option.some<PluginDiffReaderV1>({
+          readInventoryPage: () => Effect.die("unused"),
+          readContentRange: () =>
+            Ref.update(providerCalls, (count) => count + 1).pipe(
+              Effect.as({
+                bytesBase64: Encoding.encodeBase64(new TextEncoder().encode("provider")),
+                totalBytes: 8,
+                unavailableReason: null
+              })
+            )
+        }))
+        const reads = yield* makeReads(connection, undefined, persistence)
+        const content = yield* reads.content({
+          workspaceId,
+          pluginConnectionId,
+          vendorImmutableId,
+          revision,
+          anchor: DiffFileAnchor.make(
+            "sha256:2e4905203b5018ac900b9b455578b8d1509fbc2ee0622eba98fc7e0703a7bbbe"
+          ),
+          path: PluginRelativePathV1.make("src/file.ts"),
+          previousPath: null,
+          status: modifiedStatus,
+          side: "after",
+          offset: 0,
+          length: 8
+        })
+        const bytes = yield* Effect.fromResult(Encoding.decodeBase64(content.bytesBase64 ?? ""))
+
+        assert.strictEqual(new TextDecoder().decode(bytes), "provider")
+        assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      }
+    }))
+
+  it.effect("keeps provider status validation authoritative after a cache hit", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const digest = ContentBlobDigest.make("e".repeat(64))
+      const persistence: DiffContentCachePersistence = {
+        diffContentCache: {
+          get: (key) =>
+            Effect.succeed(
+              key.status === modifiedStatus
+                ? Option.some(digest)
+                : Option.none()
+            ),
+          putContent: () => Effect.die("unused")
+        },
+        content: {
+          readAll: () => Effect.succeed(new TextEncoder().encode("cached"))
+        }
+      }
+      const connection = baseConnection(Option.some<PluginDiffReaderV1>({
+        readInventoryPage: () => Effect.die("unused"),
+        readContentRange: () =>
+          Ref.update(providerCalls, (count) => count + 1).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new PluginConflictFailure({
+                  operation: "read-diff-content",
+                  diagnosticCode: "status-mismatch"
+                })
+              )
+            )
+          )
+      }))
+      const reads = yield* makeReads(connection, undefined, persistence)
+      const identity = {
+        workspaceId,
+        pluginConnectionId,
+        vendorImmutableId,
+        revision,
+        anchor: DiffFileAnchor.make(
+          "sha256:2e4905203b5018ac900b9b455578b8d1509fbc2ee0622eba98fc7e0703a7bbbe"
+        ),
+        path: PluginRelativePathV1.make("src/file.ts"),
+        previousPath: null,
+        status: modifiedStatus,
+        side: "after",
+        offset: 0,
+        length: 6
+      } satisfies Parameters<typeof reads.content>[0]
+
+      const cached = yield* reads.content(identity)
+      const mismatch = yield* reads.content({ ...identity, status: "deleted" }).pipe(Effect.result)
+      const cachedBytes = yield* Effect.fromResult(Encoding.decodeBase64(cached.bytesBase64 ?? ""))
+
+      assert.strictEqual(new TextDecoder().decode(cachedBytes), "cached")
+      assert.strictEqual(mismatch._tag, "Failure")
+      if (mismatch._tag === "Failure") assert.strictEqual(mismatch.failure._tag, "ApplicationConflict")
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
     }))
 
   it.effect("rejects mismatched content identity before calling the provider", () =>
@@ -501,10 +636,9 @@ describe("CompleteDiffReads", () => {
             Ref.update(cacheCalls, (count) => count + 1).pipe(
               Effect.as(Option.none())
             ),
-          put: () => Effect.die("unused")
+          putContent: () => Effect.die("unused")
         },
         content: {
-          put: () => Effect.die("unused"),
           readAll: () => Effect.die("unused")
         }
       }

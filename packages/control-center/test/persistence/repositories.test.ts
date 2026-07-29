@@ -1,12 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Option, Result, Schema } from "effect"
+import type { Crypto, Path, Scope } from "effect"
+import { Context, Effect, FileSystem, Layer, Option, Result, Schema } from "effect"
 
 import { DiffFileAnchor } from "../../src/api/diff.js"
 import { Person, RoleAssignment } from "../../src/domain/actors.js"
 import { AgentId, EntityId, PluginConnectionId, RoleAssignmentId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { ContentStore } from "../../src/server/persistence/ContentStore.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   PersistedRecordError,
@@ -15,13 +17,22 @@ import {
   SourceIdentityMismatchError
 } from "../../src/server/persistence/errors.js"
 import { BlobDigest } from "../../src/server/persistence/object-store/BlobDigest.js"
+import { BlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
+import { BlobStoreIoError } from "../../src/server/persistence/object-store/BlobStoreError.js"
+import {
+  putContentAndSweepDiffContentCache,
+  sweepDiffContentCacheCleanup
+} from "../../src/server/persistence/Persistence.js"
+import { BlobRoot } from "../../src/server/persistence/PersistenceConfig.js"
 import { ContentBlobMetadataRepository } from "../../src/server/persistence/repositories/contentBlobMetadataRepository.js"
 import {
   type DiffContentCacheKey,
-  DiffContentCacheRepository
+  DiffContentCacheRepository,
+  MaximumDiffContentCacheCleanupBatch
 } from "../../src/server/persistence/repositories/diffContentCacheRepository.js"
 import { EntityRepository } from "../../src/server/persistence/repositories/entityRepository.js"
 import {
+  ContentBlobDigest,
   PluginConnectionDisplayName,
   RecordRevision,
   WorkspaceName
@@ -76,40 +87,66 @@ const testConfig = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
   const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-repositories-" })
   return {
-    blobRoot: `${root}/blobs`,
+    blobRoot: BlobRoot.make(`${root}/blobs`),
     busyTimeoutMilliseconds: 5_000,
     databaseUrl: `file:${root}/control-center.db`,
     maxConnections: 1
   }
 })
 
+interface RepositoryTestConfigShape {
+  readonly blobRoot: BlobRoot
+  readonly busyTimeoutMilliseconds: number
+  readonly databaseUrl: string
+  readonly maxConnections: number
+}
+
+class RepositoryTestConfig extends Context.Service<
+  RepositoryTestConfig,
+  RepositoryTestConfigShape
+>()("@knpkv/control-center/test/RepositoryTestConfig") {}
+
 const withRepositories = <Success, Failure>(
   use: Effect.Effect<
     Success,
     Failure,
+    | ContentStore
+    | Crypto.Crypto
     | EntityRepository
+    | FileSystem.FileSystem
     | ContentBlobMetadataRepository
     | Database
     | DiffContentCacheRepository
+    | BlobStore
     | PeopleRepository
+    | Path.Path
     | PluginConnectionRepository
     | QuarantineRepository
+    | RepositoryTestConfig
+    | Scope.Scope
     | WorkspaceRepository
   >
 ) =>
   Effect.gen(function*() {
     const config = yield* testConfig
     const database = databaseLayer(config)
+    const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const content = ContentBlobMetadataRepository.layer.pipe(Layer.provide(foundation))
+    const contentStore = ContentStore.layer.pipe(
+      Layer.provide(Layer.mergeAll(content, blobs, database))
+    )
     const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
     const diffContentCache = DiffContentCacheRepository.layer.pipe(Layer.provide(database))
     const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
     const plugins = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
     const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
     const repositories = Layer.mergeAll(
+      Layer.succeed(RepositoryTestConfig, config),
       foundation,
+      blobs,
       content,
+      contentStore,
       diffContentCache,
       entities,
       people,
@@ -574,21 +611,422 @@ describe("workspace-scoped repositories", () => {
           createdAt: CREATED_AT,
           lastVerifiedAt: null
         })
+        const maximumRevision = Revision.make("r".repeat(512))
         const key = {
           workspaceId: WORKSPACE_A,
           pluginConnectionId: PLUGIN_ID,
           vendorImmutableId: VendorImmutableId.make("184"),
-          revision: Revision.make("revision-9"),
+          revision: maximumRevision,
           anchor: DiffFileAnchor.make(`sha256:${"d".repeat(64)}`),
+          status: "modified",
           side: "after"
         } satisfies DiffContentCacheKey
 
+        assert.throws(() => Schema.decodeUnknownSync(Revision)("r".repeat(513)))
         assert.isTrue(Option.isNone(yield* cache.get(key)))
         yield* cache.put(key, CONTENT_DIGEST)
         assert.deepStrictEqual(yield* cache.get(key), Option.some(CONTENT_DIGEST))
         assert.isTrue(Option.isNone(yield* cache.get({ ...key, revision: Revision.make("revision-10") })))
+        assert.isTrue(Option.isNone(yield* cache.get({ ...key, status: "deleted" })))
         yield* cache.put(key, SECOND_CONTENT_DIGEST)
         assert.deepStrictEqual(yield* cache.get(key), Option.some(SECOND_CONTENT_DIGEST))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [{
+          workspaceId: WORKSPACE_A,
+          digest: CONTENT_DIGEST
+        }])
+      })
+    ))
+
+  it.effect("evicts oldest cache entries and only removes unreferenced reproducible blobs", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const blobs = yield* BlobStore
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentBlobMetadataRepository
+        const contentStore = yield* ContentStore
+        const database = yield* Database
+
+        const unique = yield* blobs.put(WORKSPACE_A, new Uint8Array([1]), "reproducible-cache")
+        const durable = yield* blobs.put(WORKSPACE_A, new Uint8Array([2]), "durable")
+        const shared = yield* blobs.put(WORKSPACE_A, new Uint8Array([3]), "reproducible-cache")
+        const recent = yield* blobs.put(WORKSPACE_A, new Uint8Array([4]), "reproducible-cache")
+        for (const stored of [unique, durable, shared, recent]) {
+          yield* content.create(WORKSPACE_A, {
+            digest: stored.ref.digest,
+            storageClass: stored.ref.classification,
+            byteLength: stored.ref.sizeBytes,
+            mimeType: "text/plain",
+            createdAt: CREATED_AT,
+            lastVerifiedAt: null
+          })
+        }
+
+        const keyFor = (anchorCharacter: string): DiffContentCacheKey => ({
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-9"),
+          anchor: DiffFileAnchor.make(`sha256:${anchorCharacter.repeat(64)}`),
+          status: "modified",
+          side: "after"
+        })
+        const uniqueKey = keyFor("1")
+        const durableKey = keyFor("2")
+        const sharedOldKey = keyFor("3")
+        const sharedRecentKey = keyFor("4")
+        const recentKey = keyFor("5")
+
+        yield* cache.put(uniqueKey, unique.ref.digest, 100)
+        yield* cache.put(durableKey, durable.ref.digest, 100)
+        yield* cache.put(sharedOldKey, shared.ref.digest, 100)
+        yield* cache.put(sharedRecentKey, shared.ref.digest, 100)
+        yield* database.sql`UPDATE diff_content_cache_entries
+          SET cached_at = CASE file_anchor
+            WHEN ${uniqueKey.anchor} THEN '1960-07-13T10:00:00.000Z'
+            WHEN ${durableKey.anchor} THEN '1960-07-13T10:01:00.000Z'
+            WHEN ${sharedOldKey.anchor} THEN '1960-07-13T10:02:00.000Z'
+            WHEN ${sharedRecentKey.anchor} THEN '1960-07-13T10:03:00.000Z'
+            ELSE cached_at
+          END
+          WHERE workspace_id = ${WORKSPACE_A}`
+
+        yield* cache.put(recentKey, recent.ref.digest, 2)
+        yield* sweepDiffContentCacheCleanup(database, contentStore, cache)
+
+        assert.isTrue(Option.isNone(yield* cache.get(uniqueKey)))
+        assert.isTrue(Option.isNone(yield* cache.get(durableKey)))
+        assert.isTrue(Option.isNone(yield* cache.get(sharedOldKey)))
+        assert.deepStrictEqual(yield* cache.get(sharedRecentKey), Option.some(shared.ref.digest))
+        assert.deepStrictEqual(yield* cache.get(recentKey), Option.some(recent.ref.digest))
+
+        const removedMetadata = yield* content.get(WORKSPACE_A, unique.ref.digest).pipe(Effect.result)
+        const removedBytes = yield* blobs.readAll(WORKSPACE_A, unique.ref.digest).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(removedMetadata))
+        if (Result.isFailure(removedMetadata)) {
+          assert.strictEqual(removedMetadata.failure._tag, "RecordNotFoundError")
+        }
+        assert.isTrue(Result.isFailure(removedBytes))
+        if (Result.isFailure(removedBytes)) {
+          assert.strictEqual(removedBytes.failure._tag, "BlobNotFoundError")
+        }
+
+        assert.strictEqual((yield* content.get(WORKSPACE_A, durable.ref.digest)).storageClass, "durable")
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, durable.ref.digest), new Uint8Array([2]))
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, shared.ref.digest), new Uint8Array([3]))
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, recent.ref.digest), new Uint8Array([4]))
+      })
+    ))
+
+  it.effect("keeps failed cache cleanup durable and retries it after storage recovers", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const blobs = yield* BlobStore
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const workspaces = yield* WorkspaceRepository
+        yield* workspaces.create(WORKSPACE_B, {
+          displayName: IDENTITY,
+          createdAt: CREATED_AT
+        })
+        const published = yield* content.put(WORKSPACE_A, {
+          bytes: new Uint8Array([9]),
+          classification: "reproducible-cache",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_A, published.metadata.digest)
+        const later = yield* content.put(WORKSPACE_B, {
+          bytes: new Uint8Array([12]),
+          classification: "reproducible-cache",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_B, later.metadata.digest)
+
+        yield* sweepDiffContentCacheCleanup(
+          database,
+          {
+            removeReproducible: (workspaceId, digest) =>
+              digest === published.metadata.digest
+                ? Effect.fail(
+                  new BlobStoreIoError({
+                    operation: "injected cache cleanup",
+                    message: "platform storage operation failed"
+                  })
+                )
+                : content.removeReproducible(workspaceId, digest)
+          },
+          cache
+        )
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, published.metadata.digest), new Uint8Array([9]))
+        assert.strictEqual(
+          (yield* content.getMetadata(WORKSPACE_A, published.metadata.digest)).digest,
+          published.metadata.digest
+        )
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [{
+          workspaceId: WORKSPACE_A,
+          digest: published.metadata.digest
+        }])
+        assert.isTrue(Result.isFailure(
+          yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
+        ))
+        assert.isTrue(Result.isFailure(
+          yield* blobs.readAll(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
+        ))
+
+        yield* sweepDiffContentCacheCleanup(database, content, cache)
+        assert.isTrue(Result.isFailure(
+          yield* content.getMetadata(WORKSPACE_A, published.metadata.digest).pipe(Effect.result)
+        ))
+        assert.isTrue(Result.isFailure(
+          yield* blobs.readAll(WORKSPACE_A, published.metadata.digest).pipe(Effect.result)
+        ))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("reclaims publication orphans when cache mapping insertion fails", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const blobs = yield* BlobStore
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const expectedDigest = ContentBlobDigest.make(
+          "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+        )
+        const key = {
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-cache-failure"),
+          anchor: DiffFileAnchor.make(`sha256:${"6".repeat(64)}`),
+          status: "modified",
+          side: "after"
+        } satisfies DiffContentCacheKey
+
+        const failed = yield* Effect.acquireUseRelease(
+          database.sql`CREATE TRIGGER fail_diff_content_cache_insert
+            BEFORE INSERT ON diff_content_cache_entries
+            BEGIN
+              SELECT RAISE(ABORT, 'injected cache mapping failure');
+            END`,
+          () =>
+            putContentAndSweepDiffContentCache(
+              database,
+              content,
+              cache,
+              key,
+              {
+                bytes: new Uint8Array([10]),
+                classification: "reproducible-cache",
+                mimeType: "text/plain",
+                createdAt: CREATED_AT
+              }
+            ).pipe(Effect.result),
+          () => database.sql`DROP TRIGGER fail_diff_content_cache_insert`.pipe(Effect.ignore)
+        )
+        assert.isTrue(Result.isFailure(failed))
+        assert.isTrue(Result.isFailure(
+          yield* content.getMetadata(WORKSPACE_A, expectedDigest).pipe(Effect.result)
+        ))
+        assert.isTrue(Result.isFailure(
+          yield* blobs.readAll(WORKSPACE_A, expectedDigest).pipe(Effect.result)
+        ))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("rotates a full failed cleanup batch so later workspaces still progress", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const workspaces = yield* WorkspaceRepository
+        yield* workspaces.create(WORKSPACE_B, {
+          displayName: IDENTITY,
+          createdAt: CREATED_AT
+        })
+
+        const failingDigests = new Set<string>()
+        for (let index = 0; index < MaximumDiffContentCacheCleanupBatch; index += 1) {
+          const published = yield* content.put(WORKSPACE_A, {
+            bytes: new Uint8Array([13, index]),
+            classification: "reproducible-cache",
+            mimeType: "application/octet-stream",
+            createdAt: CREATED_AT
+          })
+          failingDigests.add(published.metadata.digest)
+          yield* cache.requestCleanup(WORKSPACE_A, published.metadata.digest)
+        }
+        const later = yield* content.put(WORKSPACE_B, {
+          bytes: new Uint8Array([14]),
+          classification: "reproducible-cache",
+          mimeType: "application/octet-stream",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_B, later.metadata.digest)
+
+        const removeUnlessPoisoned = {
+          removeReproducible: (workspaceId: WorkspaceId, digest: BlobDigest) =>
+            failingDigests.has(digest)
+              ? Effect.fail(
+                new BlobStoreIoError({
+                  operation: "injected full cache cleanup batch",
+                  message: "platform storage operation failed"
+                })
+              )
+              : content.removeReproducible(workspaceId, digest)
+        }
+        yield* sweepDiffContentCacheCleanup(database, removeUnlessPoisoned, cache)
+        yield* sweepDiffContentCacheCleanup(database, removeUnlessPoisoned, cache)
+
+        assert.isTrue(Result.isFailure(
+          yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
+        ))
+        const pending = yield* cache.pendingCleanup(
+          MaximumDiffContentCacheCleanupBatch + 1
+        )
+        assert.lengthOf(pending, MaximumDiffContentCacheCleanupBatch)
+        assert.isTrue(pending.every(({ workspaceId }) => workspaceId === WORKSPACE_A))
+
+        yield* sweepDiffContentCacheCleanup(database, content, cache)
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("acquires the writer lock on an independent connection before republishing", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const bytes = new Uint8Array([11])
+        const blobs = yield* BlobStore
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const config = yield* RepositoryTestConfig
+        const secondaryDatabase = databaseLayer({
+          ...config,
+          maxConnections: 1
+        })
+        const secondaryDatabaseContext = yield* Layer.build(secondaryDatabase)
+        const secondaryDatabaseService = Context.get(
+          secondaryDatabaseContext,
+          Database
+        )
+        const secondaryDatabaseLayer = Layer.succeed(
+          Database,
+          secondaryDatabaseService
+        )
+        const secondaryBlobContext = yield* Layer.build(
+          BlobStore.layer({ blobRoot: config.blobRoot })
+        )
+        const rawSecondaryBlobs = Context.get(secondaryBlobContext, BlobStore)
+        const secondaryBlobs = Layer.succeed(
+          BlobStore,
+          BlobStore.of({
+            ...rawSecondaryBlobs,
+            put: (...args) =>
+              secondaryDatabaseService.sql`SELECT observed
+                FROM content_writer_lock_audit`.pipe(
+                Effect.mapError(() =>
+                  new BlobStoreIoError({
+                    operation: "observe content writer lock",
+                    message: "platform storage operation failed"
+                  })
+                ),
+                Effect.flatMap((rows) =>
+                  rows.length === 1
+                    ? rawSecondaryBlobs.put(...args)
+                    : Effect.die(
+                      "ContentStore reached blob publication before acquiring its writer lock"
+                    )
+                )
+              )
+          })
+        )
+        const secondaryFoundation = QuarantineRepository.layer.pipe(
+          Layer.provideMerge(secondaryDatabaseLayer)
+        )
+        const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(
+          Layer.provide(secondaryFoundation)
+        )
+        const secondaryContentContext = yield* Layer.build(
+          Layer.fresh(ContentStore.layer).pipe(
+            Layer.provide(
+              Layer.mergeAll(
+                secondaryMetadata,
+                secondaryBlobs,
+                secondaryDatabaseLayer
+              )
+            )
+          )
+        )
+        const secondaryContent = Context.get(secondaryContentContext, ContentStore)
+        const first = yield* content.put(WORKSPACE_A, {
+          bytes,
+          classification: "reproducible-cache",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_A, first.metadata.digest)
+        yield* sweepDiffContentCacheCleanup(database, content, cache)
+
+        const { lockAudit, second } = yield* Effect.acquireUseRelease(
+          database.transaction(
+            Effect.gen(function*() {
+              yield* database.sql`CREATE TABLE content_writer_lock_audit (
+                observed INTEGER NOT NULL
+              )`
+              yield* database.sql`CREATE TRIGGER observe_content_writer_lock
+                AFTER UPDATE OF workspace_id ON workspaces
+                WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000001'
+                BEGIN
+                  INSERT INTO content_writer_lock_audit (observed) VALUES (1);
+                END`
+            })
+          ),
+          () =>
+            Effect.gen(function*() {
+              const second = yield* secondaryContent.put(WORKSPACE_A, {
+                bytes,
+                classification: "reproducible-cache",
+                mimeType: "text/plain",
+                createdAt: CREATED_AT
+              })
+              const lockAudit = yield* database.sql`SELECT observed
+                FROM content_writer_lock_audit`
+              return { lockAudit, second }
+            }),
+          () =>
+            database.transaction(
+              Effect.gen(function*() {
+                yield* database.sql`DROP TRIGGER observe_content_writer_lock`
+                yield* database.sql`DROP TABLE content_writer_lock_audit`
+              })
+            ).pipe(Effect.ignore)
+        )
+        assert.deepStrictEqual(lockAudit, [{ observed: 1 }])
+        assert.strictEqual(second.metadata.digest, first.metadata.digest)
+
+        const key = {
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-republished"),
+          anchor: DiffFileAnchor.make(`sha256:${"7".repeat(64)}`),
+          status: "modified",
+          side: "after"
+        } satisfies DiffContentCacheKey
+        yield* cache.put(key, second.metadata.digest)
+        assert.deepStrictEqual(yield* cache.get(key), Option.some(second.metadata.digest))
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, second.metadata.digest), bytes)
       })
     ))
 })

@@ -1,18 +1,23 @@
 // @vitest-environment happy-dom
 
-import { act } from "react"
+import { act, createRef } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "../../src/diff/annotation.js"
 import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
-import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../../src/diff/types.js"
+import type { RlyDiffCodeAnnotation, RlyDiffCodeItem, RlyDiffCodeViewHandle } from "../../src/diff/types.js"
 import { DiffWorkerProvider } from "../../src/diff/worker-pool.js"
 
 const item = {
   after: { contents: "const ready = true\n", name: "src/release.ts" },
   before: { contents: "const ready = false\n", name: "src/release.ts" },
   id: "release"
+} satisfies RlyDiffCodeItem
+const shiftedContextItem = {
+  after: { contents: "const inserted = true\nconst stable = true\n", name: "src/release.ts" },
+  before: { contents: "const stable = true\n", name: "src/release.ts" },
+  id: "shifted-context"
 } satisfies RlyDiffCodeItem
 
 const validAnnotation = {
@@ -21,6 +26,7 @@ const validAnnotation = {
   location: { itemId: "release", lineNumber: 1, side: "additions" },
   render: () => "Finding"
 } satisfies RlyDiffCodeAnnotation
+const rendererModes: ReadonlyArray<"split" | "stacked"> = ["split", "stacked"]
 
 afterEach(() => document.body.replaceChildren())
 
@@ -66,6 +72,81 @@ describe("DiffCodeView", () => {
     expect(host.querySelectorAll("[role='status']")).toHaveLength(1)
     expect(host.querySelector("[data-rly-diff-code-fallback]")).toBeNull()
     expect(host.querySelectorAll("[data-rly-diff-code-view]")).toHaveLength(1)
+    await act(async () => root.unmount())
+  })
+
+  it.each(rendererModes)("focuses an exact added line through the %s renderer", async (mode) => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const rendererRef = createRef<RlyDiffCodeViewHandle>()
+    await act(async () =>
+      root.render(
+        <DiffWorkerProvider
+          workerFactory={() => {
+            throw new Error("Workers blocked by policy")
+          }}
+        >
+          <DiffCodeView initialItems={[item]} mode={mode} ref={rendererRef} />
+        </DiffWorkerProvider>
+      )
+    )
+
+    await vi.waitFor(() => {
+      expect(host.querySelector(`diffs-container[data-rly-diff-item="${item.id}"]`)).not.toBeNull()
+    })
+    const focused = rendererRef.current?.focusLine({
+      id: item.id,
+      lineNumber: 1,
+      side: "additions",
+      type: "line"
+    })
+    const container = host.querySelector<HTMLElement>(`diffs-container[data-rly-diff-item="${item.id}"]`)
+    expect(container).not.toBeNull()
+    expect(focused, container?.shadowRoot?.innerHTML).toBe(true)
+    expect(container?.shadowRoot?.activeElement?.getAttribute("data-line")).toBe("1")
+    await act(async () => root.unmount())
+  })
+
+  it("focuses both identities of a shifted stacked context line", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const rendererRef = createRef<RlyDiffCodeViewHandle>()
+    await act(async () =>
+      root.render(
+        <DiffWorkerProvider
+          workerFactory={() => {
+            throw new Error("Workers blocked by policy")
+          }}
+        >
+          <DiffCodeView initialItems={[shiftedContextItem]} mode="stacked" ref={rendererRef} />
+        </DiffWorkerProvider>
+      )
+    )
+    await vi.waitFor(() => {
+      expect(host.querySelector(`diffs-container[data-rly-diff-item="${shiftedContextItem.id}"]`)).not.toBeNull()
+    })
+    const container = host.querySelector<HTMLElement>(`diffs-container[data-rly-diff-item="${shiftedContextItem.id}"]`)
+
+    expect(
+      rendererRef.current?.focusLine({
+        id: shiftedContextItem.id,
+        lineNumber: 2,
+        side: "additions",
+        type: "line"
+      })
+    ).toBe(true)
+    expect(container?.shadowRoot?.activeElement?.getAttribute("data-line")).toBe("2")
+    expect(
+      rendererRef.current?.focusLine({
+        id: shiftedContextItem.id,
+        lineNumber: 1,
+        side: "deletions",
+        type: "line"
+      })
+    ).toBe(true)
+    expect(container?.shadowRoot?.activeElement?.getAttribute("data-alt-line")).toBe("1")
     await act(async () => root.unmount())
   })
 
@@ -142,6 +223,30 @@ describe("DiffCodeView", () => {
     card?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }))
 
     expect(shadow.activeElement).toBe(addition)
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  it("returns focus through alternate-line renderer markup", async () => {
+    const container = document.createElement("diffs-container")
+    const shadow = container.shadowRoot
+    if (shadow === null) throw new Error("Expected the diff container shadow root")
+    const additions = document.createElement("span")
+    additions.dataset.additions = ""
+    const alternate = document.createElement("span")
+    alternate.dataset.altLine = "1"
+    alternate.tabIndex = -1
+    additions.append(alternate)
+    shadow.replaceChildren(additions)
+    document.body.append(container)
+    const root = createRoot(container)
+
+    await act(async () => root.render(<DiffCodeAnnotation annotation={validAnnotation} className="annotation" />))
+    const card = container.querySelector<HTMLElement>("[data-rly-diff-annotation='finding']")
+    card?.focus()
+    card?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }))
+
+    expect(shadow.activeElement).toBe(alternate)
     await act(async () => root.unmount())
     container.remove()
   })

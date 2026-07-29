@@ -221,7 +221,10 @@ export const WorkspacePullRequestDiff = ({
     readonly side: "additions" | "deletions"
   }>()
   const viewerRef = useRef<HTMLDivElement>(null)
-  const diffCodeViewRef = useRef<RlyDiffCodeViewHandle>(null)
+  const [diffCodeView, setDiffCodeView] = useState<RlyDiffCodeViewHandle | null>(null)
+  const attachDiffCodeView = useCallback((viewer: RlyDiffCodeViewHandle | null): void => {
+    setDiffCodeView(viewer)
+  }, [])
 
   useEffect(() => {
     setFindingFilter("agent")
@@ -574,7 +577,7 @@ export const WorkspacePullRequestDiff = ({
                   key={selectedEntry.anchor}
                   initialItems={selectedCodeItems}
                   mode={layout}
-                  ref={diffCodeViewRef}
+                  ref={attachDiffCodeView}
                   wrap={isWrapped}
                 />
               </Suspense>
@@ -586,7 +589,7 @@ export const WorkspacePullRequestDiff = ({
                     lineNumber={focusRequest.lineNumber}
                     root={viewerRef}
                     side={focusRequest.side}
-                    viewer={diffCodeViewRef}
+                    viewer={diffCodeView}
                   />
                 </Suspense>
               )}

@@ -13,42 +13,76 @@ export const DiffLineFocus = ({
   readonly lineNumber: number
   readonly root: RefObject<HTMLElement | null>
   readonly side: "additions" | "deletions"
-  readonly viewer: RefObject<RlyDiffCodeViewHandle | null>
+  readonly viewer: RlyDiffCodeViewHandle | null
 }): ReactNode => {
   useEffect(() => {
-    viewer.current?.scrollTo({
-      id: fileId,
-      lineNumber,
-      side,
-      type: "line"
-    })
-    const focusLine = (): boolean => {
-      const item = `[data-rly-diff-item="${CSS.escape(fileId)}"]`
-      const boundedLine = root.current?.querySelector<HTMLElement>(
-        `${item}[data-rly-diff-line="${String(lineNumber)}"][data-rly-diff-line-side="${side}"]`
-      )
-      if (boundedLine !== null && boundedLine !== undefined) {
-        boundedLine.focus({ preventScroll: true })
-        return document.activeElement === boundedLine
-      }
-      for (const container of root.current?.querySelectorAll<HTMLElement>("diffs-container") ?? []) {
-        const line = container.shadowRoot?.querySelector<HTMLElement>(
-          `[data-code][data-${side}] [data-line="${String(lineNumber)}"]`
-        )
-        if (line === null || line === undefined) continue
-        line.tabIndex = -1
-        line.focus({ preventScroll: true })
-        return container.shadowRoot?.activeElement === line
-      }
-      return false
+    const rootElement = root.current
+    if (rootElement === null || viewer === null) return
+
+    let completed = false
+    let focusFrame: number | undefined
+    let applyingFocus = false
+    const shadowObservers = new Map<ShadowRoot, MutationObserver>()
+    const disconnect = (): void => {
+      completed = true
+      if (focusFrame !== undefined) cancelAnimationFrame(focusFrame)
+      rootObserver.disconnect()
+      for (const observer of shadowObservers.values()) observer.disconnect()
+      shadowObservers.clear()
+      rootElement.ownerDocument.removeEventListener("focusin", relinquishFocus, true)
+      rootElement.ownerDocument.removeEventListener("keydown", relinquishFocus, true)
+      rootElement.ownerDocument.removeEventListener("pointerdown", relinquishFocus, true)
     }
-    focusLine()
-    let attempts = 0
-    const retry = window.setInterval(() => {
-      attempts += 1
-      if (focusLine() || attempts >= 20) window.clearInterval(retry)
-    }, 50)
-    return () => window.clearInterval(retry)
+    const relinquishFocus = (): void => {
+      if (!applyingFocus) disconnect()
+    }
+    const observeRendererRoots = (): void => {
+      for (const [shadowRoot, observer] of shadowObservers) {
+        if (rootElement.contains(shadowRoot.host)) continue
+        observer.disconnect()
+        shadowObservers.delete(shadowRoot)
+      }
+      for (const container of rootElement.querySelectorAll<HTMLElement>("diffs-container")) {
+        const shadowRoot = container.shadowRoot
+        if (shadowRoot === null || shadowObservers.has(shadowRoot)) continue
+        const observer = new MutationObserver(scheduleFocus)
+        observer.observe(shadowRoot, { childList: true, subtree: true })
+        shadowObservers.set(shadowRoot, observer)
+      }
+    }
+    const scheduleFocus = (): void => {
+      if (completed || focusFrame !== undefined) return
+      focusFrame = requestAnimationFrame(() => {
+        focusFrame = undefined
+        attemptFocus()
+      })
+    }
+    const attemptFocus = (): void => {
+      if (completed) return
+      observeRendererRoots()
+      const target: Parameters<RlyDiffCodeViewHandle["focusLine"]>[0] = {
+        id: fileId,
+        lineNumber,
+        side,
+        type: "line"
+      }
+      applyingFocus = true
+      try {
+        viewer.scrollTo(target)
+        viewer.focusLine(target)
+      } finally {
+        applyingFocus = false
+      }
+    }
+    const rootObserver = new MutationObserver(scheduleFocus)
+    rootObserver.observe(rootElement, { childList: true, subtree: true })
+    rootElement.ownerDocument.addEventListener("focusin", relinquishFocus, true)
+    rootElement.ownerDocument.addEventListener("keydown", relinquishFocus, true)
+    rootElement.ownerDocument.addEventListener("pointerdown", relinquishFocus, true)
+    void customElements.whenDefined("diffs-container").then(scheduleFocus)
+    attemptFocus()
+
+    return disconnect
   }, [fileId, lineNumber, root, side, viewer])
   return null
 }

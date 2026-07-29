@@ -151,8 +151,11 @@ const unsupported = (capabilityId: "diff.inventory" | "diff.content") =>
 type ContentScope = Parameters<CompleteDiffReads["Service"]["content"]>[0]
 /** Narrow cache boundary accepted by the complete-diff application service. */
 export interface DiffContentCachePersistence {
-  readonly content: Pick<PersistenceService["content"], "put" | "readAll">
-  readonly diffContentCache: PersistenceService["diffContentCache"]
+  readonly content: Pick<PersistenceService["content"], "readAll">
+  readonly diffContentCache: Pick<
+    PersistenceService["diffContentCache"],
+    "get" | "putContent"
+  >
 }
 
 const cacheKey = (scope: ContentScope) => ({
@@ -161,6 +164,7 @@ const cacheKey = (scope: ContentScope) => ({
   vendorImmutableId: scope.vendorImmutableId,
   revision: scope.revision,
   anchor: scope.anchor,
+  status: scope.status,
   side: scope.side
 })
 
@@ -182,21 +186,16 @@ const readCachedContent = Effect.fn("CompleteDiffReads.readCachedContent")(funct
   persistence: DiffContentCachePersistence,
   scope: ContentScope
 ) {
-  const digest = yield* persistence.diffContentCache.get(cacheKey(scope)).pipe(
-    Effect.mapError(() => unavailable())
-  )
+  const digestRead = yield* persistence.diffContentCache.get(cacheKey(scope)).pipe(Effect.result)
+  if (Result.isFailure(digestRead)) return Option.none<CompleteDiffContentRange>()
+  const digest = digestRead.success
   if (Option.isNone(digest)) return Option.none<CompleteDiffContentRange>()
   const attempted = yield* persistence.content.readAll(
     scope.workspaceId,
     digest.value,
     MaximumContentBytes
   ).pipe(Effect.result)
-  if (Result.isFailure(attempted)) {
-    if (attempted.failure._tag === "ReproducibleContentUnavailableError") {
-      return Option.none<CompleteDiffContentRange>()
-    }
-    return yield* unavailable()
-  }
+  if (Result.isFailure(attempted)) return Option.none<CompleteDiffContentRange>()
   return Option.some(sliceContent(attempted.success, scope.offset, scope.length))
 })
 
@@ -205,15 +204,12 @@ const rememberContent = Effect.fn("CompleteDiffReads.rememberContent")(function*
   scope: ContentScope,
   bytes: Uint8Array
 ) {
-  const stored = yield* persistence.content.put(scope.workspaceId, {
+  yield* persistence.diffContentCache.putContent(cacheKey(scope), {
     bytes,
     classification: "reproducible-cache",
     mimeType: "text/plain; charset=utf-8",
     createdAt: yield* DateTime.now
   }).pipe(Effect.mapError(() => unavailable()))
-  yield* persistence.diffContentCache.put(cacheKey(scope), stored.metadata.digest).pipe(
-    Effect.mapError(() => unavailable())
-  )
 })
 
 /** Build complete bounded diff reads over the same lazy scoped plugin registry as synchronization. */
@@ -305,7 +301,7 @@ export const makeCompleteDiffReads = (
     if (content.totalBytes !== bytes.byteLength || bytes.byteLength > MaximumContentBytes) {
       return yield* unavailable()
     }
-    if (persistence !== undefined) yield* rememberContent(persistence, scope, bytes)
+    if (persistence !== undefined) yield* rememberContent(persistence, scope, bytes).pipe(Effect.ignore)
     return sliceContent(bytes, scope.offset, scope.length)
   })
 })

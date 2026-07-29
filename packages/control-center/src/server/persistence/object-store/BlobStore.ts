@@ -67,6 +67,14 @@ interface BlobStoreService {
     workspaceId: WorkspaceId,
     bytes: Uint8Array
   ) => Effect.Effect<BlobPutResult, BlobStoreError>
+  /**
+   * Remove bytes only while holding the SQLite writer lock, with a durable cleanup intent and
+   * after confirming that no cache entry references the reproducible digest.
+   */
+  readonly removeReproducible: (
+    workspaceId: WorkspaceId,
+    digest: BlobDigest
+  ) => Effect.Effect<void, BlobStoreError>
   readonly verify: (
     workspaceId: WorkspaceId,
     digest: BlobDigest
@@ -527,6 +535,24 @@ export const makeBlobStore: (
     }
   })
 
+  const removeReproducible = Effect.fn("BlobStore.removeReproducible")(function*(
+    workspaceId: WorkspaceId,
+    digest: BlobDigest
+  ) {
+    const reference = yield* decodeReference("remove reproducible blob", workspaceId, digest)
+    yield* Effect.scoped(
+      Effect.gen(function*() {
+        const pinned = yield* pinDirectory(fs, path, reference.derived.objectDirectory)
+        yield* pinned.assertIdentity
+        yield* fs.remove(path.join(pinned.path, reference.digest), { force: true }).pipe(
+          Effect.mapError((cause) => blobStoreIoError("remove reproducible blob", cause))
+        )
+        yield* pinned.sync
+        yield* pinned.assertIdentity
+      })
+    )
+  })
+
   const readAll = Effect.fn("BlobStore.readAll")(function*(
     workspaceId: WorkspaceId,
     digest: BlobDigest,
@@ -631,5 +657,13 @@ export const makeBlobStore: (
     }
   })
 
-  return BlobStore.of({ put, readAll, readRange, readStream, repairReproducible, verify })
+  return BlobStore.of({
+    put,
+    readAll,
+    readRange,
+    readStream,
+    removeReproducible,
+    repairReproducible,
+    verify
+  })
 })

@@ -63,8 +63,13 @@
     },
     {
       "type": "table",
+      "name": "diff_content_cache_cleanup",
+      "sql": "CREATE TABLE diff_content_cache_cleanup (\n    workspace_id TEXT NOT NULL,\n    content_digest TEXT NOT NULL CHECK(\n      length(content_digest) = 64 AND content_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    requested_at TEXT NOT NULL,\n    attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0),\n    PRIMARY KEY (workspace_id, content_digest),\n    FOREIGN KEY (workspace_id, content_digest)\n      REFERENCES content_blobs(workspace_id, digest)\n      ON DELETE CASCADE\n  )"
+    },
+    {
+      "type": "table",
       "name": "diff_content_cache_entries",
-      "sql": "CREATE TABLE diff_content_cache_entries (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    vendor_immutable_id TEXT NOT NULL CHECK(length(vendor_immutable_id) BETWEEN 1 AND 512),\n    source_revision TEXT NOT NULL CHECK(length(source_revision) BETWEEN 1 AND 500),\n    file_anchor TEXT NOT NULL CHECK(\n      length(file_anchor) = 71 AND file_anchor GLOB 'sha256:*'\n        AND substr(file_anchor, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    side TEXT NOT NULL CHECK(side IN ('before', 'after')),\n    content_digest TEXT NOT NULL CHECK(\n      length(content_digest) = 64 AND content_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    cached_at TEXT NOT NULL,\n    PRIMARY KEY (\n      workspace_id, plugin_connection_id, vendor_immutable_id, source_revision, file_anchor, side\n    ),\n    FOREIGN KEY (workspace_id, plugin_connection_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, content_digest)\n      REFERENCES content_blobs(workspace_id, digest)\n      ON DELETE RESTRICT\n  )"
+      "sql": "CREATE TABLE diff_content_cache_entries (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    vendor_immutable_id TEXT NOT NULL CHECK(length(vendor_immutable_id) BETWEEN 1 AND 512),\n    source_revision TEXT NOT NULL CHECK(length(source_revision) BETWEEN 1 AND 512),\n    file_anchor TEXT NOT NULL CHECK(\n      length(file_anchor) = 71 AND file_anchor GLOB 'sha256:*'\n        AND substr(file_anchor, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    file_status TEXT NOT NULL CHECK(file_status IN ('added', 'modified', 'deleted', 'renamed', 'copied')),\n    side TEXT NOT NULL CHECK(side IN ('before', 'after')),\n    content_digest TEXT NOT NULL CHECK(\n      length(content_digest) = 64 AND content_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    cached_at TEXT NOT NULL,\n    PRIMARY KEY (\n      workspace_id, plugin_connection_id, vendor_immutable_id, source_revision,\n      file_anchor, file_status, side\n    ),\n    FOREIGN KEY (workspace_id, plugin_connection_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, content_digest)\n      REFERENCES content_blobs(workspace_id, digest)\n      ON DELETE RESTRICT\n  )"
     },
     {
       "type": "table",
@@ -445,6 +450,11 @@
       "type": "index",
       "name": "delivery_nodes_release_idx",
       "sql": "CREATE INDEX delivery_nodes_release_idx\n    ON delivery_nodes(workspace_id, release_id, environment_id)\n    WHERE release_id IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "diff_content_cache_cleanup_requested_idx",
+      "sql": "CREATE INDEX diff_content_cache_cleanup_requested_idx\n    ON diff_content_cache_cleanup(attempt_count, requested_at, workspace_id, content_digest)"
     },
     {
       "type": "index",

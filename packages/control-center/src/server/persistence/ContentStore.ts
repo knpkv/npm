@@ -3,6 +3,7 @@ import type { Success } from "effect/Effect"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import { Database } from "./Database.js"
 import { ContentMetadataMismatchError, ReproducibleContentUnavailableError } from "./errors.js"
 import type { BlobDigest } from "./object-store/BlobDigest.js"
 import type { BlobClassification } from "./object-store/BlobRef.js"
@@ -10,6 +11,7 @@ import { BlobStore } from "./object-store/BlobStore.js"
 import type { BlobStoreError } from "./object-store/BlobStoreError.js"
 import type { BlobRange } from "./object-store/BlobStoreTypes.js"
 import { ContentBlobMetadataRepository } from "./repositories/contentBlobMetadataRepository.js"
+import { mapPersistenceOperation } from "./repositories/internal.js"
 import type { ContentBlobMetadata } from "./repositories/models.js"
 
 /** Metadata supplied when content bytes cross into durable persistence. */
@@ -28,6 +30,7 @@ export interface PutContentResult {
 
 const makeContentStore = Effect.gen(function*() {
   const blobs = yield* BlobStore
+  const database = yield* Database
   const metadataRepository = yield* ContentBlobMetadataRepository
 
   const requireMetadata = (workspaceId: WorkspaceId, digest: BlobDigest) => metadataRepository.get(workspaceId, digest)
@@ -113,11 +116,21 @@ const makeContentStore = Effect.gen(function*() {
       workspaceId: WorkspaceId,
       input: PutContentInput
     ) {
-      // Publication is intentionally bytes-first: SQL can never advertise bytes
-      // that were not durably linked and synced into the object directory.
-      const published = yield* publish(workspaceId, input)
-      const metadata = yield* ensureMetadata(workspaceId, published.ref.digest, input)
-      return { metadata, stored: published.stored }
+      return yield* database.transaction(
+        Effect.gen(function*() {
+          // Cache cleanup takes the same SQLite writer lock before unlinking bytes.
+          // Holding it from before publication through metadata insertion makes
+          // identical-digest publication and reclamation cross-process serial.
+          yield* database.sql`UPDATE workspaces
+            SET workspace_id = workspace_id
+            WHERE workspace_id = ${workspaceId}`
+          // Publication is intentionally bytes-first: SQL can never advertise bytes
+          // that were not durably linked and synced into the object directory.
+          const published = yield* publish(workspaceId, input)
+          const metadata = yield* ensureMetadata(workspaceId, published.ref.digest, input)
+          return { metadata, stored: published.stored }
+        })
+      ).pipe(mapPersistenceOperation("content.put"))
     }),
     getMetadata: requireMetadata,
     listMetadata: (workspaceId: WorkspaceId) => metadataRepository.list(workspaceId),
@@ -155,6 +168,10 @@ const makeContentStore = Effect.gen(function*() {
         bytes: result.bytes.pipe(Stream.mapError((failure) => mapReadFailure(metadata, failure)))
       }
     }),
+    removeReproducible: (
+      workspaceId: WorkspaceId,
+      digest: BlobDigest
+    ) => blobs.removeReproducible(workspaceId, digest),
     verify: Effect.fn("ContentStore.verify")(function*(
       workspaceId: WorkspaceId,
       digest: BlobDigest,

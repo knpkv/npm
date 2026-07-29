@@ -1,10 +1,10 @@
 import type { FileSystem, Path } from "effect"
-import { Context, Crypto, Effect, Layer, Predicate } from "effect"
+import { Context, Crypto, Effect, Layer, Predicate, Result } from "effect"
 import type { Success } from "effect/Effect"
 
 import type { BackupFailure, SchemaWriteBarrierError } from "./backup/index.js"
 import { ContentStore, type ContentStoreService } from "./ContentStore.js"
-import { Database, databaseLayer } from "./Database.js"
+import { Database, databaseLayer, type DatabaseShape } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
   type DatabaseInitializationError,
@@ -148,6 +148,100 @@ const publicOperation = <Value, Failure, Requirements>(
         )
   )
 
+/** Reclaim a bounded durable batch while publication holds the same writer lock. */
+export const sweepDiffContentCacheCleanup = Effect.fn("Persistence.sweepDiffContentCacheCleanup")(
+  function*(
+    database: DatabaseShape,
+    content: Pick<ContentStoreService, "removeReproducible">,
+    diffContentCache: DiffContentCacheRepositoryService
+  ) {
+    const candidates = yield* diffContentCache.pendingCleanup()
+    for (const candidate of candidates) {
+      yield* database.transaction(
+        Effect.gen(function*() {
+          yield* database.sql`UPDATE workspaces
+            SET workspace_id = workspace_id
+            WHERE workspace_id = ${candidate.workspaceId}`
+          if (yield* diffContentCache.isReferenced(candidate.workspaceId, candidate.digest)) {
+            yield* diffContentCache.cancelCleanup(candidate.workspaceId, candidate.digest)
+            return
+          }
+          yield* content.removeReproducible(candidate.workspaceId, candidate.digest)
+          yield* diffContentCache.completeCleanup(candidate.workspaceId, candidate.digest)
+        })
+      ).pipe(
+        mapPersistenceOperation("diff-content-cache.cleanup"),
+        Effect.catch(() =>
+          diffContentCache.deferCleanup(candidate.workspaceId, candidate.digest).pipe(
+            Effect.catch(() => Effect.logWarning("A diff content cache cleanup retry could not be rescheduled")),
+            Effect.andThen(
+              Effect.logWarning("One deferred diff content cache cleanup remains pending")
+            )
+          )
+        )
+      )
+    }
+  }
+)
+
+/** Publish a mapping, persist orphan intent even on failure, then drain one retryable batch. */
+export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDiffContentCache")(
+  function*(
+    database: DatabaseShape,
+    content: ContentStoreService,
+    diffContentCache: DiffContentCacheRepositoryService,
+    ...args: Parameters<DiffContentCacheRepositoryService["put"]>
+  ) {
+    const [key, digest] = args
+    const requestResult = yield* diffContentCache.requestCleanup(
+      key.workspaceId,
+      digest
+    ).pipe(Effect.result)
+    const putResult = yield* diffContentCache.put(...args).pipe(Effect.result)
+    const cleanupResult = yield* sweepDiffContentCacheCleanup(
+      database,
+      content,
+      diffContentCache
+    ).pipe(Effect.result)
+    if (Result.isFailure(requestResult)) return yield* requestResult.failure
+    if (Result.isFailure(putResult)) return yield* putResult.failure
+    if (Result.isFailure(cleanupResult)) return yield* cleanupResult.failure
+    return yield* Effect.void
+  }
+)
+
+/** Atomically publish metadata with durable diff ownership before mapping it. */
+export const putContentAndSweepDiffContentCache = Effect.fn(
+  "Persistence.putContentAndSweepDiffContentCache"
+)(function*(
+  database: DatabaseShape,
+  content: ContentStoreService,
+  diffContentCache: DiffContentCacheRepositoryService,
+  key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
+  input: Parameters<ContentStoreService["put"]>[1]
+) {
+  const stored = yield* Effect.uninterruptible(
+    database.transaction(
+      Effect.gen(function*() {
+        const published = yield* content.put(key.workspaceId, input)
+        yield* diffContentCache.requestCleanup(
+          key.workspaceId,
+          published.metadata.digest
+        )
+        return published
+      })
+    ).pipe(mapPersistenceOperation("diff-content-cache.stage-content"))
+  )
+  yield* putAndSweepDiffContentCache(
+    database,
+    content,
+    diffContentCache,
+    key,
+    stored.metadata.digest
+  )
+  return stored
+})
+
 /** Failures possible while acquiring the durable persistence service. */
 export type PersistenceLayerError =
   | BackupFailure
@@ -178,6 +272,10 @@ const makePersistence = Effect.gen(function*() {
   const timeline = yield* TimelineRepository
   const timelineExportAudits = yield* TimelineExportAuditRepository
   const workspaces = yield* WorkspaceRepository
+
+  yield* sweepDiffContentCacheCleanup(database, content, diffContentCache).pipe(
+    Effect.catch(() => Effect.logWarning("Deferred diff content cache cleanup will retry on the next cache write"))
+  )
 
   return {
     agentJobs: {
@@ -273,7 +371,24 @@ const makePersistence = Effect.gen(function*() {
       get: (...args: Parameters<DiffContentCacheRepositoryService["get"]>) =>
         publicOperation("diff-content-cache.get", diffContentCache.get(...args)),
       put: (...args: Parameters<DiffContentCacheRepositoryService["put"]>) =>
-        publicOperation("diff-content-cache.put", diffContentCache.put(...args))
+        publicOperation(
+          "diff-content-cache.put",
+          putAndSweepDiffContentCache(database, content, diffContentCache, ...args).pipe(Effect.asVoid)
+        ),
+      putContent: (
+        key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
+        input: Parameters<ContentStoreService["put"]>[1]
+      ) =>
+        publicOperation(
+          "diff-content-cache.put-content",
+          putContentAndSweepDiffContentCache(
+            database,
+            content,
+            diffContentCache,
+            key,
+            input
+          )
+        )
     },
     deliveryGraph: {
       read: (...args: Parameters<DeliveryGraphRepositoryService["read"]>) =>
@@ -538,7 +653,6 @@ export const persistenceLayerFromDatabase = (
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
         const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
-        const diffContentCache = DiffContentCacheRepository.layer
         const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
         const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
@@ -553,6 +667,7 @@ export const persistenceLayerFromDatabase = (
         const timelineExportAudits = TimelineExportAuditRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
+        const diffContentCache = DiffContentCacheRepository.layer
         const content = ContentStore.layer.pipe(
           Layer.provide(Layer.merge(contentMetadata, blobs))
         )

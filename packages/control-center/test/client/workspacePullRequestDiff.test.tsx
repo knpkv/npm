@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import type { RlyDiffCodeViewHandle } from "@knpkv/rly/diff"
 import * as Schema from "effect/Schema"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
@@ -15,6 +16,7 @@ import { PluginConnectionId } from "../../src/domain/identifiers.js"
 import { PluginRelativePathV1 } from "../../src/domain/plugins/events.js"
 import { PrReviewSuggestion } from "../../src/domain/prReview.js"
 import { Revision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
+import { DiffLineFocus } from "../../src/client/entities/DiffLineFocus.js"
 import {
   browserWorkspacePullRequestDiffTransport,
   WorkspacePullRequestDiff,
@@ -40,10 +42,19 @@ const fullDiffText = (host: HTMLElement): string =>
     .join("")
 
 const fullDiffLine = (host: HTMLElement, lineNumber: number, side: "additions" | "deletions"): HTMLElement | null => {
+  const sideContainer = side === "additions" ? "data-additions" : "data-deletions"
+  const lineType = side === "additions" ? "change-addition" : "change-deletion"
   for (const container of host.querySelectorAll<HTMLElement>("diffs-container")) {
-    const line = container.shadowRoot?.querySelector<HTMLElement>(
-      `[data-code][data-${side}] [data-line="${String(lineNumber)}"]`
-    )
+    const line =
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-code][${sideContainer}] [data-line="${String(lineNumber)}"]`
+      ) ??
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-line="${String(lineNumber)}"][data-line-type="${lineType}"]`
+      ) ??
+      container.shadowRoot?.querySelector<HTMLElement>(
+        `[data-code][${sideContainer}] [data-alt-line="${String(lineNumber)}"]`
+      )
     if (line !== null && line !== undefined) return line
   }
   return null
@@ -624,6 +635,13 @@ describe("WorkspacePullRequestDiff", () => {
     })
     await flushLazyDiffViewer()
 
+    const stackedLayout = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Stacked"
+    )
+    if (stackedLayout === undefined) throw new Error("Expected stacked diff layout control")
+    await act(async () => stackedLayout.click())
+    await flushLazyDiffViewer()
+
     const relatedLocation = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
       ({ textContent }) => textContent === "src/other.ts:8"
     )
@@ -829,5 +847,121 @@ describe("WorkspacePullRequestDiff", () => {
       "1 validated review suggestion is not attached because the anchor path is absent from this diff inventory."
     )
     expect(host.textContent).toContain("P2 · Keep the supported invariant")
+  })
+})
+
+describe("DiffLineFocus ownership", () => {
+  const viewer = (focusLine: () => boolean): RlyDiffCodeViewHandle => ({
+    addItems: vi.fn(),
+    focusLine: vi.fn(focusLine),
+    scrollTo: vi.fn(),
+    updateItem: vi.fn(() => false)
+  })
+
+  it("becomes idle when the requested line is absent", async () => {
+    const callbacks: Array<FrameRequestCallback> = []
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        callbacks.push(callback)
+        return callbacks.length
+      })
+    )
+    vi.stubGlobal("cancelAnimationFrame", vi.fn())
+    const viewerRoot = document.createElement("div")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => false)
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={999}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+      await Promise.resolve()
+    })
+    while (callbacks.length > 0) callbacks.shift()?.(0)
+
+    expect(handle.focusLine).toHaveBeenCalledTimes(2)
+    expect(callbacks).toHaveLength(0)
+  })
+
+  it("does not reclaim focus after the user moves to another control", async () => {
+    const viewerRoot = document.createElement("div")
+    const container = document.createElement("diffs-container")
+    const shadow = container.shadowRoot
+    if (shadow === null) throw new Error("Expected the diff container shadow root")
+    const line = document.createElement("span")
+    line.tabIndex = -1
+    shadow.append(line)
+    viewerRoot.append(container)
+    const toolbar = document.createElement("button")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, toolbar, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => {
+      line.focus()
+      return true
+    })
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={1}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+    })
+    expectShadowFocused(line)
+    toolbar.focus()
+    shadow.replaceChildren(line.cloneNode(true))
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+
+    expect(document.activeElement).toBe(toolbar)
+    expect(handle.focusLine).toHaveBeenCalledTimes(1)
+  })
+
+  it("relinquishes a pending request when the user focuses another control", async () => {
+    const viewerRoot = document.createElement("div")
+    const toolbar = document.createElement("button")
+    const mount = document.createElement("div")
+    document.body.append(viewerRoot, toolbar, mount)
+    const root = createRoot(mount)
+    roots.push(root)
+    const handle = viewer(() => false)
+
+    await act(async () => {
+      root.render(
+        <DiffLineFocus
+          fileId={String(fileAnchor)}
+          lineNumber={1}
+          root={{ current: viewerRoot }}
+          side="additions"
+          viewer={handle}
+        />
+      )
+    })
+    const attemptsBeforeUserFocus = vi.mocked(handle.focusLine).mock.calls.length
+    toolbar.focus()
+    viewerRoot.append(document.createElement("diffs-container"))
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+
+    expect(document.activeElement).toBe(toolbar)
+    expect(handle.focusLine).toHaveBeenCalledTimes(attemptsBeforeUserFocus)
   })
 })

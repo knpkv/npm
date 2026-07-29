@@ -71,6 +71,11 @@ export type RlyDiffCodeScrollTarget =
 /** Stable imperative operations exposed by DiffCodeView. */
 export interface RlyDiffCodeViewHandle {
   addItems(items: ReadonlyArray<RlyDiffCodeItem>): void
+  focusLine(
+    target: Extract<RlyDiffCodeScrollTarget, { readonly type: "line" }> & {
+      readonly side: "additions" | "deletions"
+    }
+  ): boolean
   scrollTo(target: RlyDiffCodeScrollTarget): void
   updateItem(item: RlyDiffCodeItem): boolean
 }

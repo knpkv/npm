@@ -267,9 +267,10 @@ const reviewReport = Schema.encodeSync(PrReviewReport)(
         },
         recommendation: "Reuse the original idempotency key for retry attempts.",
         anchor: {
-          _tag: "line",
+          _tag: "file",
           path: "src/capture.ts",
-          line: 42
+          line: 42,
+          relativeFileVersion: "AFTER"
         },
         relatedLocations: [],
         confidence: {
@@ -735,6 +736,10 @@ test("launches an exact-head review and presents its durable findings", async ({
   let enqueued = false
   let enqueuePayload: unknown
   let remainingPendingReviewPolls = 1
+  let releaseRenderer: (() => void) | undefined
+  const rendererGate = new Promise<void>((resolve) => {
+    releaseRenderer = resolve
+  })
   const threadEvents = Schema.encodeSync(PullRequestReviewThreadPage)(
     Schema.decodeUnknownSync(PullRequestReviewThreadPage)({
       events: [
@@ -803,13 +808,16 @@ test("launches an exact-head review and presents its durable findings", async ({
     const body = Schema.decodeUnknownSync(Schema.Struct({
       side: Schema.Literals(["before", "after"])
     }))(route.request().postDataJSON())
-    const bytesBase64 = body.side === "before"
-      ? "ZXhwb3J0IGNvbnN0IGNhcHR1cmUgPSBmYWxzZQo="
-      : "ZXhwb3J0IGNvbnN0IGNhcHR1cmUgPSB0cnVlCg=="
+    const text = Array.from({ length: 80 }, (_, index) =>
+      index === 41
+        ? body.side === "before"
+          ? "export const capture = false"
+          : "export const capture = true"
+        : `// ${body.side} line ${String(index + 1)}`).join("\n")
     await route.fulfill({
       body: JSON.stringify({
-        bytesBase64,
-        totalBytes: body.side === "before" ? 29 : 28,
+        bytesBase64: Buffer.from(text).toString("base64"),
+        totalBytes: Buffer.byteLength(text),
         unavailableReason: null
       }),
       contentType: "application/json",
@@ -864,11 +872,13 @@ test("launches an exact-head review and presents its durable findings", async ({
       status: 202
     })
   })
+  await page.route("**/assets/diff-*.js", async (route) => {
+    await rendererGate
+    await route.continue()
+  })
 
   await page.goto(canonicalEntityPath)
-  await expect(page.locator("[data-rly-diff-code-view]")).toBeVisible()
-  await expect(page.getByText("Worker acceleration is unavailable")).toBeVisible()
-  await expect(page.getByText("export const capture = true")).toBeVisible()
+  await expect(page.getByText("Rendering complete diff…")).toBeVisible()
   const evidenceStamp = page.locator("[data-rly-evidence-stamp]")
   const evidenceSource = evidenceStamp.locator("[data-rly-evidence-source]")
   await expect(evidenceStamp.locator("[data-rly-evidence-freshness]")).toBeVisible()
@@ -909,8 +919,40 @@ test("launches an exact-head review and presents its durable findings", async ({
 
   await expect(page.getByText("Changes Required")).toBeVisible()
   await expect(
-    page.getByRole("strong").filter({ hasText: /^Reuse the original idempotency key$/u })
+    page.locator("strong").filter({ hasText: /^Reuse the original idempotency key$/u }).first()
   ).toBeVisible()
+  await page.clock.install()
+  await page.getByRole("button", { name: "src/capture.ts:42" }).click()
+  await page.clock.runFor(1_100)
+  if (releaseRenderer === undefined) throw new Error("Expected the deferred diff renderer gate")
+  releaseRenderer()
+  await page.clock.resume()
+  await expect(page.locator("[data-rly-diff-code-view]")).toBeVisible()
+  await expect(page.getByText("Worker acceleration is unavailable")).toBeVisible()
+  await expect(page.getByText("export const capture = true")).toBeVisible()
+  const focusedDiffLine = page.locator("diffs-container [data-code][data-additions] [data-line=\"42\"]")
+  await expect(focusedDiffLine).toBeFocused()
+  await page.evaluate(`
+    {
+      const line = document.querySelector("diffs-container")?.shadowRoot?.querySelector(
+        '[data-code][data-additions] [data-line="42"]'
+      )
+      line?.replaceWith(line.cloneNode(true))
+    }
+  `)
+  await expect(focusedDiffLine).toBeFocused()
+  const wrapLines = page.getByRole("button", { name: "Wrap lines" })
+  await wrapLines.focus()
+  await expect(wrapLines).toBeFocused()
+  await page.evaluate(`
+    {
+      const line = document.querySelector("diffs-container")?.shadowRoot?.querySelector(
+        '[data-code][data-additions] [data-line="42"]'
+      )
+      line?.replaceWith(line.cloneNode(true))
+    }
+  `)
+  await expect(wrapLines).toBeFocused()
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
