@@ -45,6 +45,7 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
+import { workspaceSettingsEtag, WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   AgentId,
@@ -61,7 +62,8 @@ import {
   RelationshipRepairReviewId,
   ReleaseId,
   ShareId,
-  WorkspaceId
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
@@ -76,6 +78,7 @@ import {
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { Revision } from "../../src/domain/sourceRevision.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
+import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
   ApplicationInvalidRequest,
@@ -93,7 +96,8 @@ import {
   ReleaseAgentJobs,
   ReleaseAgentTurns,
   TimelineExportAudits,
-  TimelineReads
+  TimelineReads,
+  WorkspaceSettingsAdministration
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
 import {
@@ -103,7 +107,8 @@ import {
   pluginHandlersLayer,
   portfolioHandlersLayer,
   shareHandlersLayer,
-  timelineHandlersLayer
+  timelineHandlersLayer,
+  workspaceSettingsHandlersLayer
 } from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
@@ -458,6 +463,84 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("derives workspace-settings mutation attribution from the owner session", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const settings = Layer.succeed(WorkspaceSettingsAdministration, {
+        read: () => Effect.succeed(readModel),
+        update: (input) =>
+          Ref.set(received, input).pipe(
+            Effect.as({
+              ...readModel,
+              revision: WorkspaceSettingsRevision.make(2),
+              etag: workspaceSettingsEtag(WorkspaceSettingsRevision.make(2)),
+              settings: input.request.settings,
+              updatedByPersonId: input.session.actor._tag === "human"
+                ? input.session.actor.personId
+                : null
+            })
+          )
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(settings),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const mutationId = WorkspaceSettingsMutationId.make(
+        "01890f6f-6d6a-7cc0-98d2-000000000191"
+      )
+      const candidate = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          minimumConfidencePercent: 91
+        }
+      }
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        return yield* client.workspaceSettings.update({
+          payload: {
+            mutationId,
+            expectedRevision: revision,
+            settings: candidate,
+            acknowledgedGovernedSections: []
+          }
+        })
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.revision, 2)
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        session,
+        request: {
+          mutationId,
+          expectedRevision: revision,
+          settings: candidate,
+          acknowledgedGovernedSections: []
+        }
+      })
+    }))
+
   it.effect("submits an exact-revision Clockify approval through the authenticated product boundary", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<unknown>(null)

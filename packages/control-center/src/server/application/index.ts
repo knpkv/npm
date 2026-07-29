@@ -51,3 +51,7 @@ export type {
 } from "./releaseSynchronization.js"
 export { makeTimelineExportAudits, timelineExportAuditsLayer } from "./timelineExportAudits.js"
 export { makeTimelineReads, timelineReadsLayer } from "./timelineReads.js"
+export {
+  makeWorkspaceSettingsAdministration,
+  workspaceSettingsAdministrationLayer
+} from "./workspaceSettingsAdministration.js"

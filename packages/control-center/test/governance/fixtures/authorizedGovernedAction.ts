@@ -6,6 +6,7 @@ import {
   GovernedActionEnvelopeMaterialV1,
   GovernedActionEnvelopeV1,
   GovernedActionEvidenceReference,
+  type GovernedActionPolicyBinding,
   GovernedActionTransitionCause
 } from "../../../src/domain/governedAction/index.js"
 import { EntityId, GraphNodeId, PluginConnectionId, WorkspaceId } from "../../../src/domain/identifiers.js"
@@ -482,6 +483,7 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
 export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   "AuthorizedGovernedActionFixture.makeEnvelope"
 )(function*(options?: {
+  readonly policy?: GovernedActionPolicyBinding | undefined
   readonly pluginConnectionAuthorityDigest?: string | undefined
   readonly targetEntityId?: string | undefined
   readonly variant?: GovernedActionFixtureVariant | undefined
@@ -503,7 +505,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   })
   const evidenceReferences = variant === "codepipeline-start" ? [] : [evidence]
   const evidenceSetDigest = yield* digestGovernedActionEvidenceSet(evidenceReferences)
-  const policy = (yield* makeBuiltInGovernedActionPolicyDefinition()).binding
+  const policy = options?.policy ?? (yield* makeBuiltInGovernedActionPolicyDefinition()).binding
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
     actionId: ACTION_ID,
@@ -558,6 +560,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
 export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.seed")(function*(options?: {
   readonly authorizationExpiresAt?: string
   readonly authorized?: boolean
+  readonly policy?: GovernedActionPolicyBinding
   readonly pluginConnectionAuthorityDigest?: string
   readonly seedAuthorityRoots?: boolean
   readonly targetEntityId?: string
@@ -566,6 +569,7 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
   if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots(options?.variant)
   const repository = yield* GovernedActionRepository
   const envelope = yield* makeAuthorizedGovernedActionEnvelope({
+    policy: options?.policy,
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest,
     targetEntityId: options?.targetEntityId,
     variant: options?.variant

@@ -11,6 +11,7 @@ import { PortfolioApiGroup } from "./portfolio.js"
 import { SessionApiGroup } from "./session.js"
 import { SharesApiGroup } from "./shares.js"
 import { TimelineApiGroup } from "./timeline.js"
+import { WorkspaceSettingsApiGroup } from "./workspaceSettings.js"
 
 /** Browser-safe authenticated HTTP contract shared by the generated client and server implementation. */
 export class ControlCenterApi extends HttpApi.make("ControlCenterApi")
@@ -24,5 +25,6 @@ export class ControlCenterApi extends HttpApi.make("ControlCenterApi")
   .add(MediaApiGroup)
   .add(LiveEventsApiGroup)
   .add(TimelineApiGroup)
+  .add(WorkspaceSettingsApiGroup)
   .add(AgentApiGroup)
 {}

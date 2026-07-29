@@ -6,23 +6,36 @@ import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
 import {
-  governedActionPermissionGrants,
   GovernedActionPolicyBinding,
   type GovernedActionPolicyBinding as GovernedActionPolicyBindingType,
   GovernedActionPolicyEvaluationV1
 } from "../../../domain/governedAction/index.js"
+import { WorkspaceSettingsV1 } from "../../../domain/workspaceSettings.js"
+import { RecordRevision } from "../../persistence/repositories/models.js"
+import {
+  type WorkspaceSettingsRecord,
+  WorkspaceSettingsRepository
+} from "../../persistence/repositories/workspaceSettingsRepository.js"
 import type { VerifyGovernedActionDispatchAuthorityInput } from "../governedActionAuthority.js"
 import {
   digestGovernedActionEvidenceSet,
   digestGovernedActionPolicyDefinition,
   type GovernedActionDigestError
 } from "../governedActionDigests.js"
+import { governedHumanMutationPolicyAllows } from "../GovernedHumanMutationPolicyEvaluator.js"
 
 const PolicyRule = Schema.Literals(["permission-grants", "workspace-match"])
 const canonicalRules = Schema.makeFilter(
   (rules: ReadonlyArray<string>) => rules.every((rule, index) => index === 0 || (rules[index - 1] ?? "") < rule),
   { expected: "policy rules in canonical order" }
 )
+
+const WorkspaceGovernedActionPolicy = Schema.Struct({
+  policyRevision: RecordRevision,
+  jiraCommentMode: WorkspaceSettingsV1.fields.jira.fields.commentMode,
+  pipelineRetryMode: WorkspaceSettingsV1.fields.pipeline.fields.retryMode,
+  agent: WorkspaceSettingsV1.fields.agent
+})
 
 /** Canonical declarative policy material; executable source text is never hashed. */
 export const GovernedActionPolicyMaterialV1 = Schema.Struct({
@@ -32,7 +45,8 @@ export const GovernedActionPolicyMaterialV1 = Schema.Struct({
   requiredPermission: GovernedActionPolicyBinding.fields.requiredPermission,
   evaluator: Schema.Literal("human-session-policy"),
   evaluatorVersion: Schema.Literal(1),
-  rules: Schema.Array(PolicyRule).check(Schema.isNonEmpty(), Schema.isUnique(), canonicalRules)
+  rules: Schema.Array(PolicyRule).check(Schema.isNonEmpty(), Schema.isUnique(), canonicalRules),
+  workspacePolicy: Schema.NullOr(WorkspaceGovernedActionPolicy)
 })
 
 /** Decoded version-one policy definition material. */
@@ -48,7 +62,8 @@ export const BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL = Schema.decodeUnknownSync
   requiredPermission: "workspace-owner",
   evaluator: "human-session-policy",
   evaluatorVersion: 1,
-  rules: ["permission-grants", "workspace-match"]
+  rules: ["permission-grants", "workspace-match"],
+  workspacePolicy: null
 })
 
 /** Built-in policy for actions that an exact workspace approver or owner may authorize. */
@@ -61,7 +76,8 @@ export const BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL = Schema.decodeUn
   requiredPermission: "workspace-approver",
   evaluator: "human-session-policy",
   evaluatorVersion: 1,
-  rules: ["permission-grants", "workspace-match"]
+  rules: ["permission-grants", "workspace-match"],
+  workspacePolicy: null
 })
 
 export interface GovernedActionPolicyDefinition {
@@ -111,7 +127,11 @@ const ruleAllows = (
 ): boolean => {
   switch (rule) {
     case "permission-grants":
-      return governedActionPermissionGrants(input.session.permission, definition.binding.requiredPermission)
+      return governedHumanMutationPolicyAllows({
+        requiredPermission: definition.binding.requiredPermission,
+        session: input.session,
+        workspaceId: input.envelope.workspaceId
+      })
     case "workspace-match":
       return input.session.workspaceId === input.envelope.workspaceId
   }
@@ -132,6 +152,27 @@ const evidenceAllows = Effect.fn("GovernedActionPolicyEvaluator.evidenceAllows")
       (reference.validUntil === null || DateTime.Order(input.evaluatedAt, reference.validUntil) < 0)
     )
 })
+
+const workspacePolicyAllows = (
+  input: GovernedActionPolicyEvaluationInput,
+  definition: GovernedActionPolicyDefinition
+): boolean => {
+  const policy = definition.material.workspacePolicy
+  if (policy === null) return true
+  if (
+    input.envelope.pluginId === "dev.knpkv.jira.read" &&
+    input.envelope.proposal.request.actionKind === "comment"
+  ) {
+    return policy.jiraCommentMode === "confirm-before-publish"
+  }
+  if (
+    input.envelope.pluginId === "dev.knpkv.aws-codepipeline" &&
+    input.envelope.proposal.request.actionKind === "pipeline.retry"
+  ) {
+    return policy.pipelineRetryMode === "confirm-before-retry"
+  }
+  return true
+}
 
 /** Construct a catalog entry whose binding digest is derived from its complete declarative semantics. */
 export const makeGovernedActionPolicyDefinition = Effect.fn(
@@ -175,6 +216,28 @@ export const makeBuiltInGovernedActionPolicyDefinitions = Effect.fn(
   ])
 })
 
+/** Derive the D03 binding catalog from one exact persisted settings revision. */
+export const makeWorkspaceGovernedActionPolicyDefinitions = Effect.fn(
+  "GovernedActionPolicyEvaluator.makeWorkspaceDefinitions"
+)(function*(record: WorkspaceSettingsRecord) {
+  const workspacePolicy = {
+    policyRevision: record.policyRevision,
+    jiraCommentMode: record.settings.jira.commentMode,
+    pipelineRetryMode: record.settings.pipeline.retryMode,
+    agent: record.settings.agent
+  }
+  return yield* Effect.all([
+    makeGovernedActionPolicyDefinition(
+      { ...BUILT_IN_GOVERNED_ACTION_POLICY_MATERIAL, workspacePolicy },
+      true
+    ),
+    makeGovernedActionPolicyDefinition(
+      { ...BUILT_IN_GOVERNED_ACTION_APPROVER_POLICY_MATERIAL, workspacePolicy },
+      true
+    )
+  ])
+})
+
 /** Build the policy evaluator from a versioned server-owned catalog. */
 export const makeGovernedActionPolicyEvaluator = Effect.fn(
   "GovernedActionPolicyEvaluator.make"
@@ -206,6 +269,7 @@ export const makeGovernedActionPolicyEvaluator = Effect.fn(
     const allowed = definition.enabled &&
       input.session.actor._tag === "human" &&
       definition.material.rules.every((rule) => ruleAllows(rule, input, definition)) &&
+      workspacePolicyAllows(input, definition) &&
       (yield* evidenceAllows(input).pipe(Effect.provideService(Crypto.Crypto, cryptoService)))
 
     return GovernedActionPolicyEvaluationV1.make({
@@ -229,6 +293,34 @@ const makeLiveEvaluator = Effect.gen(function*() {
   return yield* makeGovernedActionPolicyEvaluator(definitions)
 })
 
+const makeWorkspaceSettingsEvaluator = Effect.gen(function*() {
+  const cryptoService = yield* Crypto.Crypto
+  const repository = yield* WorkspaceSettingsRepository
+  return {
+    evaluate: (input: GovernedActionPolicyEvaluationInput) =>
+      repository.get(input.envelope.workspaceId).pipe(
+        Effect.mapError(() => new GovernedActionPolicyBindingUnavailable()),
+        Effect.flatMap((record) =>
+          makeWorkspaceGovernedActionPolicyDefinitions(record).pipe(
+            Effect.provideService(Crypto.Crypto, cryptoService),
+            Effect.mapError(
+              () => new GovernedActionPolicyBindingUnavailable()
+            )
+          )
+        ),
+        Effect.flatMap((definitions) =>
+          makeGovernedActionPolicyEvaluator(definitions).pipe(
+            Effect.provideService(Crypto.Crypto, cryptoService),
+            Effect.mapError(
+              () => new GovernedActionPolicyBindingUnavailable()
+            )
+          )
+        ),
+        Effect.flatMap((evaluator) => evaluator.evaluate(input))
+      )
+  } satisfies GovernedActionPolicyEvaluatorV1
+})
+
 /** Server-only fresh policy evaluator; persisted workspace-policy adapters replace this at I12. */
 export class GovernedActionPolicyEvaluator extends Context.Service<
   GovernedActionPolicyEvaluator,
@@ -241,5 +333,11 @@ export class GovernedActionPolicyEvaluator extends Context.Service<
   > = Layer.effect(
     GovernedActionPolicyEvaluator,
     makeLiveEvaluator
+  )
+
+  /** Live I12 adapter that binds every policy decision to persisted settings. */
+  static readonly workspaceSettingsLayer = Layer.effect(
+    GovernedActionPolicyEvaluator,
+    makeWorkspaceSettingsEvaluator
   )
 }

@@ -75,6 +75,7 @@ import type {
   AuthorizedShareSummary,
   CreateAuthorizedShareRequest
 } from "../../api/shares.js"
+import type { UpdateWorkspaceSettingsRequest, WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
 import type { Actor } from "../../domain/actors.js"
 import type {
   DeliveryEntityKind,
@@ -144,6 +145,24 @@ export class ApplicationInvalidRequest extends Schema.TaggedErrorClass<Applicati
   "ApplicationInvalidRequest",
   {}
 ) {}
+
+/** Authenticated read and owner-only compare-and-swap mutation boundary for workspace settings. */
+export class WorkspaceSettingsAdministration extends Context.Service<
+  WorkspaceSettingsAdministration,
+  {
+    readonly read: (
+      workspaceId: WorkspaceId
+    ) => Effect.Effect<WorkspaceSettingsReadModel, ApplicationServiceUnavailable>
+    readonly update: (input: {
+      readonly workspaceId: WorkspaceId
+      readonly request: UpdateWorkspaceSettingsRequest
+      readonly session: SessionSummary
+    }) => Effect.Effect<
+      WorkspaceSettingsReadModel,
+      ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable
+    >
+  }
+>()("@knpkv/control-center/server/api/WorkspaceSettingsAdministration") {}
 
 export type PluginAdministrationError =
   | ApplicationRateLimited

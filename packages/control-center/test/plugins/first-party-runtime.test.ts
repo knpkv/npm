@@ -61,7 +61,10 @@ import { SessionSummary } from "../../src/server/auth/models.js"
 import { governedActionExecutionStoreLayer } from "../../src/server/governance/internal/execution-store/live.js"
 import { GovernedActionExecutionEngine } from "../../src/server/governance/internal/GovernedActionExecutionEngine.js"
 import { GovernedActionExecutionStore } from "../../src/server/governance/internal/GovernedActionExecutionStore.js"
-import { GovernedActionPolicyEvaluator } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
+import {
+  GovernedActionPolicyEvaluator,
+  makeWorkspaceGovernedActionPolicyDefinitions
+} from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
@@ -2867,7 +2870,16 @@ describe("first-party plugin runtime", () => {
         )
         assert.notStrictEqual(authorityB, authorityA)
 
+        const settings = yield* persistenceService.workspaceSettings.get(GOVERNED_WORKSPACE)
+        const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(settings)
+        const ownerPolicy = definitions.find(
+          ({ binding }) => binding.requiredPermission === "workspace-owner"
+        )
+        if (ownerPolicy === undefined) {
+          return yield* Effect.die("workspace-owner governed-action policy is unavailable")
+        }
         yield* seedGovernedAction({
+          policy: ownerPolicy.binding,
           pluginConnectionAuthorityDigest: authorityB,
           seedAuthorityRoots: false,
           variant: "codecommit"

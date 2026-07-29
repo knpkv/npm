@@ -34,7 +34,8 @@ import type {
   PortfolioSnapshots,
   RelationshipRepairProposals,
   TimelineExportAudits,
-  TimelineReads
+  TimelineReads,
+  WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
 import { controlCenterApiLayerWithLifecycle } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
@@ -59,7 +60,8 @@ import {
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
   timelineExportAuditsLayer,
-  timelineReadsLayer
+  timelineReadsLayer,
+  workspaceSettingsAdministrationLayer
 } from "../application/index.js"
 import { reviewSuggestionPublicationGatewayUnavailableLayer } from "../application/ReviewSuggestionPublicationGateway.js"
 import { authLayerFromDatabase } from "../auth/Auth.js"
@@ -102,9 +104,9 @@ import {
   type GovernedActionExecutionStartupError,
   governedActionExecutionStartupLayer,
   type GovernedActionExecutionStartupOptions,
-  governedActionPolicyBindingSourceLayer,
   governedActionProposalAuthorityLiveLayer,
-  governedActionSubmissionLayer
+  governedActionSubmissionLayer,
+  workspaceGovernedActionPolicyBindingSourceLayer
 } from "./GovernedActionExecutionStartup.js"
 import {
   type DirectTlsServerError,
@@ -132,6 +134,7 @@ type ControlCenterCoreApplicationServices =
   | RelationshipRepairProposals
   | TimelineExportAudits
   | TimelineReads
+  | WorkspaceSettingsAdministration
 
 /** Explicit production review worker; absence keeps review capability unavailable. */
 export interface ControlCenterPrReviewWorkerOptions {
@@ -276,7 +279,8 @@ export const liveApplicationServices = (
     timelineExportAuditsLayer,
     timelineReadsLayer,
     mediaReadsLayer,
-    relationshipRepairProposalsLayer
+    relationshipRepairProposalsLayer,
+    workspaceSettingsAdministrationLayer
   )
 
 /** Compose API routes, request policy, immutable static assets, and startup bootstrap. */
@@ -414,6 +418,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const governedActionSubmission = governedActionSubmissionLayer.pipe(
     Layer.provide(governedActionStartup)
   )
+  const governedActionPolicyBindings = governedActionConfiguration === null
+    ? null
+    : workspaceGovernedActionPolicyBindingSourceLayer(
+      governedActionConfiguration.workspaceId
+    ).pipe(Layer.provide(persistence))
   const publicationConnections = configuredPluginConnections === null
     ? firstPartyPluginRuntime
       ? firstPartyRuntime!.connections.pipe(Layer.provide(database))
@@ -423,7 +432,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ? reviewSuggestionPublicationGatewayUnavailableLayer
     : governedReviewSuggestionPublicationGatewayLayer.pipe(
       Layer.provide(governedActionSubmission),
-      Layer.provide(governedActionPolicyBindingSourceLayer),
+      Layer.provide(governedActionPolicyBindings!),
       Layer.provide(governedActionProposalAuthorityLiveLayer.pipe(Layer.provide(database))),
       Layer.provide(publicationConnections),
       Layer.provide(persistence)
@@ -432,7 +441,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     ? clockifyActionSubmissionsUnavailableLayer
     : clockifyActionSubmissionsLayer.pipe(
       Layer.provide(governedActionSubmission),
-      Layer.provide(governedActionPolicyBindingSourceLayer),
+      Layer.provide(governedActionPolicyBindings!),
       Layer.provide(governedActionProposalAuthorityLiveLayer.pipe(Layer.provide(database))),
       Layer.provide(publicationConnections),
       Layer.provide(persistence)

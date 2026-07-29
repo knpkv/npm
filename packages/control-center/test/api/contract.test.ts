@@ -27,7 +27,8 @@ import {
   SessionId,
   SessionMutationAuth,
   SharesApiGroup,
-  TimelineApiGroup
+  TimelineApiGroup,
+  WorkspaceSettingsApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -333,7 +334,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the eleven API groups and endpoint routes explicit", () => {
+  it("keeps the twelve API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -346,9 +347,19 @@ describe("ControlCenterApi contract", () => {
       "media",
       "liveEvents",
       "timeline",
+      "workspaceSettings",
       "agent"
     ])
 
+    assert.deepStrictEqual(
+      Object.entries(WorkspaceSettingsApiGroup.endpoints).map(
+        ([identifier, { method, path }]) => [identifier, method, path]
+      ),
+      [
+        ["read", "GET", "/api/v1/settings"],
+        ["update", "PUT", "/api/v1/settings"]
+      ]
+    )
     assert.deepStrictEqual(
       Object.entries(SessionApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [

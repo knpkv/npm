@@ -1,4 +1,5 @@
 import * as Context from "effect/Context"
+import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -23,9 +24,12 @@ import type { GovernedActionExecutionStoreError } from "../governance/internal/G
 import {
   type GovernedActionPolicyCatalogInvalid,
   GovernedActionPolicyEvaluator,
-  makeBuiltInGovernedActionPolicyDefinitions
+  makeBuiltInGovernedActionPolicyDefinitions,
+  makeWorkspaceGovernedActionPolicyDefinitions
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
+import { Persistence } from "../persistence/Persistence.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
+import { WorkspaceSettingsRepository } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { AuthorizedPluginExecutorMap } from "../plugins/internal/AuthorizedPluginExecutorMap.js"
 import { PluginRuntimeAuthorityToken } from "../plugins/internal/PluginRuntimeAuthority.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
@@ -136,6 +140,40 @@ export const governedActionPolicyBindingSourceLayer = Layer.effect(
   )
 )
 
+/** Expose D03 bindings derived from the exact current settings revision. */
+export const workspaceGovernedActionPolicyBindingSourceLayer = (
+  workspaceId: WorkspaceId
+) =>
+  Layer.effect(
+    GovernedActionPolicyBindingSource,
+    Effect.gen(function*() {
+      const cryptoService = yield* Crypto.Crypto
+      const persistence = yield* Persistence
+      const forPermission = (requiredPermission: Role) =>
+        persistence.workspaceSettings.get(workspaceId).pipe(
+          Effect.mapError(() => submissionUnavailable()),
+          Effect.flatMap((record) =>
+            makeWorkspaceGovernedActionPolicyDefinitions(record).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService)
+            )
+          ),
+          Effect.mapError(() => submissionUnavailable()),
+          Effect.flatMap((definitions) => {
+            const definition = definitions.find(
+              ({ binding }) => binding.requiredPermission === requiredPermission
+            )
+            return definition === undefined
+              ? Effect.fail(submissionUnavailable())
+              : Effect.succeed(definition.binding)
+          })
+        )
+      return {
+        current: forPermission("workspace-owner"),
+        forPermission
+      }
+    })
+  )
+
 /** Verify a proposal's exact runtime generation in the same transaction as its durable writes. */
 export const governedActionProposalAuthorityLayer = Layer.effect(
   GovernedActionProposalAuthority,
@@ -182,9 +220,16 @@ export const governedActionProposalAuthorityLiveLayer = governedActionProposalAu
 
 const readyLayersFromRuntimeMap = (workspaceId: WorkspaceId) => {
   const executors = AuthorizedPluginExecutorMap.layer
+  const workspaceSettings = WorkspaceSettingsRepository.layer.pipe(
+    Layer.provideMerge(QuarantineRepository.layer)
+  )
   const store = governedActionExecutionStoreLayer(workspaceId).pipe(
     Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
-    Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+    Layer.provideMerge(
+      GovernedActionPolicyEvaluator.workspaceSettingsLayer.pipe(
+        Layer.provide(workspaceSettings)
+      )
+    ),
     Layer.provideMerge(QuarantineRepository.layer)
   )
   const engine = GovernedActionExecutionEngine.layer.pipe(

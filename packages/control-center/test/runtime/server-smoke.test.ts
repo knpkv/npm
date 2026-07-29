@@ -50,6 +50,7 @@ import {
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
+import { makeWorkspaceGovernedActionPolicyDefinitions } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   Persistence,
@@ -302,10 +303,12 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
   const graph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
   const runtimes = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
   const authorities = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
-  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities)
+  const persistence = persistenceLayerFromDatabase(persistenceConfig).pipe(Layer.provide(database))
+  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities, persistence)
 
   return yield* Effect.gen(function*() {
     yield* seedGovernedActionAuthorityRoots()
+    const persistenceService = yield* Persistence
     const runtimeRepository = yield* PluginRuntimeRepository
     const runtimeRecord = yield* runtimeRepository.acceptPluginDescriptor(
       AUTHORIZED_WORKSPACE,
@@ -331,7 +334,16 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
       accountDigest: PluginRuntimeAccountDigest.make(`sha256:${"c".repeat(64)}`),
       activatedAt: GOVERNED_AUTHORITY_TIME
     })
+    const settings = yield* persistenceService.workspaceSettings.get(AUTHORIZED_WORKSPACE)
+    const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(settings)
+    const ownerPolicy = definitions.find(
+      ({ binding }) => binding.requiredPermission === "workspace-owner"
+    )
+    if (ownerPolicy === undefined) {
+      return yield* Effect.die("workspace-owner governed-action policy is unavailable")
+    }
     yield* seedGovernedAction({
+      policy: ownerPolicy.binding,
       pluginConnectionAuthorityDigest: current.runtimeAuthorityToken,
       seedAuthorityRoots: false
     })
