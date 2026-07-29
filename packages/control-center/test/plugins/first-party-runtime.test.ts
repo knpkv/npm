@@ -80,6 +80,7 @@ import {
   type CodePipelinePipeline,
   type CodePipelineReadClientService
 } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
+import { codePipelineRuntimeIdentityMatches } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
 import {
   confluencePagePluginDescriptor,
   historicalConfluenceReadPluginDescriptor
@@ -967,13 +968,22 @@ describe("first-party plugin runtime", () => {
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("starts from a synchronized durable pipeline authority and blocks stale definitions", () => {
-    const runScenario = (stale: boolean) =>
+    const runScenario = (mode: "current" | "rotated" | "stale") =>
       Effect.gen(function*() {
         yield* TestClock.setTime(DateTime.toEpochMillis(
           Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
         ))
         const pipelineVersion = yield* Ref.make(7)
         const mutationCalls = yield* Ref.make(0)
+        const mutationIdentity = mode === "rotated"
+          ? {
+            accountId: "210987654321",
+            arn: "arn:aws:iam::210987654321:role/rotated-control-center"
+          }
+          : {
+            accountId: "123456789012",
+            arn: "arn:aws:sts::123456789012:assumed-role/control-center/mutation-session"
+          }
         const pipelineFor = (version: number): CodePipelinePipeline => ({
           name: "release",
           arn: "arn:aws:codepipeline:eu-west-1:123456789012:release",
@@ -1025,15 +1035,22 @@ describe("first-party plugin runtime", () => {
           getPipelineState: () => Effect.die("unused getPipelineState"),
           getLogPage: () => Effect.die("unused getLogPage"),
           getArtifactRange: () => Effect.die("unused getArtifactRange"),
-          startPipelineExecution: () =>
-            Ref.update(mutationCalls, (count) => count + 1).pipe(
-              Effect.as("execution-started-from-declaration")
-            ),
+          startPipelineExecution: (request) =>
+            codePipelineRuntimeIdentityMatches(request.runtimeIdentity, mutationIdentity)
+              ? Ref.update(mutationCalls, (count) => count + 1).pipe(
+                Effect.as("execution-started-from-declaration")
+              )
+              : Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-runtime-identity-changed"
+                })
+              ),
           stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
           putApprovalResult: () => Effect.die("unused putApprovalResult")
         }
         const config = yield* makePersistenceTestConfig(
-          `control-center-first-party-codepipeline-start-${stale ? "stale" : "current"}-`
+          `control-center-first-party-codepipeline-start-${mode}-`
         )
         const root = config.blobRoot.slice(0, -"/blobs".length)
         const database = databaseLayer(config)
@@ -1136,7 +1153,7 @@ describe("first-party plugin runtime", () => {
             targetEntityId: target.entityId,
             variant: "codepipeline-start"
           })
-          if (stale) yield* Ref.set(pipelineVersion, 8)
+          if (mode === "stale") yield* Ref.set(pipelineVersion, 8)
 
           const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
           const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
@@ -1178,13 +1195,23 @@ describe("first-party plugin runtime", () => {
       })
 
     return Effect.gen(function*() {
-      const current = yield* runScenario(false)
+      const current = yield* runScenario("current")
       assert.deepStrictEqual(current.execution, { _tag: "advanced", state: "started" })
       assert.strictEqual(current.record.head.state, "started")
       assert.strictEqual(current.record.head.lineage._tag, "accepted")
       assert.strictEqual(current.mutationCalls, 1)
 
-      const stale = yield* runScenario(true)
+      const rotated = yield* runScenario("rotated")
+      assert.deepStrictEqual(rotated.execution, { _tag: "advanced", state: "failed" })
+      assert.strictEqual(rotated.record.head.state, "failed")
+      assert.strictEqual(rotated.record.head.lineage._tag, "terminal")
+      if (rotated.record.head.lineage._tag === "terminal") {
+        assert.strictEqual(rotated.record.head.lineage.receipt.status, "failed")
+        assert.include(rotated.record.head.lineage.receipt.providerOperationId, "rejected:start:")
+      }
+      assert.strictEqual(rotated.mutationCalls, 0)
+
+      const stale = yield* runScenario("stale")
       assert.deepStrictEqual(stale.execution, { _tag: "advanced", state: "denied" })
       assert.strictEqual(stale.record.head.state, "denied")
       assert.strictEqual(stale.mutationCalls, 0)

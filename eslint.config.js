@@ -205,6 +205,14 @@ export default tseslint.config(
     }
   },
   {
+    // Prettier formats root JavaScript utilities; ESLint still enforces their
+    // semantic and safety rules.
+    files: ["scripts/check-security-doc-examples.mjs"],
+    rules: {
+      "@effect/dprint": "off"
+    }
+  },
+  {
     files: ["scratchpad/eslint/**/*"],
     plugins: {
       "unused-imports": unusedImports

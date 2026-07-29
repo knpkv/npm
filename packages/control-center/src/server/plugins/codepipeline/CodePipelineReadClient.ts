@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema"
 import { PluginMalformedResponseFailure } from "../failures.js"
 import {
   type CodePipelineAwsAccount,
+  CodePipelineCredentialResolverLive,
   type CodePipelineMutationProviderFailure,
   type CodePipelineProviderFailure,
   CodePipelineReadProvider,
@@ -31,6 +32,9 @@ import {
   type StartPipelineExecutionProviderRequest,
   type StopPipelineExecutionProviderRequest
 } from "./CodePipelineReadProvider.js"
+
+/** @internal */
+export { canonicalCodePipelinePrincipalArn } from "./CodePipelineReadProvider.js"
 
 const EXECUTION_PROVIDER_PAGE_LIMIT = 1
 const ACTION_PROVIDER_PAGE_LIMIT = 100
@@ -293,19 +297,6 @@ const RawApprovalResult = Schema.Struct({ approvedAt: Schema.optionalKey(Schema.
 export const CodePipelineAccountIdentity = Schema.Struct({ accountId: Identifier, arn: Identifier })
 /** @internal */
 export type CodePipelineAccountIdentity = typeof CodePipelineAccountIdentity.Type
-
-/**
- * Collapse only STS assumed-role sessions to their stable IAM role principal.
- * IAM users, federated users, and all unknown ARN shapes remain exact.
- *
- * @internal
- */
-export const canonicalCodePipelinePrincipalArn = (arn: string): string => {
-  const assumedRole = /^arn:([^:]+):sts::([^:]+):assumed-role\/(.+)\/[^/]+$/u.exec(arn)
-  return assumedRole === null
-    ? arn
-    : `arn:${assumedRole[1]}:iam::${assumedRole[2]}:role/${assumedRole[3]}`
-}
 
 const CodePipelineActionType = Schema.Struct({
   category: Identifier,
@@ -1085,5 +1076,9 @@ export class CodePipelineReadClient extends Context.Service<
   )
 
   /** Production client using direct @distilled.cloud/aws operations. @internal */
-  static readonly live = CodePipelineReadClient.layer.pipe(Layer.provide(CodePipelineReadProviderLive))
+  static readonly live = CodePipelineReadClient.layer.pipe(
+    Layer.provide(
+      CodePipelineReadProviderLive.pipe(Layer.provide(CodePipelineCredentialResolverLive))
+    )
+  )
 }

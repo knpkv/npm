@@ -1,3 +1,4 @@
+import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
@@ -13,6 +14,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
   AuthorizedPluginActionV1,
@@ -29,7 +31,10 @@ import {
 } from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
 import { CodePipelineReadClient } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
+  callPinnedCodePipelineMutationProvider,
   codePipelineCredentialProviderOptions,
+  CodePipelineCredentialResolver,
+  CodePipelinePreDispatchFailure,
   CodePipelinePreDispatchTimeoutFailure,
   CodePipelineReadProvider,
   type CodePipelineReadProviderService,
@@ -897,6 +902,104 @@ describe("CodePipelinePlugin", () => {
     assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), {})
     assert.deepStrictEqual(codePipelineCredentialProviderOptions("production"), { profile: "production" })
   })
+
+  it.effect("pins identity verification and mutation to one acquired credential snapshot", () =>
+    Effect.gen(function*() {
+      const runScenario = (identityEffect: Effect.Effect<unknown, unknown>) =>
+        Effect.gen(function*() {
+          const resolutionCalls = yield* Ref.make(0)
+          const mutationCalls = yield* Ref.make(0)
+          const mutationAccessKeys = yield* Ref.make<Array<string>>([])
+          const resolver = Layer.succeed(CodePipelineCredentialResolver, {
+            resolve: () =>
+              Ref.update(resolutionCalls, (count) => count + 1).pipe(
+                Effect.as({
+                  accessKeyId: "mutation-access-key",
+                  secretAccessKey: "mutation-secret",
+                  sessionToken: "mutation-session-token"
+                })
+              )
+          })
+          const resolvedAccessKey = Effect.gen(function*() {
+            const credentials = yield* DistilledCredentials.Credentials
+            const resolved = yield* credentials
+            return Redacted.value(resolved.accessKeyId)
+          })
+          const result = yield* callPinnedCodePipelineMutationProvider(
+            "codepipeline-start-execution",
+            {
+              profile: "production",
+              region: "eu-west-1",
+              operationTimeoutMillis: 10_000
+            },
+            {
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/control-center/preflight-session"
+            },
+            resolvedAccessKey.pipe(Effect.andThen(identityEffect)),
+            Effect.gen(function*() {
+              const accessKeyId = yield* resolvedAccessKey
+              yield* Ref.update(mutationCalls, (count) => count + 1)
+              yield* Ref.update(mutationAccessKeys, (keys) => [...keys, accessKeyId])
+              return "execution-started"
+            })
+          ).pipe(
+            Effect.result,
+            Effect.provide(resolver),
+            Effect.provideService(
+              HttpClient.HttpClient,
+              HttpClient.make(() => Effect.die("unused HTTP client"))
+            )
+          )
+          return {
+            mutationAccessKeys: yield* Ref.get(mutationAccessKeys),
+            mutationCalls: yield* Ref.get(mutationCalls),
+            resolutionCalls: yield* Ref.get(resolutionCalls),
+            result
+          }
+        })
+
+      const rotated = yield* runScenario(
+        Effect.succeed({
+          Account: "210987654321",
+          Arn: "arn:aws:iam::210987654321:role/rotated-control-center"
+        })
+      )
+      assert.strictEqual(rotated.result._tag, "Failure")
+      if (rotated.result._tag === "Failure") {
+        assert.instanceOf(rotated.result.failure, PluginConflictFailure)
+      }
+      assert.strictEqual(rotated.resolutionCalls, 1)
+      assert.strictEqual(rotated.mutationCalls, 0)
+      assert.deepStrictEqual(rotated.mutationAccessKeys, [])
+
+      const identityOutage = yield* runScenario(Effect.fail({ _tag: "ServiceUnavailable" }))
+      assert.strictEqual(identityOutage.result._tag, "Failure")
+      if (identityOutage.result._tag === "Failure") {
+        assert.instanceOf(identityOutage.result.failure, CodePipelinePreDispatchFailure)
+      }
+      assert.strictEqual(identityOutage.mutationCalls, 0)
+
+      const malformedIdentity = yield* runScenario(
+        Effect.succeed({ Account: "123456789012" })
+      )
+      assert.strictEqual(malformedIdentity.result._tag, "Failure")
+      if (malformedIdentity.result._tag === "Failure") {
+        assert.instanceOf(malformedIdentity.result.failure, CodePipelinePreDispatchFailure)
+      }
+      assert.strictEqual(malformedIdentity.mutationCalls, 0)
+
+      const sameRole = yield* runScenario(
+        Effect.succeed({
+          Account: "123456789012",
+          Arn: "arn:aws:sts::123456789012:assumed-role/control-center/mutation-session"
+        })
+      )
+      assert.strictEqual(sameRole.result._tag, "Success")
+      assert.strictEqual(sameRole.resolutionCalls, 1)
+      assert.strictEqual(sameRole.mutationCalls, 1)
+      assert.deepStrictEqual(sameRole.mutationAccessKeys, ["mutation-access-key"])
+    }))
 
   it.effect("maps AWS request-timeout tags separately from provider outages", () =>
     Effect.gen(function*() {
@@ -2860,12 +2963,16 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(result.stopped._tag, "succeeded")
     }))
 
-  it.effect("distinguishes credential timeouts before mutation from ambiguous on-wire timeouts", () =>
+  it.effect("distinguishes pre-dispatch identity failures from ambiguous on-wire failures", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
       const attempt = (
         identity: string,
-        failure: CodePipelinePreDispatchTimeoutFailure | PluginTimeoutFailure,
+        failure:
+          | CodePipelinePreDispatchFailure
+          | CodePipelinePreDispatchTimeoutFailure
+          | PluginOutageFailure
+          | PluginTimeoutFailure,
         mutationStarted: boolean
       ) =>
         runWithProvider(
@@ -2915,23 +3022,48 @@ describe("CodePipelinePlugin", () => {
         new PluginTimeoutFailure({ operation: "codepipeline-stop-execution" }),
         true
       )
+      const identityOutage = yield* attempt(
+        "identity-outage",
+        new CodePipelinePreDispatchFailure({
+          operation: "codepipeline-stop-execution",
+          diagnosticCode: "codepipeline-runtime-identity-unavailable"
+        }),
+        false
+      )
+      const malformedIdentity = yield* attempt(
+        "malformed-identity",
+        new CodePipelinePreDispatchFailure({
+          operation: "codepipeline-stop-execution",
+          diagnosticCode: "codepipeline-runtime-identity-invalid"
+        }),
+        false
+      )
+      const onWireOutage = yield* attempt(
+        "on-wire-outage",
+        new PluginOutageFailure({ operation: "codepipeline-stop-execution" }),
+        true
+      )
 
-      assert.isTrue(Result.isSuccess(beforeDispatch))
-      if (Result.isSuccess(beforeDispatch)) {
-        assert.strictEqual(beforeDispatch.success._tag, "confirmed")
-        if (beforeDispatch.success._tag === "confirmed") {
-          assert.strictEqual(beforeDispatch.success.receipt.status, "failed")
-          assert.match(beforeDispatch.success.receipt.providerOperationId, /^not-dispatched:stop:/u)
+      for (const knownNotDispatched of [beforeDispatch, identityOutage, malformedIdentity]) {
+        assert.isTrue(Result.isSuccess(knownNotDispatched))
+        if (Result.isSuccess(knownNotDispatched)) {
+          assert.strictEqual(knownNotDispatched.success._tag, "confirmed")
+          if (knownNotDispatched.success._tag === "confirmed") {
+            assert.strictEqual(knownNotDispatched.success.receipt.status, "failed")
+            assert.match(knownNotDispatched.success.receipt.providerOperationId, /^not-dispatched:stop:/u)
+          }
         }
       }
-      assert.isTrue(Result.isFailure(onWire))
-      if (Result.isFailure(onWire)) {
-        assert.instanceOf(onWire.failure, PluginUnknownOutcomeFailure)
-        if (Predicate.isTagged(onWire.failure, "PluginUnknownOutcomeFailure")) {
-          assert.match(onWire.failure.reconciliationKey, /^codepipeline:stop:/u)
+      for (const ambiguous of [onWire, onWireOutage]) {
+        assert.isTrue(Result.isFailure(ambiguous))
+        if (Result.isFailure(ambiguous)) {
+          assert.instanceOf(ambiguous.failure, PluginUnknownOutcomeFailure)
+          if (Predicate.isTagged(ambiguous.failure, "PluginUnknownOutcomeFailure")) {
+            assert.match(ambiguous.failure.reconciliationKey, /^codepipeline:stop:/u)
+          }
         }
       }
-      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 2)
     }))
 
   it.effect("reconciles an ambiguous approval from its exact execution history", () =>

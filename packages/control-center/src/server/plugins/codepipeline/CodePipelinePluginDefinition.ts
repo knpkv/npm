@@ -70,6 +70,7 @@ import {
 } from "./CodePipelineReadClient.js"
 import type {
   CodePipelineMutationProviderFailure,
+  CodePipelinePreDispatchFailure,
   CodePipelinePreDispatchTimeoutFailure,
   CodePipelineProviderFailure
 } from "./CodePipelineReadProvider.js"
@@ -802,7 +803,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
   const mutationProvider = <A>(
     operation: string,
     effect: Effect.Effect<A, CodePipelineMutationProviderFailure>
-  ): Effect.Effect<A, PluginFailure | CodePipelinePreDispatchTimeoutFailure> =>
+  ): Effect.Effect<
+    A,
+    PluginFailure | CodePipelinePreDispatchFailure | CodePipelinePreDispatchTimeoutFailure
+  > =>
     effect.pipe(
       Effect.catchTag(
         "CodePipelineProviderNotFoundFailure",
@@ -1914,6 +1918,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
                 readClient.startPipelineExecution({
                   account: awsAccount,
                   pipelineName: configuration.pipelineName,
+                  runtimeIdentity,
                   clientRequestToken: token,
                   sourceRevisions: action.sourceRevisions,
                   variables: action.variables
@@ -1931,6 +1936,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             readClient.stopPipelineExecution({
               account: awsAccount,
               pipelineName: configuration.pipelineName,
+              runtimeIdentity,
               pipelineExecutionId: action.executionId,
               abandon: action.abandon,
               reason: action.reason
@@ -1945,6 +1951,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             readClient.putApprovalResult({
               account: awsAccount,
               pipelineName: configuration.pipelineName,
+              runtimeIdentity,
               stageName: action.stageName,
               actionName: action.actionName,
               token: action.token,
@@ -1958,7 +1965,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       }
     })().pipe(Effect.result)
     if (Result.isFailure(result)) {
-      if (Predicate.isTagged(result.failure, "CodePipelinePreDispatchTimeoutFailure")) {
+      if (
+        Predicate.isTagged(result.failure, "CodePipelinePreDispatchFailure") ||
+        Predicate.isTagged(result.failure, "CodePipelinePreDispatchTimeoutFailure")
+      ) {
         return {
           _tag: "confirmed",
           receipt: {
@@ -1966,7 +1976,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             providerOperationId: PluginProviderOperationId.make(
               `not-dispatched:${action._tag}:${request.payloadDigest}`
             ),
-            safeSummary: "CodePipeline credentials timed out before the authorized action reached AWS",
+            safeSummary: "CodePipeline could not verify its runtime identity before the authorized action reached AWS",
             observedAt
           }
         }
@@ -2105,15 +2115,18 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         readClient.startPipelineExecution({
           account: awsAccount,
           pipelineName: configuration.pipelineName,
+          runtimeIdentity,
           clientRequestToken: token,
           sourceRevisions: resolved.sourceRevisions,
           variables: resolved.variables
         })
       ).pipe(
-        Effect.catchTag(
-          "CodePipelinePreDispatchTimeoutFailure",
-          (failure) => Effect.fail(new PluginTimeoutFailure({ operation: failure.operation }))
-        )
+        Effect.catchTags({
+          CodePipelinePreDispatchFailure: (failure) =>
+            Effect.fail(new PluginOutageFailure({ operation: failure.operation })),
+          CodePipelinePreDispatchTimeoutFailure: (failure) =>
+            Effect.fail(new PluginTimeoutFailure({ operation: failure.operation }))
+        })
       )
       const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
       if (["InProgress", "Stopping"].includes(snapshot.execution.status)) {

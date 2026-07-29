@@ -126,6 +126,12 @@ export interface CodePipelineAwsAccount {
   readonly operationTimeoutMillis: number
 }
 
+/** Stable AWS authority approved for one provider mutation. @internal */
+export interface CodePipelineRuntimeIdentity {
+  readonly accountId: string
+  readonly arn: string
+}
+
 /** Request for a single configured pipeline. @internal */
 export interface GetPipelineProviderRequest {
   readonly account: CodePipelineAwsAccount
@@ -192,6 +198,7 @@ export interface CodePipelineVariableOverride {
 
 /** Idempotent request to start a distinct pipeline execution. @internal */
 export interface StartPipelineExecutionProviderRequest extends GetPipelineProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
   readonly clientRequestToken: string
   readonly sourceRevisions: ReadonlyArray<CodePipelineSourceRevisionOverride>
   readonly variables: ReadonlyArray<CodePipelineVariableOverride>
@@ -199,12 +206,14 @@ export interface StartPipelineExecutionProviderRequest extends GetPipelineProvid
 
 /** Request to stop one exact pipeline execution. @internal */
 export interface StopPipelineExecutionProviderRequest extends GetPipelineExecutionProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
   readonly abandon: boolean
   readonly reason: string
 }
 
 /** Request to resolve one exact pending manual approval. @internal */
 export interface PutPipelineApprovalProviderRequest extends GetPipelineProviderRequest {
+  readonly runtimeIdentity: CodePipelineRuntimeIdentity
   readonly stageName: string
   readonly actionName: string
   readonly token: string
@@ -226,6 +235,12 @@ export class CodePipelinePreDispatchTimeoutFailure
   )
 {}
 
+/** Identity verification failed before a mutation could reach AWS. @internal */
+export class CodePipelinePreDispatchFailure extends Schema.TaggedErrorClass<CodePipelinePreDispatchFailure>()(
+  "CodePipelinePreDispatchFailure",
+  { operation: Schema.String, diagnosticCode: Schema.String }
+) {}
+
 /** Failures visible to the Schema-decoding read client. @internal */
 export type CodePipelineProviderFailure =
   | PluginFailure
@@ -234,6 +249,7 @@ export type CodePipelineProviderFailure =
 /** Failures visible only while invoking a provider mutation. @internal */
 export type CodePipelineMutationProviderFailure =
   | CodePipelineProviderFailure
+  | CodePipelinePreDispatchFailure
   | CodePipelinePreDispatchTimeoutFailure
 
 /** Raw provider surface used by the CodePipeline read client. @internal */
@@ -286,6 +302,31 @@ const AwsCredentialIdentity = Schema.Struct({
   accessKeyId: Schema.String.check(Schema.isNonEmpty()),
   secretAccessKey: Schema.String.check(Schema.isNonEmpty()),
   sessionToken: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty()))
+})
+
+/** Credentials acquired once and pinned across mutation identity verification and dispatch. @internal */
+export type CodePipelineCredentialIdentity = typeof AwsCredentialIdentity.Type
+
+/** Injectable credential acquisition boundary used by the live AWS provider. @internal */
+export interface CodePipelineCredentialResolverService {
+  readonly resolve: (
+    operation: string,
+    account: CodePipelineAwsAccount
+  ) => Effect.Effect<
+    CodePipelineCredentialIdentity,
+    PluginAuthenticationFailure | PluginTimeoutFailure
+  >
+}
+
+/** Injectable credential acquisition boundary used by the live AWS provider. @internal */
+export class CodePipelineCredentialResolver extends Context.Service<
+  CodePipelineCredentialResolver,
+  CodePipelineCredentialResolverService
+>()("@knpkv/control-center/CodePipelineCredentialResolver") {}
+
+const RawRuntimeIdentity = Schema.Struct({
+  Account: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512)),
+  Arn: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 })
 
 const hasTag = (cause: unknown, tags: ReadonlyArray<string>): boolean =>
@@ -364,26 +405,50 @@ export const codePipelineCredentialProviderOptions = (
   profile: string
 ): { readonly profile?: string } => profile === "default" ? {} : { profile }
 
-const acquireCredentials = Effect.fn("CodePipelineReadProvider.acquireCredentials")(function*(
-  operation: string,
-  account: CodePipelineAwsAccount
-): Effect.fn.Return<
-  typeof AwsCredentialIdentity.Type,
-  PluginAuthenticationFailure | PluginTimeoutFailure
-> {
-  const raw = yield* Effect.tryPromise({
-    try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
-    catch: () => new PluginAuthenticationFailure({ operation })
-  }).pipe(
-    Effect.timeoutOrElse({
-      duration: account.operationTimeoutMillis,
-      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+/** Live AWS profile-chain credential acquisition. @internal */
+export const CodePipelineCredentialResolverLive = Layer.succeed(
+  CodePipelineCredentialResolver,
+  {
+    resolve: Effect.fn("CodePipelineCredentialResolver.resolve")(function*(
+      operation: string,
+      account: CodePipelineAwsAccount
+    ) {
+      const raw = yield* Effect.tryPromise({
+        try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
+        catch: () => new PluginAuthenticationFailure({ operation })
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: account.operationTimeoutMillis,
+          orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+        })
+      )
+      return yield* Schema.decodeUnknownEffect(AwsCredentialIdentity)(raw).pipe(
+        Effect.mapError(() => new PluginAuthenticationFailure({ operation }))
+      )
     })
-  )
-  return yield* Schema.decodeUnknownEffect(AwsCredentialIdentity)(raw).pipe(
-    Effect.mapError(() => new PluginAuthenticationFailure({ operation }))
-  )
-})
+  } satisfies CodePipelineCredentialResolverService
+)
+
+/**
+ * Collapse only STS assumed-role sessions to their stable IAM role principal.
+ * IAM users, federated users, and all unknown ARN shapes remain exact.
+ *
+ * @internal
+ */
+export const canonicalCodePipelinePrincipalArn = (arn: string): string => {
+  const assumedRole = /^arn:([^:]+):sts::([^:]+):assumed-role\/(.+)\/[^/]+$/u.exec(arn)
+  return assumedRole === null
+    ? arn
+    : `arn:${assumedRole[1]}:iam::${assumedRole[2]}:role/${assumedRole[3]}`
+}
+
+/** Compare an observed STS identity with the authority approved for mutation. @internal */
+export const codePipelineRuntimeIdentityMatches = (
+  expected: CodePipelineRuntimeIdentity,
+  observed: CodePipelineRuntimeIdentity
+): boolean =>
+  expected.accountId === observed.accountId &&
+  canonicalCodePipelinePrincipalArn(expected.arn) === canonicalCodePipelinePrincipalArn(observed.arn)
 
 const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function*<Value, Error>(
   operation: string,
@@ -393,9 +458,14 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
     Error,
     DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
   >
-): Effect.fn.Return<Value, CodePipelineProviderFailure, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  Value,
+  CodePipelineProviderFailure,
+  CodePipelineCredentialResolver | HttpClient.HttpClient
+> {
   const httpClient = yield* HttpClient.HttpClient
-  const credentials = yield* acquireCredentials(operation, account)
+  const credentialResolver = yield* CodePipelineCredentialResolver
+  const credentials = yield* credentialResolver.resolve(operation, account)
   return yield* effect.pipe(
     Effect.provide(
       Layer.mergeAll(
@@ -416,30 +486,94 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
   )
 })
 
-const callMutationProvider = Effect.fn("CodePipelineReadProvider.callMutationProvider")(function*<Value, Error>(
+/**
+ * Verify and dispatch a mutation through one immutable credential snapshot.
+ *
+ * Exported for provider-boundary regression coverage.
+ *
+ * @internal
+ */
+export const callPinnedCodePipelineMutationProvider = Effect.fn(
+  "CodePipelineReadProvider.callPinnedMutationProvider"
+)(function*<Value, IdentityError, MutationError>(
   operation: string,
   account: CodePipelineAwsAccount,
-  effect: Effect.Effect<
+  expectedIdentity: CodePipelineRuntimeIdentity,
+  identityEffect: Effect.Effect<
+    unknown,
+    IdentityError,
+    DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
+  >,
+  mutationEffect: Effect.Effect<
     Value,
-    Error,
+    MutationError,
     DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
   >
-): Effect.fn.Return<Value, CodePipelineMutationProviderFailure, HttpClient.HttpClient> {
+): Effect.fn.Return<
+  Value,
+  CodePipelineMutationProviderFailure,
+  CodePipelineCredentialResolver | HttpClient.HttpClient
+> {
   const httpClient = yield* HttpClient.HttpClient
-  const credentials = yield* acquireCredentials(operation, account).pipe(
-    Effect.catchTag(
-      "PluginTimeoutFailure",
-      () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+  const credentialResolver = yield* CodePipelineCredentialResolver
+  const credentials = yield* credentialResolver.resolve(operation, account).pipe(
+    Effect.catchTags({
+      PluginAuthenticationFailure: () =>
+        Effect.fail(
+          new CodePipelinePreDispatchFailure({
+            operation,
+            diagnosticCode: "codepipeline-credentials-unavailable"
+          })
+        ),
+      PluginTimeoutFailure: () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+    })
+  )
+  const runtimeLayer = Layer.mergeAll(
+    DistilledCredentials.fromCredentials(credentials),
+    Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
+    Layer.succeed(HttpClient.HttpClient, httpClient)
+  )
+  const rawIdentity = yield* identityEffect.pipe(
+    Effect.provide(runtimeLayer),
+    Effect.timeoutOrElse({
+      duration: account.operationTimeoutMillis,
+      orElse: () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+    }),
+    Effect.catch((cause) =>
+      Predicate.isTagged(cause, "CodePipelinePreDispatchTimeoutFailure")
+        ? Effect.fail(cause)
+        : mapCodePipelineAwsFailure(operation, cause).pipe(
+          Effect.mapError((failure) =>
+            Predicate.isTagged(failure, "PluginTimeoutFailure")
+              ? new CodePipelinePreDispatchTimeoutFailure({ operation })
+              : new CodePipelinePreDispatchFailure({
+                operation,
+                diagnosticCode: "codepipeline-runtime-identity-unavailable"
+              })
+          )
+        )
     )
   )
-  return yield* effect.pipe(
-    Effect.provide(
-      Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials),
-        Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
-        Layer.succeed(HttpClient.HttpClient, httpClient)
-      )
+  const observedIdentity = yield* Schema.decodeUnknownEffect(RawRuntimeIdentity)(rawIdentity).pipe(
+    Effect.mapError(() =>
+      new CodePipelinePreDispatchFailure({
+        operation,
+        diagnosticCode: "codepipeline-runtime-identity-invalid"
+      })
     ),
+    Effect.map((identity): CodePipelineRuntimeIdentity => ({
+      accountId: identity.Account,
+      arn: identity.Arn
+    }))
+  )
+  if (!codePipelineRuntimeIdentityMatches(expectedIdentity, observedIdentity)) {
+    return yield* new PluginConflictFailure({
+      operation,
+      diagnosticCode: "codepipeline-runtime-identity-changed"
+    })
+  }
+  return yield* mutationEffect.pipe(
+    Effect.provide(runtimeLayer),
     Effect.timeoutOrElse({
       duration: account.operationTimeoutMillis,
       orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
@@ -457,9 +591,18 @@ export const CodePipelineReadProviderLive = Layer.effect(
   CodePipelineReadProvider,
   Effect.gen(function*() {
     const httpClient = yield* HttpClient.HttpClient
+    const credentialResolver = yield* CodePipelineCredentialResolver
     const provideHttp = <Value, Error>(
-      effect: Effect.Effect<Value, Error, HttpClient.HttpClient>
-    ): Effect.Effect<Value, Error> => Effect.provideService(effect, HttpClient.HttpClient, httpClient)
+      effect: Effect.Effect<
+        Value,
+        Error,
+        CodePipelineCredentialResolver | HttpClient.HttpClient
+      >
+    ): Effect.Effect<Value, Error> =>
+      effect.pipe(
+        Effect.provideService(HttpClient.HttpClient, httpClient),
+        Effect.provideService(CodePipelineCredentialResolver, credentialResolver)
+      )
 
     return {
       getCallerIdentity: (account) =>
@@ -617,9 +760,11 @@ export const CodePipelineReadProviderLive = Layer.effect(
         })),
       startPipelineExecution: (request) =>
         provideHttp(
-          callMutationProvider(
+          callPinnedCodePipelineMutationProvider(
             "codepipeline-start-execution",
             request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
             codepipeline.startPipelineExecution({
               name: request.pipelineName,
               clientRequestToken: request.clientRequestToken,
@@ -630,9 +775,11 @@ export const CodePipelineReadProviderLive = Layer.effect(
         ),
       stopPipelineExecution: (request) =>
         provideHttp(
-          callMutationProvider(
+          callPinnedCodePipelineMutationProvider(
             "codepipeline-stop-execution",
             request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
             codepipeline.stopPipelineExecution({
               pipelineName: request.pipelineName,
               pipelineExecutionId: request.pipelineExecutionId,
@@ -643,9 +790,11 @@ export const CodePipelineReadProviderLive = Layer.effect(
         ),
       putApprovalResult: (request) =>
         provideHttp(
-          callMutationProvider(
+          callPinnedCodePipelineMutationProvider(
             "codepipeline-put-approval",
             request.account,
+            request.runtimeIdentity,
+            sts.getCallerIdentity({}),
             codepipeline.putApprovalResult({
               pipelineName: request.pipelineName,
               stageName: request.stageName,

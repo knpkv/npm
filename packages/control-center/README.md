@@ -464,7 +464,7 @@ Provisioning must persist the descriptor-advertised keys with the exact value ki
 | Confluence   | `siteBaseUrl` (url), `email` (text), `apiToken` (secret reference), `siteId`, `spaceId`, `probePageId` (text)                                                                                    |
 | Clockify     | `apiKey` (secret reference), `webBaseUrl` (url), `workspaceId`, `userIds` (text), `pageSize`, `maximumPages`, `maximumConcurrency`, `operationTimeoutMillis` (integer)                           |
 
-The production runtime registry preserves historical read-only descriptors while installing the action-capable CodeCommit and Confluence executors only for descriptors that negotiated those capabilities. Composition coverage crosses the durable governed-action store, runtime authority, executor projection, and provider boundary and asserts a single provider mutation.
+The production runtime registry preserves historical read-only descriptors while installing the action-capable CodeCommit, CodePipeline, and Confluence executors only for descriptors that negotiated those capabilities. Historical read-only descriptor generations remain read-only. Composition coverage crosses the durable governed-action store, runtime authority, executor projection, and provider boundary and asserts a single provider mutation.
 
 The request boundary applies exact Host and Origin policy, session/CSRF/capability checks, correlation and security headers, bounded URL/header/body sizes, timeouts, and rate limits before API work. Static assets are captured into an immutable allowlisted map at startup and never resolved from request-controlled filesystem paths.
 
