@@ -47,7 +47,7 @@ import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
 /** Closed failure from the authenticated Clockify action product boundary. */
 export class ClockifyActionSubmissionError extends Schema.TaggedErrorClass<ClockifyActionSubmissionError>()(
   "ClockifyActionSubmissionError",
-  { reason: Schema.Literals(["conflict", "invalid-request", "unavailable"]) }
+  { reason: Schema.Literals(["conflict", "forbidden", "invalid-request", "unavailable"]) }
 ) {}
 
 interface SubmitClockifyActionInput {
@@ -116,14 +116,14 @@ const makeService = Effect.gen(function*() {
       input.session.workspaceId !== input.workspaceId ||
       input.session.revokedAt !== null ||
       DateTime.Order(checkedAt, input.session.idleExpiresAt) >= 0 ||
-      DateTime.Order(checkedAt, input.session.absoluteExpiresAt) >= 0 ||
-      (
-        input.request._tag === "correct-association"
-          ? input.session.permission !== "workspace-owner"
-          : input.session.permission !== "workspace-owner" &&
-            input.session.permission !== "workspace-approver"
-      )
+      DateTime.Order(checkedAt, input.session.absoluteExpiresAt) >= 0
     ) return yield* failure("conflict")
+    if (
+      input.request._tag === "correct-association"
+        ? input.session.permission !== "workspace-owner"
+        : input.session.permission !== "workspace-owner" &&
+          input.session.permission !== "workspace-approver"
+    ) return yield* failure("forbidden")
     const session = input.session
     if (session.actor._tag !== "human") return yield* failure("conflict")
     const actor = session.actor

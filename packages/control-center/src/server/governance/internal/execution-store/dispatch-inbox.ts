@@ -80,7 +80,6 @@ const outcomeMatches = (
   existing: typeof ExistingOutcomeRow.Type,
   expected: {
     readonly actionId: GovernedActionId
-    readonly commandDigest: typeof GovernedActionCommandDigest.Type
     readonly outcomeDigest: string
     readonly outcomeJson: string
     readonly resultKind: typeof DispatchResultKind.Type
@@ -91,8 +90,7 @@ const outcomeMatches = (
   existing.actionId === expected.actionId &&
   existing.resultKind === expected.resultKind &&
   existing.outcomeJson === expected.outcomeJson &&
-  existing.outcomeDigest === expected.outcomeDigest &&
-  existing.expectedCommandDigest === expected.commandDigest
+  existing.outcomeDigest === expected.outcomeDigest
 
 /** Build the single durable append-then-fold boundary shared by dispatch-side outcomes. */
 export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
@@ -184,8 +182,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
               actionId: lease.actionId,
               resultKind,
               outcomeJson: encoded.outcomeJson,
-              outcomeDigest: encoded.outcomeDigest,
-              commandDigest: existing.expectedCommandDigest
+              outcomeDigest: encoded.outcomeDigest
             })
           ) return yield* storeError(input.operation, "conflict")
           return {

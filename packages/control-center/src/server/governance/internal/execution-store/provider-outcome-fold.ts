@@ -300,8 +300,8 @@ export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(funct
   ) {
     const decoded = yield* decodeAndVerify(row, operation)
     const record = yield* transaction.read({ workspaceId: row.workspaceId, actionId: row.actionId })
-    yield* validateAuthorizationObservation(decoded, record, row.observedAt, operation)
     if (row.foldTransitionId !== null) {
+      yield* validateAuthorizationObservation(decoded, record, row.observedAt, operation)
       if (row.foldCommandDigest !== row.expectedCommandDigest) {
         return yield* storeError(operation, "invalid-record")
       }

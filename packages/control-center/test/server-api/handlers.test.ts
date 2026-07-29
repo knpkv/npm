@@ -108,7 +108,10 @@ import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
 } from "../../src/server/api/LiveStreamAdmission.js"
-import { ClockifyActionSubmissions } from "../../src/server/application/clockifyActionSubmissions.js"
+import {
+  ClockifyActionSubmissionError,
+  ClockifyActionSubmissions
+} from "../../src/server/application/clockifyActionSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -499,6 +502,78 @@ describe("Control Center API handlers", () => {
           rationale: "Reviewed against the delivery record"
         }
       })
+    }))
+
+  it.effect("maps Clockify submission failures through the documented HTTP contract", () =>
+    Effect.gen(function*() {
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const request = Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      })
+      const attempt = (reason: ClockifyActionSubmissionError["reason"]) => {
+        const applications = Layer.mergeAll(
+          deliveryGraphApplicationLayer,
+          Layer.succeed(ClockifyActionSubmissions, {
+            submit: () => Effect.fail(new ClockifyActionSubmissionError({ reason }))
+          })
+        )
+        const handler = deliveryGraphHandlersLayer.pipe(
+          Layer.provide(sessionMiddlewareLayer),
+          Layer.provide(mutationMiddlewareLayer),
+          Layer.provide(applications)
+        )
+        return request.pipe(
+          Effect.provide([
+            NodeHttpServer.layerHttpServices,
+            mutationMiddlewareLayer,
+            sessionMiddlewareLayer,
+            handler
+          ]),
+          Effect.result
+        )
+      }
+
+      const conflict = yield* attempt("conflict")
+      const forbidden = yield* attempt("forbidden")
+      const invalid = yield* attempt("invalid-request")
+      const unavailable = yield* attempt("unavailable")
+      const missingService = yield* request.pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          deliveryGraphHandlersTestLayer
+        ]),
+        Effect.result
+      )
+
+      assert.isTrue(Result.isFailure(conflict))
+      assert.isTrue(Result.isFailure(forbidden))
+      assert.isTrue(Result.isFailure(invalid))
+      assert.isTrue(Result.isFailure(unavailable))
+      assert.isTrue(Result.isFailure(missingService))
+      if (
+        Result.isFailure(conflict) &&
+        Result.isFailure(forbidden) &&
+        Result.isFailure(invalid) &&
+        Result.isFailure(unavailable) &&
+        Result.isFailure(missingService)
+      ) {
+        assert.strictEqual(conflict.failure._tag, "ConflictApiError")
+        assert.strictEqual(forbidden.failure._tag, "ForbiddenApiError")
+        assert.strictEqual(invalid.failure._tag, "InvalidRequestApiError")
+        assert.strictEqual(unavailable.failure._tag, "ServiceUnavailableApiError")
+        assert.strictEqual(missingService.failure._tag, "ServiceUnavailableApiError")
+      }
     }))
 
   it.effect("creates an exact share from session-derived human owner authority", () =>

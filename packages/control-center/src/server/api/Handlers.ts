@@ -12,7 +12,12 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
-import type { ConflictApiError, InvalidRequestApiError, ServiceUnavailableApiError } from "../../api/errors.js"
+import type {
+  ConflictApiError,
+  ForbiddenApiError,
+  InvalidRequestApiError,
+  ServiceUnavailableApiError
+} from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
@@ -82,10 +87,12 @@ const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
 
 const mapClockifyActionSubmissionError = (
   error: ClockifyActionSubmissionError
-): Effect.Effect<never, ConflictApiError | InvalidRequestApiError | ServiceUnavailableApiError> => {
+): Effect.Effect<never, ConflictApiError | ForbiddenApiError | InvalidRequestApiError | ServiceUnavailableApiError> => {
   switch (error.reason) {
     case "conflict":
       return mapApplicationConflict(new ApplicationConflict())
+    case "forbidden":
+      return Effect.flatMap(forbiddenApiError, Effect.fail)
     case "invalid-request":
       return Effect.flatMap(invalidRequestApiError, Effect.fail)
     case "unavailable":

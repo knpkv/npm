@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
@@ -3345,6 +3346,18 @@ describe("first-party plugin runtime", () => {
           },
           session
         })
+        const forbiddenCorrection = yield* submissions.submit({
+          workspaceId: GOVERNED_WORKSPACE,
+          entityId: EntityId.make(GOVERNED_ENTITY_ID),
+          request: {
+            _tag: "correct-association",
+            expectedRevision: Revision.make(
+              "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
+            ),
+            jiraIssueKey: "OPS-42"
+          },
+          session
+        }).pipe(Effect.result)
         const record = yield* persistenceService.governedActions.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: result.actionId
@@ -3353,6 +3366,10 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(result.state, "succeeded")
         assert.strictEqual(record.head.state, "succeeded")
         assert.strictEqual(record.envelope.policy.requiredPermission, "workspace-approver")
+        assert.isTrue(Result.isFailure(forbiddenCorrection))
+        if (Result.isFailure(forbiddenCorrection)) {
+          assert.strictEqual(forbiddenCorrection.failure.reason, "forbidden")
+        }
         assert.strictEqual(yield* Ref.get(entryReads), 2)
         assert.strictEqual(yield* Ref.get(mutations), 0)
       }).pipe(

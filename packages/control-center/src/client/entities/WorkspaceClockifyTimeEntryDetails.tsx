@@ -1,5 +1,5 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
-import { useState, type FormEvent, type ReactElement, type ReactNode } from "react"
+import { useRef, useState, type FormEvent, type ReactElement, type ReactNode } from "react"
 import { Link } from "react-router"
 
 import type { SubmitClockifyActionRequest } from "../../api/deliveryGraph.js"
@@ -45,6 +45,7 @@ export const WorkspaceClockifyTimeEntryDetails = ({
 }): ReactElement => {
   const [jiraIssueKey, setJiraIssueKey] = useState("")
   const [rationale, setRationale] = useState("")
+  const approvalDecision = useRef<"approved" | "rejected">("approved")
   const correctionDisabled = !canCorrect || onSubmit === undefined || submission._tag === "submitting"
   const approvalDisabled = !canApprove || onSubmit === undefined || submission._tag === "submitting"
   const submitCorrection = (event: FormEvent): void => {
@@ -55,6 +56,18 @@ export const WorkspaceClockifyTimeEntryDetails = ({
         expectedRevision: timeEntry.sourceRevision,
         jiraIssueKey
       })
+  }
+  const submitApproval = (event: FormEvent): void => {
+    event.preventDefault()
+    if (!approvalDisabled && rationale.trim().length > 0) {
+      onSubmit({
+        _tag: "record-approval",
+        expectedRevision: timeEntry.sourceRevision,
+        decision: approvalDecision.current,
+        rationale: rationale.trim()
+      })
+      approvalDecision.current = "approved"
+    }
   }
   return (
     <article className={styles.document} data-workspace-clockify-time-entry-detail>
@@ -174,44 +187,36 @@ export const WorkspaceClockifyTimeEntryDetails = ({
             Correct association
           </button>
         </form>
-        <label>
-          Approval rationale
-          <input
-            disabled={approvalDisabled}
-            maxLength={1_000}
-            onChange={(event) => setRationale(event.currentTarget.value)}
-            required
-            value={rationale}
-          />
-        </label>
-        <button
-          disabled={approvalDisabled || rationale.trim().length === 0}
-          onClick={() =>
-            onSubmit?.({
-              _tag: "record-approval",
-              expectedRevision: timeEntry.sourceRevision,
-              decision: "approved",
-              rationale: rationale.trim()
-            })
-          }
-          type="button"
-        >
-          Approve revision
-        </button>
-        <button
-          disabled={approvalDisabled || rationale.trim().length === 0}
-          onClick={() =>
-            onSubmit?.({
-              _tag: "record-approval",
-              expectedRevision: timeEntry.sourceRevision,
-              decision: "rejected",
-              rationale: rationale.trim()
-            })
-          }
-          type="button"
-        >
-          Reject revision
-        </button>
+        <form onSubmit={submitApproval}>
+          <label>
+            Approval rationale
+            <input
+              disabled={approvalDisabled}
+              maxLength={1_000}
+              onChange={(event) => setRationale(event.currentTarget.value)}
+              required
+              value={rationale}
+            />
+          </label>
+          <button
+            disabled={approvalDisabled || rationale.trim().length === 0}
+            onClick={() => {
+              approvalDecision.current = "approved"
+            }}
+            type="submit"
+          >
+            Approve revision
+          </button>
+          <button
+            disabled={approvalDisabled || rationale.trim().length === 0}
+            onClick={() => {
+              approvalDecision.current = "rejected"
+            }}
+            type="submit"
+          >
+            Reject revision
+          </button>
+        </form>
         {submission._tag === "failed" ? <p role="alert">The governed action could not be submitted.</p> : null}
         {submission._tag === "succeeded" ? <p>Action recorded: {submission.result.state}</p> : null}
       </section>
