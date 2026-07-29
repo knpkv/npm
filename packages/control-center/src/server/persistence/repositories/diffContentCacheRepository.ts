@@ -38,6 +38,7 @@ const CleanupCandidateRow = Schema.Struct({
   workspaceId: WorkspaceId,
   digest: ContentBlobDigestSchema
 })
+const UnknownPersistedWorkspaceId = WorkspaceId.make("00000000-0000-7000-8000-000000000000")
 
 const makeDiffContentCacheRepository = Effect.gen(function*() {
   const database = yield* Database
@@ -153,7 +154,7 @@ const makeDiffContentCacheRepository = Effect.gen(function*() {
       const decoded = Schema.decodeUnknownResult(Schema.Array(CleanupCandidateRow))(rows)
       if (Result.isSuccess(decoded)) return decoded.success
       return yield* new PersistedRecordError({
-        workspaceId: WorkspaceId.make("00000000-0000-4000-8000-000000000000"),
+        workspaceId: UnknownPersistedWorkspaceId,
         recordKind: "diff-content-cache-cleanup",
         recordKey: "pending",
         diagnosticCode: "diff-content-cache-cleanup-schema-invalid"

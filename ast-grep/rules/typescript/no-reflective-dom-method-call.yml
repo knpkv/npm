@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-reflective-dom-method-call
+language: tsx
+severity: error
+message: "Narrow the DOM value and call its method directly instead of escaping through Reflect"
+
+rule:
+  pattern: Reflect.apply(Reflect.get($OBJECT, $METHOD), $OBJECT, $$$ARGS)
+
+files:
+  - "packages/control-center/e2e/**/*.spec.ts"
+
+ignores:
+  - "**/generated/**"
+
+note: |
+  Reflect.get returns an unchecked value and hides ordinary DOM method
+  contracts. Narrow browser values structurally, then invoke the method
+  directly. Deliberate generic reflection helpers outside E2E specs are not
+  affected.

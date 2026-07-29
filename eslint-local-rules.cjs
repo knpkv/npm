@@ -1394,6 +1394,165 @@ module.exports = {
       }
     }
   },
+  "require-playwright-clock-before-navigation": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "install Playwright's controllable clock before navigating the page under test",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        lateClock: "Call {{page}}.clock.install() before this test's first {{page}}.goto()."
+      }
+    },
+    create(context) {
+      const calls = []
+      const clockPage = (node, methods) => {
+        if (
+          node.callee.type !== "MemberExpression" ||
+          !methods.includes(staticPropertyName(node.callee.property)) ||
+          node.callee.object.type !== "MemberExpression" ||
+          staticPropertyName(node.callee.object.property) !== "clock" ||
+          node.callee.object.object.type !== "Identifier"
+        ) {
+          return undefined
+        }
+        return node.callee.object.object
+      }
+      const navigationPage = (node) =>
+        node.callee.type === "MemberExpression" &&
+        staticPropertyName(node.callee.property) === "goto" &&
+        node.callee.object.type === "Identifier"
+          ? node.callee.object
+          : undefined
+      const samePage = (left, right) =>
+        left.name === right.name && resolvedVariable(context, left) === resolvedVariable(context, right)
+
+      return {
+        CallExpression(node) {
+          calls.push(node)
+        },
+        "Program:exit"() {
+          const checked = new Map()
+          for (const clockCall of calls) {
+            const page = clockPage(clockCall, ["fastForward", "install", "pauseAt", "runFor"])
+            if (page === undefined) continue
+            const owner = enclosingFunction(clockCall)
+            const binding = resolvedVariable(context, page)
+            const ownerChecks = checked.get(owner) ?? new Set()
+            if (ownerChecks.has(binding)) continue
+            ownerChecks.add(binding)
+            checked.set(owner, ownerChecks)
+            const navigations = calls.filter((candidate) => {
+              const candidatePage = navigationPage(candidate)
+              return (
+                candidatePage !== undefined && enclosingFunction(candidate) === owner && samePage(page, candidatePage)
+              )
+            })
+            if (navigations.length === 0) continue
+            const firstNavigation = Math.min(...navigations.map((candidate) => candidate.range?.[0] ?? 0))
+            const installs = calls.filter((candidate) => {
+              const candidatePage = clockPage(candidate, ["install"])
+              return (
+                candidatePage !== undefined && enclosingFunction(candidate) === owner && samePage(page, candidatePage)
+              )
+            })
+            const installedBeforeNavigation = installs.some(
+              (candidate) => (candidate.range?.[0] ?? 0) < firstNavigation
+            )
+            if (!installedBeforeNavigation) {
+              context.report({
+                data: { page: page.name },
+                messageId: "lateClock",
+                node: installs[0] ?? clockCall
+              })
+            }
+          }
+        }
+      }
+    }
+  },
+  "no-invalid-branded-uuid-literal": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require canonical UUIDv7 literals in branded Control Center identifier constructors",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        invalidUuid: "Use a canonical lowercase UUIDv7 literal with {{identifier}}.make()."
+      }
+    },
+    create(context) {
+      const canonicalUuid7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
+      const uuid7Identifiers = new Set([
+        "AgentId",
+        "AgentThreadId",
+        "DomainEventId",
+        "EntityId",
+        "EnvironmentId",
+        "EvidenceClaimId",
+        "EvidenceId",
+        "FollowedResourceId",
+        "GovernedActionAttemptId",
+        "GovernedActionAuthorizationId",
+        "GovernedActionId",
+        "GovernedActionTransitionId",
+        "GraphNodeId",
+        "JobId",
+        "PersonId",
+        "PluginConnectionId",
+        "ProviderAccountId",
+        "ReadinessAssessmentId",
+        "RelationshipId",
+        "RelationshipRepairProposalId",
+        "RelationshipRepairReviewId",
+        "ReleaseId",
+        "ReviewSuggestionPublicationReservationId",
+        "RoleAssignmentId",
+        "SessionId",
+        "ShareId",
+        "WorkspaceId"
+      ])
+      return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            staticPropertyName(node.callee.property) !== "make" ||
+            node.callee.object.type !== "Identifier" ||
+            node.arguments.length === 0 ||
+            node.arguments[0].type !== "Literal" ||
+            typeof node.arguments[0].value !== "string" ||
+            canonicalUuid7.test(node.arguments[0].value)
+          ) {
+            return
+          }
+          const definition = importedBinding(context, node.callee.object)
+          const importedName =
+            definition?.node.type === "ImportSpecifier" ? staticPropertyName(definition.node.imported) : undefined
+          const source = importSource(definition)
+          if (
+            !isValueImport(definition) ||
+            importedName === undefined ||
+            !uuid7Identifiers.has(importedName) ||
+            typeof source !== "string" ||
+            !source.endsWith("/domain/identifiers.js")
+          ) {
+            return
+          }
+          context.report({
+            data: { identifier: importedName },
+            messageId: "invalidUuid",
+            node
+          })
+        }
+      }
+    }
+  },
   "no-opaque-instance-fields": {
     meta: {
       type: "problem",

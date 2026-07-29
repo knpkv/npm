@@ -168,10 +168,21 @@ const makeContentStore = Effect.gen(function*() {
         bytes: result.bytes.pipe(Stream.mapError((failure) => mapReadFailure(metadata, failure)))
       }
     }),
-    removeReproducible: (
+    removeReproducible: Effect.fn("ContentStore.removeReproducible")(function*(
       workspaceId: WorkspaceId,
       digest: BlobDigest
-    ) => blobs.removeReproducible(workspaceId, digest),
+    ) {
+      const metadata = yield* requireMetadata(workspaceId, digest).pipe(
+        Effect.map(Option.some),
+        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
+      )
+      // Another process may have completed the same stale cleanup candidate.
+      if (Option.isNone(metadata)) return
+      if (metadata.value.storageClass !== "reproducible-cache") {
+        return yield* new ContentMetadataMismatchError({ workspaceId, digest })
+      }
+      yield* blobs.removeAuthorizedBytes(workspaceId, digest)
+    }),
     verify: Effect.fn("ContentStore.verify")(function*(
       workspaceId: WorkspaceId,
       digest: BlobDigest,

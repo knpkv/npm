@@ -341,9 +341,8 @@ describe("CompleteDiffReads", () => {
 
   it.effect("serves healthy provider bytes when optional cache operations fail", () =>
     Effect.gen(function*() {
-      const failureModes: ReadonlyArray<"cache-get" | "content-put" | "cache-put"> = [
+      const failureModes: ReadonlyArray<"cache-get" | "cache-put"> = [
         "cache-get",
-        "content-put",
         "cache-put"
       ]
       for (const failureMode of failureModes) {
@@ -359,7 +358,7 @@ describe("CompleteDiffReads", () => {
                 ? Effect.fail(persistenceFailure)
                 : Effect.succeed(Option.none()),
             putContent: (_key, input) =>
-              failureMode === "cache-put" || failureMode === "content-put"
+              failureMode === "cache-put"
                 ? Effect.fail(persistenceFailure)
                 : Effect.succeed(
                   {
@@ -414,17 +413,20 @@ describe("CompleteDiffReads", () => {
       }
     }))
 
-  it.effect("keeps provider status validation authoritative after a cache hit", () =>
+  it.effect("keeps file status in cache identity before provider fallback", () =>
     Effect.gen(function*() {
       const providerCalls = yield* Ref.make(0)
+      const cacheStatuses = yield* Ref.make<ReadonlyArray<string>>([])
       const digest = ContentBlobDigest.make("e".repeat(64))
       const persistence: DiffContentCachePersistence = {
         diffContentCache: {
           get: (key) =>
-            Effect.succeed(
-              key.status === modifiedStatus
-                ? Option.some(digest)
-                : Option.none()
+            Ref.update(cacheStatuses, (statuses) => [...statuses, key.status]).pipe(
+              Effect.as(
+                key.status === modifiedStatus
+                  ? Option.some(digest)
+                  : Option.none()
+              )
             ),
           putContent: () => Effect.die("unused")
         },
@@ -470,6 +472,7 @@ describe("CompleteDiffReads", () => {
       assert.strictEqual(new TextDecoder().decode(cachedBytes), "cached")
       assert.strictEqual(mismatch._tag, "Failure")
       if (mismatch._tag === "Failure") assert.strictEqual(mismatch.failure._tag, "ApplicationConflict")
+      assert.deepStrictEqual(yield* Ref.get(cacheStatuses), [modifiedStatus, "deleted"])
       assert.strictEqual(yield* Ref.get(providerCalls), 1)
     }))
 

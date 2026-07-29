@@ -67,11 +67,8 @@ interface BlobStoreService {
     workspaceId: WorkspaceId,
     bytes: Uint8Array
   ) => Effect.Effect<BlobPutResult, BlobStoreError>
-  /**
-   * Remove bytes only while holding the SQLite writer lock, with a durable cleanup intent and
-   * after confirming that no cache entry references the reproducible digest.
-   */
-  readonly removeReproducible: (
+  /** Remove bytes only after ContentStore has authorized the persisted storage class. */
+  readonly removeAuthorizedBytes: (
     workspaceId: WorkspaceId,
     digest: BlobDigest
   ) => Effect.Effect<void, BlobStoreError>
@@ -535,7 +532,7 @@ export const makeBlobStore: (
     }
   })
 
-  const removeReproducible = Effect.fn("BlobStore.removeReproducible")(function*(
+  const removeAuthorizedBytes = Effect.fn("BlobStore.removeAuthorizedBytes")(function*(
     workspaceId: WorkspaceId,
     digest: BlobDigest
   ) {
@@ -662,7 +659,7 @@ export const makeBlobStore: (
     readAll,
     readRange,
     readStream,
-    removeReproducible,
+    removeAuthorizedBytes,
     repairReproducible,
     verify
   })

@@ -1,7 +1,10 @@
 import type { RlyDiffCodeViewHandle } from "@knpkv/rly/diff"
 import { type ReactNode, type RefObject, useEffect } from "react"
 
-/** Focus one lazily rendered immutable-diff line after the renderer scrolls it into view. */
+/**
+ * Own focus across lazy renderer replacements until the user takes focus or the request unmounts.
+ * Failed attempts are mutation-driven; this component never polls an absent line.
+ */
 export const DiffLineFocus = ({
   fileId,
   lineNumber,

@@ -877,6 +877,7 @@ test("launches an exact-head review and presents its durable findings", async ({
     await route.continue()
   })
 
+  await page.clock.install()
   await page.goto(canonicalEntityPath)
   await expect(page.getByText("Rendering complete diff…")).toBeVisible()
   const evidenceStamp = page.locator("[data-rly-evidence-stamp]")
@@ -921,7 +922,6 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(
     page.locator("strong").filter({ hasText: /^Reuse the original idempotency key$/u }).first()
   ).toBeVisible()
-  await page.clock.install()
   await page.getByRole("button", { name: "src/capture.ts:42" }).click()
   await page.clock.runFor(1_100)
   if (releaseRenderer === undefined) throw new Error("Expected the deferred diff renderer gate")
@@ -932,26 +932,24 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("export const capture = true")).toBeVisible()
   const focusedDiffLine = page.locator("diffs-container [data-code][data-additions] [data-line=\"42\"]")
   await expect(focusedDiffLine).toBeFocused()
-  await page.evaluate(`
-    {
-      const line = document.querySelector("diffs-container")?.shadowRoot?.querySelector(
-        '[data-code][data-additions] [data-line="42"]'
-      )
-      line?.replaceWith(line.cloneNode(true))
-    }
-  `)
+  const replaceFocusedDiffLine = () =>
+    focusedDiffLine.evaluate((line) => {
+      if (
+        !("cloneNode" in line) ||
+        typeof line.cloneNode !== "function" ||
+        !("replaceWith" in line) ||
+        typeof line.replaceWith !== "function"
+      ) {
+        throw new Error("Expected a replaceable rendered diff line")
+      }
+      line.replaceWith(line.cloneNode(true))
+    })
+  await replaceFocusedDiffLine()
   await expect(focusedDiffLine).toBeFocused()
   const wrapLines = page.getByRole("button", { name: "Wrap lines" })
   await wrapLines.focus()
   await expect(wrapLines).toBeFocused()
-  await page.evaluate(`
-    {
-      const line = document.querySelector("diffs-container")?.shadowRoot?.querySelector(
-        '[data-code][data-additions] [data-line="42"]'
-      )
-      line?.replaceWith(line.cloneNode(true))
-    }
-  `)
+  await replaceFocusedDiffLine()
   await expect(wrapLines).toBeFocused()
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()

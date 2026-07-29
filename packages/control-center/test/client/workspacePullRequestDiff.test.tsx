@@ -889,11 +889,16 @@ describe("DiffLineFocus ownership", () => {
     })
     while (callbacks.length > 0) callbacks.shift()?.(0)
 
-    expect(handle.focusLine).toHaveBeenCalledTimes(2)
+    const attemptsWhenIdle = vi.mocked(handle.focusLine).mock.calls.length
+    expect(attemptsWhenIdle).toBeGreaterThan(0)
     expect(callbacks).toHaveLength(0)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(handle.focusLine).toHaveBeenCalledTimes(attemptsWhenIdle)
   })
 
-  it("does not reclaim focus after the user moves to another control", async () => {
+  it("reclaims renderer-owned focus until the user moves to another control", async () => {
     const viewerRoot = document.createElement("div")
     const container = document.createElement("diffs-container")
     const shadow = container.shadowRoot
@@ -908,7 +913,9 @@ describe("DiffLineFocus ownership", () => {
     const root = createRoot(mount)
     roots.push(root)
     const handle = viewer(() => {
-      line.focus()
+      const renderedLine = shadow.querySelector<HTMLElement>("span")
+      if (renderedLine === null) return false
+      renderedLine.focus()
       return true
     })
 
@@ -924,14 +931,23 @@ describe("DiffLineFocus ownership", () => {
       )
     })
     expectShadowFocused(line)
+    const replacement = document.createElement("span")
+    replacement.tabIndex = -1
+    shadow.replaceChildren(replacement)
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+    expectShadowFocused(replacement)
+    expect(handle.focusLine).toHaveBeenCalledTimes(2)
+
     toolbar.focus()
-    shadow.replaceChildren(line.cloneNode(true))
+    shadow.replaceChildren(document.createElement("span"))
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 20))
     })
 
     expect(document.activeElement).toBe(toolbar)
-    expect(handle.focusLine).toHaveBeenCalledTimes(1)
+    expect(handle.focusLine).toHaveBeenCalledTimes(2)
   })
 
   it("relinquishes a pending request when the user focuses another control", async () => {

@@ -1,0 +1,14 @@
+id: no-bare-block-page-evaluate
+valid:
+  - page.evaluate(() => location.href)
+  - page.evaluate("document.title")
+  - |
+    page.evaluate("(() => ({ ready: true }))()")
+invalid:
+  - |
+    page.evaluate(`
+      {
+        document.querySelector("main")?.remove()
+      }
+    `)
+  - page.evaluate("{ document.querySelector('main')?.remove() }")

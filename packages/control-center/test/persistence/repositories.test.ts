@@ -11,6 +11,7 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { ContentStore } from "../../src/server/persistence/ContentStore.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
+  ContentMetadataMismatchError,
   PersistedRecordError,
   RecordNotFoundError,
   RevisionConflictError,
@@ -675,6 +676,20 @@ describe("workspace-scoped repositories", () => {
             lastVerifiedAt: null
           })
         }
+        const durableRemoval = yield* database.transaction(
+          contentStore.removeReproducible(WORKSPACE_A, durable.ref.digest)
+        ).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(durableRemoval))
+        if (Result.isFailure(durableRemoval)) {
+          assert.instanceOf(durableRemoval.failure, ContentMetadataMismatchError)
+        }
+        yield* database.transaction(
+          contentStore.removeReproducible(WORKSPACE_A, BlobDigest.make("f".repeat(64)))
+        )
+        assert.deepStrictEqual(
+          yield* blobs.readAll(WORKSPACE_A, durable.ref.digest),
+          new Uint8Array([2])
+        )
 
         const keyFor = (anchorCharacter: string): DiffContentCacheKey => ({
           workspaceId: WORKSPACE_A,
@@ -799,6 +814,39 @@ describe("workspace-scoped repositories", () => {
           yield* blobs.readAll(WORKSPACE_A, published.metadata.digest).pipe(Effect.result)
         ))
         assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("keeps malformed cleanup identities in the typed error channel", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const workspaces = yield* WorkspaceRepository
+        yield* workspaces.create(WORKSPACE_A, {
+          displayName: PAYMENTS,
+          createdAt: CREATED_AT
+        })
+        const published = yield* content.put(WORKSPACE_A, {
+          bytes: new Uint8Array([15]),
+          classification: "reproducible-cache",
+          mimeType: "application/octet-stream",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_A, published.metadata.digest)
+        yield* database.sql`PRAGMA foreign_keys = OFF`
+        yield* database.sql`UPDATE diff_content_cache_cleanup
+          SET workspace_id = '00000000-0000-4000-8000-000000000000'
+          WHERE workspace_id = ${WORKSPACE_A}
+            AND content_digest = ${published.metadata.digest}`
+        yield* database.sql`PRAGMA foreign_keys = ON`
+
+        const pending = yield* cache.pendingCleanup().pipe(Effect.result)
+        assert.isTrue(Result.isFailure(pending))
+        if (Result.isFailure(pending)) {
+          assert.instanceOf(pending.failure, PersistedRecordError)
+        }
       })
     ))
 

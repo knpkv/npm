@@ -101,6 +101,16 @@ The scoped ast-grep rule rejects `relative.startsWith("..")`, which incorrectly
 classifies a child named `..archive` as parent traversal. Match the exact `..`
 segment or `` `..${path.sep}` `` prefix and retain the absolute-path check.
 
+Control Center E2E tests that use Playwright's controllable clock must install
+it before the test's first navigation. Bare-block string expressions passed to
+`page.evaluate` are rejected; use a typed callback, while simple expressions
+and explicit IIFEs remain valid. Browser callbacks must narrow DOM capabilities
+instead of escaping through reflective method calls.
+
+Raw object-store byte removal is private to `ContentStore`, which verifies the
+persisted reproducible storage class before delegating. Other production modules
+must use the authorized content boundary.
+
 Reviewed Control Center server entrypoints require explicit exported return
 types. This check is deliberately scoped to `Auth.ts`, `TerminalRecovery.ts`,
 and `ControlCenterServer.ts`; expand the file list only after annotating and

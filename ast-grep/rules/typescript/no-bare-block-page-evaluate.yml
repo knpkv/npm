@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-bare-block-page-evaluate
+language: tsx
+severity: error
+message: "Pass a typed callback to page.evaluate instead of a bare-block string"
+
+rule:
+  pattern: $PAGE.evaluate($SCRIPT)
+  has:
+    field: arguments
+    regex: '^\(\s*["''`]\s*\{'
+
+files:
+  - "packages/control-center/e2e/**/*.spec.ts"
+
+ignores:
+  - "**/generated/**"
+
+note: |
+  Bare-block strings rely on Playwright expression wrapping and are not
+  type-checked. Simple expressions and deliberate IIFEs remain allowed.

@@ -35,6 +35,89 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
 
 await assertRuleDiagnostics({
   code: `
+    test("late clock", async ({ page }) => {
+      await page.goto("/work")
+      await page.clock.install()
+      await page.clock.runFor(1_000)
+    })
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-invalid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    test("late pause", async ({ page }) => {
+      await page.goto("/work")
+      await page.clock.pauseAt(new Date("2026-01-01T00:00:00Z"))
+    })
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-pause-invalid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    test("late install", async ({ page }) => {
+      await page.goto("/work")
+      await page.clock.install()
+    })
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-install-invalid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    test("installed clock", async ({ page }) => {
+      await page.clock.install()
+      await page.goto("/work")
+      await page.clock.runFor(1_000)
+    })
+  `,
+  expected: 0,
+  filePath: "packages/control-center/e2e/eslint-playwright-clock-valid.spec.ts",
+  ruleId: "local-rules/require-playwright-clock-before-navigation"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkspaceId } from "../../src/domain/identifiers.js"
+    WorkspaceId.make("00000000-0000-4000-8000-000000000000")
+    WorkspaceId.make("not-a-uuid")
+  `,
+  expected: 2,
+  filePath: "packages/control-center/test/eslint-branded-uuid-invalid.ts",
+  ruleId: "local-rules/no-invalid-branded-uuid-literal"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { PrReviewSuggestionRevisionId, WorkspaceId } from "../../src/domain/identifiers.js"
+    WorkspaceId.make("00000000-0000-7000-8000-000000000000")
+    WorkspaceId.make(candidate)
+    PrReviewSuggestionRevisionId.make("sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/eslint-branded-uuid-valid.ts",
+  ruleId: "local-rules/no-invalid-branded-uuid-literal"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkspaceId } from "../src/domain/identifiers.js"
+    WorkspaceId.make("00000000-0000-4000-8000-000000000000")
+  `,
+  expected: 1,
+  filePath: "packages/control-center/e2e/eslint-branded-uuid-invalid.spec.ts",
+  ruleId: "local-rules/no-invalid-branded-uuid-literal"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Fx from "effect/Effect"
     import { Effect as RootFx } from "effect"
     import { runPromise as run } from "effect/Effect"
