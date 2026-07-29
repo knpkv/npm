@@ -127,9 +127,11 @@ import {
   ACTION_ID as GOVERNED_ACTION_ID,
   CONNECTION_ID as GOVERNED_CONNECTION_ID,
   ENTITY_ID as GOVERNED_ENTITY_ID,
+  PERSON_ID as GOVERNED_PERSON_ID,
   seedGovernedAction,
   seedGovernedActionAuthorityRoots,
   seedGovernedActionCurrentInputs,
+  SESSION_ID as GOVERNED_SESSION_ID,
   WORKSPACE_ID as GOVERNED_WORKSPACE_ID
 } from "../governance/fixtures/authorizedGovernedAction.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -3262,9 +3264,9 @@ describe("first-party plugin runtime", () => {
         const { sql } = yield* Database
         yield* seedGovernedActionAuthorityRoots("clockify-approval")
         yield* sql`UPDATE sessions SET permission = 'workspace-approver'
-          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND session_id = ${
-          SessionId.make("01890f6f-6d6a-7cc0-98d2-440000000004")
-        }`
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND session_id = ${SessionId.make(GOVERNED_SESSION_ID)}`
+        const changedSessions = yield* sql<{ readonly changes: number }>`SELECT changes() AS changes`
+        assert.strictEqual(changedSessions[0]?.changes, 1)
         const apiKeyRef = yield* secretStore.create(new TextEncoder().encode("clockify-secret"))
         const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
           { _tag: "secret-reference", key: "apiKey", ref: apiKeyRef },
@@ -3320,11 +3322,11 @@ describe("first-party plugin runtime", () => {
         )
         const submissions = Context.get(composed, ClockifyActionSubmissions)
         const session = Schema.decodeSync(SessionSummary)({
-          sessionId: "01890f6f-6d6a-7cc0-98d2-440000000004",
+          sessionId: GOVERNED_SESSION_ID,
           workspaceId: GOVERNED_WORKSPACE,
           actor: {
             _tag: "human",
-            personId: "01890f6f-6d6a-7cc0-98d2-440000000005"
+            personId: GOVERNED_PERSON_ID
           },
           permission: "workspace-approver",
           createdAt: "2026-07-15T09:00:00.000Z",

@@ -1864,6 +1864,38 @@ describe("canonical workspace entity", () => {
     })
   })
 
+  it("mirrors the Jira issue-key request boundary in the correction input", async () => {
+    const host = await renderView(
+      () => undefined,
+      clockifyState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      vi.fn(),
+      { canApprove: false, canCorrect: true }
+    )
+    const jiraIssueKey = host.querySelector<HTMLInputElement>("[data-clockify-governed-actions] input")
+    if (jiraIssueKey === null) throw new Error("Expected the Clockify correction input")
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    const boundaryKey = `${"A".repeat(98)}-1`
+    const overlongKey = `${"A".repeat(99)}-1`
+
+    expect(boundaryKey).toHaveLength(100)
+    expect(overlongKey).toHaveLength(101)
+    expect(jiraIssueKey.maxLength).toBe(100)
+    await act(async () => {
+      valueSetter.call(jiraIssueKey, boundaryKey)
+      jiraIssueKey.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(jiraIssueKey.checkValidity()).toBe(true)
+    await act(async () => {
+      valueSetter.call(jiraIssueKey, overlongKey)
+      jiraIssueKey.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    expect(jiraIssueKey.checkValidity()).toBe(false)
+  })
+
   it("aborts and ignores a superseded Clockify submission when the entity changes", async () => {
     const entityA = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000001")
     const entityB = EntityId.make("01890f6f-6d6a-7cc0-98d2-550000000002")

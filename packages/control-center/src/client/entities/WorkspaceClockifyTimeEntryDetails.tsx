@@ -177,6 +177,7 @@ export const WorkspaceClockifyTimeEntryDetails = ({
             Jira issue key
             <input
               disabled={correctionDisabled}
+              maxLength={100}
               onChange={(event) => setJiraIssueKey(event.currentTarget.value)}
               pattern="[A-Z][A-Z0-9]*-[1-9][0-9]*"
               required
