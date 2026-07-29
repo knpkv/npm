@@ -10,11 +10,9 @@ import { GovernedActionId, GovernedActionTransitionId, WorkspaceId } from "../..
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 import { Database } from "../../../persistence/Database.js"
 import { makeGovernedActionTransaction } from "../../../persistence/repositories/governed-action/transaction.js"
-import { digestGovernedActionTransitionCommand } from "../../governedActionDigests.js"
 import { GovernedActionExecutionStoreError } from "../GovernedActionExecutionStore.js"
 import {
   type DispatchInboxOutcome,
-  dispatchInboxOutcomeCommand,
   dispatchInboxOutcomeKind,
   dispatchInboxOutcomeObservedAt,
   dispatchInboxOutcomeUsesAuthorizationObservation,
@@ -166,12 +164,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
     )
-    const command = dispatchInboxOutcomeCommand(input.outcome)
     const encoded = yield* encodeDispatchInboxOutcome(input.outcome).pipe(
-      Effect.provideService(Crypto.Crypto, cryptoService),
-      Effect.mapError(mapFailure)
-    )
-    const commandDigest = yield* digestGovernedActionTransitionCommand(command).pipe(
       Effect.provideService(Crypto.Crypto, cryptoService),
       Effect.mapError(mapFailure)
     )
@@ -184,41 +177,42 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
         const now = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
         const lease = yield* readLease(permitTokenDigest, input.operation)
         const existing = yield* readExisting(permitTokenDigest, input.operation)
-        const expected = {
-          workspaceId: lease.workspaceId,
-          actionId: lease.actionId,
-          resultKind,
-          outcomeJson: encoded.outcomeJson,
-          outcomeDigest: encoded.outcomeDigest,
-          commandDigest
-        }
         if (existing !== undefined) {
-          if (!outcomeMatches(existing, expected)) return yield* storeError(input.operation, "conflict")
-          return { lease, outcomeId: existing.outcomeId }
+          if (
+            !outcomeMatches(existing, {
+              workspaceId: lease.workspaceId,
+              actionId: lease.actionId,
+              resultKind,
+              outcomeJson: encoded.outcomeJson,
+              outcomeDigest: encoded.outcomeDigest,
+              commandDigest: existing.expectedCommandDigest
+            })
+          ) return yield* storeError(input.operation, "conflict")
+          return {
+            lease,
+            outcomeId: existing.outcomeId,
+            commandDigest: existing.expectedCommandDigest
+          }
         }
 
-        const record = yield* transaction.read({
+        const commandDigest = yield* folder.prepareExpectedCommand(input.operation, {
+          _tag: "dispatch",
           workspaceId: lease.workspaceId,
-          actionId: lease.actionId
+          actionId: lease.actionId,
+          outcome: input.outcome,
+          observedAt: outcomeObservedAt
         })
-        const usesAuthorizationObservation = dispatchInboxOutcomeUsesAuthorizationObservation(input.outcome)
-        const authorizationObservation = usesAuthorizationObservation &&
-          record.authorization !== null &&
-          DateTime.Equivalence(outcomeObservedAt, record.authorization.authorizedAt)
         if (
           DateTime.Order(input.receivedAt, now) > 0 ||
           DateTime.Order(outcomeObservedAt, input.receivedAt) > 0 ||
-          (usesAuthorizationObservation
-            ? !authorizationObservation
-            : DateTime.Order(outcomeObservedAt, lease.createdAt) < 0) ||
+          (
+            !dispatchInboxOutcomeUsesAuthorizationObservation(input.outcome) &&
+            DateTime.Order(outcomeObservedAt, lease.createdAt) < 0
+          ) ||
           (resultKind !== "manual-unknown" && DateTime.Order(outcomeObservedAt, lease.dispatchDeadline) >= 0) ||
           DateTime.Order(input.receivedAt, lease.leaseExpiresAt) >= 0 ||
           lease.recoveryClaimCount !== 0
         ) return yield* storeError(input.operation, "conflict")
-
-        if (record.head.state !== "started" && record.head.state !== "cancel-requested") {
-          return yield* storeError(input.operation, "conflict")
-        }
 
         const outcomeId = yield* cryptoService.randomUUIDv7
         yield* sql`INSERT INTO governed_action_provider_outcomes (
@@ -230,7 +224,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
           NULL, ${resultKind}, 1, ${encoded.outcomeJson}, ${encoded.outcomeDigest},
           ${commandDigest}, ${DateTime.formatIso(outcomeObservedAt)}, ${DateTime.formatIso(input.receivedAt)}
         )`
-        return { lease, outcomeId }
+        return { lease, outcomeId, commandDigest }
       })
     ).pipe(Effect.mapError(mapFailure))
 
@@ -244,7 +238,7 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
       outcomeJson: encoded.outcomeJson,
       outcomeDigest: encoded.outcomeDigest,
       observedAt: outcomeObservedAt,
-      commandDigest
+      commandDigest: persisted.commandDigest
     })
   })
 

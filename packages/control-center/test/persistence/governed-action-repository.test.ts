@@ -17,6 +17,7 @@ import {
 } from "../../src/domain/governedAction/index.js"
 import { GovernedActionId } from "../../src/domain/identifiers.js"
 import { PluginPayloadJson } from "../../src/domain/plugins/bounds.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
   digestGovernedActionAuthorization,
@@ -132,6 +133,7 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
   options?: {
     readonly actionKind?: string
     readonly evidenceCurrentUntil?: string
+    readonly expectedRevision?: string
     readonly idempotencyKey?: string
     readonly policyId?: string
     readonly proposalKey?: string
@@ -174,7 +176,7 @@ const makeEnvelope = Effect.fn("GovernedActionRepositoryTest.makeEnvelope")(func
       request: {
         actionKind: options?.actionKind ?? "transition",
         target: { entityType: "issue", vendorImmutableId: "PAY-42" },
-        expectedRevision: "1",
+        expectedRevision: options?.expectedRevision ?? "1",
         payload,
         evidenceIds: ["provider-evidence-1"]
       },
@@ -1292,12 +1294,14 @@ describe("governed action writer", () => {
         index: number,
         authorizedAt: string,
         terminalAt: string,
-        actionKind = "record-approval"
+        actionKind = "record-approval",
+        expectedRevision = "matching-revision"
       ) {
         const actionId = fixtureId("40", index)
         const authorizationId = fixtureId("43", index)
         const envelope = yield* makeEnvelope(actionId, {
           actionKind,
+          expectedRevision,
           idempotencyKey: `governed-action:PAY-42:approval:${String(index)}`,
           proposalKey: `approval:PAY-42:${String(index)}`
         })
@@ -1355,7 +1359,9 @@ describe("governed action writer", () => {
         yield* commitTerminalAction(
           index,
           `2026-07-15T10:01:${String(index).padStart(2, "0")}.000Z`,
-          `2026-07-15T10:20:${String(index).padStart(2, "0")}.000Z`
+          `2026-07-15T10:20:${String(index).padStart(2, "0")}.000Z`,
+          "record-approval",
+          "other-revision"
         )
       }
       for (let index = 20; index < 100; index++) {
@@ -1363,12 +1369,13 @@ describe("governed action writer", () => {
           index,
           "2026-07-15T10:01:40.000Z",
           "2026-07-15T10:20:30.000Z",
-          "transition"
+          "transition",
+          "other-revision"
         )
       }
       const latestAuthorizedActionId = yield* commitTerminalAction(
         100,
-        "2026-07-15T10:01:30.000Z",
+        "2026-07-15T10:00:30.000Z",
         "2026-07-15T10:03:00.000Z"
       )
       const selected = yield* repository.readLatestTerminalByTarget({
@@ -1376,10 +1383,11 @@ describe("governed action writer", () => {
         providerId: "jira",
         targetEntityId: ENTITY_ID,
         actionKind: "record-approval",
+        expectedRevision: Revision.make("matching-revision"),
         limit: 20
       })
 
-      assert.lengthOf(selected, 20)
+      assert.lengthOf(selected, 1)
       assert.strictEqual(selected[0]?.envelope.actionId, latestAuthorizedActionId)
     })))
 

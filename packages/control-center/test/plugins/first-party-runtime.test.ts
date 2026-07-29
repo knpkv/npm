@@ -2939,6 +2939,7 @@ describe("first-party plugin runtime", () => {
               userId: "user-1",
               description: "Review payment safeguards",
               billable: true,
+              customFieldValues: [],
               projectId: null,
               taskId: null,
               tagIds: [],

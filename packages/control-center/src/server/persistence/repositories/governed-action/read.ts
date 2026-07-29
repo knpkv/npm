@@ -100,6 +100,10 @@ export const selectLatestTerminalByTarget = (
   candidates.filter(({ authorization, envelope, head }) =>
     envelope.proposal.request.actionKind === request.actionKind &&
     (
+      request.expectedRevision === undefined ||
+      envelope.proposal.request.expectedRevision === request.expectedRevision
+    ) &&
+    (
       request.actionKind !== "record-approval" ||
       (
         authorization !== null &&

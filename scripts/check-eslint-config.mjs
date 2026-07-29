@@ -1058,6 +1058,46 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const locatorText = (digest, providerToken) => {
+      if (digest) return \`clockify-correction:v1:\${digest}\`
+      return providerToken
+    }
+    const reconciliationKey = (digest, providerToken) =>
+      PluginActionReconciliationKey.make(locatorText(digest, providerToken))
+    const matches = request.reconciliationKey === reconciliationKey(request.payloadDigest, providerToken)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-conditional-return-invalid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Schema from "effect/Schema"
+    import { PluginActionPayloadDigest, PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const ReconciliationLocator = Schema.TemplateLiteralParser([
+      "clockify-correction:v1:",
+      PluginActionPayloadDigest
+    ])
+    const locatorText = (digest, providerToken) => {
+      if (digest) {
+        return Schema.encodeSync(ReconciliationLocator)(["clockify-correction:v1:", digest])
+      }
+      return providerToken
+    }
+    const reconciliationKey = (digest, providerToken) =>
+      PluginActionReconciliationKey.make(locatorText(digest, providerToken))
+    const locator = Schema.decodeUnknownSync(ReconciliationLocator)(request.reconciliationKey)
+    const matches = locator[1] === request.payloadDigest
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-conditional-return-valid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Schema from "effect/Schema"
     import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
     const reconciliationKey = (digest) =>

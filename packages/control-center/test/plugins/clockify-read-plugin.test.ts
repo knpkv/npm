@@ -64,12 +64,18 @@ const configuration = {
   operationTimeoutMillis: 5_000
 }
 
+const emptyCustomFieldValues: ReadonlyArray<{
+  readonly customFieldId: string
+  readonly value?: {}
+}> = []
+
 const timeEntry = (id: string, userId = "user-1", overrides: Readonly<Record<string, unknown>> = {}) => ({
   id,
   workspaceId: "workspace-1",
   userId,
   description: `Work on ${id}`,
   billable: true,
+  customFieldValues: emptyCustomFieldValues,
   projectId: "project-1",
   tagIds: ["delivery", "review"],
   timeInterval: {
@@ -947,6 +953,14 @@ describe("ClockifyReadPlugin", () => {
       }, {
         name: "unsupported-type",
         entry: Option.some(timeEntry("entry-1", "user-1", { type: "HOLIDAY" })),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "custom-fields-not-hydrated",
+        entry: Option.some((({ customFieldValues: _customFieldValues, ...entry }) => entry)(
+          timeEntry("entry-1")
+        )),
         deriveRevision: true,
         expectedRevision: "",
         jiraIssueKey: "OPS-42"

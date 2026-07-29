@@ -90,9 +90,7 @@ export const ClockifyCorrectAssociationPayload = Schema.TaggedStruct(CORRECT_ASS
   jiraIssueKey: ClockifyJiraIssueKey,
   originalDescription: ClockifyDescription,
   correctedDescription: ClockifyWritableDescription,
-  customFields: Schema.optionalKey(
-    Schema.Array(ClockifyCustomField).check(Schema.isMaxLength(50))
-  ),
+  customFields: Schema.Array(ClockifyCustomField).check(Schema.isMaxLength(50)),
   start: ClockifyActionTimestamp,
   end: Schema.NullOr(ClockifyActionTimestamp),
   duration: Schema.NullOr(ClockifyDuration),
@@ -239,6 +237,7 @@ const samePreservedFields = (
   snapshot: ClockifyTimeEntrySnapshot,
   payload: ClockifyCorrectAssociationPayload
 ): boolean =>
+  snapshot.customFieldsComplete &&
   snapshot.workspaceId === payload.workspaceId &&
   snapshot.userId === payload.userId &&
   snapshot.id === payload.entryId &&
@@ -250,7 +249,7 @@ const samePreservedFields = (
   snapshot.billable === payload.billable &&
   snapshot.entryType === payload.entryType &&
   canonicalizeGovernedActionJson(snapshot.customFields) ===
-    canonicalizeGovernedActionJson(payload.customFields ?? []) &&
+    canonicalizeGovernedActionJson(payload.customFields) &&
   snapshot.tagIds.length === payload.tagIds.length &&
   snapshot.tagIds.every((tagId, index) => tagId === payload.tagIds[index])
 
@@ -392,6 +391,9 @@ export const makeClockifyGovernedActions = (
     const payload: ClockifyActionPayload = request.actionKind === CORRECT_ASSOCIATION
       ? yield* Effect.gen(function*() {
         yield* assertCorrectable(snapshot)
+        if (!snapshot.customFieldsComplete) {
+          return yield* conflict("clockify-time-entry-custom-fields-incomplete")
+        }
         const requested = yield* Schema.decodeUnknownEffect(Schema.toType(CorrectAssociationRequest))(
           request.payload
         ).pipe(Effect.mapError(() => configurationFailure("clockify-correction-request-invalid")))
@@ -547,7 +549,7 @@ export const makeClockifyGovernedActions = (
         payload.entryId,
         {
           billable: payload.billable,
-          customFields: payload.customFields ?? [],
+          customFields: payload.customFields,
           description: payload.correctedDescription,
           ...(payload.end === null ? {} : { end: payload.end }),
           ...(payload.projectId === null ? {} : { projectId: payload.projectId }),

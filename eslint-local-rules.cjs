@@ -774,9 +774,9 @@ module.exports = {
       const isRequestReconciliationKey = (expression) =>
         expression.type === "MemberExpression" && staticPropertyName(expression.property) === "reconciliationKey"
       const isNullLiteral = (expression) => expression.type === "Literal" && expression.value === null
-      const returnedExpression = (expression) => {
+      const returnedExpressions = (expression) => {
         if (expression.type === "ArrowFunctionExpression" && expression.body.type !== "BlockStatement") {
-          return expression.body
+          return [expression.body]
         }
         if (
           (expression.type === "ArrowFunctionExpression" ||
@@ -784,10 +784,34 @@ module.exports = {
             expression.type === "FunctionDeclaration") &&
           expression.body.type === "BlockStatement"
         ) {
-          const returns = expression.body.body.filter((statement) => statement.type === "ReturnStatement")
-          return returns.length === 1 ? returns[0].argument : null
+          const returns = []
+          const collectReturns = (node) => {
+            if (node.type === "ReturnStatement") {
+              if (node.argument !== null) returns.push(node.argument)
+              return
+            }
+            if (
+              node !== expression.body &&
+              (node.type === "ArrowFunctionExpression" ||
+                node.type === "FunctionExpression" ||
+                node.type === "FunctionDeclaration")
+            )
+              return
+            for (const key of context.sourceCode.visitorKeys[node.type] ?? []) {
+              const child = node[key]
+              if (Array.isArray(child)) {
+                for (const entry of child) {
+                  if (entry !== null) collectReturns(entry)
+                }
+              } else if (child !== null && child !== undefined) {
+                collectReturns(child)
+              }
+            }
+          }
+          collectReturns(expression.body)
+          return returns
         }
-        return expression
+        return null
       }
       const isTemplateLiteralParserSchema = (expression, visited = new Set()) => {
         const unwrapped = unwrapTypeExpression(expression)
@@ -807,8 +831,10 @@ module.exports = {
       const containsStructuredLocator = (expression, visited = new Set()) => {
         if (expression === null || expression === undefined || visited.has(expression)) return false
         visited.add(expression)
-        const returned = returnedExpression(expression)
-        if (returned !== expression) return containsStructuredLocator(returned, visited)
+        const returned = returnedExpressions(expression)
+        if (returned !== null) {
+          return returned.some((candidate) => containsStructuredLocator(candidate, new Set(visited)))
+        }
         if (expression.type === "TemplateLiteral") {
           return expression.quasis.some((quasi) => quasi.value.raw.includes(":"))
         }

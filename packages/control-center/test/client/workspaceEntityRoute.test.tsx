@@ -2,7 +2,7 @@
 
 import { PortalProvider } from "@knpkv/rly/foundations"
 import * as Schema from "effect/Schema"
-import { type ReactElement, act, useState } from "react"
+import { type ComponentProps, type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { MemoryRouter, useLocation, useNavigate } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -851,7 +851,8 @@ const renderView = async (
   viewState: WorkspaceEntityState = state,
   onReviewStart: (prompt?: DurableAgentPrompt) => void = () => undefined,
   reviewState: PullRequestReviewControllerState = pullRequestReviewState,
-  reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport
+  reviewSuggestionRevisionTransport?: ReviewSuggestionRevisionTransport,
+  clockifyActionSubmit?: ComponentProps<typeof WorkspaceEntityView>["clockifyActionSubmit"]
 ): Promise<HTMLElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -860,6 +861,8 @@ const renderView = async (
     <PortalProvider>
       <MemoryRouter>
         <WorkspaceEntityView
+          clockifyActionCanSubmit={clockifyActionSubmit !== undefined}
+          {...(clockifyActionSubmit === undefined ? {} : { clockifyActionSubmit })}
           onAskAgent={onAskAgent}
           originHref={`/w/${WORKSET_WORKSPACE_ID}/items?q=payments#results`}
           originLabel="Back to items"
@@ -1685,7 +1688,15 @@ describe("canonical workspace entity", () => {
         graph: { ...clockifyInspection.graph, relationships: [] }
       }
     } satisfies WorkspaceEntityState
-    const host = await renderView(() => undefined, unattributedState)
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      unattributedState,
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction
+    )
 
     expect(host.querySelector("[data-workspace-clockify-time-entry-detail]")).not.toBeNull()
     expect(host.textContent).toContain("2h 15m")
@@ -1701,7 +1712,30 @@ describe("canonical workspace entity", () => {
     expect(host.querySelector("[data-clockify-approval] time")?.getAttribute("datetime")).toBe(
       "2026-07-14T10:05:00.000Z"
     )
-    expect(host.querySelector("input, textarea, select")).toBeNull()
+    const actionInputs = host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")
+    expect(actionInputs).toHaveLength(2)
+    const jiraIssueKey = actionInputs[0]
+    const rationale = actionInputs[1]
+    if (jiraIssueKey === undefined || rationale === undefined) {
+      throw new Error("Expected Clockify governed action inputs")
+    }
+    const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (valueSetter === undefined) throw new Error("Expected the input value setter")
+    await act(async () => {
+      valueSetter.call(rationale, "Reviewed against the delivery record")
+      rationale.dispatchEvent(new Event("input", { bubbles: true }))
+    })
+    const approve = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Approve revision"
+    )
+    if (approve === undefined) throw new Error("Expected the Clockify approval action")
+    await act(async () => approve.click())
+    expect(submitClockifyAction).toHaveBeenCalledWith({
+      _tag: "record-approval",
+      expectedRevision: clockifyInspection.source.revision,
+      decision: "approved",
+      rationale: "Reviewed against the delivery record"
+    })
 
     const pendingHost = await renderView(() => undefined, {
       ...unattributedState,

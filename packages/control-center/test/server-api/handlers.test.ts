@@ -73,6 +73,7 @@ import {
   PrReviewSuggestionValidated
 } from "../../src/domain/prReviewRevision.js"
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
@@ -107,6 +108,7 @@ import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
   LiveStreamAdmission
 } from "../../src/server/api/LiveStreamAdmission.js"
+import { ClockifyActionSubmissions } from "../../src/server/application/clockifyActionSubmissions.js"
 import { Auth } from "../../src/server/auth/Auth.js"
 import { CredentialRejectedError } from "../../src/server/auth/errors.js"
 import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
@@ -452,6 +454,53 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("submits an exact-revision Clockify approval through the authenticated product boundary", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const actionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-000000000099")
+      const applications = Layer.mergeAll(
+        deliveryGraphApplicationLayer,
+        Layer.succeed(ClockifyActionSubmissions, {
+          submit: (input) => Ref.set(received, input).pipe(Effect.as({ actionId, state: "succeeded" }))
+        })
+      )
+      const handler = deliveryGraphHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(applications)
+      )
+      const expectedRevision = Revision.make("clockify-revision-42")
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["deliveryGraph"])
+        return yield* client.deliveryGraph.submitClockifyAction({
+          params: { entityId: sharedEntityId },
+          payload: {
+            _tag: "record-approval",
+            expectedRevision,
+            decision: "approved",
+            rationale: "Reviewed against the delivery record"
+          }
+        })
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.deepStrictEqual(result, { actionId, state: "succeeded" })
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        entityId: sharedEntityId,
+        request: {
+          _tag: "record-approval",
+          expectedRevision,
+          decision: "approved",
+          rationale: "Reviewed against the delivery record"
+        }
+      })
+    }))
+
   it.effect("creates an exact share from session-derived human owner authority", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<

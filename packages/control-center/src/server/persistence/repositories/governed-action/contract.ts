@@ -21,7 +21,7 @@ import {
   PluginConnectionId,
   WorkspaceId
 } from "../../../../domain/identifiers.js"
-import { ProviderId } from "../../../../domain/sourceRevision.js"
+import { ProviderId, Revision } from "../../../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../../../domain/utcTimestamp.js"
 
 /** Immutable identity of the audit record paired with one action transition. */
@@ -219,6 +219,7 @@ export const GovernedActionTargetReadInput = Schema.Struct({
   providerId: ProviderId,
   targetEntityId: EntityId,
   actionKind: GovernedActionEnvelopeV1.fields.proposal.fields.request.fields.actionKind,
+  expectedRevision: Schema.optionalKey(Revision),
   limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 100 }))
 })
 

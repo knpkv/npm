@@ -42,6 +42,8 @@ import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimit
 import { governedReviewSuggestionPublicationGatewayLayer } from "../application/GovernedReviewSuggestionPublicationGateway.js"
 import {
   authorizedSharesLayer,
+  clockifyActionSubmissionsLayer,
+  clockifyActionSubmissionsUnavailableLayer,
   codePipelineReadsLayer,
   completeDiffReadsLayer,
   deliveryGraphInspectionLayer,
@@ -426,6 +428,15 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       Layer.provide(publicationConnections),
       Layer.provide(persistence)
     )
+  const clockifyActionSubmissions = !governedActionExecutionReady || publicationConnections === null
+    ? clockifyActionSubmissionsUnavailableLayer
+    : clockifyActionSubmissionsLayer.pipe(
+      Layer.provide(governedActionSubmission),
+      Layer.provide(governedActionPolicyBindingSourceLayer),
+      Layer.provide(governedActionProposalAuthorityLiveLayer.pipe(Layer.provide(database))),
+      Layer.provide(publicationConnections),
+      Layer.provide(persistence)
+    )
   const pullRequestReviews = pullRequestReviewsLayer.pipe(
     Layer.provide(providerRegistry),
     Layer.provide(reviewSuggestionPublications),
@@ -519,6 +530,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     releaseAgent,
     releaseAgentJobs,
     pullRequestReviews,
+    clockifyActionSubmissions,
     liveEventRuntime,
     databaseDrain
   )

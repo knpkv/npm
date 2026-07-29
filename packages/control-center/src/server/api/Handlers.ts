@@ -12,11 +12,16 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
+import type { ConflictApiError, InvalidRequestApiError, ServiceUnavailableApiError } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import {
+  type ClockifyActionSubmissionError,
+  ClockifyActionSubmissions
+} from "../application/clockifyActionSubmissions.js"
 import { listFirstPartyServiceMetadata } from "../application/pluginAdministration.js"
 import { collectTimelineExport, encodeTimelineCsv, encodeTimelineJson } from "../application/timelineExports.js"
 import { Auth } from "../auth/Auth.js"
@@ -25,7 +30,7 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
-  type ApplicationConflict,
+  ApplicationConflict,
   type ApplicationRateLimited,
   type ApplicationResourceNotFound,
   type ApplicationServiceUnavailable,
@@ -74,6 +79,19 @@ const requireWorkspaceRead = (session: CurrentSession["Service"]) =>
   session.permission === "workspace-owner" || session.permission === "workspace-approver"
     ? Effect.void
     : Effect.flatMap(forbiddenApiError, Effect.fail)
+
+const mapClockifyActionSubmissionError = (
+  error: ClockifyActionSubmissionError
+): Effect.Effect<never, ConflictApiError | InvalidRequestApiError | ServiceUnavailableApiError> => {
+  switch (error.reason) {
+    case "conflict":
+      return mapApplicationConflict(new ApplicationConflict())
+    case "invalid-request":
+      return Effect.flatMap(invalidRequestApiError, Effect.fail)
+    case "unavailable":
+      return Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+  }
+}
 
 interface TimelineExportQuery {
   readonly actor?: TimelineActorKind | undefined
@@ -742,6 +760,7 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
     Effect.gen(function*() {
       const inspection = yield* DeliveryGraphInspection
       const repairProposals = yield* RelationshipRepairProposals
+      const clockifyActions = Option.getOrUndefined(yield* Effect.serviceOption(ClockifyActionSubmissions))
       return handlers
         .handle("workspaceEntity", ({ params }) =>
           Effect.gen(function*() {
@@ -754,6 +773,22 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
+          }))
+        .handle("submitClockifyAction", ({ params, payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            if (clockifyActions === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* clockifyActions.submit({
+              workspaceId: session.workspaceId,
+              entityId: params.entityId,
+              request: payload,
+              session
+            }).pipe(Effect.catchTag(
+              "ClockifyActionSubmissionError",
+              mapClockifyActionSubmissionError
+            ))
           }))
         .handle("workspaceEntityProjections", ({ query }) =>
           Effect.gen(function*() {

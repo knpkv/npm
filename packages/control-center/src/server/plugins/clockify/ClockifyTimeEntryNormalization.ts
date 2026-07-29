@@ -89,6 +89,7 @@ type ClockifyPersonEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "Up
 export interface ClockifyTimeEntrySnapshot {
   readonly billable: boolean
   readonly customFields: ReadonlyArray<typeof ClockifyCustomField.Type>
+  readonly customFieldsComplete: boolean
   readonly description: string
   readonly end: DateTime.Utc | null
   readonly entryType: "REGULAR" | "BREAK" | "HOLIDAY" | "TIME_OFF"
@@ -174,6 +175,7 @@ export const decodeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization
     customFields: [...(entry.customFieldValues ?? [])].sort(
       (left, right) => left.customFieldId.localeCompare(right.customFieldId)
     ),
+    customFieldsComplete: entry.customFieldValues !== undefined,
     description: entry.description,
     duration: entry.timeInterval.duration ?? null,
     end: entry.timeInterval.end ?? null,

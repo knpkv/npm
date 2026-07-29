@@ -21,6 +21,7 @@ import {
   dispatchInboxOutcomeCommand,
   dispatchInboxOutcomeKind,
   dispatchInboxOutcomeObservedAt,
+  dispatchInboxOutcomeUsesAuthorizationObservation,
   encodeDispatchInboxOutcome
 } from "./dispatch-outcome.js"
 import { governedActionReconciliationKey } from "./reconciliation-locator.js"
@@ -29,7 +30,8 @@ import {
   ReconciliationInboxOutcome,
   reconciliationInboxOutcomeCommand,
   reconciliationInboxOutcomeKind,
-  reconciliationInboxOutcomeObservedAt
+  reconciliationInboxOutcomeObservedAt,
+  reconciliationInboxOutcomeUsesAuthorizationObservation
 } from "./reconciliation-outcome.js"
 import type { GovernedActionPermitTokenDigest, GovernedActionRecoveryTokenDigest } from "./tokens.js"
 
@@ -87,6 +89,22 @@ const ProviderOutcomeRow = Schema.Struct({
 type DecodedProviderOutcome =
   | { readonly _tag: "dispatch"; readonly outcome: DispatchInboxOutcome }
   | { readonly _tag: "reconciliation"; readonly outcome: ReconciliationInboxOutcome }
+
+type ExpectedCommandInput =
+  | {
+    readonly _tag: "dispatch"
+    readonly actionId: GovernedActionId
+    readonly outcome: DispatchInboxOutcome
+    readonly observedAt: UtcTimestamp
+    readonly workspaceId: WorkspaceId
+  }
+  | {
+    readonly _tag: "reconciliation"
+    readonly actionId: GovernedActionId
+    readonly outcome: ReconciliationInboxOutcome
+    readonly observedAt: UtcTimestamp
+    readonly workspaceId: WorkspaceId
+  }
 
 const storeError = (
   operation: ProviderOutcomeFoldOperation,
@@ -154,6 +172,11 @@ const outcomeCommand = (
       observedAt
     )
 
+const usesAuthorizationObservation = (decoded: DecodedProviderOutcome): boolean =>
+  decoded._tag === "dispatch"
+    ? dispatchInboxOutcomeUsesAuthorizationObservation(decoded.outcome)
+    : reconciliationInboxOutcomeUsesAuthorizationObservation(decoded.outcome)
+
 /** Own every canonical verification, replay check, transaction, and fold for provider outcomes. */
 export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(function*() {
   const { sql } = yield* Database
@@ -211,28 +234,82 @@ export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(funct
     return { _tag: "reconciliation", outcome } satisfies DecodedProviderOutcome
   })
 
+  const validateAuthorizationObservation = (
+    decoded: DecodedProviderOutcome,
+    record: GovernedActionRecord,
+    observedAt: UtcTimestamp,
+    operation: ProviderOutcomeFoldOperation
+  ): Effect.Effect<void, GovernedActionExecutionStoreError> =>
+    (
+        usesAuthorizationObservation(decoded) &&
+        (
+          record.authorization === null ||
+          !DateTime.Equivalence(observedAt, record.authorization.authorizedAt)
+        )
+      )
+      ? Effect.fail(storeError(operation, "conflict"))
+      : Effect.void
+
+  const validateRecordAndDigest = Effect.fn(
+    "GovernedActionExecutionProviderOutcomeFolder.validateRecordAndDigest"
+  )(function*(
+    decoded: DecodedProviderOutcome,
+    record: GovernedActionRecord,
+    observedAt: UtcTimestamp,
+    operation: ProviderOutcomeFoldOperation
+  ) {
+    if (!isFoldableState(decoded._tag, record.head.state)) {
+      return yield* storeError(operation, "conflict")
+    }
+    yield* validateAuthorizationObservation(decoded, record, observedAt, operation)
+    return yield* digestGovernedActionTransitionCommand(
+      outcomeCommand(decoded, record, observedAt)
+    ).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError((failure) => mapStoreFailure(operation, failure))
+    )
+  })
+
+  const prepareExpectedCommand = Effect.fn(
+    "GovernedActionExecutionProviderOutcomeFolder.prepareExpectedCommand"
+  )(function*(
+    operation: Exclude<ProviderOutcomeFoldOperation, "inspect">,
+    input: ExpectedCommandInput
+  ) {
+    if (!operationMatchesSource(operation, input._tag)) {
+      return yield* storeError(operation, "conflict")
+    }
+    const record = yield* transaction.read({
+      workspaceId: input.workspaceId,
+      actionId: input.actionId
+    })
+    const decoded: DecodedProviderOutcome = input._tag === "dispatch"
+      ? { _tag: "dispatch", outcome: input.outcome }
+      : { _tag: "reconciliation", outcome: input.outcome }
+    return yield* validateRecordAndDigest(
+      decoded,
+      record,
+      input.observedAt,
+      operation
+    )
+  })
+
   const foldRow = Effect.fn("GovernedActionExecutionProviderOutcomeFolder.foldRow")(function*(
     row: typeof ProviderOutcomeRow.Type,
     operation: ProviderOutcomeFoldOperation
   ) {
-    const mapFailure = (failure: unknown): GovernedActionExecutionStoreError => mapStoreFailure(operation, failure)
     const decoded = yield* decodeAndVerify(row, operation)
     const record = yield* transaction.read({ workspaceId: row.workspaceId, actionId: row.actionId })
+    yield* validateAuthorizationObservation(decoded, record, row.observedAt, operation)
     if (row.foldTransitionId !== null) {
       if (row.foldCommandDigest !== row.expectedCommandDigest) {
         return yield* storeError(operation, "invalid-record")
       }
       return record.head.state
     }
-    if (!isFoldableState(row.sourceKind, record.head.state)) {
-      return yield* storeError(operation, "conflict")
-    }
-    const command = outcomeCommand(decoded, record, row.observedAt)
-    const commandDigest = yield* digestGovernedActionTransitionCommand(command).pipe(
-      Effect.provideService(Crypto.Crypto, cryptoService),
-      Effect.mapError(mapFailure)
-    )
+    const commandDigest = yield* validateRecordAndDigest(decoded, record, row.observedAt, operation)
     if (commandDigest !== row.expectedCommandDigest) return yield* storeError(operation, "invalid-record")
+    const command = outcomeCommand(decoded, record, row.observedAt)
 
     const foldedAt = DateTime.makeUnsafe(yield* clock.currentTimeMillis)
     if (DateTime.Order(foldedAt, row.receivedAt) < 0) return yield* storeError(operation, "conflict")
@@ -336,5 +413,5 @@ export const makeGovernedActionExecutionProviderOutcomeFolder = Effect.gen(funct
     ).pipe(Effect.mapError((failure) => mapStoreFailure("inspect", failure)))
   })
 
-  return { foldExpected, foldPending }
+  return { foldExpected, foldPending, prepareExpectedCommand }
 })

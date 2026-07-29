@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime"
 import type { WorkspaceEntityInspection } from "../../api/deliveryGraph.js"
 import type { DeliveryEntityDetails, DeliveryRelationship } from "../../domain/deliveryGraph.js"
 import type { EntityId, WorkspaceId } from "../../domain/identifiers.js"
+import type { Revision } from "../../domain/sourceRevision.js"
 import { workspaceEntityPath } from "../workspaceEntityPaths.js"
 
 type TimeEntryDetails = Extract<DeliveryEntityDetails, { readonly _tag: "time-entry" }>
@@ -34,6 +35,7 @@ export interface WorkspaceClockifyTimeEntryPresentation {
   readonly lockLabel: string
   readonly projectLabel: string
   readonly rollupLabel: string
+  readonly sourceRevision: Revision
   readonly startedAt: string
   readonly timerLabel: string
   readonly totalMinutes: number
@@ -188,6 +190,7 @@ export const presentWorkspaceClockifyTimeEntry = (
     rollupLabel: `1 visible entry · ${String(details.durationMinutes)} exact minute${
       details.durationMinutes === 1 ? "" : "s"
     }`,
+    sourceRevision: inspection.source.revision,
     startedAt: timestampLabel(details.startedAt),
     timerLabel: details.startedAt === undefined || details.endedAt === undefined
       ? "Timer state not synchronized"

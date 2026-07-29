@@ -174,6 +174,7 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
           providerId: "clockify",
           targetEntityId: input.entityId,
           actionKind: "record-approval",
+          expectedRevision: entityRecord.sourceRevision.revision,
           limit: 20
         })
       )

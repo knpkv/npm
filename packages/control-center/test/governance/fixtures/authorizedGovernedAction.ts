@@ -208,6 +208,7 @@ const clockifyCorrectionFixture = defineFixture({
     jiraIssueKey: "OPS-42",
     originalDescription: "Review payment safeguards",
     correctedDescription: "[OPS-42] Review payment safeguards",
+    customFields: [],
     start: "2026-07-15T08:00:00.000Z",
     end: "2026-07-15T09:00:00.000Z",
     duration: "PT1H",
