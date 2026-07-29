@@ -15,6 +15,7 @@ import {
   GovernedActionTransitionCause,
   GovernedActionTransitionCommand
 } from "../../src/domain/governedAction/index.js"
+import { GovernedActionId } from "../../src/domain/identifiers.js"
 import { PluginPayloadJson } from "../../src/domain/plugins/bounds.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import {
@@ -32,9 +33,13 @@ import {
   GovernedActionCommitCompanion,
   GovernedActionCommitInput,
   GovernedActionIdempotencyReadInput,
-  GovernedActionInputError
+  GovernedActionInputError,
+  GovernedActionTargetReadInput
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
-import { decodeGovernedActionIdempotencyRows } from "../../src/server/persistence/repositories/governed-action/read.js"
+import {
+  decodeGovernedActionIdempotencyRows,
+  selectLatestTerminalByTarget
+} from "../../src/server/persistence/repositories/governed-action/read.js"
 import {
   makeGovernedActionTransactionWrite,
   makeGovernedActionWrite
@@ -1120,6 +1125,105 @@ describe("governed action writer", () => {
       })
       assert.deepStrictEqual(matching.map(({ envelope }) => envelope.actionId), [ACTION_ID])
       assert.deepStrictEqual(differentKind, [])
+      if (record.authorization === null || record.head.lineage._tag !== "terminal") {
+        return yield* Effect.die("expected verified terminal action with authorization")
+      }
+      const authorization = record.authorization
+      const terminalLineage = record.head.lineage
+      const approvalRequest = Schema.decodeUnknownSync(GovernedActionTargetReadInput)({
+        workspaceId: envelope.workspaceId,
+        providerId: envelope.providerId,
+        targetEntityId: envelope.targetEntityId,
+        actionKind: "record-approval",
+        limit: 20
+      })
+      const makeApprovalCandidate = (
+        actionId: typeof record.envelope.actionId,
+        authorizedAt: string,
+        observationBasis: "authorization" | null = "authorization"
+      ): typeof record => ({
+        ...record,
+        authorization: {
+          ...authorization,
+          authorizedAt: decodeTimestamp(authorizedAt)
+        },
+        envelope: {
+          ...record.envelope,
+          actionId,
+          proposal: {
+            ...record.envelope.proposal,
+            request: {
+              ...record.envelope.proposal.request,
+              actionKind: approvalRequest.actionKind
+            }
+          }
+        },
+        head: {
+          ...record.head,
+          lineage: {
+            ...terminalLineage,
+            receipt: {
+              ...terminalLineage.receipt,
+              ...(observationBasis === null ? {} : { observationBasis }),
+              observedAt: decodeTimestamp(authorizedAt)
+            }
+          }
+        }
+      })
+      const olderApproval = makeApprovalCandidate(
+        record.envelope.actionId,
+        "2026-07-15T10:01:00.000Z"
+      )
+      const newerActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000097")
+      const tieActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000098")
+      const newerApproval = makeApprovalCandidate(
+        newerActionId,
+        "2026-07-15T10:02:00.000Z"
+      )
+      const tieApproval = makeApprovalCandidate(
+        tieActionId,
+        "2026-07-15T10:02:00.000Z"
+      )
+      const providerObserved = makeApprovalCandidate(
+        GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-330000000099"),
+        "2026-07-15T10:03:00.000Z",
+        null
+      )
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [
+          olderApproval,
+          providerObserved,
+          newerApproval
+        ]).map(({ envelope: selected }) => selected.actionId),
+        [newerActionId, record.envelope.actionId]
+      )
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [newerApproval, tieApproval])
+          .map(({ envelope: selected }) => selected.actionId),
+        [tieActionId, newerActionId]
+      )
+
+      const quarantine = yield* QuarantineRepository
+      yield* sql`DROP TRIGGER governed_action_head_exact_update`
+      yield* sql`DROP TRIGGER governed_action_identity_immutable`
+      yield* sql`UPDATE governed_actions
+        SET envelope_json = 'not-json'
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND action_id = ${ACTION_ID}`
+      const corrupted = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "record-approval",
+        limit: 20
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(corrupted))
+      if (Result.isFailure(corrupted)) {
+        assert.isTrue(Schema.is(PersistedRecordError)(corrupted.failure))
+      }
+      const quarantined = yield* quarantine.list(envelope.workspaceId)
+      assert.lengthOf(quarantined, 1)
+      assert.notInclude(JSON.stringify(quarantined), "not-json")
     })))
 
   it.effect("physically binds authorization-based provider outcomes to their terminal receipt", () =>

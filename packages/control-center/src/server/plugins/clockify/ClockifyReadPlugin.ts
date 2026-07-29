@@ -72,7 +72,7 @@ export interface ClockifyReadPluginRuntime {
   readonly layer: Layer.Layer<PluginDefinitionServices, PluginFailure, Crypto.Crypto>
 }
 
-/** Descriptor persisted by provisioning before the runtime can be acquired. */
+/** Configuration fields shared by every published Clockify descriptor generation. */
 const clockifyConfigurationFields = Schema.decodeUnknownSync(
   Schema.Array(PluginConfigurationFieldV1)
 )([

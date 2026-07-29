@@ -1716,9 +1716,9 @@ describe("canonical workspace entity", () => {
       }
     } satisfies WorkspaceEntityState
     const runningHost = await renderView(() => undefined, runningState)
+    const runningPresentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, runningState.inspection)
     expect(runningHost.textContent).toContain("Timer running")
-    expect(runningHost.textContent).toContain("Unlocked")
-    expect(runningHost.textContent).not.toContain("Locked")
+    expect(runningPresentation.clockifyTimeEntry?.lockLabel).toBe("Unlocked")
     expect(runningHost.textContent).toContain("Control Center approval: Approved")
   })
 

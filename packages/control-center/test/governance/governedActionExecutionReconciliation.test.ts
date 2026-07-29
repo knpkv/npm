@@ -12,6 +12,7 @@ import { makeGovernedActionExecutionRecordReconciliation } from "../../src/serve
 import { makeGovernedActionExecutionRecordRecoveryUnavailable } from "../../src/server/governance/internal/execution-store/record-recovery-unavailable.js"
 import { Database } from "../../src/server/persistence/Database.js"
 import { GovernedActionRepository } from "../../src/server/persistence/repositories/governedActionRepository.js"
+import { AUTHORIZED_AT } from "./fixtures/authorizedGovernedAction.js"
 import {
   ACTION,
   claimStartedRecovery,
@@ -134,7 +135,7 @@ describe("governed action reconciliation outcomes", () => {
               providerOperationId: "control-center-authorization-outcome",
               observationBasis: "authorization",
               safeSummary: "Recovered the authorized local decision",
-              observedAt: "2026-07-15T10:01:00.000Z"
+              observedAt: AUTHORIZED_AT
             }
           }),
           observedAt: receivedAt

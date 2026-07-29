@@ -14,6 +14,7 @@ export const projectClockifyApproval = (
   records: ReadonlyArray<GovernedActionRecord>
 ): ClockifyApproval | null => {
   if (source.providerId !== "clockify") return null
+  let newest: ClockifyApproval | null = null
   for (const record of records) {
     const { envelope, head } = record
     if (
@@ -36,12 +37,19 @@ export const projectClockifyApproval = (
       payload.value.entryId !== source.vendorImmutableId ||
       payload.value.expectedRevision !== source.revision
     ) continue
-    return {
+    const candidate = {
       actionId: envelope.actionId,
       decision: payload.value.decision,
       rationale: payload.value.rationale,
       decidedAt: head.lineage.receipt.observedAt
     }
+    if (
+      newest === null ||
+      candidate.decidedAt > newest.decidedAt ||
+      (candidate.decidedAt === newest.decidedAt && candidate.actionId > newest.actionId)
+    ) {
+      newest = candidate
+    }
   }
-  return null
+  return newest
 }

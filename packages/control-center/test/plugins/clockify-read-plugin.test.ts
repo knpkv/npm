@@ -1,6 +1,6 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
-import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
+import { ClockifyApiClient, ClockifyApiConfig, type UpdateTimeEntryParams } from "@knpkv/clockify-api-client"
 import * as Cause from "effect/Cause"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -108,7 +108,7 @@ const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyRe
 
 const withConnection = <Value, Error>(
   provider: ClockifyReadProvider,
-  use: Effect.Effect<Value, Error, PluginConnection>,
+  use: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
   configured: unknown = configuration,
   cryptoLayer: Layer.Layer<Crypto.Crypto> = NodeCrypto.layer
 ): Effect.Effect<Value, Error | PluginFailure> => {
@@ -120,10 +120,7 @@ const withActionRuntime = <Value, Error>(
   provider: ClockifyReadProvider,
   use: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
   configured: unknown = configuration
-): Effect.Effect<Value, Error | PluginFailure> => {
-  const runtime = makeClockifyReadPluginRuntimeFromProvider(provider, configured)
-  return use.pipe(Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))), Effect.scoped)
-}
+): Effect.Effect<Value, Error | PluginFailure> => withConnection(provider, use, configured)
 
 const syncRequest = (checkpoint: string | null = null) =>
   Schema.decodeUnknownSync(PluginSyncRequestV1)({
@@ -991,19 +988,34 @@ describe("ClockifyReadPlugin", () => {
 
   it.effect("corrects one association and makes an identical replay mutation-free", () =>
     Effect.gen(function*() {
-      const state = yield* Ref.make(timeEntry("entry-1", "user-1", {
-        description: "[OLD-1] Investigate timeout"
-      }))
-      const updates = yield* Ref.make<ReadonlyArray<{ readonly description: string; readonly start: string }>>([])
+      const state = yield* Ref.make({
+        ...timeEntry("entry-1", "user-1", {
+          description: "[OLD-1] Investigate timeout"
+        }),
+        taskId: "task-1",
+        type: "BREAK"
+      })
+      const updates = yield* Ref.make<ReadonlyArray<UpdateTimeEntryParams>>([])
       const provider = baseProvider({
         getTimeEntry: () => Ref.get(state).pipe(Effect.map(Option.some)),
         updateTimeEntry: (_workspaceId, _entryId, request) =>
           Ref.update(updates, (calls) => [...calls, request]).pipe(
             Effect.andThen(
               Ref.updateAndGet(state, (current) => ({
-                ...current,
-                description: request.description,
-                timeInterval: { ...current.timeInterval, start: request.start }
+                id: current.id,
+                workspaceId: current.workspaceId,
+                userId: current.userId,
+                billable: request.billable ?? false,
+                description: request.description ?? "",
+                projectId: request.projectId ?? "",
+                tagIds: [...(request.tagIds ?? [])],
+                taskId: request.taskId ?? "",
+                type: request.type ?? "REGULAR",
+                timeInterval: {
+                  start: request.start,
+                  end: request.end ?? "",
+                  duration: current.timeInterval.duration
+                }
               }))
             )
           )
@@ -1045,8 +1057,24 @@ describe("ClockifyReadPlugin", () => {
 
       const calls = yield* Ref.get(updates)
       assert.lengthOf(calls, 1)
-      assert.deepEqual(Object.keys(calls[0] ?? {}).sort(), ["description", "start"])
-      assert.strictEqual(calls[0]?.description, "[OPS-42] Investigate timeout")
+      assert.deepStrictEqual(calls[0], {
+        billable: true,
+        description: "[OPS-42] Investigate timeout",
+        end: "2026-07-17T09:00:00.000Z",
+        projectId: "project-1",
+        start: "2026-07-17T08:00:00.000Z",
+        tagIds: ["delivery", "review"],
+        taskId: "task-1",
+        type: "BREAK"
+      })
+      assert.deepInclude(yield* Ref.get(state), {
+        billable: true,
+        description: "[OPS-42] Investigate timeout",
+        projectId: "project-1",
+        tagIds: ["delivery", "review"],
+        taskId: "task-1",
+        type: "BREAK"
+      })
     }))
 
   it.effect("blocks authorized identity drift without hiding malformed provider data", () =>
@@ -1213,7 +1241,7 @@ describe("ClockifyReadPlugin", () => {
               Effect.andThen(
                 Ref.update(state, (current) => ({
                   ...current,
-                  description: request.description,
+                  description: request.description ?? current.description,
                   timeInterval: { ...current.timeInterval, start: request.start }
                 }))
               ),
@@ -1269,6 +1297,40 @@ describe("ClockifyReadPlugin", () => {
         })
       )
       assert.strictEqual(yield* Ref.get(updateCalls), 1)
+    }))
+
+  it.effect("terminates reconciliation when the provider entry identity drifts", () =>
+    Effect.gen(function*() {
+      const state = yield* Ref.make<unknown>(timeEntry("entry-1", "user-1", {
+        description: "[OLD-1] Investigate timeout"
+      }))
+      yield* withActionRuntime(
+        baseProvider({
+          getTimeEntry: () => Ref.get(state).pipe(Effect.map(Option.some))
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const current = yield* connection.readEntity(entryReference("entry-1"))
+          if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+          const proposal = yield* connection.proposeAction(
+            actionRequest("correct-association", current.event.revision, { jiraIssueKey: "OPS-42" })
+          )
+          const authorized = authorize(proposal, proposal.payloadDigest, "reconcile-identity-drift")
+          yield* Ref.set(state, timeEntry("other-entry", "user-1"))
+          const reconciled = yield* executor.reconcile({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+          assert.strictEqual(reconciled._tag, "failed")
+          if (reconciled._tag === "failed") {
+            assert.strictEqual(reconciled.receipt.status, "failed")
+            assert.include(reconciled.receipt.safeSummary, "changed independently")
+          }
+        })
+      )
     }))
 
   it.effect("accepts a configured workspace in a response containing 101 workspaces", () =>
@@ -1369,8 +1431,14 @@ describe("ClockifyReadPlugin", () => {
           "workspace-1",
           "entry-1",
           {
+            billable: true,
             start: "2026-07-17T08:00:00.000Z",
-            description: "[OPS-42] Investigate timeout"
+            end: "2026-07-17T09:00:00.000Z",
+            description: "[OPS-42] Investigate timeout",
+            projectId: "project-1",
+            tagIds: ["delivery", "review"],
+            taskId: "task-1",
+            type: "BREAK"
           }
         )
       }).pipe(Effect.provide(successfulClient))
@@ -1390,8 +1458,14 @@ describe("ClockifyReadPlugin", () => {
       assert.deepStrictEqual(
         JSON.parse(new TextDecoder().decode(request.body.body)),
         {
+          billable: true,
           start: "2026-07-17T08:00:00.000Z",
-          description: "[OPS-42] Investigate timeout"
+          end: "2026-07-17T09:00:00.000Z",
+          description: "[OPS-42] Investigate timeout",
+          projectId: "project-1",
+          tagIds: ["delivery", "review"],
+          taskId: "task-1",
+          type: "BREAK"
         }
       )
 
@@ -1401,13 +1475,27 @@ describe("ClockifyReadPlugin", () => {
           "workspace-1",
           "entry-1",
           {
+            billable: true,
             start: "2026-07-17T08:00:00.000Z",
-            description: "[OPS-42] Investigate timeout"
+            end: "2026-07-17T09:00:00.000Z",
+            description: "[OPS-42] Investigate timeout",
+            projectId: "project-1",
+            tagIds: ["delivery", "review"],
+            taskId: "task-1",
+            type: "BREAK"
           }
         )
       }).pipe(Effect.provide(clockifyClientLayer(409)), Effect.result)
       assert.isTrue(Result.isFailure(rejected))
-      if (Result.isFailure(rejected)) assert.strictEqual(rejected.failure._tag, "PluginConflictFailure")
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "PluginConflictFailure")
+        if (rejected.failure._tag === "PluginConflictFailure") {
+          assert.strictEqual(
+            rejected.failure.diagnosticCode,
+            "clockify-time-entry-update-rejected"
+          )
+        }
+      }
     }))
 
   it.effect("interrupts an in-flight provider page", () =>

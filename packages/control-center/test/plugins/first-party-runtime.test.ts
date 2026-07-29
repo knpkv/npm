@@ -3337,6 +3337,43 @@ describe("first-party plugin runtime", () => {
           rationale: "Reviewed against the delivery record",
           decidedAt: authorizationTime
         })
+        if (record.head.lineage._tag !== "terminal") {
+          return yield* Effect.die("expected terminal Clockify approval")
+        }
+        const laterApprovalAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:01:01.000Z")
+        const laterActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-440000000097")
+        const tieActionId = GovernedActionId.make("01890f6f-6d6a-7cc0-98d2-440000000098")
+        const laterRecord = {
+          ...record,
+          envelope: { ...record.envelope, actionId: laterActionId },
+          head: {
+            ...record.head,
+            lineage: {
+              ...record.head.lineage,
+              receipt: { ...record.head.lineage.receipt, observedAt: laterApprovalAt }
+            }
+          }
+        }
+        const tieRecord = {
+          ...laterRecord,
+          envelope: { ...laterRecord.envelope, actionId: tieActionId }
+        }
+        assert.strictEqual(
+          projectClockifyApproval(
+            EntityId.make(GOVERNED_ENTITY_ID),
+            sourceRevision,
+            [record, laterRecord]
+          )?.actionId,
+          laterActionId
+        )
+        assert.strictEqual(
+          projectClockifyApproval(
+            EntityId.make(GOVERNED_ENTITY_ID),
+            sourceRevision,
+            [tieRecord, laterRecord]
+          )?.actionId,
+          tieActionId
+        )
         assert.isNull(projectClockifyApproval(
           EntityId.make(GOVERNED_ENTITY_ID),
           { ...sourceRevision, revision: Revision.make("next-clockify-revision") },

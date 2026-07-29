@@ -7,7 +7,7 @@
  *
  * @internal
  */
-import type { ClockifyApiClientShape } from "@knpkv/clockify-api-client"
+import type { ClockifyApiClientShape, UpdateTimeEntryParams } from "@knpkv/clockify-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
@@ -52,7 +52,7 @@ export interface ClockifyReadProvider {
   readonly updateTimeEntry: (
     workspaceId: string,
     timeEntryId: string,
-    request: { readonly description: string; readonly start: string }
+    request: UpdateTimeEntryParams
   ) => Effect.Effect<unknown, PluginFailure>
 }
 
@@ -116,6 +116,7 @@ const providerCall = <Value, Error>(
 
 const mutationCall = <Value, Error>(
   operation: string,
+  diagnosticCode: string,
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> =>
   Effect.catch(effect, (error) => {
@@ -124,7 +125,7 @@ const mutationCall = <Value, Error>(
       ? Effect.fail(
         new PluginConflictFailure({
           operation,
-          diagnosticCode: "clockify-time-entry-update-rejected"
+          diagnosticCode
         })
       )
       : mapFailure(operation, error)
@@ -163,6 +164,7 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
   updateTimeEntry: (workspaceId, timeEntryId, request) =>
     mutationCall(
       "clockify-update-time-entry",
+      "clockify-time-entry-update-rejected",
       client.updateTimeEntry(workspaceId, timeEntryId, request)
     )
 })

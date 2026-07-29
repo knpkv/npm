@@ -520,7 +520,18 @@ export const makeClockifyGovernedActions = (
       input.provider.updateTimeEntry(
         payload.workspaceId,
         payload.entryId,
-        { start: payload.start, description: payload.correctedDescription }
+        {
+          billable: payload.billable,
+          description: payload.correctedDescription,
+          ...(payload.end === null ? {} : { end: payload.end }),
+          ...(payload.projectId === null ? {} : { projectId: payload.projectId }),
+          start: payload.start,
+          tagIds: [...payload.tagIds],
+          ...(payload.taskId === null ? {} : { taskId: payload.taskId }),
+          ...(payload.entryType === "REGULAR" || payload.entryType === "BREAK"
+            ? { type: payload.entryType }
+            : {})
+        }
       )
     ).pipe(Effect.result)
     const observedAt = yield* DateTime.now
@@ -611,11 +622,26 @@ export const makeClockifyGovernedActions = (
     )
     const checkedAt = yield* DateTime.now
     if (Option.isNone(raw)) return { _tag: "pending", checkedAt }
-    const snapshot = yield* decodeClockifyTimeEntry({
+    const snapshotResult = yield* decodeClockifyTimeEntry({
       allowedUserIds: new Set(input.userIds),
       entry: raw.value,
       expectedWorkspaceId: input.configuration.workspaceId
-    })
+    }).pipe(Effect.result)
+    if (snapshotResult._tag === "Failure") {
+      if (!isClockifyIdentityDrift(snapshotResult.failure)) {
+        return yield* snapshotResult.failure
+      }
+      return {
+        _tag: "failed",
+        receipt: {
+          status: "failed",
+          providerOperationId: operationId(payload, request.payloadDigest),
+          safeSummary: `Clockify entry ${payload.entryId} changed independently of the authorized correction`,
+          observedAt: checkedAt
+        }
+      }
+    }
+    const snapshot = snapshotResult.success
     if (snapshot.id !== payload.entryId || !samePreservedFields(snapshot, payload)) {
       return {
         _tag: "failed",

@@ -85,6 +85,33 @@ const failMalformed = (
   recordKey?: string
 ) => Effect.fail(malformed(request, recordKind, diagnosticCode, recordKey)).pipe(captureMalformedGovernedActionRow(row))
 
+/** Order verified target candidates by terminal observation and enforce local approval provenance. @internal */
+export const selectLatestTerminalByTarget = (
+  request: GovernedActionTargetReadInput,
+  candidates: ReadonlyArray<GovernedActionRecord>
+): ReadonlyArray<GovernedActionRecord> =>
+  candidates.filter(({ authorization, envelope, head }) =>
+    envelope.proposal.request.actionKind === request.actionKind &&
+    (
+      request.actionKind !== "record-approval" ||
+      (
+        authorization !== null &&
+        head.lineage._tag === "terminal" &&
+        head.lineage.receipt.observationBasis === "authorization" &&
+        DateTime.Order(head.lineage.receipt.observedAt, authorization.authorizedAt) === 0
+      )
+    )
+  ).sort((left, right) => {
+    if (left.head.lineage._tag !== "terminal" || right.head.lineage._tag !== "terminal") return 0
+    const newestFirst = DateTime.Order(
+      right.head.lineage.receipt.observedAt,
+      left.head.lineage.receipt.observedAt
+    )
+    return newestFirst !== 0
+      ? newestFirst
+      : right.envelope.actionId.localeCompare(left.envelope.actionId)
+  }).slice(0, request.limit)
+
 /** @internal Decode the unique action identity returned by an idempotency lookup. */
 export const decodeGovernedActionIdempotencyRows = Effect.fn(
   "GovernedActionReader.decodeIdempotencyRows"
@@ -520,12 +547,11 @@ export const makeGovernedActionRead = Effect.gen(function*() {
         AND provider_id = ${request.providerId}
         AND target_entity_id = ${request.targetEntityId}
         AND terminal_status = 'succeeded'
-        AND json_extract(envelope_json, '$.proposal.request.actionKind') = ${request.actionKind}
       ORDER BY updated_at DESC, action_id DESC
-      LIMIT ${request.limit}`
+      LIMIT 100`
     const identities = yield* Schema.decodeUnknownEffect(
       Schema.Array(Schema.Struct({ actionId: GovernedActionId })).check(
-        Schema.isMaxLength(request.limit)
+        Schema.isMaxLength(100)
       )
     )(rows).pipe(
       Effect.mapError(() =>
@@ -537,10 +563,11 @@ export const makeGovernedActionRead = Effect.gen(function*() {
         })
       )
     )
-    return yield* Effect.forEach(
+    const candidates = yield* Effect.forEach(
       identities,
       ({ actionId }) => read({ workspaceId: request.workspaceId, actionId })
     )
+    return selectLatestTerminalByTarget(request, candidates)
   })
 
   return { read, readByIdempotencyKey, readLatestTerminalByTarget }
