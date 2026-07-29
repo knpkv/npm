@@ -95,6 +95,13 @@ const RawPipelineOutput = Schema.Struct({
     version: Schema.Int.check(Schema.isGreaterThan(0)),
     pipelineType: Schema.optionalKey(Identifier),
     executionMode: Schema.optionalKey(Identifier),
+    variables: Schema.optionalKey(
+      Schema.Array(Schema.Struct({
+        name: Schema.String,
+        defaultValue: Schema.optionalKey(Schema.String),
+        description: Schema.optionalKey(Schema.String)
+      })).check(Schema.isMaxLength(50))
+    ),
     stages: Schema.Array(RawStageDeclaration).check(Schema.isMaxLength(PIPELINE_STAGE_LIMIT))
   }),
   metadata: Schema.Struct({
@@ -165,6 +172,12 @@ const RawExecutionOutput = Schema.Struct({
     statusSummary: Schema.optionalKey(Summary),
     lastUpdateTime: Schema.optionalKey(Schema.Date),
     artifactRevisions: Schema.optionalKey(Schema.Array(RawArtifactRevision).check(Schema.isMaxLength(100))),
+    variables: Schema.optionalKey(
+      Schema.Array(Schema.Struct({
+        name: Schema.optionalKey(Schema.String),
+        resolvedValue: Schema.optionalKey(Schema.String)
+      })).check(Schema.isMaxLength(50))
+    ),
     trigger: Schema.optionalKey(Schema.Struct({
       triggerType: Schema.optionalKey(Identifier),
       triggerDetail: Schema.optionalKey(Summary)
@@ -309,6 +322,21 @@ const CodePipelineStageDeclaration = Schema.Struct({
   actions: Schema.Array(CodePipelineActionDeclaration)
 })
 
+const PipelineVariableName = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(128),
+  Schema.isPattern(/^[A-Za-z0-9@_-]+$/u)
+)
+const PipelineVariableValue = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+const CodePipelineVariableDeclaration = Schema.Struct({
+  name: PipelineVariableName,
+  defaultValue: Schema.NullOr(PipelineVariableValue)
+})
+const CodePipelineResolvedVariable = Schema.Struct({
+  name: PipelineVariableName,
+  value: PipelineVariableValue
+})
+
 /** One decoded pipeline definition with stable AWS provenance. @internal */
 export const CodePipelinePipeline = Schema.Struct({
   name: Identifier,
@@ -318,6 +346,13 @@ export const CodePipelinePipeline = Schema.Struct({
   executionMode: Schema.NullOr(Identifier),
   createdAt: Schema.NullOr(Schema.Date),
   updatedAt: Schema.NullOr(Schema.Date),
+  variables: Schema.Array(CodePipelineVariableDeclaration).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter(
+      (variables) => new Set(variables.map(({ name }) => name)).size === variables.length,
+      { expected: "unique pipeline variable names" }
+    )
+  ),
   stages: Schema.Array(CodePipelineStageDeclaration)
 })
 /** @internal */
@@ -380,6 +415,13 @@ export const CodePipelineExecution = Schema.Struct({
   statusSummary: Schema.NullOr(Summary),
   updatedAt: Schema.NullOr(Schema.Date),
   artifactRevisions: Schema.Array(CodePipelineArtifactRevision),
+  variables: Schema.Array(CodePipelineResolvedVariable).check(
+    Schema.isMaxLength(50),
+    Schema.makeFilter(
+      (variables) => new Set(variables.map(({ name }) => name)).size === variables.length,
+      { expected: "unique resolved pipeline variable names" }
+    )
+  ),
   triggerType: Schema.NullOr(Identifier),
   triggerDetail: Schema.NullOr(Summary),
   executionMode: Schema.NullOr(Identifier),
@@ -621,6 +663,10 @@ export class CodePipelineReadClient extends Context.Service<
           executionMode: response.pipeline.executionMode ?? null,
           createdAt: response.metadata.created ?? null,
           updatedAt: response.metadata.updated ?? null,
+          variables: (response.pipeline.variables ?? []).map((variable) => ({
+            name: variable.name,
+            defaultValue: variable.defaultValue ?? null
+          })),
           stages: response.pipeline.stages.map((stage) => ({
             name: stage.name,
             actions: stage.actions.map((action) => ({
@@ -787,6 +833,10 @@ export class CodePipelineReadClient extends Context.Service<
               revisionId: revision.revisionId ?? null,
               revisionSummary: revision.revisionSummary ?? null,
               createdAt: revision.created ?? null
+            })),
+            variables: (execution.variables ?? []).map((variable) => ({
+              name: variable.name,
+              value: variable.resolvedValue
             })),
             triggerType: execution.trigger?.triggerType ?? null,
             triggerDetail: execution.trigger?.triggerDetail ?? null,

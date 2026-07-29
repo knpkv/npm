@@ -140,21 +140,43 @@ const SourceRevision = Schema.Struct({
 }).check(
   Schema.makeFilter(
     ({ revisionType, revisionValue }) =>
-      revisionType === "S3_OBJECT_KEY"
+      revisionType === "S3_OBJECT_KEY" || revisionType === "S3_OBJECT_VERSION_ID"
         ? utf8Encoder.encode(revisionValue).byteLength <= 1_024
         : revisionValue === revisionValue.trim() && revisionValue.length <= 256,
     { expected: "a provider-compatible source revision value" }
   )
 )
-const StartActionPayload = Schema.Struct({
-  sourceRevisions: Schema.Array(SourceRevision).check(
+const PipelineVariable = Schema.Struct({
+  name: Schema.String.check(
     Schema.isNonEmpty(),
-    Schema.isMaxLength(50),
-    Schema.makeFilter(
-      (revisions) => new Set(revisions.map(({ actionName }) => actionName)).size === revisions.length,
-      { expected: "unique source action names" }
-    )
+    Schema.isMaxLength(128),
+    Schema.isPattern(/^[A-Za-z0-9@_-]+$/u)
   ),
+  value: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000))
+})
+const PipelineVariables = Schema.Array(PipelineVariable).check(
+  Schema.isMaxLength(50),
+  Schema.makeFilter(
+    (variables) => new Set(variables.map(({ name }) => name)).size === variables.length,
+    { expected: "unique pipeline variable names" }
+  )
+)
+const StartSourceRevisions = Schema.Array(SourceRevision).check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(50),
+  Schema.makeFilter(
+    (revisions) => new Set(revisions.map(({ actionName }) => actionName)).size === revisions.length,
+    { expected: "unique source action names" }
+  )
+)
+const StartActionPayloadInput = Schema.Struct({
+  sourceRevisions: StartSourceRevisions,
+  variables: Schema.optionalKey(PipelineVariables),
+  pipelineRevision: Schema.optionalKey(Revision)
+})
+const StartActionPayload = Schema.Struct({
+  sourceRevisions: StartSourceRevisions,
+  variables: PipelineVariables,
   pipelineRevision: Schema.optionalKey(Revision)
 })
 const StopActionPayload = Schema.Struct({
@@ -177,6 +199,7 @@ const ApprovalActionPayload = Schema.Struct({
 const RetryActionPayload = Schema.Struct({
   retryOf: ActionIdentifier,
   sourceRevisions: Schema.Array(SourceRevision).check(Schema.isNonEmpty(), Schema.isMaxLength(50)),
+  variables: PipelineVariables,
   pipelineRevision: Schema.optionalKey(Revision)
 })
 const LogCursorParts = Schema.Struct({
@@ -820,6 +843,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     request: AuthorizedPluginActionV1
   ) {
     const digest = yield* digestGovernedActionPayload({
+      authorizationId: request.authorizationId,
       idempotencyKey: request.idempotencyKey,
       payloadDigest: request.payloadDigest
     }).pipe(
@@ -1303,6 +1327,42 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     )
   }
 
+  const resolvedStartVariables = (
+    pipeline: CodePipelinePipeline,
+    overrides: ReadonlyArray<typeof PipelineVariable.Type>
+  ): ReadonlyArray<typeof PipelineVariable.Type> | null => {
+    const declarations = new Map(pipeline.variables.map((variable) => [variable.name, variable]))
+    if (
+      declarations.size !== pipeline.variables.length ||
+      overrides.some(({ name }) => !declarations.has(name))
+    ) {
+      return null
+    }
+    const overrideValues = new Map(overrides.map(({ name, value }) => [name, value]))
+    const variables = pipeline.variables.flatMap((declaration) => {
+      const value = overrideValues.get(declaration.name) ?? declaration.defaultValue
+      return value === null || value === undefined
+        ? []
+        : [{ name: declaration.name, value }]
+    })
+    return variables.length === pipeline.variables.length
+      ? [...variables].sort((left, right) => compareText(left.name, right.name))
+      : null
+  }
+
+  const validResolvedVariables = (
+    pipeline: CodePipelinePipeline,
+    variables: ReadonlyArray<typeof PipelineVariable.Type>
+  ): boolean => {
+    const expectedNames = new Set(pipeline.variables.map(({ name }) => name))
+    return (
+      expectedNames.size === pipeline.variables.length &&
+      variables.length === expectedNames.size &&
+      new Set(variables.map(({ name }) => name)).size === variables.length &&
+      variables.every(({ name }) => expectedNames.has(name))
+    )
+  }
+
   const retryPayload = Effect.fn("CodePipelinePlugin.retryPayload")(function*(
     pipeline: CodePipelinePipeline,
     snapshot: CodePipelineExecutionSnapshot
@@ -1338,10 +1398,16 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         diagnosticCode: "codepipeline-retry-source-revision-incomplete"
       })
     }
+    if (!validResolvedVariables(pipeline, snapshot.execution.variables)) {
+      return yield* new PluginConfigurationFailure({
+        diagnosticCode: "codepipeline-retry-variable-set-incomplete"
+      })
+    }
     return yield* decodeOutput("codepipeline-retry-payload", RetryActionPayload, {
       retryOf: snapshot.execution.executionId,
       pipelineRevision: pipelineRevision(pipeline),
-      sourceRevisions: [...sourceRevisions].sort((left, right) => compareText(left.actionName, right.actionName))
+      sourceRevisions: [...sourceRevisions].sort((left, right) => compareText(left.actionName, right.actionName)),
+      variables: [...snapshot.execution.variables].sort((left, right) => compareText(left.name, right.name))
     })
   })
 
@@ -1366,7 +1432,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-start-target-changed"
           })
         }
-        const payload = yield* Schema.decodeUnknownEffect(StartActionPayload)(request.payload).pipe(
+        const payload = yield* Schema.decodeUnknownEffect(StartActionPayloadInput)(request.payload).pipe(
           Effect.mapError(() =>
             new PluginConflictFailure({
               operation: "propose-action",
@@ -1380,12 +1446,20 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             diagnosticCode: "codepipeline-start-source-set-invalid"
           })
         }
+        const variables = resolvedStartVariables(pipeline, payload.variables ?? [])
+        if (variables === null) {
+          return yield* new PluginConflictFailure({
+            operation: "propose-action",
+            diagnosticCode: "codepipeline-start-variable-set-invalid"
+          })
+        }
         return {
           ...payload,
           pipelineRevision: pipelineRevision(pipeline),
           sourceRevisions: [...payload.sourceRevisions].sort((left, right) =>
             compareText(left.actionName, right.actionName)
-          )
+          ),
+          variables
         }
       }
       case "pipeline.stop": {
@@ -1550,6 +1624,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     | {
       readonly _tag: "start"
       readonly sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>
+      readonly variables: ReadonlyArray<typeof PipelineVariable.Type>
       readonly checkedRevision: string
     }
     | {
@@ -1573,6 +1648,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       readonly _tag: "retry"
       readonly retryOf: string
       readonly sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>
+      readonly variables: ReadonlyArray<typeof PipelineVariable.Type>
       readonly checkedRevision: string
     }
 
@@ -1610,7 +1686,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           actionRequest.expectedRevision !== revision ||
           payload.pipelineRevision === undefined ||
           payload.pipelineRevision !== revision ||
-          !validSourceRevisions(pipeline, payload.sourceRevisions)
+          !validSourceRevisions(pipeline, payload.sourceRevisions) ||
+          !validResolvedVariables(pipeline, payload.variables)
         ) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
@@ -1620,6 +1697,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         return {
           _tag: "start",
           sourceRevisions: payload.sourceRevisions,
+          variables: payload.variables,
           checkedRevision: revision
         }
       }
@@ -1759,16 +1837,24 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
               actual.revisionType === expected.revisionType &&
               actual.revisionValue === expected.revisionValue
           })
-        if (!sameSourceRevisions) {
+        const sameVariables = currentPayload.variables.length === payload.variables.length &&
+          currentPayload.variables.every((expected, index) => {
+            const actual = payload.variables[index]
+            return actual !== undefined &&
+              actual.name === expected.name &&
+              actual.value === expected.value
+          })
+        if (!sameSourceRevisions || !sameVariables) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",
-            diagnosticCode: "codepipeline-retry-revisions-changed"
+            diagnosticCode: "codepipeline-retry-inputs-changed"
           })
         }
         return {
           _tag: "retry",
           retryOf: payload.retryOf,
           sourceRevisions: payload.sourceRevisions,
+          variables: payload.variables,
           checkedRevision: revision
         }
       }
@@ -1820,7 +1906,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
                   account: awsAccount,
                   pipelineName: configuration.pipelineName,
                   clientRequestToken: token,
-                  sourceRevisions: action.sourceRevisions
+                  sourceRevisions: action.sourceRevisions,
+                  variables: action.variables
                 })
               )
           ).pipe(Effect.map((operationId) => ({
@@ -2000,7 +2087,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           account: awsAccount,
           pipelineName: configuration.pipelineName,
           clientRequestToken: token,
-          sourceRevisions: resolved.sourceRevisions
+          sourceRevisions: resolved.sourceRevisions,
+          variables: resolved.variables
         })
       ).pipe(
         Effect.catchTag(

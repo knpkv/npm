@@ -1686,8 +1686,8 @@ describe("Control Center API handlers", () => {
       logs: () => Effect.die("not used"),
       artifact: ({ request }) =>
         Effect.succeed({
-          body: Stream.make(new Uint8Array(request.offset === 9 ? [] : [1, 2, 3])),
-          contentLength: request.offset === 9 ? 0 : 3,
+          body: Stream.make(new Uint8Array(request.offset >= 9 ? [] : [1, 2, 3])),
+          contentLength: request.offset >= 9 ? 0 : 3,
           filename: "BuildOutput.zip",
           offset: request.offset,
           totalBytes: request.offset === 0 ? 3 : 9
@@ -1763,7 +1763,7 @@ describe("Control Center API handlers", () => {
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
       const artifactResponse = await webHandler.handler(artifactRequest(3), requestContext)
       const completeArtifactResponse = await webHandler.handler(artifactRequest(0), requestContext)
-      const exhaustedArtifactResponse = await webHandler.handler(artifactRequest(9), requestContext)
+      const exhaustedArtifactResponse = await webHandler.handler(artifactRequest(10), requestContext)
 
       assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
       assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")

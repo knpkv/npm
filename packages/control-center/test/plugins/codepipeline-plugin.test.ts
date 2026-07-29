@@ -346,6 +346,50 @@ describe("CodePipelinePlugin", () => {
       )
     ))
 
+  it.effect("preserves an offset beyond EOF as an empty exhausted range through the plugin boundary", () =>
+    Effect.gen(function*() {
+      const result = yield* runWithProvider(
+        baseProvider({
+          getArtifactRange: () =>
+            Effect.succeed({
+              bytes: new Uint8Array(),
+              contentLength: 0,
+              contentRange: "bytes */9"
+            })
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (connection.pipeline === undefined || Option.isNone(connection.pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* connection.pipeline.value.readArtifactRange(
+            Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+              action: {
+                entity: {
+                  entityType: "aws.codepipeline.action",
+                  vendorImmutableId: "execution-1842#execution-1842-action-1"
+                },
+                executionId: "execution-1842",
+                actionExecutionId: "execution-1842-action-1",
+                expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+              },
+              direction: "output",
+              artifactName: "BuildOutput",
+              offset: 10,
+              length: 3
+            })
+          )
+        })
+      )
+
+      assert.deepStrictEqual(result, {
+        bytesBase64: "",
+        contentType: "application/octet-stream",
+        filename: "BuildOutput.zip",
+        totalBytes: 9
+      })
+    }))
+
   it.effect("rejects an S3 response whose Content-Range does not match the requested offset", () =>
     Effect.gen(function*() {
       const client = yield* CodePipelineReadClient
@@ -1103,14 +1147,19 @@ describe("CodePipelinePlugin", () => {
   it.effect("reuses one start token per idempotency key and separates distinct action identities", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make<
-        ReadonlyArray<{ readonly token: string; readonly revisions: ReadonlyArray<unknown> }>
+        ReadonlyArray<{
+          readonly token: string
+          readonly revisions: ReadonlyArray<unknown>
+          readonly variables: ReadonlyArray<unknown>
+        }>
       >([])
       const provider = baseProvider({
         getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
         startPipelineExecution: (request) =>
           Ref.update(calls, (current) => [...current, {
             token: request.clientRequestToken,
-            revisions: request.sourceRevisions
+            revisions: request.sourceRevisions,
+            variables: request.variables
           }]).pipe(Effect.as({ pipelineExecutionId: "execution-governed-1" }))
       })
       const result = yield* runWithProvider(
@@ -1173,10 +1222,67 @@ describe("CodePipelinePlugin", () => {
         revisionType: "COMMIT_ID",
         revisionValue: "commit-abc"
       }])
+      assert.deepStrictEqual(observed[0]?.variables, [])
       const serialized = JSON.stringify(result)
       assert.notInclude(serialized, "accessKeyId")
       assert.notInclude(serialized, "secretAccessKey")
       assert.notInclude(serialized, "sessionToken")
+    }))
+
+  it.effect("scopes AWS start tokens to the authorized action across runtime instances", () =>
+    Effect.gen(function*() {
+      const tokens = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
+        startPipelineExecution: (request) =>
+          Ref.update(tokens, (current) => [...current, request.clientRequestToken]).pipe(
+            Effect.as({ pipelineExecutionId: `execution-${request.clientRequestToken}` })
+          )
+      })
+      const execute = (authorizationId: string) =>
+        runWithProvider(
+          provider,
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const proposal = yield* connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.start",
+                target: {
+                  entityType: "pipeline",
+                  vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+                },
+                expectedRevision: "7:2026-07-16T08:00:00.000Z",
+                payload: {
+                  sourceRevisions: [{
+                    actionName: "Checkout",
+                    revisionType: "COMMIT_ID",
+                    revisionValue: "commit-abc"
+                  }]
+                },
+                evidenceIds: []
+              })
+            )
+            const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+              proposal,
+              idempotencyKey: "shared-semantic-key",
+              payloadDigest: proposal.payloadDigest,
+              authorizationId,
+              authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+              expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+            })
+            const first = yield* executor.executeAuthorizedAction(authorized)
+            const replay = yield* executor.executeAuthorizedAction(authorized)
+            assert.deepStrictEqual(replay, first)
+          })
+        )
+
+      yield* execute("workspace-a-authorization")
+      yield* execute("workspace-b-authorization")
+
+      const observed = yield* Ref.get(tokens)
+      assert.strictEqual(observed.length, 2)
+      assert.notStrictEqual(observed[0], observed[1])
     }))
 
   it.effect("orders canonical source revisions by code unit across reconstruction", () =>
@@ -1264,7 +1370,8 @@ describe("CodePipelinePlugin", () => {
           actionName: "ä-source",
           revisionType: "COMMIT_ID",
           revisionValue: "commit-umlaut"
-        }]
+        }],
+        variables: []
       })
       assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
@@ -1502,6 +1609,20 @@ describe("CodePipelinePlugin", () => {
 
       const rejectedKey = yield* attempt("S3", false, "S3_OBJECT_KEY", "s3-key-disabled")
       const acceptedVersion = yield* attempt("S3", false, "S3_OBJECT_VERSION_ID", "s3-version")
+      const acceptedFullVersion = yield* attempt(
+        "S3",
+        false,
+        "S3_OBJECT_VERSION_ID",
+        "s3-version-full",
+        "v".repeat(1_024)
+      )
+      const rejectedOversizedVersion = yield* attempt(
+        "S3",
+        false,
+        "S3_OBJECT_VERSION_ID",
+        "s3-version-oversized",
+        "v".repeat(1_025)
+      )
       const acceptedKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-enabled")
       const acceptedFullKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-full", "a".repeat(1_024))
       const rejectedOversizedKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-oversized", "a".repeat(1_025))
@@ -1517,13 +1638,105 @@ describe("CodePipelinePlugin", () => {
 
       assert.isTrue(Result.isFailure(rejectedKey))
       assert.isTrue(Result.isSuccess(acceptedVersion))
+      assert.isTrue(Result.isSuccess(acceptedFullVersion))
+      assert.isTrue(Result.isFailure(rejectedOversizedVersion))
       assert.isTrue(Result.isSuccess(acceptedKey))
       assert.isTrue(Result.isSuccess(acceptedFullKey))
       assert.isTrue(Result.isFailure(rejectedOversizedKey))
       assert.isTrue(Result.isSuccess(acceptedUtf8Key))
       assert.isTrue(Result.isFailure(rejectedOversizedUtf8Key))
       assert.isTrue(Result.isFailure(rejectedUnknown))
-      assert.strictEqual(yield* Ref.get(mutationCalls), 4)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 5)
+    }))
+
+  it.effect("binds declared pipeline variables into the reviewed start payload", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const dispatchedVariables = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const provider = baseProvider({
+        getPipeline: () =>
+          Effect.succeed({
+            ...pipelineOutput,
+            pipeline: {
+              ...pipelineOutput.pipeline,
+              variables: [{
+                name: "Environment",
+                defaultValue: "staging",
+                description: "Deployment environment"
+              }, {
+                name: "Target",
+                description: "Required release target"
+              }]
+            }
+          }),
+        getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
+        startPipelineExecution: (request) =>
+          Effect.all([
+            Ref.update(mutationCalls, (count) => count + 1),
+            Ref.set(dispatchedVariables, request.variables)
+          ]).pipe(Effect.as({ pipelineExecutionId: "execution-variable-start" }))
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const propose = (variables?: ReadonlyArray<{ readonly name: string; readonly value: string }>) =>
+            connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.start",
+                target: {
+                  entityType: "pipeline",
+                  vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+                },
+                expectedRevision: "7:2026-07-16T08:00:00.000Z",
+                payload: {
+                  sourceRevisions: [{
+                    actionName: "Checkout",
+                    revisionType: "COMMIT_ID",
+                    revisionValue: "commit-abc"
+                  }],
+                  ...(variables === undefined ? {} : { variables })
+                },
+                evidenceIds: []
+              })
+            )
+          const missingRequired = yield* propose().pipe(Effect.result)
+          const proposal = yield* propose([{ name: "Target", value: "production" }])
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-with-variables",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-start-with-variables",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          return {
+            dispatched: yield* executor.executeAuthorizedAction(authorized),
+            missingRequired,
+            proposal
+          }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result.missingRequired))
+      if (Result.isFailure(result.missingRequired)) {
+        assert.instanceOf(result.missingRequired.failure, PluginConflictFailure)
+        if (Predicate.isTagged(result.missingRequired.failure, "PluginConflictFailure")) {
+          assert.strictEqual(
+            result.missingRequired.failure.diagnosticCode,
+            "codepipeline-start-variable-set-invalid"
+          )
+        }
+      }
+      const expectedVariables = [
+        { name: "Environment", value: "staging" },
+        { name: "Target", value: "production" }
+      ]
+      assert.deepInclude(result.proposal.request.payload, { variables: expectedVariables })
+      assert.deepStrictEqual(yield* Ref.get(dispatchedVariables), expectedVariables)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      assert.strictEqual(result.dispatched._tag, "confirmed")
     }))
 
   it.effect("rejects a start target outside the configured pipeline before mutation", () =>
@@ -2330,12 +2543,30 @@ describe("CodePipelinePlugin", () => {
     Effect.gen(function*() {
       const calls = yield* Ref.make(0)
       const revisions = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const variables = yield* Ref.make<ReadonlyArray<unknown>>([])
       const provider = baseProvider({
-        getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "Failed")),
+        getPipeline: () =>
+          Effect.succeed({
+            ...pipelineOutput,
+            pipeline: {
+              ...pipelineOutput.pipeline,
+              variables: [{ name: "Target", description: "Required release target" }]
+            }
+          }),
+        getPipelineExecution: (request) => {
+          const output = executionOutput(request.pipelineExecutionId, "Failed")
+          return Effect.succeed({
+            pipelineExecution: {
+              ...output.pipelineExecution,
+              variables: [{ name: "Target", resolvedValue: "production" }]
+            }
+          })
+        },
         startPipelineExecution: (request) =>
           Effect.all([
             Ref.update(calls, (count) => count + 1),
-            Ref.set(revisions, request.sourceRevisions)
+            Ref.set(revisions, request.sourceRevisions),
+            Ref.set(variables, request.variables)
           ]).pipe(Effect.as({ pipelineExecutionId: "execution-retry-1" }))
       })
       const result = yield* runWithProvider(
@@ -2375,6 +2606,13 @@ describe("CodePipelinePlugin", () => {
         revisionType: "COMMIT_ID",
         revisionValue: "commit-abc"
       }])
+      assert.deepStrictEqual(yield* Ref.get(variables), [{
+        name: "Target",
+        value: "production"
+      }])
+      assert.deepInclude(result.proposal.request.payload, {
+        variables: [{ name: "Target", value: "production" }]
+      })
       assert.deepStrictEqual(result.first, result.replay)
       assert.include(JSON.stringify(result.proposal.request.payload), "\"retryOf\":\"execution-1842\"")
       assert.strictEqual(result.first._tag, "confirmed")

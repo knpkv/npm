@@ -166,7 +166,8 @@ const codePipelineFixture = defineFixture({
       actionName: "Checkout",
       revisionType: "COMMIT_ID",
       revisionValue: "commit-abc"
-    }]
+    }],
+    variables: []
   },
   actionSummary: "Retry CodePipeline execution execution-failed-1",
   impactSummary: "Starts one new execution with the failed execution's pinned source revisions",
@@ -214,7 +215,8 @@ const codePipelineStartFixture = defineFixture({
       actionName: "Checkout",
       revisionType: "COMMIT_ID",
       revisionValue: "commit-abc"
-    }]
+    }],
+    variables: []
   },
   actionSummary: "Start CodePipeline pipeline release",
   impactSummary: "Starts one new execution with pinned source revisions",

@@ -986,6 +986,7 @@ describe("first-party plugin runtime", () => {
               ? "2026-07-15T09:40:00.000Z"
               : "2026-07-15T09:41:00.000Z"
           ),
+          variables: [],
           stages: [{
             name: "Source",
             actions: [{
@@ -1209,6 +1210,7 @@ describe("first-party plugin runtime", () => {
         executionMode: "SUPERSEDED",
         createdAt: new Date("2026-07-15T08:00:00.000Z"),
         updatedAt: new Date("2026-07-15T09:40:00.000Z"),
+        variables: [],
         stages: [{
           name: "Source",
           actions: [{
@@ -1242,6 +1244,7 @@ describe("first-party plugin runtime", () => {
             revisionSummary: "main",
             createdAt: new Date("2026-07-15T09:44:00.000Z")
           }],
+          variables: [],
           triggerType: "StartPipelineExecution",
           triggerDetail: "release-operator",
           executionMode: "SUPERSEDED",

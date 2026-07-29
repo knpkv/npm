@@ -171,10 +171,17 @@ export interface CodePipelineSourceRevisionOverride {
   readonly revisionValue: string
 }
 
+/** Resolved pipeline-level variable bound to an execution. @internal */
+export interface CodePipelineVariableOverride {
+  readonly name: string
+  readonly value: string
+}
+
 /** Idempotent request to start a distinct pipeline execution. @internal */
 export interface StartPipelineExecutionProviderRequest extends GetPipelineProviderRequest {
   readonly clientRequestToken: string
   readonly sourceRevisions: ReadonlyArray<CodePipelineSourceRevisionOverride>
+  readonly variables: ReadonlyArray<CodePipelineVariableOverride>
 }
 
 /** Request to stop one exact pipeline execution. @internal */
@@ -593,7 +600,8 @@ export const CodePipelineReadProviderLive = Layer.effect(
             codepipeline.startPipelineExecution({
               name: request.pipelineName,
               clientRequestToken: request.clientRequestToken,
-              sourceRevisions: [...request.sourceRevisions]
+              sourceRevisions: [...request.sourceRevisions],
+              variables: [...request.variables]
             })
           )
         ),
