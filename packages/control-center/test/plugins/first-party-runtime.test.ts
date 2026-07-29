@@ -32,12 +32,19 @@ import {
   SessionId,
   WorkspaceId
 } from "../../src/domain/identifiers.js"
-import { PluginSyncRequestV1 } from "../../src/domain/plugins/index.js"
+import {
+  AuthorizedPluginActionV1,
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineLogPageRequestV1,
+  PluginSyncRequestV1,
+  ProposePluginActionRequestV1
+} from "../../src/domain/plugins/index.js"
 import { PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
+import { materializeNormalizedPluginPage } from "../../src/server/application/normalizedPluginPageMaterialization.js"
 import {
   ReviewSuggestionPublicationGateway,
   type ReviewSuggestionPublicationTarget
@@ -56,6 +63,7 @@ import {
   WorkspaceName
 } from "../../src/server/persistence/repositories/models.js"
 import { StoredPluginConfiguration } from "../../src/server/persistence/repositories/pluginConfigurationModels.js"
+import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
 import { QuarantineRepository } from "../../src/server/persistence/repositories/quarantineRepository.js"
 import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import {
@@ -63,14 +71,28 @@ import {
   codeCommitPluginDescriptor
 } from "../../src/server/plugins/codecommit/CodeCommitPluginDefinition.js"
 import {
+  codePipelinePluginDefinition,
+  codePipelinePluginDescriptor
+} from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
+import {
+  canonicalCodePipelinePrincipalArn,
+  type CodePipelineExecutionSnapshot,
+  type CodePipelinePipeline,
+  type CodePipelineReadClientService
+} from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
+import { codePipelineRuntimeIdentityMatches } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
+import {
   confluencePagePluginDescriptor,
   historicalConfluenceReadPluginDescriptor
 } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
+import { PluginConflictFailure } from "../../src/server/plugins/failures.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { AuthorizedPluginExecutorMap } from "../../src/server/plugins/internal/AuthorizedPluginExecutorMap.js"
 import {
   historicalActionCodeCommitDescriptor,
   historicalCodeCommitDescriptor,
   historicalCompleteDiffCodeCommitDescriptor,
+  historicalReadOnlyCodePipelineDescriptor,
   makeFirstPartyPluginRuntimeRegistry
 } from "../../src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import {
@@ -287,6 +309,23 @@ const unusedCodeCommitClients = (() => {
 })()
 
 describe("first-party plugin runtime", () => {
+  it("canonicalizes only assumed-role sessions for stable CodePipeline authority", () => {
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn(
+        "arn:aws:sts::123456789012:assumed-role/team/control-center/session-a"
+      ),
+      "arn:aws:iam::123456789012:role/team/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:iam::123456789012:user/control-center"),
+      "arn:aws:iam::123456789012:user/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:sts::123456789012:federated-user/control-center"),
+      "arn:aws:sts::123456789012:federated-user/control-center"
+    )
+  })
+
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
@@ -928,6 +967,726 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("starts from a synchronized durable pipeline authority and blocks stale definitions", () => {
+    const runScenario = (mode: "current" | "rotated" | "stale") =>
+      Effect.gen(function*() {
+        yield* TestClock.setTime(DateTime.toEpochMillis(
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+        ))
+        const pipelineVersion = yield* Ref.make(7)
+        const mutationCalls = yield* Ref.make(0)
+        const mutationIdentity = mode === "rotated"
+          ? {
+            accountId: "210987654321",
+            arn: "arn:aws:iam::210987654321:role/rotated-control-center"
+          }
+          : {
+            accountId: "123456789012",
+            arn: "arn:aws:sts::123456789012:assumed-role/control-center/mutation-session"
+          }
+        const pipelineFor = (version: number): CodePipelinePipeline => ({
+          name: "release",
+          arn: "arn:aws:codepipeline:eu-west-1:123456789012:release",
+          version,
+          pipelineType: "V2",
+          executionMode: "SUPERSEDED",
+          createdAt: new Date("2026-07-15T08:00:00.000Z"),
+          updatedAt: new Date(
+            version === 7
+              ? "2026-07-15T09:40:00.000Z"
+              : "2026-07-15T09:41:00.000Z"
+          ),
+          variables: [],
+          stages: [{
+            name: "Source",
+            actions: [{
+              name: "Checkout",
+              actionType: {
+                category: "Source",
+                owner: "AWS",
+                provider: "CodeCommit",
+                version: "1"
+              },
+              allowS3ObjectKeyOverride: false,
+              runOrder: 1,
+              region: "eu-west-1",
+              roleArn: null,
+              inputArtifactNames: [],
+              outputArtifactNames: ["Source"]
+            }]
+          }]
+        })
+        const codePipelineClient: CodePipelineReadClientService = {
+          discoverAccount: () =>
+            Effect.succeed({
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/control-center/start-session"
+            }),
+          getPipeline: () => Ref.get(pipelineVersion).pipe(Effect.map(pipelineFor)),
+          listExecutionsPage: () =>
+            Effect.succeed({
+              executions: [],
+              nextToken: null,
+              providerPageLimit: 1
+            }),
+          listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+          findActionExecution: () => Effect.die("unused findActionExecution"),
+          getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
+          getPipelineState: () => Effect.die("unused getPipelineState"),
+          getLogPage: () => Effect.die("unused getLogPage"),
+          getArtifactRange: () => Effect.die("unused getArtifactRange"),
+          startPipelineExecution: (request) =>
+            codePipelineRuntimeIdentityMatches(request.runtimeIdentity, mutationIdentity)
+              ? Ref.update(mutationCalls, (count) => count + 1).pipe(
+                Effect.as("execution-started-from-declaration")
+              )
+              : Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-runtime-identity-changed"
+                })
+              ),
+          stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+          putApprovalResult: () => Effect.die("unused putApprovalResult")
+        }
+        const config = yield* makePersistenceTestConfig(
+          `control-center-first-party-codepipeline-start-${mode}-`
+        )
+        const root = config.blobRoot.slice(0, -"/blobs".length)
+        const database = databaseLayer(config)
+        const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+        const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+        const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+        const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+        const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+        const dependencies = Layer.mergeAll(
+          persistence,
+          database,
+          foundation,
+          governedActions,
+          deliveryGraph,
+          runtimeAuthority,
+          SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+          Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+        )
+
+        return yield* Effect.gen(function*() {
+          const persistenceService = yield* Persistence
+          yield* seedGovernedActionAuthorityRoots("codepipeline-start")
+          const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+            { _tag: "integer", key: "actionPageSize", value: 20 },
+            { _tag: "integer", key: "maximumActionPages", value: 2 },
+            { _tag: "integer", key: "maximumActionsPerExecution", value: 40 },
+            { _tag: "integer", key: "maximumExecutionPages", value: 2 },
+            { _tag: "integer", key: "maximumLogBytes", value: 262_144 },
+            { _tag: "integer", key: "operationTimeoutMillis", value: 10_000 },
+            { _tag: "text", key: "pipelineName", value: "release" },
+            { _tag: "text", key: "profile", value: "production" },
+            { _tag: "text", key: "region", value: "eu-west-1" }
+          ])
+          const synchronizedAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+          yield* persistenceService.pluginConfigurations.update(
+            GOVERNED_WORKSPACE,
+            GOVERNED_CONNECTION,
+            configuration,
+            0,
+            synchronizedAt
+          )
+          yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+            GOVERNED_WORKSPACE,
+            GOVERNED_CONNECTION,
+            "codepipeline",
+            codePipelinePluginDefinition.rawDescriptor,
+            0,
+            synchronizedAt
+          )
+
+          const registry = yield* PluginRuntimeRegistry
+          const authority = yield* PluginRuntimeAuthority.pipe(
+            Effect.provide(registry.layer(pluginRuntimeKey({
+              workspaceId: GOVERNED_WORKSPACE,
+              pluginConnectionId: GOVERNED_CONNECTION
+            }))),
+            Effect.scoped
+          )
+          const syncRequest = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+            streamKey: "executions",
+            checkpoint: null
+          })
+          const pages = yield* Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            return yield* connection.sync(syncRequest).pipe(Stream.runCollect)
+          }).pipe(
+            Effect.provide(registry.layer(pluginRuntimeKey({
+              workspaceId: GOVERNED_WORKSPACE,
+              pluginConnectionId: GOVERNED_CONNECTION
+            }))),
+            Effect.scoped
+          )
+          assert.strictEqual(pages.length, 1)
+          const page = pages[0]
+          if (page === undefined) return yield* Effect.die("expected one CodePipeline synchronization page")
+          yield* materializeNormalizedPluginPage({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION,
+            providerId: "codepipeline",
+            streamKey: PluginStreamKey.make("executions"),
+            expectedRevision: 0,
+            committedAt: synchronizedAt,
+            successfulHealth: { _tag: "healthy", checkedAt: synchronizedAt }
+          }, page)
+          const target = yield* persistenceService.entities.findBySourceIdentity(
+            GOVERNED_WORKSPACE,
+            {
+              pluginConnectionId: GOVERNED_CONNECTION,
+              providerId: "codepipeline",
+              vendorImmutableId: VendorImmutableId.make(
+                "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              )
+            }
+          )
+          assert.strictEqual(target.entityType, "pipeline")
+          assert.strictEqual(target.sourceRevision.revision, "7:2026-07-15T09:40:00.000Z")
+          yield* seedGovernedAction({
+            pluginConnectionAuthorityDigest: authority,
+            seedAuthorityRoots: false,
+            targetEntityId: target.entityId,
+            variant: "codepipeline-start"
+          })
+          if (mode === "stale") yield* Ref.set(pipelineVersion, 8)
+
+          const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+          const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+          const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+          const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+            Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+            Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+            Layer.provideMerge(QuarantineRepository.layer)
+          )
+          const execution = yield* Effect.gen(function*() {
+            const engine = yield* GovernedActionExecutionEngine
+            return yield* engine.run({
+              workspaceId: GOVERNED_WORKSPACE,
+              actionId: GOVERNED_ACTION
+            })
+          }).pipe(
+            Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+              Layer.provide(store),
+              Layer.provide(executors)
+            ))
+          )
+          const record = yield* GovernedActionRepository.pipe(
+            Effect.flatMap((repository) =>
+              repository.read({
+                workspaceId: GOVERNED_WORKSPACE,
+                actionId: GOVERNED_ACTION
+              })
+            )
+          )
+          return {
+            execution,
+            mutationCalls: yield* Ref.get(mutationCalls),
+            record
+          }
+        }).pipe(
+          Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient)),
+          Effect.provide(dependencies)
+        )
+      })
+
+    return Effect.gen(function*() {
+      const current = yield* runScenario("current")
+      assert.deepStrictEqual(current.execution, { _tag: "advanced", state: "started" })
+      assert.strictEqual(current.record.head.state, "started")
+      assert.strictEqual(current.record.head.lineage._tag, "accepted")
+      assert.strictEqual(current.mutationCalls, 1)
+
+      const rotated = yield* runScenario("rotated")
+      assert.deepStrictEqual(rotated.execution, { _tag: "advanced", state: "failed" })
+      assert.strictEqual(rotated.record.head.state, "failed")
+      assert.strictEqual(rotated.record.head.lineage._tag, "terminal")
+      if (rotated.record.head.lineage._tag === "terminal") {
+        assert.strictEqual(rotated.record.head.lineage.receipt.status, "failed")
+        assert.include(rotated.record.head.lineage.receipt.providerOperationId, "rejected:start:")
+      }
+      assert.strictEqual(rotated.mutationCalls, 0)
+
+      const stale = yield* runScenario("stale")
+      assert.deepStrictEqual(stale.execution, { _tag: "advanced", state: "denied" })
+      assert.strictEqual(stale.record.head.state, "denied")
+      assert.strictEqual(stale.mutationCalls, 0)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
+  })
+
+  it.effect("folds a deterministic CodePipeline rejection through the production registry exactly once", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
+      ))
+      const mutationCalls = yield* Ref.make(0)
+      const logCalls = yield* Ref.make(0)
+      const artifactCalls = yield* Ref.make(0)
+      const identityArn = yield* Ref.make(
+        "arn:aws:sts::123456789012:assumed-role/control-center/registry-session"
+      )
+      const identityCalls = yield* Ref.make(0)
+      const pipeline = {
+        name: "release",
+        arn: "arn:aws:codepipeline:eu-west-1:123456789012:release",
+        version: 7,
+        pipelineType: "V2",
+        executionMode: "SUPERSEDED",
+        createdAt: new Date("2026-07-15T08:00:00.000Z"),
+        updatedAt: new Date("2026-07-15T09:40:00.000Z"),
+        variables: [],
+        stages: [{
+          name: "Source",
+          actions: [{
+            name: "Checkout",
+            actionType: {
+              category: "Source",
+              owner: "AWS",
+              provider: "CodeCommit",
+              version: "1"
+            },
+            allowS3ObjectKeyOverride: false,
+            runOrder: 1,
+            region: "eu-west-1",
+            roleArn: null,
+            inputArtifactNames: [],
+            outputArtifactNames: ["Source"]
+          }]
+        }]
+      } satisfies CodePipelinePipeline
+      const snapshot = {
+        execution: {
+          pipelineName: "release",
+          pipelineVersion: 7,
+          executionId: "execution-failed-1",
+          status: "Failed",
+          statusSummary: "Build failed",
+          updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+          artifactRevisions: [{
+            name: "Source",
+            revisionId: "commit-abc",
+            revisionSummary: "main",
+            createdAt: new Date("2026-07-15T09:44:00.000Z")
+          }],
+          variables: [],
+          triggerType: "StartPipelineExecution",
+          triggerDetail: "release-operator",
+          executionMode: "SUPERSEDED",
+          executionType: "STANDARD",
+          rollbackTargetExecutionId: null
+        },
+        summary: {
+          executionId: "execution-failed-1",
+          status: "Failed",
+          statusSummary: "Build failed",
+          startedAt: new Date("2026-07-15T09:45:00.000Z"),
+          updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+          sourceRevisions: [{
+            actionName: "Checkout",
+            revisionId: "commit-abc",
+            revisionSummary: "main"
+          }],
+          triggerType: "StartPipelineExecution",
+          triggerDetail: "release-operator",
+          executionMode: "SUPERSEDED",
+          executionType: "STANDARD",
+          rollbackTargetExecutionId: null
+        },
+        actionCollection: {
+          actions: [{
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            pipelineVersion: 7,
+            stageName: "Build",
+            actionName: "Compile",
+            status: "Failed",
+            startedAt: new Date("2026-07-15T09:45:00.000Z"),
+            updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+            updatedBy: null,
+            actionType: {
+              category: "Build",
+              owner: "AWS",
+              provider: "CodeBuild",
+              version: "1"
+            },
+            roleArn: null,
+            region: "eu-west-1",
+            inputArtifacts: [],
+            outputArtifacts: [{
+              name: "BuildOutput",
+              bucket: "private-artifacts",
+              key: "build.zip",
+              access: "proxy-required"
+            }],
+            externalExecutionId: null,
+            externalExecutionSummary: null,
+            errorCode: null,
+            errorMessage: null,
+            logStreamArn: "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+          }],
+          truncated: false,
+          pagesRead: 1
+        }
+      } satisfies CodePipelineExecutionSnapshot
+      const codePipelineClient: CodePipelineReadClientService = {
+        discoverAccount: () =>
+          Effect.all([
+            Ref.update(identityCalls, (count) => count + 1),
+            Ref.get(identityArn)
+          ]).pipe(
+            Effect.map(([, arn]) => ({
+              accountId: "123456789012",
+              arn
+            }))
+          ),
+        getPipeline: () => Effect.succeed(pipeline),
+        listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
+        listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
+        getExecutionSnapshot: () => Effect.succeed(snapshot),
+        getPipelineState: () => Effect.die("unused getPipelineState"),
+        getLogPage: () =>
+          Ref.update(logCalls, (count) => count + 1).pipe(
+            Effect.as({ events: [], nextToken: null })
+          ),
+        getArtifactRange: () =>
+          Ref.update(artifactCalls, (count) => count + 1).pipe(
+            Effect.as({ bytesBase64: "AQID", totalBytes: 3 })
+          ),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(
+              Effect.fail(
+                new PluginConflictFailure({
+                  operation: "codepipeline-start-execution",
+                  diagnosticCode: "codepipeline-provider-state-conflict"
+                })
+              )
+            )
+          ),
+        stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+        putApprovalResult: () => Effect.die("unused putApprovalResult")
+      }
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codepipeline-governed-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
+      const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        governedActions,
+        deliveryGraph,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* seedGovernedActionAuthorityRoots("codepipeline")
+        const configuration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "integer", key: "actionPageSize", value: 20 },
+          { _tag: "integer", key: "maximumActionPages", value: 2 },
+          { _tag: "integer", key: "maximumActionsPerExecution", value: 40 },
+          { _tag: "integer", key: "maximumExecutionPages", value: 2 },
+          { _tag: "integer", key: "maximumLogBytes", value: 262_144 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 10_000 },
+          { _tag: "text", key: "pipelineName", value: "release" },
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          configuration,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          GOVERNED_WORKSPACE,
+          GOVERNED_CONNECTION,
+          "codepipeline",
+          codePipelinePluginDefinition.rawDescriptor,
+          0,
+          Schema.decodeSync(UtcTimestamp)("2026-07-15T10:00:00.000Z")
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const authority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        assert.strictEqual(yield* Ref.get(identityCalls), 1)
+        yield* Ref.set(
+          identityArn,
+          "arn:aws:sts::123456789012:assumed-role/control-center/executor-session"
+        )
+        yield* seedGovernedAction({
+          pluginConnectionAuthorityDigest: authority,
+          seedAuthorityRoots: false,
+          variant: "codepipeline"
+        })
+        yield* seedGovernedActionCurrentInputs("codepipeline")
+
+        const registryLayer = Layer.succeed(PluginRuntimeRegistry, registry)
+        const runtimeMap = PluginRuntimeMap.layer.pipe(Layer.provide(registryLayer))
+        const executors = AuthorizedPluginExecutorMap.layer.pipe(Layer.provide(runtimeMap))
+        const store = governedActionExecutionStoreLayer(GOVERNED_WORKSPACE).pipe(
+          Layer.provideMerge(pluginRuntimeAuthoritySourceLayer),
+          Layer.provideMerge(GovernedActionPolicyEvaluator.layer),
+          Layer.provideMerge(QuarantineRepository.layer)
+        )
+        const execution = yield* Effect.gen(function*() {
+          const engine = yield* GovernedActionExecutionEngine
+          return yield* engine.run({
+            workspaceId: GOVERNED_WORKSPACE,
+            actionId: GOVERNED_ACTION
+          })
+        }).pipe(
+          Effect.provide(GovernedActionExecutionEngine.layer.pipe(
+            Layer.provide(store),
+            Layer.provide(executors)
+          ))
+        )
+        const governedActionRepository = yield* GovernedActionRepository
+        const record = yield* governedActionRepository.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: GOVERNED_ACTION
+        })
+
+        assert.deepStrictEqual(execution, { _tag: "advanced", state: "failed" })
+        assert.strictEqual(record.head.state, "failed")
+        assert.strictEqual(record.head.lineage._tag, "terminal")
+        if (record.head.lineage._tag === "terminal") {
+          assert.strictEqual(record.head.lineage.receipt.status, "failed")
+          assert.include(record.head.lineage.receipt.providerOperationId, "rejected:retry:")
+          assert.include(record.head.lineage.receipt.safeSummary, "without applying")
+        }
+        const stableAuthority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        const identityCallsBeforePinnedRuntime = yield* Ref.get(identityCalls)
+        const blockedAfterIdentityChange = yield* Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          assert.strictEqual(
+            yield* Ref.get(identityCalls),
+            identityCallsBeforePinnedRuntime + 1
+          )
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.retry",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-failed-1"
+              },
+              expectedRevision: "7:Failed:2026-07-15T09:50:00.000Z",
+              payload: {},
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "registry-identity-change",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "registry-identity-change-authorization",
+            authorizedAt: DateTime.makeUnsafe("2026-07-15T10:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-15T11:00:00.000Z")
+          })
+          const pipelineCapability = connection.pipeline
+          if (pipelineCapability === undefined || Option.isNone(pipelineCapability)) {
+            return yield* Effect.die("pipeline evidence capability missing")
+          }
+          const evidenceAction = {
+            entity: {
+              entityType: "aws.codepipeline.action",
+              vendorImmutableId: "execution-failed-1#execution-failed-1-action-1"
+            },
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            expectedRevision: "Failed:2026-07-15T09:50:00.000Z"
+          }
+          const logRequest = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+            action: evidenceAction,
+            cursor: null,
+            limit: 10
+          })
+          const artifactRequest = Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+            action: evidenceAction,
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset: 0,
+            length: 3
+          })
+          yield* Ref.set(
+            identityArn,
+            "arn:aws:sts::123456789012:assumed-role/control-center/evidence-session"
+          )
+          const sameRoleLogs = yield* pipelineCapability.value.readLogPage(logRequest)
+          const sameRoleArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest)
+          yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-control-center")
+          const blockedLogs = yield* pipelineCapability.value.readLogPage(logRequest).pipe(Effect.result)
+          const blockedArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest).pipe(Effect.result)
+          const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
+          return {
+            blockedArtifact,
+            blockedLogs,
+            preflight,
+            sameRoleArtifact,
+            sameRoleLogs
+          }
+        }).pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        const rotatedAuthority = yield* PluginRuntimeAuthority.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: GOVERNED_WORKSPACE,
+            pluginConnectionId: GOVERNED_CONNECTION
+          }))),
+          Effect.scoped
+        )
+        assert.strictEqual(stableAuthority, authority)
+        assert.deepStrictEqual(blockedAfterIdentityChange.sameRoleLogs.events, [])
+        assert.strictEqual(blockedAfterIdentityChange.sameRoleArtifact.bytesBase64, "AQID")
+        assert.strictEqual(blockedAfterIdentityChange.blockedLogs._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedLogs._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedLogs.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.blockedArtifact._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedArtifact._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedArtifact.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.preflight._tag, "Failure")
+        if (blockedAfterIdentityChange.preflight._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.preflight.failure._tag, "PluginConflictFailure")
+        }
+        assert.notStrictEqual(rotatedAuthority, authority)
+        assert.strictEqual(yield* Ref.get(logCalls), 1)
+        assert.strictEqual(yield* Ref.get(artifactCalls), 1)
+        assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+      }).pipe(
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient)),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("loads a persisted read-only CodePipeline runtime with its historical configuration", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
+      const identityCalls = yield* Ref.make(0)
+      const historicalClient: CodePipelineReadClientService = {
+        discoverAccount: () =>
+          Ref.update(identityCalls, (count) => count + 1).pipe(
+            Effect.as({
+              accountId: "123456789012",
+              arn: "arn:aws:iam::123456789012:role/historical-control-center"
+            })
+          ),
+        getPipeline: () => Effect.die("unused getPipeline"),
+        listExecutionsPage: () => Effect.die("unused listExecutionsPage"),
+        listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
+        findActionExecution: () => Effect.die("unused findActionExecution"),
+        getExecutionSnapshot: () => Effect.die("unused getExecutionSnapshot"),
+        getPipelineState: () => Effect.die("unused getPipelineState"),
+        getLogPage: () => Effect.die("unused getLogPage"),
+        getArtifactRange: () => Effect.die("unused getArtifactRange"),
+        startPipelineExecution: () => Effect.die("unused startPipelineExecution"),
+        stopPipelineExecution: () => Effect.die("unused stopPipelineExecution"),
+        putApprovalResult: () => Effect.die("unused putApprovalResult")
+      }
+      const config = yield* makePersistenceTestConfig("control-center-first-party-codepipeline-historical-")
+      const root = config.blobRoot.slice(0, -"/blobs".length)
+      const database = databaseLayer(config)
+      const persistence = persistenceLayerFromDatabase(config).pipe(Layer.provide(database))
+      const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
+      const runtimeAuthority = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
+      const dependencies = Layer.mergeAll(
+        persistence,
+        database,
+        foundation,
+        runtimeAuthority,
+        SecretStore.layer({ secretRoot: SecretRoot.make(`${root}/secrets`) }),
+        Layer.succeed(HttpClient.HttpClient, fakeClockifyClient([]))
+      )
+
+      yield* Effect.gen(function*() {
+        const persistenceService = yield* Persistence
+        yield* persistenceService.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Historical pipeline"),
+          createdAt: CREATED_AT
+        })
+        yield* persistenceService.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: CONNECTION_ID,
+          providerId: "codepipeline",
+          displayName: PluginConnectionDisplayName.make("Historical CodePipeline"),
+          isEnabled: true,
+          createdAt: CREATED_AT
+        })
+        const historicalConfiguration = yield* Schema.decodeUnknownEffect(StoredPluginConfiguration)([
+          { _tag: "integer", key: "actionPageSize", value: 50 },
+          { _tag: "integer", key: "maximumActionPages", value: 3 },
+          { _tag: "integer", key: "maximumActionsPerExecution", value: 100 },
+          { _tag: "integer", key: "maximumExecutionPages", value: 5 },
+          { _tag: "integer", key: "operationTimeoutMillis", value: 30_000 },
+          { _tag: "text", key: "pipelineName", value: "release" },
+          { _tag: "text", key: "profile", value: "production" },
+          { _tag: "text", key: "region", value: "eu-west-1" }
+        ])
+        yield* persistenceService.pluginConfigurations.update(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          historicalConfiguration,
+          0,
+          CREATED_AT
+        )
+        yield* persistenceService.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          CONNECTION_ID,
+          "codepipeline",
+          historicalReadOnlyCodePipelineDescriptor,
+          0,
+          CREATED_AT
+        )
+
+        const registry = yield* PluginRuntimeRegistry
+        const connection = yield* PluginConnection.pipe(
+          Effect.provide(registry.layer(pluginRuntimeKey({
+            workspaceId: WORKSPACE_ID,
+            pluginConnectionId: CONNECTION_ID
+          }))),
+          Effect.scoped
+        )
+
+        assert.isTrue(hasPluginCapability(connection.descriptor, "entity.read", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "action.execute", 1))
+        assert.isFalse(hasPluginCapability(connection.descriptor, "pipeline.logs", 1))
+        assert.strictEqual(yield* Ref.get(identityCalls), 1)
+      }).pipe(
+        Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, historicalClient)),
+        Effect.provide(dependencies)
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it("keeps the historical Confluence descriptor independent of future current fields", () => {
     const futureCurrent = {
       ...confluencePagePluginDescriptor,
@@ -1002,6 +1761,57 @@ describe("first-party plugin runtime", () => {
         "action.reconcile",
         "diff.inventory",
         "diff.content"
+      ]
+    )
+  })
+
+  it("keeps the historical CodePipeline descriptor independent of current governed fields", () => {
+    const futureCurrent = {
+      ...codePipelinePluginDescriptor,
+      configurationFields: [
+        ...codePipelinePluginDescriptor.configurationFields,
+        {
+          _tag: "text",
+          key: "futureField",
+          label: "Future field",
+          description: "A field added after the historical descriptor was persisted.",
+          required: false
+        }
+      ]
+    }
+
+    assert.isTrue(futureCurrent.configurationFields.some(({ key }) => key === "futureField"))
+    assert.isFalse(
+      historicalReadOnlyCodePipelineDescriptor.configurationFields.some(({ key }) =>
+        key === "futureField" || key === "maximumLogBytes"
+      )
+    )
+    assert.deepStrictEqual(
+      historicalReadOnlyCodePipelineDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental"]
+    )
+    assert.deepStrictEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      { major: 0, minor: 1, patch: 0 }
+    )
+    assert.deepStrictEqual(
+      codePipelinePluginDescriptor.adapterVersion,
+      { major: 0, minor: 2, patch: 0 }
+    )
+    assert.notDeepEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      codePipelinePluginDescriptor.adapterVersion
+    )
+    assert.deepStrictEqual(
+      codePipelinePluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      [
+        "entity.read",
+        "sync.incremental",
+        "action.propose",
+        "action.execute",
+        "action.reconcile",
+        "pipeline.logs",
+        "pipeline.artifact"
       ]
     )
   })

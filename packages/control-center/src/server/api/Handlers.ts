@@ -25,7 +25,12 @@ import { sessionCookiePolicy } from "../security/RequestSecurity.js"
 import { ApiBindConfiguration } from "./ApiConfiguration.js"
 import { authorizePairingRequest } from "./ApiMiddleware.js"
 import {
+  type ApplicationConflict,
+  type ApplicationRateLimited,
+  type ApplicationResourceNotFound,
+  type ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   CompleteDiffReads,
   DeliveryGraphInspection,
   LiveEvents,
@@ -1238,5 +1243,86 @@ export const mediaHandlersLayer = HttpApiBuilder.group(
           )
           return media.body
         }))
+    })
+)
+
+/** Authenticated workspace-scoped CodePipeline log and artifact proxy handlers. */
+export const codePipelineHandlersLayer = HttpApiBuilder.group(
+  ControlCenterApi,
+  "codepipeline",
+  (handlers) =>
+    Effect.gen(function*() {
+      const reads = yield* Effect.serviceOption(CodePipelineReads)
+      const mapReadErrors = <A, R>(
+        effect: Effect.Effect<
+          A,
+          | ApplicationConflict
+          | ApplicationRateLimited
+          | ApplicationResourceNotFound
+          | ApplicationServiceUnavailable,
+          R
+        >
+      ) =>
+        effect.pipe(Effect.catchTags({
+          ApplicationConflict: mapApplicationConflict,
+          ApplicationRateLimited: mapApplicationRateLimited,
+          ApplicationResourceNotFound: mapApplicationNotFound,
+          ApplicationServiceUnavailable: mapApplicationUnavailable
+        }))
+      return handlers
+        .handle("logs", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            if (Option.isNone(reads)) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            return yield* mapReadErrors(reads.value.logs({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: payload.pluginConnectionId,
+              request: payload.request
+            }))
+          }))
+        .handle("artifact", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            if (Option.isNone(reads)) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const artifact = yield* mapReadErrors(reads.value.artifact({
+              workspaceId: session.workspaceId,
+              pluginConnectionId: payload.pluginConnectionId,
+              request: payload.request
+            }))
+            const rangeUnsatisfied = artifact.contentLength === 0 && artifact.offset >= artifact.totalBytes
+            const partial = !rangeUnsatisfied &&
+              (artifact.offset > 0 || artifact.contentLength < artifact.totalBytes)
+            const contentRange = rangeUnsatisfied
+              ? `bytes */${String(artifact.totalBytes)}`
+              : `bytes ${String(artifact.offset)}-${String(artifact.offset + artifact.contentLength - 1)}/${
+                String(artifact.totalBytes)
+              }`
+            yield* HttpEffect.appendPreResponseHandler((_request, response) =>
+              Effect.succeed(
+                HttpServerResponse.setHeaders(
+                  rangeUnsatisfied
+                    ? HttpServerResponse.setStatus(response, 416)
+                    : partial
+                    ? HttpServerResponse.setStatus(response, 206)
+                    : response,
+                  {
+                    "cache-control": "private, no-store",
+                    "content-disposition": `attachment; filename="${artifact.filename}"`,
+                    "content-length": String(artifact.contentLength),
+                    ...(partial || rangeUnsatisfied ? { "content-range": contentRange } : {}),
+                    "content-type": "application/octet-stream",
+                    "x-content-type-options": "nosniff"
+                  }
+                )
+              )
+            )
+            return artifact.body
+          }))
     })
 )

@@ -42,8 +42,15 @@ import {
   codeCommitPluginDefinition,
   codeCommitPluginDescriptor
 } from "../codecommit/CodeCommitPluginDefinition.js"
-import { codePipelinePluginDefinition } from "../codepipeline/CodePipelinePluginDefinition.js"
-import { CodePipelineReadClient } from "../codepipeline/CodePipelineReadClient.js"
+import {
+  codePipelinePluginDefinition,
+  codePipelinePluginDescriptor
+} from "../codepipeline/CodePipelinePluginDefinition.js"
+import {
+  canonicalCodePipelinePrincipalArn,
+  CodePipelineReadClient,
+  type CodePipelineReadClientService
+} from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
 import { confluencePageClientLayer } from "../confluence/ConfluencePageClient.js"
 import {
@@ -59,7 +66,7 @@ import {
 } from "../jira/JiraReadPlugin.js"
 import { negotiatePluginDescriptorV1 } from "../negotiation.js"
 import type { PluginRuntimeScope } from "../PluginConnectionMap.js"
-import { buildPluginDefinitionLayer, buildPluginDefinitionLayerFromNegotiatedDescriptor } from "../PluginDefinition.js"
+import { buildPluginDefinitionLayerFromNegotiatedDescriptor } from "../PluginDefinition.js"
 import { AuthorizedPluginExecutor } from "./AuthorizedPluginExecutor.js"
 import {
   PluginRuntimeAccountDigest,
@@ -118,6 +125,7 @@ interface LoadedRuntime {
     | "current"
     | "compatible-atlassian"
     | "compatible-codecommit"
+    | "compatible-codepipeline"
     | "legacy-atlassian"
   readonly runtime: PluginRuntimeRecord
 }
@@ -573,6 +581,88 @@ export const historicalCompleteDiffCodeCommitDescriptor = {
   ]
 }
 
+/** Frozen read-only CodePipeline descriptor accepted before governed actions and evidence reads. @internal */
+export const historicalReadOnlyCodePipelineDescriptor = {
+  contractId: "dev.knpkv.control-center.plugin",
+  contractVersion: { major: 1, minor: 0, patch: 0 },
+  pluginId: "dev.knpkv.aws-codepipeline",
+  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  displayName: "AWS CodePipeline",
+  configurationFields: [
+    {
+      _tag: "text",
+      key: "profile",
+      label: "AWS profile",
+      description: "Local AWS credential profile resolved only by the server-side adapter.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "region",
+      label: "AWS region",
+      description: "AWS region containing the configured pipeline.",
+      required: true
+    },
+    {
+      _tag: "text",
+      key: "pipelineName",
+      label: "Pipeline",
+      description: "One CodePipeline pipeline normalized by this connection.",
+      required: true
+    },
+    {
+      _tag: "integer",
+      key: "maximumExecutionPages",
+      label: "Execution pages",
+      description: "Maximum single-execution provider pages read by one synchronization run.",
+      required: true,
+      minimum: 1,
+      maximum: 20
+    },
+    {
+      _tag: "integer",
+      key: "actionPageSize",
+      label: "Action page size",
+      description: "Maximum action executions requested from one provider page.",
+      required: true,
+      minimum: 1,
+      maximum: 100
+    },
+    {
+      _tag: "integer",
+      key: "maximumActionPages",
+      label: "Action pages",
+      description: "Maximum action-execution pages read for one pipeline execution.",
+      required: true,
+      minimum: 1,
+      maximum: 5
+    },
+    {
+      _tag: "integer",
+      key: "maximumActionsPerExecution",
+      label: "Actions per execution",
+      description: "Hard normalization limit for action executions under one execution.",
+      required: true,
+      minimum: 1,
+      maximum: 200
+    },
+    {
+      _tag: "integer",
+      key: "operationTimeoutMillis",
+      label: "Request timeout",
+      description: "Maximum milliseconds for credential and CodePipeline provider requests.",
+      required: true,
+      minimum: 1_000,
+      maximum: 120_000
+    }
+  ],
+  capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+}
+
 const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => {
   if (providerId === "jira") return [jiraReadPluginDescriptor, ...historicalJiraDescriptors]
   if (providerId === "confluence") {
@@ -585,6 +675,9 @@ const expectedDescriptors = (providerId: ProviderId): ReadonlyArray<unknown> => 
       historicalActionCodeCommitDescriptor,
       historicalCodeCommitDescriptor
     ]
+  }
+  if (providerId === "codepipeline") {
+    return [codePipelinePluginDescriptor, historicalReadOnlyCodePipelineDescriptor]
   }
   return [expectedDescriptor(providerId)]
 }
@@ -631,6 +724,8 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
       ? "current"
       : connection.providerId === "codecommit"
       ? "compatible-codecommit"
+      : connection.providerId === "codepipeline"
+      ? "compatible-codepipeline"
       : connection.providerId === "jira" && (descriptorGeneration === 1 || descriptorGeneration === 2)
       ? "compatible-atlassian"
       : "legacy-atlassian",
@@ -1010,7 +1105,10 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
   }
 })
 
-const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(loaded: LoadedRuntime) {
+const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")(function*(
+  loaded: LoadedRuntime,
+  client: CodePipelineReadClientService | undefined
+) {
   const expectedKeys = new Set([
     "actionPageSize",
     "maximumActionPages",
@@ -1021,6 +1119,7 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
     "profile",
     "region"
   ])
+  if (loaded.descriptorGeneration === "current") expectedKeys.add("maximumLogBytes")
   yield* requireExactKeys(loaded.configuration, expectedKeys)
   const profile = yield* textValue(loaded.configuration, "profile")
   const region = yield* textValue(loaded.configuration, "region")
@@ -1032,19 +1131,43 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
     actionPageSize: yield* integerValue(loaded.configuration, "actionPageSize"),
     maximumActionPages: yield* integerValue(loaded.configuration, "maximumActionPages"),
     maximumActionsPerExecution: yield* integerValue(loaded.configuration, "maximumActionsPerExecution"),
+    maximumLogBytes: loaded.descriptorGeneration === "current"
+      ? yield* integerValue(loaded.configuration, "maximumLogBytes")
+      : 262_144,
     operationTimeoutMillis: yield* integerValue(loaded.configuration, "operationTimeoutMillis")
   }
+  const clientLayer = client === undefined
+    ? CodePipelineReadClient.live
+    : Layer.succeed(CodePipelineReadClient, client)
+  const identity = yield* Effect.gen(function*() {
+    const readClient = yield* CodePipelineReadClient
+    return yield* readClient.discoverAccount({
+      profile: configuration.profile,
+      region: configuration.region,
+      operationTimeoutMillis: configuration.operationTimeoutMillis
+    })
+  }).pipe(
+    Effect.provide(clientLayer),
+    Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
+  )
+  const canonicalIdentity = {
+    ...identity,
+    arn: canonicalCodePipelinePrincipalArn(identity.arn)
+  }
   return {
-    credentialGeneration: `${profile}\0${region}`,
-    layer: buildPluginDefinitionLayer(codePipelinePluginDefinition, configuration).pipe(
-      Layer.provide(CodePipelineReadClient.live)
-    )
+    credentialGeneration: `${profile}\0${region}\0${canonicalIdentity.accountId}\0${canonicalIdentity.arn}`,
+    layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
+      codePipelinePluginDefinition,
+      { ...configuration, runtimeIdentity: canonicalIdentity },
+      loaded.descriptor
+    ).pipe(Layer.provide(clientLayer))
   }
 })
 
 const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
   loaded: LoadedRuntime,
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   switch (loaded.runtime.providerId) {
     case "jira":
@@ -1056,12 +1179,13 @@ const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(functio
     case "codecommit":
       return yield* codeCommitLayer(loaded, codeCommitClients)
     case "codepipeline":
-      return yield* codePipelineLayer(loaded)
+      return yield* codePipelineLayer(loaded, codePipelineClient)
   }
 })
 
 const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*(
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   const persistence = yield* Persistence
   const secrets = yield* SecretStore
@@ -1086,7 +1210,7 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded, codeCommitClients)
+          const provider = yield* providerLayer(loaded, codeCommitClients, codePipelineClient)
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
           return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)
@@ -1100,7 +1224,8 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
 
 /** Injectable first-party registry used to verify complete owning-package runtime wiring. @internal */
 export const makeFirstPartyPluginRuntimeRegistry = (
-  codeCommitClients: CodeCommitClientsLayer
+  codeCommitClients: CodeCommitClientsLayer,
+  codePipelineClient?: CodePipelineReadClientService
 ): Layer.Layer<
   PluginRuntimeRegistry,
   never,
@@ -1111,7 +1236,7 @@ export const makeFirstPartyPluginRuntimeRegistry = (
   | FileSystem.FileSystem
   | Path.Path
   | PluginRuntimeAuthoritySource
-> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients))
+> => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients, codePipelineClient))
 
 /** Production registry for the fixed first-party provider catalog. @internal */
 export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)

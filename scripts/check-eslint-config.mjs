@@ -913,6 +913,7 @@ await assertRuleDiagnostics({
     import { FutureStableService } from "./FutureService.js"
     import * as Services from "./FutureServices.js"
     const AliasedStableService = FutureStableService
+    const optionalService = Effect.serviceOption
     handlers
       .handle("first", () => Effect.gen(function*() {
         const auth = yield* Auth
@@ -933,8 +934,14 @@ await assertRuleDiagnostics({
       .handle("alias", () => Effect.gen(function*() {
         return yield* AliasedStableService
       }))
+      .handle("optional", () => Effect.gen(function*() {
+        return yield* Effect.serviceOption(PluginAdministration)
+      }))
+      .handle("optional-alias", () => Effect.gen(function*() {
+        return yield* optionalService(FutureStableService)
+      }))
   `,
-  expected: 5,
+  expected: 7,
   filePath: "packages/control-center/src/server/api/Handlers.ts",
   ruleId: "local-rules/no-stable-service-yield-in-http-handler"
 })
@@ -950,11 +957,12 @@ await assertRuleDiagnostics({
     Effect.gen(function*() {
       const auth = yield* Auth
       const plugins = yield* PluginAdministration
+      const optionalPlugins = yield* Effect.serviceOption(PluginAdministration)
       return handlers.handle("first", () => Effect.gen(function*() {
         const session = yield* RequestSession
         const aliasedSession = yield* AliasedRequestSession
         const namespaceSession = yield* SessionServices.CurrentSession
-        return { aliasedSession, auth, namespaceSession, plugins, session }
+        return { aliasedSession, auth, namespaceSession, optionalPlugins, plugins, session }
       }))
     })
   `,
@@ -973,4 +981,50 @@ await assertRuleDiagnostics({
   expected: 0,
   filePath: "packages/control-center/src/api/eslint-number-from-string-valid.ts",
   ruleId: "local-rules/no-number-from-string-in-control-center-api"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    import * as Result from "effect/Result"
+    import * as Schema from "effect/Schema"
+    const ArtifactBytes = Schema.String.check(
+      Schema.makeFilter((value) => {
+        const decoded = Encoding.decodeBase64(value)
+        return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
+      })
+    )
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/domain/plugins/eslint-base64-bound-invalid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    import * as Result from "effect/Result"
+    import * as Schema from "effect/Schema"
+    const ArtifactBytes = Schema.String.check(
+      Schema.isMaxLength(1_398_104),
+      Schema.isBase64(),
+      Schema.makeFilter((value) => {
+        const decoded = Encoding.decodeBase64(value)
+        return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
+      })
+    )
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/domain/plugins/eslint-base64-bound-valid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    const decoded = Encoding.decodeBase64(providerValue)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/eslint-base64-nonschema-valid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
 })

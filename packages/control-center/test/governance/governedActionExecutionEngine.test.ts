@@ -111,6 +111,16 @@ const confirmedDispatch = Schema.decodeUnknownSync(PluginActionDispatchResultV1)
   }
 })
 
+const confirmedFailedDispatch = Schema.decodeUnknownSync(PluginActionDispatchResultV1)({
+  _tag: "confirmed",
+  receipt: {
+    providerOperationId: "not-dispatched:credential-timeout",
+    status: "failed",
+    safeSummary: "Credentials timed out before provider dispatch",
+    observedAt: OBSERVED_AT
+  }
+})
+
 const reconciliationRequest = Schema.decodeUnknownSync(Schema.toType(PluginActionReconciliationRequestV1))({
   reconciliationKey: null,
   idempotencyKey: "action:PAY-42:done",
@@ -150,11 +160,13 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   readonly inspectFails?: boolean
   readonly pauseBegin?: boolean
   readonly reconcileDefectOnce?: boolean
+  readonly dispatchResult?: typeof PluginActionDispatchResultV1.Type
   readonly leaseRuntimeAuthorityToken?: PluginRuntimeAuthorityToken
   readonly recoveryCandidates?: ReadonlyArray<GovernedActionExecutionReference>
 }) {
   const events = yield* Ref.make<ReadonlyArray<string>>([])
   const unknowns = yield* Ref.make<ReadonlyArray<GovernedActionUnknownOutcome>>([])
+  const dispatchResults = yield* Ref.make<ReadonlyArray<typeof PluginActionDispatchResultV1.Type>>([])
   const beginInputs = yield* Ref.make<ReadonlyArray<Parameters<GovernedActionExecutionStoreV1["begin"]>[0]>>([])
   const beginEntered = yield* Deferred.make<void>()
   const releaseBegin = yield* Deferred.make<void>()
@@ -188,7 +200,11 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
         Effect.as(begin)
       ),
     recordBlocked: () => record("blocked").pipe(Effect.as("denied")),
-    recordDispatch: () => record("record-dispatch").pipe(Effect.as("succeeded")),
+    recordDispatch: ({ result }) =>
+      Ref.update(dispatchResults, (current) => [...current, result]).pipe(
+        Effect.andThen(record("record-dispatch")),
+        Effect.as(result._tag === "confirmed" && result.receipt.status === "failed" ? "failed" : "succeeded")
+      ),
     recordUnknown: ({ outcome }) =>
       Ref.update(unknowns, (current) => [...current, outcome]).pipe(
         Effect.andThen(record("record-unknown")),
@@ -207,7 +223,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
         yield* Deferred.succeed(executeEntered, undefined)
         if (options?.executeDefect === true) return yield* Effect.die("injected-provider-defect")
         if (options?.executeNever === true) return yield* Effect.never
-        return confirmedDispatch
+        return options?.dispatchResult ?? confirmedDispatch
       }),
     requestCancellation: () => Effect.die("cancellation is outside this test"),
     reconcile: (request) =>
@@ -240,6 +256,7 @@ const makeHarness = Effect.fn("GovernedActionExecutionEngineTest.harness")(funct
   return {
     events,
     unknowns,
+    dispatchResults,
     beginInputs,
     beginEntered,
     releaseBegin,
@@ -273,6 +290,23 @@ describe("governed action execution engine", () => {
         "execute",
         "record-dispatch"
       ])
+    }))
+
+  it.effect("records a confirmed pre-dispatch failure as terminal without scheduling recovery", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(observedAt))
+      const harness = yield* makeHarness({ dispatchResult: confirmedFailedDispatch })
+
+      assert.deepStrictEqual(yield* run(harness.layer), { _tag: "advanced", state: "failed" })
+      assert.deepStrictEqual(yield* Ref.get(harness.events), [
+        "inspect",
+        "preflight",
+        "begin",
+        "execute",
+        "record-dispatch"
+      ])
+      assert.deepStrictEqual(yield* Ref.get(harness.dispatchResults), [confirmedFailedDispatch])
+      assert.isEmpty(yield* Ref.get(harness.unknowns))
     }))
 
   it.effect("passes the inspected runtime scope to the atomic begin boundary", () =>

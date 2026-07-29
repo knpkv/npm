@@ -95,6 +95,11 @@ import type {
   ShareId,
   WorkspaceId
 } from "../../domain/identifiers.js"
+import type {
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineLogPageRequestV1,
+  PluginPipelineLogPageV1
+} from "../../domain/plugins/index.js"
 import type { PrReviewSuggestionId } from "../../domain/prReview.js"
 import type {
   PrReviewSuggestionRevisionPageSize,
@@ -282,6 +287,29 @@ export class CompleteDiffReads extends Context.Service<CompleteDiffReads, {
     readonly revision: Revision
   }) => Effect.Effect<CompleteDiffInventory, CompleteDiffReadError>
 }>()("@knpkv/control-center/server/api/CompleteDiffReads") {}
+
+/** Fully authorized artifact bytes with provider storage coordinates removed. */
+export interface CodePipelineArtifactRead {
+  readonly body: Stream.Stream<Uint8Array>
+  readonly contentLength: number
+  readonly filename: string
+  readonly offset: number
+  readonly totalBytes: number
+}
+
+/** Workspace-scoped bounded CodePipeline evidence reads. */
+export class CodePipelineReads extends Context.Service<CodePipelineReads, {
+  readonly logs: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly request: PluginPipelineLogPageRequestV1
+  }) => Effect.Effect<PluginPipelineLogPageV1, CompleteDiffReadError>
+  readonly artifact: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly request: PluginPipelineArtifactRangeRequestV1
+  }) => Effect.Effect<CodePipelineArtifactRead, CompleteDiffReadError>
+}>()("@knpkv/control-center/server/api/CodePipelineReads") {}
 
 /** Injectable bird's-eye portfolio projection boundary. */
 export class PortfolioSnapshots extends Context.Service<PortfolioSnapshots, {

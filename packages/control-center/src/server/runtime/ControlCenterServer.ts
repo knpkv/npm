@@ -26,6 +26,7 @@ import {
 import { ApiBindConfiguration } from "../api/ApiConfiguration.js"
 import type {
   AuthorizedShares,
+  CodePipelineReads,
   CompleteDiffReads,
   DeliveryGraphInspection,
   MediaReads,
@@ -41,6 +42,7 @@ import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimit
 import { governedReviewSuggestionPublicationGatewayLayer } from "../application/GovernedReviewSuggestionPublicationGateway.js"
 import {
   authorizedSharesLayer,
+  codePipelineReadsLayer,
   completeDiffReadsLayer,
   deliveryGraphInspectionLayer,
   liveEventsLayer,
@@ -119,6 +121,7 @@ import { ServerLifecycle } from "./ServerLifecycle.js"
 
 type ControlCenterCoreApplicationServices =
   | AuthorizedShares
+  | CodePipelineReads
   | CompleteDiffReads
   | DeliveryGraphInspection
   | MediaReads
@@ -214,24 +217,27 @@ const pluginApplicationServices = (
   firstPartyConnectionsLayer: typeof firstPartyPluginConnectionMapLayer
 ) => {
   if (pluginConnections !== null) {
-    return Layer.merge(
+    return Layer.mergeAll(
       pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin),
-      completeDiffReadsLayer(pluginConnections)
+      completeDiffReadsLayer(pluginConnections),
+      codePipelineReadsLayer(pluginConnections)
     )
   }
   if (!firstPartyPluginRuntime) {
-    return Layer.merge(
+    return Layer.mergeAll(
       pluginAdministrationOAuthLayer(publicOrigin),
-      completeDiffReadsLayer(null)
+      completeDiffReadsLayer(null),
+      codePipelineReadsLayer(null)
     )
   }
   return Layer.unwrap(
     Effect.map(
       PluginConnectionMap,
       (connections) =>
-        Layer.merge(
+        Layer.mergeAll(
           pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin),
-          completeDiffReadsLayer(connections)
+          completeDiffReadsLayer(connections),
+          codePipelineReadsLayer(connections)
         )
     )
   ).pipe(Layer.provideMerge(firstPartyConnectionsLayer))

@@ -53,6 +53,7 @@ export {
   makeControlCenterApiClient,
   makeControlCenterApiUrls
 } from "./client.js"
+export { CodePipelineApiGroup, CodePipelineArtifactReadRequest, CodePipelineLogReadRequest } from "./codepipeline.js"
 export { ControlCenterApi } from "./controlCenterApi.js"
 export {
   CreateRelationshipRepairProposalRequest,

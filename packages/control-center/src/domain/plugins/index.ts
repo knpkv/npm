@@ -8,3 +8,5 @@ export * from "./discovery.js"
 export * from "./events.js"
 /** Browser-safe governed-action proposal and outcome schemas. */
 export * from "./actions.js"
+/** Browser-safe bounded pipeline log and artifact read schemas. */
+export * from "./pipeline.js"

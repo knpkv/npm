@@ -80,6 +80,7 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   AuthorizedShares,
+  CodePipelineReads,
   DeliveryGraphInspection,
   LiveEvents,
   MediaReads,
@@ -1681,10 +1682,22 @@ describe("Control Center API handlers", () => {
       testConnection: () => Effect.die("not used")
     })
     const media = MediaReads.of({ read: () => Effect.die("not used") })
+    const codePipelineReads = CodePipelineReads.of({
+      logs: () => Effect.die("not used"),
+      artifact: ({ request }) =>
+        Effect.succeed({
+          body: Stream.make(new Uint8Array(request.offset >= 9 ? [] : [1, 2, 3])),
+          contentLength: request.offset >= 9 ? 0 : 3,
+          filename: "BuildOutput.zip",
+          offset: request.offset,
+          totalBytes: request.offset === 0 ? 3 : 9
+        })
+    })
     const bind = await Effect.runPromise(decodeBindConfig({}))
     const requestContext = Context.empty().pipe(
       Context.add(Auth, authentication),
       Context.add(ApiBindConfiguration, bind),
+      Context.add(CodePipelineReads, codePipelineReads),
       Context.add(MediaReads, media),
       Context.add(PluginAdministration, plugins),
       Context.add(LiveEvents, liveEvents)
@@ -1694,6 +1707,7 @@ describe("Control Center API handlers", () => {
         Layer.mergeAll(
           Layer.succeed(Auth, authentication),
           Layer.succeed(ApiBindConfiguration, bind),
+          Layer.succeed(CodePipelineReads, codePipelineReads),
           Layer.succeed(MediaReads, media),
           Layer.succeed(PluginAdministration, plugins),
           liveEventsLayer,
@@ -1716,9 +1730,40 @@ describe("Control Center API handlers", () => {
           origin: "http://127.0.0.1:4173"
         }
       })
+    const artifactRequest = (offset: number) =>
+      new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `cc_session=${"ab".repeat(32)}`,
+          host: "127.0.0.1:4173",
+          origin: "http://127.0.0.1:4173"
+        },
+        body: JSON.stringify({
+          pluginConnectionId: codeCommitPluginConnectionId,
+          request: {
+            action: {
+              entity: {
+                entityType: "aws.codepipeline.action",
+                vendorImmutableId: "execution-1#action-1"
+              },
+              executionId: "execution-1",
+              actionExecutionId: "action-1",
+              expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+            },
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset,
+            length: 3
+          }
+        })
+      })
     try {
       const csvResponse = await webHandler.handler(request("csv"), requestContext)
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
+      const artifactResponse = await webHandler.handler(artifactRequest(3), requestContext)
+      const completeArtifactResponse = await webHandler.handler(artifactRequest(0), requestContext)
+      const exhaustedArtifactResponse = await webHandler.handler(artifactRequest(10), requestContext)
 
       assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
       assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")
@@ -1736,6 +1781,26 @@ describe("Control Center API handlers", () => {
         metadata: { eventCount: 0, eventLimit: 25, truncated: false },
         events: []
       })
+      assert.strictEqual(artifactResponse.headers.get("content-type"), "application/octet-stream")
+      assert.strictEqual(
+        artifactResponse.headers.get("content-disposition"),
+        "attachment; filename=\"BuildOutput.zip\""
+      )
+      assert.strictEqual(artifactResponse.headers.get("content-length"), "3")
+      assert.strictEqual(artifactResponse.headers.get("content-range"), "bytes 3-5/9")
+      assert.strictEqual(artifactResponse.status, 206)
+      assert.strictEqual(artifactResponse.headers.get("cache-control"), "private, no-store")
+      assert.strictEqual(artifactResponse.headers.get("x-content-type-options"), "nosniff")
+      assert.deepStrictEqual(new Uint8Array(await artifactResponse.arrayBuffer()), new Uint8Array([1, 2, 3]))
+      assert.strictEqual(completeArtifactResponse.status, 200)
+      assert.isNull(completeArtifactResponse.headers.get("content-range"))
+      assert.deepStrictEqual(
+        new Uint8Array(await completeArtifactResponse.arrayBuffer()),
+        new Uint8Array([1, 2, 3])
+      )
+      assert.strictEqual(exhaustedArtifactResponse.status, 416)
+      assert.strictEqual(exhaustedArtifactResponse.headers.get("content-range"), "bytes */9")
+      assert.strictEqual((await exhaustedArtifactResponse.arrayBuffer()).byteLength, 0)
     } finally {
       await webHandler.dispose()
     }

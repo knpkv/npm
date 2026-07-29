@@ -4,6 +4,7 @@ import { OpenApi } from "effect/unstable/httpapi"
 
 import {
   AgentApiGroup,
+  CodePipelineApiGroup,
   CompleteDiffContentRequest,
   ControlCenterApi,
   CreateAtlassianOAuthGrantRequest,
@@ -133,6 +134,25 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(eventsPath.get.responses["200"])
     assert.isDefined(eventsPath.get.responses["200"].content)
     assert.isDefined(eventsPath.get.responses["200"].content["text/event-stream"])
+    const artifactPath = specification.paths["/api/v1/codepipeline/artifact"]
+    assert.isDefined(artifactPath)
+    assert.isDefined(artifactPath.post)
+    assert.deepStrictEqual(Object.keys(artifactPath.post.responses), [
+      "200",
+      "206",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "416",
+      "429",
+      "503"
+    ])
+    const artifactSuccessStatuses: ReadonlyArray<"200" | "206" | "416"> = ["200", "206", "416"]
+    for (const status of artifactSuccessStatuses) {
+      assert.isDefined(artifactPath.post.responses[status]?.content?.["application/octet-stream"])
+    }
     assert.deepStrictEqual(
       eventsPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
       [
@@ -283,7 +303,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the ten API groups and endpoint routes explicit", () => {
+  it("keeps the eleven API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -292,6 +312,7 @@ describe("ControlCenterApi contract", () => {
       "portfolio",
       "deliveryGraph",
       "diff",
+      "codepipeline",
       "media",
       "liveEvents",
       "timeline",
@@ -306,6 +327,17 @@ describe("ControlCenterApi contract", () => {
         ["list", "GET", "/api/v1/session"],
         ["revoke", "DELETE", "/api/v1/session/:sessionId"],
         ["logout", "POST", "/api/v1/session/logout"]
+      ]
+    )
+    assert.deepStrictEqual(
+      Object.entries(CodePipelineApiGroup.endpoints).map(([identifier, { method, path }]) => [
+        identifier,
+        method,
+        path
+      ]),
+      [
+        ["logs", "POST", "/api/v1/codepipeline/logs"],
+        ["artifact", "POST", "/api/v1/codepipeline/artifact"]
       ]
     )
     assert.deepStrictEqual(
@@ -545,6 +577,10 @@ describe("ControlCenterApi contract", () => {
     assert.deepStrictEqual(middlewareByEndpoint(DiffApiGroup.endpoints), {
       inventory: [SessionCookieAuth.key],
       content: [SessionCookieAuth.key]
+    })
+    assert.deepStrictEqual(middlewareByEndpoint(CodePipelineApiGroup.endpoints), {
+      logs: [SessionCookieAuth.key],
+      artifact: [SessionCookieAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(MediaApiGroup.endpoints), {
       read: [SessionCookieAuth.key]

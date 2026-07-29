@@ -44,6 +44,7 @@ const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): Ins
   switch (groupIdentifier) {
     case "media":
     case "portfolio":
+    case "codepipeline":
     case "liveEvents":
       return "release-read"
     case "agent":
@@ -68,7 +69,13 @@ export const isAuthenticatedReadTransportEndpoint = (
   method === "GET" ||
   method === "HEAD" ||
   method === "OPTIONS" ||
-  (method === "POST" && groupIdentifier === "diff" && endpointIdentifier === "content")
+  (method === "POST" && (
+    (groupIdentifier === "diff" && endpointIdentifier === "content") ||
+    (groupIdentifier === "codepipeline" && (
+      endpointIdentifier === "logs" ||
+      endpointIdentifier === "artifact"
+    ))
+  ))
 
 /** Guard the sole unauthenticated endpoint with the same authority and Origin policy. */
 export const authorizePairingRequest = Effect.fn("ApiMiddleware.authorizePairing")(function*() {

@@ -38,7 +38,12 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
-export type GovernedActionFixtureVariant = "jira" | "codecommit" | "confluence"
+export type GovernedActionFixtureVariant =
+  | "jira"
+  | "codecommit"
+  | "codepipeline"
+  | "codepipeline-start"
+  | "confluence"
 
 const defineFixture = <const Fixture>(fixture: Fixture): Fixture => fixture
 
@@ -139,12 +144,98 @@ const confluenceFixture = defineFixture({
   }
 })
 
+const codePipelineFixture = defineFixture({
+  providerId: "codepipeline",
+  connectionName: "Payments CodePipeline",
+  entityType: "pipeline-execution",
+  vendorImmutableId: "execution-failed-1",
+  sourceRevision: "7:Failed:2026-07-15T09:50:00.000Z",
+  sourceUrl:
+    "https://eu-west-1.console.aws.amazon.com/codesuite/codepipeline/pipelines/release/view?region=eu-west-1&pipeline-execution=execution-failed-1",
+  displayKey: "execution-failed-1",
+  title: "release · execution-failed-1",
+  pluginId: "dev.knpkv.aws-codepipeline",
+  pluginAdapterVersion: { major: 0, minor: 2, patch: 0 },
+  idempotencyKey: "governed-action:codepipeline:execution-failed-1:retry:1",
+  proposalKey: "pipeline.retry:execution-failed-1:7:Failed:2026-07-15T09:50:00.000Z",
+  actionKind: "pipeline.retry",
+  payload: {
+    retryOf: "execution-failed-1",
+    pipelineRevision: "7:2026-07-15T09:40:00.000Z",
+    sourceRevisions: [{
+      actionName: "Checkout",
+      revisionType: "COMMIT_ID",
+      revisionValue: "commit-abc"
+    }],
+    variables: []
+  },
+  actionSummary: "Retry CodePipeline execution execution-failed-1",
+  impactSummary: "Starts one new execution with the failed execution's pinned source revisions",
+  correlationId: "action:codepipeline:execution-failed-1:retry",
+  details: {
+    _tag: "pipeline-execution",
+    pipelineName: "release",
+    executionId: "execution-failed-1",
+    status: "failed",
+    triggerRevision: "commit-abc",
+    pipelineVersion: 7,
+    statusSummary: "Build failed",
+    startedAt: "2026-07-15T09:45:00.000Z",
+    updatedAt: "2026-07-15T09:50:00.000Z",
+    triggerType: "StartPipelineExecution",
+    triggerDetail: "release-operator",
+    executionMode: "SUPERSEDED",
+    executionType: "STANDARD",
+    rollbackTargetExecutionId: null,
+    sourceRevisions: [{
+      actionName: "Checkout",
+      revisionId: "commit-abc",
+      revisionSummary: "main"
+    }]
+  }
+})
+
+const codePipelineStartFixture = defineFixture({
+  providerId: "codepipeline",
+  connectionName: "Payments CodePipeline",
+  entityType: "pipeline",
+  vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release",
+  sourceRevision: "7:2026-07-15T09:40:00.000Z",
+  sourceUrl: "https://eu-west-1.console.aws.amazon.com/codesuite/codepipeline/pipelines/release/view",
+  displayKey: "release",
+  title: "release",
+  pluginId: "dev.knpkv.aws-codepipeline",
+  pluginAdapterVersion: { major: 0, minor: 2, patch: 0 },
+  idempotencyKey: "governed-action:codepipeline:release:start:1",
+  proposalKey: "pipeline.start:release:7:2026-07-15T09:40:00.000Z",
+  actionKind: "pipeline.start",
+  payload: {
+    pipelineRevision: "7:2026-07-15T09:40:00.000Z",
+    sourceRevisions: [{
+      actionName: "Checkout",
+      revisionType: "COMMIT_ID",
+      revisionValue: "commit-abc"
+    }],
+    variables: []
+  },
+  actionSummary: "Start CodePipeline pipeline release",
+  impactSummary: "Starts one new execution with pinned source revisions",
+  correlationId: "action:codepipeline:release:start",
+  details: null
+})
+
 const fixtureVariant = (variant: GovernedActionFixtureVariant = "jira") =>
   variant === "codecommit"
     ? codeCommitFixture
+    : variant === "codepipeline-start"
+    ? codePipelineStartFixture
+    : variant === "codepipeline"
+    ? codePipelineFixture
     : variant === "confluence"
     ? confluenceFixture
     : jiraFixture
+
+const fixtureProjectionEntityType = (fixture: ReturnType<typeof fixtureVariant>): string => fixture.entityType
 
 const decodePayload = Schema.decodeUnknownSync(PluginPayloadJson)
 const decodeEnvelopeMaterial = Schema.decodeUnknownSync(GovernedActionEnvelopeMaterialV1)
@@ -174,13 +265,15 @@ export const seedGovernedActionAuthorityRoots = Effect.fn(
     ${WORKSPACE_ID}, ${CONNECTION_ID}, ${fixture.providerId}, ${fixture.connectionName},
     1, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
   )`
-  yield* sql`INSERT INTO entities (
-    workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
-    entity_type, current_revision, created_at, updated_at
-  ) VALUES (
-    ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, ${fixture.providerId}, ${fixture.vendorImmutableId},
-    ${fixture.entityType}, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
-  )`
+  if (variant !== "codepipeline-start") {
+    yield* sql`INSERT INTO entities (
+      workspace_id, entity_id, plugin_connection_id, provider_id, vendor_immutable_id,
+      entity_type, current_revision, created_at, updated_at
+    ) VALUES (
+      ${WORKSPACE_ID}, ${ENTITY_ID}, ${CONNECTION_ID}, ${fixture.providerId}, ${fixture.vendorImmutableId},
+      ${fixture.entityType}, 1, '2026-07-15T09:00:00.000Z', ${PROPOSED_AT}
+    )`
+  }
   yield* sql`INSERT INTO sessions (
     workspace_id, session_id, token_hash, csrf_hash, actor_kind, person_id, agent_id,
     permission, created_at, last_seen_at, idle_expires_at, absolute_expires_at, revoked_at
@@ -221,7 +314,7 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
         supersedesProjectionRevision: null,
         projectionSchemaVersion: 1,
         entityState: "present",
-        entityType: fixture.entityType,
+        entityType: fixtureProjectionEntityType(fixture),
         displayKey: fixture.displayKey,
         title: fixture.title,
         details: fixture.details
@@ -231,10 +324,10 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
     nodes: [{
       workspaceId,
       nodeId,
-      endpointKind: fixture.entityType,
+      endpointKind: fixtureProjectionEntityType(fixture),
       resolution: {
         _tag: "resolved",
-        target: { _tag: "entity", entityId, entityKind: fixture.entityType }
+        target: { _tag: "entity", entityId, entityKind: fixtureProjectionEntityType(fixture) }
       },
       createdAt: "2026-07-15T09:55:00.000Z"
     }],
@@ -297,6 +390,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   "AuthorizedGovernedActionFixture.makeEnvelope"
 )(function*(options?: {
   readonly pluginConnectionAuthorityDigest?: string | undefined
+  readonly targetEntityId?: string | undefined
   readonly variant?: GovernedActionFixtureVariant | undefined
 }) {
   const variant = options?.variant ?? "jira"
@@ -314,7 +408,8 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     source: "current",
     validity: "valid"
   })
-  const evidenceSetDigest = yield* digestGovernedActionEvidenceSet([evidence])
+  const evidenceReferences = variant === "codepipeline-start" ? [] : [evidence]
+  const evidenceSetDigest = yield* digestGovernedActionEvidenceSet(evidenceReferences)
   const policy = (yield* makeBuiltInGovernedActionPolicyDefinition()).binding
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
@@ -329,7 +424,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
     pluginAdapterVersion: fixture.pluginAdapterVersion,
     providerId: fixture.providerId,
     capability: { capabilityId: "action.execute", version: 1 },
-    targetEntityId: ENTITY_ID,
+    targetEntityId: options?.targetEntityId ?? ENTITY_ID,
     proposal: {
       proposalKey: fixture.proposalKey,
       capabilityVersion: 1,
@@ -341,7 +436,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
         },
         expectedRevision: fixture.sourceRevision,
         payload,
-        evidenceIds: ["provider-evidence-1"]
+        evidenceIds: variant === "codepipeline-start" ? [] : ["provider-evidence-1"]
       },
       payloadDigest,
       summary: fixture.actionSummary,
@@ -351,7 +446,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
       },
       proposedAt: PROPOSED_AT
     },
-    evidence: [Schema.encodeSync(GovernedActionEvidenceReference)(evidence)],
+    evidence: evidenceReferences.map((reference) => Schema.encodeSync(GovernedActionEvidenceReference)(reference)),
     evidenceSetDigest,
     policy,
     origin: {
@@ -372,12 +467,14 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
   readonly authorized?: boolean
   readonly pluginConnectionAuthorityDigest?: string
   readonly seedAuthorityRoots?: boolean
+  readonly targetEntityId?: string
   readonly variant?: GovernedActionFixtureVariant
 }) {
   if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots(options?.variant)
   const repository = yield* GovernedActionRepository
   const envelope = yield* makeAuthorizedGovernedActionEnvelope({
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest,
+    targetEntityId: options?.targetEntityId,
     variant: options?.variant
   })
   const proposal = decodeCommit({

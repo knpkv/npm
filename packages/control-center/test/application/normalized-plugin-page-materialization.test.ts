@@ -828,7 +828,7 @@ describe("normalized plugin page materialization", () => {
         successfulHealth: { _tag: "healthy", checkedAt: T4 }
       }, richCodePipelinePage)
       assert.strictEqual(receipt.entityProjectionCount, 1)
-      assert.strictEqual(receipt.skippedEntityCount, 4)
+      assert.strictEqual(receipt.skippedEntityCount, 3)
 
       const index = yield* items()
       const projection = index.items[0]?.projection
@@ -1191,7 +1191,7 @@ describe("normalized plugin page materialization", () => {
         })
       )
       assert.strictEqual(declarationOnly.entityProjectionCount, 1)
-      assert.strictEqual(declarationOnly.skippedEntityCount, 1)
+      assert.strictEqual(declarationOnly.skippedEntityCount, 0)
       const declared = (yield* items()).items[0]?.projection
       if (declared?.details._tag !== "pipeline-execution") {
         return yield* Effect.die("expected declaration-refreshed pipeline execution")
@@ -1221,7 +1221,7 @@ describe("normalized plugin page materialization", () => {
         })
       )
       assert.strictEqual(unrelatedDeclaration.entityProjectionCount, 0)
-      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 1)
+      assert.strictEqual(unrelatedDeclaration.skippedEntityCount, 0)
 
       const deletedActionPage = Schema.decodeSync(PluginSyncPageV1)({
         checkpointAfterPage: "pipeline-cache-action-deleted",

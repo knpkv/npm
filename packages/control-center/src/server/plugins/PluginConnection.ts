@@ -15,6 +15,10 @@ import type {
   PluginActionActorIdentityV1,
   PluginActionProposalV1,
   PluginDiscoveryV1,
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineArtifactRangeV1,
+  PluginPipelineLogPageRequestV1,
+  PluginPipelineLogPageV1,
   PluginSyncPageV1,
   PluginSyncRequestV1,
   ProposePluginActionRequestV1,
@@ -39,6 +43,16 @@ export interface PluginDiffReaderV1 {
   ) => Effect.Effect<DiffContentRangeV1, PluginFailure>
 }
 
+/** Optional bounded pipeline evidence reads negotiated independently from entity reads. */
+export interface PluginPipelineReaderV1 {
+  readonly readLogPage: (
+    request: PluginPipelineLogPageRequestV1
+  ) => Effect.Effect<PluginPipelineLogPageV1, PluginFailure>
+  readonly readArtifactRange: (
+    request: PluginPipelineArtifactRangeRequestV1
+  ) => Effect.Effect<PluginPipelineArtifactRangeV1, PluginFailure>
+}
+
 /** Safe plugin surface available to application reads and action proposals. */
 export interface PluginConnectionV1 {
   readonly descriptor: NegotiatedPluginDescriptorV1
@@ -52,6 +66,7 @@ export interface PluginConnectionV1 {
     request: ReadPluginEntityRequestV1
   ) => Effect.Effect<ReadPluginEntityResultV1, PluginFailure>
   readonly diff: Option.Option<PluginDiffReaderV1>
+  readonly pipeline?: Option.Option<PluginPipelineReaderV1>
   readonly proposeAction: (
     request: ProposePluginActionRequestV1
   ) => Effect.Effect<PluginActionProposalV1, PluginFailure>

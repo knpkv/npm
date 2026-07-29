@@ -151,7 +151,8 @@ export default tseslint.config(
   {
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "error"
+      "@typescript-eslint/no-explicit-any": "error",
+      "local-rules/require-bounded-base64-schema": "error"
     }
   },
   {
@@ -199,6 +200,14 @@ export default tseslint.config(
     // Prettier remains the repository formatter for JSX. ESLint still applies
     // every semantic, import, safety, no-console, and no-any rule to TSX.
     files: ["**/*.tsx"],
+    rules: {
+      "@effect/dprint": "off"
+    }
+  },
+  {
+    // Prettier formats root JavaScript utilities; ESLint still enforces their
+    // semantic and safety rules.
+    files: ["scripts/check-security-doc-examples.mjs"],
     rules: {
       "@effect/dprint": "off"
     }
