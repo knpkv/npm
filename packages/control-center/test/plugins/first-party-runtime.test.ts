@@ -3195,7 +3195,7 @@ describe("first-party plugin runtime", () => {
       )
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("converges concurrent identical Clockify approvals through the production composition", () =>
+  it.effect("converges concurrent approvals and retries corrections before mutable Clockify checks", () =>
     Effect.gen(function*() {
       const submittedAt = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       yield* TestClock.setTime(DateTime.toEpochMillis(submittedAt))
@@ -3220,18 +3220,28 @@ describe("first-party plugin runtime", () => {
           duration: "PT1H"
         }
       }
+      const correctedTimeEntry = {
+        ...timeEntry,
+        description: "[OPS-42] Review payment safeguards"
+      }
+      const providerState = yield* Ref.make(timeEntry)
       const httpClient = HttpClient.make((request) =>
         Effect.gen(function*() {
           if (request.method !== "GET") yield* Ref.update(mutations, (count) => count + 1)
-          const body = request.url.endsWith(
-              "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
-            )
-            ? yield* Effect.gen(function*() {
-              const readCount = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
-              if (readCount === 2) yield* Deferred.succeed(concurrentProposalReads, undefined)
-              if (readCount <= 2) yield* Deferred.await(concurrentProposalReads)
-              return timeEntry
-            })
+          const entryUrl = request.url.endsWith(
+            "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
+          )
+          const body = entryUrl
+            ? request.method === "GET"
+              ? yield* Effect.gen(function*() {
+                const readCount = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
+                if (readCount === 2) yield* Deferred.succeed(concurrentProposalReads, undefined)
+                if (readCount <= 2) yield* Deferred.await(concurrentProposalReads)
+                return yield* Ref.get(providerState)
+              })
+              : yield* Ref.set(providerState, correctedTimeEntry).pipe(
+                Effect.as(correctedTimeEntry)
+              )
             : request.url.endsWith("/v1/user")
             ? { id: "user-1", name: "Ada Lovelace", email: "ada@example.com", status: "ACTIVE" }
             : [{ id: "clockify-workspace", name: "Delivery" }]
@@ -3398,8 +3408,49 @@ describe("first-party plugin runtime", () => {
         if (Result.isFailure(forbiddenCorrection)) {
           assert.strictEqual(forbiddenCorrection.failure.reason, "forbidden")
         }
-        assert.strictEqual(yield* Ref.get(entryReads), 4)
+        assert.strictEqual(yield* Ref.get(entryReads), 3)
         assert.strictEqual(yield* Ref.get(mutations), 0)
+
+        yield* sql`UPDATE sessions SET permission = 'workspace-owner'
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND session_id = ${SessionId.make(GOVERNED_SESSION_ID)}`
+        const ownerSession = {
+          ...session,
+          permission: "workspace-owner"
+        } satisfies SessionSummary
+        const correctionRequest = {
+          workspaceId: GOVERNED_WORKSPACE,
+          entityId: EntityId.make(GOVERNED_ENTITY_ID),
+          request: Schema.decodeSync(SubmitClockifyActionRequest)({
+            _tag: "correct-association",
+            expectedRevision: Revision.make(
+              "fde93bd687136fe87203da46c3a6ac4ecb9a0271cacbf1b472c128a0879a450b"
+            ),
+            jiraIssueKey: "OPS-42"
+          }),
+          session: ownerSession
+        }
+        const correction = yield* submissions.submit(correctionRequest)
+        assert.strictEqual(correction.state, "succeeded")
+        assert.strictEqual(yield* Ref.get(mutations), 1)
+        const readsAfterCorrection = yield* Ref.get(entryReads)
+
+        yield* sql`INSERT INTO entity_revisions (
+          workspace_id, entity_id, revision, source_revision, normalization_schema_version,
+          source_url, first_observed_at, last_observed_at, synchronized_at, created_at
+        ) VALUES (
+          ${GOVERNED_WORKSPACE}, ${EntityId.make(GOVERNED_ENTITY_ID)}, 2, ${"f".repeat(64)}, 1,
+          'https://app.clockify.me/tracker', '2026-07-15T10:03:00.000Z',
+          '2026-07-15T10:03:00.000Z', '2026-07-15T10:03:00.000Z', '2026-07-15T10:03:00.000Z'
+        )`
+        yield* sql`UPDATE entities SET current_revision = 2, updated_at = '2026-07-15T10:03:00.000Z'
+          WHERE workspace_id = ${GOVERNED_WORKSPACE} AND entity_id = ${EntityId.make(GOVERNED_ENTITY_ID)}`
+
+        const correctionRetry = yield* submissions.submit(correctionRequest)
+        const approvalRetry = yield* submissions.submit({ ...request, session: ownerSession })
+        assert.deepStrictEqual(correctionRetry, correction)
+        assert.deepStrictEqual(approvalRetry, result)
+        assert.strictEqual(yield* Ref.get(entryReads), readsAfterCorrection)
+        assert.strictEqual(yield* Ref.get(mutations), 1)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
         Effect.provide(dependencies)

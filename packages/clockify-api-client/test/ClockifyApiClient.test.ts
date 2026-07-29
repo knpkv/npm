@@ -114,6 +114,23 @@ describe("ClockifyApiClient", () => {
     )
   })
 
+  it.effect("forwards hydration when listing canonical time-entry snapshots", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = []
+    return Effect.gen(function*() {
+      const client = yield* ClockifyApiClient
+      yield* client.getTimeEntries("workspace-1", "user-1", {
+        hydrated: true,
+        page: 2,
+        pageSize: 10
+      })
+      expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("2")
+      expect(new Map(requests[0]?.urlParams ?? []).get("page-size")).toBe("10")
+    }).pipe(
+      Effect.provide(clientLayer({ status: 200, body: [] }, requests))
+    )
+  })
+
   it.effect("pages through the complete workspace user directory", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = []
     const firstPage = Array.from({ length: 500 }, (_, index) => ({

@@ -1133,9 +1133,8 @@ describe("ClockifyReadPlugin", () => {
       )
 
       const readRequests = yield* Ref.get(actionReadRequests)
-      assert.isUndefined(readRequests[0])
       assert.isTrue(readRequests.length > 1)
-      assert.isTrue(readRequests.slice(1).every((request) => request?.hydrated === true))
+      assert.isTrue(readRequests.every((request) => request?.hydrated === true))
       const calls = yield* Ref.get(updates)
       assert.lengthOf(calls, 1)
       assert.deepStrictEqual(calls[0], {

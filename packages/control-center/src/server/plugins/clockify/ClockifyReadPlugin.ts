@@ -490,7 +490,7 @@ const readTimeEntry = Effect.fn("ClockifyReadPlugin.readTimeEntry")(function*(
   const entry = yield* withTimeout(
     "clockify-get-time-entry",
     configuration.operationTimeoutMillis,
-    provider.getTimeEntry(configuration.workspaceId, request.vendorImmutableId)
+    provider.getTimeEntry(configuration.workspaceId, request.vendorImmutableId, { hydrated: true })
   )
   if (Option.isNone(entry)) {
     return { _tag: "missing", reference: request, observedAt: yield* DateTime.now }

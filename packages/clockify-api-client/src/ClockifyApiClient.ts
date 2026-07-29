@@ -40,6 +40,7 @@ export type AuthenticatedClockifyApi = Omit<Generated.ClockifyApi, "uploadImage"
 export interface GetTimeEntriesParams {
   readonly start?: string | undefined
   readonly end?: string | undefined
+  readonly hydrated?: boolean | undefined
   readonly page?: number | undefined
   readonly pageSize?: number | undefined
 }
@@ -188,6 +189,7 @@ export class ClockifyApiClient extends Context.Service<ClockifyApiClient, Clocki
               params: {
                 ...(params?.start !== undefined ? { start: params.start } : {}),
                 ...(params?.end !== undefined ? { end: params.end } : {}),
+                ...(params?.hydrated === undefined ? {} : { hydrated: params.hydrated }),
                 ...(params?.page !== undefined ? { page: params.page } : {}),
                 ...(params?.pageSize !== undefined ? { "page-size": params.pageSize } : {})
               }

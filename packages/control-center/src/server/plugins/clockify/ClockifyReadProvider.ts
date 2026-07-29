@@ -158,6 +158,7 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
     providerCall(
       "clockify-get-time-entries",
       client.getTimeEntries(workspaceId, userId, {
+        hydrated: true,
         page: request.page,
         pageSize: request.pageSize
       })

@@ -31,7 +31,11 @@ import {
 } from "../../domain/identifiers.js"
 import { type PluginActionProposalV1, ProposePluginActionRequestV1 } from "../../domain/plugins/index.js"
 import type { SessionSummary } from "../auth/models.js"
-import { digestGovernedActionEvidenceSet, makeGovernedActionEnvelope } from "../governance/governedActionDigests.js"
+import {
+  digestCanonicalGovernedActionJson,
+  digestGovernedActionEvidenceSet,
+  makeGovernedActionEnvelope
+} from "../governance/governedActionDigests.js"
 import {
   GovernedActionPolicyBindingSource,
   GovernedActionProposalAuthority,
@@ -39,7 +43,10 @@ import {
 } from "../governance/GovernedActionSubmission.js"
 import { RecordNotFoundError } from "../persistence/errors.js"
 import { Persistence } from "../persistence/Persistence.js"
-import { GovernedActionCommitInput } from "../persistence/repositories/governedActionRepository.js"
+import {
+  GovernedActionCommitInput,
+  type GovernedActionRecord
+} from "../persistence/repositories/governedActionRepository.js"
 import { PluginConflictFailure } from "../plugins/failures.js"
 import { PluginConnection } from "../plugins/PluginConnection.js"
 import { PluginConnectionMap } from "../plugins/PluginConnectionMap.js"
@@ -92,6 +99,34 @@ const canAdvance = (state: string): boolean =>
   state === "cancel-requested" ||
   state === "cancel-requested-unknown"
 
+const clockifyActionSubmissionIdempotencyKey = Effect.fn(
+  "ClockifyActionSubmissions.idempotencyKey"
+)(function*(input: {
+  readonly entityId: EntityId
+  readonly request: SubmitClockifyActionRequest
+  readonly workspaceId: WorkspaceId
+}) {
+  const request = input.request._tag === "correct-association"
+    ? {
+      _tag: input.request._tag,
+      expectedRevision: input.request.expectedRevision,
+      jiraIssueKey: input.request.jiraIssueKey
+    }
+    : {
+      _tag: input.request._tag,
+      expectedRevision: input.request.expectedRevision,
+      decision: input.request.decision,
+      rationale: input.request.rationale
+    }
+  const digest = yield* digestCanonicalGovernedActionJson({
+    schemaVersion: 1,
+    workspaceId: input.workspaceId,
+    entityId: input.entityId,
+    request
+  })
+  return GovernedActionIdempotencyKey.make(`clockify-submission:v1:${digest}`)
+})
+
 /** Require an idempotent proposal retry to remain on its original runtime generation. */
 export const clockifyActionRuntimeAuthorityMatches = (
   envelope: GovernedActionEnvelopeV1,
@@ -140,12 +175,32 @@ const makeService = Effect.gen(function*() {
 
     const entity = yield* persistence.entities.get(input.workspaceId, input.entityId).pipe(mapFailure)
     const source = entity.sourceRevision
-    if (
-      source.providerId !== "clockify" ||
-      source.revision !== input.request.expectedRevision
-    ) return yield* failure("conflict")
+    if (source.providerId !== "clockify") return yield* failure("conflict")
 
-    const prepared = yield* Effect.scoped(Effect.gen(function*() {
+    const request = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
+      actionKind: input.request._tag,
+      target: {
+        entityType: "time-entry",
+        vendorImmutableId: source.vendorImmutableId
+      },
+      expectedRevision: input.request.expectedRevision,
+      payload: input.request._tag === "correct-association"
+        ? { jiraIssueKey: input.request.jiraIssueKey }
+        : {
+          decision: input.request.decision,
+          rationale: input.request.rationale
+        },
+      evidenceIds: []
+    }).pipe(Effect.mapError(() => failure("invalid-request")))
+    const idempotencyKey = yield* clockifyActionSubmissionIdempotencyKey({
+      entityId: input.entityId,
+      request: input.request,
+      workspaceId: input.workspaceId
+    }).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      mapFailure
+    )
+    const runtime = yield* Effect.scoped(Effect.gen(function*() {
       if (connections.proposalContextEffect === undefined) return yield* failure("unavailable")
       const lease = yield* connections.proposalContextEffect({
         workspaceId: input.workspaceId,
@@ -163,27 +218,10 @@ const makeService = Effect.gen(function*() {
         ({ capabilityId }) => capabilityId === "action.execute"
       )
       if (capability === undefined) return yield* failure("conflict")
-      const request = yield* Schema.decodeUnknownEffect(ProposePluginActionRequestV1)({
-        actionKind: input.request._tag,
-        target: {
-          entityType: "time-entry",
-          vendorImmutableId: source.vendorImmutableId
-        },
-        expectedRevision: input.request.expectedRevision,
-        payload: input.request._tag === "correct-association"
-          ? { jiraIssueKey: input.request.jiraIssueKey }
-          : {
-            decision: input.request.decision,
-            rationale: input.request.rationale
-          },
-        evidenceIds: []
-      }).pipe(Effect.mapError(() => failure("invalid-request")))
-      const proposal = yield* connection.proposeAction(request).pipe(mapFailure)
       return {
         capability,
         connectionRecord,
         descriptor: connection.descriptor.descriptor,
-        proposal,
         runtimeAuthorityToken: lease.runtimeAuthorityToken
       }
     }))
@@ -200,7 +238,7 @@ const makeService = Effect.gen(function*() {
         {
           workspaceId: input.workspaceId,
           pluginConnectionId: source.pluginConnectionId,
-          runtimeAuthorityToken: prepared.runtimeAuthorityToken
+          runtimeAuthorityToken: runtime.runtimeAuthorityToken
         },
         () => effect
       ).pipe(
@@ -275,8 +313,71 @@ const makeService = Effect.gen(function*() {
       }).pipe(mapFailure)
       return { actionId, state: record.head.state }
     })
+    const existingMatches = (record: GovernedActionRecord): boolean =>
+      record.envelope.idempotencyKey === idempotencyKey &&
+      record.envelope.targetEntityId === input.entityId &&
+      record.envelope.proposal.request.actionKind === request.actionKind &&
+      record.envelope.proposal.request.target.entityType === request.target.entityType &&
+      record.envelope.proposal.request.target.vendorImmutableId === request.target.vendorImmutableId &&
+      record.envelope.proposal.request.expectedRevision === request.expectedRevision &&
+      clockifyActionRuntimeAuthorityMatches(
+        record.envelope,
+        runtime.connectionRecord.revision,
+        runtime.runtimeAuthorityToken
+      ) &&
+      record.envelope.origin._tag === "human" &&
+      record.envelope.origin.actor.personId === actor.personId
+    const reuseExisting = Effect.fn("ClockifyActionSubmissions.reuseExisting")(function*(
+      record: GovernedActionRecord
+    ) {
+      if (!existingMatches(record)) return yield* failure("conflict")
+      if (record.head.state === "proposed") {
+        yield* persistence.governedActions.commit(
+          yield* prepareAuthorization(record.envelope, record.headTransition.transitionId)
+        )
+      } else if (!canAdvance(record.head.state)) {
+        return {
+          actionId: record.envelope.actionId,
+          response: Option.some({
+            actionId: record.envelope.actionId,
+            state: record.head.state
+          })
+        }
+      }
+      return {
+        actionId: record.envelope.actionId,
+        response: Option.none<SubmitClockifyActionResponse>()
+      }
+    })
+    const retry = yield* commitCurrent(
+      persistence.governedActions.readByIdempotencyKey({
+        workspaceId: input.workspaceId,
+        pluginConnectionId: source.pluginConnectionId,
+        idempotencyKey
+      }).pipe(
+        Effect.flatMap(reuseExisting),
+        Effect.map(Option.some),
+        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
+      )
+    )
+    if (Option.isSome(retry)) {
+      return Option.isSome(retry.value.response)
+        ? retry.value.response.value
+        : yield* advance(retry.value.actionId)
+    }
 
-    const idempotencyKey = GovernedActionIdempotencyKey.make(prepared.proposal.proposalKey)
+    if (source.revision !== input.request.expectedRevision) return yield* failure("conflict")
+    const providerProposal = yield* Effect.scoped(Effect.gen(function*() {
+      if (connections.proposalContextEffect === undefined) return yield* failure("unavailable")
+      const lease = yield* connections.proposalContextEffect({
+        workspaceId: input.workspaceId,
+        pluginConnectionId: source.pluginConnectionId
+      }).pipe(mapFailure)
+      if (lease.runtimeAuthorityToken !== runtime.runtimeAuthorityToken) {
+        return yield* failure("conflict")
+      }
+      return yield* Context.get(lease.context, PluginConnection).proposeAction(request).pipe(mapFailure)
+    }))
     const actionId = GovernedActionId.make(yield* cryptoService.randomUUIDv7)
     const proposalTransitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)
     const evidence: GovernedActionEvidenceSet = []
@@ -295,26 +396,26 @@ const makeService = Effect.gen(function*() {
       workspaceId: input.workspaceId,
       pluginConnectionId: source.pluginConnectionId,
       pluginConnectionRevision: GovernedActionPluginConnectionRevision.make(
-        prepared.connectionRecord.revision
+        runtime.connectionRecord.revision
       ),
       pluginConnectionAuthorityDigest: GovernedActionPluginConnectionAuthorityDigest.make(
-        prepared.runtimeAuthorityToken
+        runtime.runtimeAuthorityToken
       ),
-      pluginId: prepared.descriptor.pluginId,
-      pluginContractVersion: prepared.descriptor.contractVersion,
-      pluginAdapterVersion: prepared.descriptor.adapterVersion,
+      pluginId: runtime.descriptor.pluginId,
+      pluginContractVersion: runtime.descriptor.contractVersion,
+      pluginAdapterVersion: runtime.descriptor.adapterVersion,
       providerId: "clockify",
       capability: {
         capabilityId: "action.execute",
-        version: prepared.capability.version
+        version: runtime.capability.version
       },
       targetEntityId: input.entityId,
-      proposal: prepared.proposal,
+      proposal: providerProposal,
       evidence,
       evidenceSetDigest,
       policy,
       origin: { _tag: "human", actor, sessionId: session.sessionId },
-      proposalExpiresAt: DateTime.addDuration(prepared.proposal.proposedAt, Duration.minutes(10)),
+      proposalExpiresAt: DateTime.addDuration(providerProposal.proposedAt, Duration.minutes(10)),
       causationId: null,
       correlationId: null
     })
@@ -328,7 +429,7 @@ const makeService = Effect.gen(function*() {
       commandId: GovernedActionCommandId.make(`clockify:${actionId}:propose`),
       command: { _tag: "propose" },
       cause,
-      occurredAt: prepared.proposal.proposedAt,
+      occurredAt: providerProposal.proposedAt,
       causationId: null,
       correlationId: null,
       companion: { _tag: "none" },
@@ -345,34 +446,10 @@ const makeService = Effect.gen(function*() {
       )
       if (Option.isSome(existing)) {
         const record = existing.value
-        if (
-          record.envelope.targetEntityId !== input.entityId ||
-          !clockifyActionProposalMatches(record.envelope.proposal, prepared.proposal) ||
-          !clockifyActionRuntimeAuthorityMatches(
-            record.envelope,
-            prepared.connectionRecord.revision,
-            prepared.runtimeAuthorityToken
-          ) ||
-          record.envelope.origin._tag !== "human" ||
-          record.envelope.origin.actor.personId !== actor.personId
-        ) return yield* failure("conflict")
-        if (record.head.state === "proposed") {
-          yield* persistence.governedActions.commit(
-            yield* prepareAuthorization(record.envelope, record.headTransition.transitionId)
-          )
-        } else if (!canAdvance(record.head.state)) {
-          return {
-            actionId: record.envelope.actionId,
-            response: Option.some({
-              actionId: record.envelope.actionId,
-              state: record.head.state
-            })
-          }
+        if (!clockifyActionProposalMatches(record.envelope.proposal, providerProposal)) {
+          return yield* failure("conflict")
         }
-        return {
-          actionId: record.envelope.actionId,
-          response: Option.none<SubmitClockifyActionResponse>()
-        }
+        return yield* reuseExisting(record)
       }
 
       yield* persistence.governedActions.commit(proposal)
