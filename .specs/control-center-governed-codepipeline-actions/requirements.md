@@ -11,8 +11,10 @@
   byte range.
 - **FR1.4 — Authenticated proxy.** Log and artifact APIs SHALL require a valid
   workspace session and SHALL resolve provider coordinates server-side.
-- **FR1.5 — Start proposal.** A start proposal SHALL name the configured
-  pipeline and an ordered, unique set of explicit source-action revisions.
+- **FR1.5 — Start proposal.** A start proposal SHALL target the configured
+  pipeline ARN and definition revision without requiring execution history,
+  and SHALL carry an ordered, unique set of explicit source-action revisions
+  whose revision types match their declared source providers.
 - **FR1.6 — Stop proposal.** A stop proposal SHALL bind the execution ID,
   current execution revision, reason, and explicit wait/abandon mode.
 - **FR1.7 — Approval proposal.** An approval proposal SHALL bind the execution,

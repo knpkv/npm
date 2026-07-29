@@ -88,7 +88,9 @@ export const makeCodePipelineReads = (
     return {
       body: Stream.succeed(bytes),
       contentLength: bytes.byteLength,
-      filename: range.filename
+      filename: range.filename,
+      offset: input.request.offset,
+      totalBytes: range.totalBytes
     }
   })
 })

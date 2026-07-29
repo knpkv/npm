@@ -134,6 +134,25 @@ describe("ControlCenterApi contract", () => {
     assert.isDefined(eventsPath.get.responses["200"])
     assert.isDefined(eventsPath.get.responses["200"].content)
     assert.isDefined(eventsPath.get.responses["200"].content["text/event-stream"])
+    const artifactPath = specification.paths["/api/v1/codepipeline/artifact"]
+    assert.isDefined(artifactPath)
+    assert.isDefined(artifactPath.post)
+    assert.deepStrictEqual(Object.keys(artifactPath.post.responses), [
+      "200",
+      "206",
+      "401",
+      "403",
+      "404",
+      "408",
+      "409",
+      "416",
+      "429",
+      "503"
+    ])
+    const artifactSuccessStatuses: ReadonlyArray<"200" | "206" | "416"> = ["200", "206", "416"]
+    for (const status of artifactSuccessStatuses) {
+      assert.isDefined(artifactPath.post.responses[status]?.content?.["application/octet-stream"])
+    }
     assert.deepStrictEqual(
       eventsPath.get.parameters?.map(({ in: location, name, required }) => ({ location, name, required })),
       [

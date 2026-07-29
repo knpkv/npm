@@ -1684,11 +1684,13 @@ describe("Control Center API handlers", () => {
     const media = MediaReads.of({ read: () => Effect.die("not used") })
     const codePipelineReads = CodePipelineReads.of({
       logs: () => Effect.die("not used"),
-      artifact: () =>
+      artifact: ({ request }) =>
         Effect.succeed({
-          body: Stream.make(new Uint8Array([1, 2, 3])),
-          contentLength: 3,
-          filename: "BuildOutput.zip"
+          body: Stream.make(new Uint8Array(request.offset === 9 ? [] : [1, 2, 3])),
+          contentLength: request.offset === 9 ? 0 : 3,
+          filename: "BuildOutput.zip",
+          offset: request.offset,
+          totalBytes: request.offset === 0 ? 3 : 9
         })
     })
     const bind = await Effect.runPromise(decodeBindConfig({}))
@@ -1728,37 +1730,40 @@ describe("Control Center API handlers", () => {
           origin: "http://127.0.0.1:4173"
         }
       })
-    const artifactRequest = new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        cookie: `cc_session=${"ab".repeat(32)}`,
-        host: "127.0.0.1:4173",
-        origin: "http://127.0.0.1:4173"
-      },
-      body: JSON.stringify({
-        pluginConnectionId: codeCommitPluginConnectionId,
-        request: {
-          action: {
-            entity: {
-              entityType: "aws.codepipeline.action",
-              vendorImmutableId: "execution-1#action-1"
+    const artifactRequest = (offset: number) =>
+      new Request("http://127.0.0.1:4173/api/v1/codepipeline/artifact", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: `cc_session=${"ab".repeat(32)}`,
+          host: "127.0.0.1:4173",
+          origin: "http://127.0.0.1:4173"
+        },
+        body: JSON.stringify({
+          pluginConnectionId: codeCommitPluginConnectionId,
+          request: {
+            action: {
+              entity: {
+                entityType: "aws.codepipeline.action",
+                vendorImmutableId: "execution-1#action-1"
+              },
+              executionId: "execution-1",
+              actionExecutionId: "action-1",
+              expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
             },
-            executionId: "execution-1",
-            actionExecutionId: "action-1",
-            expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
-          },
-          direction: "output",
-          artifactName: "BuildOutput",
-          offset: 0,
-          length: 3
-        }
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset,
+            length: 3
+          }
+        })
       })
-    })
     try {
       const csvResponse = await webHandler.handler(request("csv"), requestContext)
       const jsonResponse = await webHandler.handler(request("json"), requestContext)
-      const artifactResponse = await webHandler.handler(artifactRequest, requestContext)
+      const artifactResponse = await webHandler.handler(artifactRequest(3), requestContext)
+      const completeArtifactResponse = await webHandler.handler(artifactRequest(0), requestContext)
+      const exhaustedArtifactResponse = await webHandler.handler(artifactRequest(9), requestContext)
 
       assert.strictEqual(csvResponse.headers.get("content-type"), "text/csv; charset=utf-8")
       assert.strictEqual(csvResponse.headers.get("content-disposition"), "attachment; filename=\"timeline-export.csv\"")
@@ -1782,9 +1787,20 @@ describe("Control Center API handlers", () => {
         "attachment; filename=\"BuildOutput.zip\""
       )
       assert.strictEqual(artifactResponse.headers.get("content-length"), "3")
+      assert.strictEqual(artifactResponse.headers.get("content-range"), "bytes 3-5/9")
+      assert.strictEqual(artifactResponse.status, 206)
       assert.strictEqual(artifactResponse.headers.get("cache-control"), "private, no-store")
       assert.strictEqual(artifactResponse.headers.get("x-content-type-options"), "nosniff")
       assert.deepStrictEqual(new Uint8Array(await artifactResponse.arrayBuffer()), new Uint8Array([1, 2, 3]))
+      assert.strictEqual(completeArtifactResponse.status, 200)
+      assert.isNull(completeArtifactResponse.headers.get("content-range"))
+      assert.deepStrictEqual(
+        new Uint8Array(await completeArtifactResponse.arrayBuffer()),
+        new Uint8Array([1, 2, 3])
+      )
+      assert.strictEqual(exhaustedArtifactResponse.status, 416)
+      assert.strictEqual(exhaustedArtifactResponse.headers.get("content-range"), "bytes */9")
+      assert.strictEqual((await exhaustedArtifactResponse.arrayBuffer()).byteLength, 0)
     } finally {
       await webHandler.dispose()
     }

@@ -58,11 +58,16 @@ interface.
 
 ### Start
 
-The request carries explicit source action/revision pairs. Proposal validates
-source action names against the pipeline definition and freezes their sorted
-order. Preflight checks the pipeline definition revision. Dispatch calls
-`StartPipelineExecution` with a token derived from the governed idempotency key
-and payload digest.
+The request targets the configured pipeline entity by its exact ARN
+and pipeline-definition revision; it does not require a prior execution.
+It carries explicit source action/revision pairs. Proposal validates the exact
+unique source-action set and each revision type against its declared provider,
+then freezes the sorted order. Preflight repeats those checks against the
+current pipeline definition. Dispatch calls `StartPipelineExecution` with a
+token derived from the governed idempotency key and payload digest.
+CodeCommit accepts commit IDs, ECR accepts image digests, and S3 accepts version
+IDs plus object keys only when `AllowOverrideForS3ObjectKey` is enabled;
+unrecognized source providers fail closed.
 
 ### Stop
 
@@ -105,7 +110,10 @@ The HTTP request identifies an artifact by action, direction, and name plus a
 byte range. The plugin reloads the exact action and selects the corresponding
 artifact metadata server-side. S3 receives a single bounded range request.
 The response is `application/octet-stream`, attachment-only, private/no-store,
-and `nosniff`; bucket, key, ARN, and signed URLs never leave the server.
+and `nosniff`. Partial slices return `206` with an exact `Content-Range`,
+complete objects return `200`, and exhausted ranges return `416` with
+`bytes */total`. Bucket, key, ARN, and signed URLs never enter normalized
+events or leave the server.
 
 ## Error handling strategy
 

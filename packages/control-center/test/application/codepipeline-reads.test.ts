@@ -115,7 +115,7 @@ describe("CodePipelineReads", () => {
           readArtifactRange: () =>
             Effect.succeed({
               bytesBase64: "AQID",
-              totalBytes: 3,
+              totalBytes: 9,
               contentType: "application/octet-stream",
               filename: "BuildOutput.zip"
             })
@@ -134,7 +134,7 @@ describe("CodePipelineReads", () => {
           action,
           direction: "output",
           artifactName: "BuildOutput",
-          offset: 0,
+          offset: 3,
           length: 3
         })
       })
@@ -142,7 +142,12 @@ describe("CodePipelineReads", () => {
 
       assert.strictEqual(artifact.contentLength, 3)
       assert.strictEqual(artifact.filename, "BuildOutput.zip")
+      assert.strictEqual(artifact.offset, 3)
+      assert.strictEqual(artifact.totalBytes, 9)
       assert.deepStrictEqual(Array.from(chunks[0] ?? []), [1, 2, 3])
-      assert.deepStrictEqual(Object.keys(artifact).sort(), ["body", "contentLength", "filename"])
+      assert.deepStrictEqual(
+        Object.keys(artifact).sort(),
+        ["body", "contentLength", "filename", "offset", "totalBytes"]
+      )
     }))
 })

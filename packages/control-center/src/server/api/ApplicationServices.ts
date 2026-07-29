@@ -293,6 +293,8 @@ export interface CodePipelineArtifactRead {
   readonly body: Stream.Stream<Uint8Array>
   readonly contentLength: number
   readonly filename: string
+  readonly offset: number
+  readonly totalBytes: number
 }
 
 /** Workspace-scoped bounded CodePipeline evidence reads. */

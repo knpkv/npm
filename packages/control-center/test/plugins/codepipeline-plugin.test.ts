@@ -559,6 +559,11 @@ describe("CodePipelinePlugin", () => {
       assert.isTrue((yield* Ref.get(actionRequests)).every(({ maximumResults }) => maximumResults === 1))
 
       const firstEvents = first[0]?.events ?? []
+      const serializedEvents = JSON.stringify(first.flatMap(({ events }) => events))
+      assert.notInclude(serializedEvents, "\"bucket\"")
+      assert.notInclude(serializedEvents, "\"key\"")
+      assert.notInclude(serializedEvents, "source.zip")
+      assert.notInclude(serializedEvents, "build.zip")
       assert.deepStrictEqual(
         firstEvents.map((event) => event._tag === "UpsertEntity" ? event.entityType : event._tag),
         [
@@ -572,13 +577,45 @@ describe("CodePipelinePlugin", () => {
       const action = firstEvents.find((event) =>
         event._tag === "UpsertEntity" && event.entityType === "aws.codepipeline.action"
       )
+      const synchronizedExecution = firstEvents.find((event) =>
+        event._tag === "UpsertEntity" &&
+        event.entityType === "aws.codepipeline.execution" &&
+        event.vendorImmutableId === "execution-1842"
+      )
       assert.strictEqual(action?._tag, "UpsertEntity")
       if (action?._tag === "UpsertEntity") {
         const serialized = JSON.stringify(action.attributes)
         assert.include(serialized, "\"access\":\"proxy-required\"")
+        assert.notInclude(serialized, "\"bucket\"")
+        assert.notInclude(serialized, "\"key\"")
+        assert.notInclude(serialized, "source.zip")
+        assert.notInclude(serialized, "build.zip")
         assert.notInclude(serialized, "token=secret")
         assert.notInclude(serialized, "SECRET=must-not-leak")
         assert.notInclude(serialized, "externalExecutionUrl")
+      }
+
+      const directExecution = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.readEntity(
+            Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
+              entityType: "aws.codepipeline.execution",
+              vendorImmutableId: "execution-1842"
+            })
+          )
+        })
+      )
+      assert.strictEqual(directExecution._tag, "found")
+      if (
+        directExecution._tag === "found" &&
+        directExecution.event._tag === "UpsertEntity" &&
+        synchronizedExecution?._tag === "UpsertEntity"
+      ) {
+        assert.strictEqual(directExecution.event.revision, synchronizedExecution.revision)
+        assert.strictEqual(directExecution.event.revision, "7:Succeeded:2026-07-16T09:05:00.000Z")
+        assert.strictEqual(directExecution.event.attributes.updatedAt, "2026-07-16T09:05:00.000Z")
       }
 
       const stageRequest = Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
@@ -597,6 +634,80 @@ describe("CodePipelinePlugin", () => {
         assert.strictEqual(stage.event.entityType, "aws.codepipeline.stage")
         assert.strictEqual(stage.event.attributes.status, "Succeeded")
       }
+    }))
+
+  it.effect("uses the execution detail timestamp as the canonical action revision input", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        listPipelineExecutionsPage: () =>
+          Effect.succeed({
+            pipelineExecutionSummaries: [executionSummary("execution-1842", "Failed")]
+          }),
+        getPipelineExecution: (request) => {
+          const output = executionOutput(request.pipelineExecutionId, "Failed")
+          const { lastUpdateTime: _lastUpdateTime, ...pipelineExecution } = output.pipelineExecution
+          return Effect.succeed({
+            ...output,
+            pipelineExecution
+          })
+        }
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const pages = yield* connection.sync(
+            Schema.decodeUnknownSync(PluginSyncRequestV1)({ streamKey: "executions", checkpoint: null })
+          ).pipe(Stream.runCollect)
+          const synchronized = pages[0]?.events.find((event) =>
+            event._tag === "UpsertEntity" &&
+            event.entityType === "aws.codepipeline.execution" &&
+            event.vendorImmutableId === "execution-1842"
+          )
+          const direct = yield* connection.readEntity(
+            Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
+              entityType: "aws.codepipeline.execution",
+              vendorImmutableId: "execution-1842"
+            })
+          )
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.retry",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-1842"
+              },
+              expectedRevision: synchronized?.revision ?? "missing",
+              payload: {},
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "retry-undated-detail",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-undated-detail",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          const preflight = yield* executor.preflight(authorized)
+          return { direct, preflight, synchronized }
+        })
+      )
+
+      assert.strictEqual(result.synchronized?._tag, "UpsertEntity")
+      assert.strictEqual(result.direct._tag, "found")
+      if (
+        result.synchronized?._tag === "UpsertEntity" &&
+        result.direct._tag === "found" &&
+        result.direct.event._tag === "UpsertEntity"
+      ) {
+        assert.strictEqual(result.synchronized.revision, "7:Failed:undated")
+        assert.strictEqual(result.direct.event.revision, result.synchronized.revision)
+        assert.isNull(result.direct.event.attributes.updatedAt)
+      }
+      assert.strictEqual(result.preflight._tag, "ready")
     }))
 
   it.effect("ends bounded execution runs terminally and resumes from the persisted provider cursor", () =>
@@ -847,6 +958,7 @@ describe("CodePipelinePlugin", () => {
         ReadonlyArray<{ readonly token: string; readonly revisions: ReadonlyArray<unknown> }>
       >([])
       const provider = baseProvider({
+        getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
         startPipelineExecution: (request) =>
           Ref.update(calls, (current) => [...current, {
             token: request.clientRequestToken,
@@ -862,10 +974,10 @@ describe("CodePipelinePlugin", () => {
             Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
               actionKind: "pipeline.start",
               target: {
-                entityType: "pipeline-execution",
-                vendorImmutableId: "execution-1842"
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
               },
-              expectedRevision: "7:Succeeded:2026-07-16T09:05:00.000Z",
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
               payload: {
                 sourceRevisions: [{
                   actionName: "Checkout",
@@ -959,10 +1071,223 @@ describe("CodePipelinePlugin", () => {
             Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
               actionKind: "pipeline.start",
               target: {
-                entityType: "pipeline-execution",
-                vendorImmutableId: "execution-1842"
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
               },
-              expectedRevision: "7:Succeeded:2026-07-16T09:05:00.000Z",
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "Checkout",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-abc"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      assert.strictEqual(yield* Ref.get(mutationCalls), 0)
+    }))
+
+  it.effect("rejects provider-incompatible start revisions before mutation and accepts exact source types", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getPipeline: () =>
+          Effect.succeed({
+            ...pipelineOutput,
+            pipeline: {
+              ...pipelineOutput.pipeline,
+              stages: [
+                ...pipelineOutput.pipeline.stages,
+                {
+                  name: "ImageSource",
+                  actions: [{
+                    name: "ContainerImage",
+                    actionTypeId: {
+                      category: "Source",
+                      owner: "AWS",
+                      provider: "ECR",
+                      version: "1"
+                    },
+                    outputArtifacts: [{ name: "ImageOutput" }]
+                  }]
+                }
+              ]
+            }
+          }),
+        getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ pipelineExecutionId: "execution-source-types" })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const propose = (revisionType: "COMMIT_ID" | "IMAGE_DIGEST") =>
+            connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.start",
+                target: {
+                  entityType: "pipeline",
+                  vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+                },
+                expectedRevision: "7:2026-07-16T08:00:00.000Z",
+                payload: {
+                  sourceRevisions: [{
+                    actionName: "Checkout",
+                    revisionType: "COMMIT_ID",
+                    revisionValue: "commit-abc"
+                  }, {
+                    actionName: "ContainerImage",
+                    revisionType,
+                    revisionValue: "sha256:image"
+                  }]
+                },
+                evidenceIds: []
+              })
+            )
+          const invalid = yield* propose("COMMIT_ID").pipe(Effect.result)
+          const proposal = yield* propose("IMAGE_DIGEST")
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-source-types",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-source-types",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          const dispatched = yield* executor.executeAuthorizedAction(authorized)
+          return { dispatched, invalid }
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result.invalid))
+      if (Result.isFailure(result.invalid)) {
+        assert.strictEqual(result.invalid.failure._tag, "PluginConflictFailure")
+      }
+      assert.strictEqual(result.dispatched._tag, "confirmed")
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+    }))
+
+  it.effect("gates S3 key overrides by action configuration and rejects unknown source providers", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const attempt = (
+        providerName: "S3" | "CustomSource",
+        allowS3ObjectKeyOverride: boolean,
+        revisionType: "COMMIT_ID" | "S3_OBJECT_KEY" | "S3_OBJECT_VERSION_ID",
+        identity: string
+      ) =>
+        runWithProvider(
+          baseProvider({
+            getPipeline: () =>
+              Effect.succeed({
+                ...pipelineOutput,
+                pipeline: {
+                  ...pipelineOutput.pipeline,
+                  stages: pipelineOutput.pipeline.stages.map((stage) =>
+                    stage.name !== "Source"
+                      ? stage
+                      : {
+                        ...stage,
+                        actions: stage.actions.map((action) => ({
+                          ...action,
+                          actionTypeId: {
+                            ...action.actionTypeId,
+                            provider: providerName
+                          },
+                          ...(providerName === "S3"
+                            ? {
+                              configuration: {
+                                AllowOverrideForS3ObjectKey: allowS3ObjectKeyOverride ? "true" : "false"
+                              }
+                            }
+                            : {})
+                        }))
+                      }
+                  )
+                }
+              }),
+            getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
+            startPipelineExecution: () =>
+              Ref.update(mutationCalls, (count) => count + 1).pipe(
+                Effect.as({ pipelineExecutionId: `execution-${identity}` })
+              )
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const proposal = yield* connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.start",
+                target: {
+                  entityType: "pipeline",
+                  vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+                },
+                expectedRevision: "7:2026-07-16T08:00:00.000Z",
+                payload: {
+                  sourceRevisions: [{
+                    actionName: "Checkout",
+                    revisionType,
+                    revisionValue: revisionType === "S3_OBJECT_KEY" ? "releases/v2.zip" : "revision-abc"
+                  }]
+                },
+                evidenceIds: []
+              })
+            )
+            return yield* executor.executeAuthorizedAction(
+              Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+                proposal,
+                idempotencyKey: `start-${identity}`,
+                payloadDigest: proposal.payloadDigest,
+                authorizationId: `authorization-${identity}`,
+                authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+                expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+              })
+            )
+          })
+        ).pipe(Effect.result)
+
+      const rejectedKey = yield* attempt("S3", false, "S3_OBJECT_KEY", "s3-key-disabled")
+      const acceptedVersion = yield* attempt("S3", false, "S3_OBJECT_VERSION_ID", "s3-version")
+      const acceptedKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-enabled")
+      const rejectedUnknown = yield* attempt("CustomSource", false, "COMMIT_ID", "custom")
+
+      assert.isTrue(Result.isFailure(rejectedKey))
+      assert.isTrue(Result.isSuccess(acceptedVersion))
+      assert.isTrue(Result.isSuccess(acceptedKey))
+      assert.isTrue(Result.isFailure(rejectedUnknown))
+      assert.strictEqual(yield* Ref.get(mutationCalls), 2)
+    }))
+
+  it.effect("rejects a start target outside the configured pipeline before mutation", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const result = yield* runWithProvider(
+        baseProvider({
+          getPipelineExecution: () => Effect.die("invalid pipeline target must not load an execution"),
+          startPipelineExecution: () =>
+            Ref.update(mutationCalls, (count) => count + 1).pipe(
+              Effect.as({ pipelineExecutionId: "must-not-start" })
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          return yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:other"
+              },
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
               payload: {
                 sourceRevisions: [{
                   actionName: "Checkout",
@@ -1002,10 +1327,10 @@ describe("CodePipelinePlugin", () => {
             Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
               actionKind: "pipeline.start",
               target: {
-                entityType: "pipeline-execution",
-                vendorImmutableId: "execution-1842"
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
               },
-              expectedRevision: "7:Succeeded:2026-07-16T09:05:00.000Z",
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
               payload: {
                 sourceRevisions: [{
                   actionName: "Checkout",
@@ -1074,10 +1399,10 @@ describe("CodePipelinePlugin", () => {
             Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
               actionKind: "pipeline.start",
               target: {
-                entityType: "pipeline-execution",
-                vendorImmutableId: "execution-1842"
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
               },
-              expectedRevision: "7:Succeeded:2026-07-16T09:05:00.000Z",
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
               payload: {
                 sourceRevisions: [{
                   actionName: "Checkout",
@@ -1700,12 +2025,16 @@ describe("CodePipelinePlugin", () => {
 
   it.effect("revalidates action identity before bounded logs and artifact bytes leave the plugin", () =>
     Effect.gen(function*() {
-      const logCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
+      const logCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string, string]>>([])
       const artifactCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
       const provider = baseProvider({
         getLogEventsPage: (request) =>
           Ref.update(logCoordinates, (current) => {
-            const coordinates: readonly [string, string] = [request.logGroupName, request.logStreamName]
+            const coordinates: readonly [string, string, string] = [
+              request.account.region,
+              request.logGroupName,
+              request.logStreamName
+            ]
             return [...current, coordinates]
           }).pipe(
             Effect.as({
@@ -1768,7 +2097,7 @@ describe("CodePipelinePlugin", () => {
       )
 
       assert.deepStrictEqual(yield* Ref.get(logCoordinates), [
-        ["/aws/codebuild/release", "build"]
+        ["eu-west-1", "/aws/codebuild/release", "build"]
       ])
       assert.deepStrictEqual(yield* Ref.get(artifactCoordinates), [
         ["artifacts", "build.zip"]
@@ -1781,6 +2110,126 @@ describe("CodePipelinePlugin", () => {
       assert.notInclude(serialized, "build.zip")
       assert.notInclude(serialized, "arn:aws")
       assert.notInclude(serialized, "https://")
+    }))
+
+  it.effect("routes action logs to the validated action ARN region", () =>
+    Effect.gen(function*() {
+      const regions = yield* Ref.make<ReadonlyArray<string>>([])
+      const provider = baseProvider({
+        listActionExecutionsPage: (request) => {
+          const output = actionOutput(
+            request.pipelineExecutionId,
+            `${request.pipelineExecutionId}-action-1`,
+            "Compile",
+            "Succeeded"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((action) => ({
+              ...action,
+              input: {
+                ...action.input,
+                region: "us-east-1"
+              },
+              output: {
+                ...action.output,
+                executionResult: {
+                  ...action.output.executionResult,
+                  logStreamARN: "arn:aws:logs:us-east-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+                }
+              }
+            }))
+          })
+        },
+        getLogEventsPage: (request) =>
+          Ref.update(regions, (current) => [...current, request.account.region]).pipe(
+            Effect.as({ events: [] })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* pipeline.value.readLogPage(
+            Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+              action: {
+                entity: {
+                  entityType: "aws.codepipeline.action",
+                  vendorImmutableId: "execution-1842#execution-1842-action-1"
+                },
+                executionId: "execution-1842",
+                actionExecutionId: "execution-1842-action-1",
+                expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+              },
+              cursor: null,
+              limit: 10
+            })
+          )
+        })
+      )
+
+      assert.deepStrictEqual(result.events, [])
+      assert.deepStrictEqual(yield* Ref.get(regions), ["us-east-1"])
+    }))
+
+  it.effect("rejects a log ARN that disagrees with the action region before provider access", () =>
+    Effect.gen(function*() {
+      const providerCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        listActionExecutionsPage: (providerRequest) => {
+          const output = actionOutput(
+            providerRequest.pipelineExecutionId,
+            `${providerRequest.pipelineExecutionId}-action-1`,
+            "Compile",
+            "Succeeded"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((action) => ({
+              ...action,
+              output: {
+                ...action.output,
+                executionResult: {
+                  ...action.output.executionResult,
+                  logStreamARN: "arn:aws:logs:us-east-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+                }
+              }
+            }))
+          })
+        },
+        getLogEventsPage: () => Ref.update(providerCalls, (count) => count + 1).pipe(Effect.as({ events: [] }))
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          const request = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+            action: {
+              entity: {
+                entityType: "aws.codepipeline.action",
+                vendorImmutableId: "execution-1842#execution-1842-action-1"
+              },
+              executionId: "execution-1842",
+              actionExecutionId: "execution-1842-action-1",
+              expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+            },
+            cursor: null,
+            limit: 10
+          })
+          return yield* pipeline.value.readLogPage(request).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(result))
+      assert.strictEqual(yield* Ref.get(providerCalls), 0)
     }))
 
   it.effect("scopes opaque log cursors to one exact action and log stream", () =>

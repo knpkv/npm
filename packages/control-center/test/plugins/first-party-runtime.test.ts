@@ -70,10 +70,11 @@ import {
   codePipelinePluginDefinition,
   codePipelinePluginDescriptor
 } from "../../src/server/plugins/codepipeline/CodePipelinePluginDefinition.js"
-import type {
-  CodePipelineExecutionSnapshot,
-  CodePipelinePipeline,
-  CodePipelineReadClientService
+import {
+  canonicalCodePipelinePrincipalArn,
+  type CodePipelineExecutionSnapshot,
+  type CodePipelinePipeline,
+  type CodePipelineReadClientService
 } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
   confluencePagePluginDescriptor,
@@ -302,6 +303,23 @@ const unusedCodeCommitClients = (() => {
 })()
 
 describe("first-party plugin runtime", () => {
+  it("canonicalizes only assumed-role sessions for stable CodePipeline authority", () => {
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn(
+        "arn:aws:sts::123456789012:assumed-role/team/control-center/session-a"
+      ),
+      "arn:aws:iam::123456789012:role/team/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:iam::123456789012:user/control-center"),
+      "arn:aws:iam::123456789012:user/control-center"
+    )
+    assert.strictEqual(
+      canonicalCodePipelinePrincipalArn("arn:aws:sts::123456789012:federated-user/control-center"),
+      "arn:aws:sts::123456789012:federated-user/control-center"
+    )
+  })
+
   it.effect("keeps the CodeCommit action executor when composing the production registry", () =>
     Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(CREATED_AT))
@@ -949,7 +967,9 @@ describe("first-party plugin runtime", () => {
         Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       ))
       const mutationCalls = yield* Ref.make(0)
-      const identityArn = yield* Ref.make("arn:aws:iam::123456789012:role/control-center")
+      const identityArn = yield* Ref.make(
+        "arn:aws:sts::123456789012:assumed-role/control-center/registry-session"
+      )
       const identityCalls = yield* Ref.make(0)
       const pipeline = {
         name: "release",
@@ -969,6 +989,7 @@ describe("first-party plugin runtime", () => {
               provider: "CodeCommit",
               version: "1"
             },
+            allowS3ObjectKeyOverride: false,
             runOrder: 1,
             region: "eu-west-1",
             roleArn: null,
@@ -1103,6 +1124,10 @@ describe("first-party plugin runtime", () => {
           Effect.scoped
         )
         assert.strictEqual(yield* Ref.get(identityCalls), 1)
+        yield* Ref.set(
+          identityArn,
+          "arn:aws:sts::123456789012:assumed-role/control-center/executor-session"
+        )
         yield* seedGovernedAction({
           pluginConnectionAuthorityDigest: authority,
           seedAuthorityRoots: false,

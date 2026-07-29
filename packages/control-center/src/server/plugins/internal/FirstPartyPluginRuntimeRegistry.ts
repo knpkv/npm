@@ -46,7 +46,11 @@ import {
   codePipelinePluginDefinition,
   codePipelinePluginDescriptor
 } from "../codepipeline/CodePipelinePluginDefinition.js"
-import { CodePipelineReadClient, type CodePipelineReadClientService } from "../codepipeline/CodePipelineReadClient.js"
+import {
+  canonicalCodePipelinePrincipalArn,
+  CodePipelineReadClient,
+  type CodePipelineReadClientService
+} from "../codepipeline/CodePipelineReadClient.js"
 import { ConfluencePageAdapterConfiguration } from "../confluence/ConfluencePageAdapter.js"
 import { confluencePageClientLayer } from "../confluence/ConfluencePageClient.js"
 import {
@@ -1146,11 +1150,15 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
     Effect.provide(clientLayer),
     Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
   )
+  const canonicalIdentity = {
+    ...identity,
+    arn: canonicalCodePipelinePrincipalArn(identity.arn)
+  }
   return {
-    credentialGeneration: `${profile}\0${region}\0${identity.accountId}\0${identity.arn}`,
+    credentialGeneration: `${profile}\0${region}\0${canonicalIdentity.accountId}\0${canonicalIdentity.arn}`,
     layer: buildPluginDefinitionLayerFromNegotiatedDescriptor(
       codePipelinePluginDefinition,
-      { ...configuration, runtimeIdentity: identity },
+      { ...configuration, runtimeIdentity: canonicalIdentity },
       loaded.descriptor
     ).pipe(Layer.provide(clientLayer))
   }

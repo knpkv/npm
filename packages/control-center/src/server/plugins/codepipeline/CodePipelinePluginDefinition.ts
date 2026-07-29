@@ -58,6 +58,7 @@ import { definePluginV1 } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import {
+  canonicalCodePipelinePrincipalArn,
   CodePipelineAccountIdentity,
   type CodePipelineActionExecution,
   type CodePipelineExecutionSnapshot,
@@ -72,6 +73,45 @@ const NEXT_CHECKPOINT_PREFIX = "next:"
 const LOG_CURSOR_SEPARATOR = ":"
 const MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH = 3_900
 const utf8Encoder = new TextEncoder()
+
+interface CloudWatchLogCoordinates {
+  readonly region: string
+  readonly logGroupName: string
+  readonly logStreamName: string
+}
+
+const cloudWatchLogCoordinates = (
+  arn: string,
+  expectedAccountId: string,
+  expectedPrincipalArn: string,
+  actionRegion: string | null
+): CloudWatchLogCoordinates | null => {
+  const match = /^arn:([^:]+):logs:([^:]+):([^:]+):log-group:(.+):log-stream:(.+)$/u.exec(arn)
+  const expectedPartition = /^arn:([^:]+):/u.exec(expectedPrincipalArn)?.[1]
+  const partition = match?.[1]
+  const region = match?.[2]
+  const accountId = match?.[3]
+  const logGroupName = match?.[4]
+  const logStreamName = match?.[5]
+  if (
+    partition === undefined ||
+    region === undefined ||
+    accountId === undefined ||
+    logGroupName === undefined ||
+    logStreamName === undefined ||
+    expectedPartition === undefined ||
+    partition !== expectedPartition ||
+    accountId !== expectedAccountId ||
+    (actionRegion !== null && actionRegion !== region)
+  ) {
+    return null
+  }
+  return {
+    region,
+    logGroupName,
+    logStreamName
+  }
+}
 
 const AwsProfile = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
 const AwsRegion = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
@@ -443,8 +483,8 @@ const actionEvent = Effect.fn("CodePipelinePlugin.actionEvent")(function*(
       updatedBy: action.updatedBy,
       roleArn: action.roleArn,
       actionRegion: action.region,
-      inputArtifacts: action.inputArtifacts,
-      outputArtifacts: action.outputArtifacts,
+      inputArtifacts: action.inputArtifacts.map(({ access, name }) => ({ access, name })),
+      outputArtifacts: action.outputArtifacts.map(({ access, name }) => ({ access, name })),
       externalExecutionId: action.externalExecutionId,
       externalExecutionSummary: action.externalExecutionSummary,
       errorCode: action.errorCode,
@@ -519,8 +559,9 @@ const executionEvent = Effect.fn("CodePipelinePlugin.executionEvent")(function*(
 ) {
   const execution = snapshot.execution
   const summary = snapshot.summary
+  const updatedAt = execution.updatedAt
   const revision = `${execution.pipelineVersion}:${execution.status}:${
-    summary?.updatedAt === null || summary?.updatedAt === undefined ? "undated" : formatDate(summary.updatedAt)
+    updatedAt === null ? "undated" : formatDate(updatedAt)
   }`
   return yield* decodeOutput("codepipeline-normalize-execution", NormalizedPluginEventV1, {
     _tag: "UpsertEntity",
@@ -542,9 +583,7 @@ const executionEvent = Effect.fn("CodePipelinePlugin.executionEvent")(function*(
       status: execution.status,
       statusSummary: execution.statusSummary ?? summary?.statusSummary ?? null,
       startedAt: summary === null ? null : formatDate(summary.startedAt),
-      updatedAt: summary?.updatedAt === null || summary?.updatedAt === undefined
-        ? null
-        : formatDate(summary.updatedAt),
+      updatedAt: updatedAt === null ? null : formatDate(updatedAt),
       sourceRevisions: summary?.sourceRevisions ?? [],
       triggerType: execution.triggerType ?? summary?.triggerType ?? null,
       triggerDetail: execution.triggerDetail ?? summary?.triggerDetail ?? null,
@@ -571,9 +610,10 @@ const snapshotEvents = Effect.fn("CodePipelinePlugin.snapshotEvents")(function*(
   snapshot: CodePipelineExecutionSnapshot,
   includePipeline: boolean
 ): Effect.fn.Return<ReadonlyArray<NormalizedPluginEventV1>, PluginMalformedResponseFailure> {
-  const fallbackObservedAt = snapshot.summary?.updatedAt === null || snapshot.summary?.updatedAt === undefined
+  const updatedAt = snapshot.execution.updatedAt ?? snapshot.summary?.updatedAt ?? null
+  const fallbackObservedAt = updatedAt === null
     ? snapshot.summary === null ? yield* sampledAt : formatDate(snapshot.summary.startedAt)
-    : formatDate(snapshot.summary.updatedAt)
+    : formatDate(updatedAt)
   const events: Array<NormalizedPluginEventV1> = []
   if (includePipeline) events.push(yield* pipelineEvent(configuration, pipeline))
   events.push(yield* executionEvent(configuration, pipeline, snapshot, fallbackObservedAt))
@@ -704,7 +744,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       "runtime-identity",
       readClient.discoverAccount(awsAccount)
     )
-    if (current.accountId !== runtimeIdentity.accountId || current.arn !== runtimeIdentity.arn) {
+    if (
+      current.accountId !== runtimeIdentity.accountId ||
+      canonicalCodePipelinePrincipalArn(current.arn) !== canonicalCodePipelinePrincipalArn(runtimeIdentity.arn)
+    ) {
       return yield* new PluginConflictFailure({
         operation: "runtime-identity",
         diagnosticCode: "codepipeline-runtime-identity-changed"
@@ -1014,11 +1057,15 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         diagnosticCode: "codepipeline-log-target-mismatch"
       })
     }
-    const marker = ":log-group:"
-    const streamMarker = ":log-stream:"
-    const markerIndex = action.logStreamArn?.indexOf(marker) ?? -1
-    const streamIndex = action.logStreamArn?.lastIndexOf(streamMarker) ?? -1
-    if (action.logStreamArn === null || markerIndex < 0 || streamIndex <= markerIndex + marker.length) {
+    const coordinates = action.logStreamArn === null
+      ? null
+      : cloudWatchLogCoordinates(
+        action.logStreamArn,
+        runtimeIdentity.accountId,
+        runtimeIdentity.arn,
+        action.region
+      )
+    if (coordinates === null) {
       return yield* new PluginConflictFailure({
         operation: "pipeline-logs",
         diagnosticCode: "codepipeline-log-stream-unavailable"
@@ -1031,9 +1078,9 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     const page = yield* actionProvider(
       "pipeline-logs",
       readClient.getLogPage({
-        account: awsAccount,
-        logGroupName: action.logStreamArn.slice(markerIndex + marker.length, streamIndex),
-        logStreamName: action.logStreamArn.slice(streamIndex + streamMarker.length),
+        account: { ...awsAccount, region: coordinates.region },
+        logGroupName: coordinates.logGroupName,
+        logStreamName: coordinates.logStreamName,
         nextToken: providerCursor,
         limit: request.limit
       })
@@ -1101,16 +1148,60 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     })
   })
 
-  const sourceRevisionType = (
+  const sourceRevisionTypes = (
     pipeline: CodePipelinePipeline,
     actionName: string
-  ): typeof SourceRevisionType.Type => {
+  ): ReadonlySet<typeof SourceRevisionType.Type> | null => {
     const source = pipeline.stages
       .flatMap(({ actions }) => actions)
       .find((action) => action.name === actionName && action.actionType.category === "Source")
-    if (source?.actionType.provider === "ECR") return "IMAGE_DIGEST"
-    if (source?.actionType.provider === "S3") return "S3_OBJECT_VERSION_ID"
-    return "COMMIT_ID"
+    if (source?.actionType.owner !== "AWS") return null
+    switch (source.actionType.provider) {
+      case "CodeCommit":
+        return new Set(["COMMIT_ID"])
+      case "ECR":
+        return new Set(["IMAGE_DIGEST"])
+      case "S3":
+        return new Set(
+          source.allowS3ObjectKeyOverride
+            ? ["S3_OBJECT_VERSION_ID", "S3_OBJECT_KEY"]
+            : ["S3_OBJECT_VERSION_ID"]
+        )
+      default:
+        return null
+    }
+  }
+
+  const retrySourceRevisionType = (
+    pipeline: CodePipelinePipeline,
+    actionName: string
+  ): typeof SourceRevisionType.Type | null => {
+    const allowed = sourceRevisionTypes(pipeline, actionName)
+    if (allowed?.has("COMMIT_ID")) return "COMMIT_ID"
+    if (allowed?.has("IMAGE_DIGEST")) return "IMAGE_DIGEST"
+    if (allowed?.has("S3_OBJECT_VERSION_ID")) return "S3_OBJECT_VERSION_ID"
+    return null
+  }
+
+  const validSourceRevisions = (
+    pipeline: CodePipelinePipeline,
+    sourceRevisions: ReadonlyArray<typeof SourceRevision.Type>
+  ): boolean => {
+    const sourceActions = pipeline.stages.flatMap(({ actions }) =>
+      actions.filter(({ actionType }) => actionType.category === "Source")
+    )
+    const sourceNames = new Set(sourceActions.map(({ name }) => name))
+    const requestedNames = new Set(sourceRevisions.map(({ actionName }) => actionName))
+    return (
+      sourceNames.size > 0 &&
+      sourceNames.size === sourceActions.length &&
+      requestedNames.size === sourceNames.size &&
+      sourceRevisions.length === sourceNames.size &&
+      sourceRevisions.every(({ actionName, revisionType }) =>
+        sourceNames.has(actionName) &&
+        sourceRevisionTypes(pipeline, actionName)?.has(revisionType) === true
+      )
+    )
   }
 
   const retryPayload = Effect.fn("CodePipelinePlugin.retryPayload")(function*(
@@ -1134,11 +1225,12 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           candidate.name !== null &&
           action.outputArtifactNames.includes(candidate.name)
       )
-      return revision?.revisionId === null || revision === undefined
+      const revisionType = retrySourceRevisionType(pipeline, action.name)
+      return revision?.revisionId === null || revision === undefined || revisionType === null
         ? []
         : [{
           actionName: action.name,
-          revisionType: sourceRevisionType(pipeline, action.name),
+          revisionType,
           revisionValue: revision.revisionId
         }]
     })
@@ -1166,18 +1258,10 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     switch (request.actionKind) {
       case "pipeline.start": {
         if (
-          request.target.entityType !== "pipeline-execution"
+          request.target.entityType !== "pipeline" ||
+          request.target.vendorImmutableId !== pipeline.arn ||
+          request.expectedRevision !== pipelineRevision(pipeline)
         ) {
-          return yield* new PluginConflictFailure({
-            operation: "propose-action",
-            diagnosticCode: "codepipeline-start-target-changed"
-          })
-        }
-        const snapshot = yield* actionProvider(
-          "propose-action",
-          loadSnapshot(request.target.vendorImmutableId)
-        )
-        if (request.expectedRevision !== executionRevision(snapshot)) {
           return yield* new PluginConflictFailure({
             operation: "propose-action",
             diagnosticCode: "codepipeline-start-target-changed"
@@ -1191,16 +1275,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             })
           )
         )
-        const sourceActionNames = pipeline.stages.flatMap(({ actions }) =>
-          actions.filter(({ actionType }) => actionType.category === "Source").map(({ name }) => name)
-        )
-        const sourceNames = new Set(sourceActionNames)
-        if (
-          sourceNames.size === 0 ||
-          sourceNames.size !== sourceActionNames.length ||
-          payload.sourceRevisions.length !== sourceNames.size ||
-          payload.sourceRevisions.some(({ actionName }) => !sourceNames.has(actionName))
-        ) {
+        if (!validSourceRevisions(pipeline, payload.sourceRevisions)) {
           return yield* new PluginConflictFailure({
             operation: "propose-action",
             diagnosticCode: "codepipeline-start-source-set-invalid"
@@ -1425,16 +1500,14 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             new PluginConfigurationFailure({ diagnosticCode: "codepipeline-start-payload-invalid" })
           )
         )
-        const snapshot = yield* actionProvider(
-          "authorized-action",
-          loadSnapshot(actionRequest.target.vendorImmutableId)
-        )
-        const revision = executionRevision(snapshot)
+        const revision = pipelineRevision(pipeline)
         if (
-          actionRequest.target.entityType !== "pipeline-execution" ||
+          actionRequest.target.entityType !== "pipeline" ||
+          actionRequest.target.vendorImmutableId !== pipeline.arn ||
           actionRequest.expectedRevision !== revision ||
           payload.pipelineRevision === undefined ||
-          payload.pipelineRevision !== pipelineRevision(pipeline)
+          payload.pipelineRevision !== revision ||
+          !validSourceRevisions(pipeline, payload.sourceRevisions)
         ) {
           return yield* new PluginConflictFailure({
             operation: "authorized-action",

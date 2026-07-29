@@ -46,9 +46,14 @@ const logs = HttpApiEndpoint.post("logs", "/logs", {
   error: readErrors
 }).middleware(SessionCookieAuth)
 
+const artifactStream = HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" })
 const artifact = HttpApiEndpoint.post("artifact", "/artifact", {
   payload: CodePipelineArtifactReadRequest,
-  success: HttpApiSchema.StreamUint8Array({ contentType: "application/octet-stream" }),
+  success: [
+    artifactStream,
+    artifactStream.pipe(HttpApiSchema.status(206)),
+    artifactStream.pipe(HttpApiSchema.status(416))
+  ],
   error: readErrors
 }).middleware(SessionCookieAuth)
 

@@ -71,6 +71,11 @@ const RawActionDeclaration = Schema.Struct({
   name: Identifier,
   actionTypeId: RawActionType,
   runOrder: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThan(0))),
+  configuration: Schema.optionalKey(Schema.Struct({
+    AllowOverrideForS3ObjectKey: Schema.optionalKey(
+      Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(5))
+    )
+  })),
   region: Schema.optionalKey(Identifier),
   roleArn: Schema.optionalKey(Identifier),
   inputArtifacts: Schema.optionalKey(Schema.Array(RawArtifactDeclaration).check(Schema.isMaxLength(50))),
@@ -266,6 +271,19 @@ export const CodePipelineAccountIdentity = Schema.Struct({ accountId: Identifier
 /** @internal */
 export type CodePipelineAccountIdentity = typeof CodePipelineAccountIdentity.Type
 
+/**
+ * Collapse only STS assumed-role sessions to their stable IAM role principal.
+ * IAM users, federated users, and all unknown ARN shapes remain exact.
+ *
+ * @internal
+ */
+export const canonicalCodePipelinePrincipalArn = (arn: string): string => {
+  const assumedRole = /^arn:([^:]+):sts::([^:]+):assumed-role\/(.+)\/[^/]+$/u.exec(arn)
+  return assumedRole === null
+    ? arn
+    : `arn:${assumedRole[1]}:iam::${assumedRole[2]}:role/${assumedRole[3]}`
+}
+
 const CodePipelineActionType = Schema.Struct({
   category: Identifier,
   owner: Identifier,
@@ -276,6 +294,7 @@ const CodePipelineActionType = Schema.Struct({
 const CodePipelineActionDeclaration = Schema.Struct({
   name: Identifier,
   actionType: CodePipelineActionType,
+  allowS3ObjectKeyOverride: Schema.Boolean,
   runOrder: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   region: Schema.NullOr(Identifier),
   roleArn: Schema.NullOr(Identifier),
@@ -600,6 +619,7 @@ export class CodePipelineReadClient extends Context.Service<
             actions: stage.actions.map((action) => ({
               name: action.name,
               actionType: action.actionTypeId,
+              allowS3ObjectKeyOverride: action.configuration?.AllowOverrideForS3ObjectKey === "true",
               runOrder: action.runOrder ?? null,
               region: action.region ?? null,
               roleArn: action.roleArn ?? null,

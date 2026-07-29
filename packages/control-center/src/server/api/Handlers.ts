@@ -1295,14 +1295,32 @@ export const codePipelineHandlersLayer = HttpApiBuilder.group(
               pluginConnectionId: payload.pluginConnectionId,
               request: payload.request
             }))
+            const rangeUnsatisfied = artifact.contentLength === 0 && artifact.offset >= artifact.totalBytes
+            const partial = !rangeUnsatisfied &&
+              (artifact.offset > 0 || artifact.contentLength < artifact.totalBytes)
+            const contentRange = rangeUnsatisfied
+              ? `bytes */${String(artifact.totalBytes)}`
+              : `bytes ${String(artifact.offset)}-${String(artifact.offset + artifact.contentLength - 1)}/${
+                String(artifact.totalBytes)
+              }`
             yield* HttpEffect.appendPreResponseHandler((_request, response) =>
-              Effect.succeed(HttpServerResponse.setHeaders(response, {
-                "cache-control": "private, no-store",
-                "content-disposition": `attachment; filename="${artifact.filename}"`,
-                "content-length": String(artifact.contentLength),
-                "content-type": "application/octet-stream",
-                "x-content-type-options": "nosniff"
-              }))
+              Effect.succeed(
+                HttpServerResponse.setHeaders(
+                  rangeUnsatisfied
+                    ? HttpServerResponse.setStatus(response, 416)
+                    : partial
+                    ? HttpServerResponse.setStatus(response, 206)
+                    : response,
+                  {
+                    "cache-control": "private, no-store",
+                    "content-disposition": `attachment; filename="${artifact.filename}"`,
+                    "content-length": String(artifact.contentLength),
+                    ...(partial || rangeUnsatisfied ? { "content-range": contentRange } : {}),
+                    "content-type": "application/octet-stream",
+                    "x-content-type-options": "nosniff"
+                  }
+                )
+              )
             )
             return artifact.body
           }))
