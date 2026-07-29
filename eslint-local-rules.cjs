@@ -54,7 +54,7 @@ const resolvedVariable = (context, identifier) => {
 
 const enclosingFunction = (node) => {
   let current = node.parent
-  while (current !== undefined) {
+  while (current !== undefined && current !== null) {
     if (
       current.type === "ArrowFunctionExpression" ||
       current.type === "FunctionExpression" ||
@@ -741,6 +741,81 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-bounded-base64-schema": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require a text-length bound before base64 schema filters decode input",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unboundedDecode: "Apply Schema.isMaxLength before decoding base64 text inside a Schema.String filter."
+      }
+    },
+    create(context) {
+      const isSchemaCall = (call, method) =>
+        call?.type === "CallExpression" &&
+        call.callee.type === "MemberExpression" &&
+        staticPropertyName(call.callee.property) === method &&
+        isSchemaModule(context, call.callee.object)
+      const isDecodeBase64Call = (call) => {
+        if (call.callee.type === "Identifier") {
+          return isNamedImportFrom(context, call.callee, ["effect/Encoding"], ["decodeBase64"])
+        }
+        return (
+          call.callee.type === "MemberExpression" &&
+          staticPropertyName(call.callee.property) === "decodeBase64" &&
+          call.callee.object.type === "Identifier" &&
+          isNamespaceImportFrom(context, call.callee.object, ["effect/Encoding"])
+        )
+      }
+      const enclosingInlineFilter = (node) => {
+        const callback = enclosingFunction(node)
+        const makeFilter = callback?.parent
+        if (
+          callback === undefined ||
+          makeFilter?.type !== "CallExpression" ||
+          !makeFilter.arguments.includes(callback) ||
+          !isSchemaCall(makeFilter, "makeFilter")
+        ) {
+          return undefined
+        }
+        return makeFilter
+      }
+      const attachedStringCheck = (filter) => {
+        const check = filter.parent
+        if (
+          check?.type !== "CallExpression" ||
+          !check.arguments.includes(filter) ||
+          check.callee.type !== "MemberExpression" ||
+          staticPropertyName(check.callee.property) !== "check" ||
+          check.callee.object.type !== "MemberExpression" ||
+          staticPropertyName(check.callee.object.property) !== "String" ||
+          !isSchemaModule(context, check.callee.object.object)
+        ) {
+          return undefined
+        }
+        return check
+      }
+
+      return {
+        CallExpression(node) {
+          if (!isDecodeBase64Call(node)) return
+          const filter = enclosingInlineFilter(node)
+          if (filter === undefined) return
+          const check = attachedStringCheck(filter)
+          if (check === undefined) return
+          const filterIndex = check.arguments.indexOf(filter)
+          const hasPriorTextBound = check.arguments
+            .slice(0, filterIndex)
+            .some((argument) => argument.type !== "SpreadElement" && isSchemaCall(argument, "isMaxLength"))
+          if (!hasPriorTextBound) context.report({ node, messageId: "unboundedDecode" })
+        }
+      }
+    }
+  },
   "require-jira-path-identifier-schema": {
     meta: {
       type: "problem",

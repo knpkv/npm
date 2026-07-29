@@ -982,3 +982,49 @@ await assertRuleDiagnostics({
   filePath: "packages/control-center/src/api/eslint-number-from-string-valid.ts",
   ruleId: "local-rules/no-number-from-string-in-control-center-api"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    import * as Result from "effect/Result"
+    import * as Schema from "effect/Schema"
+    const ArtifactBytes = Schema.String.check(
+      Schema.makeFilter((value) => {
+        const decoded = Encoding.decodeBase64(value)
+        return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
+      })
+    )
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/domain/plugins/eslint-base64-bound-invalid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    import * as Result from "effect/Result"
+    import * as Schema from "effect/Schema"
+    const ArtifactBytes = Schema.String.check(
+      Schema.isMaxLength(1_398_104),
+      Schema.isBase64(),
+      Schema.makeFilter((value) => {
+        const decoded = Encoding.decodeBase64(value)
+        return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
+      })
+    )
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/domain/plugins/eslint-base64-bound-valid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Encoding from "effect/Encoding"
+    const decoded = Encoding.decodeBase64(providerValue)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/eslint-base64-nonschema-valid.ts",
+  ruleId: "local-rules/require-bounded-base64-schema"
+})

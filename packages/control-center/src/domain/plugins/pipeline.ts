@@ -12,6 +12,7 @@ const boundedOpaque = (name: string, maximum: number) =>
 const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const MaximumArtifactRangeBytes = 1024 * 1024
+const MaximumArtifactRangeBase64Characters = 4 * Math.ceil(MaximumArtifactRangeBytes / 3)
 const MaximumLogPageBytes = 1024 * 1024
 const utf8Encoder = new TextEncoder()
 const Utf8BoundedLogMessage = Schema.String.check(
@@ -72,6 +73,8 @@ export const PluginPipelineArtifactRangeRequestV1 = Schema.Struct({
 /** Browser-safe artifact bytes; provider storage coordinates are deliberately absent. */
 export const PluginPipelineArtifactRangeV1 = Schema.Struct({
   bytesBase64: Schema.String.check(
+    Schema.isMaxLength(MaximumArtifactRangeBase64Characters),
+    Schema.isBase64(),
     Schema.makeFilter((value) => {
       const decoded = Encoding.decodeBase64(value)
       return Result.isSuccess(decoded) && decoded.success.byteLength <= MaximumArtifactRangeBytes

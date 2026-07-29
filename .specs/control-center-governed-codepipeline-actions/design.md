@@ -64,7 +64,8 @@ It carries explicit source action/revision pairs. Proposal validates the exact
 unique source-action set and each revision type against its declared provider,
 then freezes the sorted order. Preflight repeats those checks against the
 current pipeline definition. Dispatch calls `StartPipelineExecution` with a
-token derived from the governed idempotency key and payload digest.
+token derived from the persisted canonical authorized-action identity:
+`authorizationId`, `idempotencyKey`, and `payloadDigest`.
 CodeCommit accepts commit IDs, ECR accepts image digests, and S3 accepts version
 IDs plus object keys only when `AllowOverrideForS3ObjectKey` is enabled;
 unrecognized source providers fail closed.
@@ -119,8 +120,12 @@ artifact metadata server-side. S3 receives a single bounded range request.
 The response is `application/octet-stream`, attachment-only, private/no-store,
 and `nosniff`. Partial slices return `206` with an exact `Content-Range`,
 complete objects return `200`, and exhausted ranges return `416` with
-`bytes */total`. Bucket, key, ARN, and signed URLs never enter normalized
-events or leave the server.
+`bytes */total`. S3 bucket/key/object identity, log-group/log-stream coordinates,
+and signed URLs remain server-private. Pipeline and role ARNs are intentionally
+normalized into entity events and may cross the standard entity HTTP boundary.
+The evidence endpoints expose only log timestamps, ingestion timestamps,
+bounded message text, and an opaque cursor, or bounded artifact bytes with safe
+content length/range/type and attachment filename metadata.
 
 ## Error handling strategy
 
@@ -154,6 +159,7 @@ events or leave the server.
 const tokenDigest =
   yield *
   digestGovernedActionPayload({
+    authorizationId: request.authorizationId,
     idempotencyKey: request.idempotencyKey,
     payloadDigest: request.payloadDigest
   })

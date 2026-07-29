@@ -151,7 +151,8 @@ export default tseslint.config(
   {
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
-      "@typescript-eslint/no-explicit-any": "error"
+      "@typescript-eslint/no-explicit-any": "error",
+      "local-rules/require-bounded-base64-schema": "error"
     }
   },
   {
