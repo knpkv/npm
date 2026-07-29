@@ -762,6 +762,7 @@ module.exports = {
       }
 
       const structuredKeyConstructors = []
+      const localDefinitions = new Map()
       let comparesRequestKey = false
       const isReconciliationKeyImport = (identifier) => {
         const definition = importedBinding(context, identifier)
@@ -773,21 +774,86 @@ module.exports = {
       const isRequestReconciliationKey = (expression) =>
         expression.type === "MemberExpression" && staticPropertyName(expression.property) === "reconciliationKey"
       const isNullLiteral = (expression) => expression.type === "Literal" && expression.value === null
+      const returnedExpression = (expression) => {
+        if (expression.type === "ArrowFunctionExpression" && expression.body.type !== "BlockStatement") {
+          return expression.body
+        }
+        if (
+          (expression.type === "ArrowFunctionExpression" ||
+            expression.type === "FunctionExpression" ||
+            expression.type === "FunctionDeclaration") &&
+          expression.body.type === "BlockStatement"
+        ) {
+          const returns = expression.body.body.filter((statement) => statement.type === "ReturnStatement")
+          return returns.length === 1 ? returns[0].argument : null
+        }
+        return expression
+      }
+      const containsStructuredLocator = (expression, visited = new Set()) => {
+        if (expression === null || expression === undefined || visited.has(expression)) return false
+        visited.add(expression)
+        const returned = returnedExpression(expression)
+        if (returned !== expression) return containsStructuredLocator(returned, visited)
+        if (expression.type === "TemplateLiteral") {
+          return expression.quasis.some((quasi) => quasi.value.raw.includes(":"))
+        }
+        if (expression.type === "Literal") {
+          return typeof expression.value === "string" && expression.value.includes(":")
+        }
+        if (expression.type === "BinaryExpression" && expression.operator === "+") {
+          return (
+            containsStructuredLocator(expression.left, visited) || containsStructuredLocator(expression.right, visited)
+          )
+        }
+        if (expression.type === "Identifier") {
+          return containsStructuredLocator(localDefinitions.get(expression.name), visited)
+        }
+        if (expression.type === "CallExpression") {
+          if (
+            expression.callee.type === "CallExpression" &&
+            expression.callee.callee.type === "MemberExpression" &&
+            expression.callee.callee.object.type === "Identifier" &&
+            isNamespaceImportFrom(context, expression.callee.callee.object, ["effect/Schema"]) &&
+            ["encode", "encodeSync"].includes(staticPropertyName(expression.callee.callee.property))
+          ) {
+            return false
+          }
+          if (
+            expression.callee.type === "Identifier" &&
+            containsStructuredLocator(localDefinitions.get(expression.callee.name), visited)
+          ) {
+            return true
+          }
+          return expression.arguments.some(
+            (argument) => argument.type !== "SpreadElement" && containsStructuredLocator(argument, visited)
+          )
+        }
+        return false
+      }
 
       return {
+        FunctionDeclaration(node) {
+          if (node.id !== null) localDefinitions.set(node.id.name, node)
+        },
+        VariableDeclarator(node) {
+          if (node.id.type === "Identifier" && node.init !== null) {
+            localDefinitions.set(node.id.name, node.init)
+          }
+        },
         CallExpression(node) {
           if (
             node.callee.type !== "MemberExpression" ||
             staticPropertyName(node.callee.property) !== "make" ||
             node.callee.object.type !== "Identifier" ||
             !isReconciliationKeyImport(node.callee.object) ||
-            node.arguments.length !== 1 ||
-            node.arguments[0].type !== "TemplateLiteral" ||
-            !node.arguments[0].quasis.some((quasi) => quasi.value.raw.includes(":"))
+            node.arguments.length !== 1
           ) {
             return
           }
-          structuredKeyConstructors.push(node)
+          const argument = node.arguments[0]
+          if (argument.type !== "SpreadElement") {
+            structuredKeyConstructors.push({ argument, node })
+          }
         },
         BinaryExpression(node) {
           if (
@@ -800,8 +866,10 @@ module.exports = {
         },
         "Program:exit"() {
           if (!comparesRequestKey) return
-          for (const node of structuredKeyConstructors) {
-            context.report({ node, messageId: "rawStructuredLocator" })
+          for (const { argument, node } of structuredKeyConstructors) {
+            if (containsStructuredLocator(argument)) {
+              context.report({ node, messageId: "rawStructuredLocator" })
+            }
           }
         }
       }

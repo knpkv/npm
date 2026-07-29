@@ -21,6 +21,25 @@ export const ClockifyDescription = Schema.String.check(Schema.isMaxLength(4_000)
 export const ClockifyWritableDescription = Schema.String.check(Schema.isMaxLength(3_000))
 /** Bounded duration returned by Clockify for a time-entry interval. @internal */
 export const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
+const ClockifyCustomFieldValue = Schema.Union([
+  Schema.String.check(Schema.isMaxLength(4_000)),
+  Schema.Number,
+  Schema.Boolean,
+  Schema.Array(Schema.Json).check(Schema.isMaxLength(100)),
+  Schema.Record(Schema.String, Schema.Json)
+])
+/** Canonical custom-field value required for safe replacement updates. @internal */
+export const ClockifyCustomField = Schema.Struct({
+  customFieldId: ClockifyIdentifier,
+  value: Schema.optionalKey(ClockifyCustomFieldValue)
+})
+const ClockifyCustomFields = Schema.Array(ClockifyCustomField).check(
+  Schema.isMaxLength(50),
+  Schema.makeFilter(
+    (fields) => new Set(fields.map(({ customFieldId }) => customFieldId)).size === fields.length,
+    { expected: "unique Clockify custom field identifiers" }
+  )
+)
 // Clockify's workspace-user response has no profile revision timestamp. Keep the
 // observation deterministic so an unchanged person has one immutable payload.
 const ClockifyPersonObservedAt = DateTime.makeUnsafe(0)
@@ -39,6 +58,7 @@ const ClockifyPersonResponse = Schema.Struct({
 
 const ClockifyTimeEntryResponse = Schema.Struct({
   billable: Schema.Boolean,
+  customFieldValues: Schema.optionalKey(ClockifyCustomFields),
   description: ClockifyDescription,
   id: ClockifyIdentifier,
   isLocked: Schema.optionalKey(Schema.Boolean),
@@ -68,11 +88,12 @@ type ClockifyPersonEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "Up
 /** Canonical decoded provider snapshot shared by sync and governed actions. @internal */
 export interface ClockifyTimeEntrySnapshot {
   readonly billable: boolean
+  readonly customFields: ReadonlyArray<typeof ClockifyCustomField.Type>
   readonly description: string
   readonly end: DateTime.Utc | null
   readonly entryType: "REGULAR" | "BREAK" | "HOLIDAY" | "TIME_OFF"
   readonly id: string
-  readonly isLocked: boolean
+  readonly isLocked?: boolean
   readonly projectId: string | null
   readonly start: DateTime.Utc
   readonly tagIds: ReadonlyArray<string>
@@ -109,9 +130,10 @@ const digestJson = Effect.fn("ClockifyTimeEntryNormalization.digestJson")(functi
 
 const revisionMaterial = (entry: ClockifyTimeEntrySnapshot): Schema.Json => ({
   billable: entry.billable,
+  ...(entry.customFields.length === 0 ? {} : { customFields: entry.customFields }),
   description: entry.description,
   id: entry.id,
-  isLocked: entry.isLocked,
+  ...(entry.isLocked === undefined ? {} : { isLocked: entry.isLocked }),
   projectId: entry.projectId,
   tagIds: [...entry.tagIds],
   taskId: entry.taskId,
@@ -155,12 +177,15 @@ export const decodeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization
   }
   return {
     billable: entry.billable,
+    customFields: [...(entry.customFieldValues ?? [])].sort(
+      (left, right) => left.customFieldId.localeCompare(right.customFieldId)
+    ),
     description: entry.description,
     duration: entry.timeInterval.duration ?? null,
     end: entry.timeInterval.end ?? null,
     entryType: entry.type ?? "REGULAR",
     id: entry.id,
-    isLocked: entry.isLocked ?? false,
+    ...(entry.isLocked === undefined ? {} : { isLocked: entry.isLocked }),
     projectId: entry.projectId ?? null,
     start: entry.timeInterval.start,
     tagIds: [...(entry.tagIds ?? [])].sort(),
@@ -251,10 +276,10 @@ export const normalizeClockifyTimeEntrySnapshot = Effect.fn(
       userId: entry.userId,
       description: entry.description,
       billable: entry.billable,
+      ...(entry.isLocked === undefined ? {} : { locked: entry.isLocked }),
       projectId: entry.projectId,
       taskId: entry.taskId,
       tagIds: entry.tagIds,
-      locked: entry.isLocked,
       entryType: entry.entryType,
       interval: {
         start,

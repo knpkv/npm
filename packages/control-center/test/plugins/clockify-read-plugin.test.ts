@@ -165,6 +165,7 @@ const ExpectedAttributes = Schema.Struct({
   workspaceId: Schema.String,
   userId: Schema.String,
   billable: Schema.Boolean,
+  locked: Schema.optionalKey(Schema.Boolean),
   projectId: Schema.NullOr(Schema.String),
   interval: Schema.Struct({
     start: Schema.String,
@@ -815,9 +816,22 @@ describe("ClockifyReadPlugin", () => {
       if (running._tag !== "found") return assert.fail("expected a running time entry")
       const attributes = Schema.decodeUnknownSync(ExpectedAttributes)(running.event.attributes)
       assert.strictEqual(attributes.interval.state, "running")
+      assert.isUndefined(attributes.locked)
       assert.strictEqual(attributes.interval.end, null)
       assert.strictEqual(attributes.freshness.sourceObservedAt, "2026-07-17T10:00:00.000Z")
       assert.strictEqual(attributes.freshness.sourceTimestamp, "interval-start")
+
+      const explicitlyUnlocked = yield* withConnection(
+        baseProvider({
+          getTimeEntry: () => Effect.succeed(Option.some(timeEntry("entry-1", "user-1", { isLocked: false })))
+        }),
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.readEntity(entryReference("entry-1"))))
+      )
+      assert.strictEqual(explicitlyUnlocked._tag, "found")
+      if (explicitlyUnlocked._tag !== "found") return assert.fail("expected an unlocked time entry")
+      assert.isFalse(
+        Schema.decodeUnknownSync(ExpectedAttributes)(explicitlyUnlocked.event.attributes).locked
+      )
     }))
 
   it.effect("preserves typed authentication failures without exposing provider causes", () =>
@@ -988,10 +1002,23 @@ describe("ClockifyReadPlugin", () => {
 
   it.effect("corrects one association and makes an identical replay mutation-free", () =>
     Effect.gen(function*() {
-      const state = yield* Ref.make({
+      const state = yield* Ref.make<
+        ReturnType<typeof timeEntry> & {
+          readonly customFieldValues: ReadonlyArray<{
+            readonly customFieldId: string
+            readonly value?: {}
+          }>
+          readonly taskId: string
+          readonly type: string
+        }
+      >({
         ...timeEntry("entry-1", "user-1", {
           description: "[OLD-1] Investigate timeout"
         }),
+        customFieldValues: [{
+          customFieldId: "customer-field",
+          value: "Acme"
+        }],
         taskId: "task-1",
         type: "BREAK"
       })
@@ -1006,6 +1033,12 @@ describe("ClockifyReadPlugin", () => {
                 workspaceId: current.workspaceId,
                 userId: current.userId,
                 billable: request.billable ?? false,
+                customFieldValues: (request.customFields ?? []).map(
+                  ({ customFieldId, value }) => ({
+                    customFieldId,
+                    ...(value === undefined ? {} : { value })
+                  })
+                ),
                 description: request.description ?? "",
                 projectId: request.projectId ?? "",
                 tagIds: [...(request.tagIds ?? [])],
@@ -1059,6 +1092,10 @@ describe("ClockifyReadPlugin", () => {
       assert.lengthOf(calls, 1)
       assert.deepStrictEqual(calls[0], {
         billable: true,
+        customFields: [{
+          customFieldId: "customer-field",
+          value: "Acme"
+        }],
         description: "[OPS-42] Investigate timeout",
         end: "2026-07-17T09:00:00.000Z",
         projectId: "project-1",
@@ -1069,6 +1106,10 @@ describe("ClockifyReadPlugin", () => {
       })
       assert.deepInclude(yield* Ref.get(state), {
         billable: true,
+        customFieldValues: [{
+          customFieldId: "customer-field",
+          value: "Acme"
+        }],
         description: "[OPS-42] Investigate timeout",
         projectId: "project-1",
         tagIds: ["delivery", "review"],

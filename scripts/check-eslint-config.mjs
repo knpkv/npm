@@ -1045,6 +1045,32 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const locatorText = (digest) => "clockify-correction:v1:" + digest
+    const reconciliationKey = (digest) =>
+      PluginActionReconciliationKey.make(locatorText(digest))
+    const matches = request.reconciliationKey === reconciliationKey(request.payloadDigest)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-concatenation-invalid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const locatorText = (digest) => encodeURIComponent("clockify-correction:v1:" + digest)
+    const reconciliationKey = (digest) =>
+      PluginActionReconciliationKey.make(locatorText(digest))
+    const matches = request.reconciliationKey === reconciliationKey(request.payloadDigest)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-encoded-invalid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Schema from "effect/Schema"
     import { PluginActionPayloadDigest, PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
     const ReconciliationLocator = Schema.TemplateLiteralParser([

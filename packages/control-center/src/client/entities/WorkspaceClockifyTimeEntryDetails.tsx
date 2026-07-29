@@ -127,9 +127,12 @@ export const WorkspaceClockifyTimeEntryDetails = ({
       </dl>
     </Section>
 
-    <aside className={styles.readOnly}>
+    <aside className={styles.readOnly} data-clockify-approval>
       <strong>Control Center approval: {timeEntry.approvalLabel}</strong>
       <span>{timeEntry.approvalDetail}</span>
+      {timeEntry.approvalDecidedAt === null ? null : (
+        <time dateTime={timeEntry.approvalDecidedAt.dateTime}>Recorded {timeEntry.approvalDecidedAt.label}</time>
+      )}
     </aside>
   </article>
 )

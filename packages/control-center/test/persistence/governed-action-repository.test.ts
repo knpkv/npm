@@ -38,6 +38,7 @@ import {
 } from "../../src/server/persistence/repositories/governed-action/contract.js"
 import {
   decodeGovernedActionIdempotencyRows,
+  hasEnoughTerminalByTargetCandidates,
   selectLatestTerminalByTarget
 } from "../../src/server/persistence/repositories/governed-action/read.js"
 import {
@@ -1212,6 +1213,27 @@ describe("governed action writer", () => {
         selectLatestTerminalByTarget(approvalRequest, [newerApproval, tieApproval])
           .map(({ envelope: selected }) => selected.actionId),
         [tieActionId, newerActionId]
+      )
+      const newerNonMatching = Array.from({ length: 100 }, (_, index) => ({
+        ...record,
+        envelope: {
+          ...record.envelope,
+          actionId: GovernedActionId.make(
+            `01890f6f-6d6a-7cc0-98d2-33${String(index).padStart(10, "0")}`
+          )
+        }
+      }))
+      assert.isFalse(
+        hasEnoughTerminalByTargetCandidates(approvalRequest, newerNonMatching),
+        "a full SQL page of other action kinds must not stop target pagination"
+      )
+      assert.deepStrictEqual(
+        selectLatestTerminalByTarget(approvalRequest, [
+          ...newerNonMatching,
+          olderApproval
+        ]).map(({ envelope: selected }) => selected.actionId),
+        [record.envelope.actionId],
+        "an older matching approval on the next page remains visible"
       )
 
       const quarantine = yield* QuarantineRepository

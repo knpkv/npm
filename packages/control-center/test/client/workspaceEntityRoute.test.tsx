@@ -1698,7 +1698,17 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Locked")
     expect(host.textContent).toContain("Control Center approval: Approved")
     expect(host.textContent).toContain("Reviewed against the delivery record.")
+    expect(host.querySelector("[data-clockify-approval] time")?.getAttribute("datetime")).toBe(
+      "2026-07-14T10:05:00.000Z"
+    )
     expect(host.querySelector("input, textarea, select")).toBeNull()
+
+    const pendingHost = await renderView(() => undefined, {
+      ...unattributedState,
+      inspection: { ...unattributedState.inspection, clockifyApproval: null }
+    })
+    expect(pendingHost.textContent).toContain("Control Center approval: Pending")
+    expect(pendingHost.querySelector("[data-clockify-approval] time")).toBeNull()
 
     const timeEntryDetails = clockifyInspection.entity.projection.details
     if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")

@@ -16,6 +16,10 @@ export interface WorkspaceClockifyJiraAssociation {
 }
 
 export interface WorkspaceClockifyTimeEntryPresentation {
+  readonly approvalDecidedAt: {
+    readonly dateTime: string
+    readonly label: string
+  } | null
   readonly approvalDetail: string
   readonly approvalLabel: string
   readonly approvers: ReadonlyArray<string>
@@ -57,6 +61,14 @@ const durationLabel = (minutes: number): string => {
 
 const timestampLabel = (value: DateTime.DateTime | null | undefined): string =>
   value === null || value === undefined ? "Not synchronized" : timestampFormatter.format(DateTime.toDateUtc(value))
+
+const timestampPresentation = (value: DateTime.DateTime | null | undefined) =>
+  value === null || value === undefined
+    ? null
+    : {
+      dateTime: DateTime.formatIso(value),
+      label: timestampFormatter.format(DateTime.toDateUtc(value))
+    }
 
 const acceptedRelationship = (relationship: DeliveryRelationship): boolean =>
   relationship.lifecycle._tag !== "missing" &&
@@ -147,6 +159,7 @@ export const presentWorkspaceClockifyTimeEntry = (
       ) ?? false
     )
   return {
+    approvalDecidedAt: timestampPresentation(inspection.clockifyApproval?.decidedAt),
     approvalDetail: inspection.clockifyApproval === null
       ? "No Control Center decision is recorded for this exact Clockify revision."
       : inspection.clockifyApproval.rationale,

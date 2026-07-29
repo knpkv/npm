@@ -21,7 +21,7 @@ import {
   type ProposePluginActionRequestV1
 } from "../../../domain/plugins/index.js"
 import { Revision } from "../../../domain/sourceRevision.js"
-import { digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
+import { canonicalizeGovernedActionJson, digestGovernedActionPayload } from "../../governance/governedActionDigests.js"
 import {
   PluginConfigurationFailure,
   PluginConflictFailure,
@@ -36,6 +36,7 @@ import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
 import type { ClockifyReadPluginConfiguration } from "./ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "./ClockifyReadProvider.js"
 import {
+  ClockifyCustomField,
   ClockifyDescription,
   ClockifyDuration,
   ClockifyIdentifier,
@@ -89,6 +90,9 @@ export const ClockifyCorrectAssociationPayload = Schema.TaggedStruct(CORRECT_ASS
   jiraIssueKey: ClockifyJiraIssueKey,
   originalDescription: ClockifyDescription,
   correctedDescription: ClockifyWritableDescription,
+  customFields: Schema.optionalKey(
+    Schema.Array(ClockifyCustomField).check(Schema.isMaxLength(50))
+  ),
   start: ClockifyActionTimestamp,
   end: Schema.NullOr(ClockifyActionTimestamp),
   duration: Schema.NullOr(ClockifyDuration),
@@ -227,6 +231,8 @@ const samePreservedFields = (
   snapshot.taskId === payload.taskId &&
   snapshot.billable === payload.billable &&
   snapshot.entryType === payload.entryType &&
+  canonicalizeGovernedActionJson(snapshot.customFields) ===
+    canonicalizeGovernedActionJson(payload.customFields ?? []) &&
   snapshot.tagIds.length === payload.tagIds.length &&
   snapshot.tagIds.every((tagId, index) => tagId === payload.tagIds[index])
 
@@ -395,6 +401,7 @@ export const makeClockifyGovernedActions = (
           jiraIssueKey: requested.jiraIssueKey,
           originalDescription: snapshot.description,
           correctedDescription: boundedDescription,
+          customFields: snapshot.customFields,
           start: DateTime.formatIso(snapshot.start),
           end: snapshot.end === null ? null : DateTime.formatIso(snapshot.end),
           duration: snapshot.duration,
@@ -522,6 +529,7 @@ export const makeClockifyGovernedActions = (
         payload.entryId,
         {
           billable: payload.billable,
+          customFields: payload.customFields ?? [],
           description: payload.correctedDescription,
           ...(payload.end === null ? {} : { end: payload.end }),
           ...(payload.projectId === null ? {} : { projectId: payload.projectId }),
