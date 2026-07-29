@@ -56,6 +56,7 @@ const CONTENT_DIGEST = Schema.decodeSync(BlobDigest)("b".repeat(64))
 const SECOND_CONTENT_DIGEST = Schema.decodeSync(BlobDigest)("c".repeat(64))
 const PAYMENTS = WorkspaceName.make("Payments")
 const IDENTITY = WorkspaceName.make("Identity")
+const ExplainQueryPlanRow = Schema.Struct({ detail: Schema.String })
 
 const person = Schema.decodeSync(Person)({
   personId: "01890f6f-6d6a-7cc0-98d2-000000000005",
@@ -595,6 +596,7 @@ describe("workspace-scoped repositories", () => {
         yield* createWorkspaceAndPlugin
         const content = yield* ContentBlobMetadataRepository
         const cache = yield* DiffContentCacheRepository
+        const { sql } = yield* Database
         yield* content.create(WORKSPACE_A, {
           digest: CONTENT_DIGEST,
           storageClass: "reproducible-cache",
@@ -634,6 +636,18 @@ describe("workspace-scoped repositories", () => {
           workspaceId: WORKSPACE_A,
           digest: CONTENT_DIGEST
         }])
+        const referencePlan = yield* sql.unsafe(
+          `EXPLAIN QUERY PLAN
+            SELECT 1
+            FROM diff_content_cache_entries
+            WHERE workspace_id = ? AND content_digest = ?
+            LIMIT 1`,
+          [WORKSPACE_A, CONTENT_DIGEST]
+        ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExplainQueryPlanRow))))
+        assert.include(
+          referencePlan.map(({ detail }) => detail).join("\n"),
+          "diff_content_cache_content_digest_idx"
+        )
       })
     ))
 

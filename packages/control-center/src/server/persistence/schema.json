@@ -458,6 +458,11 @@
     },
     {
       "type": "index",
+      "name": "diff_content_cache_content_digest_idx",
+      "sql": "CREATE INDEX diff_content_cache_content_digest_idx\n    ON diff_content_cache_entries(workspace_id, content_digest)"
+    },
+    {
+      "type": "index",
       "name": "domain_events_retention_idx",
       "sql": "CREATE INDEX domain_events_retention_idx\n    ON domain_events(workspace_id, ingested_at, event_cursor)"
     },
