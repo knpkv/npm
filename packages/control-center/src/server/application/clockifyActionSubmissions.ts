@@ -127,6 +127,20 @@ const clockifyActionSubmissionIdempotencyKey = Effect.fn(
   return GovernedActionIdempotencyKey.make(`clockify-submission:v1:${digest}`)
 })
 
+const clockifyActionRetryIdempotencyKey = Effect.fn(
+  "ClockifyActionSubmissions.retryIdempotencyKey"
+)(function*(input: {
+  readonly previousActionId: GovernedActionId
+  readonly previousIdempotencyKey: typeof GovernedActionIdempotencyKey.Type
+}) {
+  const digest = yield* digestCanonicalGovernedActionJson({
+    schemaVersion: 1,
+    previousActionId: input.previousActionId,
+    previousIdempotencyKey: input.previousIdempotencyKey
+  })
+  return GovernedActionIdempotencyKey.make(`clockify-submission-retry:v1:${digest}`)
+})
+
 /** Require an idempotent proposal retry to remain on its original runtime generation. */
 export const clockifyActionRuntimeAuthorityMatches = (
   envelope: GovernedActionEnvelopeV1,
@@ -192,7 +206,7 @@ const makeService = Effect.gen(function*() {
         },
       evidenceIds: []
     }).pipe(Effect.mapError(() => failure("invalid-request")))
-    const idempotencyKey = yield* clockifyActionSubmissionIdempotencyKey({
+    const initialIdempotencyKey = yield* clockifyActionSubmissionIdempotencyKey({
       entityId: input.entityId,
       request: input.request,
       workspaceId: input.workspaceId
@@ -308,8 +322,11 @@ const makeService = Effect.gen(function*() {
       }).pipe(mapFailure)
       return { actionId, state: record.head.state }
     })
-    const existingMatches = (record: GovernedActionRecord): boolean =>
-      record.envelope.idempotencyKey === idempotencyKey &&
+    const existingMatches = (
+      record: GovernedActionRecord,
+      expectedIdempotencyKey: typeof GovernedActionIdempotencyKey.Type
+    ): boolean =>
+      record.envelope.idempotencyKey === expectedIdempotencyKey &&
       record.envelope.targetEntityId === input.entityId &&
       record.envelope.proposal.request.actionKind === request.actionKind &&
       record.envelope.proposal.request.target.entityType === request.target.entityType &&
@@ -323,9 +340,10 @@ const makeService = Effect.gen(function*() {
       record.envelope.origin._tag === "human" &&
       record.envelope.origin.actor.personId === actor.personId
     const reuseExisting = Effect.fn("ClockifyActionSubmissions.reuseExisting")(function*(
-      record: GovernedActionRecord
+      record: GovernedActionRecord,
+      expectedIdempotencyKey: typeof GovernedActionIdempotencyKey.Type
     ) {
-      if (!existingMatches(record)) return yield* failure("conflict")
+      if (!existingMatches(record, expectedIdempotencyKey)) return yield* failure("conflict")
       if (record.head.state === "proposed") {
         yield* persistence.governedActions.commit(
           yield* prepareAuthorization(record.envelope, record.headTransition.transitionId)
@@ -344,21 +362,47 @@ const makeService = Effect.gen(function*() {
         response: Option.none<SubmitClockifyActionResponse>()
       }
     })
-    const retry = yield* commitCurrent(
-      persistence.governedActions.readByIdempotencyKey({
-        workspaceId: input.workspaceId,
-        pluginConnectionId: source.pluginConnectionId,
-        idempotencyKey
-      }).pipe(
-        Effect.flatMap(reuseExisting),
-        Effect.map(Option.some),
-        Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
-      )
-    )
-    if (Option.isSome(retry)) {
-      return Option.isSome(retry.value.response)
-        ? retry.value.response.value
-        : yield* advance(retry.value.actionId)
+    const retry = yield* commitCurrent(Effect.gen(function*() {
+      let idempotencyKey = initialIdempotencyKey
+      while (true) {
+        const existing = yield* persistence.governedActions.readByIdempotencyKey({
+          workspaceId: input.workspaceId,
+          pluginConnectionId: source.pluginConnectionId,
+          idempotencyKey
+        }).pipe(
+          Effect.map(Option.some),
+          Effect.catchTag("RecordNotFoundError", () => Effect.succeed(Option.none()))
+        )
+        if (Option.isNone(existing)) {
+          return {
+            idempotencyKey,
+            reused: Option.none<{
+              readonly actionId: GovernedActionId
+              readonly response: Option.Option<SubmitClockifyActionResponse>
+            }>()
+          }
+        }
+        if (!existingMatches(existing.value, idempotencyKey)) return yield* failure("conflict")
+        if (existing.value.head.state !== "failed") {
+          return {
+            idempotencyKey,
+            reused: Option.some(yield* reuseExisting(existing.value, idempotencyKey))
+          }
+        }
+        idempotencyKey = yield* clockifyActionRetryIdempotencyKey({
+          previousActionId: existing.value.envelope.actionId,
+          previousIdempotencyKey: idempotencyKey
+        }).pipe(
+          Effect.provideService(Crypto.Crypto, cryptoService),
+          mapFailure
+        )
+      }
+    }))
+    const idempotencyKey = retry.idempotencyKey
+    if (Option.isSome(retry.reused)) {
+      return Option.isSome(retry.reused.value.response)
+        ? retry.reused.value.response.value
+        : yield* advance(retry.reused.value.actionId)
     }
 
     if (source.revision !== input.request.expectedRevision) return yield* failure("conflict")
@@ -444,7 +488,7 @@ const makeService = Effect.gen(function*() {
         if (!clockifyActionProposalMatches(record.envelope.proposal, providerProposal)) {
           return yield* failure("conflict")
         }
-        return yield* reuseExisting(record)
+        return yield* reuseExisting(record, idempotencyKey)
       }
 
       yield* persistence.governedActions.commit(proposal)

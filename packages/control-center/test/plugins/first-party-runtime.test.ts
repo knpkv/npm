@@ -3288,10 +3288,21 @@ describe("first-party plugin runtime", () => {
       const providerState = yield* Ref.make(timeEntry)
       const httpClient = HttpClient.make((request) =>
         Effect.gen(function*() {
-          if (request.method !== "GET") yield* Ref.update(mutations, (count) => count + 1)
+          const mutationCount = request.method === "GET"
+            ? null
+            : yield* Ref.updateAndGet(mutations, (count) => count + 1)
           const entryUrl = request.url.endsWith(
             "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
           )
+          if (entryUrl && mutationCount === 1) {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response(JSON.stringify({ message: "rate limited" }), {
+                status: 429,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
           const body = entryUrl
             ? request.method === "GET"
               ? yield* Effect.gen(function*() {
@@ -3499,11 +3510,22 @@ describe("first-party plugin runtime", () => {
           }),
           session: ownerSession
         }
+        const failedCorrection = yield* submissions.submit(correctionRequest)
+        const failedCorrectionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: failedCorrection.actionId
+        })
+        assert.strictEqual(failedCorrection.state, "failed")
+        assert.strictEqual(failedCorrectionRecord.head.state, "failed")
+        assert.strictEqual(yield* Ref.get(mutations), 1)
+
+        yield* TestClock.adjust(Duration.minutes(1))
         const correction = yield* submissions.submit(correctionRequest)
         const correctionRecord = yield* persistenceService.governedActions.read({
           workspaceId: GOVERNED_WORKSPACE,
           actionId: correction.actionId
         })
+        assert.notStrictEqual(correction.actionId, failedCorrection.actionId)
         assert.strictEqual(correction.state, "succeeded")
         assert.isNotNull(correctionRecord.authorization)
         if (correctionRecord.authorization !== null) {
@@ -3514,7 +3536,7 @@ describe("first-party plugin runtime", () => {
             ) >= 0
           )
         }
-        assert.strictEqual(yield* Ref.get(mutations), 1)
+        assert.strictEqual(yield* Ref.get(mutations), 2)
         const readsAfterCorrection = yield* Ref.get(entryReads)
 
         yield* sql`INSERT INTO entity_revisions (
@@ -3533,7 +3555,7 @@ describe("first-party plugin runtime", () => {
         assert.deepStrictEqual(correctionRetry, correction)
         assert.deepStrictEqual(approvalRetry, result)
         assert.strictEqual(yield* Ref.get(entryReads), readsAfterCorrection)
-        assert.strictEqual(yield* Ref.get(mutations), 1)
+        assert.strictEqual(yield* Ref.get(mutations), 2)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
         Effect.provide(dependencies)
