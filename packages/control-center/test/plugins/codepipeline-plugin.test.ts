@@ -34,10 +34,12 @@ import {
   type CodePipelineReadProviderService,
   collectBoundedArtifactBody,
   collectBoundedArtifactBodyWithin,
-  mapCodePipelineAwsFailure
+  mapCodePipelineAwsFailure,
+  planCodePipelineArtifactRange
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
 import {
   PluginAuthenticationFailure,
+  PluginAuthorizationFailure,
   PluginConfigurationFailure,
   PluginConflictFailure,
   PluginMalformedResponseFailure,
@@ -293,6 +295,54 @@ describe("CodePipelinePlugin", () => {
         }
       }
     }))
+
+  it.effect("plans exhausted and satisfiable S3 artifact ranges without issuing an invalid range", () =>
+    Effect.sync(() => {
+      assert.deepStrictEqual(
+        planCodePipelineArtifactRange(9, 3, 9),
+        { _tag: "exhausted", contentRange: "bytes */9" }
+      )
+      assert.deepStrictEqual(
+        planCodePipelineArtifactRange(3, 3, 9),
+        { _tag: "bounded", range: "bytes=3-5" }
+      )
+    }))
+
+  it.effect("decodes an exhausted artifact range as an empty successful page", () =>
+    Effect.gen(function*() {
+      const client = yield* CodePipelineReadClient
+      const range = yield* client.getArtifactRange({
+        account: {
+          profile: configuration.profile,
+          region: configuration.region,
+          operationTimeoutMillis: configuration.operationTimeoutMillis
+        },
+        bucket: "private-artifacts",
+        key: "release.zip",
+        offset: 9,
+        length: 3
+      })
+      assert.deepStrictEqual(range, {
+        bytesBase64: "",
+        totalBytes: 9
+      })
+    }).pipe(
+      Effect.provide(
+        CodePipelineReadClient.layer.pipe(
+          Layer.provide(Layer.succeed(
+            CodePipelineReadProvider,
+            baseProvider({
+              getArtifactRange: () =>
+                Effect.succeed({
+                  bytes: new Uint8Array(),
+                  contentLength: 0,
+                  contentRange: "bytes */9"
+                })
+            })
+          ))
+        )
+      )
+    ))
 
   it.effect("rejects an S3 response whose Content-Range does not match the requested offset", () =>
     Effect.gen(function*() {
@@ -595,6 +645,12 @@ describe("CodePipelinePlugin", () => {
         assert.notInclude(serialized, "token=secret")
         assert.notInclude(serialized, "SECRET=must-not-leak")
         assert.notInclude(serialized, "externalExecutionUrl")
+        assert.notInclude(serialized, "\"logStreamArn\"")
+        assert.notInclude(
+          serialized,
+          "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+        )
+        assert.include(serialized, "arn:aws:codepipeline:eu-west-1:123456789012:release")
       }
 
       const directExecution = yield* runWithProvider(
@@ -816,6 +872,14 @@ describe("CodePipelinePlugin", () => {
         "codepipeline-get-pipeline",
         { _tag: "ValidationException" }
       ).pipe(Effect.flip)
+      const missingArtifact = yield* mapCodePipelineAwsFailure(
+        "codepipeline-head-artifact",
+        { _tag: "NotFound" }
+      ).pipe(Effect.flip)
+      const deniedArtifact = yield* mapCodePipelineAwsFailure(
+        "codepipeline-head-artifact",
+        { _tag: "AccessDenied" }
+      ).pipe(Effect.flip)
 
       assert.instanceOf(requestTimeout, PluginTimeoutFailure)
       assert.instanceOf(requestExpired, PluginTimeoutFailure)
@@ -824,6 +888,8 @@ describe("CodePipelinePlugin", () => {
       assert.instanceOf(invalidMutation, PluginConflictFailure)
       assert.instanceOf(unstoppability, PluginConflictFailure)
       assert.instanceOf(readValidation, PluginOutageFailure)
+      assert.strictEqual(missingArtifact._tag, "CodePipelineProviderNotFoundFailure")
+      assert.instanceOf(deniedArtifact, PluginAuthorizationFailure)
     }))
 
   it.effect("structurally redacts decoded approval tokens in private pipeline state", () =>
@@ -1440,6 +1506,60 @@ describe("CodePipelinePlugin", () => {
       const observedTokens = yield* Ref.get(tokens)
       assert.strictEqual(observedTokens.length, 2)
       assert.strictEqual(observedTokens[0], observedTokens[1])
+    }))
+
+  it.effect("classifies a malformed start response as an unknown mutation outcome", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({})
+          )
+      })
+      const dispatched = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              },
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "Checkout",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-abc"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-release-malformed-response",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-malformed-response",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          return yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(dispatched))
+      if (Result.isFailure(dispatched)) {
+        assert.instanceOf(dispatched.failure, PluginUnknownOutcomeFailure)
+        if (Predicate.isTagged(dispatched.failure, "PluginUnknownOutcomeFailure")) {
+          assert.match(dispatched.failure.reconciliationKey ?? "", /^codepipeline:start:/u)
+        }
+      }
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
 
   it.effect("binds non-null reconciliation locators before provider access and permits null started intents", () =>
@@ -2418,9 +2538,16 @@ describe("CodePipelinePlugin", () => {
 
   it.effect("revalidates action identity before bounded logs and artifact bytes leave the plugin", () =>
     Effect.gen(function*() {
+      const identityArn = yield* Ref.make(
+        "arn:aws:sts::123456789012:assumed-role/control-center/connection-session"
+      )
       const logCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string, string]>>([])
       const artifactCoordinates = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
       const provider = baseProvider({
+        getCallerIdentity: () =>
+          Ref.get(identityArn).pipe(
+            Effect.map((Arn) => ({ Account: "123456789012", Arn }))
+          ),
         getLogEventsPage: (request) =>
           Ref.update(logCoordinates, (current) => {
             const coordinates: readonly [string, string, string] = [
@@ -2460,6 +2587,10 @@ describe("CodePipelinePlugin", () => {
           if (pipeline === undefined || Option.isNone(pipeline)) {
             return yield* Effect.die("pipeline reader missing")
           }
+          yield* Ref.set(
+            identityArn,
+            "arn:aws:sts::123456789012:assumed-role/control-center/evidence-session"
+          )
           const action = {
             entity: {
               entityType: "aws.codepipeline.action",
@@ -2485,7 +2616,27 @@ describe("CodePipelinePlugin", () => {
               length: 3
             })
           )
-          return { artifact, logs }
+          yield* Ref.set(
+            identityArn,
+            "arn:aws:sts::123456789012:assumed-role/rotated-control-center/evidence-session"
+          )
+          const blockedLogs = yield* pipeline.value.readLogPage(
+            Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+              action,
+              cursor: null,
+              limit: 10
+            })
+          ).pipe(Effect.result)
+          const blockedArtifact = yield* pipeline.value.readArtifactRange(
+            Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+              action,
+              direction: "output",
+              artifactName: "BuildOutput",
+              offset: 0,
+              length: 3
+            })
+          ).pipe(Effect.result)
+          return { artifact, blockedArtifact, blockedLogs, logs }
         })
       )
 
@@ -2498,7 +2649,18 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(result.logs.events[0]?.message, "build completed")
       assert.strictEqual(result.artifact.bytesBase64, "AQID")
       assert.strictEqual(result.artifact.totalBytes, 9)
-      const serialized = JSON.stringify(result)
+      assert.isTrue(Result.isFailure(result.blockedLogs))
+      assert.isTrue(Result.isFailure(result.blockedArtifact))
+      if (Result.isFailure(result.blockedLogs)) {
+        assert.instanceOf(result.blockedLogs.failure, PluginConflictFailure)
+      }
+      if (Result.isFailure(result.blockedArtifact)) {
+        assert.instanceOf(result.blockedArtifact.failure, PluginConflictFailure)
+      }
+      const serialized = JSON.stringify({
+        artifact: result.artifact,
+        logs: result.logs
+      })
       assert.notInclude(serialized, "artifacts")
       assert.notInclude(serialized, "build.zip")
       assert.notInclude(serialized, "arn:aws")

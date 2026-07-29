@@ -41,6 +41,21 @@ interface ArtifactBodyCollection {
   readonly total: number
 }
 
+/** Plan a satisfiable S3 byte range or the canonical exhausted-range response. @internal */
+export const planCodePipelineArtifactRange = (
+  offset: number,
+  length: number,
+  totalBytes: number
+):
+  | { readonly _tag: "exhausted"; readonly contentRange: string }
+  | { readonly _tag: "bounded"; readonly range: string } =>
+  offset >= totalBytes
+    ? { _tag: "exhausted", contentRange: `bytes */${totalBytes}` }
+    : {
+      _tag: "bounded",
+      range: `bytes=${offset}-${Math.min(offset + length - 1, totalBytes - 1)}`
+    }
+
 /** Collect one provider body while stopping consumption at the authorized range bound. @internal */
 export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.collectBoundedArtifactBody")(
   function*<Error>(body: Stream.Stream<Uint8Array, Error>, maximumBytes: number): Effect.fn.Return<
@@ -257,7 +272,8 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
       "PipelineNotFoundException",
       "PipelineExecutionNotFoundException",
       "ResourceNotFoundException",
-      "NoSuchKey"
+      "NoSuchKey",
+      "NotFound"
     ])
   ) {
     return yield* new CodePipelineProviderNotFoundFailure({ operation })
@@ -273,7 +289,7 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
   ) {
     return yield* new PluginAuthenticationFailure({ operation })
   }
-  if (hasTag(cause, ["AccessDeniedException", "UnauthorizedException"])) {
+  if (hasTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])) {
     return yield* new PluginAuthorizationFailure({ operation })
   }
   if (
@@ -456,39 +472,68 @@ export const CodePipelineReadProviderLive = Layer.effect(
           )
         ),
       getArtifactRange: (request) =>
-        provideHttp(
-          callProvider(
+        provideHttp(Effect.gen(function*() {
+          const metadata = yield* callProvider(
+            "codepipeline-head-artifact",
+            request.account,
+            s3.headObject({
+              Bucket: request.bucket,
+              Key: request.key
+            })
+          ).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({
+              ContentLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+            }))),
+            Effect.mapError((failure) =>
+              Schema.isSchemaError(failure)
+                ? new PluginMalformedResponseFailure({
+                  operation: "codepipeline-head-artifact",
+                  diagnosticCode: "codepipeline-artifact-size-invalid"
+                })
+                : failure
+            )
+          )
+          const plan = planCodePipelineArtifactRange(
+            request.offset,
+            request.length,
+            metadata.ContentLength
+          )
+          if (plan._tag === "exhausted") {
+            return {
+              bytes: new Uint8Array(),
+              contentLength: 0,
+              contentRange: plan.contentRange
+            }
+          }
+          const response = yield* callProvider(
             "codepipeline-get-artifact",
             request.account,
             s3.getObject({
               Bucket: request.bucket,
               Key: request.key,
-              Range: `bytes=${request.offset}-${request.offset + request.length - 1}`
+              Range: plan.range
             })
-          ).pipe(
-            Effect.flatMap((response) =>
-              response.Body === undefined
-                ? Effect.succeed({
-                  bytes: new Uint8Array(),
-                  contentLength: response.ContentLength,
-                  contentRange: response.ContentRange
-                })
-                : collectBoundedArtifactBodyWithin(
-                  response.Body.pipe(
-                    Stream.mapError(() => new PluginOutageFailure({ operation: "codepipeline-get-artifact" }))
-                  ),
-                  request.length,
-                  request.account.operationTimeoutMillis
-                ).pipe(
-                  Effect.map((bytes) => ({
-                    bytes,
-                    contentLength: response.ContentLength,
-                    contentRange: response.ContentRange
-                  }))
-                )
-            )
           )
-        ),
+          return yield* response.Body === undefined
+            ? Effect.succeed({
+              bytes: new Uint8Array(),
+              contentLength: response.ContentLength,
+              contentRange: response.ContentRange
+            })
+            : collectBoundedArtifactBodyWithin(
+              response.Body.pipe(
+                Stream.mapError(() => new PluginOutageFailure({ operation: "codepipeline-get-artifact" }))
+              ),
+              request.length,
+              request.account.operationTimeoutMillis
+            ).pipe(
+              Effect.map((bytes) => ({
+                bytes,
+                contentLength: response.ContentLength,
+                contentRange: response.ContentRange
+              }))
+            )
+        })),
       startPipelineExecution: (request) =>
         provideHttp(
           callProvider(

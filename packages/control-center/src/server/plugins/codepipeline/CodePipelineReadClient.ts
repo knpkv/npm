@@ -850,6 +850,24 @@ export class CodePipelineReadClient extends Context.Service<
         if (response.bytes.byteLength > request.length) {
           return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-range-exceeded")
         }
+        const exhaustedRangeMatch = response.contentRange === undefined
+          ? null
+          : /^bytes \*\/(\d+)$/u.exec(response.contentRange)
+        if (exhaustedRangeMatch !== null) {
+          const totalBytes = Number(exhaustedRangeMatch[1])
+          if (
+            !Number.isSafeInteger(totalBytes) ||
+            request.offset < totalBytes ||
+            response.bytes.byteLength !== 0 ||
+            (response.contentLength !== undefined && response.contentLength !== 0)
+          ) {
+            return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-content-range-mismatch")
+          }
+          return yield* decodeModel("codepipeline-get-artifact", CodePipelineArtifactRange, {
+            bytesBase64: "",
+            totalBytes
+          })
+        }
         const rangeMatch = response.contentRange === undefined
           ? null
           : /^bytes (\d+)-(\d+)\/(\d+)$/u.exec(response.contentRange)

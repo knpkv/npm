@@ -521,7 +521,6 @@ const actionEvent = Effect.fn("CodePipelinePlugin.actionEvent")(function*(
       externalExecutionSummary: action.externalExecutionSummary,
       errorCode: action.errorCode,
       errorMessage: action.errorMessage,
-      logStreamArn: action.logStreamArn,
       sampledAt: observedAt
     }
   })
@@ -869,6 +868,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       readonly expectedRevision: string
     }
   ) {
+    yield* verifyRuntimeIdentity()
     const snapshot = yield* actionProvider(
       "codepipeline-action-read",
       loadSnapshot(reference.executionId)
@@ -1833,7 +1833,8 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     if (Result.isFailure(result)) {
       if (
         Predicate.isTagged(result.failure, "PluginTimeoutFailure") ||
-        Predicate.isTagged(result.failure, "PluginOutageFailure")
+        Predicate.isTagged(result.failure, "PluginOutageFailure") ||
+        Predicate.isTagged(result.failure, "PluginMalformedResponseFailure")
       ) {
         return yield* new PluginUnknownOutcomeFailure({
           operation: "execute-authorized-action",

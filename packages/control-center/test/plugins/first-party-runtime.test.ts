@@ -34,6 +34,8 @@ import {
 } from "../../src/domain/identifiers.js"
 import {
   AuthorizedPluginActionV1,
+  PluginPipelineArtifactRangeRequestV1,
+  PluginPipelineLogPageRequestV1,
   PluginSyncRequestV1,
   ProposePluginActionRequestV1
 } from "../../src/domain/plugins/index.js"
@@ -967,6 +969,8 @@ describe("first-party plugin runtime", () => {
         Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       ))
       const mutationCalls = yield* Ref.make(0)
+      const logCalls = yield* Ref.make(0)
+      const artifactCalls = yield* Ref.make(0)
       const identityArn = yield* Ref.make(
         "arn:aws:sts::123456789012:assumed-role/control-center/registry-session"
       )
@@ -1036,9 +1040,39 @@ describe("first-party plugin runtime", () => {
           rollbackTargetExecutionId: null
         },
         actionCollection: {
-          actions: [],
+          actions: [{
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            pipelineVersion: 7,
+            stageName: "Build",
+            actionName: "Compile",
+            status: "Failed",
+            startedAt: new Date("2026-07-15T09:45:00.000Z"),
+            updatedAt: new Date("2026-07-15T09:50:00.000Z"),
+            updatedBy: null,
+            actionType: {
+              category: "Build",
+              owner: "AWS",
+              provider: "CodeBuild",
+              version: "1"
+            },
+            roleArn: null,
+            region: "eu-west-1",
+            inputArtifacts: [],
+            outputArtifacts: [{
+              name: "BuildOutput",
+              bucket: "private-artifacts",
+              key: "build.zip",
+              access: "proxy-required"
+            }],
+            externalExecutionId: null,
+            externalExecutionSummary: null,
+            errorCode: null,
+            errorMessage: null,
+            logStreamArn: "arn:aws:logs:eu-west-1:123456789012:log-group:/aws/codebuild/release:log-stream:build"
+          }],
           truncated: false,
-          pagesRead: 0
+          pagesRead: 1
         }
       } satisfies CodePipelineExecutionSnapshot
       const codePipelineClient: CodePipelineReadClientService = {
@@ -1057,8 +1091,14 @@ describe("first-party plugin runtime", () => {
         listPipelinesPage: () => Effect.die("unused listPipelinesPage"),
         getExecutionSnapshot: () => Effect.succeed(snapshot),
         getPipelineState: () => Effect.die("unused getPipelineState"),
-        getLogPage: () => Effect.die("unused getLogPage"),
-        getArtifactRange: () => Effect.die("unused getArtifactRange"),
+        getLogPage: () =>
+          Ref.update(logCalls, (count) => count + 1).pipe(
+            Effect.as({ events: [], nextToken: null })
+          ),
+        getArtifactRange: () =>
+          Ref.update(artifactCalls, (count) => count + 1).pipe(
+            Effect.as({ bytesBase64: "AQID", totalBytes: 3 })
+          ),
         startPipelineExecution: () =>
           Ref.update(mutationCalls, (count) => count + 1).pipe(
             Effect.as("execution-retry-1")
@@ -1204,8 +1244,48 @@ describe("first-party plugin runtime", () => {
             authorizedAt: DateTime.makeUnsafe("2026-07-15T10:00:00.000Z"),
             expiresAt: DateTime.makeUnsafe("2026-07-15T11:00:00.000Z")
           })
+          const pipelineCapability = connection.pipeline
+          if (pipelineCapability === undefined || Option.isNone(pipelineCapability)) {
+            return yield* Effect.die("pipeline evidence capability missing")
+          }
+          const evidenceAction = {
+            entity: {
+              entityType: "aws.codepipeline.action",
+              vendorImmutableId: "execution-failed-1#execution-failed-1-action-1"
+            },
+            executionId: "execution-failed-1",
+            actionExecutionId: "execution-failed-1-action-1",
+            expectedRevision: "Failed:2026-07-15T09:50:00.000Z"
+          }
+          const logRequest = Schema.decodeUnknownSync(PluginPipelineLogPageRequestV1)({
+            action: evidenceAction,
+            cursor: null,
+            limit: 10
+          })
+          const artifactRequest = Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+            action: evidenceAction,
+            direction: "output",
+            artifactName: "BuildOutput",
+            offset: 0,
+            length: 3
+          })
+          yield* Ref.set(
+            identityArn,
+            "arn:aws:sts::123456789012:assumed-role/control-center/evidence-session"
+          )
+          const sameRoleLogs = yield* pipelineCapability.value.readLogPage(logRequest)
+          const sameRoleArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest)
           yield* Ref.set(identityArn, "arn:aws:iam::123456789012:role/rotated-control-center")
-          return yield* executor.preflight(authorized).pipe(Effect.result)
+          const blockedLogs = yield* pipelineCapability.value.readLogPage(logRequest).pipe(Effect.result)
+          const blockedArtifact = yield* pipelineCapability.value.readArtifactRange(artifactRequest).pipe(Effect.result)
+          const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
+          return {
+            blockedArtifact,
+            blockedLogs,
+            preflight,
+            sameRoleArtifact,
+            sameRoleLogs
+          }
         }).pipe(
           Effect.provide(registry.layer(pluginRuntimeKey({
             workspaceId: GOVERNED_WORKSPACE,
@@ -1221,11 +1301,23 @@ describe("first-party plugin runtime", () => {
           Effect.scoped
         )
         assert.strictEqual(stableAuthority, authority)
-        assert.strictEqual(blockedAfterIdentityChange._tag, "Failure")
-        if (blockedAfterIdentityChange._tag === "Failure") {
-          assert.strictEqual(blockedAfterIdentityChange.failure._tag, "PluginConflictFailure")
+        assert.deepStrictEqual(blockedAfterIdentityChange.sameRoleLogs.events, [])
+        assert.strictEqual(blockedAfterIdentityChange.sameRoleArtifact.bytesBase64, "AQID")
+        assert.strictEqual(blockedAfterIdentityChange.blockedLogs._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedLogs._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedLogs.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.blockedArtifact._tag, "Failure")
+        if (blockedAfterIdentityChange.blockedArtifact._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.blockedArtifact.failure._tag, "PluginConflictFailure")
+        }
+        assert.strictEqual(blockedAfterIdentityChange.preflight._tag, "Failure")
+        if (blockedAfterIdentityChange.preflight._tag === "Failure") {
+          assert.strictEqual(blockedAfterIdentityChange.preflight.failure._tag, "PluginConflictFailure")
         }
         assert.notStrictEqual(rotatedAuthority, authority)
+        assert.strictEqual(yield* Ref.get(logCalls), 1)
+        assert.strictEqual(yield* Ref.get(artifactCalls), 1)
         assert.strictEqual(yield* Ref.get(mutationCalls), 1)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients, codePipelineClient)),
