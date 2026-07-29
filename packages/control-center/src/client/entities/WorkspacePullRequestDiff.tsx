@@ -8,12 +8,17 @@ import {
   type RlyDiffInventory,
   type RlyDiffLayout
 } from "@knpkv/rly/diff/workbench"
-import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
+import type {
+  RlyDiffCodeAnnotation,
+  RlyDiffCodeItem,
+  RlyDiffCodeViewHandle,
+  RlyDiffCodeViewProps
+} from "@knpkv/rly/diff"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import { lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { forwardRef, lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { CompleteDiffContentRange, CompleteDiffInventory, CompleteDiffInventoryEntry } from "../../api/diff.js"
@@ -22,9 +27,14 @@ import type { PrReviewSuggestion, PrReviewSuggestionState } from "../../domain/p
 import type { Revision, VendorImmutableId } from "../../domain/sourceRevision.js"
 import styles from "./WorkspacePullRequestDiff.module.css"
 
-const BoundedDiffCodeView = lazy(async () => {
-  const module = await import("@knpkv/rly/diff/bounded")
-  return { default: module.BoundedDiffCodeView }
+const CompleteDiffCodeView = lazy(async () => {
+  const module = await import("@knpkv/rly/diff")
+  const Viewer = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewProps>((props, ref): ReactElement => (
+    <module.DiffWorkerProvider poolSize={2}>
+      <module.DiffCodeView {...props} ref={ref} />
+    </module.DiffWorkerProvider>
+  ))
+  return { default: Viewer }
 })
 const DiffLineFocus = lazy(async () => {
   const module = await import("./DiffLineFocus.js")
@@ -211,6 +221,7 @@ export const WorkspacePullRequestDiff = ({
     readonly side: "additions" | "deletions"
   }>()
   const viewerRef = useRef<HTMLDivElement>(null)
+  const diffCodeViewRef = useRef<RlyDiffCodeViewHandle>(null)
 
   useEffect(() => {
     setFindingFilter("agent")
@@ -558,11 +569,12 @@ export const WorkspacePullRequestDiff = ({
           ) : (
             <div className={styles.viewerTarget} ref={viewerRef}>
               <Suspense fallback={<p aria-live="polite">Rendering complete diff…</p>}>
-                <BoundedDiffCodeView
+                <CompleteDiffCodeView
                   annotations={annotations}
                   key={selectedEntry.anchor}
                   initialItems={selectedCodeItems}
                   mode={layout}
+                  ref={diffCodeViewRef}
                   wrap={isWrapped}
                 />
               </Suspense>
@@ -574,6 +586,7 @@ export const WorkspacePullRequestDiff = ({
                     lineNumber={focusRequest.lineNumber}
                     root={viewerRef}
                     side={focusRequest.side}
+                    viewer={diffCodeViewRef}
                   />
                 </Suspense>
               )}

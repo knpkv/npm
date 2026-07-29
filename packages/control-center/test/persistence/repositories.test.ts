@@ -1,10 +1,11 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Result, Schema } from "effect"
+import { Effect, FileSystem, Layer, Option, Result, Schema } from "effect"
 
+import { DiffFileAnchor } from "../../src/api/diff.js"
 import { Person, RoleAssignment } from "../../src/domain/actors.js"
 import { AgentId, EntityId, PluginConnectionId, RoleAssignmentId, WorkspaceId } from "../../src/domain/identifiers.js"
-import { SourceRevision } from "../../src/domain/sourceRevision.js"
+import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
@@ -15,6 +16,10 @@ import {
 } from "../../src/server/persistence/errors.js"
 import { BlobDigest } from "../../src/server/persistence/object-store/BlobDigest.js"
 import { ContentBlobMetadataRepository } from "../../src/server/persistence/repositories/contentBlobMetadataRepository.js"
+import {
+  type DiffContentCacheKey,
+  DiffContentCacheRepository
+} from "../../src/server/persistence/repositories/diffContentCacheRepository.js"
 import { EntityRepository } from "../../src/server/persistence/repositories/entityRepository.js"
 import {
   PluginConnectionDisplayName,
@@ -85,6 +90,7 @@ const withRepositories = <Success, Failure>(
     | EntityRepository
     | ContentBlobMetadataRepository
     | Database
+    | DiffContentCacheRepository
     | PeopleRepository
     | PluginConnectionRepository
     | QuarantineRepository
@@ -97,12 +103,14 @@ const withRepositories = <Success, Failure>(
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const content = ContentBlobMetadataRepository.layer.pipe(Layer.provide(foundation))
     const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
+    const diffContentCache = DiffContentCacheRepository.layer.pipe(Layer.provide(database))
     const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
     const plugins = PluginConnectionRepository.layer.pipe(Layer.provide(foundation))
     const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
     const repositories = Layer.mergeAll(
       foundation,
       content,
+      diffContentCache,
       entities,
       people,
       plugins,
@@ -541,6 +549,46 @@ describe("workspace-scoped repositories", () => {
         assert.strictEqual(records[0]?.recordKey, CONTENT_DIGEST)
         assert.strictEqual(records[0]?.diagnosticCode, "content-metadata-schema-invalid")
         assert.notInclude(JSON.stringify({ listed, malformed, records }), secretCanary)
+      })
+    ))
+
+  it.effect("keys diff content cache entries by immutable revision and replaces repaired content", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const content = yield* ContentBlobMetadataRepository
+        const cache = yield* DiffContentCacheRepository
+        yield* content.create(WORKSPACE_A, {
+          digest: CONTENT_DIGEST,
+          storageClass: "reproducible-cache",
+          byteLength: 6,
+          mimeType: "text/plain",
+          createdAt: CREATED_AT,
+          lastVerifiedAt: null
+        })
+        yield* content.create(WORKSPACE_A, {
+          digest: SECOND_CONTENT_DIGEST,
+          storageClass: "reproducible-cache",
+          byteLength: 8,
+          mimeType: "text/plain",
+          createdAt: CREATED_AT,
+          lastVerifiedAt: null
+        })
+        const key = {
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-9"),
+          anchor: DiffFileAnchor.make(`sha256:${"d".repeat(64)}`),
+          side: "after"
+        } satisfies DiffContentCacheKey
+
+        assert.isTrue(Option.isNone(yield* cache.get(key)))
+        yield* cache.put(key, CONTENT_DIGEST)
+        assert.deepStrictEqual(yield* cache.get(key), Option.some(CONTENT_DIGEST))
+        assert.isTrue(Option.isNone(yield* cache.get({ ...key, revision: Revision.make("revision-10") })))
+        yield* cache.put(key, SECOND_CONTENT_DIGEST)
+        assert.deepStrictEqual(yield* cache.get(key), Option.some(SECOND_CONTENT_DIGEST))
       })
     ))
 })

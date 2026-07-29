@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  CONTROL_CENTER_DEFERRED_DIFF_ARTIFACT_BUDGET,
   CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS,
   inspectJavaScriptArtifactBudgets,
   javaScriptArtifactPaths
@@ -52,6 +53,47 @@ describe("JavaScript artifact budgets", () => {
       `server JavaScript artifact "assets/gzip-overflow.js" gzip size: actual ${
         budget.gzipBytes + 1
       } bytes, budget ${budget.gzipBytes} bytes`
+    ])
+  })
+
+  it("allows only named deferred diff renderer chunks to use the isolated heavyweight budget", () => {
+    const base = CONTROL_CENTER_JAVASCRIPT_ARTIFACT_BUDGETS.client
+    const deferred = CONTROL_CENTER_DEFERRED_DIFF_ARTIFACT_BUDGET
+
+    expect(
+      inspectJavaScriptArtifactBudgets("client", [
+        {
+          artifact: "assets/diff-immutable-workbench.js",
+          gzipBytes: deferred.gzipBytes,
+          rawBytes: deferred.rawBytes
+        }
+      ])
+    ).toEqual([])
+    expect(
+      inspectJavaScriptArtifactBudgets("client", [
+        {
+          artifact: "assets/difference-immutable-workbench.js",
+          gzipBytes: base.gzipBytes,
+          rawBytes: base.rawBytes + 1
+        }
+      ])
+    ).toEqual([
+      `client JavaScript artifact "assets/difference-immutable-workbench.js" raw size: actual ${
+        base.rawBytes + 1
+      } bytes, budget ${base.rawBytes} bytes`
+    ])
+    expect(
+      inspectJavaScriptArtifactBudgets("client", [
+        {
+          artifact: "assets/wasm-renderer.js",
+          gzipBytes: deferred.gzipBytes + 1,
+          rawBytes: deferred.rawBytes
+        }
+      ])
+    ).toEqual([
+      `client JavaScript artifact "assets/wasm-renderer.js" gzip size: actual ${
+        deferred.gzipBytes + 1
+      } bytes, budget ${deferred.gzipBytes} bytes`
     ])
   })
 })

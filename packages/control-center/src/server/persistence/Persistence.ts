@@ -34,6 +34,8 @@ import {
   type DeliveryGraphInputError,
   DeliveryGraphRepository,
   type DeliveryGraphRepositoryService,
+  DiffContentCacheRepository,
+  type DiffContentCacheRepositoryService,
   DomainEventRepository,
   type DomainEventRepositoryService,
   EntityRepository,
@@ -160,6 +162,7 @@ const makePersistence = Effect.gen(function*() {
   const agentJobs = yield* AgentJobRepository
   const authorizedShares = yield* AuthorizedShareRepository
   const content = yield* ContentStore
+  const diffContentCache = yield* DiffContentCacheRepository
   const deliveryGraph = yield* DeliveryGraphRepository
   const events = yield* DomainEventRepository
   const governedActions = yield* GovernedActionRepository
@@ -265,6 +268,12 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("content.read-stream", content.readStream(...args)),
       verify: (...args: Parameters<ContentStoreService["verify"]>) =>
         publicOperation("content.verify", content.verify(...args))
+    },
+    diffContentCache: {
+      get: (...args: Parameters<DiffContentCacheRepositoryService["get"]>) =>
+        publicOperation("diff-content-cache.get", diffContentCache.get(...args)),
+      put: (...args: Parameters<DiffContentCacheRepositoryService["put"]>) =>
+        publicOperation("diff-content-cache.put", diffContentCache.put(...args))
     },
     deliveryGraph: {
       read: (...args: Parameters<DeliveryGraphRepositoryService["read"]>) =>
@@ -529,6 +538,7 @@ export const persistenceLayerFromDatabase = (
         )
         const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
         const deliveryGraph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
+        const diffContentCache = DiffContentCacheRepository.layer
         const events = DomainEventRepository.layer.pipe(Layer.provide(foundation))
         const governedActions = GovernedActionRepository.layer.pipe(Layer.provide(foundation))
         const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
@@ -552,6 +562,7 @@ export const persistenceLayerFromDatabase = (
           authorizedShares,
           contentMetadata,
           deliveryGraph,
+          diffContentCache,
           entities,
           events,
           governedActions,

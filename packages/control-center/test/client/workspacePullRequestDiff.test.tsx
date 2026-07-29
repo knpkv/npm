@@ -28,9 +28,32 @@ const roots: Array<ReturnType<typeof createRoot>> = []
 
 const flushLazyDiffViewer = async (): Promise<void> => {
   await act(async () => {
-    await import("@knpkv/rly/diff/bounded")
+    await import("@knpkv/rly/diff")
     await vi.dynamicImportSettled()
+    await new Promise((resolve) => window.setTimeout(resolve, 60))
   })
+}
+
+const fullDiffText = (host: HTMLElement): string =>
+  [...host.querySelectorAll<HTMLElement>("diffs-container")]
+    .map((container) => container.shadowRoot?.textContent ?? "")
+    .join("")
+
+const fullDiffLine = (host: HTMLElement, lineNumber: number, side: "additions" | "deletions"): HTMLElement | null => {
+  for (const container of host.querySelectorAll<HTMLElement>("diffs-container")) {
+    const line = container.shadowRoot?.querySelector<HTMLElement>(
+      `[data-code][data-${side}] [data-line="${String(lineNumber)}"]`
+    )
+    if (line !== null && line !== undefined) return line
+  }
+  return null
+}
+
+const expectShadowFocused = (target: HTMLElement | null): void => {
+  expect(target).not.toBeNull()
+  const root = target?.getRootNode()
+  if (root === undefined || !("activeElement" in root)) throw new Error("Expected a shadow-root focus owner")
+  expect(root.activeElement).toBe(target)
 }
 
 afterEach(async () => {
@@ -487,7 +510,8 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
   })
 
-  it("renders bounded content through the complete line diff viewer", async () => {
+  it("renders complete content synchronously when worker acceleration is unavailable", async () => {
+    vi.stubGlobal("Worker", undefined)
     const transport: WorkspacePullRequestDiffTransport = {
       inventory: async (): Promise<CompleteDiffInventory> => ({
         ready: true,
@@ -528,8 +552,9 @@ describe("WorkspacePullRequestDiff", () => {
 
     expect(host.querySelector("[data-rly-diff-workbench-slot='viewer']")).not.toBeNull()
     expect(host.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
-    expect(host.textContent).toContain("answer = 42")
-    expect(host.textContent).toContain("answer = 43")
+    expect(fullDiffText(host)).toContain("answer = 42")
+    expect(fullDiffText(host)).toContain("answer = 43")
+    expect(host.textContent).toContain("Worker acceleration is unavailable")
     expect(host.textContent).toContain("P2 · Keep the supported invariant")
     expect(host.textContent).toContain("Impact:")
     expect(host.textContent).toContain("Recommendation:")
@@ -613,11 +638,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(
       host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
     ).toBe("true")
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
-    )
-    expect(target).not.toBeNull()
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 8, "additions"))
   })
 
   it("navigates line-suggestion related locations only when their diff content is actionable", async () => {
@@ -720,10 +741,7 @@ describe("WorkspacePullRequestDiff", () => {
     })
     await flushLazyDiffViewer()
 
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="8"][data-rly-diff-line-side="additions"]`
-    )
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 8, "additions"))
   })
 
   it("attaches a BEFORE file anchor to the previous path of a rename", async () => {
@@ -784,10 +802,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(
       host.querySelector(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.getAttribute("aria-current")
     ).toBe("true")
-    const target = host.querySelector<HTMLElement>(
-      `[data-rly-diff-item="${otherFileAnchor}"][data-rly-diff-line="1"][data-rly-diff-line-side="deletions"]`
-    )
-    expect(document.activeElement).toBe(target)
+    expectShadowFocused(fullDiffLine(host, 1, "deletions"))
   })
 
   it("surfaces validated suggestions whose evidence path is absent from the diff inventory", async () => {

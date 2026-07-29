@@ -724,6 +724,14 @@ test("renders a synchronized Jira issue as a complete read-only document", async
 })
 
 test("launches an exact-head review and presents its durable findings", async ({ page }) => {
+  await page.addInitScript({
+    content: `Object.defineProperty(window, "Worker", {
+      configurable: true,
+      value: function UnavailableDiffWorker() {
+        throw new Error("Worker blocked by browser policy")
+      }
+    })`
+  })
   let enqueued = false
   let enqueuePayload: unknown
   let remainingPendingReviewPolls = 1
@@ -775,7 +783,35 @@ test("launches an exact-head review and presents its durable findings", async ({
   })
   await page.route("**/api/v1/diffs/*/pull-requests/*/inventory**", async (route) => {
     await route.fulfill({
-      body: JSON.stringify({ entries: [], ready: true }),
+      body: JSON.stringify({
+        entries: [{
+          anchor: `sha256:${"a".repeat(64)}`,
+          path: "src/capture.ts",
+          previousPath: null,
+          status: "modified",
+          binary: false,
+          generated: false,
+          oversized: false
+        }],
+        ready: true
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/diffs/*/pull-requests/*/content", async (route) => {
+    const body = Schema.decodeUnknownSync(Schema.Struct({
+      side: Schema.Literals(["before", "after"])
+    }))(route.request().postDataJSON())
+    const bytesBase64 = body.side === "before"
+      ? "ZXhwb3J0IGNvbnN0IGNhcHR1cmUgPSBmYWxzZQo="
+      : "ZXhwb3J0IGNvbnN0IGNhcHR1cmUgPSB0cnVlCg=="
+    await route.fulfill({
+      body: JSON.stringify({
+        bytesBase64,
+        totalBytes: body.side === "before" ? 29 : 28,
+        unavailableReason: null
+      }),
       contentType: "application/json",
       status: 200
     })
@@ -830,6 +866,9 @@ test("launches an exact-head review and presents its durable findings", async ({
   })
 
   await page.goto(canonicalEntityPath)
+  await expect(page.locator("[data-rly-diff-code-view]")).toBeVisible()
+  await expect(page.getByText("Worker acceleration is unavailable")).toBeVisible()
+  await expect(page.getByText("export const capture = true")).toBeVisible()
   const evidenceStamp = page.locator("[data-rly-evidence-stamp]")
   const evidenceSource = evidenceStamp.locator("[data-rly-evidence-source]")
   await expect(evidenceStamp.locator("[data-rly-evidence-freshness]")).toBeVisible()
@@ -869,7 +908,9 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("Review queued")).toBeVisible()
 
   await expect(page.getByText("Changes Required")).toBeVisible()
-  await expect(page.getByText("Reuse the original idempotency key", { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole("strong").filter({ hasText: /^Reuse the original idempotency key$/u })
+  ).toBeVisible()
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()

@@ -1,9 +1,11 @@
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Result from "effect/Result"
 
 import {
   type CompleteDiffContentRange,
@@ -35,6 +37,7 @@ import { mapPersistenceRead } from "./errors.js"
 
 const MaximumFiles = 500
 const MaximumPages = 100
+const MaximumContentBytes = 1_048_576
 
 interface DiffScope {
   readonly workspaceId: WorkspaceId
@@ -112,10 +115,10 @@ const entityReference = ({ vendorImmutableId }: DiffScope) =>
 
 const anchorFor = Effect.fn("CompleteDiffReads.anchorFor")(function*(
   cryptoService: Crypto.Crypto,
-  revision: Revision,
-  entry: Pick<CompleteDiffInventoryEntry, "path" | "previousPath" | "status">
+  headRevision: Revision,
+  entry: Pick<CompleteDiffInventoryEntry, "path" | "previousPath">
 ) {
-  const material = JSON.stringify([revision, entry.status, entry.previousPath, entry.path])
+  const material = JSON.stringify([headRevision, entry.previousPath, entry.path])
   const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(material)).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "complete-diff-anchor-digest" }))
   )
@@ -145,11 +148,80 @@ const unsupported = (capabilityId: "diff.inventory" | "diff.content") =>
     diagnosticCode: "complete-diff-capability-unavailable"
   })
 
+type ContentScope = Parameters<CompleteDiffReads["Service"]["content"]>[0]
+/** Narrow cache boundary accepted by the complete-diff application service. */
+export interface DiffContentCachePersistence {
+  readonly content: Pick<PersistenceService["content"], "put" | "readAll">
+  readonly diffContentCache: PersistenceService["diffContentCache"]
+}
+
+const cacheKey = (scope: ContentScope) => ({
+  workspaceId: scope.workspaceId,
+  pluginConnectionId: scope.pluginConnectionId,
+  vendorImmutableId: scope.vendorImmutableId,
+  revision: scope.revision,
+  anchor: scope.anchor,
+  side: scope.side
+})
+
+const sliceContent = (
+  bytes: Uint8Array,
+  offset: number,
+  length: number
+): CompleteDiffContentRange => {
+  const start = Math.min(offset, bytes.byteLength)
+  const end = Math.min(bytes.byteLength, start + length)
+  return {
+    bytesBase64: Encoding.encodeBase64(bytes.slice(start, end)),
+    totalBytes: bytes.byteLength,
+    unavailableReason: null
+  }
+}
+
+const readCachedContent = Effect.fn("CompleteDiffReads.readCachedContent")(function*(
+  persistence: DiffContentCachePersistence,
+  scope: ContentScope
+) {
+  const digest = yield* persistence.diffContentCache.get(cacheKey(scope)).pipe(
+    Effect.mapError(() => unavailable())
+  )
+  if (Option.isNone(digest)) return Option.none<CompleteDiffContentRange>()
+  const attempted = yield* persistence.content.readAll(
+    scope.workspaceId,
+    digest.value,
+    MaximumContentBytes
+  ).pipe(Effect.result)
+  if (Result.isFailure(attempted)) {
+    if (attempted.failure._tag === "ReproducibleContentUnavailableError") {
+      return Option.none<CompleteDiffContentRange>()
+    }
+    return yield* unavailable()
+  }
+  return Option.some(sliceContent(attempted.success, scope.offset, scope.length))
+})
+
+const rememberContent = Effect.fn("CompleteDiffReads.rememberContent")(function*(
+  persistence: DiffContentCachePersistence,
+  scope: ContentScope,
+  bytes: Uint8Array
+) {
+  const stored = yield* persistence.content.put(scope.workspaceId, {
+    bytes,
+    classification: "reproducible-cache",
+    mimeType: "text/plain; charset=utf-8",
+    createdAt: yield* DateTime.now
+  }).pipe(Effect.mapError(() => unavailable()))
+  yield* persistence.diffContentCache.put(cacheKey(scope), stored.metadata.digest).pipe(
+    Effect.mapError(() => unavailable())
+  )
+})
+
 /** Build complete bounded diff reads over the same lazy scoped plugin registry as synchronization. */
 export const makeCompleteDiffReads = (
   pluginConnections: PluginConnectionMapV1 | null,
   cryptoService: Crypto.Crypto,
-  lookupRevision: DiffRevisionLookup
+  lookupRevision: DiffRevisionLookup,
+  persistence?: DiffContentCachePersistence
 ): CompleteDiffReads["Service"] => ({
   inventory: Effect.fn("CompleteDiffReads.inventory")(function*(scope) {
     if (pluginConnections === null) return yield* unavailable()
@@ -177,7 +249,7 @@ export const makeCompleteDiffReads = (
                   if (entries.length >= MaximumFiles) {
                     return yield* new PluginOutageFailure({ operation: "complete-diff-file-limit" })
                   }
-                  const anchor = yield* anchorFor(cryptoService, scope.revision, entry)
+                  const anchor = yield* anchorFor(cryptoService, immutable.headRevision, entry)
                   entries.push({ ...entry, anchor })
                 }
                 if (page.nextCursor === null) {
@@ -197,11 +269,15 @@ export const makeCompleteDiffReads = (
   content: Effect.fn("CompleteDiffReads.content")(function*(scope) {
     if (pluginConnections === null) return yield* unavailable()
     const immutable = yield* lookupRevision(scope)
-    const expectedAnchor = yield* anchorFor(cryptoService, scope.revision, scope).pipe(
+    const expectedAnchor = yield* anchorFor(cryptoService, immutable.headRevision, scope).pipe(
       Effect.mapError(mapPluginFailure)
     )
     if (expectedAnchor !== scope.anchor) return yield* new ApplicationConflict()
-    return yield* withConnection(pluginConnections, scope, (connection) =>
+    if (persistence !== undefined) {
+      const cached = yield* readCachedContent(persistence, scope)
+      if (Option.isSome(cached)) return cached.value
+    }
+    const content = yield* withConnection(pluginConnections, scope, (connection) =>
       Option.match(connection.diff, {
         onNone: () => Effect.fail(unsupported("diff.content")),
         onSome: (diff) =>
@@ -217,11 +293,20 @@ export const makeCompleteDiffReads = (
                 previousPath: scope.previousPath,
                 status: scope.status,
                 side: scope.side,
-                offset: scope.offset,
-                length: scope.length
+                offset: 0,
+                length: MaximumContentBytes
               })
               .pipe(Effect.map((content) => content satisfies CompleteDiffContentRange))
       }))
+    if (content.unavailableReason !== null || content.bytesBase64 === null) return content
+    const bytes = yield* Effect.fromResult(Encoding.decodeBase64(content.bytesBase64)).pipe(
+      Effect.mapError(() => unavailable())
+    )
+    if (content.totalBytes !== bytes.byteLength || bytes.byteLength > MaximumContentBytes) {
+      return yield* unavailable()
+    }
+    if (persistence !== undefined) yield* rememberContent(persistence, scope, bytes)
+    return sliceContent(bytes, scope.offset, scope.length)
   })
 })
 
@@ -234,6 +319,11 @@ export const completeDiffReadsLayer = (
     Effect.gen(function*() {
       const cryptoService = yield* Crypto.Crypto
       const persistence = yield* Persistence
-      return makeCompleteDiffReads(pluginConnections, cryptoService, makeDiffRevisionLookup(persistence))
+      return makeCompleteDiffReads(
+        pluginConnections,
+        cryptoService,
+        makeDiffRevisionLookup(persistence),
+        persistence
+      )
     })
   )

@@ -63,6 +63,11 @@
     },
     {
       "type": "table",
+      "name": "diff_content_cache_entries",
+      "sql": "CREATE TABLE diff_content_cache_entries (\n    workspace_id TEXT NOT NULL,\n    plugin_connection_id TEXT NOT NULL,\n    vendor_immutable_id TEXT NOT NULL CHECK(length(vendor_immutable_id) BETWEEN 1 AND 512),\n    source_revision TEXT NOT NULL CHECK(length(source_revision) BETWEEN 1 AND 500),\n    file_anchor TEXT NOT NULL CHECK(\n      length(file_anchor) = 71 AND file_anchor GLOB 'sha256:*'\n        AND substr(file_anchor, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    side TEXT NOT NULL CHECK(side IN ('before', 'after')),\n    content_digest TEXT NOT NULL CHECK(\n      length(content_digest) = 64 AND content_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    cached_at TEXT NOT NULL,\n    PRIMARY KEY (\n      workspace_id, plugin_connection_id, vendor_immutable_id, source_revision, file_anchor, side\n    ),\n    FOREIGN KEY (workspace_id, plugin_connection_id)\n      REFERENCES plugin_connections(workspace_id, plugin_connection_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, content_digest)\n      REFERENCES content_blobs(workspace_id, digest)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
       "name": "domain_event_streams",
       "sql": "CREATE TABLE domain_event_streams (\n    workspace_id TEXT NOT NULL,\n    next_cursor INTEGER NOT NULL DEFAULT 1 CHECK(\n      next_cursor BETWEEN 1 AND 9007199254740991\n    ),\n    pruned_through_cursor INTEGER NOT NULL DEFAULT 0 CHECK(\n      pruned_through_cursor >= 0 AND pruned_through_cursor < next_cursor\n    ),\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id)\n  )"
     },
