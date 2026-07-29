@@ -57,6 +57,7 @@ describe("DiffCodeView", () => {
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
+    const onItemRender = vi.fn()
     await act(async () =>
       root.render(
         <DiffWorkerProvider
@@ -64,7 +65,7 @@ describe("DiffCodeView", () => {
             throw new Error("Workers blocked by policy")
           }}
         >
-          <DiffCodeView initialItems={[item]} />
+          <DiffCodeView initialItems={[item]} onItemRender={onItemRender} />
         </DiffWorkerProvider>
       )
     )
@@ -72,6 +73,9 @@ describe("DiffCodeView", () => {
     expect(host.querySelectorAll("[role='status']")).toHaveLength(1)
     expect(host.querySelector("[data-rly-diff-code-fallback]")).toBeNull()
     expect(host.querySelectorAll("[data-rly-diff-code-view]")).toHaveLength(1)
+    await vi.waitFor(() => {
+      expect(onItemRender).toHaveBeenCalledWith(item.id, "fallback")
+    })
     await act(async () => root.unmount())
   })
 

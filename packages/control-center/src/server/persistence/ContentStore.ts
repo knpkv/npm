@@ -22,6 +22,11 @@ export interface PutContentInput {
   readonly createdAt: UtcTimestamp
 }
 
+/** Reproducible content published while the cache coordinator owns the writer transaction. */
+export interface ReproduciblePutContentInput extends Omit<PutContentInput, "classification"> {
+  readonly classification: "reproducible-cache"
+}
+
 /** Result of publishing bytes before their SQL metadata becomes visible. */
 export interface PutContentResult {
   readonly metadata: ContentBlobMetadata
@@ -111,11 +116,52 @@ const makeContentStore = Effect.gen(function*() {
     return yield* blobs.repairReproducible(workspaceId, input.bytes)
   })
 
+  const publishDurable = Effect.fn("ContentStore.publishDurable")(function*(
+    workspaceId: WorkspaceId,
+    input: PutContentInput
+  ) {
+    const published = yield* publish(workspaceId, input)
+    return yield* database.transaction(
+      Effect.gen(function*() {
+        yield* database.sql`UPDATE workspaces
+          SET workspace_id = workspace_id
+          WHERE workspace_id = ${workspaceId}`
+        yield* blobs.assertPublished(
+          workspaceId,
+          published.ref.digest,
+          input.bytes.byteLength
+        )
+        const metadata = yield* ensureMetadata(workspaceId, published.ref.digest, input)
+        return { metadata, stored: published.stored }
+      })
+    ).pipe(mapPersistenceOperation("content.put"))
+  })
+
+  const putReproducibleLocked = Effect.fn("ContentStore.putReproducibleLocked")(function*(
+    workspaceId: WorkspaceId,
+    input: ReproduciblePutContentInput
+  ) {
+    const published = yield* publish(workspaceId, input)
+    const metadata = yield* ensureMetadata(workspaceId, published.ref.digest, input)
+    return { metadata, stored: published.stored }
+  })
+
   return {
     put: Effect.fn("ContentStore.put")(function*(
       workspaceId: WorkspaceId,
       input: PutContentInput
     ) {
+      if (input.classification === "durable") {
+        // Durable bytes are never reclaimed by diff-cache cleanup. Publish them
+        // without holding SQLite's global writer lock across filesystem I/O,
+        // then briefly serialize the canonical-presence check and metadata.
+        const firstAttempt = yield* publishDurable(workspaceId, input).pipe(Effect.result)
+        if (Result.isSuccess(firstAttempt)) return firstAttempt.success
+        if (firstAttempt.failure._tag !== "BlobNotFoundError") return yield* firstAttempt.failure
+        // A concurrent reproducible-cache sweep may win before the short SQL
+        // finalization window. Republish once after that durable intent is gone.
+        return yield* publishDurable(workspaceId, input)
+      }
       return yield* database.transaction(
         Effect.gen(function*() {
           // Cache cleanup takes the same SQLite writer lock before unlinking bytes.
@@ -124,11 +170,12 @@ const makeContentStore = Effect.gen(function*() {
           yield* database.sql`UPDATE workspaces
             SET workspace_id = workspace_id
             WHERE workspace_id = ${workspaceId}`
-          // Publication is intentionally bytes-first: SQL can never advertise bytes
-          // that were not durably linked and synced into the object directory.
-          const published = yield* publish(workspaceId, input)
-          const metadata = yield* ensureMetadata(workspaceId, published.ref.digest, input)
-          return { metadata, stored: published.stored }
+          return yield* putReproducibleLocked(workspaceId, {
+            bytes: input.bytes,
+            classification: "reproducible-cache",
+            mimeType: input.mimeType,
+            createdAt: input.createdAt
+          })
         })
       ).pipe(mapPersistenceOperation("content.put"))
     }),

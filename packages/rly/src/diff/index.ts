@@ -20,6 +20,7 @@ export type {
   RlyDiffCodeSelection,
   RlyDiffCodeViewHandle,
   RlyDiffCodeViewProps,
+  RlyDiffRendererGeneration,
   RlyDiffTextFile
 } from "./types.js"
 export * from "./workbench/index.js"

@@ -109,6 +109,7 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
     expandContext = false,
     initialItems,
     mode = "split",
+    onItemRender,
     onSelectedLinesChange,
     selectedLines,
     virtualization = "buffered",
@@ -219,8 +220,10 @@ export const DiffCodeView = forwardRef<RlyDiffCodeViewHandle, RlyDiffCodeViewPro
           expansionLineCount: contextLines,
           hunkSeparators: "line-info-basic",
           layout: { gap: 8, paddingBottom: 8, paddingTop: 8 },
-          onPostRender: (node, _instance, phase, context) =>
-            keepRenderedDiffKeyboardAccessible(node, context.item.id, phase, !wrap),
+          onPostRender: (node, _instance, phase, context) => {
+            keepRenderedDiffKeyboardAccessible(node, context.item.id, phase, !wrap)
+            if (phase !== "unmount") onItemRender?.(context.item.id, workerState.status)
+          },
           overflow: wrap ? "wrap" : "scroll",
           stickyHeaders: true,
           theme: RLY_DIFF_THEMES

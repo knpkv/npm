@@ -521,6 +521,105 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
   })
 
+  it("shows every lazily loaded text item in all-files mode without hydrating untouched inventory", async () => {
+    const content = vi.fn(
+      async (
+        _scope: WorkspacePullRequestDiffScope,
+        entry: Pick<CompleteDiffInventoryEntry, "anchor" | "path" | "previousPath" | "status">,
+        side: "before" | "after"
+      ): Promise<CompleteDiffContentRange> => {
+        const text = `${side}:${String(entry.path)}`
+        return {
+          bytesBase64: btoa(text),
+          totalBytes: text.length,
+          unavailableReason: null
+        }
+      }
+    )
+    const transport: WorkspacePullRequestDiffTransport = {
+      inventory: async (): Promise<CompleteDiffInventory> => ({
+        ready: true,
+        entries: [
+          {
+            anchor: fileAnchor,
+            path: PluginRelativePathV1.make("src/file.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: otherFileAnchor,
+            path: PluginRelativePathV1.make("src/other.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: binaryFileAnchor,
+            path: PluginRelativePathV1.make("src/binary.bin"),
+            previousPath: null,
+            status: "modified",
+            binary: true,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: generatedFileAnchor,
+            path: PluginRelativePathV1.make("src/generated.ts"),
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: true,
+            oversized: false
+          }
+        ]
+      }),
+      content
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+
+    await act(async () => {
+      root.render(<WorkspacePullRequestDiff heading="PR 184" scope={scope} transport={transport} />)
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+    expect(content).toHaveBeenCalledTimes(2)
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>(`[data-rly-diff-file-id="${otherFileAnchor}"] button`)?.click()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+    expect(content).toHaveBeenCalledTimes(4)
+
+    const showAll = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Show all files"
+    )
+    if (showAll === undefined) throw new Error("Expected the all-files workbench control")
+    await act(async () => {
+      showAll.click()
+      await Promise.resolve()
+    })
+    await flushLazyDiffViewer()
+
+    expect(content).toHaveBeenCalledTimes(4)
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${fileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${otherFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`[data-rly-diff-file-id="${binaryFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`[data-rly-diff-file-id="${generatedFileAnchor}"]`)).not.toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${binaryFileAnchor}"]`)).toBeNull()
+    expect(host.querySelector(`diffs-container[data-rly-diff-item="${generatedFileAnchor}"]`)).toBeNull()
+  })
+
   it("renders complete content synchronously when worker acceleration is unavailable", async () => {
     vi.stubGlobal("Worker", undefined)
     const transport: WorkspacePullRequestDiffTransport = {

@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import type { Crypto, Path, Scope } from "effect"
-import { Context, Effect, FileSystem, Layer, Option, Result, Schema } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Option, Ref, Result, Schema } from "effect"
 
 import { DiffFileAnchor } from "../../src/api/diff.js"
 import { Person, RoleAssignment } from "../../src/domain/actors.js"
@@ -21,6 +21,7 @@ import { BlobDigest } from "../../src/server/persistence/object-store/BlobDigest
 import { BlobStore } from "../../src/server/persistence/object-store/BlobStore.js"
 import { BlobStoreIoError } from "../../src/server/persistence/object-store/BlobStoreError.js"
 import {
+  putAndSweepDiffContentCache,
   putContentAndSweepDiffContentCache,
   sweepDiffContentCacheCleanup
 } from "../../src/server/persistence/Persistence.js"
@@ -103,10 +104,9 @@ interface RepositoryTestConfigShape {
   readonly maxConnections: number
 }
 
-class RepositoryTestConfig extends Context.Service<
-  RepositoryTestConfig,
-  RepositoryTestConfigShape
->()("@knpkv/control-center/test/RepositoryTestConfig") {}
+class RepositoryTestConfig extends Context.Service<RepositoryTestConfig, RepositoryTestConfigShape>()(
+  "@knpkv/control-center/test/RepositoryTestConfig"
+) {}
 
 const withRepositories = <Success, Failure>(
   use: Effect.Effect<
@@ -135,9 +135,7 @@ const withRepositories = <Success, Failure>(
     const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
     const foundation = QuarantineRepository.layer.pipe(Layer.provideMerge(database))
     const content = ContentBlobMetadataRepository.layer.pipe(Layer.provide(foundation))
-    const contentStore = ContentStore.layer.pipe(
-      Layer.provide(Layer.mergeAll(content, blobs, database))
-    )
+    const contentStore = ContentStore.layer.pipe(Layer.provide(Layer.mergeAll(content, blobs, database)))
     const entities = EntityRepository.layer.pipe(Layer.provide(foundation))
     const diffContentCache = DiffContentCacheRepository.layer.pipe(Layer.provide(database))
     const people = PeopleRepository.layer.pipe(Layer.provide(foundation))
@@ -195,9 +193,9 @@ describe("workspace-scoped repositories", () => {
           assert.instanceOf(crossWorkspaceBlob.failure, RecordNotFoundError)
         }
 
-        const missing = yield* workspaces.get(
-          Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000009")
-        ).pipe(Effect.result)
+        const missing = yield* workspaces
+          .get(Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000009"))
+          .pipe(Effect.result)
         assert.isTrue(Result.isFailure(missing))
         if (Result.isFailure(missing)) assert.instanceOf(missing.failure, RecordNotFoundError)
 
@@ -209,11 +207,13 @@ describe("workspace-scoped repositories", () => {
         assert.strictEqual(updated.revision, 2)
         assert.strictEqual((yield* workspaces.get(WORKSPACE_B)).displayName, "Identity")
 
-        const stale = yield* workspaces.updateDisplayName(WORKSPACE_A, {
-          displayName: WorkspaceName.make("Stale write"),
-          expectedRevision: RecordRevision.make(1),
-          updatedAt: UPDATED_AT
-        }).pipe(Effect.result)
+        const stale = yield* workspaces
+          .updateDisplayName(WORKSPACE_A, {
+            displayName: WorkspaceName.make("Stale write"),
+            expectedRevision: RecordRevision.make(1),
+            updatedAt: UPDATED_AT
+          })
+          .pipe(Effect.result)
         assert.isTrue(Result.isFailure(stale))
         if (Result.isFailure(stale)) {
           assert.instanceOf(stale.failure, RevisionConflictError)
@@ -262,14 +262,16 @@ describe("workspace-scoped repositories", () => {
         })
         assert.strictEqual(entity.revision, 1)
 
-        const mismatched = yield* entities.updateSourceRevision(WORKSPACE_A, ENTITY_ID, {
-          sourceRevision: Schema.decodeSync(SourceRevision)({
-            ...Schema.encodeSync(SourceRevision)(sourceRevision),
-            vendorImmutableId: "PAY-99"
-          }),
-          expectedRevision: RecordRevision.make(1),
-          updatedAt: UPDATED_AT
-        }).pipe(Effect.result)
+        const mismatched = yield* entities
+          .updateSourceRevision(WORKSPACE_A, ENTITY_ID, {
+            sourceRevision: Schema.decodeSync(SourceRevision)({
+              ...Schema.encodeSync(SourceRevision)(sourceRevision),
+              vendorImmutableId: "PAY-99"
+            }),
+            expectedRevision: RecordRevision.make(1),
+            updatedAt: UPDATED_AT
+          })
+          .pipe(Effect.result)
         assert.isTrue(Result.isFailure(mismatched))
         if (Result.isFailure(mismatched)) {
           assert.instanceOf(mismatched.failure, SourceIdentityMismatchError)
@@ -384,11 +386,7 @@ describe("workspace-scoped repositories", () => {
             lifecycle: { _tag: "active", assignedAt: "2026-07-13T10:00:00.000Z" }
           })
         yield* people.createRoleAssignment(WORKSPACE_A, makeAssignment(ASSIGNMENT_ID), CREATED_AT)
-        const valid = yield* people.createRoleAssignment(
-          WORKSPACE_A,
-          makeAssignment(SECOND_ASSIGNMENT_ID),
-          CREATED_AT
-        )
+        const valid = yield* people.createRoleAssignment(WORKSPACE_A, makeAssignment(SECOND_ASSIGNMENT_ID), CREATED_AT)
 
         const roleCanary = "never-return-malformed-role"
         yield* database.sql`UPDATE role_assignments
@@ -396,10 +394,7 @@ describe("workspace-scoped repositories", () => {
           WHERE workspace_id = ${WORKSPACE_A}
             AND assignment_id = ${ASSIGNMENT_ID}`
 
-        const malformed = yield* people.getRoleAssignment(
-          WORKSPACE_A,
-          ASSIGNMENT_ID
-        ).pipe(Effect.result)
+        const malformed = yield* people.getRoleAssignment(WORKSPACE_A, ASSIGNMENT_ID).pipe(Effect.result)
         const listed = yield* people.listRoleAssignments(WORKSPACE_A)
         const records = yield* quarantine.list(WORKSPACE_A)
 
@@ -633,22 +628,23 @@ describe("workspace-scoped repositories", () => {
         assert.isTrue(Option.isNone(yield* cache.get({ ...key, status: "deleted" })))
         yield* cache.put(key, SECOND_CONTENT_DIGEST)
         assert.deepStrictEqual(yield* cache.get(key), Option.some(SECOND_CONTENT_DIGEST))
-        assert.deepStrictEqual(yield* cache.pendingCleanup(), [{
-          workspaceId: WORKSPACE_A,
-          digest: CONTENT_DIGEST
-        }])
-        const referencePlan = yield* sql.unsafe(
-          `EXPLAIN QUERY PLAN
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [
+          {
+            workspaceId: WORKSPACE_A,
+            digest: CONTENT_DIGEST
+          }
+        ])
+        const referencePlan = yield* sql
+          .unsafe(
+            `EXPLAIN QUERY PLAN
             SELECT 1
             FROM diff_content_cache_entries
             WHERE workspace_id = ? AND content_digest = ?
             LIMIT 1`,
-          [WORKSPACE_A, CONTENT_DIGEST]
-        ).pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExplainQueryPlanRow))))
-        assert.include(
-          referencePlan.map(({ detail }) => detail).join("\n"),
-          "diff_content_cache_content_digest_idx"
-        )
+            [WORKSPACE_A, CONTENT_DIGEST]
+          )
+          .pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExplainQueryPlanRow))))
+        assert.include(referencePlan.map(({ detail }) => detail).join("\n"), "diff_content_cache_content_digest_idx")
       })
     ))
 
@@ -676,20 +672,15 @@ describe("workspace-scoped repositories", () => {
             lastVerifiedAt: null
           })
         }
-        const durableRemoval = yield* database.transaction(
-          contentStore.removeReproducible(WORKSPACE_A, durable.ref.digest)
-        ).pipe(Effect.result)
+        const durableRemoval = yield* database
+          .transaction(contentStore.removeReproducible(WORKSPACE_A, durable.ref.digest))
+          .pipe(Effect.result)
         assert.isTrue(Result.isFailure(durableRemoval))
         if (Result.isFailure(durableRemoval)) {
           assert.instanceOf(durableRemoval.failure, ContentMetadataMismatchError)
         }
-        yield* database.transaction(
-          contentStore.removeReproducible(WORKSPACE_A, BlobDigest.make("f".repeat(64)))
-        )
-        assert.deepStrictEqual(
-          yield* blobs.readAll(WORKSPACE_A, durable.ref.digest),
-          new Uint8Array([2])
-        )
+        yield* database.transaction(contentStore.removeReproducible(WORKSPACE_A, BlobDigest.make("f".repeat(64))))
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, durable.ref.digest), new Uint8Array([2]))
 
         const keyFor = (anchorCharacter: string): DiffContentCacheKey => ({
           workspaceId: WORKSPACE_A,
@@ -795,24 +786,24 @@ describe("workspace-scoped repositories", () => {
           (yield* content.getMetadata(WORKSPACE_A, published.metadata.digest)).digest,
           published.metadata.digest
         )
-        assert.deepStrictEqual(yield* cache.pendingCleanup(), [{
-          workspaceId: WORKSPACE_A,
-          digest: published.metadata.digest
-        }])
-        assert.isTrue(Result.isFailure(
-          yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
-        ))
-        assert.isTrue(Result.isFailure(
-          yield* blobs.readAll(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
-        ))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [
+          {
+            workspaceId: WORKSPACE_A,
+            digest: published.metadata.digest
+          }
+        ])
+        assert.isTrue(
+          Result.isFailure(yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result))
+        )
+        assert.isTrue(Result.isFailure(yield* blobs.readAll(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)))
 
         yield* sweepDiffContentCacheCleanup(database, content, cache)
-        assert.isTrue(Result.isFailure(
-          yield* content.getMetadata(WORKSPACE_A, published.metadata.digest).pipe(Effect.result)
-        ))
-        assert.isTrue(Result.isFailure(
-          yield* blobs.readAll(WORKSPACE_A, published.metadata.digest).pipe(Effect.result)
-        ))
+        assert.isTrue(
+          Result.isFailure(yield* content.getMetadata(WORKSPACE_A, published.metadata.digest).pipe(Effect.result))
+        )
+        assert.isTrue(
+          Result.isFailure(yield* blobs.readAll(WORKSPACE_A, published.metadata.digest).pipe(Effect.result))
+        )
         assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
       })
     ))
@@ -878,27 +869,132 @@ describe("workspace-scoped repositories", () => {
               SELECT RAISE(ABORT, 'injected cache mapping failure');
             END`,
           () =>
-            putContentAndSweepDiffContentCache(
-              database,
-              content,
-              cache,
-              key,
-              {
-                bytes: new Uint8Array([10]),
-                classification: "reproducible-cache",
-                mimeType: "text/plain",
-                createdAt: CREATED_AT
-              }
-            ).pipe(Effect.result),
+            putContentAndSweepDiffContentCache(database, content, cache, key, {
+              bytes: new Uint8Array([10]),
+              classification: "reproducible-cache",
+              mimeType: "text/plain",
+              createdAt: CREATED_AT
+            }).pipe(Effect.result),
           () => database.sql`DROP TRIGGER fail_diff_content_cache_insert`.pipe(Effect.ignore)
         )
         assert.isTrue(Result.isFailure(failed))
-        assert.isTrue(Result.isFailure(
-          yield* content.getMetadata(WORKSPACE_A, expectedDigest).pipe(Effect.result)
-        ))
-        assert.isTrue(Result.isFailure(
-          yield* blobs.readAll(WORKSPACE_A, expectedDigest).pipe(Effect.result)
-        ))
+        assert.isTrue(Result.isFailure(yield* content.getMetadata(WORKSPACE_A, expectedDigest).pipe(Effect.result)))
+        assert.isTrue(Result.isFailure(yield* blobs.readAll(WORKSPACE_A, expectedDigest).pipe(Effect.result)))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("keeps one transaction open from cache staging through mapping", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const blobs = yield* BlobStore
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const key = {
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-concurrent-cleanup"),
+          anchor: DiffFileAnchor.make(`sha256:${"8".repeat(64)}`),
+          status: "modified",
+          side: "after"
+        } satisfies DiffContentCacheKey
+        const completedCoordinatorTransactions = yield* Ref.make(0)
+        const trackedDatabase = Database.of({
+          ...database,
+          transaction: (effect) =>
+            database.transaction(effect).pipe(
+              Effect.ensuring(
+                Ref.update(completedCoordinatorTransactions, (count) => count + 1)
+              )
+            )
+        })
+        const lockObservingCache = DiffContentCacheRepository.of({
+          ...cache,
+          put: (...args) =>
+            Ref.get(completedCoordinatorTransactions).pipe(
+              Effect.flatMap((completedTransactions) =>
+                completedTransactions === 0
+                  ? cache.put(...args)
+                  : Effect.die("Cache mapping began after completing its staging transaction")
+              )
+            )
+        })
+        const stored = yield* putContentAndSweepDiffContentCache(
+          trackedDatabase,
+          content,
+          lockObservingCache,
+          key,
+          {
+            bytes: new Uint8Array([16]),
+            classification: "reproducible-cache",
+            mimeType: "text/plain",
+            createdAt: CREATED_AT
+          }
+        )
+
+        assert.deepStrictEqual(yield* cache.get(key), Option.some(stored.metadata.digest))
+        assert.deepStrictEqual(yield* blobs.readAll(WORKSPACE_A, stored.metadata.digest), new Uint8Array([16]))
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("keeps cleanup intent and direct cache mapping in one transaction", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const published = yield* content.put(WORKSPACE_A, {
+          bytes: new Uint8Array([19]),
+          classification: "reproducible-cache",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+        const key = {
+          workspaceId: WORKSPACE_A,
+          pluginConnectionId: PLUGIN_ID,
+          vendorImmutableId: VendorImmutableId.make("184"),
+          revision: Revision.make("revision-direct-mapping"),
+          anchor: DiffFileAnchor.make(`sha256:${"9".repeat(64)}`),
+          status: "modified",
+          side: "after"
+        } satisfies DiffContentCacheKey
+        const activeCoordinatorTransactions = yield* Ref.make(0)
+        const trackedDatabase = Database.of({
+          ...database,
+          transaction: (effect) =>
+            Ref.update(activeCoordinatorTransactions, (count) => count + 1).pipe(
+              Effect.andThen(database.transaction(effect)),
+              Effect.ensuring(
+                Ref.update(activeCoordinatorTransactions, (count) => count - 1)
+              )
+            )
+        })
+        const lockObservingCache = DiffContentCacheRepository.of({
+          ...cache,
+          put: (...args) =>
+            Ref.get(activeCoordinatorTransactions).pipe(
+              Effect.flatMap((activeTransactions) =>
+                activeTransactions === 1
+                  ? cache.put(...args)
+                  : Effect.die("Direct cache mapping ran outside its cleanup-intent transaction")
+              )
+            )
+        })
+
+        yield* putAndSweepDiffContentCache(
+          trackedDatabase,
+          content,
+          lockObservingCache,
+          key,
+          published.metadata.digest
+        )
+
+        assert.deepStrictEqual(yield* cache.get(key), Option.some(published.metadata.digest))
         assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
       })
     ))
@@ -949,16 +1045,147 @@ describe("workspace-scoped repositories", () => {
         yield* sweepDiffContentCacheCleanup(database, removeUnlessPoisoned, cache)
         yield* sweepDiffContentCacheCleanup(database, removeUnlessPoisoned, cache)
 
-        assert.isTrue(Result.isFailure(
-          yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result)
-        ))
-        const pending = yield* cache.pendingCleanup(
-          MaximumDiffContentCacheCleanupBatch + 1
+        assert.isTrue(
+          Result.isFailure(yield* content.getMetadata(WORKSPACE_B, later.metadata.digest).pipe(Effect.result))
         )
+        const pending = yield* cache.pendingCleanup(MaximumDiffContentCacheCleanupBatch + 1)
         assert.lengthOf(pending, MaximumDiffContentCacheCleanupBatch)
         assert.isTrue(pending.every(({ workspaceId }) => workspaceId === WORKSPACE_A))
 
         yield* sweepDiffContentCacheCleanup(database, content, cache)
+        assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
+      })
+    ))
+
+  it.effect("publishes durable bytes before acquiring the writer transaction", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const database = yield* Database
+        const rawBlobs = yield* BlobStore
+        const activeWriterTransactions = yield* Ref.make(0)
+        const trackedDatabaseLayer = Layer.succeed(
+          Database,
+          Database.of({
+            ...database,
+            transaction: (effect) =>
+              Ref.update(activeWriterTransactions, (count) => count + 1).pipe(
+                Effect.andThen(database.transaction(effect)),
+                Effect.ensuring(
+                  Ref.update(activeWriterTransactions, (count) => count - 1)
+                )
+              )
+          })
+        )
+        const observingBlobs = Layer.succeed(
+          BlobStore,
+          BlobStore.of({
+            ...rawBlobs,
+            put: (...args) =>
+              Ref.get(activeWriterTransactions).pipe(
+                Effect.flatMap((activeTransactions) =>
+                  activeTransactions === 0
+                    ? rawBlobs.put(...args)
+                    : Effect.die("Durable blob publication held the global writer transaction")
+                )
+              )
+          })
+        )
+        const trackedFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(trackedDatabaseLayer))
+        const trackedMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(trackedFoundation))
+        const trackedContentContext = yield* Layer.build(
+          Layer.fresh(ContentStore.layer).pipe(
+            Layer.provide(Layer.mergeAll(trackedMetadata, observingBlobs, trackedDatabaseLayer))
+          )
+        )
+        const trackedContent = Context.get(trackedContentContext, ContentStore)
+        const stored = yield* trackedContent.put(WORKSPACE_A, {
+          bytes: new Uint8Array([17]),
+          classification: "durable",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+
+        assert.strictEqual(yield* Ref.get(activeWriterTransactions), 0)
+        assert.deepStrictEqual(yield* rawBlobs.readAll(WORKSPACE_A, stored.metadata.digest), new Uint8Array([17]))
+      })
+    ))
+
+  it.effect("retries durable finalization when same-digest cache cleanup wins the first publication race", () =>
+    withRepositories(
+      Effect.gen(function*() {
+        yield* createWorkspaceAndPlugin
+        const bytes = new Uint8Array([18])
+        const cache = yield* DiffContentCacheRepository
+        const content = yield* ContentStore
+        const database = yield* Database
+        const config = yield* RepositoryTestConfig
+        const firstPublicationReady = yield* Deferred.make<void>()
+        const releaseFirstPublication = yield* Deferred.make<void>()
+        const putCount = yield* Ref.make(0)
+        const cached = yield* content.put(WORKSPACE_A, {
+          bytes,
+          classification: "reproducible-cache",
+          mimeType: "text/plain",
+          createdAt: CREATED_AT
+        })
+        yield* cache.requestCleanup(WORKSPACE_A, cached.metadata.digest)
+
+        const secondaryDatabaseContext = yield* Layer.build(
+          databaseLayer({
+            ...config,
+            maxConnections: 1
+          })
+        )
+        const secondaryDatabase = Context.get(secondaryDatabaseContext, Database)
+        const secondaryDatabaseLayer = Layer.succeed(Database, secondaryDatabase)
+        const secondaryBlobContext = yield* Layer.build(BlobStore.layer({ blobRoot: config.blobRoot }))
+        const rawSecondaryBlobs = Context.get(secondaryBlobContext, BlobStore)
+        const gatedSecondaryBlobs = Layer.succeed(
+          BlobStore,
+          BlobStore.of({
+            ...rawSecondaryBlobs,
+            put: (...args) =>
+              rawSecondaryBlobs.put(...args).pipe(
+                Effect.flatMap((published) =>
+                  Ref.getAndUpdate(putCount, (count) => count + 1).pipe(
+                    Effect.flatMap((count) =>
+                      count === 0
+                        ? Deferred.succeed(firstPublicationReady, undefined).pipe(
+                          Effect.andThen(Deferred.await(releaseFirstPublication))
+                        )
+                        : Effect.void
+                    ),
+                    Effect.as(published)
+                  )
+                )
+              )
+          })
+        )
+        const secondaryFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(secondaryDatabaseLayer))
+        const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(secondaryFoundation))
+        const secondaryContentContext = yield* Layer.build(
+          Layer.fresh(ContentStore.layer).pipe(
+            Layer.provide(Layer.mergeAll(secondaryMetadata, gatedSecondaryBlobs, secondaryDatabaseLayer))
+          )
+        )
+        const secondaryContent = Context.get(secondaryContentContext, ContentStore)
+        const durablePublication = yield* Effect.forkChild(
+          secondaryContent.put(WORKSPACE_A, {
+            bytes,
+            classification: "durable",
+            mimeType: "text/plain",
+            createdAt: CREATED_AT
+          })
+        )
+        yield* Deferred.await(firstPublicationReady)
+        yield* sweepDiffContentCacheCleanup(database, content, cache)
+        yield* Deferred.succeed(releaseFirstPublication, undefined)
+        const durable = yield* Fiber.join(durablePublication)
+
+        assert.strictEqual(yield* Ref.get(putCount), 2)
+        assert.strictEqual(durable.metadata.storageClass, "durable")
+        assert.deepStrictEqual(yield* rawSecondaryBlobs.readAll(WORKSPACE_A, durable.metadata.digest), bytes)
         assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
       })
     ))
@@ -978,17 +1205,9 @@ describe("workspace-scoped repositories", () => {
           maxConnections: 1
         })
         const secondaryDatabaseContext = yield* Layer.build(secondaryDatabase)
-        const secondaryDatabaseService = Context.get(
-          secondaryDatabaseContext,
-          Database
-        )
-        const secondaryDatabaseLayer = Layer.succeed(
-          Database,
-          secondaryDatabaseService
-        )
-        const secondaryBlobContext = yield* Layer.build(
-          BlobStore.layer({ blobRoot: config.blobRoot })
-        )
+        const secondaryDatabaseService = Context.get(secondaryDatabaseContext, Database)
+        const secondaryDatabaseLayer = Layer.succeed(Database, secondaryDatabaseService)
+        const secondaryBlobContext = yield* Layer.build(BlobStore.layer({ blobRoot: config.blobRoot }))
         const rawSecondaryBlobs = Context.get(secondaryBlobContext, BlobStore)
         const secondaryBlobs = Layer.succeed(
           BlobStore,
@@ -997,37 +1216,26 @@ describe("workspace-scoped repositories", () => {
             put: (...args) =>
               secondaryDatabaseService.sql`SELECT observed
                 FROM content_writer_lock_audit`.pipe(
-                Effect.mapError(() =>
-                  new BlobStoreIoError({
-                    operation: "observe content writer lock",
-                    message: "platform storage operation failed"
-                  })
+                Effect.mapError(
+                  () =>
+                    new BlobStoreIoError({
+                      operation: "observe content writer lock",
+                      message: "platform storage operation failed"
+                    })
                 ),
                 Effect.flatMap((rows) =>
                   rows.length === 1
                     ? rawSecondaryBlobs.put(...args)
-                    : Effect.die(
-                      "ContentStore reached blob publication before acquiring its writer lock"
-                    )
+                    : Effect.die("ContentStore reached blob publication before acquiring its writer lock")
                 )
               )
           })
         )
-        const secondaryFoundation = QuarantineRepository.layer.pipe(
-          Layer.provideMerge(secondaryDatabaseLayer)
-        )
-        const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(
-          Layer.provide(secondaryFoundation)
-        )
+        const secondaryFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(secondaryDatabaseLayer))
+        const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(secondaryFoundation))
         const secondaryContentContext = yield* Layer.build(
           Layer.fresh(ContentStore.layer).pipe(
-            Layer.provide(
-              Layer.mergeAll(
-                secondaryMetadata,
-                secondaryBlobs,
-                secondaryDatabaseLayer
-              )
-            )
+            Layer.provide(Layer.mergeAll(secondaryMetadata, secondaryBlobs, secondaryDatabaseLayer))
           )
         )
         const secondaryContent = Context.get(secondaryContentContext, ContentStore)
@@ -1067,12 +1275,14 @@ describe("workspace-scoped repositories", () => {
               return { lockAudit, second }
             }),
           () =>
-            database.transaction(
-              Effect.gen(function*() {
-                yield* database.sql`DROP TRIGGER observe_content_writer_lock`
-                yield* database.sql`DROP TABLE content_writer_lock_audit`
-              })
-            ).pipe(Effect.ignore)
+            database
+              .transaction(
+                Effect.gen(function*() {
+                  yield* database.sql`DROP TRIGGER observe_content_writer_lock`
+                  yield* database.sql`DROP TABLE content_writer_lock_audit`
+                })
+              )
+              .pipe(Effect.ignore)
         )
         assert.deepStrictEqual(lockAudit, [{ observed: 1 }])
         assert.strictEqual(second.metadata.digest, first.metadata.digest)

@@ -3,7 +3,7 @@ import { Context, Crypto, Effect, Layer, Predicate, Result } from "effect"
 import type { Success } from "effect/Effect"
 
 import type { BackupFailure, SchemaWriteBarrierError } from "./backup/index.js"
-import { ContentStore, type ContentStoreService } from "./ContentStore.js"
+import { ContentStore, type ContentStoreService, type ReproduciblePutContentInput } from "./ContentStore.js"
 import { Database, databaseLayer, type DatabaseShape } from "./Database.js"
 import {
   type ContentMetadataMismatchError,
@@ -193,24 +193,34 @@ export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDif
     ...args: Parameters<DiffContentCacheRepositoryService["put"]>
   ) {
     const [key, digest] = args
-    const requestResult = yield* diffContentCache.requestCleanup(
-      key.workspaceId,
-      digest
-    ).pipe(Effect.result)
-    const putResult = yield* diffContentCache.put(...args).pipe(Effect.result)
+    const publication = yield* Effect.uninterruptible(
+      database.transaction(
+        Effect.gen(function*() {
+          yield* database.sql`UPDATE workspaces
+            SET workspace_id = workspace_id
+            WHERE workspace_id = ${key.workspaceId}`
+          const requestResult = yield* diffContentCache.requestCleanup(
+            key.workspaceId,
+            digest
+          ).pipe(Effect.result)
+          const putResult = yield* diffContentCache.put(...args).pipe(Effect.result)
+          return { requestResult, putResult }
+        })
+      ).pipe(mapPersistenceOperation("diff-content-cache.publish"))
+    )
     const cleanupResult = yield* sweepDiffContentCacheCleanup(
       database,
       content,
       diffContentCache
     ).pipe(Effect.result)
-    if (Result.isFailure(requestResult)) return yield* requestResult.failure
-    if (Result.isFailure(putResult)) return yield* putResult.failure
+    if (Result.isFailure(publication.requestResult)) return yield* publication.requestResult.failure
+    if (Result.isFailure(publication.putResult)) return yield* publication.putResult.failure
     if (Result.isFailure(cleanupResult)) return yield* cleanupResult.failure
     return yield* Effect.void
   }
 )
 
-/** Atomically publish metadata with durable diff ownership before mapping it. */
+/** Atomically publish metadata, cleanup intent, and the diff ownership mapping. */
 export const putContentAndSweepDiffContentCache = Effect.fn(
   "Persistence.putContentAndSweepDiffContentCache"
 )(function*(
@@ -218,28 +228,35 @@ export const putContentAndSweepDiffContentCache = Effect.fn(
   content: ContentStoreService,
   diffContentCache: DiffContentCacheRepositoryService,
   key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
-  input: Parameters<ContentStoreService["put"]>[1]
+  input: ReproduciblePutContentInput
 ) {
-  const stored = yield* Effect.uninterruptible(
+  const staged = yield* Effect.uninterruptible(
     database.transaction(
       Effect.gen(function*() {
+        yield* database.sql`UPDATE workspaces
+          SET workspace_id = workspace_id
+          WHERE workspace_id = ${key.workspaceId}`
         const published = yield* content.put(key.workspaceId, input)
         yield* diffContentCache.requestCleanup(
           key.workspaceId,
           published.metadata.digest
         )
-        return published
+        const putResult = yield* diffContentCache.put(
+          key,
+          published.metadata.digest
+        ).pipe(Effect.result)
+        return { published, putResult }
       })
     ).pipe(mapPersistenceOperation("diff-content-cache.stage-content"))
   )
-  yield* putAndSweepDiffContentCache(
+  const cleanupResult = yield* sweepDiffContentCacheCleanup(
     database,
     content,
-    diffContentCache,
-    key,
-    stored.metadata.digest
-  )
-  return stored
+    diffContentCache
+  ).pipe(Effect.result)
+  if (Result.isFailure(staged.putResult)) return yield* staged.putResult.failure
+  if (Result.isFailure(cleanupResult)) return yield* cleanupResult.failure
+  return staged.published
 })
 
 /** Failures possible while acquiring the durable persistence service. */
@@ -377,7 +394,7 @@ const makePersistence = Effect.gen(function*() {
         ),
       putContent: (
         key: Parameters<DiffContentCacheRepositoryService["put"]>[0],
-        input: Parameters<ContentStoreService["put"]>[1]
+        input: ReproduciblePutContentInput
       ) =>
         publicOperation(
           "diff-content-cache.put-content",

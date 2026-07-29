@@ -128,29 +128,35 @@ const canonicalEntityInspection = Schema.encodeSync(WorkspaceEntityInspection)(
           assigneeSourcePersonId: "account-mina",
           reporterSourcePersonId: null,
           creatorSourcePersonId: null,
-          collaborators: [{
-            sourcePersonId: "account-mina",
-            displayName: "Mina Ortiz",
-            avatarUrl: "https://images.example.test/mina.png",
-            active: true,
-            roles: ["assignee", "commenter"]
-          }],
-          comments: [{
-            sourceId: "comment-41",
-            authorSourcePersonId: "account-mina",
-            updateAuthorSourcePersonId: null,
-            body: "Sandbox replay is green. I am waiting for the final reviewer.",
-            createdAt: "2026-07-14T09:30:00.000Z",
-            updatedAt: null
-          }],
+          collaborators: [
+            {
+              sourcePersonId: "account-mina",
+              displayName: "Mina Ortiz",
+              avatarUrl: "https://images.example.test/mina.png",
+              active: true,
+              roles: ["assignee", "commenter"]
+            }
+          ],
+          comments: [
+            {
+              sourceId: "comment-41",
+              authorSourcePersonId: "account-mina",
+              updateAuthorSourcePersonId: null,
+              body: "Sandbox replay is green. I am waiting for the final reviewer.",
+              createdAt: "2026-07-14T09:30:00.000Z",
+              updatedAt: null
+            }
+          ],
           commentTotal: 1,
           commentsTruncated: false,
-          history: [{
-            sourceId: "history-9",
-            authorSourcePersonId: "account-mina",
-            createdAt: "2026-07-14T09:00:00.000Z",
-            changes: [{ field: "Status", from: "In progress", to: "In review" }]
-          }],
+          history: [
+            {
+              sourceId: "history-9",
+              authorSourcePersonId: "account-mina",
+              createdAt: "2026-07-14T09:00:00.000Z",
+              changes: [{ field: "Status", from: "In progress", to: "In review" }]
+            }
+          ],
           historyTotal: 1,
           historyTruncated: false,
           truncatedFields: []
@@ -558,9 +564,10 @@ const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): v
   expect(geometry.computedName).toBe(geometry.name)
 }
 
-const transitionIdentity = (
-  geometry: ReleaseTransitionGeometry
-): { readonly name: string; readonly part: string } => ({ name: geometry.name, part: geometry.part })
+const transitionIdentity = (geometry: ReleaseTransitionGeometry): { readonly name: string; readonly part: string } => ({
+  name: geometry.name,
+  part: geometry.part
+})
 
 test("canonicalizes the root before any release activation renders", async ({ page }) => {
   await page.goto("/")
@@ -786,18 +793,32 @@ test("launches an exact-head review and presents its durable findings", async ({
       status: 200
     })
   })
+  const captureDiffAnchor = `sha256:${"a".repeat(64)}`
+  const helperDiffAnchor = `sha256:${"b".repeat(64)}`
+  let diffContentRequests = 0
   await page.route("**/api/v1/diffs/*/pull-requests/*/inventory**", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
-        entries: [{
-          anchor: `sha256:${"a".repeat(64)}`,
-          path: "src/capture.ts",
-          previousPath: null,
-          status: "modified",
-          binary: false,
-          generated: false,
-          oversized: false
-        }],
+        entries: [
+          {
+            anchor: captureDiffAnchor,
+            path: "src/capture.ts",
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          },
+          {
+            anchor: helperDiffAnchor,
+            path: "src/helper.ts",
+            previousPath: null,
+            status: "modified",
+            binary: false,
+            generated: false,
+            oversized: false
+          }
+        ],
         ready: true
       }),
       contentType: "application/json",
@@ -805,15 +826,23 @@ test("launches an exact-head review and presents its durable findings", async ({
     })
   })
   await page.route("**/api/v1/diffs/*/pull-requests/*/content", async (route) => {
-    const body = Schema.decodeUnknownSync(Schema.Struct({
-      side: Schema.Literals(["before", "after"])
-    }))(route.request().postDataJSON())
-    const text = Array.from({ length: 80 }, (_, index) =>
-      index === 41
-        ? body.side === "before"
-          ? "export const capture = false"
-          : "export const capture = true"
-        : `// ${body.side} line ${String(index + 1)}`).join("\n")
+    const body = Schema.decodeUnknownSync(
+      Schema.Struct({
+        path: Schema.String,
+        side: Schema.Literals(["before", "after"])
+      })
+    )(route.request().postDataJSON())
+    diffContentRequests += 1
+    const text = body.path === "src/helper.ts"
+      ? body.side === "before"
+        ? "export const helper = false"
+        : "export const helper = true"
+      : Array.from({ length: 80 }, (_, index) =>
+        index === 41
+          ? body.side === "before"
+            ? "export const capture = false"
+            : "export const capture = true"
+          : `// ${body.side} line ${String(index + 1)}`).join("\n")
     await route.fulfill({
       body: JSON.stringify({
         bytesBase64: Buffer.from(text).toString("base64"),
@@ -848,9 +877,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   })
   await page.route(`**/api/v1/agent/pull-requests/${canonicalEntityId}/review-thread/events**`, async (route) => {
     const after = Number.parseInt(new URL(route.request().url()).searchParams.get("after") ?? "0", 10)
-    const events = enqueued
-      ? threadEvents.filter(({ eventSequence }) => eventSequence > after)
-      : []
+    const events = enqueued ? threadEvents.filter(({ eventSequence }) => eventSequence > after) : []
     await route.fulfill({
       body: JSON.stringify({
         events,
@@ -910,17 +937,22 @@ test("launches an exact-head review and presents its durable findings", async ({
 
   await reviewTrigger.click()
   await launchDialog.getByRole("button", { name: "Start full review" }).click()
-  await expect.poll(() => enqueuePayload).toEqual({
-    providerId: "openai-compatible",
-    model: "review-model",
-    profile: "read-only",
-    reviewProfileId: reviewProfile.profileId
-  })
+  await expect
+    .poll(() => enqueuePayload)
+    .toEqual({
+      providerId: "openai-compatible",
+      model: "review-model",
+      profile: "read-only",
+      reviewProfileId: reviewProfile.profileId
+    })
   await expect(page.getByText("Review queued")).toBeVisible()
 
   await expect(page.getByText("Changes Required")).toBeVisible()
   await expect(
-    page.locator("strong").filter({ hasText: /^Reuse the original idempotency key$/u }).first()
+    page
+      .locator("strong")
+      .filter({ hasText: /^Reuse the original idempotency key$/u })
+      .first()
   ).toBeVisible()
   await page.getByRole("button", { name: "src/capture.ts:42" }).click()
   await page.clock.runFor(1_100)
@@ -957,6 +989,16 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(
     page.getByText("Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.")
   ).toBeVisible()
+  await page.locator(`[data-rly-diff-file-id="${helperDiffAnchor}"] button`).click()
+  await expect(page.getByText("export const helper = true")).toBeVisible()
+  await expect.poll(() => diffContentRequests).toBe(4)
+  await page.getByRole("button", { name: "Show all files" }).click()
+  await expect(page.locator("[data-rly-diff-scope=\"all-files\"]")).toBeVisible()
+  await expect(page.getByText("Showing 2 lazily loaded files.")).toBeVisible()
+  const allFilesTarget = page.locator(`diffs-container[data-rly-diff-item="${helperDiffAnchor}"]`)
+  await expect(allFilesTarget).toBeVisible()
+  await expect(allFilesTarget).toBeInViewport()
+  expect(diffContentRequests).toBe(4)
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {
@@ -1066,9 +1108,9 @@ test("keeps the complete release workset readable on a compact viewport", async 
 
   await expect(page.locator("[data-rly-workset-jira-id]")).toHaveCount(6)
   await expect(page.locator("[data-rly-workset-dimension]")).toHaveCount(3)
-  await expect.poll(() => page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(
-    true
-  )
+  await expect
+    .poll(() => page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth"))
+    .toBe(true)
 })
 
 test("keeps one human-first Relay thread per canonical release", async ({ page }) => {
@@ -1080,9 +1122,7 @@ test("keeps one human-first Relay thread per canonical release", async ({ page }
   await expect(page.getByText("Mara Singh")).toBeVisible()
 
   await page.getByRole("button", { name: "Which evidence is still missing?" }).click()
-  await expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
-    "Which evidence is still missing?"
-  )
+  await expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue("Which evidence is still missing?")
   await page.getByRole("button", { name: "Ask Relay" }).click()
   await expect(page.getByText("Approval is current. Production deployment evidence is still missing.")).toBeVisible()
   await expect(page.getByText("Preset codex")).toBeVisible()
@@ -1183,9 +1223,7 @@ test("shares Relay, version, and verdict geometry across the sole orchestrated t
     { name: `release-${release.releaseId}-version`, part: "version" },
     { name: `release-${release.releaseId}-verdict`, part: "verdict" }
   ]
-  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
-    "window.__releaseTransitionSnapshots"
-  )
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>("window.__releaseTransitionSnapshots")
   expect(snapshots).toHaveLength(2)
   for (const snapshot of snapshots) {
     expect(snapshot.before.map(transitionIdentity)).toEqual(expectedIdentities)
@@ -1220,25 +1258,18 @@ test("gives a compact View Transition sole ownership of sheet entry motion", asy
   await page.waitForFunction(
     "window.__releaseTransitionReadiness.length === 1 && window.__releaseTransitionReadiness[0].state !== 'pending'"
   )
-  await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute(
-    "data-rly-sheet-entry-motion",
-    "external"
-  )
+  await expect(page.locator("[data-rly-sheet-layer]")).toHaveAttribute("data-rly-sheet-entry-motion", "external")
   await expect(sheet).toHaveCSS("animation-name", "none")
   await expect(page.locator("[data-rly-sheet-overlay]")).toHaveCSS("animation-name", "none")
 
-  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>(
-    "window.__releaseTransitionSnapshots"
-  )
+  const snapshots = await page.evaluate<ReadonlyArray<ReleaseTransitionSnapshot>>("window.__releaseTransitionSnapshots")
   expect(snapshots).toHaveLength(1)
   const snapshot = snapshots[0]
   if (snapshot === undefined) throw new Error("Compact release transition snapshot was unavailable")
   expect(snapshot.before.map(transitionIdentity)).toEqual(snapshot.after.map(transitionIdentity))
   for (const geometry of snapshot.after) expectVisibleTransitionGeometry(geometry)
   expect(await page.evaluate<ReadonlyArray<ReleaseTransitionReadiness>>("window.__releaseTransitionReadiness")).toEqual(
-    [
-      { state: "resolved" }
-    ]
+    [{ state: "resolved" }]
   )
   await expect(page.getByRole("button", { name: "Open Solar Grove full view" })).toBeInViewport()
   expect(await page.evaluate("document.documentElement.scrollWidth <= document.documentElement.clientWidth")).toBe(true)

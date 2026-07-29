@@ -12,7 +12,8 @@ import {
   type BlobStoreError,
   BlobStoreInputError,
   blobStoreIoError,
-  BlobTooLargeError
+  BlobTooLargeError,
+  BlobUnexpectedEofError
 } from "./BlobStoreError.js"
 import type { BlobRange, BlobRangeRead, BlobReadStream, BlobVerification } from "./BlobStoreTypes.js"
 import { makeOpenedBlobReader } from "./OpenedBlob.js"
@@ -42,6 +43,12 @@ export interface BlobPutResult {
 }
 
 interface BlobStoreService {
+  /** Reconfirm a just-published canonical object while its SQL owner holds the cleanup lock. */
+  readonly assertPublished: (
+    workspaceId: WorkspaceId,
+    digest: BlobDigest,
+    expectedBytes: number
+  ) => Effect.Effect<void, BlobStoreError>
   readonly put: (
     workspaceId: WorkspaceId,
     bytes: Uint8Array,
@@ -378,6 +385,26 @@ export const makeBlobStore: (
     }
   })
 
+  const assertPublished = Effect.fn("BlobStore.assertPublished")(function*(
+    workspaceId: WorkspaceId,
+    digest: BlobDigest,
+    expectedBytes: number
+  ) {
+    const decodedExpectedBytes = yield* decodeInput(
+      "assert published blob",
+      NonNegativeSafeInteger,
+      expectedBytes
+    )
+    const located = yield* locate("assert published blob", workspaceId, digest)
+    if (located.sizeBytes !== decodedExpectedBytes) {
+      return yield* new BlobUnexpectedEofError({
+        operation: "assert published blob",
+        expectedBytes: decodedExpectedBytes,
+        actualBytes: located.sizeBytes
+      })
+    }
+  })
+
   const publish = makeBlobPublisher(fs, path, cryptoService)
 
   const put = Effect.fn("BlobStore.put")(function*(
@@ -655,6 +682,7 @@ export const makeBlobStore: (
   })
 
   return BlobStore.of({
+    assertPublished,
     put,
     readAll,
     readRange,
