@@ -113,6 +113,8 @@ External-resource tests must register scope cleanup immediately after successful
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
+Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
+
 ### Versioning and Publishing
 
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.

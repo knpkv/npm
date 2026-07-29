@@ -3,6 +3,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
+import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
@@ -93,7 +94,10 @@ describe("CodePipelineReads", () => {
         })
       }).pipe(Effect.result)
 
-      assert.strictEqual(result._tag, "Failure")
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "ApplicationServiceUnavailable")
+      }
       assert.strictEqual(yield* Ref.get(providerCalls), 0)
     }))
 
@@ -139,9 +143,6 @@ describe("CodePipelineReads", () => {
       assert.strictEqual(artifact.contentLength, 3)
       assert.strictEqual(artifact.filename, "BuildOutput.zip")
       assert.deepStrictEqual(Array.from(chunks[0] ?? []), [1, 2, 3])
-      const serialized = JSON.stringify(artifact)
-      assert.notInclude(serialized, "bucket")
-      assert.notInclude(serialized, "key")
-      assert.notInclude(serialized, "https://")
+      assert.deepStrictEqual(Object.keys(artifact).sort(), ["body", "contentLength", "filename"])
     }))
 })

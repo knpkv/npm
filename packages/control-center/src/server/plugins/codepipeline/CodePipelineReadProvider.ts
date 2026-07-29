@@ -72,6 +72,25 @@ export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.co
   }
 )
 
+/** Bound both artifact body size and the time spent draining the provider stream. @internal */
+export const collectBoundedArtifactBodyWithin = Effect.fn(
+  "CodePipelineReadProvider.collectBoundedArtifactBodyWithin"
+)(function*<Error>(
+  body: Stream.Stream<Uint8Array, Error>,
+  maximumBytes: number,
+  timeoutMillis: number
+): Effect.fn.Return<
+  Uint8Array,
+  Error | PluginMalformedResponseFailure | PluginTimeoutFailure
+> {
+  return yield* collectBoundedArtifactBody(body, maximumBytes).pipe(
+    Effect.timeoutOrElse({
+      duration: timeoutMillis,
+      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation: "codepipeline-get-artifact" }))
+    })
+  )
+})
+
 /** Secret-free AWS coordinates shared by every provider request. @internal */
 export interface CodePipelineAwsAccount {
   readonly profile: string
@@ -447,11 +466,12 @@ export const CodePipelineReadProviderLive = Layer.effect(
                   contentLength: response.ContentLength,
                   contentRange: response.ContentRange
                 })
-                : collectBoundedArtifactBody(
+                : collectBoundedArtifactBodyWithin(
                   response.Body.pipe(
                     Stream.mapError(() => new PluginOutageFailure({ operation: "codepipeline-get-artifact" }))
                   ),
-                  request.length
+                  request.length,
+                  request.account.operationTimeoutMillis
                 ).pipe(
                   Effect.map((bytes) => ({
                     bytes,

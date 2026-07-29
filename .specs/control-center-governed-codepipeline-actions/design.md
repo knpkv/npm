@@ -74,9 +74,10 @@ bounded reason. Proposal/preflight require the exact execution revision and
 
 The request targets an action and carries Approved/Rejected plus a bounded
 summary. Proposal loads the action and current pipeline state, verifies that it
-is a pending Approval action, and freezes the one-time token. Summaries and
-receipts never include that token. Preflight repeats the token and revision
-check. AWS validates the token atomically at dispatch.
+is a pending Approval action, and freezes only a one-way digest of the one-time
+token. The raw token remains ephemeral and never enters the canonical payload,
+summaries, or receipts. Preflight reloads the token and repeats its digest and
+revision check. AWS validates the token atomically at dispatch.
 
 ### Retry
 
@@ -133,7 +134,13 @@ and `nosniff`; bucket, key, ARN, and signed URLs never leave the server.
 ## Key implementation patterns
 
 ```ts
-const token = `cc-${request.payloadDigest}`
+const tokenDigest =
+  yield *
+  digestGovernedActionPayload({
+    idempotencyKey: request.idempotencyKey,
+    payloadDigest: request.payloadDigest
+  })
+const token = `cc-${tokenDigest}`
 
 yield *
   provider.startPipelineExecution({

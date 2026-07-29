@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -10,6 +11,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import * as TestClock from "effect/testing/TestClock"
 
 import {
   AuthorizedPluginActionV1,
@@ -29,6 +31,7 @@ import {
   CodePipelineReadProvider,
   type CodePipelineReadProviderService,
   collectBoundedArtifactBody,
+  collectBoundedArtifactBodyWithin,
   mapCodePipelineAwsFailure
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
 import {
@@ -268,6 +271,27 @@ describe("CodePipelinePlugin", () => {
       assert.deepStrictEqual(Array.from(accepted), [5, 6])
     }))
 
+  it.effect("times out while draining a stalled artifact body", () =>
+    Effect.gen(function*() {
+      const stalledBody: Stream.Stream<Uint8Array> = Stream.fromEffect(Effect.never)
+      const draining = yield* collectBoundedArtifactBodyWithin(
+        stalledBody,
+        3,
+        1_000
+      ).pipe(Effect.result, Effect.forkChild({ startImmediately: true }))
+
+      yield* TestClock.adjust("1 second")
+      const result = yield* Fiber.join(draining)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginTimeoutFailure)
+        if (Predicate.isTagged(result.failure, "PluginTimeoutFailure")) {
+          assert.strictEqual(result.failure.operation, "codepipeline-get-artifact")
+        }
+      }
+    }))
+
   it.effect("rejects an S3 response whose Content-Range does not match the requested offset", () =>
     Effect.gen(function*() {
       const client = yield* CodePipelineReadClient
@@ -305,6 +329,52 @@ describe("CodePipelinePlugin", () => {
         )
       )
     ))
+
+  it.effect("rejects a provider-truncated artifact range before returning plugin bytes", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider({
+        getArtifactRange: () =>
+          Effect.succeed({
+            bytes: Uint8Array.from([1, 2]),
+            contentLength: 2,
+            contentRange: "bytes 0-1/9"
+          })
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          if (connection.pipeline === undefined || Option.isNone(connection.pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* connection.pipeline.value.readArtifactRange(
+            Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+              action: {
+                entity: {
+                  entityType: "aws.codepipeline.action",
+                  vendorImmutableId: "execution-1842#execution-1842-action-1"
+                },
+                executionId: "execution-1842",
+                actionExecutionId: "execution-1842-action-1",
+                expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+              },
+              direction: "output",
+              artifactName: "BuildOutput",
+              offset: 0,
+              length: 3
+            })
+          )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginMalformedResponseFailure)
+        if (Predicate.isTagged(result.failure, "PluginMalformedResponseFailure")) {
+          assert.strictEqual(result.failure.diagnosticCode, "plugin-pipeline-artifact-range-invalid")
+        }
+      }
+    }))
 
   it.effect("decodes a bounded pipeline discovery page", () =>
     Effect.gen(function*() {
@@ -771,7 +841,7 @@ describe("CodePipelinePlugin", () => {
       }
     }))
 
-  it.effect("starts an explicitly pinned execution exactly once for a repeated idempotency key", () =>
+  it.effect("reuses one start token per idempotency key and separates distinct action identities", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make<
         ReadonlyArray<{ readonly token: string; readonly revisions: ReadonlyArray<unknown> }>
@@ -817,7 +887,13 @@ describe("CodePipelinePlugin", () => {
           const preflight = yield* executor.preflight(authorized)
           const first = yield* executor.executeAuthorizedAction(authorized)
           const replay = yield* executor.executeAuthorizedAction(authorized)
-          return { authorized, first, preflight, proposal, replay }
+          const distinctAuthorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            ...authorized,
+            idempotencyKey: "start-release-2",
+            authorizationId: "authorization-2"
+          })
+          const distinct = yield* executor.executeAuthorizedAction(distinctAuthorized)
+          return { authorized, distinct, first, preflight, proposal, replay }
         })
       )
 
@@ -828,8 +904,10 @@ describe("CodePipelinePlugin", () => {
         assert.strictEqual(result.first.receipt.status, "accepted")
       }
       const observed = yield* Ref.get(calls)
-      assert.strictEqual(observed.length, 1)
+      assert.strictEqual(observed.length, 2)
       assert.match(observed[0]?.token ?? "", /^cc-[0-9a-f]{64}$/u)
+      assert.match(observed[1]?.token ?? "", /^cc-[0-9a-f]{64}$/u)
+      assert.notStrictEqual(observed[0]?.token, observed[1]?.token)
       assert.deepStrictEqual(observed[0]?.revisions, [{
         actionName: "Checkout",
         revisionType: "COMMIT_ID",
@@ -966,6 +1044,83 @@ describe("CodePipelinePlugin", () => {
       const observedTokens = yield* Ref.get(tokens)
       assert.strictEqual(observedTokens.length, 2)
       assert.strictEqual(observedTokens[0], observedTokens[1])
+    }))
+
+  it.effect("rejects ambiguous start reconciliation after the authorized pipeline revision moves", () =>
+    Effect.gen(function*() {
+      const pipelineVersion = yield* Ref.make(7)
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getPipeline: () =>
+          Ref.get(pipelineVersion).pipe(
+            Effect.map((version) => ({
+              ...pipelineOutput,
+              pipeline: { ...pipelineOutput.pipeline, version }
+            }))
+          ),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.andThen(
+              Effect.fail(new PluginTimeoutFailure({ operation: "codepipeline-start-execution" }))
+            )
+          )
+      })
+      const reconciliation = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline-execution",
+                vendorImmutableId: "execution-1842"
+              },
+              expectedRevision: "7:Succeeded:2026-07-16T09:05:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "Checkout",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-abc"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-release-stale-reconciliation",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-stale-reconciliation",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          const dispatched = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          if (
+            Result.isSuccess(dispatched) ||
+            !Predicate.isTagged(dispatched.failure, "PluginUnknownOutcomeFailure")
+          ) {
+            return yield* Effect.die("expected an ambiguous start")
+          }
+          yield* Ref.set(pipelineVersion, 8)
+          return yield* executor.reconcile({
+            reconciliationKey: dispatched.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          }).pipe(Effect.result)
+        })
+      )
+
+      assert.isTrue(Result.isFailure(reconciliation))
+      if (Result.isFailure(reconciliation)) {
+        assert.instanceOf(reconciliation.failure, PluginConflictFailure)
+        if (Predicate.isTagged(reconciliation.failure, "PluginConflictFailure")) {
+          assert.strictEqual(reconciliation.failure.diagnosticCode, "codepipeline-start-target-changed")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
     }))
 
   it.effect("keeps the one-time approval token private while dispatching it exactly once", () =>

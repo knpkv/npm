@@ -59,9 +59,11 @@ receipts, and no duplicate execution.
   after the production runtime implements them.
 - Use AWS `clientRequestToken` for start/retry idempotency. Derive it from the
   immutable action identity using only AWS-accepted characters.
-- Treat approval tokens as sensitive provider locators: keep them inside the
-  canonical authorized payload and never include them in summaries, operation
-  IDs, reconciliation keys, URLs, or logs.
+- Treat approval tokens as sensitive provider locators: persist only their
+  digest in the canonical authorized payload, then reload and revalidate the
+  raw token ephemerally immediately before dispatch. Never include the raw
+  token in summaries, operation IDs, reconciliation keys, URLs, logs, or
+  durable governance state.
 - Keep stop-and-wait as the default. Abandon mode must be explicit and carry a
   critical impact warning because AWS documents out-of-sequence risk.
 - Retain the exact checked-in unstable persistence schema; add no migration.

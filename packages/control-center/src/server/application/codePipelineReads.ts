@@ -39,6 +39,7 @@ const mapPluginFailure = (failure: PluginFailure): CompleteDiffReadError => {
 
 const withPipeline = <A>(
   pluginConnections: PluginConnectionMapV1 | null,
+  capabilityId: "pipeline.logs" | "pipeline.artifact",
   scope: {
     readonly workspaceId: Parameters<CodePipelineReads["Service"]["logs"]>[0]["workspaceId"]
     readonly pluginConnectionId: Parameters<CodePipelineReads["Service"]["logs"]>[0]["pluginConnectionId"]
@@ -52,7 +53,7 @@ const withPipeline = <A>(
       const connection = Context.get(context, PluginConnection)
       if (connection.pipeline === undefined || Option.isNone(connection.pipeline)) {
         return yield* new PluginUnsupportedCapabilityFailure({
-          capabilityId: "pipeline.logs",
+          capabilityId,
           requestedVersion: 1,
           diagnosticCode: "codepipeline-read-capability-unavailable"
         })
@@ -67,10 +68,20 @@ export const makeCodePipelineReads = (
   pluginConnections: PluginConnectionMapV1 | null
 ): CodePipelineReads["Service"] => ({
   logs: Effect.fn("CodePipelineReads.logs")(function*(input) {
-    return yield* withPipeline(pluginConnections, input, (pipeline) => pipeline.readLogPage(input.request))
+    return yield* withPipeline(
+      pluginConnections,
+      "pipeline.logs",
+      input,
+      (pipeline) => pipeline.readLogPage(input.request)
+    )
   }),
   artifact: Effect.fn("CodePipelineReads.artifact")(function*(input) {
-    const range = yield* withPipeline(pluginConnections, input, (pipeline) => pipeline.readArtifactRange(input.request))
+    const range = yield* withPipeline(
+      pluginConnections,
+      "pipeline.artifact",
+      input,
+      (pipeline) => pipeline.readArtifactRange(input.request)
+    )
     const bytes = yield* Effect.fromResult(Encoding.decodeBase64(range.bytesBase64)).pipe(
       Effect.mapError(() => unavailable())
     )

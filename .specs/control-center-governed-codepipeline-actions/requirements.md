@@ -16,7 +16,8 @@
 - **FR1.6 — Stop proposal.** A stop proposal SHALL bind the execution ID,
   current execution revision, reason, and explicit wait/abandon mode.
 - **FR1.7 — Approval proposal.** An approval proposal SHALL bind the execution,
-  stage, action, one-time approval token, result, summary, and action revision.
+  stage, action, one-way digest of the one-time approval token, result, summary,
+  and action revision. The raw token SHALL remain ephemeral.
 - **FR1.8 — Retry proposal.** A retry proposal SHALL capture the original
   execution, its exact source revisions, and a distinct-execution `retryOf`
   relationship.

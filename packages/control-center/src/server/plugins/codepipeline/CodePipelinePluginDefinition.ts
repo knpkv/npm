@@ -1757,21 +1757,12 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     }
     const checkedAt = yield* DateTime.now
     if (actionKind === "pipeline.start" || actionKind === "pipeline.retry") {
-      const payload = actionKind === "pipeline.start"
-        ? yield* Schema.decodeUnknownEffect(StartActionPayload)(
-          request.authorizedAction.proposal.request.payload
-        ).pipe(
-          Effect.mapError(() =>
-            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
-          )
-        )
-        : yield* Schema.decodeUnknownEffect(RetryActionPayload)(
-          request.authorizedAction.proposal.request.payload
-        ).pipe(
-          Effect.mapError(() =>
-            new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
-          )
-        )
+      const resolved = yield* resolveAuthorized(request.authorizedAction)
+      if (resolved._tag !== "start" && resolved._tag !== "retry") {
+        return yield* new PluginConfigurationFailure({
+          diagnosticCode: "codepipeline-reconciliation-action-kind-invalid"
+        })
+      }
       const token = yield* clientRequestToken(request.authorizedAction)
       const executionId = yield* actionProvider(
         "reconcile",
@@ -1779,7 +1770,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           account: awsAccount,
           pipelineName: configuration.pipelineName,
           clientRequestToken: token,
-          sourceRevisions: payload.sourceRevisions
+          sourceRevisions: resolved.sourceRevisions
         })
       )
       const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))

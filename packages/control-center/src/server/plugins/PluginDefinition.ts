@@ -165,12 +165,14 @@ const validatePipelineArtifactRange = Effect.fn("PluginDefinition.validatePipeli
   response: PluginPipelineArtifactRangeV1
 ) {
   const decoded = Encoding.decodeBase64(response.bytesBase64)
-  if (
-    Result.isFailure(decoded) ||
-    decoded.success.byteLength > request.length ||
-    request.offset > response.totalBytes ||
-    request.offset + decoded.success.byteLength > response.totalBytes
-  ) {
+  if (Result.isFailure(decoded) || request.offset > response.totalBytes) {
+    return yield* new PluginMalformedResponseFailure({
+      operation: "pipeline-artifact",
+      diagnosticCode: "plugin-pipeline-artifact-range-invalid"
+    })
+  }
+  const expectedLength = Math.min(request.length, response.totalBytes - request.offset)
+  if (decoded.success.byteLength !== expectedLength) {
     return yield* new PluginMalformedResponseFailure({
       operation: "pipeline-artifact",
       diagnosticCode: "plugin-pipeline-artifact-range-invalid"
