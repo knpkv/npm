@@ -34,10 +34,13 @@ const request = {
 }
 
 describe("bind and request security", () => {
-  it.effect("authorizes only the bounded diff content POST as a read transport", () =>
+  it.effect("authorizes only explicitly allowlisted bounded POST reads", () =>
     Effect.gen(function*() {
       const config = yield* decodeBindConfig({})
       assert.isTrue(isAuthenticatedReadTransportEndpoint("diff", "content", "POST"))
+      assert.isTrue(isAuthenticatedReadTransportEndpoint("codepipeline", "logs", "POST"))
+      assert.isTrue(isAuthenticatedReadTransportEndpoint("codepipeline", "artifact", "POST"))
+      assert.isFalse(isAuthenticatedReadTransportEndpoint("codepipeline", "execute", "POST"))
       assert.isFalse(isAuthenticatedReadTransportEndpoint("agent", "turn", "POST"))
 
       yield* authorizeAuthenticatedReadPost({
@@ -61,6 +64,29 @@ describe("bind and request security", () => {
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(foreignOrigin))
       if (Result.isFailure(foreignOrigin)) assert.strictEqual(foreignOrigin.failure.reason, "origin-rejected")
+
+      const rejectedHost = yield* authorizeAuthenticatedReadPost({
+        capability: "release-read",
+        config,
+        request: {
+          ...request,
+          method: "POST",
+          host: "attacker.example",
+          origin: "http://127.0.0.1:4173"
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(rejectedHost))
+      if (Result.isFailure(rejectedHost)) assert.strictEqual(rejectedHost.failure.reason, "host-rejected")
+
+      yield* authorizeAuthenticatedReadPost({
+        capability: "release-read",
+        config,
+        request: {
+          ...request,
+          method: "POST",
+          origin: "http://127.0.0.1:4173"
+        }
+      })
     }))
 
   it.effect("defaults to one explicit loopback URL and strict session cookie", () =>

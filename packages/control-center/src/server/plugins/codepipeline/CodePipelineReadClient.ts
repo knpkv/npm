@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema"
 import { PluginMalformedResponseFailure } from "../failures.js"
 import {
   type CodePipelineAwsAccount,
+  type CodePipelineMutationProviderFailure,
   type CodePipelineProviderFailure,
   CodePipelineReadProvider,
   CodePipelineReadProviderLive,
@@ -574,13 +575,13 @@ export interface CodePipelineReadClientService {
   ) => Effect.Effect<CodePipelineArtifactRange, CodePipelineProviderFailure>
   readonly startPipelineExecution: (
     request: StartPipelineExecutionProviderRequest
-  ) => Effect.Effect<string, CodePipelineProviderFailure>
+  ) => Effect.Effect<string, CodePipelineMutationProviderFailure>
   readonly stopPipelineExecution: (
     request: StopPipelineExecutionProviderRequest
-  ) => Effect.Effect<string, CodePipelineProviderFailure>
+  ) => Effect.Effect<string, CodePipelineMutationProviderFailure>
   readonly putApprovalResult: (
     request: PutPipelineApprovalProviderRequest
-  ) => Effect.Effect<Date | null, CodePipelineProviderFailure>
+  ) => Effect.Effect<Date | null, CodePipelineMutationProviderFailure>
 }
 
 /** Injectable Schema-decoded CodePipeline read client. @internal */

@@ -51,6 +51,7 @@ import {
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
+  PluginTimeoutFailure,
   PluginUnknownOutcomeFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
@@ -67,7 +68,11 @@ import {
   type CodePipelinePipeline,
   CodePipelineReadClient
 } from "./CodePipelineReadClient.js"
-import type { CodePipelineProviderFailure } from "./CodePipelineReadProvider.js"
+import type {
+  CodePipelineMutationProviderFailure,
+  CodePipelinePreDispatchTimeoutFailure,
+  CodePipelineProviderFailure
+} from "./CodePipelineReadProvider.js"
 
 const EXECUTION_STREAM_KEY = "executions"
 const COMPLETE_CHECKPOINT = "complete"
@@ -119,6 +124,7 @@ const AwsProfile = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), 
 const AwsRegion = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const PipelineName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100))
 const ActionIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
+const SourceRevisionValue = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))
 const StopReason = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
 const ApprovalSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const SourceRevisionType = Schema.Literals([
@@ -130,8 +136,16 @@ const SourceRevisionType = Schema.Literals([
 const SourceRevision = Schema.Struct({
   actionName: ActionIdentifier,
   revisionType: SourceRevisionType,
-  revisionValue: ActionIdentifier
-})
+  revisionValue: SourceRevisionValue
+}).check(
+  Schema.makeFilter(
+    ({ revisionType, revisionValue }) =>
+      revisionType === "S3_OBJECT_KEY"
+        ? utf8Encoder.encode(revisionValue).byteLength <= 1_024
+        : revisionValue === revisionValue.trim() && revisionValue.length <= 256,
+    { expected: "a provider-compatible source revision value" }
+  )
+)
 const StartActionPayload = Schema.Struct({
   sourceRevisions: Schema.Array(SourceRevision).check(
     Schema.isNonEmpty(),
@@ -193,6 +207,7 @@ const ACTION_KINDS: ReadonlySet<string> = new Set([
 ])
 
 const isActionKind = (value: string): value is CodePipelineActionKind => ACTION_KINDS.has(value)
+const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 
 const ReconciliationActionKind = Schema.Literals(["start", "stop", "approval", "retry"])
 const ReconciliationLocator = Schema.TemplateLiteralParser([
@@ -760,6 +775,22 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           )
       )
     )
+  const mutationProvider = <A>(
+    operation: string,
+    effect: Effect.Effect<A, CodePipelineMutationProviderFailure>
+  ): Effect.Effect<A, PluginFailure | CodePipelinePreDispatchTimeoutFailure> =>
+    effect.pipe(
+      Effect.catchTag(
+        "CodePipelineProviderNotFoundFailure",
+        () =>
+          Effect.fail(
+            new PluginConflictFailure({
+              operation,
+              diagnosticCode: "codepipeline-provider-object-not-found"
+            })
+          )
+      )
+    )
   const runtimeIdentity = configuration.runtimeIdentity ??
     (yield* actionProvider(
       "runtime-identity",
@@ -1310,7 +1341,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     return yield* decodeOutput("codepipeline-retry-payload", RetryActionPayload, {
       retryOf: snapshot.execution.executionId,
       pipelineRevision: pipelineRevision(pipeline),
-      sourceRevisions: [...sourceRevisions].sort((left, right) => left.actionName.localeCompare(right.actionName))
+      sourceRevisions: [...sourceRevisions].sort((left, right) => compareText(left.actionName, right.actionName))
     })
   })
 
@@ -1353,7 +1384,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           ...payload,
           pipelineRevision: pipelineRevision(pipeline),
           sourceRevisions: [...payload.sourceRevisions].sort((left, right) =>
-            left.actionName.localeCompare(right.actionName)
+            compareText(left.actionName, right.actionName)
           )
         }
       }
@@ -1783,7 +1814,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           return Effect.flatMap(
             clientRequestToken(request),
             (token) =>
-              actionProvider(
+              mutationProvider(
                 "execute-authorized-action",
                 readClient.startPipelineExecution({
                   account: awsAccount,
@@ -1799,7 +1830,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
               : `Started pipeline execution ${operationId}`
           })))
         case "stop":
-          return actionProvider(
+          return mutationProvider(
             "execute-authorized-action",
             readClient.stopPipelineExecution({
               account: awsAccount,
@@ -1813,7 +1844,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
             summary: `Accepted stop for pipeline execution ${operationId}`
           })))
         case "approval":
-          return actionProvider(
+          return mutationProvider(
             "execute-authorized-action",
             readClient.putApprovalResult({
               account: awsAccount,
@@ -1831,6 +1862,9 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       }
     })().pipe(Effect.result)
     if (Result.isFailure(result)) {
+      if (Predicate.isTagged(result.failure, "CodePipelinePreDispatchTimeoutFailure")) {
+        return yield* new PluginTimeoutFailure({ operation: result.failure.operation })
+      }
       if (
         Predicate.isTagged(result.failure, "PluginTimeoutFailure") ||
         Predicate.isTagged(result.failure, "PluginOutageFailure") ||
@@ -1960,7 +1994,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         })
       }
       const token = yield* clientRequestToken(request.authorizedAction)
-      const executionId = yield* actionProvider(
+      const executionId = yield* mutationProvider(
         "reconcile",
         readClient.startPipelineExecution({
           account: awsAccount,
@@ -1968,6 +2002,11 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
           clientRequestToken: token,
           sourceRevisions: resolved.sourceRevisions
         })
+      ).pipe(
+        Effect.catchTag(
+          "CodePipelinePreDispatchTimeoutFailure",
+          (failure) => Effect.fail(new PluginTimeoutFailure({ operation: failure.operation }))
+        )
       )
       const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
       if (["InProgress", "Stopping"].includes(snapshot.execution.status)) {
@@ -2014,22 +2053,33 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         new PluginConfigurationFailure({ diagnosticCode: "codepipeline-reconciliation-payload-invalid" })
       )
     )
-    const state = yield* actionProvider(
-      "reconcile",
-      readClient.getPipelineState({
-        account: awsAccount,
-        pipelineName: configuration.pipelineName
-      })
+    const executionId = request.authorizedAction.proposal.request.target.vendorImmutableId
+    const snapshot = yield* actionProvider("reconcile", loadSnapshot(executionId))
+    const current = snapshot.actionCollection.actions.find(
+      (candidate) =>
+        candidate.executionId === executionId &&
+        candidate.stageName === payload.stageName &&
+        candidate.actionName === payload.actionName &&
+        candidate.actionExecutionId === payload.actionExecutionId
     )
-    const current = state.actions.find(
-      (candidate) => candidate.actionExecutionId === payload.actionExecutionId
-    )
-    if (current === undefined || current.status === "InProgress") return { _tag: "pending", checkedAt }
+    if (current === undefined && snapshot.actionCollection.truncated) return { _tag: "pending", checkedAt }
     if (payload.approvalStatus === undefined) {
       return yield* new PluginConfigurationFailure({
         diagnosticCode: "codepipeline-reconciliation-approval-status-missing"
       })
     }
+    if (current === undefined) {
+      return {
+        _tag: "failed",
+        receipt: {
+          status: "failed",
+          providerOperationId: PluginProviderOperationId.make(`approval:${payload.actionExecutionId}`),
+          safeSummary: `Manual pipeline action ${payload.actionExecutionId} is absent from its execution history`,
+          observedAt: checkedAt
+        }
+      }
+    }
+    if (current.status === "InProgress") return { _tag: "pending", checkedAt }
     const expectedStatus = payload.approvalStatus === "Approved" ? "Succeeded" : "Failed"
     const succeeded = current.status === expectedStatus
     return {

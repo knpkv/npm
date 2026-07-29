@@ -667,16 +667,64 @@ const sameSourceUrl = (
   right: EntityUpsert["sourceUrl"]
 ): boolean => left?.href === right?.href
 
+const materializePipelineAuthority = Effect.fn(
+  "NormalizedPluginPageMaterialization.pipelineAuthority"
+)(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  scope: NormalizedPluginPageMaterializationScope,
+  event: EntityUpsert
+) {
+  const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
+  const entityId = existing?.entityId ??
+    (yield* entityIdFor(cryptoService, scope, event.vendorImmutableId, event.eventId))
+  const pipelineSourceRevision = {
+    ...sourceRevision(scope, event, existing?.sourceRevision.firstObservedAt ?? event.observedAt, event.sourceUrl),
+    synchronizedAt: laterTimestamp(scope.committedAt, event.observedAt)
+  }
+  if (existing === null) {
+    yield* persistence.entities.create(scope.workspaceId, {
+      entityId,
+      entityType: "pipeline",
+      sourceRevision: pipelineSourceRevision,
+      createdAt: scope.committedAt
+    })
+    return
+  }
+  if (existing.entityType !== "pipeline") {
+    return yield* malformed("normalized-pipeline-authority-kind-conflict", event.eventId)
+  }
+  const refreshed = {
+    ...pipelineSourceRevision,
+    lastObservedAt: laterTimestamp(existing.sourceRevision.lastObservedAt, event.observedAt),
+    synchronizedAt: laterTimestamp(existing.sourceRevision.synchronizedAt, pipelineSourceRevision.synchronizedAt)
+  }
+  if (
+    existing.sourceRevision.revision === refreshed.revision &&
+    sameSourceUrl(existing.sourceRevision.sourceUrl, refreshed.sourceUrl) &&
+    DateTime.Equivalence(existing.sourceRevision.lastObservedAt, refreshed.lastObservedAt) &&
+    DateTime.Equivalence(existing.sourceRevision.synchronizedAt, refreshed.synchronizedAt)
+  ) return
+  yield* persistence.entities.updateSourceRevision(scope.workspaceId, entityId, {
+    sourceRevision: refreshed,
+    expectedRevision: existing.revision,
+    updatedAt: scope.committedAt
+  })
+})
+
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
   kind === "time-entry" ? 3 : kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
 
-const requiresProjectionSchemaBackfill = Effect.fn(
-  "NormalizedPluginPageMaterialization.requiresProjectionSchemaBackfill"
+const requiresMaterializationBackfill = Effect.fn(
+  "NormalizedPluginPageMaterialization.requiresMaterializationBackfill"
 )(function*(
   persistence: PersistenceService,
   scope: NormalizedPluginPageMaterializationScope,
   event: EntityUpsert
 ) {
+  if (event.entityType === "aws.codepipeline.pipeline") {
+    return (yield* findEntity(persistence, scope, event.vendorImmutableId)) === null
+  }
   const kind = canonicalKind(event.entityType)
   if (kind !== "time-entry") return false
   const existing = yield* findEntity(persistence, scope, event.vendorImmutableId)
@@ -1799,7 +1847,7 @@ export const materializeNormalizedPluginPage = Effect.fn(
         !accepted.has(event.eventId) &&
           event._tag === "UpsertEntity" &&
           !acceptedClockifyTimeEntryIds.has(event.vendorImmutableId)
-          ? requiresProjectionSchemaBackfill(persistence, scope, event)
+          ? requiresMaterializationBackfill(persistence, scope, event)
           : Effect.succeed(false)
     )
     const acceptedPipelineTombstones = new Set(
@@ -1922,6 +1970,10 @@ export const materializeNormalizedPluginPage = Effect.fn(
       if (event._tag === "UpsertEntity") {
         if (event.entityType === "release") {
           nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
+          continue
+        }
+        if (event.entityType === "aws.codepipeline.pipeline") {
+          yield* materializePipelineAuthority(persistence, cryptoService, scope, event)
           continue
         }
         const schemaBackfill = backfillEntityEventIds.has(event.eventId)

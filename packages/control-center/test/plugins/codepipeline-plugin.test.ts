@@ -30,6 +30,7 @@ import {
 import { CodePipelineReadClient } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
   codePipelineCredentialProviderOptions,
+  CodePipelinePreDispatchTimeoutFailure,
   CodePipelineReadProvider,
   type CodePipelineReadProviderService,
   collectBoundedArtifactBody,
@@ -1178,6 +1179,96 @@ describe("CodePipelinePlugin", () => {
       assert.notInclude(serialized, "sessionToken")
     }))
 
+  it.effect("orders canonical source revisions by code unit across reconstruction", () =>
+    Effect.gen(function*() {
+      const mutationCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        getPipeline: () =>
+          Effect.succeed({
+            ...pipelineOutput,
+            pipeline: {
+              ...pipelineOutput.pipeline,
+              stages: [{
+                name: "Source",
+                actions: ["ä-source", "z-source"].map((name) => ({
+                  name,
+                  actionTypeId: {
+                    category: "Source",
+                    owner: "AWS",
+                    provider: "CodeCommit",
+                    version: "1"
+                  },
+                  outputArtifacts: [{ name: `${name}-output` }]
+                }))
+              }]
+            }
+          }),
+        getPipelineExecution: () => Effect.die("pipeline start must not load an existing execution"),
+        startPipelineExecution: () =>
+          Ref.update(mutationCalls, (count) => count + 1).pipe(
+            Effect.as({ pipelineExecutionId: "execution-code-unit-order" })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const proposal = yield* connection.proposeAction(
+            Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+              actionKind: "pipeline.start",
+              target: {
+                entityType: "pipeline",
+                vendorImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:release"
+              },
+              expectedRevision: "7:2026-07-16T08:00:00.000Z",
+              payload: {
+                sourceRevisions: [{
+                  actionName: "ä-source",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-umlaut"
+                }, {
+                  actionName: "z-source",
+                  revisionType: "COMMIT_ID",
+                  revisionValue: "commit-z"
+                }]
+              },
+              evidenceIds: []
+            })
+          )
+          const authorized = Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+            proposal,
+            idempotencyKey: "start-code-unit-order",
+            payloadDigest: proposal.payloadDigest,
+            authorizationId: "authorization-code-unit-order",
+            authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+            expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+          })
+          return {
+            dispatched: yield* executor.executeAuthorizedAction(authorized),
+            payload: proposal.request.payload,
+            preflight: yield* executor.preflight(authorized)
+          }
+        })
+      )
+
+      assert.strictEqual(result.preflight._tag, "ready")
+      assert.strictEqual(result.dispatched._tag, "confirmed")
+      assert.deepStrictEqual(result.payload, {
+        pipelineRevision: "7:2026-07-16T08:00:00.000Z",
+        sourceRevisions: [{
+          actionName: "z-source",
+          revisionType: "COMMIT_ID",
+          revisionValue: "commit-z"
+        }, {
+          actionName: "ä-source",
+          revisionType: "COMMIT_ID",
+          revisionValue: "commit-umlaut"
+        }]
+      })
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+    }))
+
   it.effect("rejects a start that omits one configured source action revision", () =>
     Effect.gen(function*() {
       const mutationCalls = yield* Ref.make(0)
@@ -1336,7 +1427,8 @@ describe("CodePipelinePlugin", () => {
         providerName: "S3" | "CustomSource",
         allowS3ObjectKeyOverride: boolean,
         revisionType: "COMMIT_ID" | "S3_OBJECT_KEY" | "S3_OBJECT_VERSION_ID",
-        identity: string
+        identity: string,
+        revisionValue = revisionType === "S3_OBJECT_KEY" ? "releases/v2.zip" : "revision-abc"
       ) =>
         runWithProvider(
           baseProvider({
@@ -1389,7 +1481,7 @@ describe("CodePipelinePlugin", () => {
                   sourceRevisions: [{
                     actionName: "Checkout",
                     revisionType,
-                    revisionValue: revisionType === "S3_OBJECT_KEY" ? "releases/v2.zip" : "revision-abc"
+                    revisionValue
                   }]
                 },
                 evidenceIds: []
@@ -1411,13 +1503,27 @@ describe("CodePipelinePlugin", () => {
       const rejectedKey = yield* attempt("S3", false, "S3_OBJECT_KEY", "s3-key-disabled")
       const acceptedVersion = yield* attempt("S3", false, "S3_OBJECT_VERSION_ID", "s3-version")
       const acceptedKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-enabled")
+      const acceptedFullKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-full", "a".repeat(1_024))
+      const rejectedOversizedKey = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-oversized", "a".repeat(1_025))
+      const acceptedUtf8Key = yield* attempt("S3", true, "S3_OBJECT_KEY", "s3-key-utf8", "é".repeat(512))
+      const rejectedOversizedUtf8Key = yield* attempt(
+        "S3",
+        true,
+        "S3_OBJECT_KEY",
+        "s3-key-utf8-oversized",
+        "é".repeat(513)
+      )
       const rejectedUnknown = yield* attempt("CustomSource", false, "COMMIT_ID", "custom")
 
       assert.isTrue(Result.isFailure(rejectedKey))
       assert.isTrue(Result.isSuccess(acceptedVersion))
       assert.isTrue(Result.isSuccess(acceptedKey))
+      assert.isTrue(Result.isSuccess(acceptedFullKey))
+      assert.isTrue(Result.isFailure(rejectedOversizedKey))
+      assert.isTrue(Result.isSuccess(acceptedUtf8Key))
+      assert.isTrue(Result.isFailure(rejectedOversizedUtf8Key))
       assert.isTrue(Result.isFailure(rejectedUnknown))
-      assert.strictEqual(yield* Ref.get(mutationCalls), 2)
+      assert.strictEqual(yield* Ref.get(mutationCalls), 4)
     }))
 
   it.effect("rejects a start target outside the configured pipeline before mutation", () =>
@@ -2506,36 +2612,117 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(result.stopped._tag, "succeeded")
     }))
 
-  it.effect("keeps ambiguous approval pending when its action disappears and succeeds only on the requested result", () =>
+  it.effect("distinguishes credential timeouts before mutation from ambiguous on-wire timeouts", () =>
     Effect.gen(function*() {
-      const approvalState = yield* Ref.make<"pending" | "missing" | "approved">("pending")
+      const mutationCalls = yield* Ref.make(0)
+      const attempt = (
+        identity: string,
+        failure: CodePipelinePreDispatchTimeoutFailure | PluginTimeoutFailure,
+        mutationStarted: boolean
+      ) =>
+        runWithProvider(
+          baseProvider({
+            getPipelineExecution: (request) =>
+              Effect.succeed(executionOutput(request.pipelineExecutionId, "InProgress")),
+            stopPipelineExecution: () =>
+              (mutationStarted
+                ? Ref.update(mutationCalls, (count) => count + 1)
+                : Effect.void).pipe(Effect.andThen(Effect.fail(failure)))
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const proposal = yield* connection.proposeAction(
+              Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+                actionKind: "pipeline.stop",
+                target: {
+                  entityType: "pipeline-execution",
+                  vendorImmutableId: "execution-1842"
+                },
+                expectedRevision: "7:InProgress:2026-07-16T09:05:00.000Z",
+                payload: { mode: "wait", reason: "Stop the release" },
+                evidenceIds: []
+              })
+            )
+            return yield* executor.executeAuthorizedAction(
+              Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+                proposal,
+                idempotencyKey: `stop-${identity}`,
+                payloadDigest: proposal.payloadDigest,
+                authorizationId: `authorization-${identity}`,
+                authorizedAt: DateTime.makeUnsafe("2026-07-16T09:00:00.000Z"),
+                expiresAt: DateTime.makeUnsafe("2026-07-16T10:00:00.000Z")
+              })
+            ).pipe(Effect.result)
+          })
+        )
+
+      const beforeDispatch = yield* attempt(
+        "credential-timeout",
+        new CodePipelinePreDispatchTimeoutFailure({ operation: "codepipeline-stop-execution" }),
+        false
+      )
+      const onWire = yield* attempt(
+        "on-wire-timeout",
+        new PluginTimeoutFailure({ operation: "codepipeline-stop-execution" }),
+        true
+      )
+
+      assert.isTrue(Result.isFailure(beforeDispatch))
+      if (Result.isFailure(beforeDispatch)) {
+        assert.instanceOf(beforeDispatch.failure, PluginTimeoutFailure)
+        assert.isFalse(Predicate.isTagged(beforeDispatch.failure, "PluginUnknownOutcomeFailure"))
+      }
+      assert.isTrue(Result.isFailure(onWire))
+      if (Result.isFailure(onWire)) {
+        assert.instanceOf(onWire.failure, PluginUnknownOutcomeFailure)
+        if (Predicate.isTagged(onWire.failure, "PluginUnknownOutcomeFailure")) {
+          assert.match(onWire.failure.reconciliationKey, /^codepipeline:stop:/u)
+        }
+      }
+      assert.strictEqual(yield* Ref.get(mutationCalls), 1)
+    }))
+
+  it.effect("reconciles an ambiguous approval from its exact execution history", () =>
+    Effect.gen(function*() {
+      const currentState = yield* Ref.make<"pending" | "missing">("pending")
+      const historicalState = yield* Ref.make<"InProgress" | "Succeeded" | "Truncated">("InProgress")
       const provider = baseProvider({
         getPipelineExecution: (request) => Effect.succeed(executionOutput(request.pipelineExecutionId, "InProgress")),
-        listActionExecutionsPage: (request) => {
-          const output = actionOutput(
-            request.pipelineExecutionId,
-            `${request.pipelineExecutionId}-approval-1`,
-            "ReleaseApproval",
-            "InProgress"
-          )
-          return Effect.succeed({
-            ...output,
-            actionExecutionDetails: output.actionExecutionDetails.map((detail) => ({
-              ...detail,
-              input: {
-                ...detail.input,
-                actionTypeId: {
-                  category: "Approval",
-                  owner: "AWS",
-                  provider: "Manual",
-                  version: "1"
+        listActionExecutionsPage: (request) =>
+          Ref.get(historicalState).pipe(
+            Effect.map((status) => {
+              if (status === "Truncated") {
+                return {
+                  actionExecutionDetails: [],
+                  nextToken: request.nextToken === null ? "approval-history-page-2" : "approval-history-page-3"
                 }
               }
-            }))
-          })
-        },
+              const output = actionOutput(
+                request.pipelineExecutionId,
+                `${request.pipelineExecutionId}-approval-1`,
+                "ReleaseApproval",
+                status
+              )
+              return {
+                ...output,
+                actionExecutionDetails: output.actionExecutionDetails.map((detail) => ({
+                  ...detail,
+                  input: {
+                    ...detail.input,
+                    actionTypeId: {
+                      category: "Approval",
+                      owner: "AWS",
+                      provider: "Manual",
+                      version: "1"
+                    }
+                  }
+                }))
+              }
+            })
+          ),
         getPipelineState: () =>
-          Ref.get(approvalState).pipe(
+          Ref.get(currentState).pipe(
             Effect.map((state) => ({
               pipelineName: "release",
               pipelineVersion: 7,
@@ -2547,8 +2734,8 @@ describe("CodePipelinePlugin", () => {
                     actionName: "ReleaseApproval",
                     latestExecution: {
                       actionExecutionId: "execution-1842-approval-1",
-                      status: state === "approved" ? "Succeeded" : "InProgress",
-                      ...(state === "pending" ? { token: "approval-token-a" } : {})
+                      status: "InProgress",
+                      token: "approval-token-a"
                     }
                   }]
                 }]
@@ -2599,16 +2786,19 @@ describe("CodePipelinePlugin", () => {
             payloadDigest: authorized.payloadDigest,
             authorizedAction: authorized
           }
-          yield* Ref.set(approvalState, "missing")
-          const missing = yield* executor.reconcile(reconciliation)
-          yield* Ref.set(approvalState, "approved")
-          const approved = yield* executor.reconcile(reconciliation)
-          return { approved, missing }
+          const pending = yield* executor.reconcile(reconciliation)
+          yield* Ref.set(historicalState, "Truncated")
+          const truncated = yield* executor.reconcile(reconciliation)
+          yield* Ref.set(currentState, "missing")
+          yield* Ref.set(historicalState, "Succeeded")
+          const succeededFromHistory = yield* executor.reconcile(reconciliation)
+          return { pending, succeededFromHistory, truncated }
         })
       )
 
-      assert.strictEqual(result.missing._tag, "pending")
-      assert.strictEqual(result.approved._tag, "succeeded")
+      assert.strictEqual(result.pending._tag, "pending")
+      assert.strictEqual(result.truncated._tag, "pending")
+      assert.strictEqual(result.succeededFromHistory._tag, "succeeded")
     }))
 
   it.effect("revalidates action identity before bounded logs and artifact bytes leave the plugin", () =>

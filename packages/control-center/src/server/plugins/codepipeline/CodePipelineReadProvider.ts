@@ -198,8 +198,23 @@ export class CodePipelineProviderNotFoundFailure extends Schema.TaggedErrorClass
   { operation: Schema.String }
 ) {}
 
+/** Credential acquisition timed out before a mutation could reach AWS. @internal */
+export class CodePipelinePreDispatchTimeoutFailure
+  extends Schema.TaggedErrorClass<CodePipelinePreDispatchTimeoutFailure>()(
+    "CodePipelinePreDispatchTimeoutFailure",
+    { operation: Schema.String }
+  )
+{}
+
 /** Failures visible to the Schema-decoding read client. @internal */
-export type CodePipelineProviderFailure = PluginFailure | CodePipelineProviderNotFoundFailure
+export type CodePipelineProviderFailure =
+  | PluginFailure
+  | CodePipelineProviderNotFoundFailure
+
+/** Failures visible only while invoking a provider mutation. @internal */
+export type CodePipelineMutationProviderFailure =
+  | CodePipelineProviderFailure
+  | CodePipelinePreDispatchTimeoutFailure
 
 /** Raw provider surface used by the CodePipeline read client. @internal */
 export interface CodePipelineReadProviderService {
@@ -232,13 +247,13 @@ export interface CodePipelineReadProviderService {
   ) => Effect.Effect<unknown, CodePipelineProviderFailure>
   readonly startPipelineExecution: (
     request: StartPipelineExecutionProviderRequest
-  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
   readonly stopPipelineExecution: (
     request: StopPipelineExecutionProviderRequest
-  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
   readonly putApprovalResult: (
     request: PutPipelineApprovalProviderRequest
-  ) => Effect.Effect<unknown, CodePipelineProviderFailure>
+  ) => Effect.Effect<unknown, CodePipelineMutationProviderFailure>
 }
 
 /** Injectable raw CodePipeline provider. @internal */
@@ -361,6 +376,42 @@ const callProvider = Effect.fn("CodePipelineReadProvider.callProvider")(function
 ): Effect.fn.Return<Value, CodePipelineProviderFailure, HttpClient.HttpClient> {
   const httpClient = yield* HttpClient.HttpClient
   const credentials = yield* acquireCredentials(operation, account)
+  return yield* effect.pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        DistilledCredentials.fromCredentials(credentials),
+        Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
+        Layer.succeed(HttpClient.HttpClient, httpClient)
+      )
+    ),
+    Effect.timeoutOrElse({
+      duration: account.operationTimeoutMillis,
+      orElse: () => Effect.fail(new PluginTimeoutFailure({ operation }))
+    }),
+    Effect.catch((cause): Effect.Effect<never, CodePipelineProviderFailure> =>
+      Predicate.isTagged(cause, "PluginTimeoutFailure")
+        ? Effect.fail(cause)
+        : mapCodePipelineAwsFailure(operation, cause)
+    )
+  )
+})
+
+const callMutationProvider = Effect.fn("CodePipelineReadProvider.callMutationProvider")(function*<Value, Error>(
+  operation: string,
+  account: CodePipelineAwsAccount,
+  effect: Effect.Effect<
+    Value,
+    Error,
+    DistilledCredentials.Credentials | DistilledRegion.Region | HttpClient.HttpClient
+  >
+): Effect.fn.Return<Value, CodePipelineMutationProviderFailure, HttpClient.HttpClient> {
+  const httpClient = yield* HttpClient.HttpClient
+  const credentials = yield* acquireCredentials(operation, account).pipe(
+    Effect.catchTag(
+      "PluginTimeoutFailure",
+      () => Effect.fail(new CodePipelinePreDispatchTimeoutFailure({ operation }))
+    )
+  )
   return yield* effect.pipe(
     Effect.provide(
       Layer.mergeAll(
@@ -536,7 +587,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
         })),
       startPipelineExecution: (request) =>
         provideHttp(
-          callProvider(
+          callMutationProvider(
             "codepipeline-start-execution",
             request.account,
             codepipeline.startPipelineExecution({
@@ -548,7 +599,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
         ),
       stopPipelineExecution: (request) =>
         provideHttp(
-          callProvider(
+          callMutationProvider(
             "codepipeline-stop-execution",
             request.account,
             codepipeline.stopPipelineExecution({
@@ -561,7 +612,7 @@ export const CodePipelineReadProviderLive = Layer.effect(
         ),
       putApprovalResult: (request) =>
         provideHttp(
-          callProvider(
+          callMutationProvider(
             "codepipeline-put-approval",
             request.account,
             codepipeline.putApprovalResult({
