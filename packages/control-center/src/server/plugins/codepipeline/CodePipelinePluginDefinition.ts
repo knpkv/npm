@@ -78,6 +78,7 @@ const EXECUTION_STREAM_KEY = "executions"
 const COMPLETE_CHECKPOINT = "complete"
 const NEXT_CHECKPOINT_PREFIX = "next:"
 const LOG_CURSOR_SEPARATOR = ":"
+const LOG_PROVIDER_PAGE_SIZE = 100
 const MAXIMUM_LOG_CURSOR_PROVIDER_TOKEN_LENGTH = 3_900
 const utf8Encoder = new TextEncoder()
 
@@ -276,7 +277,7 @@ const descriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.aws-codepipeline",
-  adapterVersion: { major: 0, minor: 1, patch: 0 },
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
   displayName: "AWS CodePipeline",
   configurationFields: [
     {
@@ -1186,7 +1187,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
         logGroupName: coordinates.logGroupName,
         logStreamName: coordinates.logStreamName,
         nextToken: cursor.providerCursor,
-        limit: request.limit
+        limit: LOG_PROVIDER_PAGE_SIZE
       })
     )
     if (cursor.eventOffset > page.events.length) {
@@ -1198,6 +1199,7 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
     const events = []
     let messageBytes = 0
     for (const event of page.events.slice(cursor.eventOffset)) {
+      if (events.length >= request.limit) break
       const eventBytes = utf8Encoder.encode(event.message).byteLength
       if (eventBytes > configuration.maximumLogBytes && events.length === 0) {
         return yield* new PluginMalformedResponseFailure({
@@ -1247,7 +1249,14 @@ const makeConnection = Effect.fn("CodePipelinePlugin.makeConnection")(function*(
       })
     }
     const artifacts = request.direction === "input" ? action.inputArtifacts : action.outputArtifacts
-    const artifact = artifacts.find(({ name }) => name === request.artifactName)
+    const matchingArtifacts = artifacts.filter(({ name }) => name === request.artifactName)
+    if (matchingArtifacts.length > 1) {
+      return yield* new PluginMalformedResponseFailure({
+        operation: "pipeline-artifact",
+        diagnosticCode: "codepipeline-artifact-name-ambiguous"
+      })
+    }
+    const artifact = matchingArtifacts[0]
     if (artifact?.bucket === null || artifact?.key === null || artifact === undefined) {
       return yield* new PluginConflictFailure({
         operation: "pipeline-artifact",

@@ -56,6 +56,19 @@ export const planCodePipelineArtifactRange = (
       range: `bytes=${offset}-${Math.min(offset + length - 1, totalBytes - 1)}`
     }
 
+/** Pin a satisfiable range read to the exact object observed by HEAD. @internal */
+export const planCodePipelineArtifactObjectIdentity = (
+  metadata: {
+    readonly VersionId?: string
+    readonly ETag?: string
+  }
+): { readonly VersionId: string } | { readonly IfMatch: string } | null =>
+  metadata.VersionId !== undefined
+    ? { VersionId: metadata.VersionId }
+    : metadata.ETag !== undefined
+    ? { IfMatch: metadata.ETag }
+    : null
+
 /** Collect one provider body while stopping consumption at the authorized range bound. @internal */
 export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.collectBoundedArtifactBody")(
   function*<Error>(body: Stream.Stream<Uint8Array, Error>, maximumBytes: number): Effect.fn.Return<
@@ -540,7 +553,9 @@ export const CodePipelineReadProviderLive = Layer.effect(
             })
           ).pipe(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Struct({
-              ContentLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+              ContentLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+              VersionId: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024))),
+              ETag: Schema.optionalKey(Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)))
             }))),
             Effect.mapError((failure) =>
               Schema.isSchemaError(failure)
@@ -563,13 +578,21 @@ export const CodePipelineReadProviderLive = Layer.effect(
               contentRange: plan.contentRange
             }
           }
+          const objectIdentity = planCodePipelineArtifactObjectIdentity(metadata)
+          if (objectIdentity === null) {
+            return yield* new PluginMalformedResponseFailure({
+              operation: "codepipeline-head-artifact",
+              diagnosticCode: "codepipeline-artifact-object-identity-missing"
+            })
+          }
           const response = yield* callProvider(
             "codepipeline-get-artifact",
             request.account,
             s3.getObject({
               Bucket: request.bucket,
               Key: request.key,
-              Range: plan.range
+              Range: plan.range,
+              ...objectIdentity
             })
           )
           return yield* response.Body === undefined

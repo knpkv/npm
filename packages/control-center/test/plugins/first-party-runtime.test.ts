@@ -1761,6 +1761,18 @@ describe("first-party plugin runtime", () => {
       ["entity.read", "sync.incremental"]
     )
     assert.deepStrictEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      { major: 0, minor: 1, patch: 0 }
+    )
+    assert.deepStrictEqual(
+      codePipelinePluginDescriptor.adapterVersion,
+      { major: 0, minor: 2, patch: 0 }
+    )
+    assert.notDeepEqual(
+      historicalReadOnlyCodePipelineDescriptor.adapterVersion,
+      codePipelinePluginDescriptor.adapterVersion
+    )
+    assert.deepStrictEqual(
       codePipelinePluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
       [
         "entity.read",

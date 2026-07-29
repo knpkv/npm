@@ -36,6 +36,7 @@ import {
   collectBoundedArtifactBody,
   collectBoundedArtifactBodyWithin,
   mapCodePipelineAwsFailure,
+  planCodePipelineArtifactObjectIdentity,
   planCodePipelineArtifactRange
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
 import {
@@ -308,6 +309,15 @@ describe("CodePipelinePlugin", () => {
         planCodePipelineArtifactRange(3, 3, 9),
         { _tag: "bounded", range: "bytes=3-5" }
       )
+      assert.deepStrictEqual(
+        planCodePipelineArtifactObjectIdentity({ VersionId: "version-1", ETag: "\"etag-1\"" }),
+        { VersionId: "version-1" }
+      )
+      assert.deepStrictEqual(
+        planCodePipelineArtifactObjectIdentity({ ETag: "\"etag-1\"" }),
+        { IfMatch: "\"etag-1\"" }
+      )
+      assert.isNull(planCodePipelineArtifactObjectIdentity({}))
     }))
 
   it.effect("decodes an exhausted artifact range as an empty successful page", () =>
@@ -3237,6 +3247,78 @@ describe("CodePipelinePlugin", () => {
       assert.deepStrictEqual(yield* Ref.get(regions), ["us-west-2"])
     }))
 
+  it.effect("rejects ambiguous artifact names before reading provider bytes", () =>
+    Effect.gen(function*() {
+      const artifactCalls = yield* Ref.make(0)
+      const provider = baseProvider({
+        listActionExecutionsPage: (request) => {
+          const output = actionOutput(
+            request.pipelineExecutionId,
+            `${request.pipelineExecutionId}-action-1`,
+            "Compile",
+            "Succeeded"
+          )
+          return Effect.succeed({
+            ...output,
+            actionExecutionDetails: output.actionExecutionDetails.map((action) => ({
+              ...action,
+              output: {
+                ...action.output,
+                outputArtifacts: [
+                  { name: "BuildOutput", s3location: { bucket: "artifacts", key: "build-a.zip" } },
+                  { name: "BuildOutput", s3location: { bucket: "artifacts", key: "build-b.zip" } }
+                ]
+              }
+            }))
+          })
+        },
+        getArtifactRange: () =>
+          Ref.update(artifactCalls, (count) => count + 1).pipe(
+            Effect.as({
+              bytes: Uint8Array.from([1, 2, 3]),
+              contentLength: 3,
+              contentRange: "bytes 0-2/3"
+            })
+          )
+      })
+      const result = yield* runWithProvider(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const pipeline = connection.pipeline
+          if (pipeline === undefined || Option.isNone(pipeline)) {
+            return yield* Effect.die("pipeline reader missing")
+          }
+          return yield* pipeline.value.readArtifactRange(
+            Schema.decodeUnknownSync(PluginPipelineArtifactRangeRequestV1)({
+              action: {
+                entity: {
+                  entityType: "aws.codepipeline.action",
+                  vendorImmutableId: "execution-1842#execution-1842-action-1"
+                },
+                executionId: "execution-1842",
+                actionExecutionId: "execution-1842-action-1",
+                expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
+              },
+              direction: "output",
+              artifactName: "BuildOutput",
+              offset: 0,
+              length: 3
+            })
+          )
+        })
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, PluginMalformedResponseFailure)
+        if (Predicate.isTagged(result.failure, "PluginMalformedResponseFailure")) {
+          assert.strictEqual(result.failure.diagnosticCode, "codepipeline-artifact-name-ambiguous")
+        }
+      }
+      assert.strictEqual(yield* Ref.get(artifactCalls), 0)
+    }))
+
   it.effect("routes action logs to the validated action ARN region", () =>
     Effect.gen(function*() {
       const regions = yield* Ref.make<ReadonlyArray<string>>([])
@@ -3447,14 +3529,18 @@ describe("CodePipelinePlugin", () => {
   it.effect("paginates an oversized provider log page without dropping events", () =>
     Effect.gen(function*() {
       const providerCursors = yield* Ref.make<ReadonlyArray<string | null>>([])
+      const providerLimits = yield* Ref.make<ReadonlyArray<number>>([])
       const provider = baseProvider({
         getLogEventsPage: (request) =>
-          Ref.update(providerCursors, (current) => [...current, request.nextToken]).pipe(
+          Effect.all([
+            Ref.update(providerCursors, (current) => [...current, request.nextToken]),
+            Ref.update(providerLimits, (current) => [...current, request.limit])
+          ]).pipe(
             Effect.as({
               events: [
                 { timestamp: 1, message: "éé" },
                 { timestamp: 2, message: "öö" }
-              ]
+              ].slice(0, request.limit)
             })
           )
       })
@@ -3469,7 +3555,7 @@ describe("CodePipelinePlugin", () => {
           expectedRevision: "Succeeded:2026-07-16T09:04:00.000Z"
         },
         cursor: null,
-        limit: 10
+        limit: 2
       })
       const paginated = yield* runWithProvider(
         provider,
@@ -3483,7 +3569,8 @@ describe("CodePipelinePlugin", () => {
           if (first.nextCursor === null) return yield* Effect.die("expected an intra-page cursor")
           const second = yield* pipeline.value.readLogPage({
             ...request,
-            cursor: first.nextCursor
+            cursor: first.nextCursor,
+            limit: 1
           })
           return { first, second }
         }),
@@ -3524,6 +3611,7 @@ describe("CodePipelinePlugin", () => {
         assert.instanceOf(oversizedSingle.failure, PluginMalformedResponseFailure)
       }
       assert.deepStrictEqual(yield* Ref.get(providerCursors), [null, null, null, null])
+      assert.deepStrictEqual(yield* Ref.get(providerLimits), [100, 100, 100, 100])
     }))
 
   it.effect("rejects out-of-range bounds before any provider call", () =>
