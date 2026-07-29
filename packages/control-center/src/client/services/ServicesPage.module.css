@@ -164,6 +164,41 @@
   gap: var(--rly-space-6);
 }
 
+.administration,
+.administrationSection,
+.credentialRecovery,
+.diagnostics,
+.accountEdit {
+  display: grid;
+  gap: var(--rly-space-12);
+}
+
+.administration {
+  padding-block: var(--rly-space-16);
+  border-block: 1px solid var(--rly-color-border-2);
+}
+
+.administrationLabels,
+.diagnostic,
+.accountEditAction {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+
+.diagnostic {
+  flex-wrap: nowrap;
+}
+
+.accountEdit {
+  max-inline-size: 32rem;
+}
+
+.accountEditAction {
+  justify-content: flex-end;
+}
+
 .syncActions {
   display: flex;
   flex-wrap: wrap;

@@ -45,6 +45,39 @@ const ownershipDiscovery = (
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
+/** Reject credentials whose discovered immutable identity differs from an existing binding. */
+export const assertConnectionOwnership = Effect.fn(
+  "PluginAdministration.assertConnectionOwnership"
+)(function*(
+  persistence: Persistence["Service"],
+  connection: PluginConnectionRecord,
+  discovery: PluginDiscoveryV1 | null
+) {
+  if (connection.providerAccountId === null && connection.followedResourceId === null) return
+  if (connection.providerAccountId === null || connection.followedResourceId === null) {
+    return yield* new ApplicationInvalidRequest()
+  }
+  const ownership = ownershipDiscovery(connection, discovery)
+  if (ownership === null || ownership === undefined) return yield* new ApplicationInvalidRequest()
+  const account = yield* persistence.providerAccounts.get(
+    connection.workspaceId,
+    connection.providerAccountId
+  )
+  const resource = yield* persistence.providerAccounts.getResource(
+    connection.workspaceId,
+    connection.followedResourceId
+  )
+  if (
+    account.providerFamily !== ownership.providerFamily ||
+    account.vendorAccountId !== ownership.account.providerImmutableId ||
+    resource.providerAccountId !== account.providerAccountId ||
+    resource.providerId !== connection.providerId ||
+    resource.vendorResourceId !== ownership.resource.providerImmutableId
+  ) {
+    return yield* new ApplicationInvalidRequest()
+  }
+})
+
 /** Bind a healthy connection to its provider-discovered account and resource identities. */
 export const materializeConnectionOwnership = Effect.fn(
   "PluginAdministration.materializeConnectionOwnership"

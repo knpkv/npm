@@ -20,6 +20,7 @@ import {
   PluginOverviewResponse,
   PluginsApiGroup,
   PortfolioApiGroup,
+  ReauthorizePluginConnectionRequest,
   ReleaseAgentThreadCursor,
   SessionApiGroup,
   SessionCookieAuth,
@@ -86,6 +87,21 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
 }
 
 describe("ControlCenterApi contract", () => {
+  it("preserves opaque credential bytes while rejecting blank replacements", () => {
+    const decode = Schema.decodeUnknownSync(ReauthorizePluginConnectionRequest)
+    const request = decode({
+      expectedRevision: 1,
+      credentials: [{ key: "apiToken", value: "  opaque token bytes  " }]
+    })
+    assert.strictEqual(request.credentials[0]?.value, "  opaque token bytes  ")
+    assert.throws(() =>
+      decode({
+        expectedRevision: 1,
+        credentials: [{ key: "apiToken", value: "   " }]
+      })
+    )
+  })
+
   it("accepts only one or both distinct Atlassian OAuth providers", () => {
     const isCreateGrantRequest = Schema.is(CreateAtlassianOAuthGrantRequest)
 
@@ -384,13 +400,17 @@ describe("ControlCenterApi contract", () => {
         ["createConnection", "POST", "/api/v1/plugins/connections"],
         ["createConnections", "POST", "/api/v1/plugins/connections/batch"],
         ["setConnectionEnabled", "PATCH", "/api/v1/plugins/connections/:pluginConnectionId"],
+        ["patchProviderAccount", "PATCH", "/api/v1/plugins/accounts/:providerAccountId"],
         ["health", "GET", "/api/v1/plugins/:pluginConnectionId/health"],
         ["testConnection", "POST", "/api/v1/plugins/:pluginConnectionId/test"],
         ["synchronization", "GET", "/api/v1/plugins/:pluginConnectionId/synchronization"],
         ["synchronizeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/sync"],
         ["configurationMetadata", "GET", "/api/v1/plugins/:pluginConnectionId/configuration-metadata"],
         ["configuration", "GET", "/api/v1/plugins/:pluginConnectionId/configuration"],
-        ["patchConfiguration", "PATCH", "/api/v1/plugins/:pluginConnectionId/configuration"]
+        ["administration", "GET", "/api/v1/plugins/:pluginConnectionId/administration"],
+        ["patchConfiguration", "PATCH", "/api/v1/plugins/:pluginConnectionId/configuration"],
+        ["reauthorizeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/reauthorize"],
+        ["revokeConnection", "POST", "/api/v1/plugins/:pluginConnectionId/revoke"]
       ]
     )
     assert.deepStrictEqual(
@@ -563,13 +583,17 @@ describe("ControlCenterApi contract", () => {
       createConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       createConnections: [SessionCookieAuth.key, SessionMutationAuth.key],
       setConnectionEnabled: [SessionCookieAuth.key, SessionMutationAuth.key],
+      patchProviderAccount: [SessionCookieAuth.key, SessionMutationAuth.key],
       health: [SessionCookieAuth.key],
       testConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       synchronization: [SessionCookieAuth.key],
       synchronizeConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
       configurationMetadata: [SessionCookieAuth.key],
       configuration: [SessionCookieAuth.key],
-      patchConfiguration: [SessionCookieAuth.key, SessionMutationAuth.key]
+      administration: [SessionCookieAuth.key],
+      patchConfiguration: [SessionCookieAuth.key, SessionMutationAuth.key],
+      reauthorizeConnection: [SessionCookieAuth.key, SessionMutationAuth.key],
+      revokeConnection: [SessionCookieAuth.key, SessionMutationAuth.key]
     })
     assert.deepStrictEqual(middlewareByEndpoint(PortfolioApiGroup.endpoints), {
       snapshot: [SessionCookieAuth.key]

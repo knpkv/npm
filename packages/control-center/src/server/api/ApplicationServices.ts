@@ -58,10 +58,13 @@ import type {
   CreatePluginConnectionsResponse,
   DiscoveredAtlassianProfile,
   PatchPluginConfigurationRequest,
+  PatchProviderAccountRequest,
   PluginConfiguration,
   PluginConfigurationMetadata,
+  PluginConnectionAdministration,
   PluginConnectionSummary,
   PluginConnectionTestResult,
+  PluginCredentialReplacement,
   PluginHealthResponse,
   PluginSynchronizationState,
   ProviderAccountSummary
@@ -88,6 +91,7 @@ import type {
   JobId,
   PersonId,
   PluginConnectionId,
+  ProviderAccountId,
   RelationshipId,
   RelationshipRepairProposalId,
   ReleaseId,
@@ -154,6 +158,14 @@ export interface PluginAdministrationService {
   readonly accounts?: (
     workspaceId: WorkspaceId
   ) => Effect.Effect<ReadonlyArray<ProviderAccountSummary>, ApplicationServiceUnavailable>
+  readonly patchProviderAccount?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly providerAccountId: ProviderAccountId
+    readonly patch: PatchProviderAccountRequest
+  }) => Effect.Effect<
+    ProviderAccountSummary,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
   readonly discoverAwsProfiles?: () => Effect.Effect<AwsProfileDiscoveryResponse, ApplicationServiceUnavailable>
   readonly discoverAwsResources?: (
     request: AwsResourceDiscoveryRequest
@@ -232,6 +244,30 @@ export interface PluginAdministrationService {
   }) => Effect.Effect<
     PluginSynchronizationState,
     ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly administration?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+  }) => Effect.Effect<
+    PluginConnectionAdministration,
+    ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly reauthorizeConnection?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly expectedRevision: number
+    readonly credentials: ReadonlyArray<PluginCredentialReplacement>
+  }) => Effect.Effect<
+    CreatePluginConnectionResponse,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
+  >
+  readonly revokeConnection?: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly pluginConnectionId: PluginConnectionId
+    readonly expectedRevision: number
+  }) => Effect.Effect<
+    PluginConnectionSummary,
+    ApplicationConflict | ApplicationInvalidRequest | PluginAdministrationError
   >
   readonly configurationMetadata: (input: {
     readonly workspaceId: WorkspaceId

@@ -144,12 +144,18 @@ const field = (
 })
 
 const codeCommitFields = [
-  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", { defaultValue: "default" }),
+  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", {
+    defaultValue: "default",
+    scope: "credential"
+  }),
   field("region", "AWS region", "Region containing the CodeCommit repository.", "text"),
   field("repositoryName", "Repository", "CodeCommit repository to read.", "text")
 ]
 const codePipelineFields = [
-  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", { defaultValue: "default" }),
+  field("profile", "AWS profile", "Local AWS profile used by the server.", "text", {
+    defaultValue: "default",
+    scope: "credential"
+  }),
   field("region", "AWS region", "Region containing the CodePipeline pipeline.", "text"),
   field("pipelineName", "Pipeline", "CodePipeline pipeline to read.", "text"),
   field("maximumExecutionPages", "Execution pages", "Maximum execution pages per synchronization.", "integer", {
@@ -190,7 +196,10 @@ const jiraFields = [
   field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
     defaultValue: "api-token"
   }),
-  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", {
+    required: false,
+    scope: "credential"
+  }),
   field("email", "Atlassian email", "Email paired with the Jira API token.", "text", {
     scope: "credential",
     required: false
@@ -220,7 +229,10 @@ const confluenceFields = [
   field("authMode", "Authentication", "OAuth profile or API token fallback.", "text", {
     defaultValue: "api-token"
   }),
-  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", { required: false }),
+  field("oauthProfileId", "OAuth profile", "Shared local Atlassian OAuth profile.", "text", {
+    required: false,
+    scope: "credential"
+  }),
   field("email", "Atlassian email", "Email paired with the Confluence API token.", "text", {
     scope: "credential",
     required: false
