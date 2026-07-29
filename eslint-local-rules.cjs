@@ -789,6 +789,21 @@ module.exports = {
         }
         return expression
       }
+      const isTemplateLiteralParserSchema = (expression, visited = new Set()) => {
+        const unwrapped = unwrapTypeExpression(expression)
+        if (visited.has(unwrapped)) return false
+        visited.add(unwrapped)
+        if (unwrapped.type === "Identifier") {
+          const definition = localDefinitions.get(unwrapped.name)
+          return definition !== undefined && isTemplateLiteralParserSchema(definition, visited)
+        }
+        return (
+          unwrapped.type === "CallExpression" &&
+          unwrapped.callee.type === "MemberExpression" &&
+          staticPropertyName(unwrapped.callee.property) === "TemplateLiteralParser" &&
+          isSchemaModule(context, unwrapped.callee.object)
+        )
+      }
       const containsStructuredLocator = (expression, visited = new Set()) => {
         if (expression === null || expression === undefined || visited.has(expression)) return false
         visited.add(expression)
@@ -812,11 +827,13 @@ module.exports = {
           if (
             expression.callee.type === "CallExpression" &&
             expression.callee.callee.type === "MemberExpression" &&
-            expression.callee.callee.object.type === "Identifier" &&
-            isNamespaceImportFrom(context, expression.callee.callee.object, ["effect/Schema"]) &&
+            isSchemaModule(context, expression.callee.callee.object) &&
             ["encode", "encodeSync"].includes(staticPropertyName(expression.callee.callee.property))
           ) {
-            return false
+            const schema = expression.callee.arguments[0]
+            if (schema !== undefined && schema.type !== "SpreadElement" && isTemplateLiteralParserSchema(schema)) {
+              return false
+            }
           }
           if (
             expression.callee.type === "Identifier" &&

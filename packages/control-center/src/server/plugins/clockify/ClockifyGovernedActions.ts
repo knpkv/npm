@@ -136,6 +136,24 @@ const isClockifyIdentityDrift = (failure: PluginFailure): boolean =>
     "clockify-time-entry-workspace-mismatch"
   ].includes(failure.diagnosticCode)
 
+const isConfirmedClockifyRejection = (failure: PluginFailure): boolean => {
+  switch (failure._tag) {
+    case "PluginAuthenticationFailure":
+    case "PluginAuthorizationFailure":
+    case "PluginRateLimitFailure":
+    case "PluginConflictFailure":
+      return true
+    case "PluginTimeoutFailure":
+    case "PluginMalformedResponseFailure":
+    case "PluginOutageFailure":
+    case "PluginCancellationFailure":
+    case "PluginUnsupportedCapabilityFailure":
+    case "PluginConfigurationFailure":
+    case "PluginUnknownOutcomeFailure":
+      return false
+  }
+}
+
 const withTimeout = <Value>(
   operation: string,
   duration: number,
@@ -544,7 +562,7 @@ export const makeClockifyGovernedActions = (
     ).pipe(Effect.result)
     const observedAt = yield* DateTime.now
     if (update._tag === "Failure") {
-      if (update.failure._tag === "PluginConflictFailure") {
+      if (isConfirmedClockifyRejection(update.failure)) {
         return {
           _tag: "confirmed",
           receipt: {

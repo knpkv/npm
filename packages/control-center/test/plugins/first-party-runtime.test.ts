@@ -2912,8 +2912,20 @@ describe("first-party plugin runtime", () => {
       const executionTime = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:00.000Z")
       yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
       const scenarios: ReadonlyArray<
-        "succeeded" | "provider-rejected" | "stale-denied" | "manual-recovery"
-      > = ["succeeded", "provider-rejected", "stale-denied", "manual-recovery"]
+        | "succeeded"
+        | "provider-rejected"
+        | "authorization-rejected"
+        | "ambiguous-timeout"
+        | "stale-denied"
+        | "manual-recovery"
+      > = [
+        "succeeded",
+        "provider-rejected",
+        "authorization-rejected",
+        "ambiguous-timeout",
+        "stale-denied",
+        "manual-recovery"
+      ]
       yield* Effect.forEach(
         scenarios,
         (scenario) =>
@@ -2976,7 +2988,13 @@ describe("first-party plugin runtime", () => {
                           : { message: "provider rejected correction" }
                       ),
                       {
-                        status: scenario === "succeeded" ? 200 : 409,
+                        status: scenario === "succeeded"
+                          ? 200
+                          : scenario === "authorization-rejected"
+                          ? 403
+                          : scenario === "ambiguous-timeout"
+                          ? 504
+                          : 409,
                         headers: { "content-type": "application/json" }
                       }
                     )
@@ -3137,15 +3155,21 @@ describe("first-party plugin runtime", () => {
               })
               const expectedState = scenario === "succeeded" || scenario === "manual-recovery"
                 ? "succeeded"
-                : scenario === "provider-rejected"
+                : scenario === "provider-rejected" || scenario === "authorization-rejected"
                 ? "failed"
+                : scenario === "ambiguous-timeout"
+                ? "unknown"
                 : "denied"
 
               assert.deepStrictEqual(execution, { _tag: "advanced", state: expectedState })
               assert.strictEqual(record.head.state, expectedState)
               assert.strictEqual(
                 record.head.lineage._tag,
-                scenario === "stale-denied" ? "none" : "terminal"
+                scenario === "stale-denied"
+                  ? "none"
+                  : scenario === "ambiguous-timeout"
+                  ? "reconcilable"
+                  : "terminal"
               )
               assert.strictEqual(
                 yield* Ref.get(entryReads),

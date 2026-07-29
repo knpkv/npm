@@ -1058,6 +1058,21 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import * as Schema from "effect/Schema"
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const reconciliationKey = (digest) =>
+      PluginActionReconciliationKey.make(
+        Schema.encodeSync(Schema.String)(\`clockify-correction:v1:\${digest}\`)
+      )
+    const matches = request.reconciliationKey === reconciliationKey(request.payloadDigest)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-unstructured-encoder-invalid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
     const locatorText = (digest) => encodeURIComponent("clockify-correction:v1:" + digest)
     const reconciliationKey = (digest) =>
