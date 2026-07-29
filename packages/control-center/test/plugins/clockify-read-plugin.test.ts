@@ -1304,7 +1304,45 @@ describe("ClockifyReadPlugin", () => {
               )
             }
           }
-          assert.strictEqual(yield* Ref.get(readCalls), readsBeforeReplay)
+          assert.strictEqual(yield* Ref.get(readCalls), readsBeforeReplay + 2)
+        })
+      )
+      assert.strictEqual(yield* Ref.get(updateCalls), 0)
+    }))
+
+  it.effect("rejects an approval when the Clockify revision changes after preflight", () =>
+    Effect.gen(function*() {
+      const state = yield* Ref.make(timeEntry("entry-1", "user-1"))
+      const updateCalls = yield* Ref.make(0)
+      yield* withActionRuntime(
+        baseProvider({
+          getTimeEntry: () => Ref.get(state).pipe(Effect.map(Option.some)),
+          updateTimeEntry: () =>
+            Ref.update(updateCalls, (count) => count + 1).pipe(
+              Effect.andThen(Effect.die("approval must not update Clockify"))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const current = yield* connection.readEntity(entryReference("entry-1"))
+          if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+          const proposal = yield* connection.proposeAction(
+            actionRequest("record-approval", current.event.revision, {
+              decision: "approved",
+              rationale: "Reviewed against the delivery record"
+            })
+          )
+          const authorized = authorize(proposal, proposal.payloadDigest, "stale-approval")
+          const preflight = yield* executor.preflight(authorized)
+          assert.strictEqual(preflight._tag, "ready")
+          yield* Ref.update(state, (entry) => ({
+            ...entry,
+            description: "Provider changed after preflight"
+          }))
+          const dispatch = yield* executor.executeAuthorizedAction(authorized)
+          assert.strictEqual(dispatch._tag, "confirmed")
+          if (dispatch._tag === "confirmed") assert.strictEqual(dispatch.receipt.status, "failed")
         })
       )
       assert.strictEqual(yield* Ref.get(updateCalls), 0)

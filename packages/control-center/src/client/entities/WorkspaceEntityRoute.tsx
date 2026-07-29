@@ -454,7 +454,8 @@ export const WorkspaceEntityView = ({
   }
 
   const presentation = presentWorkspaceEntity(workspaceId, state.inspection)
-  const clockifyActionsCurrent = state._tag === "ready" && state.inspection.isSourceCurrent
+  const clockifyActionsCurrent =
+    state._tag === "ready" && state.inspection.isSourceCurrent && state.inspection.sourceActionsAvailable
   return (
     <LinkProvider component={WorkspaceEntityLink}>
       <EntityShell

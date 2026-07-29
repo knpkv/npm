@@ -566,6 +566,7 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
     sourceUrl: "https://app.clockify.me/tracker"
   },
   isSourceCurrent: true,
+  sourceActionsAvailable: true,
   freshness: null,
   clockifyApproval: {
     actionId: "01890f6f-6d6a-7cc0-98d2-000000000094",
@@ -1862,6 +1863,33 @@ describe("canonical workspace entity", () => {
       decision: "approved",
       rationale: "Reviewed by the workspace approver"
     })
+  })
+
+  it("fails closed for Clockify controls when the source descriptor has no action capabilities", async () => {
+    const submitClockifyAction = vi.fn()
+    const host = await renderView(
+      () => undefined,
+      {
+        ...clockifyState,
+        inspection: {
+          ...clockifyInspection,
+          sourceActionsAvailable: false
+        }
+      },
+      () => undefined,
+      pullRequestReviewState,
+      undefined,
+      submitClockifyAction,
+      { canApprove: true, canCorrect: true }
+    )
+    const actionInputs = [...host.querySelectorAll<HTMLInputElement>("[data-clockify-governed-actions] input")]
+    const actionButtons = [...host.querySelectorAll<HTMLButtonElement>("[data-clockify-governed-actions] button")]
+
+    expect(actionInputs).toHaveLength(2)
+    expect(actionButtons).toHaveLength(3)
+    expect(actionInputs.every(({ disabled }) => disabled)).toBe(true)
+    expect(actionButtons.every(({ disabled }) => disabled)).toBe(true)
+    expect(submitClockifyAction).not.toHaveBeenCalled()
   })
 
   it.each(["source-stale", "refreshing", "refresh-failed"] satisfies ReadonlyArray<

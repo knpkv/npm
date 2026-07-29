@@ -48,6 +48,7 @@ import { PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prRev
 import { Revision, SourceRevision, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { CompleteDiffReads, PluginAdministration } from "../../src/server/api/ApplicationServices.js"
+import { RequestLimitPolicy, withRequestTimeout } from "../../src/server/api/RequestLimits.js"
 import { ClockifyActionSubmissions } from "../../src/server/application/clockifyActionSubmissions.js"
 import { projectClockifyApproval } from "../../src/server/application/clockifyApprovalProjection.js"
 import { firstPartyManualPluginSyncDrivers } from "../../src/server/application/manualPluginSynchronization.js"
@@ -2921,17 +2922,21 @@ describe("first-party plugin runtime", () => {
       const scenarios: ReadonlyArray<
         | "succeeded"
         | "rate-limited"
+        | "rate-limit-exhausted"
         | "provider-rejected"
         | "authorization-rejected"
         | "ambiguous-timeout"
+        | "pre-mutation-outage"
         | "stale-denied"
         | "manual-recovery"
       > = [
         "succeeded",
         "rate-limited",
+        "rate-limit-exhausted",
         "provider-rejected",
         "authorization-rejected",
         "ambiguous-timeout",
+        "pre-mutation-outage",
         "stale-denied",
         "manual-recovery"
       ]
@@ -2976,13 +2981,18 @@ describe("first-party plugin runtime", () => {
                   "/v1/workspaces/clockify-workspace/time-entries/clockify-entry-42"
                 )
                 if (entryUrl && request.method === "GET") {
-                  yield* Ref.update(entryReads, (count) => count + 1)
+                  const read = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
+                  const unavailable = scenario === "pre-mutation-outage" && read === 2
                   return HttpClientResponse.fromWeb(
                     request,
                     new Response(
-                      JSON.stringify(yield* Ref.get(providerState)),
+                      JSON.stringify(
+                        unavailable
+                          ? { message: "provider unavailable before mutation" }
+                          : yield* Ref.get(providerState)
+                      ),
                       {
-                        status: 200,
+                        status: unavailable ? 503 : 200,
                         headers: { "content-type": "application/json" }
                       }
                     )
@@ -2990,7 +3000,8 @@ describe("first-party plugin runtime", () => {
                 }
                 if (entryUrl && request.method === "PUT") {
                   const mutation = yield* Ref.updateAndGet(mutations, (count) => count + 1)
-                  const rateLimited = scenario === "rate-limited" && mutation === 1
+                  const rateLimited = (scenario === "rate-limited" || scenario === "rate-limit-exhausted") &&
+                    mutation === 1
                   if (rateLimited) yield* Deferred.succeed(rateLimitObserved, undefined)
                   return HttpClientResponse.fromWeb(
                     request,
@@ -3012,7 +3023,7 @@ describe("first-party plugin runtime", () => {
                           : 409,
                         headers: {
                           "content-type": "application/json",
-                          ...(rateLimited ? { "retry-after": "1" } : {})
+                          ...(scenario === "rate-limited" && rateLimited ? { "retry-after": "1" } : {})
                         }
                       }
                     )
@@ -3159,6 +3170,23 @@ describe("first-party plugin runtime", () => {
                   Effect.provide(engineLayer),
                   Effect.provide(store)
                 )
+                : scenario === "rate-limit-exhausted"
+                ? yield* Effect.gen(function*() {
+                  const engine = yield* GovernedActionExecutionEngine
+                  const fiber = yield* withRequestTimeout(
+                    engine.run({
+                      workspaceId: GOVERNED_WORKSPACE,
+                      actionId: GOVERNED_ACTION
+                    }),
+                    "mutation"
+                  ).pipe(
+                    Effect.provide(RequestLimitPolicy.defaultLayer),
+                    Effect.forkChild
+                  )
+                  yield* Deferred.await(rateLimitObserved)
+                  yield* TestClock.adjust(Duration.seconds(30))
+                  return yield* Fiber.join(fiber)
+                }).pipe(Effect.provide(engineLayer))
                 : scenario === "rate-limited"
                 ? yield* Effect.gen(function*() {
                   const engine = yield* GovernedActionExecutionEngine
@@ -3186,7 +3214,10 @@ describe("first-party plugin runtime", () => {
                   scenario === "rate-limited" ||
                   scenario === "manual-recovery"
                 ? "succeeded"
-                : scenario === "provider-rejected" || scenario === "authorization-rejected"
+                : scenario === "provider-rejected" ||
+                    scenario === "authorization-rejected" ||
+                    scenario === "rate-limit-exhausted" ||
+                    scenario === "pre-mutation-outage"
                 ? "failed"
                 : scenario === "ambiguous-timeout"
                 ? "unknown"
@@ -3208,7 +3239,9 @@ describe("first-party plugin runtime", () => {
               )
               assert.strictEqual(
                 yield* Ref.get(mutations),
-                scenario === "stale-denied" || scenario === "manual-recovery"
+                scenario === "stale-denied" ||
+                  scenario === "manual-recovery" ||
+                  scenario === "pre-mutation-outage"
                   ? 0
                   : scenario === "rate-limited"
                   ? 2
@@ -3445,7 +3478,7 @@ describe("first-party plugin runtime", () => {
         if (Result.isFailure(forbiddenCorrection)) {
           assert.strictEqual(forbiddenCorrection.failure.reason, "forbidden")
         }
-        assert.strictEqual(yield* Ref.get(entryReads), 3)
+        assert.strictEqual(yield* Ref.get(entryReads), 4)
         assert.strictEqual(yield* Ref.get(mutations), 0)
 
         yield* sql`UPDATE sessions SET permission = 'workspace-owner'
@@ -3727,7 +3760,7 @@ describe("first-party plugin runtime", () => {
           { ...sourceRevision, pluginConnectionId: UNCONFIGURED_CONNECTION_ID },
           terminalApprovals
         ))
-        assert.strictEqual(yield* Ref.get(entryReads), 1)
+        assert.strictEqual(yield* Ref.get(entryReads), 2)
         assert.strictEqual(yield* Ref.get(mutations), 0)
       }).pipe(
         Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),

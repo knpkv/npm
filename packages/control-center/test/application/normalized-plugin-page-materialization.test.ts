@@ -29,6 +29,7 @@ import { Database, databaseLayer } from "../../src/server/persistence/Database.j
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { PluginConnectionDisplayName, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { PluginStreamKey } from "../../src/server/persistence/repositories/pluginRuntimeModels.js"
+import { clockifyReadPluginDescriptor } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import { ConfluencePageAttributesV1 } from "../../src/server/plugins/confluence/ConfluencePageSchemas.js"
 import { normalizeJiraIssueEvents } from "../../src/server/plugins/jira/JiraIssueNormalization.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
@@ -755,7 +756,8 @@ const setup = Effect.gen(function*() {
 
 const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setupConnection")(function*(
   pluginConnectionId: PluginConnectionId,
-  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence"
+  providerId: "clockify" | "codecommit" | "codepipeline" | "confluence",
+  pluginDescriptor: unknown = descriptorFor(providerId)
 ) {
   const persistence = yield* Persistence
   yield* persistence.pluginConnections.create(WORKSPACE_ID, {
@@ -769,7 +771,7 @@ const setupConnection = Effect.fn("NormalizedPluginPageMaterializationTest.setup
     WORKSPACE_ID,
     pluginConnectionId,
     providerId,
-    descriptorFor(providerId),
+    pluginDescriptor,
     0,
     T0
   )
@@ -2262,6 +2264,72 @@ describe("normalized plugin page materialization", () => {
         return yield* Effect.die("expected backward Clockify interval failure")
       }
       assert.strictEqual(failure.diagnosticCode, "normalized-time-entry-timestamp-invalid")
+    })))
+
+  it.effect("projects Clockify action availability from the negotiated source descriptor", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      yield* setupConnection(CLOCKIFY_PLUGIN_ID, "clockify")
+      const entityId = Schema.decodeSync(EntityId)("01890f6f-6d6a-7cc0-98d3-000000000259")
+      const sourceRevision = Schema.decodeSync(SourceRevision)({
+        providerId: "clockify",
+        pluginConnectionId: CLOCKIFY_PLUGIN_ID,
+        vendorImmutableId: "time-entry-capabilities",
+        revision: "clockify-capabilities-revision",
+        sourceUrl: "https://app.clockify.me/tracker",
+        firstObservedAt: "2026-07-19T09:02:00.000Z",
+        lastObservedAt: "2026-07-19T09:02:00.000Z",
+        synchronizedAt: "2026-07-19T09:02:00.000Z",
+        normalizationSchemaVersion: 1
+      })
+      yield* persistence.entities.create(WORKSPACE_ID, {
+        entityId,
+        entityType: "time-entry",
+        sourceRevision,
+        createdAt: T2
+      })
+      yield* persistence.deliveryGraph.write(WORKSPACE_ID, {
+        entityProjections: [{
+          projection: {
+            workspaceId: WORKSPACE_ID,
+            entityId,
+            projectionRevision: 1,
+            sourceEntityRevision: 1,
+            supersedesProjectionRevision: null,
+            projectionSchemaVersion: 3,
+            entityState: "present",
+            entityType: "time-entry",
+            displayKey: "time-entry-capabilities",
+            title: "Capability projection",
+            details: {
+              _tag: "time-entry",
+              durationMinutes: 60,
+              billable: true,
+              approvalState: "pending"
+            }
+          },
+          recordedAt: "2026-07-19T09:02:00.000Z"
+        }],
+        nodes: [],
+        evidenceItems: [],
+        evidenceClaims: [],
+        relationships: []
+      })
+      const inspection = yield* makeDeliveryGraphInspection
+      const historical = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isFalse(historical.sourceActionsAvailable)
+
+      yield* persistence.pluginRuntime.acceptPluginDescriptor(
+        WORKSPACE_ID,
+        CLOCKIFY_PLUGIN_ID,
+        "clockify",
+        clockifyReadPluginDescriptor,
+        1,
+        T3
+      )
+      const current = yield* inspection.workspaceEntity({ workspaceId: WORKSPACE_ID, entityId })
+      assert.isTrue(current.sourceActionsAvailable)
     })))
 
   it.effect("retains complete bounded Jira detail across two inspection revisions", () =>

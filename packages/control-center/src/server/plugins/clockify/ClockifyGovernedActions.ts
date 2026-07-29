@@ -51,6 +51,7 @@ const ENTITY_TYPE = "time-entry"
 const CORRECT_ASSOCIATION = "correct-association"
 const RECORD_APPROVAL = "record-approval"
 const AUTHORIZATION_OBSERVATION = "authorization"
+const CLOCKIFY_RATE_LIMIT_RETRY_MAX_DELAY_MILLIS = 5_000
 const ReconciliationLocator = Schema.TemplateLiteralParser([
   "clockify-correction:v1:",
   PluginActionPayloadDigest
@@ -300,6 +301,21 @@ const succeeded = (
   receipt: succeededReceipt(payload, digest, observedAt)
 })
 
+const failed = (
+  payload: ClockifyActionPayload,
+  digest: string,
+  observedAt: DateTime.Utc,
+  safeSummary: string
+): PluginActionDispatchResultV1 => ({
+  _tag: "confirmed",
+  receipt: {
+    status: "failed",
+    providerOperationId: operationId(payload, digest),
+    safeSummary,
+    observedAt
+  }
+})
+
 const decodeAuthorized = Effect.fn("ClockifyGovernedActions.decodeAuthorized")(function*(
   input: GovernedActionsInput,
   request: AuthorizedPluginActionV1
@@ -520,11 +536,32 @@ export const makeClockifyGovernedActions = (
     request: AuthorizedPluginActionV1
   ): Effect.fn.Return<PluginActionDispatchResultV1, PluginFailure> {
     const payload = yield* decodeAuthorized(input, request)
+    const currentResult = yield* Effect.gen(function*() {
+      const snapshot = yield* readSnapshot(input, payload.entryId)
+      const revision = yield* snapshotRevision(snapshot, input.cryptoService)
+      return { snapshot, revision }
+    }).pipe(Effect.result)
+    if (currentResult._tag === "Failure") {
+      return failed(
+        payload,
+        request.payloadDigest,
+        yield* DateTime.now,
+        `Clockify entry ${payload.entryId} could not be verified before the authorized action`
+      )
+    }
+    const current = currentResult.success.snapshot
+    const currentRevision = currentResult.success.revision
     if (payload._tag === RECORD_APPROVAL) {
+      if (currentRevision !== payload.expectedRevision) {
+        return failed(
+          payload,
+          request.payloadDigest,
+          yield* DateTime.now,
+          `Clockify entry ${payload.entryId} changed before the Control Center decision was recorded`
+        )
+      }
       return succeeded(payload, request.payloadDigest, request.authorizedAt)
     }
-    const current = yield* readSnapshot(input, payload.entryId)
-    const currentRevision = yield* snapshotRevision(current, input.cryptoService)
     if (
       samePreservedFields(current, payload) &&
       current.description === payload.correctedDescription &&
@@ -539,7 +576,12 @@ export const makeClockifyGovernedActions = (
       current.end === null ||
       !samePreservedFields(current, payload)
     ) {
-      return yield* conflict("clockify-time-entry-changed-before-update")
+      return failed(
+        payload,
+        request.payloadDigest,
+        yield* DateTime.now,
+        `Clockify entry ${payload.entryId} changed before the authorized correction`
+      )
     }
 
     const updateTimeEntry = () =>
@@ -564,31 +606,41 @@ export const makeClockifyGovernedActions = (
           }
         )
       )
-    const update = yield* updateTimeEntry().pipe(
-      Effect.catchTag("PluginRateLimitFailure", (failure) =>
-        DateTime.now.pipe(
-          Effect.flatMap((now) =>
-            Effect.sleep(Duration.millis(Math.max(
-              0,
-              DateTime.toEpochMillis(failure.retryAt) - DateTime.toEpochMillis(now)
-            )))
-          ),
-          Effect.andThen(updateTimeEntry())
-        )),
-      Effect.result
-    )
+    const firstUpdate = yield* updateTimeEntry().pipe(Effect.result)
+    const update = yield* Effect.gen(function*() {
+      if (
+        firstUpdate._tag !== "Failure" ||
+        firstUpdate.failure._tag !== "PluginRateLimitFailure"
+      ) {
+        return firstUpdate
+      }
+      const rateLimitFailure = firstUpdate.failure
+      const now = yield* DateTime.now
+      const delayMillis = Math.max(
+        0,
+        DateTime.toEpochMillis(rateLimitFailure.retryAt) - DateTime.toEpochMillis(now)
+      )
+      if (delayMillis > CLOCKIFY_RATE_LIMIT_RETRY_MAX_DELAY_MILLIS) return firstUpdate
+      yield* Effect.sleep(Duration.millis(delayMillis))
+      return yield* updateTimeEntry().pipe(Effect.result)
+    })
     const observedAt = yield* DateTime.now
     if (update._tag === "Failure") {
+      if (update.failure._tag === "PluginRateLimitFailure") {
+        return failed(
+          payload,
+          request.payloadDigest,
+          observedAt,
+          `Clockify rate limited the authorized correction for entry ${payload.entryId} before applying it`
+        )
+      }
       if (isConfirmedClockifyRejection(update.failure)) {
-        return {
-          _tag: "confirmed",
-          receipt: {
-            status: "failed",
-            providerOperationId: operationId(payload, request.payloadDigest),
-            safeSummary: `Clockify rejected the authorized correction for entry ${payload.entryId}`,
-            observedAt
-          }
-        }
+        return failed(
+          payload,
+          request.payloadDigest,
+          observedAt,
+          `Clockify rejected the authorized correction for entry ${payload.entryId}`
+        )
       }
       if (
         update.failure._tag === "PluginTimeoutFailure" ||
