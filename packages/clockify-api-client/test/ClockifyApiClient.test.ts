@@ -85,8 +85,12 @@ describe("ClockifyApiClient", () => {
     return Effect.gen(function*() {
       const client = yield* ClockifyApiClient
       const entry = yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: true })
+      yield* client.getTimeEntry("workspace-1", "entry-1")
+      yield* client.getTimeEntry("workspace-1", "entry-1", { hydrated: false })
       expect(entry.id).toBe("entry-1")
       expect(new Map(requests[0]?.urlParams ?? []).get("hydrated")).toBe("true")
+      expect(new Map(requests[1]?.urlParams ?? []).has("hydrated")).toBe(false)
+      expect(new Map(requests[2]?.urlParams ?? []).get("hydrated")).toBe("false")
     }).pipe(
       Effect.provide(clientLayer({
         status: 200,
