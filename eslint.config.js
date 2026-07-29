@@ -168,6 +168,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/control-center/src/server/plugins/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-structured-reconciliation-key-schema": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/client/**/*.{ts,tsx}"],
     rules: {
       "local-rules/no-direct-mutation-proof-read": "error",

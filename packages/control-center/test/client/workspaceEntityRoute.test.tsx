@@ -32,6 +32,7 @@ import {
   PrReviewSuggestionRevisionPage,
   PrReviewSuggestionRevisionSequence
 } from "../../src/domain/prReviewRevision.js"
+import { Revision } from "../../src/domain/sourceRevision.js"
 import { presentWorkspaceEntity } from "../../src/client/entities/presentWorkspaceEntity.js"
 import { presentWorkspacePipelineExecution } from "../../src/client/entities/presentWorkspacePipelineExecution.js"
 import { presentWorkspacePullRequest } from "../../src/client/entities/presentWorkspacePullRequest.js"
@@ -521,6 +522,7 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
         durationMinutes: 135,
         billable: true,
         approvalState: "approved",
+        locked: true,
         projectId: "project-payments",
         userId: "clockify-user-mina",
         startedAt: "2026-07-14T07:45:00.000Z",
@@ -558,6 +560,12 @@ const clockifyInspection: Inspection = Schema.decodeUnknownSync(WorkspaceEntityI
   },
   isSourceCurrent: true,
   freshness: null,
+  clockifyApproval: {
+    actionId: "01890f6f-6d6a-7cc0-98d2-000000000094",
+    decision: "approved",
+    rationale: "Reviewed against the delivery record.",
+    decidedAt: "2026-07-14T10:05:00.000Z"
+  },
   graph: {
     truncated: false,
     nodes: [
@@ -1037,6 +1045,7 @@ describe("canonical workspace entity", () => {
         billableLabel: "Billable",
         contributorLabel: "Mina Ortiz",
         durationLabel: "2h 15m",
+        lockLabel: "Locked",
         projectLabel: "project-payments",
         rollupLabel: "1 visible entry · 135 exact minutes",
         totalMinutes: 135
@@ -1046,10 +1055,29 @@ describe("canonical workspace entity", () => {
       expect.objectContaining({ key: "OPS-429", state: "inferred" })
     ])
     expect(presentation.clockifyTimeEntry?.description).toBe("Review payment safeguards")
-
-    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
     const timeEntryDetails = clockifyInspection.entity.projection.details
     if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const historicalDetails = { ...timeEntryDetails }
+    delete historicalDetails.locked
+    const historicalProjection = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      entity: {
+        ...clockifyInspection.entity,
+        projection: {
+          ...clockifyInspection.entity.projection,
+          details: historicalDetails
+        }
+      }
+    })
+    expect(historicalProjection.clockifyTimeEntry?.lockLabel).toBe("Lock state not synchronized")
+    const advancedRevision = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
+      ...clockifyInspection,
+      clockifyApproval: null,
+      source: { ...clockifyInspection.source, revision: Revision.make("clockify-revision-5") }
+    })
+    expect(advancedRevision.clockifyTimeEntry?.approvalLabel).toBe("Pending")
+
+    const sourceDescription = `Full Clockify description ${"detail ".repeat(90)}end-marker`
     const detailedPresentation = presentWorkspaceEntity(WORKSET_WORKSPACE_ID, {
       ...clockifyInspection,
       entity: {
@@ -1649,7 +1677,7 @@ describe("canonical workspace entity", () => {
     expect(host.querySelectorAll("a[href*='bucket'], a[href*='artifact'], a[href*='logs']")).toHaveLength(0)
   })
 
-  it("renders a read-only Clockify ledger and keeps an unattributed entry visible", async () => {
+  it("renders a Clockify ledger with distinct Control Center approval and unattributed state", async () => {
     const unattributedState = {
       ...clockifyState,
       inspection: {
@@ -1667,8 +1695,31 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("Mina Ortiz")
     expect(host.textContent).toContain("Unattributed")
     expect(host.textContent).toContain("The entry remains visible")
-    expect(host.textContent).toContain("Corrections and approval remain read-only")
+    expect(host.textContent).toContain("Locked")
+    expect(host.textContent).toContain("Control Center approval: Approved")
+    expect(host.textContent).toContain("Reviewed against the delivery record.")
     expect(host.querySelector("input, textarea, select")).toBeNull()
+
+    const timeEntryDetails = clockifyInspection.entity.projection.details
+    if (timeEntryDetails._tag !== "time-entry") throw new Error("Expected Clockify time-entry details")
+    const runningState = {
+      ...clockifyState,
+      inspection: {
+        ...clockifyInspection,
+        entity: {
+          ...clockifyInspection.entity,
+          projection: {
+            ...clockifyInspection.entity.projection,
+            details: { ...timeEntryDetails, locked: false, endedAt: null }
+          }
+        }
+      }
+    } satisfies WorkspaceEntityState
+    const runningHost = await renderView(() => undefined, runningState)
+    expect(runningHost.textContent).toContain("Timer running")
+    expect(runningHost.textContent).toContain("Unlocked")
+    expect(runningHost.textContent).not.toContain("Locked")
+    expect(runningHost.textContent).toContain("Control Center approval: Approved")
   })
 
   it("renders the full Clockify source description", async () => {

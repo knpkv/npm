@@ -1028,3 +1028,49 @@ await assertRuleDiagnostics({
   filePath: "packages/control-center/src/server/eslint-base64-nonschema-valid.ts",
   ruleId: "local-rules/require-bounded-base64-schema"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Schema from "effect/Schema"
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const UnrelatedLocator = Schema.TemplateLiteralParser(["unrelated:", Schema.String])
+    const reconciliationKey = (digest) =>
+      PluginActionReconciliationKey.make(\`clockify-correction:v1:\${digest}\`)
+    const matches = request.reconciliationKey === reconciliationKey(request.payloadDigest)
+  `,
+  expected: 1,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-locator-invalid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Schema from "effect/Schema"
+    import { PluginActionPayloadDigest, PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const ReconciliationLocator = Schema.TemplateLiteralParser([
+      "clockify-correction:v1:",
+      PluginActionPayloadDigest
+    ])
+    const reconciliationKey = (digest) =>
+      PluginActionReconciliationKey.make(
+        Schema.encodeSync(ReconciliationLocator)(["clockify-correction:v1:", digest])
+      )
+    const locator = Schema.decodeUnknownSync(ReconciliationLocator)(request.reconciliationKey)
+    const matches = locator[1] === request.payloadDigest
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/plugins/clockify/eslint-structured-locator-valid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { PluginActionReconciliationKey } from "../../../domain/plugins/index.js"
+    const reconciliationKey = (providerToken) =>
+      PluginActionReconciliationKey.make(providerToken)
+    const matches = request.reconciliationKey === reconciliationKey(providerToken)
+  `,
+  expected: 0,
+  filePath: "packages/control-center/src/server/plugins/provider/eslint-opaque-locator-valid.ts",
+  ruleId: "local-rules/require-structured-reconciliation-key-schema"
+})

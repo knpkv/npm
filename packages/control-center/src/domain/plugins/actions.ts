@@ -103,6 +103,7 @@ export const PluginAcceptedProviderReceiptV1 = Schema.Struct({
 /** Terminal provider receipt safe to persist and display without raw response data. */
 export const PluginTerminalProviderReceiptV1 = Schema.Struct({
   ...providerReceiptFields,
+  observationBasis: Schema.optionalKey(Schema.Literal("authorization")),
   status: Schema.Literals(["succeeded", "failed", "cancelled"])
 })
 

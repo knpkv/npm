@@ -1,3 +1,4 @@
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
@@ -18,6 +19,7 @@ import {
   EntityId,
   EnvironmentId,
   EvidenceId,
+  GovernedActionId,
   PersonId,
   RelationshipId,
   RelationshipRepairProposalId,
@@ -180,12 +182,26 @@ export const WorkspaceEntityActivity = Schema.Struct({
 /** Decoded exact entity activity. */
 export type WorkspaceEntityActivity = typeof WorkspaceEntityActivity.Type
 
+/** Current revision-scoped Control Center approval for a Clockify entry. */
+export const ClockifyApproval = Schema.Struct({
+  actionId: GovernedActionId,
+  decision: Schema.Literals(["approved", "rejected"]),
+  rationale: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
+  decidedAt: UtcTimestamp
+}).annotate({ identifier: "ClockifyApproval" })
+
+/** Decoded browser-safe Clockify approval projection. */
+export type ClockifyApproval = typeof ClockifyApproval.Type
+
 /** Canonical provider-neutral full-page read model for one workspace entity. */
 export const WorkspaceEntityInspection = Schema.Struct({
   entity: WorkspaceEntityProjection,
   source: SourceRevision,
   isSourceCurrent: Schema.Boolean,
   freshness: Schema.NullOr(Freshness),
+  clockifyApproval: Schema.NullOr(ClockifyApproval).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null))
+  ),
   graph: WorkspaceEntityGraph,
   activity: WorkspaceEntityActivity
 }).annotate({ identifier: "WorkspaceEntityInspection" })

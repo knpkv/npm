@@ -1104,6 +1104,126 @@ describe("governed action writer", () => {
             : assert.fail("Expected succeeded command")
         }
       })
+      const matching = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "transition",
+        limit: 20
+      })
+      const differentKind = yield* repository.readLatestTerminalByTarget({
+        workspaceId: WORKSPACE_ID,
+        providerId: "jira",
+        targetEntityId: ENTITY_ID,
+        actionKind: "record-approval",
+        limit: 20
+      })
+      assert.deepStrictEqual(matching.map(({ envelope }) => envelope.actionId), [ACTION_ID])
+      assert.deepStrictEqual(differentKind, [])
+    })))
+
+  it.effect("physically binds authorization-based provider outcomes to their terminal receipt", () =>
+    withRepository(Effect.gen(function*() {
+      yield* seedAuthorityRoots()
+      const repository = yield* GovernedActionRepository
+      const envelope = yield* makeEnvelope(ACTION_ID)
+      const proposal = makeProposalInput(envelope)
+      yield* repository.commit(proposal)
+      const authorizationInput = makeAuthorizationInput(proposal, makeAuthorization(envelope))
+      yield* repository.commit(authorizationInput)
+      yield* repository.commit(
+        makeStartInput(authorizationInput, yield* makeDispatchCompanion(envelope))
+      )
+
+      const { sql } = yield* Database
+      const permitTokenDigest = "d".repeat(64)
+      yield* sql`INSERT INTO governed_action_execution_leases (
+        workspace_id, action_id, attempt_id, start_transition_id,
+        permit_token_digest, runtime_authority_token, recovery_capability_version,
+        created_at, dispatch_deadline, lease_expires_at, recovery_eligible_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, ${ATTEMPT_ID}, ${START_TRANSITION_ID},
+        ${permitTokenDigest}, ${`sha256:${"d".repeat(64)}`}, 1,
+        '2026-07-15T10:02:00.000Z', '2026-07-15T10:02:10.000Z',
+        '2026-07-15T10:02:20.000Z', '2026-07-15T10:02:30.000Z'
+      )`
+
+      const insertOutcome = (
+        outcomeId: string,
+        resultKind: string,
+        outcome: unknown,
+        observedAt: string
+      ) =>
+        sql`INSERT INTO governed_action_provider_outcomes (
+        workspace_id, action_id, outcome_id, source_kind, permit_token_digest,
+        recovery_claim_token_digest, result_kind, schema_version, outcome_json,
+        outcome_digest, expected_command_digest, observed_at, received_at
+      ) VALUES (
+        ${WORKSPACE_ID}, ${ACTION_ID}, ${outcomeId}, 'dispatch', ${permitTokenDigest},
+        NULL, ${resultKind}, 1, ${JSON.stringify(outcome)}, ${"e".repeat(64)},
+        ${`sha256:${"f".repeat(64)}`}, ${observedAt}, '2026-07-15T10:02:02.000Z'
+      )`
+      const authorizationReceipt = {
+        _tag: "confirmed",
+        receipt: {
+          status: "succeeded",
+          providerOperationId: "control-center-authorization-outcome",
+          observationBasis: "authorization",
+          safeSummary: "Recorded the authorized local decision",
+          observedAt: "2026-07-15T10:01:00.000Z"
+        }
+      }
+
+      const nonTerminal = yield* insertOutcome(
+        "forged-non-terminal-authorization-observation",
+        "manual-unknown",
+        authorizationReceipt,
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedStatus = yield* insertOutcome(
+        "forged-authorization-observation-status",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: { ...authorizationReceipt.receipt, status: "failed" }
+        },
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedReceiptTime = yield* insertOutcome(
+        "forged-authorization-observation-receipt-time",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: {
+            ...authorizationReceipt.receipt,
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        },
+        "2026-07-15T10:01:00.000Z"
+      ).pipe(Effect.result)
+      const mismatchedAuthorizationTime = yield* insertOutcome(
+        "forged-authorization-observation-durable-time",
+        "succeeded",
+        {
+          ...authorizationReceipt,
+          receipt: {
+            ...authorizationReceipt.receipt,
+            observedAt: "2026-07-15T10:02:01.000Z"
+          }
+        },
+        "2026-07-15T10:02:01.000Z"
+      ).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(nonTerminal))
+      assert.isTrue(Result.isFailure(mismatchedStatus))
+      assert.isTrue(Result.isFailure(mismatchedReceiptTime))
+      assert.isTrue(Result.isFailure(mismatchedAuthorizationTime))
+      yield* insertOutcome(
+        "valid-authorization-observation",
+        "succeeded",
+        authorizationReceipt,
+        "2026-07-15T10:01:00.000Z"
+      )
     })))
 
   it.effect("quarantines invalid stored authorization before start on read and exact replay", () =>

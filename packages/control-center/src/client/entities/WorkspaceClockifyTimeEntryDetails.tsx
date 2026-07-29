@@ -27,7 +27,7 @@ const Section = ({
   </section>
 )
 
-/** Render one immutable Clockify entry as a quiet, deterministic time ledger. */
+/** Render one immutable Clockify entry and its Control Center-owned approval. */
 export const WorkspaceClockifyTimeEntryDetails = ({
   timeEntry
 }: {
@@ -82,6 +82,10 @@ export const WorkspaceClockifyTimeEntryDetails = ({
             <dt>State</dt>
             <dd>{timeEntry.timerLabel}</dd>
           </div>
+          <div>
+            <dt>Provider lock</dt>
+            <dd>{timeEntry.lockLabel}</dd>
+          </div>
         </dl>
       </div>
     </Section>
@@ -124,8 +128,8 @@ export const WorkspaceClockifyTimeEntryDetails = ({
     </Section>
 
     <aside className={styles.readOnly}>
-      <strong>{timeEntry.approvalLabel}</strong>
-      <span>Corrections and approval remain read-only here. Make changes in Clockify.</span>
+      <strong>Control Center approval: {timeEntry.approvalLabel}</strong>
+      <span>{timeEntry.approvalDetail}</span>
     </aside>
   </article>
 )

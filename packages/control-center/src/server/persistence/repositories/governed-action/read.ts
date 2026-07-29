@@ -26,7 +26,12 @@ import {
   type GovernedActionQuarantineRecordKind,
   governedActionRecordError
 } from "./codec.js"
-import type { GovernedActionIdempotencyReadInput, GovernedActionReadInput, GovernedActionRecord } from "./contract.js"
+import type {
+  GovernedActionIdempotencyReadInput,
+  GovernedActionReadInput,
+  GovernedActionRecord,
+  GovernedActionTargetReadInput
+} from "./contract.js"
 import { captureMalformedGovernedActionRow } from "./quarantine.js"
 import {
   GovernedActionAttemptRow,
@@ -506,5 +511,37 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     return yield* read({ workspaceId: request.workspaceId, actionId })
   })
 
-  return { read, readByIdempotencyKey }
+  const readLatestTerminalByTarget = Effect.fn(
+    "GovernedActionReader.readLatestTerminalByTarget"
+  )(function*(request: GovernedActionTargetReadInput) {
+    const rows = yield* sql<Record<string, unknown>>`SELECT action_id AS actionId
+      FROM governed_actions
+      WHERE workspace_id = ${request.workspaceId}
+        AND provider_id = ${request.providerId}
+        AND target_entity_id = ${request.targetEntityId}
+        AND terminal_status = 'succeeded'
+        AND json_extract(envelope_json, '$.proposal.request.actionKind') = ${request.actionKind}
+      ORDER BY updated_at DESC, action_id DESC
+      LIMIT ${request.limit}`
+    const identities = yield* Schema.decodeUnknownEffect(
+      Schema.Array(Schema.Struct({ actionId: GovernedActionId })).check(
+        Schema.isMaxLength(request.limit)
+      )
+    )(rows).pipe(
+      Effect.mapError(() =>
+        new PersistedRecordError({
+          workspaceId: request.workspaceId,
+          recordKind: "governed-action",
+          recordKey: request.targetEntityId,
+          diagnosticCode: "governed-action-schema-invalid"
+        })
+      )
+    )
+    return yield* Effect.forEach(
+      identities,
+      ({ actionId }) => read({ workspaceId: request.workspaceId, actionId })
+    )
+  })
+
+  return { read, readByIdempotencyKey, readLatestTerminalByTarget }
 })

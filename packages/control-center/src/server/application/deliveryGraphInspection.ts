@@ -21,6 +21,7 @@ import {
   DeliveryGraphInspection
 } from "../api/ApplicationServices.js"
 import { Persistence } from "../persistence/Persistence.js"
+import { projectClockifyApproval } from "./clockifyApprovalProjection.js"
 import { mapPersistenceRead } from "./errors.js"
 import { presentTimelineEvent } from "./timelineReads.js"
 
@@ -166,12 +167,28 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
       limit: 21,
       to: null
     }))
+    const clockifyActions = entityRecord.sourceRevision.providerId === "clockify"
+      ? yield* mapPersistenceRead(
+        persistence.governedActions.readLatestTerminalByTarget({
+          workspaceId: input.workspaceId,
+          providerId: "clockify",
+          targetEntityId: input.entityId,
+          actionKind: "record-approval",
+          limit: 20
+        })
+      )
+      : []
 
     return {
       entity: result.value.entity,
       source: entityRecord.sourceRevision,
       isSourceCurrent: Number(entityRecord.revision) === Number(result.value.entity.projection.sourceEntityRevision),
       freshness,
+      clockifyApproval: projectClockifyApproval(
+        input.entityId,
+        entityRecord.sourceRevision,
+        clockifyActions
+      ),
       graph: {
         truncated: result.value.truncated,
         nodes: result.value.nodes,

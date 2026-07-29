@@ -20,6 +20,7 @@ import {
   reconciliationInboxOutcomeCommand,
   reconciliationInboxOutcomeKind,
   reconciliationInboxOutcomeObservedAt,
+  reconciliationInboxOutcomeUsesAuthorizationObservation,
   ReconciliationResultKind
 } from "./reconciliation-outcome.js"
 import {
@@ -205,16 +206,22 @@ export const makeGovernedActionExecutionReconciliationInbox = Effect.gen(functio
           }
         }
 
+        const record = yield* transaction.read({ workspaceId: claim.workspaceId, actionId: claim.actionId })
+        const usesAuthorizationObservation = reconciliationInboxOutcomeUsesAuthorizationObservation(input.outcome)
+        const authorizationObservation = usesAuthorizationObservation &&
+          record.authorization !== null &&
+          DateTime.Equivalence(outcomeObservedAt, record.authorization.authorizedAt)
         if (
           DateTime.Order(input.receivedAt, now) > 0 ||
           DateTime.Order(outcomeObservedAt, input.receivedAt) > 0 ||
-          DateTime.Order(outcomeObservedAt, claim.claimedAt) < 0 ||
+          (usesAuthorizationObservation
+            ? !authorizationObservation
+            : DateTime.Order(outcomeObservedAt, claim.claimedAt) < 0) ||
           claim.expiredAt !== null ||
           DateTime.Order(input.receivedAt, claim.leaseExpiresAt) >= 0 ||
           claim.claimSequence !== claim.latestClaimSequence
         ) return yield* storeError(input.operation, "conflict")
 
-        const record = yield* transaction.read({ workspaceId: claim.workspaceId, actionId: claim.actionId })
         if (!isRecoverableState(record.head.state)) return yield* storeError(input.operation, "conflict")
         const command = reconciliationInboxOutcomeCommand(
           input.outcome,

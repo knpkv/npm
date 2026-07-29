@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream"
 
 import { PluginHealth } from "../../../domain/freshness.js"
 import {
+  PluginConfigurationFieldV1,
   PluginDiscoveryV1,
   PluginSyncPageV1,
   type PluginSyncRequestV1,
@@ -25,10 +26,11 @@ import {
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
 import { pluginCapabilityCodecsV1 } from "../PluginCapabilityCodecs.js"
-import type { PluginConnection, PluginConnectionV1 } from "../PluginConnection.js"
-import { buildPluginDefinitionLayer, definePluginV1 } from "../PluginDefinition.js"
+import type { PluginConnectionV1 } from "../PluginConnection.js"
+import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { makeClockifyGovernedActions } from "./ClockifyGovernedActions.js"
 import { type ClockifyReadProvider, makeClockifyReadProvider } from "./ClockifyReadProvider.js"
 import {
   digestClockifySyncScope,
@@ -67,84 +69,107 @@ export type ClockifyReadPluginConfiguration = typeof ClockifyReadPluginConfigura
 /** Negotiated production runtime and its scoped plugin layer. */
 export interface ClockifyReadPluginRuntime {
   readonly definition: PluginDefinitionV1
-  readonly layer: Layer.Layer<PluginConnection, PluginFailure, Crypto.Crypto>
+  readonly layer: Layer.Layer<PluginDefinitionServices, PluginFailure, Crypto.Crypto>
 }
 
 /** Descriptor persisted by provisioning before the runtime can be acquired. */
-export const clockifyReadPluginDescriptor = {
+const clockifyConfigurationFields = Schema.decodeUnknownSync(
+  Schema.Array(PluginConfigurationFieldV1)
+)([
+  {
+    _tag: "secret-reference",
+    key: "apiKey",
+    label: "API key",
+    description: "Owner-only Clockify API key resolved only for the scoped runtime.",
+    required: true,
+    secretKind: "token"
+  },
+  {
+    _tag: "url",
+    key: "webBaseUrl",
+    label: "Clockify site URL",
+    description: "Browser-facing Clockify root URL without credentials, query, or fragment.",
+    required: true
+  },
+  {
+    _tag: "text",
+    key: "workspaceId",
+    label: "Clockify workspace ID",
+    description: "Immutable Clockify workspace identifier read by this connection.",
+    required: true
+  },
+  {
+    _tag: "text",
+    key: "userIds",
+    label: "Clockify user IDs",
+    description: "Comma-separated immutable user IDs included in the bounded time-entry sync.",
+    required: true
+  },
+  {
+    _tag: "integer",
+    key: "pageSize",
+    label: "Time-entry page size",
+    description: "Maximum entries requested for each configured user in one provider page.",
+    required: true,
+    minimum: 1,
+    maximum: 50
+  },
+  {
+    _tag: "integer",
+    key: "maximumPages",
+    label: "Maximum time-entry pages",
+    description: "Hard provider-page limit for one snapshot sync.",
+    required: true,
+    minimum: 1,
+    maximum: 10
+  },
+  {
+    _tag: "integer",
+    key: "maximumConcurrency",
+    label: "Maximum concurrency",
+    description: "Maximum simultaneous user page reads and entry normalization operations.",
+    required: true,
+    minimum: 1,
+    maximum: 5
+  },
+  {
+    _tag: "integer",
+    key: "operationTimeoutMillis",
+    label: "Request timeout",
+    description: "Maximum milliseconds for each Clockify provider request.",
+    required: true,
+    minimum: 1_000,
+    maximum: 120_000
+  }
+])
+
+/** Historical read-only descriptor accepted for already-provisioned connections. */
+export const clockifyReadOnlyPluginDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
   contractVersion: { major: 1, minor: 0, patch: 0 },
   pluginId: "dev.knpkv.clockify.read",
   adapterVersion: { major: 0, minor: 1, patch: 0 },
   displayName: "Clockify time-entry reader",
-  configurationFields: [
-    {
-      _tag: "secret-reference",
-      key: "apiKey",
-      label: "API key",
-      description: "Owner-only Clockify API key resolved only for the scoped runtime.",
-      required: true,
-      secretKind: "token"
-    },
-    {
-      _tag: "url",
-      key: "webBaseUrl",
-      label: "Clockify site URL",
-      description: "Browser-facing Clockify root URL without credentials, query, or fragment.",
-      required: true
-    },
-    {
-      _tag: "text",
-      key: "workspaceId",
-      label: "Clockify workspace ID",
-      description: "Immutable Clockify workspace identifier read by this connection.",
-      required: true
-    },
-    {
-      _tag: "text",
-      key: "userIds",
-      label: "Clockify user IDs",
-      description: "Comma-separated immutable user IDs included in the bounded time-entry sync.",
-      required: true
-    },
-    {
-      _tag: "integer",
-      key: "pageSize",
-      label: "Time-entry page size",
-      description: "Maximum entries requested for each configured user in one provider page.",
-      required: true,
-      minimum: 1,
-      maximum: 50
-    },
-    {
-      _tag: "integer",
-      key: "maximumPages",
-      label: "Maximum time-entry pages",
-      description: "Hard provider-page limit for one snapshot sync.",
-      required: true,
-      minimum: 1,
-      maximum: 10
-    },
-    {
-      _tag: "integer",
-      key: "maximumConcurrency",
-      label: "Maximum concurrency",
-      description: "Maximum simultaneous user page reads and entry normalization operations.",
-      required: true,
-      minimum: 1,
-      maximum: 5
-    },
-    {
-      _tag: "integer",
-      key: "operationTimeoutMillis",
-      label: "Request timeout",
-      description: "Maximum milliseconds for each Clockify provider request.",
-      required: true,
-      minimum: 1_000,
-      maximum: 120_000
-    }
-  ],
+  configurationFields: clockifyConfigurationFields,
   capabilities: ["entity.read", "sync.incremental"].map((capabilityId) => ({
+    capabilityId,
+    supportedVersions: [1],
+    requirement: "required"
+  }))
+} satisfies unknown
+
+/** Current descriptor with governed correction and approval capabilities. */
+export const clockifyReadPluginDescriptor = {
+  ...clockifyReadOnlyPluginDescriptor,
+  adapterVersion: { major: 0, minor: 2, patch: 0 },
+  displayName: "Clockify time-entry integration",
+  capabilities: [
+    "entity.read",
+    "sync.incremental",
+    "action.propose",
+    "action.execute",
+    "action.reconcile"
+  ].map((capabilityId) => ({
     capabilityId,
     supportedVersions: [1],
     requirement: "required"
@@ -487,7 +512,10 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
     configurationSchema: ClockifyReadPluginConfiguration,
     capabilityCodecs: {
       entityRead: pluginCapabilityCodecsV1.entityRead,
-      syncIncremental: pluginCapabilityCodecsV1.syncIncremental
+      syncIncremental: pluginCapabilityCodecsV1.syncIncremental,
+      actionPropose: pluginCapabilityCodecsV1.actionPropose,
+      actionExecute: pluginCapabilityCodecsV1.actionExecute,
+      actionReconcile: pluginCapabilityCodecsV1.actionReconcile
     },
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
@@ -498,6 +526,12 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
           })
         }
         const cryptoService = yield* Crypto.Crypto
+        const governedActions = makeClockifyGovernedActions({
+          provider,
+          configuration: decoded,
+          userIds,
+          cryptoService
+        })
         const syncScopeDigest = yield* digestClockifySyncScope({
           maximumPages: decoded.maximumPages,
           pageSize: decoded.pageSize,
@@ -506,6 +540,7 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
         })
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
+          actionActorIdentity: governedActions.actionActorIdentity,
           discover: Effect.gen(function*() {
             const context = yield* readWorkspaceContext(provider, decoded, "clockify-discover")
             const discoveredAt = yield* DateTime.now
@@ -558,14 +593,9 @@ const makeRuntime = (provider: ClockifyReadProvider, configuration: unknown): Cl
               Effect.provideService(Crypto.Crypto, cryptoService)
             ),
           diff: Option.none(),
-          proposeAction: () => Effect.fail(unsupported("action.propose"))
+          proposeAction: governedActions.proposeAction
         }
-        const executor: AuthorizedPluginExecutorV1 = {
-          preflight: () => Effect.fail(unsupported("action.execute")),
-          executeAuthorizedAction: () => Effect.fail(unsupported("action.execute")),
-          requestCancellation: () => Effect.fail(unsupported("action.cancel")),
-          reconcile: () => Effect.fail(unsupported("action.reconcile"))
-        }
+        const executor: AuthorizedPluginExecutorV1 = governedActions.executor
         return { connection, executor }
       })
   })

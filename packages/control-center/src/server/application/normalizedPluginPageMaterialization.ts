@@ -117,6 +117,7 @@ const EntityAttributes = Schema.Struct({
   revision: OptionalText,
   durationMinutes: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   billable: Schema.optionalKey(Schema.Boolean),
+  locked: Schema.optionalKey(Schema.Boolean),
   approvalState: OptionalText,
   userId: OptionalText,
   projectId: OptionalText,
@@ -516,6 +517,7 @@ const entityPresentation = Effect.fn("NormalizedPluginPageMaterialization.entity
             : attributes.interval?.state === "running"
             ? "pending"
             : "not-required",
+          ...(typeof attributes.locked === "boolean" ? { locked: attributes.locked } : {}),
           description: optionalBounded(attributes.description, 4_000),
           projectId,
           ...(userId === null ? {} : { userId }),
@@ -713,7 +715,7 @@ const materializePipelineAuthority = Effect.fn(
 })
 
 const projectionSchemaVersion = (kind: DeliveryEntityKind): number =>
-  kind === "time-entry" ? 3 : kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
+  kind === "time-entry" ? 4 : kind === "page" || kind === "pipeline-execution" || kind === "pull-request" ? 2 : 1
 
 const requiresMaterializationBackfill = Effect.fn(
   "NormalizedPluginPageMaterialization.requiresMaterializationBackfill"

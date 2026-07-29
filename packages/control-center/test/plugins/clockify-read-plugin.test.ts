@@ -17,21 +17,38 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 import * as TestClock from "effect/testing/TestClock"
 import * as HttpClient from "effect/unstable/http/HttpClient"
+import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 
 import {
+  AuthorizedPluginActionV1,
   MaximumPluginSyncPageBytes,
   NormalizedPluginEventV1,
+  PluginActionReconciliationKey,
   PluginSyncPageV1,
   PluginSyncRequestV1,
+  ProposePluginActionRequestV1,
   ReadPluginEntityRequestV1
 } from "../../src/domain/plugins/index.js"
-import { makeClockifyReadPluginRuntimeFromProvider } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
+import { correctClockifyAssociationDescription } from "../../src/server/plugins/clockify/ClockifyGovernedActions.js"
+import {
+  clockifyReadOnlyPluginDescriptor,
+  clockifyReadPluginDescriptor,
+  makeClockifyReadPluginRuntimeFromProvider
+} from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { normalizeClockifyPerson } from "../../src/server/plugins/clockify/ClockifyTimeEntryNormalization.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
-import { PluginAuthenticationFailure, PluginOutageFailure } from "../../src/server/plugins/failures.js"
+import {
+  PluginAuthenticationFailure,
+  PluginConfigurationFailure,
+  PluginMalformedResponseFailure,
+  PluginOutageFailure,
+  PluginTimeoutFailure,
+  PluginUnknownOutcomeFailure
+} from "../../src/server/plugins/failures.js"
+import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
 
 const configuration = {
@@ -77,6 +94,15 @@ const baseProvider = (overrides: Partial<ClockifyReadProvider> = {}): ClockifyRe
         ? [timeEntry("entry-3", "user-2")]
         : []
     ),
+  updateTimeEntry: (_workspaceId, entryId, request) =>
+    Effect.succeed(timeEntry(entryId, "user-1", {
+      description: request.description,
+      timeInterval: {
+        start: request.start,
+        end: "2026-07-17T09:00:00.000Z",
+        duration: "PT1H"
+      }
+    })),
   ...overrides
 })
 
@@ -90,6 +116,15 @@ const withConnection = <Value, Error>(
   return use.pipe(Effect.provide(runtime.layer.pipe(Layer.provide(cryptoLayer))), Effect.scoped)
 }
 
+const withActionRuntime = <Value, Error>(
+  provider: ClockifyReadProvider,
+  use: Effect.Effect<Value, Error, PluginConnection | AuthorizedPluginExecutor>,
+  configured: unknown = configuration
+): Effect.Effect<Value, Error | PluginFailure> => {
+  const runtime = makeClockifyReadPluginRuntimeFromProvider(provider, configured)
+  return use.pipe(Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))), Effect.scoped)
+}
+
 const syncRequest = (checkpoint: string | null = null) =>
   Schema.decodeUnknownSync(PluginSyncRequestV1)({
     streamKey: "time-entries",
@@ -100,6 +135,32 @@ const entryReference = (entryId: string) =>
   Schema.decodeUnknownSync(ReadPluginEntityRequestV1)({
     entityType: "clockify.time-entry",
     vendorImmutableId: entryId
+  })
+
+const actionRequest = (
+  actionKind: "correct-association" | "record-approval",
+  expectedRevision: string,
+  payload: Readonly<Record<string, unknown>>
+) =>
+  Schema.decodeUnknownSync(ProposePluginActionRequestV1)({
+    actionKind,
+    target: {
+      entityType: "time-entry",
+      vendorImmutableId: "entry-1"
+    },
+    expectedRevision,
+    payload,
+    evidenceIds: []
+  })
+
+const authorize = (proposal: unknown, payloadDigest: string, suffix: string) =>
+  Schema.decodeUnknownSync(Schema.toType(AuthorizedPluginActionV1))({
+    proposal,
+    idempotencyKey: `clockify-action-${suffix}`,
+    payloadDigest,
+    authorizationId: `clockify-authorization-${suffix}`,
+    authorizedAt: DateTime.makeUnsafe("2026-07-29T08:00:00.000Z"),
+    expiresAt: DateTime.makeUnsafe("2026-07-29T09:00:00.000Z")
   })
 
 const ExpectedAttributes = Schema.Struct({
@@ -774,6 +835,442 @@ describe("ClockifyReadPlugin", () => {
       if (Result.isFailure(outcome)) assert.instanceOf(outcome.failure, PluginAuthenticationFailure)
     }))
 
+  it("canonicalizes exactly one supported leading Jira marker", () => {
+    assert.strictEqual(
+      correctClockifyAssociationDescription("[OLD-1] Investigate timeout", "OPS-42"),
+      "[OPS-42] Investigate timeout"
+    )
+    assert.strictEqual(
+      correctClockifyAssociationDescription("OLD-1: Investigate timeout", "OPS-42"),
+      "[OPS-42] Investigate timeout"
+    )
+    assert.strictEqual(correctClockifyAssociationDescription("[OLD-1]", "OPS-42"), "[OPS-42]")
+    assert.strictEqual(
+      correctClockifyAssociationDescription("note with OLD-1: inside", "OPS-42"),
+      "[OPS-42] note with OLD-1: inside"
+    )
+  })
+
+  it("keeps the historical descriptor read-only and advertises actions only on the current adapter", () => {
+    assert.deepEqual(
+      clockifyReadOnlyPluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental"]
+    )
+    assert.deepEqual(
+      clockifyReadPluginDescriptor.capabilities.map(({ capabilityId }) => capabilityId),
+      ["entity.read", "sync.incremental", "action.propose", "action.execute", "action.reconcile"]
+    )
+    assert.deepEqual(clockifyReadOnlyPluginDescriptor.adapterVersion, { major: 0, minor: 1, patch: 0 })
+    assert.deepEqual(clockifyReadPluginDescriptor.adapterVersion, { major: 0, minor: 2, patch: 0 })
+  })
+
+  it.live("bounds governed provider reads with the configured operation timeout", () =>
+    Effect.gen(function*() {
+      const outcome = yield* withActionRuntime(
+        baseProvider({ getTimeEntry: () => Effect.never }),
+        PluginConnection.pipe(
+          Effect.flatMap((connection) =>
+            connection.proposeAction(
+              actionRequest("record-approval", "expected-revision", {
+                decision: "approved",
+                rationale: "Reviewed"
+              })
+            )
+          )
+        ),
+        { ...configuration, operationTimeoutMillis: 1_000 }
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(outcome))
+      if (Result.isFailure(outcome)) assert.instanceOf(outcome.failure, PluginTimeoutFailure)
+    }))
+
+  it.effect("rejects invalid correction proposals before any provider mutation", () =>
+    Effect.gen(function*() {
+      const cases = [{
+        name: "missing",
+        entry: Option.none(),
+        deriveRevision: false,
+        expectedRevision: "missing-revision",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "running",
+        entry: Option.some(timeEntry("entry-1", "user-1", {
+          timeInterval: {
+            start: "2026-07-17T08:00:00.000Z",
+            end: null,
+            duration: null
+          }
+        })),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "locked",
+        entry: Option.some(timeEntry("entry-1", "user-1", { isLocked: true })),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "unsupported-type",
+        entry: Option.some(timeEntry("entry-1", "user-1", { type: "HOLIDAY" })),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "stale-revision",
+        entry: Option.some(timeEntry("entry-1")),
+        deriveRevision: false,
+        expectedRevision: "stale-revision",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "no-op",
+        entry: Option.some(timeEntry("entry-1", "user-1", {
+          description: "[OPS-42] Work on entry-1"
+        })),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "wrong-workspace",
+        entry: Option.some(timeEntry("entry-1", "user-1", { workspaceId: "other-workspace" })),
+        deriveRevision: false,
+        expectedRevision: "wrong-workspace-revision",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "unconfigured-user",
+        entry: Option.some(timeEntry("entry-1", "user-9")),
+        deriveRevision: false,
+        expectedRevision: "unconfigured-user-revision",
+        jiraIssueKey: "OPS-42"
+      }, {
+        name: "invalid-key",
+        entry: Option.some(timeEntry("entry-1")),
+        deriveRevision: true,
+        expectedRevision: "",
+        jiraIssueKey: "ops-42"
+      }] satisfies ReadonlyArray<{
+        readonly name: string
+        readonly entry: Option.Option<unknown>
+        readonly deriveRevision: boolean
+        readonly expectedRevision: string
+        readonly jiraIssueKey: string
+      }>
+
+      for (const fixture of cases) {
+        const updates = yield* Ref.make(0)
+        const outcome = yield* withActionRuntime(
+          baseProvider({
+            getTimeEntry: () => Effect.succeed(fixture.entry),
+            updateTimeEntry: () =>
+              Ref.update(updates, (count) => count + 1).pipe(
+                Effect.andThen(Effect.die(`invalid ${fixture.name} proposal mutated Clockify`))
+              )
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const expectedRevision = fixture.deriveRevision
+              ? yield* connection.readEntity(entryReference("entry-1")).pipe(
+                Effect.flatMap((result) =>
+                  result._tag === "found"
+                    ? Effect.succeed(result.event.revision)
+                    : Effect.die(`expected readable ${fixture.name} entry`)
+                )
+              )
+              : fixture.expectedRevision
+            return yield* connection.proposeAction(
+              actionRequest("correct-association", expectedRevision, {
+                jiraIssueKey: fixture.jiraIssueKey
+              })
+            )
+          })
+        ).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(outcome), fixture.name)
+        assert.strictEqual(yield* Ref.get(updates), 0, fixture.name)
+      }
+    }))
+
+  it.effect("corrects one association and makes an identical replay mutation-free", () =>
+    Effect.gen(function*() {
+      const state = yield* Ref.make(timeEntry("entry-1", "user-1", {
+        description: "[OLD-1] Investigate timeout"
+      }))
+      const updates = yield* Ref.make<ReadonlyArray<{ readonly description: string; readonly start: string }>>([])
+      const provider = baseProvider({
+        getTimeEntry: () => Ref.get(state).pipe(Effect.map(Option.some)),
+        updateTimeEntry: (_workspaceId, _entryId, request) =>
+          Ref.update(updates, (calls) => [...calls, request]).pipe(
+            Effect.andThen(
+              Ref.updateAndGet(state, (current) => ({
+                ...current,
+                description: request.description,
+                timeInterval: { ...current.timeInterval, start: request.start }
+              }))
+            )
+          )
+      })
+
+      yield* withActionRuntime(
+        provider,
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          if (connection.actionActorIdentity === undefined) {
+            return yield* Effect.die("expected Clockify action actor identity")
+          }
+          assert.deepStrictEqual(yield* connection.actionActorIdentity, {
+            providerId: "clockify",
+            providerAccountId: "workspace-1",
+            principal: "user-1"
+          })
+          const current = yield* connection.readEntity(entryReference("entry-1"))
+          if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+          const proposal = yield* connection.proposeAction(
+            actionRequest("correct-association", current.event.revision, { jiraIssueKey: "OPS-42" })
+          )
+          const authorized = authorize(proposal, proposal.payloadDigest, "correct")
+          const preflight = yield* executor.preflight(authorized)
+          assert.strictEqual(preflight._tag, "ready")
+          const first = yield* executor.executeAuthorizedAction(authorized)
+          const replayPreflight = yield* executor.preflight(authorized)
+          const replay = yield* executor.executeAuthorizedAction(authorized)
+          assert.strictEqual(first._tag, "confirmed")
+          assert.strictEqual(replayPreflight._tag, "blocked")
+          assert.strictEqual(replay._tag, "confirmed")
+          if (first._tag === "confirmed" && replay._tag === "confirmed") {
+            assert.strictEqual(first.receipt.status, "succeeded")
+            assert.strictEqual(first.receipt.providerOperationId, replay.receipt.providerOperationId)
+          }
+        })
+      )
+
+      const calls = yield* Ref.get(updates)
+      assert.lengthOf(calls, 1)
+      assert.deepEqual(Object.keys(calls[0] ?? {}).sort(), ["description", "start"])
+      assert.strictEqual(calls[0]?.description, "[OPS-42] Investigate timeout")
+    }))
+
+  it.effect("blocks authorized identity drift without hiding malformed provider data", () =>
+    Effect.gen(function*() {
+      const cases: ReadonlyArray<{
+        readonly name: string
+        readonly changed: unknown
+        readonly expected: "blocked" | "malformed"
+      }> = [{
+        name: "workspace drift",
+        changed: timeEntry("entry-1", "user-1", { workspaceId: "other-workspace" }),
+        expected: "blocked"
+      }, {
+        name: "user drift",
+        changed: timeEntry("entry-1", "user-9"),
+        expected: "blocked"
+      }, {
+        name: "entry drift",
+        changed: timeEntry("entry-2", "user-1"),
+        expected: "blocked"
+      }, {
+        name: "malformed timestamp",
+        changed: timeEntry("entry-1", "user-1", {
+          timeInterval: {
+            start: "not-a-timestamp",
+            end: "2026-07-17T09:00:00.000Z",
+            duration: "PT1H"
+          }
+        }),
+        expected: "malformed"
+      }]
+
+      for (const fixture of cases) {
+        const state = yield* Ref.make<unknown>(timeEntry("entry-1"))
+        const updates = yield* Ref.make(0)
+        yield* withActionRuntime(
+          baseProvider({
+            getTimeEntry: () => Ref.get(state).pipe(Effect.map(Option.some)),
+            updateTimeEntry: () =>
+              Ref.update(updates, (count) => count + 1).pipe(
+                Effect.andThen(Effect.die(`${fixture.name} mutated Clockify`))
+              )
+          }),
+          Effect.gen(function*() {
+            const connection = yield* PluginConnection
+            const executor = yield* AuthorizedPluginExecutor
+            const current = yield* connection.readEntity(entryReference("entry-1"))
+            if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+            const proposal = yield* connection.proposeAction(
+              actionRequest("correct-association", current.event.revision, { jiraIssueKey: "OPS-42" })
+            )
+            const authorized = authorize(proposal, proposal.payloadDigest, fixture.name)
+            yield* Ref.set(state, fixture.changed)
+            const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
+            if (fixture.expected === "blocked") {
+              assert.isTrue(Result.isSuccess(preflight), fixture.name)
+              if (Result.isSuccess(preflight)) {
+                assert.strictEqual(preflight.success._tag, "blocked", fixture.name)
+              }
+            } else {
+              assert.isTrue(Result.isFailure(preflight), fixture.name)
+              if (Result.isFailure(preflight)) {
+                assert.instanceOf(preflight.failure, PluginMalformedResponseFailure)
+              }
+            }
+          })
+        )
+        assert.strictEqual(yield* Ref.get(updates), 0, fixture.name)
+      }
+    }))
+
+  it.effect("records revision-scoped approval without a provider mutation", () =>
+    Effect.gen(function*() {
+      const readCalls = yield* Ref.make(0)
+      const updateCalls = yield* Ref.make(0)
+      yield* withActionRuntime(
+        baseProvider({
+          getTimeEntry: (workspaceId, entryId) =>
+            Ref.update(readCalls, (count) => count + 1).pipe(
+              Effect.as(Option.some(timeEntry(entryId, "user-1", { workspaceId })))
+            ),
+          updateTimeEntry: () =>
+            Ref.update(updateCalls, (count) => count + 1).pipe(
+              Effect.andThen(Effect.die("approval must not update Clockify"))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const current = yield* connection.readEntity(entryReference("entry-1"))
+          if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+          const proposal = yield* connection.proposeAction(
+            actionRequest("record-approval", current.event.revision, {
+              decision: "approved",
+              rationale: "Reviewed against the delivery record"
+            })
+          )
+          const authorized = authorize(proposal, proposal.payloadDigest, "approval")
+          const rejectedProposal = yield* connection.proposeAction(
+            actionRequest("record-approval", current.event.revision, {
+              decision: "rejected",
+              rationale: "Evidence does not support this entry"
+            })
+          )
+          const rejectedAuthorized = authorize(
+            rejectedProposal,
+            rejectedProposal.payloadDigest,
+            "rejection"
+          )
+          const preflight = yield* executor.preflight(authorized)
+          const dispatch = yield* executor.executeAuthorizedAction(authorized)
+          const readsBeforeReplay = yield* Ref.get(readCalls)
+          yield* TestClock.adjust("1 hour")
+          const replay = yield* executor.executeAuthorizedAction(authorized)
+          const reconciled = yield* executor.reconcile({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+          const rejected = yield* executor.executeAuthorizedAction(rejectedAuthorized)
+          assert.strictEqual(preflight._tag, "ready")
+          assert.strictEqual(dispatch._tag, "confirmed")
+          assert.strictEqual(replay._tag, "confirmed")
+          assert.strictEqual(reconciled._tag, "succeeded")
+          assert.strictEqual(rejected._tag, "confirmed")
+          if (
+            dispatch._tag === "confirmed" &&
+            replay._tag === "confirmed" &&
+            reconciled._tag === "succeeded"
+          ) {
+            assert.strictEqual(dispatch.receipt.status, "succeeded")
+            assert.deepStrictEqual(replay.receipt, dispatch.receipt)
+            assert.deepStrictEqual(reconciled.receipt, dispatch.receipt)
+            if (rejected._tag === "confirmed") {
+              assert.notStrictEqual(
+                rejected.receipt.providerOperationId,
+                dispatch.receipt.providerOperationId
+              )
+            }
+          }
+          assert.strictEqual(yield* Ref.get(readCalls), readsBeforeReplay)
+        })
+      )
+      assert.strictEqual(yield* Ref.get(updateCalls), 0)
+    }))
+
+  it.effect("reconciles an ambiguous correction from provider state without replay", () =>
+    Effect.gen(function*() {
+      const state = yield* Ref.make(timeEntry("entry-1", "user-1", {
+        description: "[OLD-1] Investigate timeout"
+      }))
+      const readCalls = yield* Ref.make(0)
+      const updateCalls = yield* Ref.make(0)
+      yield* withActionRuntime(
+        baseProvider({
+          getTimeEntry: () =>
+            Ref.updateAndGet(readCalls, (count) => count + 1).pipe(
+              Effect.andThen(Ref.get(state)),
+              Effect.map(Option.some)
+            ),
+          updateTimeEntry: (_workspaceId, _entryId, request) =>
+            Ref.update(updateCalls, (count) => count + 1).pipe(
+              Effect.andThen(
+                Ref.update(state, (current) => ({
+                  ...current,
+                  description: request.description,
+                  timeInterval: { ...current.timeInterval, start: request.start }
+                }))
+              ),
+              Effect.andThen(Effect.fail(new PluginOutageFailure({ operation: "clockify-update-time-entry" })))
+            )
+        }),
+        Effect.gen(function*() {
+          const connection = yield* PluginConnection
+          const executor = yield* AuthorizedPluginExecutor
+          const current = yield* connection.readEntity(entryReference("entry-1"))
+          if (current._tag !== "found") return yield* Effect.die("expected Clockify entry")
+          const proposal = yield* connection.proposeAction(
+            actionRequest("correct-association", current.event.revision, { jiraIssueKey: "OPS-42" })
+          )
+          const authorized = authorize(proposal, proposal.payloadDigest, "ambiguous")
+          const dispatch = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(dispatch))
+          if (!Result.isFailure(dispatch)) return yield* Effect.die("expected unknown outcome")
+          assert.instanceOf(dispatch.failure, PluginUnknownOutcomeFailure)
+          if (dispatch.failure._tag !== "PluginUnknownOutcomeFailure") {
+            return yield* Effect.die("expected reconcilable failure")
+          }
+          const reconciled = yield* executor.reconcile({
+            reconciliationKey: dispatch.failure.reconciliationKey,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+          assert.strictEqual(reconciled._tag, "succeeded")
+          const readsAfterExactLocator = yield* Ref.get(readCalls)
+          const recoveredByAuthorizedIdentity = yield* executor.reconcile({
+            reconciliationKey: null,
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          })
+          assert.strictEqual(recoveredByAuthorizedIdentity._tag, "succeeded")
+          assert.strictEqual(yield* Ref.get(readCalls), readsAfterExactLocator + 1)
+          const readsAfterNullLocator = yield* Ref.get(readCalls)
+          const malformedLocator = yield* executor.reconcile({
+            reconciliationKey: PluginActionReconciliationKey.make(
+              "clockify-correction:v1:not-a-digest"
+            ),
+            idempotencyKey: authorized.idempotencyKey,
+            payloadDigest: authorized.payloadDigest,
+            authorizedAction: authorized
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(malformedLocator))
+          if (Result.isFailure(malformedLocator)) {
+            assert.instanceOf(malformedLocator.failure, PluginConfigurationFailure)
+          }
+          assert.strictEqual(yield* Ref.get(readCalls), readsAfterNullLocator)
+        })
+      )
+      assert.strictEqual(yield* Ref.get(updateCalls), 1)
+    }))
+
   it.effect("accepts a configured workspace in a response containing 101 workspaces", () =>
     Effect.gen(function*() {
       const workspaces = [
@@ -829,6 +1326,88 @@ describe("ClockifyReadPlugin", () => {
           )
         }
       }
+    }))
+
+  it.effect("sends the exact bounded Clockify correction request and classifies provider rejection", () =>
+    Effect.gen(function*() {
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const successfulClient = ClockifyApiClient.layer.pipe(
+        Layer.provide(
+          Layer.succeed(ClockifyApiConfig, {
+            apiKey: Redacted.make("secret"),
+            workspaceId: "workspace-1",
+            userId: "user-1",
+            baseUrl: "https://clockify.test/api"
+          })
+        ),
+        Layer.provide(
+          Layer.succeed(
+            HttpClient.HttpClient,
+            HttpClient.make((request) =>
+              Effect.sync(() => {
+                requests.push(request)
+                return HttpClientResponse.fromWeb(
+                  request,
+                  new Response(
+                    JSON.stringify(timeEntry("entry-1", "user-1", {
+                      description: "[OPS-42] Investigate timeout"
+                    })),
+                    {
+                      status: 200,
+                      headers: { "content-type": "application/json" }
+                    }
+                  )
+                )
+              })
+            )
+          )
+        )
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* ClockifyApiClient
+        return yield* makeClockifyReadProvider(client).updateTimeEntry(
+          "workspace-1",
+          "entry-1",
+          {
+            start: "2026-07-17T08:00:00.000Z",
+            description: "[OPS-42] Investigate timeout"
+          }
+        )
+      }).pipe(Effect.provide(successfulClient))
+
+      assert.strictEqual(
+        Schema.decodeUnknownSync(Schema.Struct({ id: Schema.String }))(result).id,
+        "entry-1"
+      )
+      assert.lengthOf(requests, 1)
+      const request = requests[0]
+      if (request === undefined) return yield* Effect.die("expected Clockify update request")
+      assert.strictEqual(request.method, "PUT")
+      assert.isTrue(request.url.endsWith("/v1/workspaces/workspace-1/time-entries/entry-1"))
+      assert.strictEqual(request.headers["x-api-key"], "secret")
+      assert.strictEqual(request.body._tag, "Uint8Array")
+      if (request.body._tag !== "Uint8Array") return yield* Effect.die("expected JSON update body")
+      assert.deepStrictEqual(
+        JSON.parse(new TextDecoder().decode(request.body.body)),
+        {
+          start: "2026-07-17T08:00:00.000Z",
+          description: "[OPS-42] Investigate timeout"
+        }
+      )
+
+      const rejected = yield* Effect.gen(function*() {
+        const client = yield* ClockifyApiClient
+        return yield* makeClockifyReadProvider(client).updateTimeEntry(
+          "workspace-1",
+          "entry-1",
+          {
+            start: "2026-07-17T08:00:00.000Z",
+            description: "[OPS-42] Investigate timeout"
+          }
+        )
+      }).pipe(Effect.provide(clockifyClientLayer(409)), Effect.result)
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) assert.strictEqual(rejected.failure._tag, "PluginConflictFailure")
     }))
 
   it.effect("interrupts an in-flight provider page", () =>

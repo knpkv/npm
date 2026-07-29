@@ -201,6 +201,7 @@ const sharedProjection = Schema.decodeSync(DeliveryEntityProjection)({
   }
 })
 const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
+  clockifyApproval: null,
   entity: {
     canonicalReleaseId: null,
     owners: [],

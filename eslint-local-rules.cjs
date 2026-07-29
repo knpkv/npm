@@ -741,6 +741,72 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-structured-reconciliation-key-schema": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require Schema parsing before comparing structured plugin reconciliation keys",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        rawStructuredLocator:
+          "Parse colon-delimited reconciliation locators with Schema.TemplateLiteralParser before comparing request fields."
+      }
+    },
+    create(context) {
+      const filename = context.filename.replaceAll("\\", "/")
+      if (!filename.includes("/server/plugins/") || /\/(?:fake|generated|vendor)\//u.test(filename)) {
+        return {}
+      }
+
+      const structuredKeyConstructors = []
+      let comparesRequestKey = false
+      const isReconciliationKeyImport = (identifier) => {
+        const definition = importedBinding(context, identifier)
+        return (
+          definition?.node.type === "ImportSpecifier" &&
+          staticPropertyName(definition.node.imported) === "PluginActionReconciliationKey"
+        )
+      }
+      const isRequestReconciliationKey = (expression) =>
+        expression.type === "MemberExpression" && staticPropertyName(expression.property) === "reconciliationKey"
+      const isNullLiteral = (expression) => expression.type === "Literal" && expression.value === null
+
+      return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            staticPropertyName(node.callee.property) !== "make" ||
+            node.callee.object.type !== "Identifier" ||
+            !isReconciliationKeyImport(node.callee.object) ||
+            node.arguments.length !== 1 ||
+            node.arguments[0].type !== "TemplateLiteral" ||
+            !node.arguments[0].quasis.some((quasi) => quasi.value.raw.includes(":"))
+          ) {
+            return
+          }
+          structuredKeyConstructors.push(node)
+        },
+        BinaryExpression(node) {
+          if (
+            ["==", "===", "!=", "!=="].includes(node.operator) &&
+            ((isRequestReconciliationKey(node.left) && !isNullLiteral(node.right)) ||
+              (isRequestReconciliationKey(node.right) && !isNullLiteral(node.left)))
+          ) {
+            comparesRequestKey = true
+          }
+        },
+        "Program:exit"() {
+          if (!comparesRequestKey) return
+          for (const node of structuredKeyConstructors) {
+            context.report({ node, messageId: "rawStructuredLocator" })
+          }
+        }
+      }
+    }
+  },
   "require-bounded-base64-schema": {
     meta: {
       type: "problem",

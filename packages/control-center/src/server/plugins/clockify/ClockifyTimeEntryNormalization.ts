@@ -9,9 +9,18 @@ import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
 import { PluginConfigurationFailure, PluginMalformedResponseFailure } from "../failures.js"
 
-const ClockifyIdentifier = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-const ClockifyText = Schema.String.check(Schema.isMaxLength(4_000))
-const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
+/** Bounded Clockify provider identity accepted by the adapter. @internal */
+export const ClockifyIdentifier = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+)
+/** Bounded description accepted from Clockify reads. @internal */
+export const ClockifyDescription = Schema.String.check(Schema.isMaxLength(4_000))
+/** Description accepted by Clockify's generated update contract. @internal */
+export const ClockifyWritableDescription = Schema.String.check(Schema.isMaxLength(3_000))
+/** Bounded duration returned by Clockify for a time-entry interval. @internal */
+export const ClockifyDuration = Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(100))
 // Clockify's workspace-user response has no profile revision timestamp. Keep the
 // observation deterministic so an unchanged person has one immutable payload.
 const ClockifyPersonObservedAt = DateTime.makeUnsafe(0)
@@ -30,17 +39,19 @@ const ClockifyPersonResponse = Schema.Struct({
 
 const ClockifyTimeEntryResponse = Schema.Struct({
   billable: Schema.Boolean,
-  description: ClockifyText,
+  description: ClockifyDescription,
   id: ClockifyIdentifier,
   isLocked: Schema.optionalKey(Schema.Boolean),
-  projectId: Schema.optionalKey(ClockifyIdentifier),
+  projectId: Schema.optionalKey(Schema.NullOr(ClockifyIdentifier)),
   tagIds: Schema.optionalKey(
-    Schema.Array(ClockifyIdentifier).check(
-      Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify tags" }),
-      Schema.isUnique()
+    Schema.NullOr(
+      Schema.Array(ClockifyIdentifier).check(
+        Schema.makeFilter((values) => values.length <= 100, { expected: "at most 100 Clockify tags" }),
+        Schema.isUnique()
+      )
     )
   ),
-  taskId: Schema.optionalKey(ClockifyIdentifier),
+  taskId: Schema.optionalKey(Schema.NullOr(ClockifyIdentifier)),
   timeInterval: Schema.Struct({
     duration: Schema.optionalKey(Schema.NullOr(ClockifyDuration)),
     end: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
@@ -54,7 +65,24 @@ const ClockifyTimeEntryResponse = Schema.Struct({
 type ClockifyTimeEntryEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertEntity" }>
 type ClockifyPersonEvent = Extract<NormalizedPluginEventV1, { readonly _tag: "UpsertPerson" }>
 
-interface NormalizeClockifyTimeEntryInput {
+/** Canonical decoded provider snapshot shared by sync and governed actions. @internal */
+export interface ClockifyTimeEntrySnapshot {
+  readonly billable: boolean
+  readonly description: string
+  readonly end: DateTime.Utc | null
+  readonly entryType: "REGULAR" | "BREAK" | "HOLIDAY" | "TIME_OFF"
+  readonly id: string
+  readonly isLocked: boolean
+  readonly projectId: string | null
+  readonly start: DateTime.Utc
+  readonly tagIds: ReadonlyArray<string>
+  readonly taskId: string | null
+  readonly userId: string
+  readonly workspaceId: string
+  readonly duration: string | null
+}
+
+export interface DecodeClockifyTimeEntryInput {
   readonly allowedUserIds?: ReadonlySet<string> | undefined
   readonly entry: unknown
   readonly expectedWorkspaceId: string
@@ -77,6 +105,69 @@ const digestJson = Effect.fn("ClockifyTimeEntryNormalization.digestJson")(functi
     .digest("SHA-256", bytes)
     .pipe(Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-digest-failed" })))
   return Encoding.encodeHex(digest)
+})
+
+const revisionMaterial = (entry: ClockifyTimeEntrySnapshot): Schema.Json => ({
+  billable: entry.billable,
+  description: entry.description,
+  id: entry.id,
+  isLocked: entry.isLocked,
+  projectId: entry.projectId,
+  tagIds: [...entry.tagIds],
+  taskId: entry.taskId,
+  timeInterval: {
+    duration: entry.duration,
+    end: entry.end === null ? null : DateTime.formatIso(entry.end),
+    start: DateTime.formatIso(entry.start)
+  },
+  type: entry.entryType,
+  userId: entry.userId,
+  workspaceId: entry.workspaceId
+})
+
+/** Derive the exact normalized source revision used by sync and action preconditions. @internal */
+export const revisionOfClockifyTimeEntry = (
+  entry: ClockifyTimeEntrySnapshot
+): Effect.Effect<string, PluginConfigurationFailure, Crypto.Crypto> => digestJson(revisionMaterial(entry))
+
+/** Decode and scope one untrusted provider entry before normalization or mutation. @internal */
+export const decodeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization.decode")(function*(
+  input: DecodeClockifyTimeEntryInput
+): Effect.fn.Return<ClockifyTimeEntrySnapshot, PluginMalformedResponseFailure> {
+  const entry = yield* Schema.decodeUnknownEffect(ClockifyTimeEntryResponse)(input.entry).pipe(
+    Effect.mapError(() => malformed("clockify-time-entry-shape-invalid"))
+  )
+  if (entry.workspaceId !== input.expectedWorkspaceId) {
+    return yield* malformed("clockify-time-entry-workspace-mismatch")
+  }
+  if (input.expectedUserId !== undefined && entry.userId !== input.expectedUserId) {
+    return yield* malformed("clockify-time-entry-user-mismatch")
+  }
+  if (input.allowedUserIds !== undefined && !input.allowedUserIds.has(entry.userId)) {
+    return yield* malformed("clockify-time-entry-user-mismatch")
+  }
+  if (
+    entry.timeInterval.end !== null &&
+    entry.timeInterval.end !== undefined &&
+    DateTime.toEpochMillis(entry.timeInterval.end) < DateTime.toEpochMillis(entry.timeInterval.start)
+  ) {
+    return yield* malformed("clockify-time-entry-interval-backward")
+  }
+  return {
+    billable: entry.billable,
+    description: entry.description,
+    duration: entry.timeInterval.duration ?? null,
+    end: entry.timeInterval.end ?? null,
+    entryType: entry.type ?? "REGULAR",
+    id: entry.id,
+    isLocked: entry.isLocked ?? false,
+    projectId: entry.projectId ?? null,
+    start: entry.timeInterval.start,
+    tagIds: [...(entry.tagIds ?? [])].sort(),
+    taskId: entry.taskId ?? null,
+    userId: entry.userId,
+    workspaceId: entry.workspaceId
+  }
 })
 
 /** Bind resumable checkpoints to every configuration value that shapes provider pagination. @internal */
@@ -124,57 +215,22 @@ export const normalizeClockifyPerson = Effect.fn("ClockifyTimeEntryNormalization
   return event
 })
 
-/** Normalize one untrusted provider entry into a stable vendor-neutral event. @internal */
-export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization.normalize")(function*(
-  input: NormalizeClockifyTimeEntryInput
+/** Normalize one decoded Clockify snapshot into a stable vendor-neutral event. @internal */
+export const normalizeClockifyTimeEntrySnapshot = Effect.fn(
+  "ClockifyTimeEntryNormalization.normalizeSnapshot"
+)(function*(
+  entry: ClockifyTimeEntrySnapshot
 ): Effect.fn.Return<
   ClockifyTimeEntryEvent,
   PluginConfigurationFailure | PluginMalformedResponseFailure,
   Crypto.Crypto
 > {
-  const entry = yield* Schema.decodeUnknownEffect(ClockifyTimeEntryResponse)(input.entry).pipe(
-    Effect.mapError(() => malformed("clockify-time-entry-shape-invalid"))
-  )
-  if (entry.workspaceId !== input.expectedWorkspaceId) {
-    return yield* malformed("clockify-time-entry-workspace-mismatch")
-  }
-  if (input.expectedUserId !== undefined && entry.userId !== input.expectedUserId) {
-    return yield* malformed("clockify-time-entry-user-mismatch")
-  }
-  if (input.allowedUserIds !== undefined && !input.allowedUserIds.has(entry.userId)) {
-    return yield* malformed("clockify-time-entry-user-mismatch")
-  }
-
-  const start = DateTime.formatIso(entry.timeInterval.start)
-  const end = entry.timeInterval.end === null || entry.timeInterval.end === undefined
+  const start = DateTime.formatIso(entry.start)
+  const end = entry.end === null
     ? null
-    : DateTime.formatIso(entry.timeInterval.end)
-  if (
-    entry.timeInterval.end !== null &&
-    entry.timeInterval.end !== undefined &&
-    DateTime.toEpochMillis(entry.timeInterval.end) < DateTime.toEpochMillis(entry.timeInterval.start)
-  ) {
-    return yield* malformed("clockify-time-entry-interval-backward")
-  }
-  const observedAt = entry.timeInterval.end ?? entry.timeInterval.start
-  const tagIds = [...(entry.tagIds ?? [])].sort()
-  const revision = yield* digestJson({
-    billable: entry.billable,
-    description: entry.description,
-    id: entry.id,
-    isLocked: entry.isLocked ?? false,
-    projectId: entry.projectId ?? null,
-    tagIds,
-    taskId: entry.taskId ?? null,
-    timeInterval: {
-      duration: entry.timeInterval.duration ?? null,
-      end,
-      start
-    },
-    type: entry.type ?? "REGULAR",
-    userId: entry.userId,
-    workspaceId: entry.workspaceId
-  })
+    : DateTime.formatIso(entry.end)
+  const observedAt = entry.end ?? entry.start
+  const revision = yield* revisionOfClockifyTimeEntry(entry)
   const title = entry.description.trim().length === 0
     ? `Clockify entry ${entry.id}`
     : entry.description.trim().slice(0, 500)
@@ -195,15 +251,15 @@ export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalizat
       userId: entry.userId,
       description: entry.description,
       billable: entry.billable,
-      projectId: entry.projectId ?? null,
-      taskId: entry.taskId ?? null,
-      tagIds,
-      locked: entry.isLocked ?? false,
-      entryType: entry.type ?? "REGULAR",
+      projectId: entry.projectId,
+      taskId: entry.taskId,
+      tagIds: entry.tagIds,
+      locked: entry.isLocked,
+      entryType: entry.entryType,
       interval: {
         start,
         end,
-        duration: entry.timeInterval.duration ?? null,
+        duration: entry.duration,
         state: end === null ? "running" : "completed"
       },
       freshness: {
@@ -214,4 +270,15 @@ export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalizat
   }).pipe(Effect.mapError(() => malformed("clockify-normalized-time-entry-invalid")))
   if (event._tag !== "UpsertEntity") return yield* malformed("clockify-normalized-event-kind-invalid")
   return event
+})
+
+/** Normalize one untrusted provider entry into a stable vendor-neutral event. @internal */
+export const normalizeClockifyTimeEntry = Effect.fn("ClockifyTimeEntryNormalization.normalize")(function*(
+  input: DecodeClockifyTimeEntryInput
+): Effect.fn.Return<
+  ClockifyTimeEntryEvent,
+  PluginConfigurationFailure | PluginMalformedResponseFailure,
+  Crypto.Crypto
+> {
+  return yield* normalizeClockifyTimeEntrySnapshot(yield* decodeClockifyTimeEntry(input))
 })

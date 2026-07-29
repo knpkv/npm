@@ -305,6 +305,13 @@ const makePersistence = Effect.gen(function*() {
         publicOperation(
           "governed-action.read-by-idempotency-key",
           governedActions.readByIdempotencyKey(...args)
+        ),
+      readLatestTerminalByTarget: (
+        ...args: Parameters<GovernedActionRepositoryService["readLatestTerminalByTarget"]>
+      ) =>
+        publicOperation(
+          "governed-action.read-latest-terminal-by-target",
+          governedActions.readLatestTerminalByTarget(...args)
         )
     },
     people: {

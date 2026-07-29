@@ -8,7 +8,8 @@ import {
   GovernedActionCommitInput,
   GovernedActionIdempotencyReadInput,
   GovernedActionInputError,
-  GovernedActionReadInput
+  GovernedActionReadInput,
+  GovernedActionTargetReadInput
 } from "./governed-action/contract.js"
 import { makeGovernedActionTransaction } from "./governed-action/transaction.js"
 import { makeGovernedActionWrite } from "./governed-action/write.js"
@@ -47,7 +48,21 @@ const makeGovernedActionRepository = Effect.gen(function*() {
     )
   })
 
-  return { commit, read, readByIdempotencyKey }
+  const readLatestTerminalByTarget = Effect.fn(
+    "GovernedActionRepository.readLatestTerminalByTarget"
+  )(function*(input: unknown) {
+    const request = yield* Schema.decodeUnknownEffect(
+      Schema.toType(GovernedActionTargetReadInput)
+    )(input).pipe(
+      Effect.mapError(() => new GovernedActionInputError({ operation: "read", reason: "invalid-request" }))
+    )
+    return yield* transaction.transact(
+      "governed-action.read-latest-terminal-by-target",
+      transaction.readLatestTerminalByTarget(request)
+    )
+  })
+
+  return { commit, read, readByIdempotencyKey, readLatestTerminalByTarget }
 })
 
 /** Deep server-only repository for governed action authority, lifecycle, and audit. */

@@ -17,6 +17,7 @@ import {
   dispatchInboxOutcomeCommand,
   dispatchInboxOutcomeKind,
   dispatchInboxOutcomeObservedAt,
+  dispatchInboxOutcomeUsesAuthorizationObservation,
   DispatchResultKind,
   encodeDispatchInboxOutcome
 } from "./dispatch-outcome.js"
@@ -196,19 +197,25 @@ export const makeGovernedActionExecutionDispatchInbox = Effect.gen(function*() {
           return { lease, outcomeId: existing.outcomeId }
         }
 
+        const record = yield* transaction.read({
+          workspaceId: lease.workspaceId,
+          actionId: lease.actionId
+        })
+        const usesAuthorizationObservation = dispatchInboxOutcomeUsesAuthorizationObservation(input.outcome)
+        const authorizationObservation = usesAuthorizationObservation &&
+          record.authorization !== null &&
+          DateTime.Equivalence(outcomeObservedAt, record.authorization.authorizedAt)
         if (
           DateTime.Order(input.receivedAt, now) > 0 ||
           DateTime.Order(outcomeObservedAt, input.receivedAt) > 0 ||
-          DateTime.Order(outcomeObservedAt, lease.createdAt) < 0 ||
+          (usesAuthorizationObservation
+            ? !authorizationObservation
+            : DateTime.Order(outcomeObservedAt, lease.createdAt) < 0) ||
           (resultKind !== "manual-unknown" && DateTime.Order(outcomeObservedAt, lease.dispatchDeadline) >= 0) ||
           DateTime.Order(input.receivedAt, lease.leaseExpiresAt) >= 0 ||
           lease.recoveryClaimCount !== 0
         ) return yield* storeError(input.operation, "conflict")
 
-        const record = yield* transaction.read({
-          workspaceId: lease.workspaceId,
-          actionId: lease.actionId
-        })
         if (record.head.state !== "started" && record.head.state !== "cancel-requested") {
           return yield* storeError(input.operation, "conflict")
         }

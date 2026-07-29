@@ -16,6 +16,7 @@ export interface WorkspaceClockifyJiraAssociation {
 }
 
 export interface WorkspaceClockifyTimeEntryPresentation {
+  readonly approvalDetail: string
   readonly approvalLabel: string
   readonly approvers: ReadonlyArray<string>
   readonly associationDetail: string
@@ -26,6 +27,7 @@ export interface WorkspaceClockifyTimeEntryPresentation {
   readonly durationLabel: string
   readonly endedAt: string
   readonly jiraAssociations: ReadonlyArray<WorkspaceClockifyJiraAssociation>
+  readonly lockLabel: string
   readonly projectLabel: string
   readonly rollupLabel: string
   readonly startedAt: string
@@ -126,7 +128,7 @@ const jiraAssociationsFor = (
   }))
 }
 
-/** Present one immutable Clockify entry as a deterministic, read-only time ledger. */
+/** Present one immutable Clockify entry with its current Control Center approval. */
 export const presentWorkspaceClockifyTimeEntry = (
   workspaceId: WorkspaceId,
   details: TimeEntryDetails,
@@ -145,7 +147,12 @@ export const presentWorkspaceClockifyTimeEntry = (
       ) ?? false
     )
   return {
-    approvalLabel: titleCase(details.approvalState),
+    approvalDetail: inspection.clockifyApproval === null
+      ? "No Control Center decision is recorded for this exact Clockify revision."
+      : inspection.clockifyApproval.rationale,
+    approvalLabel: inspection.clockifyApproval === null
+      ? "Pending"
+      : titleCase(inspection.clockifyApproval.decision),
     approvers,
     associationDetail: jiraAssociations.length === 0
       ? "No current Jira relationship explains where this time belongs. The entry remains visible."
@@ -159,6 +166,11 @@ export const presentWorkspaceClockifyTimeEntry = (
     durationLabel: durationLabel(details.durationMinutes),
     endedAt: timestampLabel(details.endedAt),
     jiraAssociations,
+    lockLabel: details.locked === undefined
+      ? "Lock state not synchronized"
+      : details.locked
+      ? "Locked"
+      : "Unlocked",
     projectLabel: details.projectId ?? "No Clockify project",
     rollupLabel: `1 visible entry · ${String(details.durationMinutes)} exact minute${
       details.durationMinutes === 1 ? "" : "s"

@@ -18,6 +18,7 @@ import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
+  PluginConflictFailure,
   type PluginFailure,
   PluginMalformedResponseFailure,
   PluginOutageFailure,
@@ -47,6 +48,11 @@ export interface ClockifyReadProvider {
     workspaceId: string,
     userId: string,
     request: ClockifyTimeEntryPageRequest
+  ) => Effect.Effect<unknown, PluginFailure>
+  readonly updateTimeEntry: (
+    workspaceId: string,
+    timeEntryId: string,
+    request: { readonly description: string; readonly start: string }
   ) => Effect.Effect<unknown, PluginFailure>
 }
 
@@ -108,6 +114,22 @@ const providerCall = <Value, Error>(
   effect: Effect.Effect<Value, Error>
 ): Effect.Effect<Value, PluginFailure> => Effect.catch(effect, (error) => mapFailure(operation, error))
 
+const mutationCall = <Value, Error>(
+  operation: string,
+  effect: Effect.Effect<Value, Error>
+): Effect.Effect<Value, PluginFailure> =>
+  Effect.catch(effect, (error) => {
+    const status = statusOf(error)
+    return status === 400 || status === 404 || status === 409 || status === 422
+      ? Effect.fail(
+        new PluginConflictFailure({
+          operation,
+          diagnosticCode: "clockify-time-entry-update-rejected"
+        })
+      )
+      : mapFailure(operation, error)
+  })
+
 /** Build the production provider boundary from the shared Clockify client. @internal */
 export const makeClockifyReadProvider = (client: ClockifyApiClientShape): ClockifyReadProvider => ({
   getCurrentUser: providerCall("clockify-current-user", client.getUser()),
@@ -137,5 +159,10 @@ export const makeClockifyReadProvider = (client: ClockifyApiClientShape): Clocki
         page: request.page,
         pageSize: request.pageSize
       })
+    ),
+  updateTimeEntry: (workspaceId, timeEntryId, request) =>
+    mutationCall(
+      "clockify-update-time-entry",
+      client.updateTimeEntry(workspaceId, timeEntryId, request)
     )
 })
