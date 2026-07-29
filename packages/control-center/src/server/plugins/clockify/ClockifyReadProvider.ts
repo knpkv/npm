@@ -1,5 +1,5 @@
 /**
- * Production Clockify read boundary.
+ * Production Clockify boundary for bounded reads and governed correction writes.
  *
  * The shared client owns authenticated request construction and generated
  * OpenAPI decoding. This boundary keeps its raw failures and response shapes
@@ -32,7 +32,7 @@ export interface ClockifyTimeEntryPageRequest {
   readonly pageSize: number
 }
 
-/** Narrow provider surface required by the production Clockify reader. @internal */
+/** Narrow provider surface required by the production Clockify integration. @internal */
 export interface ClockifyReadProvider {
   readonly getCurrentUser: Effect.Effect<unknown, PluginFailure>
   readonly getWorkspaceUsers: (

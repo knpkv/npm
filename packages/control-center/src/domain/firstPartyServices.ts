@@ -37,7 +37,7 @@ export const firstPartyServiceIdentityByProvider = {
   clockify: {
     providerId: "clockify",
     displayName: "Clockify",
-    description: "Read bounded time-entry evidence from Clockify."
+    description: "Read bounded time-entry evidence and govern association corrections and approvals."
   }
 } satisfies Readonly<Record<typeof ProviderId.Type, FirstPartyServiceIdentity>>
 

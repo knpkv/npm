@@ -1,12 +1,12 @@
 /** Schema-backed Clockify time-entry normalization. @internal */
-import * as Crypto from "effect/Crypto"
+import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
 import * as Schema from "effect/Schema"
 
 import { NormalizedPluginEventV1 } from "../../../domain/plugins/index.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"
+import { digestCanonicalGovernedActionJson } from "../../governance/governedActionDigests.js"
 import { PluginConfigurationFailure, PluginMalformedResponseFailure } from "../failures.js"
 
 /** Bounded Clockify provider identity accepted by the adapter. @internal */
@@ -117,15 +117,9 @@ const malformed = (diagnosticCode: string) =>
   })
 
 const digestJson = Effect.fn("ClockifyTimeEntryNormalization.digestJson")(function*(value: Schema.Json) {
-  const cryptoService = yield* Crypto.Crypto
-  const json = JSON.stringify(value)
-  const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(json))).pipe(
-    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-encoding-failed" }))
+  return yield* digestCanonicalGovernedActionJson(value).pipe(
+    Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-digest-failed" }))
   )
-  const digest = yield* cryptoService
-    .digest("SHA-256", bytes)
-    .pipe(Effect.mapError(() => new PluginConfigurationFailure({ diagnosticCode: "clockify-revision-digest-failed" })))
-  return Encoding.encodeHex(digest)
 })
 
 const revisionMaterial = (entry: ClockifyTimeEntrySnapshot): Schema.Json => ({

@@ -38,7 +38,10 @@ import {
 } from "../../src/server/plugins/clockify/ClockifyReadPlugin.js"
 import type { ClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
 import { makeClockifyReadProvider } from "../../src/server/plugins/clockify/ClockifyReadProvider.js"
-import { normalizeClockifyPerson } from "../../src/server/plugins/clockify/ClockifyTimeEntryNormalization.js"
+import {
+  normalizeClockifyPerson,
+  normalizeClockifyTimeEntry
+} from "../../src/server/plugins/clockify/ClockifyTimeEntryNormalization.js"
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import {
   PluginAuthenticationFailure,
@@ -437,6 +440,26 @@ describe("ClockifyReadPlugin", () => {
       )
       assert.notStrictEqual(first.eventId, renamed.eventId)
       assert.notStrictEqual(first.revision, renamed.revision)
+    }).pipe(Effect.provide(NodeCrypto.layer)))
+
+  it.effect("canonicalizes nested custom-field objects in source revisions", () =>
+    Effect.gen(function*() {
+      const normalize = (value: Schema.Json) =>
+        normalizeClockifyTimeEntry({
+          entry: timeEntry("entry-1", "user-1", {
+            customFieldValues: [{ customFieldId: "metadata", value }]
+          }),
+          expectedWorkspaceId: "workspace-1"
+        })
+      const ordered = yield* normalize({ a: 1, b: 2 })
+      const reordered = yield* normalize({ b: 2, a: 1 })
+      const changed = yield* normalize({ a: 1, b: 3 })
+      const orderedArray = yield* normalize(["first", "second"])
+      const reorderedArray = yield* normalize(["second", "first"])
+
+      assert.strictEqual(ordered.revision, reordered.revision)
+      assert.notStrictEqual(ordered.revision, changed.revision)
+      assert.notStrictEqual(orderedArray.revision, reorderedArray.revision)
     }).pipe(Effect.provide(NodeCrypto.layer)))
 
   it.effect("rejects duplicate vendor identities with different revisions in one page", () =>

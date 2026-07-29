@@ -48,7 +48,7 @@ const TERMINAL_TARGET_PAGE_SIZE = 100
 
 const GovernedActionTargetCandidateIdentity = Schema.Struct({
   actionId: GovernedActionId,
-  updatedAt: UtcTimestamp
+  sortAt: UtcTimestamp
 })
 
 const malformed = (
@@ -557,9 +557,48 @@ export const makeGovernedActionRead = Effect.gen(function*() {
     const candidates: Array<GovernedActionRecord> = []
     let cursor: typeof GovernedActionTargetCandidateIdentity.Type | null = null
     while (!hasEnoughTerminalByTargetCandidates(request, candidates)) {
-      const rows: ReadonlyArray<Record<string, unknown>> = cursor === null
+      const rows: ReadonlyArray<Record<string, unknown>> = request.actionKind === "record-approval"
+        ? cursor === null
+          ? yield* sql<Record<string, unknown>>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+          : yield* sql<Record<string, unknown>>`SELECT
+              action.action_id AS actionId,
+              COALESCE(authorization.authorized_at, action.updated_at) AS sortAt
+            FROM governed_actions AS action
+            LEFT JOIN governed_action_authorizations AS authorization
+              ON authorization.workspace_id = action.workspace_id
+              AND authorization.action_id = action.action_id
+            WHERE action.workspace_id = ${request.workspaceId}
+              AND action.provider_id = ${request.providerId}
+              AND action.target_entity_id = ${request.targetEntityId}
+              AND action.terminal_status = 'succeeded'
+              AND (
+                COALESCE(authorization.authorized_at, action.updated_at) < ${DateTime.formatIso(cursor.sortAt)}
+                OR (
+                  COALESCE(authorization.authorized_at, action.updated_at) = ${DateTime.formatIso(cursor.sortAt)}
+                  AND action.action_id < ${cursor.actionId}
+                )
+              )
+            ORDER BY
+              COALESCE(authorization.authorized_at, action.updated_at) DESC,
+              action.action_id DESC
+            LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
+        : cursor === null
         ? yield* sql<Record<string, unknown>>`SELECT
-            action_id AS actionId, updated_at AS updatedAt
+            action_id AS actionId, updated_at AS sortAt
           FROM governed_actions
           WHERE workspace_id = ${request.workspaceId}
             AND provider_id = ${request.providerId}
@@ -568,16 +607,16 @@ export const makeGovernedActionRead = Effect.gen(function*() {
           ORDER BY updated_at DESC, action_id DESC
           LIMIT ${TERMINAL_TARGET_PAGE_SIZE}`
         : yield* sql<Record<string, unknown>>`SELECT
-            action_id AS actionId, updated_at AS updatedAt
+            action_id AS actionId, updated_at AS sortAt
           FROM governed_actions
           WHERE workspace_id = ${request.workspaceId}
             AND provider_id = ${request.providerId}
             AND target_entity_id = ${request.targetEntityId}
             AND terminal_status = 'succeeded'
             AND (
-              updated_at < ${DateTime.formatIso(cursor.updatedAt)}
+              updated_at < ${DateTime.formatIso(cursor.sortAt)}
               OR (
-                updated_at = ${DateTime.formatIso(cursor.updatedAt)}
+                updated_at = ${DateTime.formatIso(cursor.sortAt)}
                 AND action_id < ${cursor.actionId}
               )
             )

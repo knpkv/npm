@@ -1,4 +1,4 @@
-/** Production Clockify time-entry read plugin runtime. */
+/** Production Clockify integration with bounded time-entry reads and governed actions. */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -52,7 +52,7 @@ const ClockifyWebBaseUrl = SourceUrl.pipe(
   )
 )
 
-/** Secret-free runtime settings for the Clockify read adapter. */
+/** Secret-free runtime settings for the current Clockify integration. */
 export const ClockifyReadPluginConfiguration = Schema.Struct({
   webBaseUrl: ClockifyWebBaseUrl,
   workspaceId: ClockifyIdentifier,
@@ -63,7 +63,7 @@ export const ClockifyReadPluginConfiguration = Schema.Struct({
   operationTimeoutMillis: OperationTimeoutMillis
 })
 
-/** Decoded Clockify read adapter settings. */
+/** Decoded Clockify integration settings. */
 export type ClockifyReadPluginConfiguration = typeof ClockifyReadPluginConfiguration.Type
 
 /** Negotiated production runtime and its scoped plugin layer. */
