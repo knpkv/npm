@@ -6,6 +6,7 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Deferred from "effect/Deferred"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
@@ -2919,6 +2920,7 @@ describe("first-party plugin runtime", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
       const scenarios: ReadonlyArray<
         | "succeeded"
+        | "rate-limited"
         | "provider-rejected"
         | "authorization-rejected"
         | "ambiguous-timeout"
@@ -2926,6 +2928,7 @@ describe("first-party plugin runtime", () => {
         | "manual-recovery"
       > = [
         "succeeded",
+        "rate-limited",
         "provider-rejected",
         "authorization-rejected",
         "ambiguous-timeout",
@@ -2939,6 +2942,7 @@ describe("first-party plugin runtime", () => {
             yield* TestClock.setTime(DateTime.toEpochMillis(executionTime))
             const entryReads = yield* Ref.make(0)
             const mutations = yield* Ref.make(0)
+            const rateLimitObserved = yield* Deferred.make<void>()
             const originalTimeEntry = {
               id: "clockify-entry-42",
               workspaceId: "clockify-workspace",
@@ -2985,24 +2989,31 @@ describe("first-party plugin runtime", () => {
                   )
                 }
                 if (entryUrl && request.method === "PUT") {
-                  yield* Ref.update(mutations, (count) => count + 1)
+                  const mutation = yield* Ref.updateAndGet(mutations, (count) => count + 1)
+                  const rateLimited = scenario === "rate-limited" && mutation === 1
+                  if (rateLimited) yield* Deferred.succeed(rateLimitObserved, undefined)
                   return HttpClientResponse.fromWeb(
                     request,
                     new Response(
                       JSON.stringify(
-                        scenario === "succeeded"
+                        scenario === "succeeded" || (scenario === "rate-limited" && !rateLimited)
                           ? correctedTimeEntry
                           : { message: "provider rejected correction" }
                       ),
                       {
-                        status: scenario === "succeeded"
+                        status: scenario === "succeeded" || (scenario === "rate-limited" && !rateLimited)
                           ? 200
+                          : rateLimited
+                          ? 429
                           : scenario === "authorization-rejected"
                           ? 403
                           : scenario === "ambiguous-timeout"
                           ? 504
                           : 409,
-                        headers: { "content-type": "application/json" }
+                        headers: {
+                          "content-type": "application/json",
+                          ...(rateLimited ? { "retry-after": "1" } : {})
+                        }
                       }
                     )
                   )
@@ -3148,6 +3159,17 @@ describe("first-party plugin runtime", () => {
                   Effect.provide(engineLayer),
                   Effect.provide(store)
                 )
+                : scenario === "rate-limited"
+                ? yield* Effect.gen(function*() {
+                  const engine = yield* GovernedActionExecutionEngine
+                  const fiber = yield* engine.run({
+                    workspaceId: GOVERNED_WORKSPACE,
+                    actionId: GOVERNED_ACTION
+                  }).pipe(Effect.forkChild)
+                  yield* Deferred.await(rateLimitObserved)
+                  yield* TestClock.adjust(Duration.seconds(1))
+                  return yield* Fiber.join(fiber)
+                }).pipe(Effect.provide(engineLayer))
                 : yield* Effect.gen(function*() {
                   const engine = yield* GovernedActionExecutionEngine
                   return yield* engine.run({
@@ -3160,7 +3182,9 @@ describe("first-party plugin runtime", () => {
                 workspaceId: GOVERNED_WORKSPACE,
                 actionId: GOVERNED_ACTION
               })
-              const expectedState = scenario === "succeeded" || scenario === "manual-recovery"
+              const expectedState = scenario === "succeeded" ||
+                  scenario === "rate-limited" ||
+                  scenario === "manual-recovery"
                 ? "succeeded"
                 : scenario === "provider-rejected" || scenario === "authorization-rejected"
                 ? "failed"
@@ -3184,7 +3208,11 @@ describe("first-party plugin runtime", () => {
               )
               assert.strictEqual(
                 yield* Ref.get(mutations),
-                scenario === "stale-denied" || scenario === "manual-recovery" ? 0 : 1
+                scenario === "stale-denied" || scenario === "manual-recovery"
+                  ? 0
+                  : scenario === "rate-limited"
+                  ? 2
+                  : 1
               )
             }).pipe(
               Effect.provide(makeFirstPartyPluginRuntimeRegistry(unusedCodeCommitClients)),
@@ -3235,8 +3263,11 @@ describe("first-party plugin runtime", () => {
             ? request.method === "GET"
               ? yield* Effect.gen(function*() {
                 const readCount = yield* Ref.updateAndGet(entryReads, (count) => count + 1)
-                if (readCount === 2) yield* Deferred.succeed(concurrentProposalReads, undefined)
+                if (readCount === 2) {
+                  yield* Deferred.succeed(concurrentProposalReads, undefined)
+                }
                 if (readCount <= 2) yield* Deferred.await(concurrentProposalReads)
+                if (readCount === 4) yield* TestClock.adjust(Duration.seconds(1))
                 return yield* Ref.get(providerState)
               })
               : yield* Ref.set(providerState, correctedTimeEntry).pipe(
@@ -3400,6 +3431,12 @@ describe("first-party plugin runtime", () => {
         assert.strictEqual(result.state, "succeeded")
         assert.strictEqual(record.head.state, "succeeded")
         assert.strictEqual(record.envelope.policy.requiredPermission, "workspace-approver")
+        assert.isNotNull(record.authorization)
+        if (record.authorization !== null) {
+          assert.isTrue(
+            DateTime.Order(record.authorization.authorizedAt, record.envelope.proposal.proposedAt) >= 0
+          )
+        }
         assert.isTrue(Result.isFailure(conflictingActor))
         if (Result.isFailure(conflictingActor)) {
           assert.strictEqual(conflictingActor.failure.reason, "conflict")
@@ -3430,7 +3467,20 @@ describe("first-party plugin runtime", () => {
           session: ownerSession
         }
         const correction = yield* submissions.submit(correctionRequest)
+        const correctionRecord = yield* persistenceService.governedActions.read({
+          workspaceId: GOVERNED_WORKSPACE,
+          actionId: correction.actionId
+        })
         assert.strictEqual(correction.state, "succeeded")
+        assert.isNotNull(correctionRecord.authorization)
+        if (correctionRecord.authorization !== null) {
+          assert.isTrue(
+            DateTime.Order(
+              correctionRecord.authorization.authorizedAt,
+              correctionRecord.envelope.proposal.proposedAt
+            ) >= 0
+          )
+        }
         assert.strictEqual(yield* Ref.get(mutations), 1)
         const readsAfterCorrection = yield* Ref.get(entryReads)
 

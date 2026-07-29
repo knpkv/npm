@@ -248,17 +248,11 @@ const makeService = Effect.gen(function*() {
         ),
         mapFailure
       )
-    const authorizationMaterial = {
-      authorizedAt: yield* DateTime.now,
-      authorizationId: GovernedActionAuthorizationId.make(yield* cryptoService.randomUUIDv7),
-      transitionId: GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7),
-      auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
-    }
-    const prepareAuthorization = (
+    const prepareAuthorization = Effect.fn("ClockifyActionSubmissions.prepareAuthorization")(function*(
       envelope: GovernedActionEnvelopeV1,
       expectedHeadTransitionId: GovernedActionTransitionId
-    ) => {
-      const authorizedAt = authorizationMaterial.authorizedAt
+    ) {
+      const authorizedAt = yield* DateTime.now
       const expiresAt = DateTime.min(
         DateTime.addDuration(authorizedAt, Duration.minutes(5)),
         DateTime.min(
@@ -266,8 +260,8 @@ const makeService = Effect.gen(function*() {
           DateTime.min(session.idleExpiresAt, session.absoluteExpiresAt)
         )
       )
-      if (DateTime.Order(authorizedAt, expiresAt) >= 0) return Effect.fail(failure("conflict"))
-      const authorizationId = authorizationMaterial.authorizationId
+      if (DateTime.Order(authorizedAt, expiresAt) >= 0) return yield* failure("conflict")
+      const authorizationId = GovernedActionAuthorizationId.make(yield* cryptoService.randomUUIDv7)
       const authorization = GovernedActionAuthorizationV1.make({
         schemaVersion: 1,
         authorizationId,
@@ -291,10 +285,10 @@ const makeService = Effect.gen(function*() {
         authorizedAt,
         expiresAt
       })
-      return Effect.succeed(GovernedActionCommitInput.make({
+      const commit = GovernedActionCommitInput.make({
         envelope,
         expectedHeadTransitionId,
-        transitionId: authorizationMaterial.transitionId,
+        transitionId: GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7),
         commandId: GovernedActionCommandId.make(`clockify:${envelope.actionId}:authorize`),
         command: { _tag: "authorize", authorizationId },
         cause,
@@ -302,9 +296,10 @@ const makeService = Effect.gen(function*() {
         causationId: null,
         correlationId: null,
         companion: { _tag: "authorization", authorization },
-        auditEventId: authorizationMaterial.auditEventId
-      }))
-    }
+        auditEventId: DomainEventId.make(yield* cryptoService.randomUUIDv7)
+      })
+      return commit
+    })
     const advance = Effect.fn("ClockifyActionSubmissions.advance")(function*(actionId: GovernedActionId) {
       yield* submission.advance({ workspaceId: input.workspaceId, actionId }).pipe(mapFailure)
       const record = yield* persistence.governedActions.read({

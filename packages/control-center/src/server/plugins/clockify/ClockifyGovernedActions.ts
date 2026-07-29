@@ -1,6 +1,7 @@
 /** Governed Clockify correction and Control Center approval actions. @internal */
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
@@ -138,9 +139,9 @@ const isConfirmedClockifyRejection = (failure: PluginFailure): boolean => {
   switch (failure._tag) {
     case "PluginAuthenticationFailure":
     case "PluginAuthorizationFailure":
-    case "PluginRateLimitFailure":
     case "PluginConflictFailure":
       return true
+    case "PluginRateLimitFailure":
     case "PluginTimeoutFailure":
     case "PluginMalformedResponseFailure":
     case "PluginOutageFailure":
@@ -541,27 +542,41 @@ export const makeClockifyGovernedActions = (
       return yield* conflict("clockify-time-entry-changed-before-update")
     }
 
-    const update = yield* withTimeout(
-      "clockify-update-time-entry",
-      input.configuration.operationTimeoutMillis,
-      input.provider.updateTimeEntry(
-        payload.workspaceId,
-        payload.entryId,
-        {
-          billable: payload.billable,
-          customFields: payload.customFields,
-          description: payload.correctedDescription,
-          ...(payload.end === null ? {} : { end: payload.end }),
-          ...(payload.projectId === null ? {} : { projectId: payload.projectId }),
-          start: payload.start,
-          tagIds: [...payload.tagIds],
-          ...(payload.taskId === null ? {} : { taskId: payload.taskId }),
-          ...(payload.entryType === "REGULAR" || payload.entryType === "BREAK"
-            ? { type: payload.entryType }
-            : {})
-        }
+    const updateTimeEntry = () =>
+      withTimeout(
+        "clockify-update-time-entry",
+        input.configuration.operationTimeoutMillis,
+        input.provider.updateTimeEntry(
+          payload.workspaceId,
+          payload.entryId,
+          {
+            billable: payload.billable,
+            customFields: payload.customFields,
+            description: payload.correctedDescription,
+            ...(payload.end === null ? {} : { end: payload.end }),
+            ...(payload.projectId === null ? {} : { projectId: payload.projectId }),
+            start: payload.start,
+            tagIds: [...payload.tagIds],
+            ...(payload.taskId === null ? {} : { taskId: payload.taskId }),
+            ...(payload.entryType === "REGULAR" || payload.entryType === "BREAK"
+              ? { type: payload.entryType }
+              : {})
+          }
+        )
       )
-    ).pipe(Effect.result)
+    const update = yield* updateTimeEntry().pipe(
+      Effect.catchTag("PluginRateLimitFailure", (failure) =>
+        DateTime.now.pipe(
+          Effect.flatMap((now) =>
+            Effect.sleep(Duration.millis(Math.max(
+              0,
+              DateTime.toEpochMillis(failure.retryAt) - DateTime.toEpochMillis(now)
+            )))
+          ),
+          Effect.andThen(updateTimeEntry())
+        )),
+      Effect.result
+    )
     const observedAt = yield* DateTime.now
     if (update._tag === "Failure") {
       if (isConfirmedClockifyRejection(update.failure)) {
