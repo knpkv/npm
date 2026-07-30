@@ -12,25 +12,86 @@ concurrency:
 permissions: {}
 
 jobs:
-  live-provider-journey:
-    name: Four-provider real server journey
+  prepare-live-runner:
+    name: Build sealed live runner
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: control-center-live-integration
+    outputs:
+      runner-sha256: ${{ steps.package-runner.outputs.sha256 }}
     permissions:
       contents: read
-      id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Install dependencies
         uses: ./.github/actions/setup
         with:
           node-version: "24.10.0"
 
+      - name: Build Control Center and workspace dependencies
+        run: pnpm --filter @knpkv/control-center... build
+
+      - name: Package sealed live runner
+        id: package-runner
+        shell: bash
+        run: |
+          runner_root="${RUNNER_TEMP}/control-center-live-runner"
+          mkdir -p "${runner_root}"
+          cp -R node_modules packages "${runner_root}/"
+          cp package.json tsconfig.base.jsonc "${runner_root}/"
+          node_root="$(dirname "$(dirname "$(command -v node)")")"
+          cp -R "${node_root}" "${runner_root}/node-runtime"
+          tar --create --gzip \
+            --file "${RUNNER_TEMP}/control-center-live-runner.tgz" \
+            --directory "${runner_root}" .
+          runner_sha256="$(sha256sum "${RUNNER_TEMP}/control-center-live-runner.tgz" | cut -d ' ' -f 1)"
+          echo "sha256=${runner_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload sealed live runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-center-live-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-runner.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  live-provider-journey:
+    name: Four-provider real server journey
+    needs: prepare-live-runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: control-center-live-integration
+    permissions:
+      id-token: write
+    steps:
+      - name: Download sealed live runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: control-center-live-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-artifact
+
+      - name: Verify sealed live runner
+        shell: bash
+        env:
+          EXPECTED_RUNNER_SHA256: ${{ needs.prepare-live-runner.outputs.runner-sha256 }}
+        run: |
+          artifact_root="${RUNNER_TEMP}/control-center-live-artifact"
+          runner_root="${RUNNER_TEMP}/control-center-live-runner"
+          printf '%s  %s\n' \
+            "${EXPECTED_RUNNER_SHA256}" \
+            "${artifact_root}/control-center-live-runner.tgz" \
+            | sha256sum --check --strict
+          mkdir -p "${runner_root}"
+          tar --extract --gzip \
+            --file "${artifact_root}/control-center-live-runner.tgz" \
+            --directory "${runner_root}"
+          echo "CONTROL_CENTER_LIVE_RUNNER=${runner_root}" >> "${GITHUB_ENV}"
+
       - name: Assume read-only live-test role
-        uses: aws-actions/configure-aws-credentials@v6.1.1
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
         with:
           aws-region: ${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}
           role-to-assume: ${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}
@@ -38,9 +99,6 @@ jobs:
           mask-aws-account-id: true
           output-credentials: false
           unset-current-credentials: true
-
-      - name: Build Control Center and workspace dependencies
-        run: pnpm --filter @knpkv/control-center... build
 
       - name: Run bounded live provider journey
         env:
@@ -57,4 +115,10 @@ jobs:
           JIRA_API_KEY: ${{ secrets.JIRA_API_KEY }}
           CONFLUENCE_EMAIL: ${{ secrets.CONFLUENCE_EMAIL }}
           CONFLUENCE_API_KEY: ${{ secrets.CONFLUENCE_API_KEY }}
-        run: pnpm --filter @knpkv/control-center test:integration:live
+        run: |
+          control_center_root="${CONTROL_CENTER_LIVE_RUNNER}/packages/control-center"
+          "${CONTROL_CENTER_LIVE_RUNNER}/node-runtime/bin/node" \
+            "${CONTROL_CENTER_LIVE_RUNNER}/node_modules/vitest/vitest.mjs" \
+            run \
+            --root "${control_center_root}" \
+            --config "${control_center_root}/vitest.live.config.ts"

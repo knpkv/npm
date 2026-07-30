@@ -3,9 +3,20 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
 import * as Redacted from "effect/Redacted"
 import * as Result from "effect/Result"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientError from "effect/unstable/http/HttpClientError"
+import { HttpApiClient } from "effect/unstable/httpapi"
 
+import { ControlCenterApi } from "../../src/api/controlCenterApi.js"
+import { PluginConfigurationKey } from "../../src/api/plugins.js"
+import { PluginConnectionId } from "../../src/domain/identifiers.js"
 import { LiveConnectionConfigurationError, loadLiveConnectionConfiguration } from "./liveConnectionConfiguration.js"
-import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
+import {
+  assertSensitiveTextAbsent,
+  LiveIntegrationRequestError,
+  makeSecretSafeLiveHttpClient,
+  redactAuthenticatedLiveResponse
+} from "./liveSecretAssertions.js"
 
 const completeEnvironment = {
   CONTROL_CENTER_LIVE_INTEGRATION: "1",
@@ -45,10 +56,7 @@ describe("live connection configuration", () => {
       assert.isTrue(Result.isFailure(result))
       if (Result.isFailure(result)) {
         assert.instanceOf(result.failure, LiveConnectionConfigurationError)
-        assert.include(
-          result.failure.requiredVariables,
-          "CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"
-        )
+        assert.include(result.failure.requiredVariables, "CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE")
         assertSensitiveTextAbsent(JSON.stringify(result.failure), "jira-token")
       }
     }).pipe(
@@ -108,4 +116,60 @@ describe("live connection configuration", () => {
     assert.isFalse(renderedFailure.includes(canary))
     assert.include(renderedFailure, "redaction boundary")
   })
+
+  it.effect("replaces transport failures at the credential-bearing HTTP client boundary", () =>
+    Effect.gen(function*() {
+      const tokenCanary = "live-http-request-token-canary"
+      const cookieCanary = "live-http-cookie-canary"
+      const csrfCanary = "live-http-csrf-canary"
+      const failingClient = HttpClient.make((request) => {
+        const rawFailure = new HttpClientError.HttpClientError({
+          reason: new HttpClientError.TransportError({
+            request,
+            description: "fixture transport failed"
+          })
+        })
+        const rawSerialization = JSON.stringify(rawFailure)
+        assert.isTrue([tokenCanary, csrfCanary].every((canary) => rawSerialization.includes(canary)))
+        assert.isFalse(rawSerialization.includes(cookieCanary))
+        return Effect.fail(rawFailure)
+      })
+      const authenticatedClient = failingClient.pipe(
+        makeSecretSafeLiveHttpClient("authenticated-api", {
+          cookie: `cc_session=${cookieCanary}`,
+          "x-csrf-token": csrfCanary
+        })
+      )
+      const apiClient = yield* HttpApiClient.makeWith(ControlCenterApi, {
+        baseUrl: "http://127.0.0.1",
+        httpClient: authenticatedClient,
+        transformResponse: redactAuthenticatedLiveResponse
+      })
+
+      const result = yield* apiClient.plugins
+        .createConnection({
+          payload: {
+            pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000ff"),
+            providerId: "jira",
+            displayName: "Transport failure fixture",
+            values: [
+              {
+                _tag: "secret",
+                key: PluginConfigurationKey.make("apiToken"),
+                value: tokenCanary
+              }
+            ]
+          }
+        })
+        .pipe(Effect.result)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, LiveIntegrationRequestError)
+        assert.strictEqual(result.failure.operation, "authenticated-api")
+        for (const canary of [tokenCanary, cookieCanary, csrfCanary]) {
+          assertSensitiveTextAbsent(JSON.stringify(result.failure), canary)
+          assertSensitiveTextAbsent(String(result.failure), canary)
+        }
+      }
+    }))
 })

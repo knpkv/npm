@@ -1507,7 +1507,6 @@ module.exports = {
         CallExpression(node) {
           if (
             node.callee.type !== "MemberExpression" ||
-            node.callee.computed ||
             node.callee.object.type !== "Identifier" ||
             staticPropertyName(node.callee.property) !== "notInclude" ||
             !isNamedImportFrom(context, node.callee.object, ["@effect/vitest"], ["assert"])

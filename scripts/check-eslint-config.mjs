@@ -125,8 +125,9 @@ await assertRuleDiagnostics({
   code: `
     import { assert } from "@effect/vitest"
     assert.notInclude(serialized, Redacted.value(configuration.jiraApiKey))
+    assert["notInclude"](serialized, configuration.jiraEmail)
   `,
-  expected: 1,
+  expected: 2,
   filePath: "packages/control-center/test/integration/live-secret-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
@@ -135,6 +136,9 @@ await assertRuleDiagnostics({
   code: `
     import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
     assertSensitiveTextAbsent(serialized, Redacted.value(configuration.jiraApiKey))
+    import { assert } from "@effect/vitest"
+    const method = "notInclude"
+    assert[method](publicSummary, "non-sensitive")
   `,
   expected: 0,
   filePath: "packages/control-center/test/integration/live-secret-assertion-valid.test.ts",
