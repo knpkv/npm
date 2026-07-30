@@ -112,6 +112,7 @@ The remediation pass must implement the proposed guardrail with the defect fix w
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
 Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
+Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 

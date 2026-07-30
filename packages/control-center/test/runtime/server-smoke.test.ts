@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { AgentContextFingerprint, AgentProviderId } from "@knpkv/ai-runtime"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
+import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -1127,6 +1128,7 @@ describe("Control Center closed runtime", () => {
 
       let sourceUses = 0
       let sandboxCalls = 0
+      const reviewExecutionCompleted = yield* Deferred.make<void>()
       const sandboxOperations = new Array<string>()
       const sourceWorkspace = PrReviewSourceWorkspace.of({
         withSource: (_request, use) => {
@@ -1193,7 +1195,9 @@ describe("Control Center closed runtime", () => {
       const sandboxSessions = PrReviewSandboxSessions.of({
         withSession: (_request, use) => {
           sandboxCalls += 1
-          return use(sandboxSession)
+          return use(sandboxSession).pipe(
+            Effect.tap(() => Deferred.succeed(reviewExecutionCompleted, undefined))
+          )
         },
         reconcile: () => Effect.succeed({ removedSandboxes: [] })
       })
@@ -1207,7 +1211,6 @@ describe("Control Center closed runtime", () => {
           workspaceId: WORKSPACE_ID,
           workspaceRoot: path.join(dataRoot, "review-workspaces"),
           leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
-          runOnceBeforeSupervision: true,
           sourceWorkspace,
           sandboxSessions
         }
@@ -1250,17 +1253,25 @@ describe("Control Center closed runtime", () => {
           workspaceId: WORKSPACE_ID,
           workspaceRoot: path.join(dataRoot, "review-workspaces"),
           leaseOwner: AgentLeaseOwner.make("runtime-review-worker"),
-          runOnceBeforeSupervision: true,
           sourceWorkspace,
           sandboxSessions
         }
       }))
       const persistence = Context.get(runtime, Persistence)
-      const latest = yield* persistence.agentJobs.latestReview({
-        workspaceId: WORKSPACE_ID,
-        pluginConnectionId: PLUGIN_ID,
-        subject
-      })
+      yield* Deferred.await(reviewExecutionCompleted)
+      const latest = yield* Effect.gen(function*() {
+        const result = yield* persistence.agentJobs.latestReview({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          subject
+        })
+        return Option.isSome(result) && result.value.state !== "running"
+          ? result
+          : yield* Effect.fail("review worker has not durably completed its claim")
+      }).pipe(
+        Effect.tapError(() => Effect.yieldNow),
+        Effect.retry({ times: 50 })
+      )
       const retentionRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
 
       assert.isTrue(Option.isSome(latest))

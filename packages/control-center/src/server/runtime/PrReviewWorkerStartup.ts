@@ -1,17 +1,16 @@
 /** Supervise the durable PR-review worker for one configured workspace. @module */
-import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
-import { PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
+import { type PrReviewSandboxSessionError, PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
 import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { ControlCenterBootstrap } from "./Bootstrap.js"
+import { superviseAgentJobWorker } from "./internal/superviseAgentJobWorker.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const DEFAULT_IDLE_POLL_INTERVAL = Duration.seconds(1)
@@ -22,8 +21,6 @@ export interface PrReviewWorkerStartupOptions {
   readonly workspaceId: WorkspaceId
   readonly idlePollInterval?: Duration.Input
   readonly failurePollInterval?: Duration.Input
-  /** Deterministic composition-test hook; production starts through the supervised loop. @internal */
-  readonly runOnceBeforeSupervision?: boolean
 }
 
 /** Diagnostic state proving the worker fiber was attached to the server scope. */
@@ -46,52 +43,27 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const persistence = yield* Persistence
   yield* ControlCenterBootstrap
   const reconciliation = yield* sandboxes.reconcile().pipe(
-    Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure)),
-    Effect.option
+    Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
-  if (Option.isSome(reconciliation)) {
-    yield* persistence.retention
-      .recordSandboxReconciliation(
-        options.workspaceId,
-        reconciliation.value.removedSandboxes.length
-      )
-  }
+  yield* persistence.retention
+    .recordSandboxReconciliation(
+      options.workspaceId,
+      reconciliation.removedSandboxes.length
+    )
   const idlePollInterval = Duration.fromInputUnsafe(
     options.idlePollInterval ?? DEFAULT_IDLE_POLL_INTERVAL
   )
   const failurePollInterval = Duration.fromInputUnsafe(
     options.failurePollInterval ?? DEFAULT_FAILURE_POLL_INTERVAL
   )
-  if (options.runOnceBeforeSupervision === true) {
-    yield* worker.runOnce(options.workspaceId).pipe(Effect.orDie)
-  }
-  const cycle = worker.runOnce(options.workspaceId).pipe(
-    Effect.map((result) => result._tag === "idle" ? idlePollInterval : Duration.zero),
-    Effect.catchCause((cause) =>
-      Cause.hasInterrupts(cause)
-        ? Effect.failCause(cause)
-        : Effect.logError("PR review worker cycle failed", cause).pipe(
-          Effect.as(failurePollInterval)
-        )
-    )
-  )
-  const supervise = Effect.gen(function*() {
-    while (true) {
-      const nextPollInterval = yield* lifecycle.runBackground(cycle)
-      const drainStarted = yield* Effect.raceFirst(
-        lifecycle.awaitDrain.pipe(Effect.as(true)),
-        (
-          Duration.isZero(nextPollInterval)
-            ? Effect.yieldNow
-            : Effect.sleep(nextPollInterval)
-        ).pipe(Effect.as(false))
-      )
-      if (drainStarted) return
-    }
-  }).pipe(
-    Effect.catch(() => Effect.void)
-  )
-  yield* Effect.forkScoped(supervise)
+  yield* superviseAgentJobWorker({
+    failurePollInterval,
+    idlePollInterval,
+    lifecycle,
+    logLabel: "PR review worker",
+    worker,
+    workspaceId: options.workspaceId
+  })
   return new PrReviewWorkerRunning({ workspaceId: options.workspaceId })
 })
 
@@ -100,6 +72,6 @@ export const prReviewWorkerStartupLayer = (
   options: PrReviewWorkerStartupOptions
 ): Layer.Layer<
   PrReviewWorkerStartup,
-  PersistenceOperationFailure,
+  PersistenceOperationFailure | PrReviewSandboxSessionError,
   AgentJobWorker | ControlCenterBootstrap | Persistence | PrReviewSandboxSessions | ServerLifecycle
 > => Layer.effect(PrReviewWorkerStartup, makeStartup(options))

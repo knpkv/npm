@@ -111,14 +111,13 @@ describe("PR review worker startup", () => {
       assert.strictEqual(observedWorkspaceId, WORKSPACE_ID)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("starts the worker when stale-sandbox reconciliation is unavailable", () =>
+  it.effect("fails before polling when stale-sandbox reconciliation is unavailable", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle.make
       const persistence = yield* makeTestPersistence(true)
-      const started = yield* Deferred.make<void>()
+      const started = yield* Ref.make(false)
       const worker = AgentJobWorker.of({
-        runOnce: () =>
-          Deferred.succeed(started, undefined).pipe(Effect.as({ _tag: "idle" } satisfies AgentJobWorkerRunResult))
+        runOnce: () => Ref.set(started, true).pipe(Effect.as({ _tag: "idle" } satisfies AgentJobWorkerRunResult))
       })
       const sandboxes = PrReviewSandboxSessions.of({
         withSession: () => Effect.die("not used"),
@@ -144,15 +143,10 @@ describe("PR review worker startup", () => {
         )
       )
 
-      const running = yield* Effect.gen(function*() {
-        const state = yield* PrReviewWorkerStartup
-        yield* Deferred.await(started)
-        yield* lifecycle.beginDrain
-        yield* lifecycle.awaitWorkDrained
-        return state
-      }).pipe(Effect.provide(startup))
+      const result = yield* Layer.build(startup).pipe(Effect.result)
 
-      assert.instanceOf(running, PrReviewWorkerRunning)
+      assert.isTrue(Result.isFailure(result))
+      assert.isFalse(yield* Ref.get(started))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("fails before polling when a successful reconciliation cannot be audited", () =>

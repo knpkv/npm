@@ -1,5 +1,4 @@
 /** Supervise durable release-chat agent jobs for one configured workspace. @module */
-import * as Cause from "effect/Cause"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
@@ -8,6 +7,7 @@ import * as Layer from "effect/Layer"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
+import { superviseAgentJobWorker } from "./internal/superviseAgentJobWorker.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const DEFAULT_IDLE_POLL_INTERVAL = Duration.seconds(1)
@@ -42,33 +42,14 @@ const makeStartup = Effect.fn("ReleaseAgentWorkerStartup.make")(function*(
   const failurePollInterval = Duration.fromInputUnsafe(
     options.failurePollInterval ?? DEFAULT_FAILURE_POLL_INTERVAL
   )
-  const cycle = worker.runOnce(options.workspaceId).pipe(
-    Effect.map((result) => result._tag === "idle" ? idlePollInterval : Duration.zero),
-    Effect.catchCause((cause) =>
-      Cause.hasInterrupts(cause)
-        ? Effect.failCause(cause)
-        : Effect.logError("Release agent worker cycle failed", cause).pipe(
-          Effect.as(failurePollInterval)
-        )
-    )
-  )
-  const supervise = Effect.gen(function*() {
-    while (true) {
-      const nextPollInterval = yield* lifecycle.runBackground(cycle)
-      const drainStarted = yield* Effect.raceFirst(
-        lifecycle.awaitDrain.pipe(Effect.as(true)),
-        (
-          Duration.isZero(nextPollInterval)
-            ? Effect.yieldNow
-            : Effect.sleep(nextPollInterval)
-        ).pipe(Effect.as(false))
-      )
-      if (drainStarted) return
-    }
-  }).pipe(
-    Effect.catch(() => Effect.void)
-  )
-  yield* Effect.forkScoped(supervise)
+  yield* superviseAgentJobWorker({
+    failurePollInterval,
+    idlePollInterval,
+    lifecycle,
+    logLabel: "Release agent worker",
+    worker,
+    workspaceId: options.workspaceId
+  })
   return new ReleaseAgentWorkerRunning({ workspaceId: options.workspaceId })
 })
 

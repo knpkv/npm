@@ -159,8 +159,6 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly leaseDuration?: Duration.Input
   readonly idlePollInterval?: Duration.Input
   readonly failurePollInterval?: Duration.Input
-  /** Deterministic composition-test hook; production omits it. @internal */
-  readonly runOnceBeforeSupervision?: boolean
   readonly maximumSandboxDurationMillis?: number
   readonly maximumSourceDuration?: Duration.Input
   /** Deterministic composition seam; production omits it. @internal */
@@ -562,10 +560,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           : { idlePollInterval: configured.idlePollInterval }),
         ...(configured.failurePollInterval === undefined
           ? {}
-          : { failurePollInterval: configured.failurePollInterval }),
-        ...(configured.runOnceBeforeSupervision === undefined
-          ? {}
-          : { runOnceBeforeSupervision: configured.runOnceBeforeSupervision })
+          : { failurePollInterval: configured.failurePollInterval })
       }).pipe(
         Layer.provide(worker),
         Layer.provide(sandboxes),
