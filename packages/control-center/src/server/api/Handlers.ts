@@ -1297,51 +1297,65 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             }))
           }))
         .handle("editReviewSuggestion", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (
-              session.actor._tag !== "human" ||
-              session.permission !== "workspace-owner"
-            ) {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* reviews.editSuggestion({
-              workspaceId: session.workspaceId,
-              entityId: params.entityId,
-              jobId: params.jobId,
-              suggestionId: params.suggestionId,
-              request: payload,
-              session
-            }).pipe(Effect.catchTags({
-              ApplicationConflict: mapApplicationConflict,
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (
+                session.actor._tag !== "human" ||
+                session.permission !== "workspace-owner"
+              ) {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.editSuggestion({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId,
+                suggestionId: params.suggestionId,
+                request: payload,
+                session
+              }).pipe(Effect.catchTags({
+                ApplicationConflict: mapApplicationConflict,
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("dismissReviewSuggestion", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (
-              session.actor._tag !== "human" ||
-              session.permission !== "workspace-owner"
-            ) {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* reviews.dismissSuggestion({
-              workspaceId: session.workspaceId,
-              entityId: params.entityId,
-              jobId: params.jobId,
-              suggestionId: params.suggestionId,
-              request: payload,
-              session
-            }).pipe(Effect.catchTags({
-              ApplicationConflict: mapApplicationConflict,
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (
+                session.actor._tag !== "human" ||
+                session.permission !== "workspace-owner"
+              ) {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.dismissSuggestion({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId,
+                suggestionId: params.suggestionId,
+                request: payload,
+                session
+              }).pipe(Effect.catchTags({
+                ApplicationConflict: mapApplicationConflict,
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("previewReviewSuggestionPublication", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
@@ -1363,25 +1377,32 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             }))
           }))
         .handle("publishReviewSuggestion", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (
-              session.actor._tag !== "human" ||
-              session.permission !== "workspace-owner"
-            ) {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* reviews.publishSuggestion({
-              workspaceId: session.workspaceId,
-              entityId: params.entityId,
-              request: payload,
-              session
-            }).pipe(Effect.catchTags({
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (
+                session.actor._tag !== "human" ||
+                session.permission !== "workspace-owner"
+              ) {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.publishSuggestion({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                request: payload,
+                session
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
     })
 )
 

@@ -3069,6 +3069,116 @@ describe("Control Center API handlers", () => {
       ])
     }))
 
+  it.effect("rejects review-suggestion writes after server drain begins", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const applicationCalls = yield* Ref.make(0)
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000025")
+      const suggestionId = PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(`sha256:${"5".repeat(64)}`)
+      const sequence = PrReviewSuggestionRevisionSequence.make(1)
+      const edit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+        title: "Decode the response",
+        severity: "P2",
+        problem: "The response is persisted before decoding.",
+        impact: "Malformed output may reach durable state.",
+        evidence: {
+          path: "src/review.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "yield* persist(response)"
+        },
+        recommendation: "Decode the response before persistence.",
+        confidence: {
+          level: "high",
+          reason: "The operation order is explicit."
+        },
+        relatedLocations: [],
+        anchor: {
+          _tag: "line",
+          path: "src/review.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        }
+      })
+      const blockedMutation = Ref.update(applicationCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.die("review mutation crossed the drain guard"))
+      )
+      const reviews = Layer.succeed(PullRequestReviews, {
+        thread: () => Effect.die("not used"),
+        current: () => Effect.die("not used"),
+        enqueue: () => Effect.die("not used"),
+        revisions: () => Effect.die("not used"),
+        editSuggestion: () => blockedMutation,
+        dismissSuggestion: () => blockedMutation,
+        previewPublication: () => Effect.die("not used"),
+        publishSuggestion: () => blockedMutation
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("not used")
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        yield* lifecycle.beginDrain
+        const edited = yield* client.agent.editReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence,
+            edit
+          }
+        }).pipe(Effect.result)
+        const dismissed = yield* client.agent.dismissReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence
+          }
+        }).pipe(Effect.result)
+        const published = yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent: ReviewSuggestionPublicationContent.make("Decode before persistence."),
+            authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+              `sha256:${"a".repeat(64)}`
+            )
+          }
+        }).pipe(Effect.result)
+        return { dismissed, edited, published }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result.edited))
+      if (Result.isFailure(result.edited)) {
+        assert.strictEqual(result.edited.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.dismissed))
+      if (Result.isFailure(result.dismissed)) {
+        assert.strictEqual(result.dismissed.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.published))
+      if (Result.isFailure(result.published)) {
+        assert.strictEqual(result.published.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.strictEqual(yield* Ref.get(applicationCalls), 0)
+    }))
+
   it.effect("returns only the redacted agent provider catalog to an owner", () =>
     Effect.gen(function*() {
       const jobs = Layer.succeed(ReleaseAgentJobs, {
