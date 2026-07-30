@@ -18,6 +18,7 @@ import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.
 
 const DEFAULT_SBX_EXECUTABLE = "sbx"
 const SANDBOX_PREFIX = "cc-pr-review-"
+const SANDBOX_JOB_TOKEN_LENGTH = 4
 const CONTROL_TIMEOUT = Duration.seconds(30)
 const SOURCE_HANDOFF_TIMEOUT = Duration.minutes(5)
 const DEFAULT_COMMAND_TIMEOUT_MILLIS = 120_000
@@ -402,13 +403,15 @@ const decodeUtf8 = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
-const workspaceSandboxPrefix = (workspaceId: WorkspaceId): string => `${SANDBOX_PREFIX}${workspaceId}-`
+const compactUuid = (identifier: WorkspaceId | JobId): string => identifier.replaceAll("-", "")
+
+const workspaceSandboxPrefix = (workspaceId: WorkspaceId): string => `${SANDBOX_PREFIX}${compactUuid(workspaceId)}-`
 
 const sandboxName = (
   workspaceId: WorkspaceId,
   jobId: JobId,
   attemptId: string
-): string => `${workspaceSandboxPrefix(workspaceId)}${jobId}-${attemptId}`
+): string => `${workspaceSandboxPrefix(workspaceId)}${compactUuid(jobId).slice(-SANDBOX_JOB_TOKEN_LENGTH)}-${attemptId}`
 
 const visiblePrefix = (bytes: Uint8Array): Uint8Array => {
   let end = Math.min(bytes.byteLength, MAXIMUM_VISIBLE_OUTPUT_BYTES)

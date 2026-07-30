@@ -183,9 +183,10 @@ and uses only the disposable clone. Codex disables project-document and exec-pol
 reviewed head; Claude disables project, local, and user setting sources so its `CLAUDE.md` files are
 review content rather than executable instructions, and safe mode disables automatic project-memory
 discovery. Every path validates structured output and exact
-diff evidence on the trusted host. Sandbox names are server-private and begin with the configured
-worker workspace's `cc-pr-review-<workspace-id>-` prefix. Startup removes only crash leftovers in
-that owned namespace; foreign-workspace and legacy unscoped names are not removed automatically.
+diff evidence on the trusted host. Sandbox names are server-private, remain within sbx's 63-character
+limit, and begin with the configured worker workspace's
+`cc-pr-review-<compact-workspace-id>-` prefix. Startup removes only crash leftovers in that owned
+namespace; foreign-workspace and legacy unscoped names are not removed automatically.
 While a review is running, the worker renews its durable lease and
 observes cancellation; cancellation
 interrupts the scoped checkout, sandbox, and model work before durably completing the job as cancelled.

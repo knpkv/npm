@@ -202,12 +202,14 @@ When writing Effect code:
   update `packages/control-center/README.md` and
   `packages/control-center/docs/agentic-pr-review.md` in the same change, and
   append an amendment to the governing ADR when earlier rationale changes.
-  Current docs must describe the server-private workspace-scoped prefix and
-  state that foreign-workspace and legacy names are not automatically removed;
-  a claim that startup removes all `cc-pr-review-*` names is invalid. Generated
-  and vendor docs are excluded. Clearly historical implementation plans may
-  remain unchanged, but ADR history requires an amendment rather than a silent
-  rewrite.
+  Current docs must describe the server-private compact workspace-scoped prefix,
+  its 63-character sbx limit, and state that foreign-workspace and legacy names
+  are not automatically removed; a claim that startup removes all
+  `cc-pr-review-*` names is invalid. Keep the focused sandbox-session test
+  proving that the invalid full-UUID shape exceeds the limit while the bounded
+  compact name and foreign-workspace fixture pass. Generated and vendor docs are
+  excluded. Clearly historical implementation plans may remain unchanged, but
+  ADR history requires an amendment rather than a silent rewrite.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

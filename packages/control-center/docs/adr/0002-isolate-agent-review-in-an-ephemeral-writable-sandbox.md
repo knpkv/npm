@@ -7,8 +7,9 @@ An Exploratory Review Run receives a writable project checkout inside an ephemer
 The original process-wide `cc-pr-review-` cleanup rule assumed one Control
 Center workspace owned the sbx runtime. A shared runtime makes that attribution
 unsafe. Current sandbox names therefore use the server-private
-`cc-pr-review-<workspace-id>-` namespace, and startup removes only leftovers
-owned by the configured PR worker workspace. Foreign-workspace and legacy
-unscoped names remain untouched because ownership cannot be established. This
-amendment supersedes the global cleanup sentence above; the scoped per-run
-cleanup and isolation decision are unchanged.
+`cc-pr-review-<compact-workspace-id>-` namespace and a bounded job/attempt
+suffix so the complete name stays within sbx's 63-character limit. Startup
+removes only leftovers owned by the configured PR worker workspace.
+Foreign-workspace and legacy unscoped names remain untouched because ownership
+cannot be established. This amendment supersedes the global cleanup sentence
+above; the scoped per-run cleanup and isolation decision are unchanged.

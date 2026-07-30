@@ -294,7 +294,9 @@ executes a credential-free initialization command inside the sandbox. That
 command removes Git remotes and credential helpers and verifies the exact head
 again before any Review Sandbox tool can run.
 The name belongs to a server-private workspace namespace beginning with
-`cc-pr-review-<workspace-id>-`; callers do not construct or interpret it.
+`cc-pr-review-<compact-workspace-id>-`, where the compact ID is the canonical
+workspace UUID without hyphens. The complete name stays within sbx's
+63-character limit; callers do not construct or interpret it.
 
 Every contained command uses `sbx exec` with an explicit work directory and a
 fixed minimal environment. Host environment inheritance and shell
@@ -330,7 +332,7 @@ Run statuses are preparing, running, completed, cancelled, interrupted, failed, 
 On startup, Control Center:
 
 - Removes stale sbx sandboxes in the configured PR worker workspace's
-  `cc-pr-review-<workspace-id>-` namespace.
+  `cc-pr-review-<compact-workspace-id>-` namespace.
 - Recovers durable queued or lease-expired review jobs through the worker.
 - Starts a fresh sandbox for a recovered attempt rather than simulating provider-session recovery.
 
