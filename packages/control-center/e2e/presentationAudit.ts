@@ -86,7 +86,41 @@ interface PaintContextElement {
   readonly parentElement: PaintContextElement | null
 }
 
+interface ViewportContextElement {
+  readonly getBoundingClientRect: () => {
+    readonly bottom: number
+    readonly left: number
+    readonly right: number
+    readonly top: number
+  }
+  readonly ownerDocument: {
+    readonly defaultView: null | {
+      readonly scrollY: number
+      readonly scrollTo: (x: number, y: number) => void
+    }
+    readonly documentElement: { readonly clientHeight: number; readonly clientWidth: number }
+  }
+}
+
+interface ViewportIntersectionEntry {
+  readonly boundingClientRect: {
+    readonly bottom: number
+    readonly left: number
+    readonly right: number
+    readonly top: number
+  }
+  readonly intersectionRect: { readonly height: number; readonly width: number }
+}
+
+interface ViewportIntersectionObserver {
+  readonly disconnect: () => void
+  readonly observe: (target: unknown) => void
+}
+
 declare const document: { readonly activeElement: unknown }
+declare const IntersectionObserver: new(
+  callback: (entries: ReadonlyArray<ViewportIntersectionEntry>) => void
+) => ViewportIntersectionObserver
 declare const window: AxeBrowserGlobal & FocusBrowserGlobal
 
 export type ProductionRoutePresentationAudit =
@@ -434,6 +468,48 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
   ).toBe(true)
 }
 
+const expectViewportIntersection = async (locator: Locator, label: string): Promise<void> => {
+  const snapshot = await locator.evaluate(async (element) =>
+    await new Promise<{
+      readonly bounds: { readonly bottom: number; readonly left: number; readonly right: number; readonly top: number }
+      readonly intersectionHeight: number
+      readonly intersectionWidth: number
+    }>((resolve) => {
+      const observer = new IntersectionObserver((entries) => {
+        const entry = entries[0]
+        if (entry === undefined) return
+        observer.disconnect()
+        resolve({
+          bounds: entry.boundingClientRect,
+          intersectionHeight: entry.intersectionRect.height,
+          intersectionWidth: entry.intersectionRect.width
+        })
+      })
+      observer.observe(element)
+    })
+  )
+  expect(
+    snapshot.intersectionHeight > 0 && snapshot.intersectionWidth > 0,
+    `${label} has no viewport intersection: ${JSON.stringify(snapshot)}`
+  ).toBe(true)
+}
+
+const scrollDocumentVerticallyTo = async (locator: Locator): Promise<void> => {
+  await locator.evaluate((element) => {
+    const isViewportContextElement = (
+      candidate: SVGElement | HTMLElement
+    ): candidate is (SVGElement | HTMLElement) & ViewportContextElement =>
+      "getBoundingClientRect" in candidate &&
+      typeof candidate.getBoundingClientRect === "function" &&
+      "ownerDocument" in candidate
+    if (!isViewportContextElement(element)) throw new Error("viewport target has no measurable document context")
+    const view = element.ownerDocument.defaultView
+    if (view === null) throw new Error("viewport target has no owning window")
+    const bounds = element.getBoundingClientRect()
+    view.scrollTo(0, Math.max(0, view.scrollY + bounds.top - 16))
+  })
+}
+
 /** Prove one production route and its primary interaction remain usable in every required presentation mode. */
 export const auditProductionRoutePresentation = async (
   page: Page,
@@ -463,6 +539,13 @@ export const auditProductionRoutePresentation = async (
 
   await page.setViewportSize({ height: 800, width: 320 })
   await expect(audit.landmark).toBeVisible()
+  await scrollDocumentVerticallyTo(audit.landmark)
+  await expectViewportIntersection(audit.landmark, "route landmark")
+  if (audit.primaryAction !== null) {
+    await expect(audit.primaryAction).toBeVisible()
+    await scrollDocumentVerticallyTo(audit.primaryAction)
+    await expectViewportIntersection(audit.primaryAction, "primary action")
+  }
   expect(
     await page.evaluate<boolean>("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
   ).toBe(true)

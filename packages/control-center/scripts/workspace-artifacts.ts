@@ -115,6 +115,14 @@ export const packagesRequiringPublishedArtifactBuild = (
     .sort()
 
 const workspaceArtifactInputDirectories = new Set(["scripts", "src"])
+const workspaceArtifactGeneratedDirectories = new Set([
+  ".astro",
+  "coverage",
+  "dist",
+  "node_modules",
+  "storybook-static",
+  "test-results"
+])
 const workspaceArtifactInputRootFiles =
   /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.jsonc?|vite(?:\.[^.]+)*\.config\.[cm]?[jt]s)$/u
 const workspaceArtifactTsconfig = /^tsconfig(?:\.[^.]+)*\.jsonc?$/u
@@ -228,6 +236,44 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
     } else if (info.type === "File" && workspaceArtifactInputRootFiles.test(entry)) {
       inputPaths.add(absolutePath)
     }
+  }
+
+  const manifestPath = path.join(packageRoot, "package.json")
+  const manifestSource = yield* fileSystem.readFileString(manifestPath).pipe(
+    Effect.mapError(
+      () => new WorkspaceArtifactError({ reason: `could not read build input package.json` })
+    )
+  )
+  const parsedManifest = TypeScript.parseConfigFileTextToJson(manifestPath, manifestSource)
+  const manifest: unknown = parsedManifest.config
+  if (
+    parsedManifest.error !== undefined ||
+    !Predicate.isObject(manifest) ||
+    !Predicate.isString(manifest["name"])
+  ) {
+    return yield* new WorkspaceArtifactError({ reason: `could not parse package manifest ${manifestPath}` })
+  }
+  for (
+    const artifact of publishedArtifactPaths({
+      bin: manifest["bin"],
+      exports: manifest["exports"],
+      main: manifest["main"],
+      name: manifest["name"],
+      types: manifest["types"]
+    })
+  ) {
+    const artifactSegments = artifact.split(/[\\/]/u)
+    if (
+      artifactSegments[0] === ".." ||
+      artifactSegments.some((segment) => workspaceArtifactGeneratedDirectories.has(segment)) ||
+      artifactSegments.some((segment) => segment === "repos" || segment === "vendor")
+    ) {
+      continue
+    }
+    const artifactPath = path.join(packageRoot, artifact)
+    if (!(yield* fileSystem.exists(artifactPath))) continue
+    const artifactInfo = yield* fileSystem.stat(artifactPath).pipe(Effect.mapError(enumerateFailure))
+    if (artifactInfo.type === "File") inputPaths.add(artifactPath)
   }
 
   let workspaceDirectory = packageRoot

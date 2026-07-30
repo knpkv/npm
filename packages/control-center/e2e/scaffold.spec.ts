@@ -243,6 +243,55 @@ test("reruns the serious accessibility gate after compact-layout content appears
   })
 })
 
+test("requires compact landmarks and primary actions to intersect the viewport", async ({ page }) => {
+  const content = (compactPosition: string): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Compact viewport fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          .clip { block-size: 50px; inline-size: 100%; overflow: hidden; }
+          @media (max-width: 400px) { button { ${compactPosition} } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Compact viewport fixture</h1>
+          <div class="clip"><button onclick="this.textContent='Continued'">Continue</button></div>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content("position: relative; inset-inline-start: 400px;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no viewport intersection")
+
+  await page.setContent(content("position: relative; inset-block-start: 900px;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no viewport intersection")
+
+  await page.setContent(content("position: static;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
 test("requires discernible system paint in forced-colors mode", async ({ page }) => {
   const content = (forcedColorPaint: string): string => `
     <!doctype html>
@@ -833,21 +882,29 @@ test("reports unavailable storage when an anonymous proof cannot be removed", as
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
 })
 
-test("distinguishes a blocked session read from an unavailable server", async ({ page }) => {
+test("distinguishes blocked and anonymous Active work sessions", async ({ page }) => {
+  let status: 401 | 403 = 403
   await page.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
-        _tag: "ForbiddenApiError",
-        code: "forbidden",
+        _tag: status === 403 ? "ForbiddenApiError" : "UnauthorizedApiError",
+        code: status === 403 ? "forbidden" : "unauthorized",
         correlationId: "session-e2e",
-        message: "Session reads are blocked on this connection"
+        message: status === 403 ? "Session reads are blocked on this connection" : "No active session"
       }),
       contentType: "application/json",
-      status: 403
+      status
     })
   })
 
-  await page.goto("/")
-  await expect(page.getByText("Session access blocked on this connection")).toBeVisible()
+  await page.goto(`/w/${pairedSession.workspaceId}/work`)
+  await expect(page.getByText("Portfolio access blocked", { exact: true })).toBeVisible()
+  await expect(page.getByText("Release facts stay private", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
+
+  status = 401
+  await page.reload()
+  await expect(page.getByText("Release facts stay private", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
+  await expect(page.getByText("Portfolio access blocked", { exact: true })).toHaveCount(0)
 })

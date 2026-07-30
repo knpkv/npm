@@ -14,7 +14,7 @@ import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
   exposedBrowserForbiddenValues,
-  serializeBrowserReadableCookies
+  snapshotBrowserReadableSurface
 } from "./browserSecretSurface.js"
 import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
 import {
@@ -89,38 +89,10 @@ test.describe("repository-managed real runtime", () => {
           sameSite: "Strict",
           secure: true
         })
-        const currentPageSurface = await page.evaluate<BrowserSecretSurface>(`(() => {
-          const liveFormControlValues = [];
-          const openShadowRootContent = [];
-          const visitRoot = (root) => {
-            for (const control of root.querySelectorAll("input, textarea, select")) {
-              liveFormControlValues.push(control.value);
-            }
-            for (const element of root.querySelectorAll("*")) {
-              if (element.shadowRoot !== null) {
-                openShadowRootContent.push({
-                  html: element.shadowRoot.innerHTML,
-                  text: element.shadowRoot.textContent
-                });
-                visitRoot(element.shadowRoot);
-              }
-            }
-          };
-          visitRoot(document);
-          return {
-            documentHtml: document.documentElement.outerHTML,
-            liveFormControlValues: JSON.stringify(liveFormControlValues),
-            localStorage: JSON.stringify(Object.entries(localStorage)),
-            openShadowRootContent: JSON.stringify(openShadowRootContent),
-            readableCookies: "",
-            sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
-            url: location.href
-          };
-        })()`)
-        const browserSurface: BrowserSecretSurface = {
-          ...currentPageSurface,
-          readableCookies: serializeBrowserReadableCookies(await context.cookies())
-        }
+        const browserSurface: BrowserSecretSurface = await snapshotBrowserReadableSurface(
+          page,
+          await context.cookies()
+        )
         expect(
           exposedBrowserForbiddenValues(browserSurface, [
             { label: "HttpOnly session cookie", value: sessionCookie.value },
@@ -130,6 +102,68 @@ test.describe("repository-managed real runtime", () => {
         const csrfProof = await page.evaluate<string | null>(`sessionStorage.getItem("cc_csrf")`)
         if (csrfProof === null) throw new Error("trusted HTTPS pairing did not expose its browser-owned CSRF proof")
         expect(browserSurfaceExposesSecret(browserSurface, csrfProof)).toBe(true)
+
+        const indexedDbFixtureSecret = "indexed-db-forbidden-fixture"
+        const cacheStorageFixtureSecret = "cache-storage-forbidden-fixture"
+        await page.evaluate(`(async () => {
+          const indexedDbSecret = ${JSON.stringify(indexedDbFixtureSecret)};
+          const cacheStorageSecret = ${JSON.stringify(cacheStorageFixtureSecret)};
+          await new Promise((resolve, reject) => {
+            const open = indexedDB.open("browser-secret-surface-fixture", 1);
+            open.addEventListener(
+              "upgradeneeded",
+              () => open.result.createObjectStore("records"),
+              { once: true }
+            );
+            open.addEventListener(
+              "success",
+              () => {
+                const database = open.result;
+                const transaction = database.transaction("records", "readwrite");
+                transaction.objectStore("records").put({ token: indexedDbSecret }, "credential");
+                transaction.addEventListener(
+                  "complete",
+                  () => {
+                    database.close();
+                    resolve();
+                  },
+                  { once: true }
+                );
+                transaction.addEventListener("error", () => reject(transaction.error), { once: true });
+              },
+              { once: true }
+            );
+            open.addEventListener("error", () => reject(open.error), { once: true });
+          });
+          const cache = await caches.open("browser-secret-surface-fixture");
+          await cache.put(
+            new Request(location.origin + "/browser-secret-surface-fixture"),
+            new Response(cacheStorageSecret)
+          );
+        })()`)
+        try {
+          const fixtureSurface = await snapshotBrowserReadableSurface(page, await context.cookies())
+          expect(
+            exposedBrowserForbiddenValues(fixtureSurface, [
+              { label: "IndexedDB fixture", value: indexedDbFixtureSecret },
+              { label: "Cache Storage fixture", value: cacheStorageFixtureSecret }
+            ])
+          ).toEqual(["IndexedDB fixture", "Cache Storage fixture"])
+        } finally {
+          await page.evaluate(`(async () => {
+            await caches.delete("browser-secret-surface-fixture");
+            await new Promise((resolve, reject) => {
+              const deletion = indexedDB.deleteDatabase("browser-secret-surface-fixture");
+              deletion.addEventListener("success", () => resolve(), { once: true });
+              deletion.addEventListener("error", () => reject(deletion.error), { once: true });
+              deletion.addEventListener(
+                "blocked",
+                () => reject(new Error("fixture database deletion blocked")),
+                { once: true }
+              );
+            });
+          })()`)
+        }
 
         const requestAsProxyClient = async (client: "rate-limit-a" | "rate-limit-b"): Promise<number> => {
           const response = await context.request.get(`${fixture.origin}/api/v1/session/current`, {
@@ -235,7 +269,9 @@ test.describe("repository-managed real runtime", () => {
     await expect(jiraService.getByText("Disabled", { exact: true })).toBeVisible()
     await jiraService.getByRole("button", { name: "Enable service" }).click()
     await expect(jiraService.getByText("Unavailable", { exact: true })).toBeVisible()
-    await expect(jiraService.getByText("The provider is currently unavailable.", { exact: true })).toBeVisible()
+    await expect(
+      jiraService.getByRole("status").getByText("The provider is currently unavailable.", { exact: true })
+    ).toBeVisible()
     await page.getByRole("link", { name: "Overview" }).click()
     await expect(page).toHaveURL(`${realRuntime.origin}/w/${REAL_WORKSPACE_ID}/overview`)
 

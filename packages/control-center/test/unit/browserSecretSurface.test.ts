@@ -8,7 +8,9 @@ import {
 } from "../../e2e/browserSecretSurface.js"
 
 const safeSurface: BrowserSecretSurface = {
+  cacheStorage: JSON.stringify([{ body: "public response", cache: "content", url: "/public" }]),
   documentHtml: "<html><body>Control Center</body></html>",
+  indexedDb: JSON.stringify([{ database: "preferences", records: [{ key: "theme", value: "dark" }] }]),
   liveFormControlValues: JSON.stringify(["ordinary search"]),
   localStorage: JSON.stringify([["theme", "dark"]]),
   openShadowRootContent: JSON.stringify([]),
@@ -36,6 +38,36 @@ describe("browser secret surface detection", () => {
         secret
       )
     ).toBe(true)
+  })
+
+  it("detects forbidden IndexedDB values and Cache Storage response bodies", () => {
+    const indexedDbSecret = "indexed-db-session-secret"
+    const cacheStorageSecret = "cache-storage-pairing-secret"
+
+    expect(
+      exposedBrowserForbiddenValues(
+        {
+          ...safeSurface,
+          indexedDb: JSON.stringify([
+            { database: "control-center", records: [{ key: "session", value: indexedDbSecret }] }
+          ])
+        },
+        [{ label: "IndexedDB session", value: indexedDbSecret }]
+      )
+    ).toEqual(["IndexedDB session"])
+    expect(
+      exposedBrowserForbiddenValues(
+        {
+          ...safeSurface,
+          cacheStorage: JSON.stringify([
+            { body: cacheStorageSecret, cache: "control-center", url: "/cached-pairing" }
+          ])
+        },
+        [{ label: "Cache Storage pairing code", value: cacheStorageSecret }]
+      )
+    ).toEqual(["Cache Storage pairing code"])
+    expect(browserSurfaceExposesSecret(safeSurface, indexedDbSecret)).toBe(false)
+    expect(browserSurfaceExposesSecret(safeSurface, cacheStorageSecret)).toBe(false)
   })
 
   it("keeps unrelated browser-readable content valid", () => {

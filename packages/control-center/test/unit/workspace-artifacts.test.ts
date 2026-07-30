@@ -117,10 +117,23 @@ describe("workspace package artifacts", () => {
       const lockfilePath = path.join(workspaceRoot, "pnpm-lock.yaml")
       const boundedViteConfigPath = path.join(packageRoot, "vite.bounded.config.ts")
       const manifestMetadataPath = path.join(packageRoot, "manifest", "registry-metadata.ts")
+      const registryComponentsPath = path.join(packageRoot, "registry", "components.json")
+      const generatedArtifactPath = path.join(packageRoot, "dist", "index.js")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
       yield* fileSystem.makeDirectory(path.dirname(testPath), { recursive: true })
       yield* fileSystem.makeDirectory(path.dirname(manifestMetadataPath), { recursive: true })
-      yield* fileSystem.writeFileString(path.join(packageRoot, "package.json"), "{\"name\":\"@example/package\"}")
+      yield* fileSystem.makeDirectory(path.dirname(registryComponentsPath), { recursive: true })
+      yield* fileSystem.makeDirectory(path.dirname(generatedArtifactPath), { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          exports: {
+            ".": "./dist/index.js",
+            "./registry/components.json": "./registry/components.json"
+          },
+          name: "@knpkv/rly"
+        })
+      )
       yield* fileSystem.writeFileString(
         path.join(packageRoot, "component-manifest.ts"),
         "export { metadata } from \"./manifest/registry-metadata.js\"\n"
@@ -139,16 +152,41 @@ describe("workspace package artifacts", () => {
       yield* fileSystem.writeFileString(sourcePath, "export const value = 1\n")
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(1)\n")
       yield* fileSystem.writeFileString(readmePath, "Example package\n")
+      yield* fileSystem.writeFileString(registryComponentsPath, "{\"components\":[]}\n")
+      yield* fileSystem.writeFileString(generatedArtifactPath, "export const generated = 1\n")
 
       const initial = yield* workspaceArtifactInputFingerprint(packageRoot)
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(2)\n")
       assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
       yield* fileSystem.writeFileString(readmePath, "Updated package documentation\n")
       assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
+      yield* fileSystem.writeFileString(generatedArtifactPath, "export const generated = 2\n")
+      assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
+
+      yield* fileSystem.writeFileString(registryComponentsPath, "{\"components\":[\"Button\"]}\n")
+      const registryChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(registryChanged, initial)
+      assert.deepStrictEqual(
+        packagesRequiringPublishedArtifactBuild(
+          [
+            {
+              artifactPaths: ["dist/index.js", "registry/components.json"],
+              fingerprintPath: path.join(packageRoot, "node_modules", ".cache", "artifact.sha256"),
+              inputFingerprint: registryChanged,
+              name: "@knpkv/rly",
+              packageRoot
+            }
+          ],
+          (candidate) => candidate === generatedArtifactPath || candidate === registryComponentsPath,
+          () => initial,
+          (root, artifact) => path.join(root, artifact)
+        ),
+        ["@knpkv/rly"]
+      )
 
       yield* fileSystem.writeFileString(manifestMetadataPath, "export const metadata = { state: \"experimental\" }\n")
       const manifestChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
-      assert.notStrictEqual(manifestChanged, initial)
+      assert.notStrictEqual(manifestChanged, registryChanged)
 
       yield* fileSystem.writeFileString(boundedViteConfigPath, "export default { build: { emptyOutDir: true } }\n")
       const boundedConfigChanged = yield* workspaceArtifactInputFingerprint(packageRoot)

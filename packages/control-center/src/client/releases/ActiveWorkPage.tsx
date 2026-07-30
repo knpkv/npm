@@ -3,6 +3,7 @@ import { StatePanel, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
 import { Link, Navigate, useLocation, useOutletContext } from "react-router"
 
+import { portfolioSessionBoundaryPresentation } from "../portfolio/PortfolioOverview.js"
 import type { PortfolioReleasePresentation } from "../portfolio/presentPortfolio.js"
 import type { WorkspaceReleaseOutletContext } from "./WorkspaceReleaseLayout.js"
 import { RelationshipRepairPanel } from "./RelationshipRepairPanel.js"
@@ -53,12 +54,7 @@ export const ActiveWorkPage = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const location = useLocation()
   if (context.controller.state._tag === "session") {
-    return (
-      <StatePanel
-        description="Pair this browser to read the workspace decision queue. Release facts never load before authentication."
-        title="Release facts stay private"
-      />
-    )
+    return <StatePanel {...portfolioSessionBoundaryPresentation(context.controller.state.reason)} />
   }
   if (context.controller.state._tag !== "ready") {
     return (
