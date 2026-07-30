@@ -417,11 +417,15 @@ const CHILD_PROCESS_OPTION_DEPTH_LIMIT = 8
  * valid configuration is worse than missing an invalid one, so any mutation makes
  * the shape unresolvable rather than assumed-complete.
  */
-const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedReference) =>
+const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedReference, knownOptionArguments) =>
   variable.references.some((reference) => {
     const identifier = reference.identifier
     // The reference being resolved is the options argument itself, not a mutation.
     if (identifier === resolvedReference || identifier === definition.name) return false
+    // Nor is a sibling `ChildProcess.make` that consumes the same object: a
+    // recognised consumer cannot mutate it, so sharing one options binding across
+    // calls must keep reporting rather than silence every call.
+    if (knownOptionArguments?.has(identifier) === true) return false
     if (reference.isWrite()) return true
     const parent = identifier.parent
     if (parent === undefined || parent === null) return false
@@ -560,7 +564,7 @@ const barrelChildProcessMakeCall = (identifier) => {
  * Those are left to review rather than guessed at, since interprocedural
  * inference would trade real false positives for coverage.
  */
-const resolvedChildProcessOptions = (context, argument, depth = 0) => {
+const resolvedChildProcessOptions = (context, argument, depth = 0, knownOptionArguments = undefined) => {
   if (argument === undefined || argument.type === "SpreadElement") return undefined
   if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
   const expression = unwrapTypeExpression(argument)
@@ -578,8 +582,8 @@ const resolvedChildProcessOptions = (context, argument, depth = 0) => {
   ) {
     return undefined
   }
-  if (isMutatedChildProcessOptionsBinding(variable, definition, unfrozen)) return undefined
-  return resolvedChildProcessOptions(context, definition.node.init, depth + 1)
+  if (isMutatedChildProcessOptionsBinding(variable, definition, unfrozen, knownOptionArguments)) return undefined
+  return resolvedChildProcessOptions(context, definition.node.init, depth + 1, knownOptionArguments)
 }
 
 /**
@@ -592,14 +596,14 @@ const resolvedChildProcessOptions = (context, argument, depth = 0) => {
  * opaque spread would report "no env" on an object that may well set one.
  * Presence is what matters here, so source order does not affect the result.
  */
-const effectiveChildProcessOptionNames = (context, argument, depth = 0) => {
+const effectiveChildProcessOptionNames = (context, argument, depth = 0, knownOptionArguments = undefined) => {
   if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
-  const options = resolvedChildProcessOptions(context, argument, depth)
+  const options = resolvedChildProcessOptions(context, argument, depth, knownOptionArguments)
   if (options === undefined) return undefined
   const names = new Set()
   for (const property of options.properties) {
     if (property.type === "SpreadElement") {
-      const nested = effectiveChildProcessOptionNames(context, property.argument, depth + 1)
+      const nested = effectiveChildProcessOptionNames(context, property.argument, depth + 1, knownOptionArguments)
       if (nested === undefined) return undefined
       for (const name of nested) names.add(name)
       continue
@@ -1431,11 +1435,11 @@ module.exports = {
       // function named `make`, which is why ast-grep cannot own this case.
       const makeBindings = []
 
-      const checkCall = (call) => {
+      const checkCall = (call, knownOptionArguments) => {
         const argument = call.arguments.at(-1)
-        const options = resolvedChildProcessOptions(context, argument)
+        const options = resolvedChildProcessOptions(context, argument, 0, knownOptionArguments)
         if (options === undefined) return
-        const names = effectiveChildProcessOptionNames(context, argument)
+        const names = effectiveChildProcessOptionNames(context, argument, 0, knownOptionArguments)
         if (names !== undefined && names.has("env") && !names.has("extendEnv")) {
           context.report({ node: options, messageId: "implicitInheritance" })
         }
@@ -1502,27 +1506,33 @@ module.exports = {
         },
         "Program:exit"() {
           followAliases()
+          const calls = []
           for (const binding of moduleBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = directChildProcessMakeCall(reference.identifier)
-              if (call !== undefined) checkCall(call)
+              if (call !== undefined) calls.push(call)
             }
           }
           for (const binding of barrelBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = barrelChildProcessMakeCall(reference.identifier)
-              if (call !== undefined) checkCall(call)
+              if (call !== undefined) calls.push(call)
             }
           }
           for (const binding of makeBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = reference.identifier.parent
-              if (call?.type === "CallExpression" && call.callee === reference.identifier) checkCall(call)
+              if (call?.type === "CallExpression" && call.callee === reference.identifier) calls.push(call)
             }
           }
+          // Collected before checking so that one options binding shared by several
+          // recognised calls stays resolvable: each call would otherwise read the
+          // others' arguments as unknown escapes and all of them would fall silent.
+          const knownOptionArguments = new Set(calls.map((call) => call.arguments.at(-1)))
+          for (const call of calls) checkCall(call, knownOptionArguments)
         }
       }
     }

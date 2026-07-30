@@ -61,6 +61,17 @@ const childEnvironment = childEnvironmentUnder("node")
 const hasHomeLocator = (env: Record<string, string | undefined>) => "HOME" in env || "USERPROFILE" in env
 
 /**
+ * Whether the child received a usable search path.
+ *
+ * Matched case-insensitively: Windows environment names are case-insensitive and
+ * the variable is commonly exposed as `Path`, but the JSON round-trip used to read
+ * the child's environment produces an ordinary case-sensitive record, so an
+ * `env.PATH` lookup would miss it on a host where resolution actually works.
+ */
+const hasSearchPath = (env: Record<string, string | undefined>) =>
+  Object.entries(env).some(([name, value]) => name.toUpperCase() === "PATH" && (value ?? "").length > 0)
+
+/**
  * Resolved from this module rather than the working directory.
  *
  * `fileURLToPath` rather than `.pathname`, which leaves percent-escapes in place
@@ -212,7 +223,7 @@ describe("ChildEnv.profileScopedEnv", () => {
         assert.isFalse("AWS_DEFAULT_REGION" in env)
 
         assert.strictEqual(env.AWS_PROFILE, "target-profile")
-        assert.isTrue((env.PATH ?? "").length > 0)
+        assert.isTrue(hasSearchPath(env))
         assert.isTrue(hasHomeLocator(env))
       }).pipe(Effect.provide(NodeServices.layer))
   )
@@ -223,7 +234,7 @@ describe("ChildEnv.profileScopedEnv", () => {
         ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" })
       )
 
-      assert.isTrue((env.PATH ?? "").length > 0)
+      assert.isTrue(hasSearchPath(env))
       assert.strictEqual(env.GRANTED_ALIAS_CONFIGURED, "true")
     }).pipe(Effect.provide(NodeServices.layer)))
 
@@ -261,4 +272,22 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.isFalse(hasHomeLocator(env))
     }).pipe(Effect.provide(NodeServices.layer)))
+
+  // The two locator helpers above are the only thing standing between a Windows
+  // host and a red suite, so pin their discrimination directly rather than
+  // relying on whichever casing this machine happens to export.
+  it("matches the search path irrespective of casing", () => {
+    assert.isTrue(hasSearchPath({ Path: "C:\\bin" }))
+    assert.isTrue(hasSearchPath({ PATH: "/usr/bin" }))
+    assert.isFalse(hasSearchPath({ PATHEXT: ".COM;.EXE" }))
+    assert.isFalse(hasSearchPath({ Path: "" }))
+    assert.isFalse(hasSearchPath({ HOME: "/root" }))
+  })
+
+  it("matches either home locator and nothing else", () => {
+    assert.isTrue(hasHomeLocator({ HOME: "/root" }))
+    assert.isTrue(hasHomeLocator({ USERPROFILE: "C:\\Users\\example" }))
+    assert.isFalse(hasHomeLocator({ HOMEDRIVE: "C:" }))
+    assert.isFalse(hasHomeLocator({ PATH: "/usr/bin" }))
+  })
 })

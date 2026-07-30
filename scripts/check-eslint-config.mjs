@@ -1551,3 +1551,27 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-contained-invalid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const shared = { env: gitEnvironment }
+    const first = ChildProcess.make("a", [], shared)
+    const second = ChildProcess.make("b", [], shared)
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-shared-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const shared = { env: gitEnvironment, extendEnv: true }
+    const first = ChildProcess.make("a", [], shared)
+    const second = ChildProcess.make("b", [], shared)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-shared-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
