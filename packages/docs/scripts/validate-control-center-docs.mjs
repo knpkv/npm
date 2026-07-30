@@ -202,7 +202,17 @@ const providerExamples = new Map([
   ]
 ])
 const rawProviderSecretField =
-  /\b(?:accessKeyId|secretAccessKey|sessionToken|approvalToken|apiToken|clientSecret|password)\b/u
+  /\b(?:access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key|session[_-]?token|approval[_-]?token|api[_-]?(?:token|key)|client[_-]?secret|access[_-]?token|refresh[_-]?token|private[_-]?key|password)\b/iu
+for (const fixture of ["apiKey", "access_token"]) {
+  if (!rawProviderSecretField.test(fixture)) {
+    failures.push(`raw-provider-secret guardrail accepted invalid fixture ${fixture}`)
+  }
+}
+for (const fixture of ["apiKeyReference", "access_token_digest"]) {
+  if (rawProviderSecretField.test(fixture)) {
+    failures.push(`raw-provider-secret guardrail rejected valid fixture ${fixture}`)
+  }
+}
 for (const [provider, examples] of providerExamples) {
   for (const [kind, fields] of Object.entries(examples)) {
     const example = governanceExample(provider, kind)
