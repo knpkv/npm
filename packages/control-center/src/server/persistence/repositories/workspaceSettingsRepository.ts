@@ -426,9 +426,13 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     )
   })
 
-  const update = Effect.fn("WorkspaceSettingsRepository.update")(function*(
+  const updateWithinTransaction = Effect.fn("WorkspaceSettingsRepository.updateWithinTransaction")(function*(
     workspaceId: WorkspaceId,
-    input: UpdateWorkspaceSettingsInput
+    input: UpdateWorkspaceSettingsInput,
+    afterUpdate: (
+      before: WorkspaceSettingsRecord,
+      current: WorkspaceSettingsRecord
+    ) => Effect.Effect<unknown, unknown>
   ) {
     const { governanceAuthority, ...untrustedInput } = input
     const decodedInput = yield* Schema.decodeUnknownEffect(
@@ -458,6 +462,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
 
     return yield* database.transaction(
       Effect.gen(function*() {
+        const before = yield* readCurrent(workspaceId, "deferred")
         const existingAuditRows = yield* readAuditRows(workspaceId, decodedInput.mutationId)
         if (existingAuditRows.length > 1) {
           return yield* new WorkspaceSettingsMutationConflictError()
@@ -465,10 +470,12 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
         const existingAuditRow = existingAuditRows[0]
         if (existingAuditRow !== undefined) {
           const existingAudit = yield* decodeAudit(existingAuditRow)
-          return yield* replayCommittedMutation(workspaceId, existingAudit, requestDigest)
+          const replayed = yield* replayCommittedMutation(workspaceId, existingAudit, requestDigest)
+          yield* afterUpdate(before, replayed)
+          return replayed
         }
 
-        const current = yield* readCurrent(workspaceId, "deferred")
+        const current = before
         if (current.revision !== decodedInput.expectedRevision) {
           return yield* new RevisionConflictError({
             workspaceId,
@@ -560,7 +567,9 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
           ${governedSections.length === 0 ? null : requestDigest},
           ${current.settingsDigest}, ${settingsDigest}, ${encodedUpdatedAt}
         )`
-        return yield* readCurrent(workspaceId, "deferred")
+        const updated = yield* readCurrent(workspaceId, "deferred")
+        yield* afterUpdate(before, updated)
+        return updated
       })
     ).pipe(
       Effect.result,
@@ -574,6 +583,29 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     )
   })
 
+  const update = Effect.fn("WorkspaceSettingsRepository.update")(function*(
+    workspaceId: WorkspaceId,
+    input: UpdateWorkspaceSettingsInput
+  ) {
+    return yield* updateWithinTransaction(workspaceId, input, () => Effect.void)
+  })
+
+  /**
+   * Extend the repository-owned settings transaction with a dependent durable
+   * update. Keeping transaction ownership here lets malformed-row quarantine
+   * run only after the complete transaction has rolled back.
+   */
+  const updateAtomically = Effect.fn("WorkspaceSettingsRepository.updateAtomically")(function*(
+    workspaceId: WorkspaceId,
+    input: UpdateWorkspaceSettingsInput,
+    afterUpdate: (
+      before: WorkspaceSettingsRecord,
+      current: WorkspaceSettingsRecord
+    ) => Effect.Effect<unknown, unknown>
+  ) {
+    return yield* updateWithinTransaction(workspaceId, input, afterUpdate)
+  })
+
   const audits = Effect.fn("WorkspaceSettingsRepository.audits")(function*(
     workspaceId: WorkspaceId
   ) {
@@ -583,7 +615,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     return yield* Effect.forEach(rows, decodeAudit)
   })
 
-  return { audits, get, update }
+  return { audits, get, update, updateAtomically }
 })
 
 /** Durable workspace-settings persistence with CAS and transactional audit. */

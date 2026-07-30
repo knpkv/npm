@@ -102,29 +102,26 @@ export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
       ) {
         return yield* new ApplicationInvalidRequest()
       }
-      const record = yield* persistence.transact(Effect.gen(function*() {
-        const before = yield* persistence.workspaceSettings.get(input.workspaceId)
-        const updated = yield* persistence.workspaceSettings.update(input.workspaceId, {
+      const record = yield* persistence.workspaceSettings.updateAtomically(
+        input.workspaceId,
+        {
           ...repositoryRequest,
           governanceAuthority,
           updatedAt
-        })
-        const current = yield* persistence.workspaceSettings.get(input.workspaceId)
-        if (
+        },
+        (before, current) =>
           before.settings.inference.enabled !== current.settings.inference.enabled ||
-          before.settings.inference.minimumConfidencePercent !==
-            current.settings.inference.minimumConfidencePercent
-        ) {
-          yield* reconcileRelationshipInferencePolicy(
-            persistence,
-            cryptoService,
-            input.workspaceId,
-            updatedAt,
-            current.settings
-          )
-        }
-        return updated
-      })).pipe(Effect.mapError(mapWriteFailure))
+            before.settings.inference.minimumConfidencePercent !==
+              current.settings.inference.minimumConfidencePercent
+            ? reconcileRelationshipInferencePolicy(
+              persistence,
+              cryptoService,
+              input.workspaceId,
+              updatedAt,
+              current.settings
+            )
+            : Effect.void
+      ).pipe(Effect.mapError(mapWriteFailure))
       return present(record)
     })
   })

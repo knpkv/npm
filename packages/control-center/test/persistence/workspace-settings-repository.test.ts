@@ -517,6 +517,55 @@ describe("WorkspaceSettingsRepository", () => {
       })
     ))
 
+  it.effect("preserves quarantine evidence across administration transaction rollback", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const administration = yield* makeWorkspaceSettingsAdministration
+        const { sql } = yield* Database
+        const original = yield* persistence.workspaceSettings.get(workspaceId)
+        yield* sql`UPDATE workspace_settings
+          SET settings_digest = ${"0".repeat(64)}
+          WHERE workspace_id = ${workspaceId}`
+
+        const result = yield* administration.update({
+          workspaceId,
+          session: ownerSession,
+          request: {
+            mutationId: firstMutation,
+            expectedRevision: WorkspaceSettingsRevision.make(original.revision),
+            settings: {
+              ...original.settings,
+              presentation: {
+                ...original.settings.presentation,
+                density: "compact"
+              }
+            },
+            acknowledgedGovernedSections: []
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "ApplicationServiceUnavailable")
+        }
+        const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+          diagnostic_code AS diagnosticCode
+        FROM quarantined_records
+        WHERE workspace_id = ${workspaceId}`
+        assert.deepEqual(
+          quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+          ["workspace-settings-digest-mismatch"]
+        )
+        const settingsRows = yield* sql<{ readonly revision: number }>`SELECT revision
+          FROM workspace_settings
+          WHERE workspace_id = ${workspaceId}`
+        assert.strictEqual(settingsRows[0]?.revision, original.revision)
+        assert.lengthOf(yield* persistence.workspaceSettings.audits(workspaceId), 0)
+      })
+    ))
+
   it.effect("quarantines the exact corrupt replay version after rollback", () =>
     withPersistence(
       Effect.gen(function*() {

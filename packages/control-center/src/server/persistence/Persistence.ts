@@ -671,7 +671,9 @@ const makePersistence = Effect.gen(function*() {
       get: (...args: Parameters<WorkspaceSettingsRepositoryService["get"]>) =>
         publicOperation("workspace-settings.get", workspaceSettings.get(...args)),
       update: (...args: Parameters<WorkspaceSettingsRepositoryService["update"]>) =>
-        publicOperation("workspace-settings.update", workspaceSettings.update(...args))
+        publicOperation("workspace-settings.update", workspaceSettings.update(...args)),
+      updateAtomically: (...args: Parameters<WorkspaceSettingsRepositoryService["updateAtomically"]>) =>
+        publicOperation("workspace-settings.update-atomically", workspaceSettings.updateAtomically(...args))
     }
   }
 })

@@ -12,6 +12,7 @@ import { useAppTheme } from "../AppProviders.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
+import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
 
 const integerValue = (event: ChangeEvent<HTMLInputElement>, fallback: number): number => {
   const parsed = Number.parseInt(event.currentTarget.value, 10)
@@ -527,7 +528,12 @@ export const SettingsForm = ({
 }
 
 /** Concurrency-safe workspace settings with explicit stale-write recovery. */
-export const WorkspaceSettingsPage = (): ReactElement => {
+export const WorkspaceSettingsPage = ({
+  transport = browserWorkspaceSettingsTransport
+}: {
+  /** Injectable browser boundary for component acceptance tests. @internal */
+  readonly transport?: WorkspaceSettingsTransport
+} = {}): ReactElement => {
   const browserSession = useBrowserSession()
   const routeWorkspaceId = useParams().workspaceId
   const session =
@@ -536,7 +542,7 @@ export const WorkspaceSettingsPage = (): ReactElement => {
       : null
   const routeMatchesSession = session === null || routeWorkspaceId === session.workspaceId
   const sessionKey = routeMatchesSession ? browserReadableSessionKey(browserSession.state) : null
-  const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession)
+  const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession, transport)
   const theme = useAppTheme()
   const [governedChangeConfirmed, setGovernedChangeConfirmed] = useState(false)
   const confirmationRevision = controller.state._tag === "ready" ? controller.state.server.revision : null
@@ -551,6 +557,20 @@ export const WorkspaceSettingsPage = (): ReactElement => {
         description="This route does not match the workspace authorized for the current browser session."
         title="Workspace not found"
         tone="critical"
+      />
+    )
+  }
+  if (sessionKey === null && browserSession.state._tag !== "checking") {
+    const authenticationRequired = browserSession.state._tag === "anonymous"
+    return (
+      <StatePanel
+        description={
+          authenticationRequired
+            ? "Sign in to inspect the settings authorized for this workspace."
+            : "The current browser session cannot read workspace settings."
+        }
+        title={authenticationRequired ? "Authentication required" : "Settings unavailable"}
+        tone={authenticationRequired ? "caution" : "critical"}
       />
     )
   }

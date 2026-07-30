@@ -11,6 +11,7 @@ import type { ServeError } from "effect/unstable/http/HttpServerError"
 
 import { type AgentJobWorkerOptions, prReviewAgentJobWorkerLayer } from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
+import { AgentJobWorkspacePolicy } from "../agent/internal/AgentJobWorkspacePolicy.js"
 import {
   type PrReviewSandboxSessionError,
   PrReviewSandboxSessions,
@@ -510,7 +511,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       const worker = prReviewAgentJobWorkerLayer(workerOptions).pipe(
         Layer.provide(providerRegistry),
         Layer.provide(sandboxes),
-        Layer.provide(repository)
+        Layer.provide(repository),
+        Layer.provide(
+          AgentJobWorkspacePolicy.live.pipe(Layer.provide(persistence))
+        )
       )
       return prReviewWorkerStartupLayer({
         workspaceId: configured.workspaceId,

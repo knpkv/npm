@@ -1,23 +1,49 @@
 // @vitest-environment happy-dom
 
 import type { RlyTheme } from "@knpkv/rly/foundations"
+import * as Schema from "effect/Schema"
 import { type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it } from "vitest"
+import { MemoryRouter, Route, Routes } from "react-router"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppThemeProvider, readStoredAppTheme, useAppTheme } from "../../src/client/AppProviders.js"
-import { SettingsForm } from "../../src/client/settings/WorkspaceSettingsPage.js"
+import { CorrelationId, UnauthorizedApiError } from "../../src/api/errors.js"
+import { CsrfToken, SessionSummary } from "../../src/api/session.js"
+import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
+import { SettingsForm, WorkspaceSettingsPage } from "../../src/client/settings/WorkspaceSettingsPage.js"
+import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
+import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
 let mountedRoot: Root | undefined
+let sessionControls: ReturnType<typeof useBrowserSession> | undefined
 const themeValues: ReadonlyArray<RlyTheme> = ["system", "light", "dark"]
+const workspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000301")
+const session = Schema.decodeSync(SessionSummary)({
+  sessionId: Schema.decodeSync(SessionId)("01890f6f-6d6a-7cc0-98d2-000000000302"),
+  workspaceId,
+  actor: {
+    _tag: "human",
+    personId: Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000303")
+  },
+  permission: "workspace-owner",
+  createdAt: "2026-07-30T09:00:00.000Z",
+  lastSeenAt: "2026-07-30T09:00:00.000Z",
+  idleExpiresAt: "2026-07-31T09:00:00.000Z",
+  absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
+  revokedAt: null
+})
+const mutationId = Schema.decodeSync(WorkspaceSettingsMutationId)("01890f6f-6d6a-7cc0-98d2-000000000304")
 
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
   mountedRoot = undefined
+  sessionControls = undefined
   localStorage.clear()
+  sessionStorage.clear()
   document.body.replaceChildren()
 })
 
@@ -42,6 +68,30 @@ const ThemeHarness = (): ReactElement => {
     </div>
   )
 }
+
+const SettingsPageHarness = ({ transport }: { readonly transport: WorkspaceSettingsTransport }): ReactElement => {
+  sessionControls = useBrowserSession()
+  return <WorkspaceSettingsPage transport={transport} />
+}
+
+const renderSettingsPage = async (transport: WorkspaceSettingsTransport): Promise<HTMLElement> =>
+  mount(
+    <AppThemeProvider>
+      <MemoryRouter initialEntries={[`/workspaces/${workspaceId}/settings`]}>
+        <BrowserSessionProvider>
+          <Routes>
+            <Route element={<SettingsPageHarness transport={transport} />} path="/workspaces/:workspaceId/settings" />
+          </Routes>
+        </BrowserSessionProvider>
+      </MemoryRouter>
+    </AppThemeProvider>
+  )
+
+const unusedSettingsTransport = (load: WorkspaceSettingsTransport["load"]): WorkspaceSettingsTransport => ({
+  load,
+  makeMutationId: () => Promise.resolve(mutationId),
+  update: () => Promise.reject(new Error("unexpected settings update"))
+})
 
 const EditableSettingsHarness = (): ReactElement => {
   const [draft, setDraft] = useState<WorkspaceSettingsV1>(DEFAULT_WORKSPACE_SETTINGS)
@@ -85,6 +135,39 @@ const changeInput = async (input: HTMLInputElement, value: string): Promise<void
 }
 
 describe("workspace settings browser acceptance", () => {
+  it("renders a terminal authentication state without loading settings for an anonymous session", async () => {
+    const load = vi.fn<WorkspaceSettingsTransport["load"]>(() => Promise.reject(new Error("unexpected settings load")))
+    const host = await renderSettingsPage(unusedSettingsTransport(load))
+    const hydrationAttempt = sessionControls?.beginHydration()
+    if (hydrationAttempt === undefined) throw new Error("expected browser session controls")
+
+    await act(async () => sessionControls?.completeHydration(hydrationAttempt, { _tag: "anonymous" }))
+
+    expect(host.textContent).toContain("Authentication required")
+    expect(host.textContent).not.toContain("Loading workspace settings")
+    expect(load).not.toHaveBeenCalled()
+  })
+
+  it("leaves loading for a terminal authentication panel after settings reject the session", async () => {
+    const load = vi.fn<WorkspaceSettingsTransport["load"]>(() =>
+      Promise.reject(
+        new UnauthorizedApiError({
+          code: "unauthorized",
+          correlationId: Schema.decodeSync(CorrelationId)("workspace-settings-session-expired"),
+          message: "Session expired."
+        })
+      )
+    )
+    const host = await renderSettingsPage(unusedSettingsTransport(load))
+
+    await act(async () => sessionControls?.establishSession(Schema.decodeSync(CsrfToken)("a".repeat(64)), session))
+    await act(async () => Promise.resolve())
+
+    expect(load).toHaveBeenCalledTimes(1)
+    expect(host.textContent).toContain("Authentication required")
+    expect(host.textContent).not.toContain("Loading workspace settings")
+  })
+
   it("associates coherent retention errors with each affected field", async () => {
     const host = await mount(
       <SettingsForm
