@@ -52,6 +52,15 @@ const childEnvironmentUnder = (runtime: string) => (env: Record<string, string |
 const childEnvironment = childEnvironmentUnder("node")
 
 /**
+ * Whether the child can still locate a home directory.
+ *
+ * Accepts either locator because the production readers pair
+ * `Config.string("HOME")` with a `USERPROFILE` fallback; requiring `HOME`
+ * specifically would fail on a Windows host that is in fact correctly equipped.
+ */
+const hasHomeLocator = (env: Record<string, string | undefined>) => "HOME" in env || "USERPROFILE" in env
+
+/**
  * Resolved from this module rather than the working directory.
  *
  * `fileURLToPath` rather than `.pathname`, which leaves percent-escapes in place
@@ -204,7 +213,7 @@ describe("ChildEnv.profileScopedEnv", () => {
 
         assert.strictEqual(env.AWS_PROFILE, "target-profile")
         assert.isTrue((env.PATH ?? "").length > 0)
-        assert.isTrue("HOME" in env)
+        assert.isTrue(hasHomeLocator(env))
       }).pipe(Effect.provide(NodeServices.layer))
   )
 
@@ -222,7 +231,34 @@ describe("ChildEnv.profileScopedEnv", () => {
     Effect.gen(function*() {
       const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
 
-      // `git` and `aws` read HOME to locate ~/.gitconfig and ~/.aws.
-      assert.isTrue("HOME" in env)
+      // `git` and `aws` need a home locator to find ~/.gitconfig and ~/.aws.
+      assert.isTrue(hasHomeLocator(env))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("keeps USERPROFILE when the host has no HOME", () =>
+    Effect.gen(function*() {
+      // `ConfigService`, `PermissionService`, and `SandboxService` all read HOME
+      // with a USERPROFILE fallback, so asserting HOME specifically would make a
+      // Windows host fail this suite even though the child is correctly equipped.
+      vi.stubEnv("HOME", undefined)
+      vi.stubEnv("USERPROFILE", "C:\\Users\\example")
+
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+
+      assert.isFalse("HOME" in env)
+      assert.strictEqual(env.USERPROFILE, "C:\\Users\\example")
+      assert.isTrue(hasHomeLocator(env))
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("reports no home locator when the host defines neither", () =>
+    Effect.gen(function*() {
+      // Negative control for the two assertions above: `hasHomeLocator` must be
+      // capable of returning false, or they prove nothing.
+      vi.stubEnv("HOME", undefined)
+      vi.stubEnv("USERPROFILE", undefined)
+
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+
+      assert.isFalse(hasHomeLocator(env))
     }).pipe(Effect.provide(NodeServices.layer)))
 })

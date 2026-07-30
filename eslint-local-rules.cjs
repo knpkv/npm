@@ -417,17 +417,38 @@ const CHILD_PROCESS_OPTION_DEPTH_LIMIT = 8
  * valid configuration is worse than missing an invalid one, so any mutation makes
  * the shape unresolvable rather than assumed-complete.
  */
-const isMutatedChildProcessOptionsBinding = (variable, definition) =>
+const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedReference) =>
   variable.references.some((reference) => {
-    if (reference.isWrite() && reference.identifier !== definition.name) return true
-    const member = reference.identifier.parent
-    if (member?.type !== "MemberExpression" || member.object !== reference.identifier) return false
-    const target = member.parent
-    return (
-      (target?.type === "AssignmentExpression" && target.left === member) ||
-      (target?.type === "UpdateExpression" && target.argument === member) ||
-      (target?.type === "UnaryExpression" && target.operator === "delete" && target.argument === member)
-    )
+    const identifier = reference.identifier
+    // The reference being resolved is the options argument itself, not a mutation.
+    if (identifier === resolvedReference || identifier === definition.name) return false
+    if (reference.isWrite()) return true
+    const parent = identifier.parent
+    if (parent === undefined || parent === null) return false
+    // A property write, increment, or delete through the binding.
+    if (parent.type === "MemberExpression" && parent.object === identifier) {
+      const target = parent.parent
+      return (
+        (target?.type === "AssignmentExpression" && target.left === parent) ||
+        (target?.type === "UpdateExpression" && target.argument === parent) ||
+        (target?.type === "UnaryExpression" && target.operator === "delete" && target.argument === parent)
+      )
+    }
+    // Anywhere the binding escapes, something out of view may complete it —
+    // `configure(options)` adding `extendEnv` is indistinguishable from a pure
+    // read without interprocedural analysis, so treat escape as unresolvable.
+    if (
+      (parent.type === "CallExpression" || parent.type === "NewExpression") &&
+      parent.arguments.includes(identifier)
+    ) {
+      return true
+    }
+    if (parent.type === "ReturnStatement" && parent.argument === identifier) return true
+    if (parent.type === "AssignmentExpression" && parent.right === identifier) return true
+    if (parent.type === "VariableDeclarator" && parent.init === identifier) return true
+    if (parent.type === "Property" && parent.value === identifier) return true
+    if (parent.type === "ArrayExpression") return true
+    return false
   })
 
 /** Bound on alias-chain following; chains this long do not occur in practice. */
@@ -557,7 +578,7 @@ const resolvedChildProcessOptions = (context, argument, depth = 0) => {
   ) {
     return undefined
   }
-  if (isMutatedChildProcessOptionsBinding(variable, definition)) return undefined
+  if (isMutatedChildProcessOptionsBinding(variable, definition, unfrozen)) return undefined
   return resolvedChildProcessOptions(context, definition.node.init, depth + 1)
 }
 

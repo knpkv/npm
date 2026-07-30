@@ -1522,3 +1522,32 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-foreign-name-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const escaping = { env: gitEnvironment }
+    configure(escaping)
+    const viaHelper = ChildProcess.make("git", args, escaping)
+    const stored = { env: gitEnvironment }
+    registry.options = stored
+    const viaStored = ChildProcess.make("git", args, stored)
+    const collected = { env: gitEnvironment }
+    const all = [collected]
+    const viaArray = ChildProcess.make("git", args, collected)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-escaping-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const contained = { env: gitEnvironment }
+    const viaContained = ChildProcess.make("git", args, contained)
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-contained-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
