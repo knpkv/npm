@@ -99,9 +99,10 @@ describe("ChildEnv.profileScopedEnv", () => {
       vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))
 
-  it.effect("lets the requested region outrank an ambient AWS_REGION", () =>
+  it.effect("lets an explicitly requested region outrank both ambient region variables", () =>
     Effect.gen(function*() {
       vi.stubEnv("AWS_REGION", "us-west-1")
+      vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
 
       const env = yield* childEnvironment(
         ChildEnv.profileScopedEnv({
@@ -113,6 +114,24 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.strictEqual(env.AWS_REGION, "eu-central-1")
       assert.strictEqual(env.AWS_DEFAULT_REGION, "eu-central-1")
+
+      vi.unstubAllEnvs()
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("clears both region variables when the caller requests none", () =>
+    Effect.gen(function*() {
+      // The `assume` spawns pass no region, so the profile's configured region
+      // must win. Clearing only one of the two would leave the outcome dependent
+      // on which variable the caller's shell happens to export.
+      vi.stubEnv("AWS_REGION", "us-west-1")
+      vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
+
+      const env = yield* childEnvironment(
+        ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" })
+      )
+
+      assert.isFalse("AWS_REGION" in env)
+      assert.isFalse("AWS_DEFAULT_REGION" in env)
 
       vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))

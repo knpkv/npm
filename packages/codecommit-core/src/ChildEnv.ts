@@ -9,10 +9,12 @@
  * That inheritance is not benign. The AWS credential chain resolves environment
  * variables *above* profile configuration, so an ambient `AWS_ACCESS_KEY_ID`
  * silently wins over the profile we asked for and the command authenticates as
- * the wrong identity. `AWS_REGION` outranks `AWS_DEFAULT_REGION` the same way.
+ * the wrong identity. Both region variables override the profile's configured
+ * region the same way.
  *
  * `profileScopedEnv` removes those variables so the named profile is the only
- * credential source. Mapping a name to `undefined` drops it from the child
+ * credential and region source, and callers reintroduce a region only by passing
+ * it explicitly. Mapping a name to `undefined` drops it from the child
  * environment rather than setting it to the string `"undefined"` — verified on
  * both Node and Bun, the two runtimes this CLI ships on.
  */
@@ -27,6 +29,10 @@
  *   `AWS_SESSION_TOKEN`, still honoured by the CLI.
  * - Web identity, which activates from `AWS_ROLE_ARN` plus
  *   `AWS_WEB_IDENTITY_TOKEN_FILE` and would otherwise assume an ambient role.
+ *
+ * Both `AWS_REGION` and `AWS_DEFAULT_REGION` are cleared. Clearing only one is
+ * worse than clearing neither, because which variable leaks through then depends
+ * on the caller's shell rather than on anything this module states.
  *
  * Deliberately *not* cleared:
  *
@@ -46,7 +52,8 @@ const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_ROLE_ARN",
   "AWS_WEB_IDENTITY_TOKEN_FILE",
   "AWS_ROLE_SESSION_NAME",
-  "AWS_REGION"
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION"
 ]
 
 /**
