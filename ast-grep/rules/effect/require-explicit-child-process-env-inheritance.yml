@@ -61,6 +61,11 @@ constraints:
                 kind: pair
                 has:
                   kind: computed_property_name
+            # Same reasoning for a spread: `extendEnv` may arrive through it, and
+            # following the operand needs binding resolution. ESLint resolves
+            # constant spreads and reports the genuinely incomplete ones.
+            - has:
+                kind: spread_element
 
 files:
   - "packages/*/src/**/*.ts"

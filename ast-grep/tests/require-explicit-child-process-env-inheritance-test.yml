@@ -50,6 +50,11 @@ valid:
     ChildProcess.make("git", args, { env: childEnv, [dynamicKey]: true })
   - |
     ChildProcess.make("git", args, { ["env"]: childEnv })
+  # `extendEnv` may arrive through the spread; ESLint resolves the operand.
+  - |
+    ChildProcess.make("git", args, { ...spawnDefaults, env })
+  - |
+    ChildProcess.make("git", args, { ...spawnDefaults, env: childEnv })
 invalid:
   - |
     ChildProcess.make("assume", ["-cd", link, profile], {
