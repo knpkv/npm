@@ -3,6 +3,10 @@ const path = require("node:path")
 const staticPropertyName = (node) => {
   if (node.type === "Identifier") return node.name
   if (node.type === "Literal" && typeof node.value === "string") return node.value
+  if (node.type === "TemplateLiteral" && node.expressions.length === 0 && node.quasis.length === 1) {
+    const cooked = node.quasis[0].value.cooked
+    return typeof cooked === "string" ? cooked : undefined
+  }
   return undefined
 }
 
