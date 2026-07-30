@@ -60,6 +60,7 @@ describe("release agent worker startup", () => {
       const release = yield* Deferred.make<void>()
       const completed = yield* Deferred.make<void>()
       const drained = yield* Deferred.make<void>()
+      const drainWaiterStarted = yield* Deferred.make<void>()
       const interrupted = yield* Ref.make(false)
       const worker = AgentJobWorker.of({
         runOnce: () =>
@@ -85,11 +86,12 @@ describe("release agent worker startup", () => {
         yield* Deferred.await(started)
         yield* lifecycle.beginDrain
         yield* Effect.forkChild(
-          lifecycle.awaitWorkDrained.pipe(
+          Deferred.succeed(drainWaiterStarted, undefined).pipe(
+            Effect.andThen(lifecycle.awaitWorkDrained),
             Effect.andThen(Deferred.succeed(drained, undefined))
           )
         )
-        yield* Effect.yieldNow
+        yield* Deferred.await(drainWaiterStarted)
         assert.isFalse(yield* Deferred.isDone(drained))
         assert.isFalse(yield* Ref.get(interrupted))
         yield* Deferred.succeed(release, undefined)

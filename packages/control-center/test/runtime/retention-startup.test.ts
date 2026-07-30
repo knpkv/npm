@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer } from "effect"
+import { DateTime, Deferred, Effect, Layer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { databaseLayer } from "../../src/server/persistence/Database.js"
@@ -68,6 +68,91 @@ describe("retention startup", () => {
         yield* lifecycle.awaitWorkDrained
       }).pipe(
         Effect.provide(Layer.merge(persistence, startup)),
+        Effect.scoped
+      )
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("preserves an admitted periodic sweep until it finishes during drain", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-retention-active-drain-")
+      const database = databaseLayer(config)
+      const persistenceLayer = persistenceLayerFromDatabase(config).pipe(
+        Layer.provide(database)
+      )
+      const lifecycle = yield* ServerLifecycle.make
+      const sweepStarted = yield* Deferred.make<void>()
+      const releaseSweep = yield* Deferred.make<void>()
+      const sweepCompleted = yield* Deferred.make<void>()
+      const drainWaiterStarted = yield* Deferred.make<void>()
+      const drained = yield* Deferred.make<void>()
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+
+      yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Active retention drain fixture"),
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+        let sweepCount = 0
+        const observedPersistence = Persistence.of({
+          ...persistence,
+          retention: {
+            ...persistence.retention,
+            sweepWorkspace: (...args) =>
+              Effect.suspend(() => {
+                sweepCount += 1
+                if (sweepCount === 1) {
+                  return persistence.retention.sweepWorkspace(...args)
+                }
+                return Deferred.succeed(sweepStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseSweep)),
+                  Effect.andThen(persistence.retention.sweepWorkspace(...args)),
+                  Effect.tap(() => Deferred.succeed(sweepCompleted, undefined))
+                )
+              })
+          }
+        })
+        const startup = retentionStartupLayer({
+          workspaceId: WORKSPACE_ID,
+          interval: "1 hour"
+        }).pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(Persistence, observedPersistence),
+              Layer.succeed(ControlCenterBootstrap, {
+                _tag: "already-initialized",
+                workspaceId: WORKSPACE_ID
+              }),
+              Layer.succeed(ServerLifecycle, lifecycle)
+            )
+          )
+        )
+
+        yield* Effect.gen(function*() {
+          yield* RetentionStartup
+          yield* TestClock.adjust("1 hour")
+          yield* Deferred.await(sweepStarted)
+          yield* lifecycle.beginDrain
+          yield* Effect.forkChild(
+            Deferred.succeed(drainWaiterStarted, undefined).pipe(
+              Effect.andThen(lifecycle.awaitWorkDrained),
+              Effect.andThen(Deferred.succeed(drained, undefined))
+            )
+          )
+          yield* Deferred.await(drainWaiterStarted)
+          assert.isFalse(yield* Deferred.isDone(drained))
+          assert.isFalse(yield* Deferred.isDone(sweepCompleted))
+          yield* Deferred.succeed(releaseSweep, undefined)
+          yield* Deferred.await(drained)
+          yield* Deferred.await(sweepCompleted)
+          assert.strictEqual(sweepCount, 2)
+        }).pipe(Effect.provide(startup))
+      }).pipe(
+        Effect.provide(persistenceLayer),
         Effect.scoped
       )
     }).pipe(

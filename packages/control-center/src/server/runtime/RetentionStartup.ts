@@ -48,12 +48,16 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
     Effect.catch(() => Effect.void)
   )
   const interval = Duration.fromInputUnsafe(options.interval ?? DEFAULT_RETENTION_INTERVAL)
-  const supervise = lifecycle.runBackground(
-    Effect.raceFirst(
-      lifecycle.awaitDrain,
-      Effect.forever(Effect.sleep(interval).pipe(Effect.andThen(runOnce)))
-    )
-  ).pipe(
+  const supervise = Effect.gen(function*() {
+    while (true) {
+      const drainStarted = yield* Effect.raceFirst(
+        lifecycle.awaitDrain.pipe(Effect.as(true)),
+        Effect.sleep(interval).pipe(Effect.as(false))
+      )
+      if (drainStarted) return
+      yield* lifecycle.runBackground(runOnce)
+    }
+  }).pipe(
     Effect.catch(() => Effect.void)
   )
   yield* Effect.forkScoped(supervise)
