@@ -4,7 +4,7 @@ import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
-const LiveIntegrationRequestOperation = Schema.Literals(["authenticated-api", "pair-owner"])
+const LiveIntegrationRequestOperation = Schema.Literals(["authenticated-api", "create-connection", "pair-owner"])
 
 type LiveIntegrationRequestOperation = typeof LiveIntegrationRequestOperation.Type
 

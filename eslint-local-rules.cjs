@@ -1499,18 +1499,63 @@ module.exports = {
       schema: [],
       messages: {
         echoingAssertion:
-          "Do not pass sensitive operands to assert.notInclude(); use a constant-message redaction helper."
+          "Do not pass sensitive operands to an echoing assertion; compare booleans with a constant message or use the redaction helper."
       }
     },
     create(context) {
+      const isDirectProviderImmutableId = (node) =>
+        node?.type === "MemberExpression" && staticPropertyName(node.property) === "providerImmutableId"
+      const containsProviderImmutableId = (node) => {
+        if (isDirectProviderImmutableId(node)) {
+          return true
+        }
+        const visitorKeys = context.sourceCode.visitorKeys[node.type] ?? []
+        return visitorKeys.some((key) => {
+          const child = node[key]
+          return Array.isArray(child)
+            ? child.some((entry) => entry !== null && containsProviderImmutableId(entry))
+            : child !== null && child !== undefined && containsProviderImmutableId(child)
+        })
+      }
+      const echoingIdentityMethods = new Set([
+        "deepEqual",
+        "deepStrictEqual",
+        "equal",
+        "include",
+        "match",
+        "strictEqual"
+      ])
+      const isStringLiteral = (node) => node?.type === "Literal" && typeof node.value === "string"
+
       return {
         CallExpression(node) {
           if (
             node.callee.type !== "MemberExpression" ||
             node.callee.object.type !== "Identifier" ||
-            staticPropertyName(node.callee.property) !== "notInclude" ||
             !isNamedImportFrom(context, node.callee.object, ["@effect/vitest"], ["assert"])
           ) {
+            return
+          }
+          const method = staticPropertyName(node.callee.property)
+          const argumentsWithStableIds = node.arguments.filter(
+            (argument) => argument.type !== "SpreadElement" && containsProviderImmutableId(argument)
+          )
+          const firstArgument = node.arguments[0]
+          const booleanAssertionIsUnsafe =
+            (method === "isTrue" || method === "isFalse") &&
+            argumentsWithStableIds.length > 0 &&
+            (firstArgument === undefined ||
+              firstArgument.type === "SpreadElement" ||
+              isDirectProviderImmutableId(firstArgument) ||
+              (node.arguments[1] !== undefined && !isStringLiteral(node.arguments[1])))
+          const awsIdentityArrayLengthIsUnsafe =
+            method === "lengthOf" && firstArgument?.type === "Identifier" && firstArgument.name === "awsIdentities"
+          const echoesSensitiveOperand =
+            method === "notInclude" ||
+            (method !== undefined && echoingIdentityMethods.has(method) && argumentsWithStableIds.length > 0) ||
+            booleanAssertionIsUnsafe ||
+            awsIdentityArrayLengthIsUnsafe
+          if (!echoesSensitiveOperand) {
             return
           }
           context.report({

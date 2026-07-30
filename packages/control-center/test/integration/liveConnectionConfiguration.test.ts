@@ -15,7 +15,8 @@ import {
   assertSensitiveTextAbsent,
   LiveIntegrationRequestError,
   makeSecretSafeLiveHttpClient,
-  redactAuthenticatedLiveResponse
+  redactAuthenticatedLiveResponse,
+  redactLiveRequestFailure
 } from "./liveSecretAssertions.js"
 
 const completeEnvironment = {
@@ -171,6 +172,54 @@ describe("live connection configuration", () => {
           assertSensitiveTextAbsent(JSON.stringify(result.failure), canary)
           assertSensitiveTextAbsent(String(result.failure), canary)
         }
+      }
+    }))
+
+  it.effect("redacts generated-client encoding failures before they can retain credential payloads", () =>
+    Effect.gen(function*() {
+      const tokenCanary = "live-http-encoding-token-canary"
+      const malformedToken = `${tokenCanary}${"x".repeat(16_384)}`
+      let requests = 0
+      const countingClient = HttpClient.make((request) => {
+        requests += 1
+        return Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request,
+              description: "malformed payload unexpectedly reached transport"
+            })
+          })
+        )
+      })
+      const apiClient = yield* HttpApiClient.makeWith(ControlCenterApi, {
+        baseUrl: "http://127.0.0.1",
+        httpClient: countingClient
+      })
+
+      const result = yield* apiClient.plugins
+        .createConnection({
+          payload: {
+            pluginConnectionId: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000fe"),
+            providerId: "jira",
+            displayName: "Encoding failure fixture",
+            values: [
+              {
+                _tag: "secret",
+                key: PluginConfigurationKey.make("apiToken"),
+                value: malformedToken
+              }
+            ]
+          }
+        })
+        .pipe(redactLiveRequestFailure("create-connection"), Effect.result)
+
+      assert.strictEqual(requests, 0)
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.instanceOf(result.failure, LiveIntegrationRequestError)
+        assert.strictEqual(result.failure.operation, "create-connection")
+        assertSensitiveTextAbsent(JSON.stringify(result.failure), tokenCanary)
+        assertSensitiveTextAbsent(String(result.failure), tokenCanary)
       }
     }))
 })

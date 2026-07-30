@@ -147,6 +147,37 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { assert } from "@effect/vitest"
+    assert.match(identity.providerImmutableId, /^[0-9]{12}$/u)
+    assert.strictEqual(left.providerImmutableId, right.providerImmutableId)
+    assert.equal(left.identity.providerImmutableId, right.identity.providerImmutableId)
+    assert.lengthOf(awsIdentities, 2)
+    assert.isTrue(identity.providerImmutableId, "constant message")
+    assert.isTrue(pattern.test(identity.providerImmutableId), dynamicMessage)
+  `,
+  expected: 6,
+  filePath: "packages/control-center/test/integration/live-provider-id-assertion-invalid.test.ts",
+  ruleId: "local-rules/no-echoing-secret-assertions"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assert } from "@effect/vitest"
+    const pattern = /^[0-9]{12}$/u
+    assert.isTrue(pattern.test(identity.providerImmutableId), "constant message")
+    assert.isTrue(
+      left.providerImmutableId === right.providerImmutableId,
+      "constant message"
+    )
+    assert.isTrue(awsIdentities.length === 2, "two AWS identities")
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/integration/live-provider-id-assertion-valid.test.ts",
+  ruleId: "local-rules/no-echoing-secret-assertions"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Identifiers from "../../src/domain/identifiers.js"
     Identifiers.WorkspaceId.make("00000000-0000-4000-8000-000000000000")
     Identifiers["WorkspaceId"].make("not-a-uuid")

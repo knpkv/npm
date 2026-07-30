@@ -193,7 +193,7 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
   const [paired, pairResponse] = yield* pairClient.session.pair({
     payload: { pairingCode: PairingCode.make(Redacted.value(bootstrap.pairingCode)) },
     responseMode: "decoded-and-response"
-  })
+  }).pipe(redactLiveRequestFailure("pair-owner"))
   const sessionCookie = pairResponse.cookies.cookies.cc_session
   if (sessionCookie === undefined) {
     return yield* Effect.die("live integration pairing did not issue a session cookie")
@@ -218,7 +218,11 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
 
   const setupResponses = []
   for (const request of connectionRequests(configuration)) {
-    setupResponses.push(yield* mutationClient.plugins.createConnection({ payload: request }))
+    setupResponses.push(
+      yield* mutationClient.plugins
+        .createConnection({ payload: request })
+        .pipe(redactLiveRequestFailure("create-connection"))
+    )
   }
   assert.isTrue(setupResponses.every(({ test }) => test._tag === "healthy"))
   const serializedSetup = JSON.stringify(setupResponses)
@@ -246,10 +250,16 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     (result) =>
       result._tag === "healthy" && (result.providerId === "codecommit" || result.providerId === "codepipeline")
   )
-  assert.lengthOf(awsIdentities, 2)
+  assert.isTrue(awsIdentities.length === 2, "Live integration must resolve exactly two AWS provider identities")
   if (awsIdentities[0]?._tag === "healthy" && awsIdentities[1]?._tag === "healthy") {
-    assert.match(awsIdentities[0].identity.providerImmutableId, /^[0-9]{12}$/u)
-    assert.strictEqual(awsIdentities[0].identity.providerImmutableId, awsIdentities[1].identity.providerImmutableId)
+    assert.isTrue(
+      /^[0-9]{12}$/u.test(awsIdentities[0].identity.providerImmutableId),
+      "AWS live provider identity must be a twelve-digit account identifier"
+    )
+    assert.isTrue(
+      awsIdentities[0].identity.providerImmutableId === awsIdentities[1].identity.providerImmutableId,
+      "AWS live provider connections must resolve the same account"
+    )
   }
 
   const synchronizations = []
@@ -375,14 +385,16 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     ["codecommit", "codepipeline", "confluence", "jira"]
   )
 
-  const authenticationRegression = yield* mutationClient.plugins.createConnection({
-    payload: {
-      pluginConnectionId: AUTHENTICATION_REGRESSION_CONNECTION_ID,
-      providerId: "jira",
-      displayName: "Live Jira authentication regression",
-      values: jiraValues(configuration, INVALID_API_TOKEN, 1)
-    }
-  })
+  const authenticationRegression = yield* mutationClient.plugins
+    .createConnection({
+      payload: {
+        pluginConnectionId: AUTHENTICATION_REGRESSION_CONNECTION_ID,
+        providerId: "jira",
+        displayName: "Live Jira authentication regression",
+        values: jiraValues(configuration, INVALID_API_TOKEN, 1)
+      }
+    })
+    .pipe(redactLiveRequestFailure("create-connection"))
   assert.strictEqual(authenticationRegression.test._tag, "failed")
   if (authenticationRegression.test._tag === "failed") {
     assert.include(["authentication", "authorization"], authenticationRegression.test.failureClass)
