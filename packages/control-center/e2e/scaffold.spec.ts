@@ -117,7 +117,7 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await page.goto("/pair")
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
-  await expect(page).toHaveURL(`/w/${pairedSession.workspaceId}/overview`)
+  await expect(page).toHaveURL("/")
   await expect(page.getByText("Owner browser paired")).toBeVisible()
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(csrfToken)
@@ -239,7 +239,7 @@ test("ignores a stale session hydration after replacing the paired session", asy
   await currentStarted
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
-  await expect(page).toHaveURL(`/w/${pairedSession.workspaceId}/overview`)
+  await expect(page).toHaveURL("/")
   await expect(page.getByText("Owner browser paired")).toBeVisible()
   await expect.poll(() => page.evaluate(() => sessionStorage.getItem("cc_csrf"))).toBe(newCsrfToken)
 
@@ -289,7 +289,7 @@ test("reports a consumed pairing when session storage rejects its mutation proof
   await page.goto("/pair")
   await page.getByRole("textbox", { name: "Pairing code" }).fill("a".repeat(64))
   await page.getByRole("button", { name: "Pair browser" }).click()
-  await expect(page).toHaveURL(`/w/${pairedSession.workspaceId}/overview`)
+  await expect(page).toHaveURL("/")
   const storageAlert = page.getByText(
     "Browser paired, but session storage is unavailable. Check storage permissions or space, then reload.",
     { exact: true }

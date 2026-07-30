@@ -16,7 +16,7 @@ import {
   LedgerRevision,
   RelationshipKind
 } from "../../domain/deliveryGraph.js"
-import type { PluginHealth } from "../../domain/freshness.js"
+import type { Freshness, PluginHealth } from "../../domain/freshness.js"
 import {
   EntityId,
   EnvironmentId,
@@ -36,11 +36,13 @@ import { Release } from "../../domain/release.js"
 import { deriveReleaseRelay } from "../../domain/releaseRelay.js"
 import { NormalizationSchemaVersion, type ProviderId, VendorImmutableId } from "../../domain/sourceRevision.js"
 import { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import type { WorkspaceSettingsV1 } from "../../domain/workspaceSettings.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord, RoleAssignmentRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import type { WorkspaceSettingsRecord } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
@@ -1193,6 +1195,7 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
   persistence: PersistenceService,
   cryptoService: Crypto.Crypto,
   scope: NormalizedPluginPageMaterializationScope,
+  settings: WorkspaceSettingsV1,
   event: EntityUpsert
 ) {
   const attributes = yield* Schema.decodeUnknownEffect(ReleaseAttributes)(event.attributes).pipe(
@@ -1224,17 +1227,33 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
     0,
     (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(observedAt)) / 1_000
   )
-  const release = yield* Schema.decodeUnknownEffect(Schema.toType(Release))({
-    createdAt: previous?.release.createdAt ?? event.observedAt,
-    freshness: {
+  const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
+  const freshness: Freshness = sourceAgeSeconds < staleAfterSeconds
+    ? {
       _tag: "current",
       evaluatedAt: scope.committedAt,
       pluginHealth: scope.successfulHealth,
       provenance: { _tag: "provider", sourceRevision: refreshedSource },
       sourceObservedAt: observedAt,
-      staleAfterSeconds: Math.max(1, Math.ceil(sourceAgeSeconds) + 86_400),
+      staleAfterSeconds,
       synchronizedAt: scope.committedAt
-    },
+    }
+    : {
+      _tag: "stale",
+      evaluatedAt: scope.committedAt,
+      pluginHealth: scope.successfulHealth,
+      provenance: {
+        _tag: "cache",
+        cachedAt: refreshedSource.synchronizedAt,
+        sourceRevision: refreshedSource
+      },
+      sourceObservedAt: observedAt,
+      staleAfterSeconds,
+      synchronizedAt: scope.committedAt
+    }
+  const release = yield* Schema.decodeUnknownEffect(Schema.toType(Release))({
+    createdAt: previous?.release.createdAt ?? event.observedAt,
+    freshness,
     id: releaseId,
     lifecycle: attributes.lifecycle,
     relay: deriveReleaseRelay(releaseId),
@@ -1447,6 +1466,7 @@ const materializeEvidence = Effect.fn("NormalizedPluginPageMaterialization.appen
   persistence: PersistenceService,
   cryptoService: Crypto.Crypto,
   scope: NormalizedPluginPageMaterializationScope,
+  settings: WorkspaceSettingsV1,
   event: EvidenceAppend
 ) {
   const subject = yield* findEntity(persistence, scope, event.subject.vendorImmutableId)
@@ -1484,6 +1504,30 @@ const materializeEvidence = Effect.fn("NormalizedPluginPageMaterialization.appen
     scope.successfulHealth._tag === "healthy"
       ? { _tag: "healthy", checkedAt: scope.committedAt }
       : { ...scope.successfulHealth, checkedAt: scope.committedAt }
+  const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
+  const freshness: Freshness = ageSeconds < staleAfterSeconds
+    ? {
+      _tag: "current",
+      evaluatedAt: scope.committedAt,
+      pluginHealth: health,
+      provenance: { _tag: "provider", sourceRevision: source },
+      sourceObservedAt: source.lastObservedAt,
+      staleAfterSeconds,
+      synchronizedAt: scope.committedAt
+    }
+    : {
+      _tag: "stale",
+      evaluatedAt: scope.committedAt,
+      pluginHealth: health,
+      provenance: {
+        _tag: "cache",
+        cachedAt: source.synchronizedAt,
+        sourceRevision: source
+      },
+      sourceObservedAt: source.lastObservedAt,
+      staleAfterSeconds,
+      synchronizedAt: scope.committedAt
+    }
   const receipt = yield* writeGraph(persistence, scope.workspaceId, {
     entityProjections: [],
     nodes: [],
@@ -1501,16 +1545,14 @@ const materializeEvidence = Effect.fn("NormalizedPluginPageMaterialization.appen
       observedAt: event.capturedAt,
       recordedAt: scope.committedAt,
       validUntil: null,
-      freshness: {
-        _tag: "current",
-        evaluatedAt: scope.committedAt,
-        pluginHealth: health,
-        provenance: { _tag: "provider", sourceRevision: source },
-        sourceObservedAt: source.lastObservedAt,
-        staleAfterSeconds: Math.max(1, Math.ceil(ageSeconds) + 1),
-        synchronizedAt: scope.committedAt
-      },
-      retention: { classification: "evidence", retainUntil: null, legalHold: false }
+      freshness,
+      retention: {
+        classification: "evidence",
+        retainUntil: DateTime.add(scope.committedAt, {
+          days: settings.retention.evidenceDays
+        }),
+        legalHold: false
+      }
     }],
     evidenceClaims: [{
       workspaceId: scope.workspaceId,
@@ -1807,10 +1849,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
 > {
   const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
-  return yield* persistence.transact(Effect.gen(function*() {
+  const materializeWithSettings = Effect.fn(
+    "NormalizedPluginPageMaterialization.materializeWithSettings"
+  )(function*(settingsRecord: WorkspaceSettingsRecord) {
     if (scope.expectedAuthority !== undefined) {
       yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
     }
+    const settings = settingsRecord.settings
     const materializationPage = yield* sequenceClockifyPersonEvents(persistence, scope, page)
     const pipelineTombstones = materializationPage.events.filter(isCodePipelineTombstone)
     const previousPipelineRecords = pipelineTombstones.length === 0
@@ -1971,7 +2016,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
     for (const event of entityEvents) {
       if (event._tag === "UpsertEntity") {
         if (event.entityType === "release") {
-          nodeCount += (yield* materializeRelease(persistence, cryptoService, scope, event)).nodeCount
+          nodeCount += (yield* materializeRelease(
+            persistence,
+            cryptoService,
+            scope,
+            settings,
+            event
+          )).nodeCount
           continue
         }
         if (event.entityType === "aws.codepipeline.pipeline") {
@@ -2000,7 +2051,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
     }
     for (const event of acceptedEvents) {
       if (event._tag !== "AppendEvidence") continue
-      const receipt = yield* materializeEvidence(persistence, cryptoService, scope, event)
+      const receipt = yield* materializeEvidence(
+        persistence,
+        cryptoService,
+        scope,
+        settings,
+        event
+      )
       evidenceItemCount += receipt.evidenceItemCount
       evidenceClaimCount += receipt.evidenceClaimCount
     }
@@ -2020,7 +2077,8 @@ export const materializeNormalizedPluginPage = Effect.fn(
       const inference = yield* materializeRelationshipInference(
         persistence,
         (identity) => stableUuid(cryptoService, identity, "relationship-inference"),
-        scope
+        scope,
+        settings
       )
       evidenceClaimCount += inference.evidenceClaimCount
       evidenceItemCount += inference.evidenceItemCount
@@ -2038,5 +2096,9 @@ export const materializeNormalizedPluginPage = Effect.fn(
       relationshipCount,
       skippedEntityCount
     }
-  }))
+  })
+  return yield* persistence.workspaceSettings.readAtomically(
+    scope.workspaceId,
+    materializeWithSettings
+  )
 })

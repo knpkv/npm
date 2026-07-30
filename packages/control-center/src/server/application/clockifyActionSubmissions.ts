@@ -1,4 +1,5 @@
 /** Authenticated product boundary for governed Clockify corrections and approvals. @module */
+import * as Cache from "effect/Cache"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
@@ -63,6 +64,11 @@ interface SubmitClockifyActionInput {
   readonly session: SessionSummary
   readonly workspaceId: WorkspaceId
 }
+
+type ClockifyActionAdvanceKey = readonly [
+  workspaceId: WorkspaceId,
+  actionId: GovernedActionId
+]
 
 /** Human-only application service; provider executors never escape this boundary. */
 export class ClockifyActionSubmissions extends Context.Service<
@@ -167,6 +173,26 @@ const makeService = Effect.gen(function*() {
   const proposalAuthority = yield* GovernedActionProposalAuthority
   const policies = yield* GovernedActionPolicyBindingSource
   const submission = yield* GovernedActionSubmission
+
+  // Share only an in-flight execution. Completed entries are removed immediately.
+  const actionAdvances = yield* Cache.makeWith(
+    ([workspaceId, actionId]: ClockifyActionAdvanceKey) =>
+      Effect.gen(function*() {
+        yield* submission.advance({
+          workspaceId,
+          actionId
+        }).pipe(mapFailure)
+        const record = yield* persistence.governedActions.read({
+          workspaceId,
+          actionId
+        }).pipe(mapFailure)
+        return { actionId, state: record.head.state }
+      }),
+    {
+      capacity: Number.POSITIVE_INFINITY,
+      timeToLive: () => "0 millis"
+    }
+  )
 
   const submit = Effect.fn("ClockifyActionSubmissions.submit")(function*(input: SubmitClockifyActionInput) {
     const checkedAt = yield* DateTime.now
@@ -315,12 +341,10 @@ const makeService = Effect.gen(function*() {
       return commit
     })
     const advance = Effect.fn("ClockifyActionSubmissions.advance")(function*(actionId: GovernedActionId) {
-      yield* submission.advance({ workspaceId: input.workspaceId, actionId }).pipe(mapFailure)
-      const record = yield* persistence.governedActions.read({
-        workspaceId: input.workspaceId,
-        actionId
-      }).pipe(mapFailure)
-      return { actionId, state: record.head.state }
+      return yield* Cache.get(
+        actionAdvances,
+        [input.workspaceId, actionId]
+      )
     })
     const existingMatches = (
       record: GovernedActionRecord,

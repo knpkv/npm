@@ -34,6 +34,7 @@ import {
   releaseChatTaskExecutorLayer,
   reviewEnabledTaskExecutorLayer
 } from "./internal/AgentJobTaskExecutor.js"
+import { AgentJobWorkspacePolicy } from "./internal/AgentJobWorkspacePolicy.js"
 import type { PrReviewSandboxSessions } from "./internal/PrReviewSandboxSession.js"
 import { prReviewTaskExecutorLayer } from "./internal/PrReviewTaskExecutor.js"
 import { prReviewThreadHistoryLayer } from "./internal/PrReviewThreadHistory.js"
@@ -154,6 +155,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const jobs = yield* AgentJobRepository
   const taskExecutor = yield* AgentJobTaskExecutor
+  const workspacePolicy = yield* AgentJobWorkspacePolicy
 
   const cancelClaim = Effect.fn("AgentJobWorker.cancelClaim")(function*(claim: ClaimedAgentJob) {
     const occurredAt = yield* DateTime.now
@@ -196,6 +198,23 @@ const makeAgentJobWorker = Effect.gen(function*() {
   const executeClaim = Effect.fn("AgentJobWorker.executeClaim")(function*(claim: ClaimedAgentJob) {
     if (claim.cancellationRequested) {
       return yield* cancelClaim(claim)
+    }
+    const policy = yield* workspacePolicy.read(claim.workspaceId)
+    const providerAllowed = policy.allowedProviders.some(
+      (providerId) => providerId === String(claim.providerId)
+    )
+    const toolsAllowed = claim.context.task._tag !== "pr-review" ||
+      policy.toolPolicy === "review-sandbox"
+    if (!providerAllowed || !toolsAllowed) {
+      return yield* failClaim(
+        claim,
+        new AgentProviderError({
+          providerId: claim.providerId,
+          phase: "configuration",
+          message: "Current workspace policy no longer permits this agent job.",
+          retryable: false
+        })
+      )
     }
 
     const onReviewActivity = (event: AgentRuntimeEvent) =>
@@ -396,7 +415,11 @@ export class AgentJobWorker extends Context.Service<AgentJobWorker, AgentJobWork
 /** Default release-chat worker composition; it remains independent of sandbox configuration. */
 export const agentJobWorkerLayer = (
   options: AgentJobWorkerOptions
-): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto> =>
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentJobWorkspacePolicy | AgentRuntimeRegistry | Crypto.Crypto
+> =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(releaseChatTaskExecutorLayer)
   )
@@ -407,7 +430,11 @@ export const agentJobWorkerWithPrReviewLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxSessions
+  | AgentJobRepository
+  | AgentJobWorkspacePolicy
+  | AgentRuntimeRegistry
+  | Crypto.Crypto
+  | PrReviewSandboxSessions
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
@@ -427,7 +454,11 @@ export const prReviewAgentJobWorkerLayer = (
 ): Layer.Layer<
   AgentJobWorker,
   never,
-  AgentJobRepository | AgentRuntimeRegistry | Crypto.Crypto | PrReviewSandboxSessions
+  | AgentJobRepository
+  | AgentJobWorkspacePolicy
+  | AgentRuntimeRegistry
+  | Crypto.Crypto
+  | PrReviewSandboxSessions
 > =>
   agentJobWorkerWithTaskExecutorLayer(options).pipe(
     Layer.provide(
@@ -444,7 +475,11 @@ export const prReviewAgentJobWorkerLayer = (
 /** Internal composition hook used by deterministic task-executor contract tests. */
 export const agentJobWorkerWithTaskExecutorLayer = (
   options: AgentJobWorkerOptions
-): Layer.Layer<AgentJobWorker, never, AgentJobRepository | AgentJobTaskExecutor | Crypto.Crypto> =>
+): Layer.Layer<
+  AgentJobWorker,
+  never,
+  AgentJobRepository | AgentJobTaskExecutor | AgentJobWorkspacePolicy | Crypto.Crypto
+> =>
   Layer.effect(
     AgentJobWorker,
     makeAgentJobWorker.pipe(Effect.map((make) => AgentJobWorker.of(make(options))))

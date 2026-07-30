@@ -27,7 +27,7 @@ import {
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import { makeControlCenterApiClient } from "../../src/api/client.js"
-import { PairingCode } from "../../src/api/session.js"
+import { PairingCode, SessionSummary } from "../../src/api/session.js"
 import { PluginHealth } from "../../src/domain/freshness.js"
 import {
   EntityId,
@@ -38,11 +38,14 @@ import {
   PluginConnectionId,
   ReleaseId,
   RoleAssignmentId,
-  WorkspaceId
+  SessionId,
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import type { PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { GovernedWorkspaceSettingsSections, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
@@ -50,6 +53,8 @@ import {
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
+import { authorizeWorkspaceSettingsGovernanceRequest } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
+import { makeWorkspaceGovernedActionPolicyDefinitions } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   Persistence,
@@ -302,10 +307,12 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
   const graph = DeliveryGraphRepository.layer.pipe(Layer.provide(foundation))
   const runtimes = PluginRuntimeRepository.layer.pipe(Layer.provide(foundation))
   const authorities = pluginRuntimeAuthoritySourceLayer.pipe(Layer.provide(foundation))
-  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities)
+  const persistence = persistenceLayerFromDatabase(persistenceConfig).pipe(Layer.provide(database))
+  const services = Layer.mergeAll(foundation, actions, graph, runtimes, authorities, persistence)
 
   return yield* Effect.gen(function*() {
     yield* seedGovernedActionAuthorityRoots()
+    const persistenceService = yield* Persistence
     const runtimeRepository = yield* PluginRuntimeRepository
     const runtimeRecord = yield* runtimeRepository.acceptPluginDescriptor(
       AUTHORIZED_WORKSPACE,
@@ -331,7 +338,16 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
       accountDigest: PluginRuntimeAccountDigest.make(`sha256:${"c".repeat(64)}`),
       activatedAt: GOVERNED_AUTHORITY_TIME
     })
+    const settings = yield* persistenceService.workspaceSettings.get(AUTHORIZED_WORKSPACE)
+    const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(settings)
+    const ownerPolicy = definitions.find(
+      ({ binding }) => binding.requiredPermission === "workspace-owner"
+    )
+    if (ownerPolicy === undefined) {
+      return yield* Effect.die("workspace-owner governed-action policy is unavailable")
+    }
     yield* seedGovernedAction({
+      policy: ownerPolicy.binding,
       pluginConnectionAuthorityDigest: current.runtimeAuthorityToken,
       seedAuthorityRoots: false
     })
@@ -796,6 +812,24 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const currentSettings = yield* mutationClient.workspaceSettings.read()
+      const configuredSettings = yield* mutationClient.workspaceSettings.update({
+        payload: {
+          mutationId: WorkspaceSettingsMutationId.make(
+            "01890f6f-6d6a-7cc0-98d2-000000000083"
+          ),
+          expectedRevision: currentSettings.revision,
+          settings: {
+            ...currentSettings.settings,
+            agent: {
+              ...currentSettings.settings.agent,
+              allowedProviders: ["codex"]
+            }
+          },
+          acknowledgedGovernedSections: ["agent"]
+        }
+      })
+      assert.deepStrictEqual(configuredSettings.settings.agent.allowedProviders, ["codex"])
       const enqueued = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
         payload: {
@@ -958,11 +992,79 @@ describe("Control Center closed runtime", () => {
           displayName: WorkspaceName.make("Runtime review"),
           createdAt: FIXTURE_TIME
         })
+        const settingsSessionId = SessionId.make(
+          "01890f6f-6d6a-7cc0-98d2-000000000085"
+        )
+        yield* database.sql`INSERT INTO persons (
+          workspace_id, person_id, display_name, avatar_json, is_active,
+          revision, created_at, updated_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${OWNER_ID}, 'Runtime Owner',
+          '{"_tag":"initials","text":"RO"}', 1, 1,
+          ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+        )`
+        yield* database.sql`INSERT INTO sessions (
+          workspace_id, session_id, token_hash, csrf_hash, actor_kind,
+          person_id, agent_id, permission, created_at, last_seen_at,
+          idle_expires_at, absolute_expires_at, revoked_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${settingsSessionId}, ${"a".repeat(64)}, ${"b".repeat(64)},
+          'human', ${OWNER_ID}, NULL, 'workspace-owner',
+          ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT},
+          '2026-07-31T09:00:00.000Z', '2026-08-30T09:00:00.000Z', NULL
+        )`
         yield* database.sql`INSERT INTO releases (
           workspace_id, release_id, current_revision, created_at, updated_at
         ) VALUES (
           ${WORKSPACE_ID}, ${RELEASE_ID}, 1, ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
         )`
+        const currentSettings = yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+        const settingsMutationId = WorkspaceSettingsMutationId.make(
+          "01890f6f-6d6a-7cc0-98d2-000000000084"
+        )
+        const settingsCandidate: WorkspaceSettingsV1 = {
+          ...currentSettings.settings,
+          agent: {
+            ...currentSettings.settings.agent,
+            allowedProviders: ["openai-compatible"],
+            toolPolicy: "review-sandbox"
+          }
+        }
+        const acknowledgedGovernedSections = GovernedWorkspaceSettingsSections.make(["agent"])
+        const settingsRequest = {
+          workspaceId: WORKSPACE_ID,
+          mutationId: settingsMutationId,
+          expectedRevision: currentSettings.revision,
+          settings: settingsCandidate,
+          acknowledgedGovernedSections,
+          actorPersonId: OWNER_ID,
+          sessionId: settingsSessionId
+        }
+        const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+          Schema.decodeSync(SessionSummary)({
+            sessionId: settingsSessionId,
+            workspaceId: WORKSPACE_ID,
+            actor: { _tag: "human", personId: OWNER_ID },
+            permission: "workspace-owner",
+            createdAt: FIXTURE_TIME_INPUT,
+            lastSeenAt: FIXTURE_TIME_INPUT,
+            idleExpiresAt: "2026-07-31T09:00:00.000Z",
+            absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
+            revokedAt: null
+          }),
+          settingsRequest,
+          FIXTURE_TIME
+        )
+        yield* persistence.workspaceSettings.update(WORKSPACE_ID, {
+          mutationId: settingsMutationId,
+          expectedRevision: currentSettings.revision,
+          settings: settingsCandidate,
+          acknowledgedGovernedSections,
+          actorPersonId: OWNER_ID,
+          sessionId: settingsSessionId,
+          governanceAuthority,
+          updatedAt: FIXTURE_TIME
+        })
         yield* persistence.agentJobs.enqueue({
           workspaceId: WORKSPACE_ID,
           releaseId: RELEASE_ID,

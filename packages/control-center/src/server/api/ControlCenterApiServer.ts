@@ -15,7 +15,8 @@ import {
   portfolioHandlersLayer,
   sessionHandlersLayer,
   shareHandlersLayer,
-  timelineHandlersLayer
+  timelineHandlersLayer,
+  workspaceSettingsHandlersLayer
 } from "./Handlers.js"
 import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
@@ -30,6 +31,7 @@ export const controlCenterApiMiddlewareLayer = controlCenterApiMiddlewareLayerWi
 /** Complete group implementation, still requiring injectable application services. */
 const controlCenterApiHandlersLayerWithLifecycle = Layer.mergeAll(
   sessionHandlersLayer,
+  workspaceSettingsHandlersLayer,
   shareHandlersLayer,
   pluginHandlersLayer,
   portfolioHandlersLayer,

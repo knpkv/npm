@@ -74,18 +74,18 @@ describe("Freshness", () => {
       expect(encoded).toEqual(encodedFreshness)
     }))
 
-  it("treats the exact stale threshold as current and the next millisecond as stale", () => {
-    const currentAtBoundary = {
+  it("treats the exact stale threshold as stale and the previous millisecond as current", () => {
+    const currentJustInsideBoundary = {
       _tag: "current",
-      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" },
+      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:44:59.999Z" },
       provenance: { _tag: "provider", sourceRevision },
       sourceObservedAt: sourceRevision.lastObservedAt,
       staleAfterSeconds: 900,
       synchronizedAt: "2026-07-13T08:31:00.000Z"
     }
-    const staleJustOverBoundary = {
+    const staleAtBoundary = {
       _tag: "stale",
-      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.001Z" },
+      pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" },
       provenance: {
         _tag: "cache",
         cachedAt: "2026-07-13T08:31:00.000Z",
@@ -96,21 +96,21 @@ describe("Freshness", () => {
       synchronizedAt: "2026-07-13T08:31:30.000Z"
     }
 
-    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(currentAtBoundary))).toBe(true)
-    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(staleJustOverBoundary))).toBe(true)
+    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(currentJustInsideBoundary))).toBe(true)
+    expect(Result.isSuccess(Schema.decodeUnknownResult(Freshness)(staleAtBoundary))).toBe(true)
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(Freshness)({
-          ...currentAtBoundary,
-          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.001Z" }
+          ...currentJustInsideBoundary,
+          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" }
         })
       )
     ).toBe(true)
     expect(
       Result.isFailure(
         Schema.decodeUnknownResult(Freshness)({
-          ...staleJustOverBoundary,
-          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:45:00.000Z" }
+          ...staleAtBoundary,
+          pluginHealth: { ...healthy, checkedAt: "2026-07-13T08:44:59.999Z" }
         })
       )
     ).toBe(true)
@@ -126,7 +126,7 @@ describe("Freshness", () => {
         staleAfterSeconds: 900,
         synchronizedAt: "2026-07-13T08:31:00.000Z"
       })
-      const evaluatedAt = Schema.decodeSync(UtcTimestamp)("2026-07-13T08:45:00.001Z")
+      const evaluatedAt = Schema.decodeSync(UtcTimestamp)("2026-07-13T08:45:00.000Z")
       const projected = yield* evaluateFreshnessAt(persisted, evaluatedAt)
 
       if (projected._tag !== "stale") return yield* Effect.die("expected stale projection")

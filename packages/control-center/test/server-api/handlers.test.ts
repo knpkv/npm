@@ -8,6 +8,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import {
   AgentModelId,
+  type AgentProviderCatalog,
   DurableAgentProviderId,
   PublishedReviewComment,
   PullRequestReviewNotStarted,
@@ -45,6 +46,11 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
+import {
+  workspaceSettingsEtag,
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision
+} from "../../src/api/workspaceSettings.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   AgentId,
@@ -61,7 +67,8 @@ import {
   RelationshipRepairReviewId,
   ReleaseId,
   ShareId,
-  WorkspaceId
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
 import { PluginProviderOperationId, PluginProviderReceiptV1 } from "../../src/domain/plugins/actions.js"
 import { PrReviewPath, PrReviewSubject, PrReviewSuggestion, PrReviewSuggestionId } from "../../src/domain/prReview.js"
@@ -76,6 +83,7 @@ import {
 import { RelationshipRepairProposal } from "../../src/domain/relationshipRepair.js"
 import { Revision } from "../../src/domain/sourceRevision.js"
 import { TimelineEventDetail } from "../../src/domain/timeline.js"
+import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 import { ApiBindConfiguration } from "../../src/server/api/ApiConfiguration.js"
 import {
   ApplicationInvalidRequest,
@@ -93,7 +101,8 @@ import {
   ReleaseAgentJobs,
   ReleaseAgentTurns,
   TimelineExportAudits,
-  TimelineReads
+  TimelineReads,
+  WorkspaceSettingsAdministration
 } from "../../src/server/api/ApplicationServices.js"
 import { controlCenterApiLayer } from "../../src/server/api/ControlCenterApiServer.js"
 import {
@@ -103,7 +112,8 @@ import {
   pluginHandlersLayer,
   portfolioHandlersLayer,
   shareHandlersLayer,
-  timelineHandlersLayer
+  timelineHandlersLayer,
+  workspaceSettingsHandlersLayer
 } from "../../src/server/api/Handlers.js"
 import {
   DEFAULT_MAXIMUM_LIVE_STREAMS_PER_SESSION,
@@ -242,6 +252,7 @@ const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+const reviewerSession = SessionSummary.make({ ...session, permission: "reviewer" })
 const agentOwnerSession = SessionSummary.make({
   ...session,
   actor: {
@@ -458,6 +469,194 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("keeps governed settings private while sharing presentation with a reviewer", () =>
+    Effect.gen(function*() {
+      const reviewerMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, reviewerSession)
+      })
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = WorkspaceSettingsReadModel.make({
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          presentation: {
+            defaultLanding: "active-work",
+            density: "compact"
+          }
+        },
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(reviewerMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        const governed = yield* client.workspaceSettings.read().pipe(Effect.result)
+        const presentation = yield* client.workspaceSettings.readPresentation()
+        return { governed, presentation }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          reviewerMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assertForbidden(result.governed)
+      assert.deepStrictEqual(result.presentation, {
+        workspaceId: session.workspaceId,
+        revision,
+        presentation: {
+          defaultLanding: "active-work",
+          density: "compact"
+        }
+      })
+      assert.strictEqual(yield* Ref.get(reads), 1)
+    }))
+
+  it.effect("admits lazy settings initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["workspaceSettings"])
+        const accepted = yield* client.workspaceSettings.read()
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.workspaceSettings.read().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.accepted.revision, revision)
+      assert.strictEqual(yield* Ref.get(reads), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
+  it.effect("derives workspace-settings mutation attribution from the owner session", () =>
+    Effect.gen(function*() {
+      const received = yield* Ref.make<unknown>(null)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const settings = Layer.succeed(WorkspaceSettingsAdministration, {
+        read: () => Effect.succeed(readModel),
+        update: (input) =>
+          Ref.set(received, input).pipe(
+            Effect.as({
+              ...readModel,
+              revision: WorkspaceSettingsRevision.make(2),
+              etag: workspaceSettingsEtag(WorkspaceSettingsRevision.make(2)),
+              settings: input.request.settings,
+              updatedByPersonId: input.session.actor._tag === "human"
+                ? input.session.actor.personId
+                : null
+            })
+          )
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(settings),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const mutationId = WorkspaceSettingsMutationId.make(
+        "01890f6f-6d6a-7cc0-98d2-000000000191"
+      )
+      const candidate = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          minimumConfidencePercent: 91
+        }
+      }
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        return yield* client.workspaceSettings.update({
+          payload: {
+            mutationId,
+            expectedRevision: revision,
+            settings: candidate,
+            acknowledgedGovernedSections: []
+          }
+        })
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.revision, 2)
+      assert.deepInclude(yield* Ref.get(received), {
+        workspaceId: session.workspaceId,
+        session,
+        request: {
+          mutationId,
+          expectedRevision: revision,
+          settings: candidate,
+          acknowledgedGovernedSections: []
+        }
+      })
+    }))
+
   it.effect("submits an exact-revision Clockify approval through the authenticated product boundary", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<unknown>(null)
@@ -2190,6 +2389,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: (input) =>
@@ -2222,6 +2422,62 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.reply, "The release is waiting for approval.")
     }))
 
+  it.effect("admits release turns only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const turnCalls = yield* Ref.make(0)
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: (input) =>
+            Ref.update(turnCalls, (count) => count + 1).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "The release is waiting for approval."
+              })
+            )
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(turnCalls), 0)
+        const accepted = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this ship?", provider: "codex" }
+        })
+        assert.strictEqual(yield* Ref.get(turnCalls), 1)
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this still ship?", provider: "codex" }
+        }).pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.accepted.releaseId, release.releaseId)
+      assert.strictEqual(yield* Ref.get(turnCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("enqueues a durable agent job in the owner session workspace", () =>
     Effect.gen(function*() {
       const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
@@ -2239,6 +2495,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2272,6 +2529,57 @@ describe("Control Center API handlers", () => {
           profile: "read-only"
         }
       })
+    }))
+
+  it.effect("admits lazy provider catalog initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const providerCalls = yield* Ref.make(0)
+      const catalog = {
+        providers: [{
+          providerId: DurableAgentProviderId.make("openai-compatible"),
+          models: [AgentModelId.make("review-model")],
+          capabilities: ["release-chat"],
+          health: "available"
+        }]
+      } satisfies AgentProviderCatalog
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        providers: () => Ref.update(providerCalls, (count) => count + 1).pipe(Effect.as(catalog)),
+        replay: () => Effect.die("not used")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(providerCalls), 0)
+        const accepted = yield* client.agent.providers()
+        assert.strictEqual(yield* Ref.get(providerCalls), 1)
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.providers().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.deepStrictEqual(result.accepted, catalog)
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
     }))
 
   it.effect("reads and enqueues immutable pull-request reviews in the authenticated workspace", () =>
@@ -2430,6 +2738,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2703,6 +3012,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2737,6 +3047,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(approverMiddleware),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("not used")
@@ -2791,6 +3102,124 @@ describe("Control Center API handlers", () => {
       ])
     }))
 
+  it.effect("rejects authority-bearing review-suggestion operations after server drain begins", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const authorityBearingCalls = yield* Ref.make(0)
+      const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
+      const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000025")
+      const suggestionId = PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`)
+      const revisionId = PrReviewSuggestionRevisionId.make(`sha256:${"5".repeat(64)}`)
+      const sequence = PrReviewSuggestionRevisionSequence.make(1)
+      const edit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+        title: "Decode the response",
+        severity: "P2",
+        problem: "The response is persisted before decoding.",
+        impact: "Malformed output may reach durable state.",
+        evidence: {
+          path: "src/review.ts",
+          startLine: 42,
+          endLine: 42,
+          excerpt: "yield* persist(response)"
+        },
+        recommendation: "Decode the response before persistence.",
+        confidence: {
+          level: "high",
+          reason: "The operation order is explicit."
+        },
+        relatedLocations: [],
+        anchor: {
+          _tag: "line",
+          path: "src/review.ts",
+          line: 42,
+          relativeFileVersion: "AFTER"
+        }
+      })
+      const blockedMutation = Ref.update(authorityBearingCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.die("authority-bearing review operation crossed the drain guard"))
+      )
+      const reviews = Layer.succeed(PullRequestReviews, {
+        thread: () => Effect.die("not used"),
+        current: () => Effect.die("not used"),
+        enqueue: () => Effect.die("not used"),
+        revisions: () => Effect.die("not used"),
+        editSuggestion: () => blockedMutation,
+        dismissSuggestion: () => blockedMutation,
+        previewPublication: () => blockedMutation,
+        publishSuggestion: () => blockedMutation
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(reviews),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: () => Effect.die("not used")
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        yield* lifecycle.beginDrain
+        const edited = yield* client.agent.editReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence,
+            edit
+          }
+        }).pipe(Effect.result)
+        const dismissed = yield* client.agent.dismissReviewSuggestion({
+          params: { entityId, jobId, suggestionId },
+          payload: {
+            expectedRevisionId: revisionId,
+            expectedSequence: sequence
+          }
+        }).pipe(Effect.result)
+        const previewed = yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
+        }).pipe(Effect.result)
+        const published = yield* client.agent.publishReviewSuggestion({
+          params: { entityId },
+          payload: {
+            jobId,
+            suggestionId,
+            revisionId,
+            finalContent: ReviewSuggestionPublicationContent.make("Decode before persistence."),
+            authorityBinding: ReviewSuggestionPublicationAuthorityBinding.make(
+              `sha256:${"a".repeat(64)}`
+            )
+          }
+        }).pipe(Effect.result)
+        return { dismissed, edited, previewed, published }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.isTrue(Result.isFailure(result.edited))
+      if (Result.isFailure(result.edited)) {
+        assert.strictEqual(result.edited.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.dismissed))
+      if (Result.isFailure(result.dismissed)) {
+        assert.strictEqual(result.dismissed.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.previewed))
+      if (Result.isFailure(result.previewed)) {
+        assert.strictEqual(result.previewed.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.isTrue(Result.isFailure(result.published))
+      if (Result.isFailure(result.published)) {
+        assert.strictEqual(result.published.failure._tag, "ServiceUnavailableApiError")
+      }
+      assert.strictEqual(yield* Ref.get(authorityBearingCalls), 0)
+    }))
+
   it.effect("returns only the redacted agent provider catalog to an owner", () =>
     Effect.gen(function*() {
       const jobs = Layer.succeed(ReleaseAgentJobs, {
@@ -2810,6 +3239,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2864,6 +3294,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2906,6 +3337,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2944,6 +3376,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("watcher reached the local agent runtime")
@@ -2984,6 +3417,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )

@@ -75,6 +75,7 @@ import type {
   AuthorizedShareSummary,
   CreateAuthorizedShareRequest
 } from "../../api/shares.js"
+import type { UpdateWorkspaceSettingsRequest, WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
 import type { Actor } from "../../domain/actors.js"
 import type {
   DeliveryEntityKind,
@@ -144,6 +145,24 @@ export class ApplicationInvalidRequest extends Schema.TaggedErrorClass<Applicati
   "ApplicationInvalidRequest",
   {}
 ) {}
+
+/** Authenticated read and owner-only compare-and-swap mutation boundary for workspace settings. */
+export class WorkspaceSettingsAdministration extends Context.Service<
+  WorkspaceSettingsAdministration,
+  {
+    readonly read: (
+      workspaceId: WorkspaceId
+    ) => Effect.Effect<WorkspaceSettingsReadModel, ApplicationServiceUnavailable>
+    readonly update: (input: {
+      readonly workspaceId: WorkspaceId
+      readonly request: UpdateWorkspaceSettingsRequest
+      readonly session: SessionSummary
+    }) => Effect.Effect<
+      WorkspaceSettingsReadModel,
+      ApplicationConflict | ApplicationInvalidRequest | ApplicationServiceUnavailable
+    >
+  }
+>()("@knpkv/control-center/server/api/WorkspaceSettingsAdministration") {}
 
 export type PluginAdministrationError =
   | ApplicationRateLimited
@@ -551,7 +570,7 @@ export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
     readonly history: ReadonlyArray<AgentHistoryMessage>
   }) => Effect.Effect<
     ReleaseAgentTurnResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/ReleaseAgentTurns") {}
 
@@ -566,9 +585,9 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
     readonly request: EnqueueReleaseAgentJobRequest
   }) => Effect.Effect<
     EnqueueReleaseAgentJobResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
-  readonly providers: () => Effect.Effect<
+  readonly providers: (workspaceId: WorkspaceId) => Effect.Effect<
     AgentProviderCatalog,
     ApplicationServiceUnavailable
   >

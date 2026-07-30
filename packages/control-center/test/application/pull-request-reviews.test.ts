@@ -7,7 +7,7 @@ import {
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
-import { DateTime, Deferred, Duration, Effect, Fiber, Option, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
 import {
@@ -55,6 +55,7 @@ import {
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
   ApplicationConflict,
@@ -77,8 +78,13 @@ import {
   ReviewSuggestionPublicationGatewayError
 } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { SessionSummary } from "../../src/server/auth/models.js"
+import { Database, databaseLayer, type DatabaseShape } from "../../src/server/persistence/Database.js"
 import { RecordNotFoundError } from "../../src/server/persistence/errors.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import {
+  Persistence,
+  persistenceLayer,
+  persistenceLayerFromDatabase
+} from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
   AgentJobInputError,
@@ -88,7 +94,8 @@ import {
   LatestAgentReviewRecord,
   ReviewSuggestionPublicationReservation
 } from "../../src/server/persistence/repositories/agentJobModels.js"
-import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { ContentBlobDigest, RecordRevision, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { WorkspaceSettingsRecord } from "../../src/server/persistence/repositories/workspaceSettingsRepository.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000401")
@@ -146,6 +153,29 @@ const STARTED_TIMESTAMP = Schema.decodeUnknownSync(UtcTimestamp)(STARTED_AT)
 const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
   `sha256:${"a".repeat(64)}`
 )
+type AllowedAgentProvider = typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]
+type AgentToolPolicy = typeof WorkspaceSettingsV1.Type["agent"]["toolPolicy"]
+const workspaceSettingsRecord = (
+  allowedProviders: ReadonlyArray<AllowedAgentProvider>,
+  toolPolicy: AgentToolPolicy = "review-sandbox"
+) =>
+  WorkspaceSettingsRecord.make({
+    workspaceId: WORKSPACE_ID,
+    revision: RecordRevision.make(1),
+    policyRevision: RecordRevision.make(1),
+    settings: WorkspaceSettingsV1.make({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      agent: {
+        ...DEFAULT_WORKSPACE_SETTINGS.agent,
+        allowedProviders,
+        toolPolicy
+      }
+    }),
+    settingsDigest: ContentBlobDigest.make("1".repeat(64)),
+    createdAt: STARTED_TIMESTAMP,
+    updatedAt: STARTED_TIMESTAMP,
+    updatedByPersonId: null
+  })
 const HUMAN_SESSION = {
   sessionId: SESSION_ID,
   workspaceId: WORKSPACE_ID,
@@ -466,7 +496,9 @@ const withService = <Success, Failure>(
     publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>,
     publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>,
     publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>,
-    revisionInputs: Ref.Ref<ReadonlyArray<unknown>>
+    revisionInputs: Ref.Ref<ReadonlyArray<unknown>>,
+    allowedProviders: Ref.Ref<ReadonlyArray<AllowedAgentProvider>>,
+    toolPolicy: Ref.Ref<AgentToolPolicy>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
@@ -491,10 +523,23 @@ const withService = <Success, Failure>(
         null | ReviewSuggestionPublicationGatewayError["reason"]
       >(null)
       const revisionInputs = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const transactionActive = yield* Ref.make(false)
+      const allowedProviders = yield* Ref.make<ReadonlyArray<AllowedAgentProvider>>([
+        "claude",
+        "openai-compatible"
+      ])
+      const toolPolicy = yield* Ref.make<AgentToolPolicy>("review-sandbox")
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
         ...persistence,
+        transact: <Success, Failure, Requirements>(
+          effect: Effect.Effect<Success, Failure, Requirements>
+        ) =>
+          Ref.set(transactionActive, true).pipe(
+            Effect.andThen(persistence.transact(effect)),
+            Effect.ensuring(Ref.set(transactionActive, false))
+          ),
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
@@ -567,6 +612,28 @@ const withService = <Success, Failure>(
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
+        },
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          readAtomically: (_workspaceId, useSettings) =>
+            Ref.set(transactionActive, true).pipe(
+              Effect.andThen(Ref.get(allowedProviders)),
+              Effect.zip(Ref.get(toolPolicy)),
+              Effect.flatMap(([providers, policy]) => useSettings(workspaceSettingsRecord(providers, policy))),
+              Effect.ensuring(Ref.set(transactionActive, false))
+            ),
+          get: () =>
+            Ref.get(transactionActive).pipe(
+              Effect.flatMap((isActive) =>
+                isActive
+                  ? Ref.get(allowedProviders)
+                  : Effect.die(
+                    new Error("workspace settings admission must run inside the enqueue transaction")
+                  )
+              ),
+              Effect.zip(Ref.get(toolPolicy)),
+              Effect.map(([providers, policy]) => workspaceSettingsRecord(providers, policy))
+            )
         }
       })
       const defaultPublish: ReviewSuggestionPublicationGateway["Service"]["publish"] = (command) =>
@@ -640,7 +707,9 @@ const withService = <Success, Failure>(
         publicationCommands,
         publicationAuthority,
         publicationFailure,
-        revisionInputs
+        revisionInputs,
+        allowedProviders,
+        toolPolicy
       )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
@@ -648,27 +717,53 @@ const withService = <Success, Failure>(
 const withRealService = <Success, Failure>(
   use: (
     service: PullRequestReviews["Service"],
-    persistence: Persistence["Service"]
+    persistence: Persistence["Service"],
+    database: DatabaseShape
   ) => Effect.Effect<Success, Failure>,
   selectedInspection = graphInspection
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-pull-request-review-race-")
+    const databaseLayerInstance = databaseLayer(config)
+    const persistenceWithDatabase = persistenceLayerFromDatabase(config).pipe(
+      Layer.provideMerge(databaseLayerInstance)
+    )
     return yield* Effect.gen(function*() {
       const persistence = yield* Persistence
+      const database = yield* Database
       yield* persistence.workspaces.create(WORKSPACE_ID, {
         displayName: WorkspaceName.make("PR review race"),
         createdAt: release.createdAt
       })
       yield* persistence.releases.create(WORKSPACE_ID, release)
+      const testPersistence = Persistence.of({
+        ...persistence,
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () => Effect.succeed(workspaceSettingsRecord(["claude", "openai-compatible"])),
+          readAtomically: (workspaceId, useSettings) =>
+            persistence.workspaceSettings.readAtomically(
+              workspaceId,
+              (record) =>
+                useSettings({
+                  ...record,
+                  settings: workspaceSettingsRecord([
+                    "claude",
+                    "openai-compatible"
+                  ]).settings
+                })
+            )
+        }
+      })
       const service = yield* PullRequestReviews.pipe(
         Effect.provide(pullRequestReviewsLayer),
+        Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, selectedInspection),
         Effect.provideService(AgentRuntimeRegistry, registry),
         Effect.provideService(ReviewSuggestionPublicationGateway, unusedPublicationGateway)
       )
-      return yield* use(service, persistence)
-    }).pipe(Effect.provide(persistenceLayer(config)))
+      return yield* use(service, persistence, database)
+    }).pipe(Effect.provide(persistenceWithDatabase))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
 describe("pull request reviews", () => {
@@ -920,6 +1015,122 @@ describe("pull request reviews", () => {
         } else {
           return yield* Effect.die("review enqueue input was not captured")
         }
+      })
+    ))
+
+  it.effect("retains malformed settings quarantine when review enqueue rolls back", () =>
+    withRealService((service, persistence, { sql }) =>
+      Effect.gen(function*() {
+        yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+        yield* sql`UPDATE workspace_settings
+          SET settings_digest = ${"0".repeat(64)}
+          WHERE workspace_id = ${WORKSPACE_ID}`
+
+        const rejected = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(rejected))
+        if (Result.isFailure(rejected)) {
+          assert.instanceOf(rejected.failure, ApplicationServiceUnavailable)
+        }
+        const jobRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM agent_jobs
+          WHERE workspace_id = ${WORKSPACE_ID}`
+        assert.strictEqual(jobRows[0]?.count, 0)
+        const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+          diagnostic_code AS diagnosticCode
+        FROM quarantined_records
+        WHERE workspace_id = ${WORKSPACE_ID}
+          AND record_kind = 'workspace-settings'`
+        assert.deepStrictEqual(
+          quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+          ["workspace-settings-digest-mismatch"]
+        )
+      })
+    ))
+
+  it.effect("rejects a provider outside the durable workspace allowlist before enqueue", () =>
+    withService((
+      service,
+      enqueueInput,
+      _publicationCommands,
+      _publicationAuthority,
+      _publicationFailure,
+      _revisionInputs,
+      allowedProviders
+    ) =>
+      Effect.gen(function*() {
+        yield* Ref.set(allowedProviders, ["claude"])
+        const rejected = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(rejected))
+        if (Result.isFailure(rejected)) {
+          assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
+        }
+        assert.isNull(yield* Ref.get(enqueueInput))
+      })
+    ))
+
+  it.effect("requires review-sandbox tool policy before durable enqueue", () =>
+    withService((
+      service,
+      enqueueInput,
+      _publicationCommands,
+      _publicationAuthority,
+      _publicationFailure,
+      _revisionInputs,
+      _allowedProviders,
+      toolPolicy
+    ) =>
+      Effect.gen(function*() {
+        yield* Ref.set(toolPolicy, "read-only")
+        const rejected = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(rejected))
+        if (Result.isFailure(rejected)) {
+          assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
+        }
+        assert.isNull(yield* Ref.get(enqueueInput))
+
+        yield* Ref.set(toolPolicy, "review-sandbox")
+        const accepted = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        })
+        assert.strictEqual(accepted._tag, "pending")
+        assert.isNotNull(yield* Ref.get(enqueueInput))
       })
     ))
 

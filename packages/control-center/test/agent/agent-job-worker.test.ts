@@ -9,13 +9,14 @@ import {
   type AgentRuntimeService,
   makeAgentRuntime
 } from "@knpkv/ai-runtime"
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { AgentModelId, type ReviewAgentProfile, ReviewAgentProfileId } from "../../src/api/agent.js"
 import { JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PrReviewReport, type PrReviewSubject } from "../../src/domain/prReview.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import type { WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import {
   AgentJobWorker,
   agentJobWorkerLayer,
@@ -27,6 +28,7 @@ import {
   agentJobTaskExecutorLayer,
   type AgentJobTaskExecutorService
 } from "../../src/server/agent/internal/AgentJobTaskExecutor.js"
+import { AgentJobWorkspacePolicy } from "../../src/server/agent/internal/AgentJobWorkspacePolicy.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import {
   AgentEventCursor,
@@ -50,6 +52,20 @@ const CURSOR_ZERO = AgentEventCursor.make(0)
 const PAGE_SIZE = AgentThreadEventPageSize.make(128)
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)("2026-07-19T09:00:00.000Z")
 type AgentOutputEvent = Extract<AgentRuntimeEvent, { readonly _tag: "output" }>
+
+const allowedPolicyLayer = Layer.succeed(
+  AgentJobWorkspacePolicy,
+  AgentJobWorkspacePolicy.of({
+    read: () =>
+      Effect.succeed({
+        allowedProviders: ["deterministic"],
+        defaultProvider: null,
+        defaultModel: null,
+        toolPolicy: "review-sandbox",
+        profilePolicy: "isolated"
+      })
+  })
+)
 
 const runWorkerOnce = Effect.fn("test.runWorkerOnce")(function*(
   workspaceId: Parameters<AgentJobWorker["Service"]["runOnce"]>[0]
@@ -264,7 +280,11 @@ const withDatabaseConfig = <Success, Failure>(
   const worker = agentJobWorkerLayer({
     leaseOwner: LEASE_OWNER,
     leaseDuration: "5 minutes"
-  }).pipe(Layer.provide(registry), Layer.provideMerge(jobs))
+  }).pipe(
+    Layer.provide(registry),
+    Layer.provide(allowedPolicyLayer),
+    Layer.provideMerge(jobs)
+  )
   return use.pipe(Effect.provide(worker), Effect.scoped)
 }
 
@@ -279,7 +299,8 @@ const withWorker = <Success, Failure>(
 
 const withTaskExecutor = <Success, Failure>(
   executor: AgentJobTaskExecutorService,
-  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>
+  use: Effect.Effect<Success, Failure, AgentJobWorker | AgentJobRepository | Database>,
+  policy: Layer.Layer<AgentJobWorkspacePolicy> = allowedPolicyLayer
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-agent-task-worker-")
@@ -288,7 +309,11 @@ const withTaskExecutor = <Success, Failure>(
     const worker = agentJobWorkerWithTaskExecutorLayer({
       leaseOwner: LEASE_OWNER,
       leaseDuration: "5 minutes"
-    }).pipe(Layer.provide(agentJobTaskExecutorLayer(executor)), Layer.provideMerge(jobs))
+    }).pipe(
+      Layer.provide(agentJobTaskExecutorLayer(executor)),
+      Layer.provide(policy),
+      Layer.provideMerge(jobs)
+    )
     return yield* use.pipe(Effect.provide(worker), Effect.scoped)
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -361,6 +386,57 @@ describe("agent job worker", () => {
       })
     )
   })
+
+  it.effect("fails a claimed PR review before provider execution when current policy revokes it", () =>
+    Effect.gen(function*() {
+      const allowedProviders = yield* Ref.make<ReadonlyArray<string>>(["deterministic"])
+      let providerCalls = 0
+      const executor: AgentJobTaskExecutorService = {
+        taskTags: ["pr-review"],
+        execute: () => {
+          providerCalls += 1
+          return Effect.succeed(
+            {
+              _tag: "pr-review",
+              report: reviewReport
+            } satisfies AgentJobTaskExecution
+          )
+        }
+      }
+      const policy = Layer.succeed(
+        AgentJobWorkspacePolicy,
+        AgentJobWorkspacePolicy.of({
+          read: () =>
+            Ref.get(allowedProviders).pipe(
+              Effect.map((providers) => ({
+                allowedProviders: providers,
+                defaultProvider: null,
+                defaultModel: null,
+                toolPolicy: "review-sandbox",
+                profilePolicy: "isolated"
+              } satisfies typeof WorkspaceSettingsV1.Type["agent"]))
+            )
+        })
+      )
+
+      yield* withTaskExecutor(
+        executor,
+        Effect.gen(function*() {
+          yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+          yield* setupFoundation
+          yield* enqueueReview
+          yield* Ref.set(allowedProviders, ["other-provider"])
+
+          const result = yield* runWorkerOnce(WORKSPACE_ID)
+          const events = yield* replay
+
+          assert.deepStrictEqual(result, { _tag: "failed", jobId: JOB_ID })
+          assert.strictEqual(providerCalls, 0)
+          assert.strictEqual(events.events.at(-1)?.eventKind, "job-failed")
+        }),
+        policy
+      )
+    }))
 
   it.effect("interrupts a running review after durable cancellation and cleans through scope release", () => {
     let interrupted = false

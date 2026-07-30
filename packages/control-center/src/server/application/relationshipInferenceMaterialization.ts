@@ -1,5 +1,7 @@
+import type * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Encoding from "effect/Encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -10,9 +12,10 @@ import {
   type EvidenceItem,
   LedgerRevision
 } from "../../domain/deliveryGraph.js"
-import type { PluginHealth } from "../../domain/freshness.js"
+import type { Freshness, PluginHealth } from "../../domain/freshness.js"
 import { EvidenceClaimId, EvidenceId, GraphNodeId, RelationshipId, type WorkspaceId } from "../../domain/identifiers.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
+import type { WorkspaceSettingsV1 } from "../../domain/workspaceSettings.js"
 import { PersistenceOperationError } from "../persistence/errors.js"
 import type { PersistenceOperationFailure, PersistenceService } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
@@ -160,6 +163,7 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
   persistence: PersistenceService,
   identity: StableIdentity<IdentityError>,
   scope: RelationshipInferenceMaterializationScope,
+  settings: WorkspaceSettingsV1,
   candidate: RelationshipInferenceCandidate,
   sourceNodeId: GraphNodeId,
   targetNodeId: GraphNodeId,
@@ -190,6 +194,30 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
     0,
     (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(source.lastObservedAt)) / 1_000
   )
+  const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
+  const freshness: Freshness = sourceAgeSeconds < staleAfterSeconds
+    ? {
+      _tag: "current",
+      evaluatedAt: scope.committedAt,
+      pluginHealth,
+      provenance: { _tag: "provider", sourceRevision: source },
+      sourceObservedAt: source.lastObservedAt,
+      staleAfterSeconds,
+      synchronizedAt: source.synchronizedAt
+    }
+    : {
+      _tag: "stale",
+      evaluatedAt: scope.committedAt,
+      pluginHealth,
+      provenance: {
+        _tag: "cache",
+        cachedAt: source.synchronizedAt,
+        sourceRevision: source
+      },
+      sourceObservedAt: source.lastObservedAt,
+      staleAfterSeconds,
+      synchronizedAt: source.synchronizedAt
+    }
   return {
     item: {
       workspaceId: scope.workspaceId,
@@ -200,16 +228,14 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
       observedAt: source.lastObservedAt,
       recordedAt: scope.committedAt,
       validUntil: null,
-      freshness: {
-        _tag: "current",
-        evaluatedAt: scope.committedAt,
-        pluginHealth,
-        provenance: { _tag: "provider", sourceRevision: source },
-        sourceObservedAt: source.lastObservedAt,
-        staleAfterSeconds: Math.max(1, Math.ceil(sourceAgeSeconds) + 86_400),
-        synchronizedAt: source.synchronizedAt
-      },
-      retention: { classification: "evidence", retainUntil: null, legalHold: false }
+      freshness,
+      retention: {
+        classification: "evidence",
+        retainUntil: DateTime.add(scope.committedAt, {
+          days: settings.retention.evidenceDays
+        }),
+        legalHold: false
+      }
     },
     claim: {
       workspaceId: scope.workspaceId,
@@ -251,6 +277,7 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
   persistence: PersistenceService,
   identity: StableIdentity<IdentityError>,
   scope: RelationshipInferenceMaterializationScope,
+  settings: WorkspaceSettingsV1,
   candidate: RelationshipInferenceCandidate,
   entityById: ReadonlyMap<string, EntityRecord>
 ): Effect.fn.Return<RelationshipInferenceMaterializationReceipt, IdentityError | PersistenceOperationFailure> {
@@ -272,8 +299,23 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
     : (entityById.get(candidate.evidenceEntityId) ?? null)
   const evidence = evidenceEntity === null
     ? null
-    : yield* evidenceFor(persistence, identity, scope, candidate, source.nodeId, target.nodeId, evidenceEntity)
-  if (unchanged(previous, candidate, source.nodeId, target.nodeId, evidence?.claim.evidenceClaimId ?? null)) {
+    : yield* evidenceFor(
+      persistence,
+      identity,
+      scope,
+      settings,
+      candidate,
+      source.nodeId,
+      target.nodeId,
+      evidenceEntity
+    )
+  const evidenceClaimId = evidence?.claim.evidenceClaimId ?? null
+  // Evidence IDs are content-derived and evidence rows are immutable, so restoring a
+  // relationship reuses the original retention metadata. The current evidenceDays
+  // policy applies only to newly materialized evidence; M5.3 owns lifecycle sweeps.
+  const reusesEvidence = evidenceClaimId !== null &&
+    previous?.evidenceClaimIds.includes(evidenceClaimId) === true
+  if (unchanged(previous, candidate, source.nodeId, target.nodeId, evidenceClaimId)) {
     return {
       evidenceClaimCount: 0,
       evidenceItemCount: 0,
@@ -319,14 +361,14 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
       rationale: candidate.confidence?.rationale ?? "Required delivery link has no synchronized match."
     },
     recordedBy: { _tag: "system", component: COMPONENT },
-    evidenceClaimIds: evidence === null ? [] : [evidence.claim.evidenceClaimId],
+    evidenceClaimIds: evidenceClaimId === null ? [] : [evidenceClaimId],
     recordedAt: scope.committedAt
   }
   const receipt = yield* writeGraph(persistence, scope.workspaceId, {
     entityProjections: [],
     nodes,
-    evidenceItems: evidence === null ? [] : [evidence.item],
-    evidenceClaims: evidence === null ? [] : [evidence.claim],
+    evidenceItems: evidence === null || reusesEvidence ? [] : [evidence.item],
+    evidenceClaims: evidence === null || reusesEvidence ? [] : [evidence.claim],
     relationships: [relationship]
   })
   return { ...receipt, skippedDueToBounds: false }
@@ -409,7 +451,8 @@ const retireInferenceForReleases = Effect.fn(
   persistence: PersistenceService,
   scope: RelationshipInferenceMaterializationScope,
   releaseIds: ReadonlyArray<RelationshipInferenceRelease["releaseId"]> | null,
-  reason: string
+  reason: string,
+  skippedDueToBounds = false
 ) {
   const reads = yield* Effect.forEach(
     releaseIds ?? [null],
@@ -440,7 +483,7 @@ const retireInferenceForReleases = Effect.fn(
       reason
     )
   }
-  return { ...emptyReceipt(true), relationshipCount }
+  return { ...emptyReceipt(skippedDueToBounds), relationshipCount }
 })
 
 const retireInferenceAtEntityBound = Effect.fn(
@@ -453,7 +496,8 @@ const retireInferenceAtEntityBound = Effect.fn(
     persistence,
     scope,
     null,
-    "Inference inputs exceeded the bounded workspace snapshot, so this relationship can no longer be proven."
+    "Inference inputs exceeded the bounded workspace snapshot, so this relationship can no longer be proven.",
+    true
   )
 })
 
@@ -463,8 +507,17 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
 >(
   persistence: PersistenceService,
   identity: StableIdentity<IdentityError>,
-  scope: RelationshipInferenceMaterializationScope
+  scope: RelationshipInferenceMaterializationScope,
+  settings: WorkspaceSettingsV1
 ): Effect.fn.Return<RelationshipInferenceMaterializationReceipt, IdentityError | PersistenceOperationFailure> {
+  if (!settings.inference.enabled) {
+    return yield* retireInferenceForReleases(
+      persistence,
+      scope,
+      null,
+      "Workspace relationship inference is disabled."
+    )
+  }
   const projectionResult = yield* persistence.deliveryGraph.read(scope.workspaceId, {
     _tag: "workspaceEntityProjections",
     owner: null,
@@ -547,12 +600,14 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
       persistence,
       scope,
       truncatedReleaseIds,
-      "The bounded release relationship snapshot was incomplete, so this inference can no longer be proven."
+      "The bounded release relationship snapshot was incomplete, so this inference can no longer be proven.",
+      true
     )
   }
   const relationships = slices.flatMap((slice) => (slice._tag === "releaseSlice" ? slice.value.relationships : []))
   const inferenceInput = {
     entities,
+    minimumConfidenceScore: settings.inference.minimumConfidencePercent / 100,
     releases: inferenceReleases.map(({ inferenceRelease }) => inferenceRelease),
     relationships
   }
@@ -581,7 +636,14 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
     receipt = { ...receipt, nodeCount: current.nodeCount }
   }
   for (const candidate of inference.candidates) {
-    const current = yield* materializeCandidate(persistence, identity, scope, candidate, entityById)
+    const current = yield* materializeCandidate(
+      persistence,
+      identity,
+      scope,
+      settings,
+      candidate,
+      entityById
+    )
     receipt = {
       evidenceClaimCount: receipt.evidenceClaimCount + current.evidenceClaimCount,
       evidenceItemCount: receipt.evidenceItemCount + current.evidenceItemCount,
@@ -603,6 +665,66 @@ export const materializeRelationshipInference = Effect.fn("RelationshipInference
       relationshipCount: receipt.relationshipCount +
         (yield* supersedeObsoleteRelationship(persistence, scope, relationshipId))
     }
+  }
+  return receipt
+})
+
+/** Derive the stable UUID namespace used by relationship-inference graph records. */
+export const stableRelationshipInferenceIdentity = Effect.fn(
+  "RelationshipInferenceMaterialization.stableIdentity"
+)(function*(
+  cryptoService: Crypto.Crypto,
+  identity: string
+) {
+  const bytes = yield* Effect.fromResult(
+    Encoding.decodeBase64(Encoding.encodeBase64(identity))
+  ).pipe(
+    Effect.mapError(() =>
+      new PersistenceOperationError({
+        operation: "relationship-inference.identity-encoding"
+      })
+    )
+  )
+  const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+    Effect.mapError(() =>
+      new PersistenceOperationError({
+        operation: "relationship-inference.identity-digest"
+      })
+    )
+  )
+  const hex = Encoding.encodeHex(digest)
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
+})
+
+/**
+ * Re-run the complete bounded inference fold when workspace policy changes.
+ * A bounded read must either produce the graph-equivalent new state or fail so
+ * the surrounding settings transaction rolls back atomically.
+ */
+export const reconcileRelationshipInferencePolicy = Effect.fn(
+  "RelationshipInferenceMaterialization.reconcilePolicy"
+)(function*(
+  persistence: PersistenceService,
+  cryptoService: Crypto.Crypto,
+  workspaceId: WorkspaceId,
+  committedAt: UtcTimestamp,
+  settings: WorkspaceSettingsV1
+) {
+  const receipt = yield* materializeRelationshipInference(
+    persistence,
+    (identity) => stableRelationshipInferenceIdentity(cryptoService, identity),
+    {
+      workspaceId,
+      committedAt,
+      streamKey: PluginStreamKey.make("workspace-settings"),
+      successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+    },
+    settings
+  )
+  if (receipt.skippedDueToBounds) {
+    return yield* new PersistenceOperationError({
+      operation: "relationship-inference.reconcile-policy-bounds"
+    })
   }
   return receipt
 })

@@ -1,13 +1,20 @@
-import { lazy, type ReactElement, Suspense } from "react"
+import { lazy, type ReactElement, Suspense, useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
+import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
+import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
 
 const CommandSearch = lazy(async () => {
   const module = await import("./command/CommandSearch.js")
   return { default: module.CommandSearch }
+})
+
+const WorkspaceHomeLink = lazy(async () => {
+  const module = await import("./settings/WorkspaceHomeLink.js")
+  return { default: module.WorkspaceHomeLink }
 })
 
 const workspaceOverviewPath = (pathname: string): string => {
@@ -21,7 +28,20 @@ const workspaceIdFromPathname = (pathname: string): WorkspaceId | null => {
   return segments[1] === "w" && isWorkspaceRouteId(workspaceId) ? workspaceId : null
 }
 
-const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: string; readonly to: string }> => {
+/** Decide whether workspace settings belong in the current session's navigation. @internal */
+export const canInspectWorkspaceSettings = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
+  const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
+  return (
+    workspaceId !== null &&
+    session?.workspaceId === workspaceId &&
+    (session.permission === "workspace-owner" || session.permission === "workspace-approver")
+  )
+}
+
+const navigation = (
+  overviewPath: string,
+  includeSettings: boolean
+): ReadonlyArray<{ readonly label: string; readonly to: string }> => {
   const workspaceId = overviewPath.split("/")[2]
   return isWorkspaceRouteId(workspaceId)
     ? [
@@ -29,6 +49,7 @@ const navigation = (overviewPath: string): ReadonlyArray<{ readonly label: strin
         { label: "Active work", to: `/w/${workspaceId}/work` },
         { label: "Items", to: `/w/${workspaceId}/items` },
         { label: "Timeline", to: `/w/${workspaceId}/timeline` },
+        ...(includeSettings ? [{ label: "Settings", to: `/w/${workspaceId}/settings` }] : []),
         { label: "Services", to: "/services" }
       ]
     : [
@@ -43,13 +64,15 @@ const navClassName = ({ isActive }: { readonly isActive: boolean }): string =>
 
 const PrimaryNavigation = ({
   className,
+  includeSettings,
   overviewPath
 }: {
   readonly className: string
+  readonly includeSettings: boolean
   readonly overviewPath: string
 }): ReactElement => (
   <nav aria-label="Primary" className={`${styles.nav ?? ""} ${className}`}>
-    {navigation(overviewPath).map((item) => (
+    {navigation(overviewPath, includeSettings).map((item) => (
       <NavLink className={navClassName} end={item.to === overviewPath} key={item.label} to={item.to}>
         {item.label}
       </NavLink>
@@ -60,32 +83,60 @@ const PrimaryNavigation = ({
 /** Quiet application chrome that keeps delivery work and the contextual agent one action away. */
 export const AppShell = (): ReactElement => {
   const location = useLocation()
+  const browserSession = useBrowserSession()
   const isAuthorizedShare = location.pathname.startsWith("/shares/")
   const overviewPath = workspaceOverviewPath(location.pathname)
   const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
+  const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
+  const [density, setDensity] = useState<"comfortable" | "compact">("comfortable")
+  useEffect(() => {
+    setDensity("comfortable")
+    let latestRevision = 0
+    return subscribeWorkspacePresentation((settings) => {
+      if (settings.workspaceId !== workspaceId || settings.revision < latestRevision) return
+      latestRevision = settings.revision
+      setDensity(settings.presentation.density)
+    })
+  }, [workspaceId])
+  const brand = (
+    <>
+      <span aria-hidden="true" className={styles.brandMark}>
+        C
+      </span>
+      <span className={styles.brandName}>Control Center</span>
+    </>
+  )
 
   return (
-    <div className={styles.root}>
+    <div className={styles.root} data-workspace-density={density}>
       <header className={styles.header}>
         {isAuthorizedShare ? (
-          <span className={styles.brand ?? ""}>
-            <span aria-hidden="true" className={styles.brandMark}>
-              C
-            </span>
-            <span className={styles.brandName}>Control Center</span>
-          </span>
-        ) : (
+          <span className={styles.brand ?? ""}>{brand}</span>
+        ) : workspaceId === null ? (
           <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to={overviewPath}>
-            <span aria-hidden="true" className={styles.brandMark}>
-              C
-            </span>
-            <span className={styles.brandName}>Control Center</span>
+            {brand}
           </NavLink>
+        ) : (
+          <Suspense
+            fallback={
+              <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to="/">
+                {brand}
+              </NavLink>
+            }
+          >
+            <WorkspaceHomeLink className={styles.brand ?? ""} fallbackPath="/" workspaceId={workspaceId}>
+              {brand}
+            </WorkspaceHomeLink>
+          </Suspense>
         )}
         {isAuthorizedShare ? null : (
           <>
-            <PrimaryNavigation className={styles.desktopNav ?? ""} overviewPath={overviewPath} />
+            <PrimaryNavigation
+              className={styles.desktopNav ?? ""}
+              includeSettings={includeSettings}
+              overviewPath={overviewPath}
+            />
             <div className={styles.actions}>
               {workspaceId === null ? null : (
                 <Suspense fallback={null}>
@@ -96,7 +147,11 @@ export const AppShell = (): ReactElement => {
                 Ask Relay
               </NavLink>
             </div>
-            <PrimaryNavigation className={styles.mobileNav ?? ""} overviewPath={overviewPath} />
+            <PrimaryNavigation
+              className={styles.mobileNav ?? ""}
+              includeSettings={includeSettings}
+              overviewPath={overviewPath}
+            />
           </>
         )}
       </header>

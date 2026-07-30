@@ -195,3 +195,9 @@ export const GovernedActionAttemptId = canonicalUuid7("GovernedActionAttemptId")
 
 /** Decoded governed-action attempt identifier. */
 export type GovernedActionAttemptId = typeof GovernedActionAttemptId.Type
+
+/** Canonical idempotency identity of one workspace-settings mutation. */
+export const WorkspaceSettingsMutationId = canonicalUuid7("WorkspaceSettingsMutationId")
+
+/** Decoded workspace-settings mutation identifier. */
+export type WorkspaceSettingsMutationId = typeof WorkspaceSettingsMutationId.Type

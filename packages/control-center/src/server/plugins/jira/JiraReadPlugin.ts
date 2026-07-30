@@ -35,6 +35,7 @@ import type { PluginConnectionV1 } from "../PluginConnection.js"
 import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
+import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import { makeJiraGovernedActions } from "./JiraGovernedActions.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
 import {
@@ -275,11 +276,6 @@ const unsupported = (
     diagnosticCode: "jira-capability-unnegotiated"
   })
 
-const JiraDescriptionDocument = Schema.Struct({
-  type: Schema.Literal("doc"),
-  version: Schema.Literal(1),
-  content: Schema.Array(Schema.Json)
-})
 const AddCommentRequestPayload = Schema.Struct({
   body: JiraDescriptionDocument
 })
@@ -351,6 +347,7 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
   provider: JiraReadProvider,
   configuration: JiraReadPluginConfiguration,
   cryptoService: Crypto.Crypto,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
   request: ProposePluginActionRequestV1
 ) {
   if (
@@ -364,18 +361,20 @@ const proposeJiraAction = Effect.fn("JiraReadPlugin.proposeAction")(function*(
     })
   }
   const issue = yield* loadActionIssue(provider, configuration, request)
+  const attributionEnabled = yield* includeControlCenterAttribution
+  const requested = yield* Schema.decodeUnknownEffect(
+    Schema.toType(AddCommentRequestPayload)
+  )(request.payload).pipe(
+    Effect.mapError(() =>
+      new PluginConfigurationFailure({
+        diagnosticCode: "jira-action-payload-invalid"
+      })
+    )
+  )
   const payload = JiraActionPayload.make({
     _tag: "add-comment",
     issueKey: issue.key,
-    body: (yield* Schema.decodeUnknownEffect(
-      Schema.toType(AddCommentRequestPayload)
-    )(request.payload).pipe(
-      Effect.mapError(() =>
-        new PluginConfigurationFailure({
-          diagnosticCode: "jira-action-payload-invalid"
-        })
-      )
-    )).body
+    body: withJiraControlCenterAttribution(requested.body, attributionEnabled)
   })
   const payloadDigest = yield* digestGovernedActionPayload(payload).pipe(
     Effect.provideService(Crypto.Crypto, cryptoService),
@@ -894,7 +893,8 @@ const syncProject = (
 const makeRuntime = (
   provider: JiraReadProvider,
   configuration: unknown,
-  verifiedSiteId: string | null
+  verifiedSiteId: string | null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>
 ): JiraReadPluginRuntime => {
   const definition = definePluginV1({
     rawDescriptor: jiraReadPluginDescriptor,
@@ -907,7 +907,12 @@ const makeRuntime = (
     make: ({ configuration: decoded, descriptor: negotiated }) =>
       Effect.gen(function*() {
         const cryptoService = yield* Crypto.Crypto
-        const governedActions = makeJiraGovernedActions(provider, decoded, cryptoService)
+        const governedActions = makeJiraGovernedActions(
+          provider,
+          decoded,
+          cryptoService,
+          includeControlCenterAttribution
+        )
         const connection: PluginConnectionV1 = {
           descriptor: negotiated,
           discover: Effect.gen(function*() {
@@ -989,7 +994,13 @@ const makeRuntime = (
           diff: Option.none(),
           proposeAction: (request) =>
             request.actionKind === "add-comment"
-              ? proposeJiraAction(provider, decoded, cryptoService, request)
+              ? proposeJiraAction(
+                provider,
+                decoded,
+                cryptoService,
+                includeControlCenterAttribution,
+                request
+              )
               : governedActions.proposeAction(request)
         }
         const executor: AuthorizedPluginExecutorV1 = {
@@ -1010,13 +1021,24 @@ const makeRuntime = (
 /** Build a production Jira runtime from the configured shared API client. */
 export const makeJiraReadPluginRuntime = (
   configuration: unknown,
-  verifiedSiteId: string | null = null
+  verifiedSiteId: string | null = null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
 ): Effect.Effect<JiraReadPluginRuntime, never, JiraApiClient> =>
-  Effect.map(JiraApiClient, (client) => makeRuntime(makeJiraReadProvider(client), configuration, verifiedSiteId))
+  Effect.map(
+    JiraApiClient,
+    (client) =>
+      makeRuntime(
+        makeJiraReadProvider(client),
+        configuration,
+        verifiedSiteId,
+        includeControlCenterAttribution
+      )
+  )
 
 /** Build the runtime around a deterministic provider double. @internal */
 export const makeJiraReadPluginRuntimeFromProvider = (
   provider: JiraReadProvider,
   configuration: unknown,
-  verifiedSiteId: string | null = null
-): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId)
+  verifiedSiteId: string | null = null,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
+): JiraReadPluginRuntime => makeRuntime(provider, configuration, verifiedSiteId, includeControlCenterAttribution)

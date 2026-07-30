@@ -426,6 +426,7 @@ const ReleaseAgentRoom = ({
   const location = useLocation()
   const [prompt, setPrompt] = useState("")
   const [provider, setProvider] = useState<"claude" | "codex">("codex")
+  const providerWasSelected = useRef(false)
   const [messages, setMessages] = useState<ReadonlyArray<LocalThreadMessage>>(() => readReleaseAgentThread(release.id))
   const [failure, setFailure] = useState<TurnFailure | null>(null)
   const [isRunning, setIsRunning] = useState(false)
@@ -454,7 +455,8 @@ const ReleaseAgentRoom = ({
     providerCatalogPending || (availableProviders !== undefined && !availableProviders.includes(provider))
 
   useEffect(() => {
-    if (availableProviders === undefined || availableProviders.includes(provider)) return
+    if (availableProviders === undefined || (providerWasSelected.current && availableProviders.includes(provider)))
+      return
     const fallback = availableProviders[0]
     if (fallback !== undefined) setProvider(fallback)
   }, [availableProviders, provider])
@@ -585,7 +587,10 @@ const ReleaseAgentRoom = ({
                 (availableProviders !== undefined && !availableProviders.includes(preset.provider))
               }
               key={preset.provider}
-              onClick={() => setProvider(preset.provider)}
+              onClick={() => {
+                providerWasSelected.current = true
+                setProvider(preset.provider)
+              }}
               role="radio"
               type="button"
             >

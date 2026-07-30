@@ -16,6 +16,7 @@ export {
   releaseFullPath,
   releaseParentPath,
   releasePreviewPath,
+  workspaceActiveWorkPath,
   workspaceItemsPath
 } from "./releasePaths.js"
 

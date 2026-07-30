@@ -20,8 +20,10 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   PortfolioSnapshots,
-  ReleaseAgentTurns
+  ReleaseAgentTurns,
+  WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
+import { assertAgentProviderAllowed } from "./agentWorkspacePolicy.js"
 
 const MAXIMUM_MODEL_OUTPUT_BYTES = 128 * 1024
 const MAXIMUM_MODEL_STDERR_BYTES = 32 * 1024
@@ -116,6 +118,7 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
   options: ReleaseAgentRuntimeOptions
 ) {
   const portfolio = yield* PortfolioSnapshots
+  const workspaceSettings = yield* WorkspaceSettingsAdministration
   const fileSystem = yield* FileSystem.FileSystem
   const processSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const processAdmission = yield* Semaphore.make(MAXIMUM_CONCURRENT_AGENT_TURNS)
@@ -158,9 +161,11 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
           })),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, processSpawner)
         )
-      const response = yield* processAdmission.withPermits(1)(
-        modelTurn.pipe(Effect.mapError(() => unavailable()))
-      )
+      const response = yield* processAdmission.withPermits(1)(Effect.gen(function*() {
+        const settings = yield* workspaceSettings.read(input.workspaceId)
+        yield* assertAgentProviderAllowed(settings.settings.agent, provider)
+        return yield* modelTurn.pipe(Effect.mapError(() => unavailable()))
+      }))
 
       const reply = response.text.trim()
       if (reply.length === 0 || reply.length > MAXIMUM_REPLY_CHARACTERS) return yield* unavailable()
@@ -182,7 +187,10 @@ export const releaseAgentTurnsLayer = (
 ): Layer.Layer<
   ReleaseAgentTurns,
   never,
-  PortfolioSnapshots | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
+  | PortfolioSnapshots
+  | WorkspaceSettingsAdministration
+  | FileSystem.FileSystem
+  | ChildProcessSpawner.ChildProcessSpawner
 > => Layer.effect(ReleaseAgentTurns, makeReleaseAgentTurns(options))
 
 /** Explicit disabled runtime used when no local provider is configured. */

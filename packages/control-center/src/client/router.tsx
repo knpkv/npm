@@ -71,6 +71,11 @@ const servicesRoute = async () => {
   return { Component: module.ServicesPage }
 }
 
+const workspaceSettingsRoute = async () => {
+  const module = await import("./settings/WorkspaceSettingsPage.js")
+  return { Component: module.WorkspaceSettingsPage }
+}
+
 const atlassianOAuthCallbackRoute = async () => {
   const module = await import("./services/AtlassianOAuthCallbackPage.js")
   return { Component: module.AtlassianOAuthCallbackPage }
@@ -102,6 +107,7 @@ export const router = createBrowserRouter([
           { path: "items/:entityId", lazy: workspaceEntityRoute },
           { path: "items", lazy: itemsRoute },
           { path: "timeline", lazy: timelineRoute },
+          { path: "settings", lazy: workspaceSettingsRoute },
           { path: "releases/:releaseId/preview", lazy: releasePreviewRoute },
           { path: "releases/:releaseId/agent", lazy: agentRoute },
           { path: "releases/:releaseId", lazy: releaseFullRoute },

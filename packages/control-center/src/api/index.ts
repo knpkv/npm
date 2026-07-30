@@ -192,3 +192,12 @@ export {
   TimelineExportLimitFromString,
   TimelineExportResponseHeaders
 } from "./timeline.js"
+export {
+  UpdateWorkspaceSettingsRequest,
+  WorkspacePresentationReadModel,
+  WorkspaceSettingsApiGroup,
+  WorkspaceSettingsEtag,
+  workspaceSettingsEtag,
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision
+} from "./workspaceSettings.js"

@@ -25,6 +25,7 @@ import {
   type AgentThreadEvent,
   AgentThreadEventPageSize
 } from "../persistence/repositories/agentJobModels.js"
+import { assertAgentProviderAllowed } from "./agentWorkspacePolicy.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 
 const ContextIdentity = Schema.Struct({
@@ -176,26 +177,83 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         subjectRevision
       })
       const createdAt = yield* DateTime.now
-      yield* persistence.agentJobs.enqueue({
-        workspaceId: input.workspaceId,
-        releaseId: input.releaseId,
-        jobId,
-        providerId,
-        model: input.request.model,
-        access: input.request.profile,
-        userPrompt: input.request.prompt,
-        prompt: providerPrompt,
-        contextFingerprint,
-        subjectRevision,
-        task: { _tag: "release-chat" },
-        createdAt
-      }).pipe(
-        Effect.mapError(mapPersistenceWriteError),
-        Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
-      )
+      yield* persistence.workspaceSettings.readAtomically(input.workspaceId, (settings) =>
+        Effect.gen(function*() {
+          yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+          yield* persistence.agentJobs.enqueue({
+            workspaceId: input.workspaceId,
+            releaseId: input.releaseId,
+            jobId,
+            providerId,
+            model: input.request.model,
+            access: input.request.profile,
+            userPrompt: input.request.prompt,
+            prompt: providerPrompt,
+            contextFingerprint,
+            subjectRevision,
+            task: { _tag: "release-chat" },
+            createdAt
+          }).pipe(
+            Effect.mapError(mapPersistenceWriteError),
+            Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
+          )
+        })).pipe(
+          Effect.mapError((error) => {
+            switch (error._tag) {
+              case "ApplicationInvalidRequest":
+              case "ApplicationResourceNotFound":
+              case "ApplicationServiceUnavailable":
+                return error
+              default:
+                return unavailable()
+            }
+          })
+        )
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
-    providers: () => runtimes.catalog().pipe(Effect.mapError(unavailable)),
+    providers: Effect.fn("ReleaseAgentJobs.providers")(function*(workspaceId) {
+      const settings = yield* persistence.workspaceSettings.get(workspaceId).pipe(
+        Effect.mapError(unavailable)
+      )
+      const catalog = yield* runtimes.catalog().pipe(Effect.mapError(unavailable))
+      const providers = catalog.providers
+        .filter(({ providerId }) =>
+          settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
+        )
+        .map((provider) => {
+          if (settings.settings.agent.toolPolicy === "review-sandbox") return provider
+          const { reviewProfile: _, ...withoutReviewProfile } = provider
+          return {
+            ...withoutReviewProfile,
+            capabilities: provider.capabilities.filter((capability) => capability !== "pr-review")
+          }
+        })
+        .filter(({ capabilities }) => capabilities.length > 0)
+      const defaultProvider = settings.settings.agent.defaultProvider
+      const orderedProviders = defaultProvider === null
+        ? providers
+        : [
+          ...providers.filter(({ providerId }) => String(providerId) === defaultProvider),
+          ...providers.filter(({ providerId }) => String(providerId) !== defaultProvider)
+        ]
+      const defaultModel = settings.settings.agent.defaultModel
+      return {
+        providers: orderedProviders.map((provider) =>
+          defaultModel !== null && String(provider.providerId) === defaultProvider &&
+            provider.models.some((model) => String(model) === defaultModel)
+            ? {
+              ...provider,
+              models: [
+                ...provider.models.filter((model) => String(model) === defaultModel),
+                ...provider.models.filter((model) => String(model) !== defaultModel)
+              ]
+            }
+            : provider
+        )
+      }
+    }),
     replay: Effect.fn("ReleaseAgentJobs.replay")(function*(input) {
       yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)

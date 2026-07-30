@@ -398,6 +398,21 @@
     },
     {
       "type": "table",
+      "name": "workspace_settings",
+      "sql": "CREATE TABLE workspace_settings (\n    workspace_id TEXT NOT NULL,\n    schema_version INTEGER NOT NULL CHECK(schema_version = 1),\n    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),\n    policy_revision INTEGER NOT NULL DEFAULT 1 CHECK(policy_revision >= 1),\n    settings_json TEXT NOT NULL CHECK(\n      length(settings_json) BETWEEN 2 AND 32768 AND json_valid(settings_json)\n    ),\n    settings_digest TEXT NOT NULL CHECK(\n      length(settings_digest) = 64 AND settings_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    updated_by_person_id TEXT,\n    PRIMARY KEY (workspace_id),\n    UNIQUE (workspace_id, revision),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, updated_by_person_id)\n      REFERENCES persons(workspace_id, person_id)\n      ON DELETE RESTRICT,\n    CHECK(created_at <= updated_at)\n  )"
+    },
+    {
+      "type": "table",
+      "name": "workspace_settings_audits",
+      "sql": "CREATE TABLE workspace_settings_audits (\n    workspace_id TEXT NOT NULL,\n    mutation_id TEXT NOT NULL,\n    request_digest TEXT NOT NULL CHECK(\n      length(request_digest) = 64 AND request_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    from_revision INTEGER NOT NULL CHECK(from_revision >= 1),\n    to_revision INTEGER NOT NULL CHECK(to_revision = from_revision + 1),\n    actor_person_id TEXT NOT NULL,\n    session_id TEXT NOT NULL,\n    changed_sections_json TEXT NOT NULL CHECK(\n      length(changed_sections_json) BETWEEN 2 AND 256 AND json_valid(changed_sections_json)\n    ),\n    governed INTEGER NOT NULL CHECK(governed IN (0, 1)),\n    governance_authority_digest TEXT CHECK(\n      governance_authority_digest IS NULL OR (\n        length(governance_authority_digest) = 64 AND\n        governance_authority_digest NOT GLOB '*[^0-9a-f]*'\n      )\n    ),\n    before_digest TEXT NOT NULL CHECK(\n      length(before_digest) = 64 AND before_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    after_digest TEXT NOT NULL CHECK(\n      length(after_digest) = 64 AND after_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    occurred_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, mutation_id),\n    UNIQUE (workspace_id, to_revision),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, actor_person_id)\n      REFERENCES persons(workspace_id, person_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, session_id)\n      REFERENCES sessions(workspace_id, session_id)\n      ON DELETE RESTRICT,\n    CHECK(\n      (governed = 0 AND governance_authority_digest IS NULL) OR\n      (governed = 1 AND governance_authority_digest IS NOT NULL)\n    )\n  )"
+    },
+    {
+      "type": "table",
+      "name": "workspace_settings_versions",
+      "sql": "CREATE TABLE workspace_settings_versions (\n    workspace_id TEXT NOT NULL,\n    schema_version INTEGER NOT NULL CHECK(schema_version = 1),\n    revision INTEGER NOT NULL CHECK(revision >= 1),\n    policy_revision INTEGER NOT NULL CHECK(policy_revision >= 1),\n    settings_json TEXT NOT NULL CHECK(\n      length(settings_json) BETWEEN 2 AND 32768 AND json_valid(settings_json)\n    ),\n    settings_digest TEXT NOT NULL CHECK(\n      length(settings_digest) = 64 AND settings_digest NOT GLOB '*[^0-9a-f]*'\n    ),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    updated_by_person_id TEXT,\n    PRIMARY KEY (workspace_id, revision),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, updated_by_person_id)\n      REFERENCES persons(workspace_id, person_id)\n      ON DELETE RESTRICT,\n    CHECK(created_at <= updated_at)\n  )"
+    },
+    {
+      "type": "table",
       "name": "workspaces",
       "sql": "CREATE TABLE workspaces (\n    workspace_id TEXT NOT NULL,\n    display_name TEXT NOT NULL CHECK(length(display_name) BETWEEN 1 AND 200),\n    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id),\n    CHECK(created_at <= updated_at)\n  )"
     },
@@ -1500,6 +1515,31 @@
       "type": "trigger",
       "name": "timeline_export_audits_no_update",
       "sql": "CREATE TRIGGER timeline_export_audits_no_update\n    BEFORE UPDATE ON timeline_export_audits\n    BEGIN\n      SELECT RAISE(ABORT, 'timeline export audits are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "workspace_settings_audits_authority",
+      "sql": "CREATE TRIGGER workspace_settings_audits_authority\n    BEFORE INSERT ON workspace_settings_audits\n    WHEN NOT EXISTS (\n      SELECT 1 FROM sessions session\n      WHERE session.workspace_id = NEW.workspace_id\n        AND session.session_id = NEW.session_id\n        AND session.actor_kind = 'human'\n        AND session.person_id = NEW.actor_person_id\n        AND session.agent_id IS NULL\n        AND session.permission = 'workspace-owner'\n        AND session.revoked_at IS NULL\n        AND session.created_at <= NEW.occurred_at\n        AND session.idle_expires_at > NEW.occurred_at\n        AND session.absolute_expires_at > NEW.occurred_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'workspace settings audit requires current human owner authority');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "workspace_settings_audits_no_delete",
+      "sql": "CREATE TRIGGER workspace_settings_audits_no_delete\n    BEFORE DELETE ON workspace_settings_audits\n    BEGIN\n      SELECT RAISE(ABORT, 'workspace settings audits are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "workspace_settings_audits_no_update",
+      "sql": "CREATE TRIGGER workspace_settings_audits_no_update\n    BEFORE UPDATE ON workspace_settings_audits\n    BEGIN\n      SELECT RAISE(ABORT, 'workspace settings audits are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "workspace_settings_versions_no_delete",
+      "sql": "CREATE TRIGGER workspace_settings_versions_no_delete\n    BEFORE DELETE ON workspace_settings_versions\n    BEGIN\n      SELECT RAISE(ABORT, 'workspace settings versions are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "workspace_settings_versions_no_update",
+      "sql": "CREATE TRIGGER workspace_settings_versions_no_update\n    BEFORE UPDATE ON workspace_settings_versions\n    BEGIN\n      SELECT RAISE(ABORT, 'workspace settings versions are immutable');\n    END"
     }
   ]
 }

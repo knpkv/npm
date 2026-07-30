@@ -18,7 +18,10 @@ import {
   type ReproducibleContentUnavailableError,
   type RevisionConflictError,
   type SecretReferenceScopeConflictError,
-  type SourceIdentityMismatchError
+  type SourceIdentityMismatchError,
+  type WorkspaceSettingsGovernanceError,
+  type WorkspaceSettingsMutationConflictError,
+  type WorkspaceSettingsNoChangesError
 } from "./errors.js"
 import { BlobStore } from "./object-store/BlobStore.js"
 import type { BlobStoreError } from "./object-store/BlobStoreError.js"
@@ -69,7 +72,9 @@ import {
   TimelineRepository,
   type TimelineRepositoryService,
   WorkspaceRepository,
-  type WorkspaceRepositoryService
+  type WorkspaceRepositoryService,
+  WorkspaceSettingsRepository,
+  type WorkspaceSettingsRepositoryService
 } from "./repositories/index.js"
 import { mapPersistenceOperation } from "./repositories/internal.js"
 
@@ -95,6 +100,9 @@ export type PersistenceOperationFailure =
   | SecretReferenceScopeConflictError
   | SourceIdentityMismatchError
   | TimelineExportAuditInputError
+  | WorkspaceSettingsGovernanceError
+  | WorkspaceSettingsMutationConflictError
+  | WorkspaceSettingsNoChangesError
 
 const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "AgentJobInputError",
@@ -122,7 +130,10 @@ const PUBLIC_OPERATION_ERROR_TAGS = new Set([
   "RevisionConflictError",
   "SecretReferenceScopeConflictError",
   "SourceIdentityMismatchError",
-  "TimelineExportAuditInputError"
+  "TimelineExportAuditInputError",
+  "WorkspaceSettingsGovernanceError",
+  "WorkspaceSettingsMutationConflictError",
+  "WorkspaceSettingsNoChangesError"
 ])
 
 const isPersistenceOperationFailure = (error: unknown): error is PersistenceOperationFailure =>
@@ -289,6 +300,7 @@ const makePersistence = Effect.gen(function*() {
   const timeline = yield* TimelineRepository
   const timelineExportAudits = yield* TimelineExportAuditRepository
   const workspaces = yield* WorkspaceRepository
+  const workspaceSettings = yield* WorkspaceSettingsRepository
 
   yield* sweepDiffContentCacheCleanup(database, content, diffContentCache).pipe(
     Effect.catch(() => Effect.logWarning("Deferred diff content cache cleanup will retry on the next cache write"))
@@ -652,6 +664,17 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("workspace.get", workspaces.get(...args)),
       updateDisplayName: (...args: Parameters<WorkspaceRepositoryService["updateDisplayName"]>) =>
         publicOperation("workspace.update", workspaces.updateDisplayName(...args))
+    },
+    workspaceSettings: {
+      audits: (...args: Parameters<WorkspaceSettingsRepositoryService["audits"]>) =>
+        publicOperation("workspace-settings.audits", workspaceSettings.audits(...args)),
+      get: (...args: Parameters<WorkspaceSettingsRepositoryService["get"]>) =>
+        publicOperation("workspace-settings.get", workspaceSettings.get(...args)),
+      readAtomically: workspaceSettings.readAtomically,
+      update: (...args: Parameters<WorkspaceSettingsRepositoryService["update"]>) =>
+        publicOperation("workspace-settings.update", workspaceSettings.update(...args)),
+      updateAtomically: (...args: Parameters<WorkspaceSettingsRepositoryService["updateAtomically"]>) =>
+        publicOperation("workspace-settings.update-atomically", workspaceSettings.updateAtomically(...args))
     }
   }
 })
@@ -698,6 +721,7 @@ export const persistenceLayerFromDatabase = (
         const timeline = TimelineRepository.layer
         const timelineExportAudits = TimelineExportAuditRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
+        const workspaceSettings = WorkspaceSettingsRepository.layer.pipe(Layer.provide(foundation))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
         const diffContentCache = DiffContentCacheRepository.layer
         const content = ContentStore.layer.pipe(
@@ -724,7 +748,8 @@ export const persistenceLayerFromDatabase = (
           timeline,
           timelineExportAudits,
           content,
-          workspaces
+          workspaces,
+          workspaceSettings
         )
         return PersistenceFromServices.pipe(Layer.provide(services))
       })

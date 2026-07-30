@@ -147,6 +147,21 @@ export class PersistedRecordError extends Schema.TaggedErrorClass<PersistedRecor
   }
 ) {}
 
+/** A settings mutation did not acknowledge the exact governed sections it changes. */
+export class WorkspaceSettingsGovernanceError extends Schema.TaggedErrorClass<
+  WorkspaceSettingsGovernanceError
+>()("WorkspaceSettingsGovernanceError", {}) {}
+
+/** A settings mutation identity was already committed with different semantics. */
+export class WorkspaceSettingsMutationConflictError extends Schema.TaggedErrorClass<
+  WorkspaceSettingsMutationConflictError
+>()("WorkspaceSettingsMutationConflictError", {}) {}
+
+/** A complete settings replacement did not change the current aggregate. */
+export class WorkspaceSettingsNoChangesError extends Schema.TaggedErrorClass<
+  WorkspaceSettingsNoChangesError
+>()("WorkspaceSettingsNoChangesError", {}) {}
+
 /** Raised when a bounded quarantine diagnostic cannot be persisted. */
 export class QuarantineWriteError extends Schema.TaggedErrorClass<QuarantineWriteError>()(
   "QuarantineWriteError",

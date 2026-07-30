@@ -27,7 +27,9 @@ import {
   SessionId,
   SessionMutationAuth,
   SharesApiGroup,
-  TimelineApiGroup
+  TimelineApiGroup,
+  WorkspacePresentationReadModel,
+  WorkspaceSettingsApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
@@ -86,7 +88,22 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
   accounts: []
 }
 
+const collaboratorPresentationCompatibilityFixture: typeof WorkspacePresentationReadModel.Encoded = {
+  workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001",
+  revision: 2,
+  presentation: {
+    density: "compact",
+    defaultLanding: "active-work"
+  }
+}
+
 describe("ControlCenterApi contract", () => {
+  it("exports the collaborator presentation validator from the public API", () => {
+    assert.isTrue(
+      Schema.is(WorkspacePresentationReadModel)(collaboratorPresentationCompatibilityFixture)
+    )
+  })
+
   it("preserves opaque credential bytes while rejecting blank replacements", () => {
     const decode = Schema.decodeUnknownSync(ReauthorizePluginConnectionRequest)
     const request = decode({
@@ -333,7 +350,7 @@ describe("ControlCenterApi contract", () => {
     ])
   })
 
-  it("keeps the eleven API groups and endpoint routes explicit", () => {
+  it("keeps the twelve API groups and endpoint routes explicit", () => {
     assert.strictEqual(ControlCenterApi.identifier, "ControlCenterApi")
     assert.deepStrictEqual(Object.keys(ControlCenterApi.groups), [
       "session",
@@ -346,9 +363,20 @@ describe("ControlCenterApi contract", () => {
       "media",
       "liveEvents",
       "timeline",
+      "workspaceSettings",
       "agent"
     ])
 
+    assert.deepStrictEqual(
+      Object.entries(WorkspaceSettingsApiGroup.endpoints).map(
+        ([identifier, { method, path }]) => [identifier, method, path]
+      ),
+      [
+        ["read", "GET", "/api/v1/settings"],
+        ["readPresentation", "GET", "/api/v1/settings/presentation"],
+        ["update", "PUT", "/api/v1/settings"]
+      ]
+    )
     assert.deepStrictEqual(
       Object.entries(SessionApiGroup.endpoints).map(([identifier, { method, path }]) => [identifier, method, path]),
       [
