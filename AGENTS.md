@@ -201,8 +201,12 @@ When writing Effect code:
   may use host APIs only where the framework requires them.
 - `ChildProcess.make` options that set `env` must also state `extendEnv`; it
   defaults to falsy, so `env` alone replaces the child environment and drops
-  `PATH`. The static rules enforce that the choice is stated, not that it is
-  correct — two things still need judgment. With `extendEnv: false`, `env` must
+  `PATH`. `local-rules/require-explicit-child-process-env-inheritance` is the
+  single enforcement layer, deliberately: deciding whether a receiver named
+  `ChildProcess` is really Effect's module needs binding resolution, so a
+  syntactic ast-grep companion reported foreign APIs of the same shape and was
+  removed rather than narrowed. The rule enforces that the choice is stated, not
+  that it is correct — two things still need judgment. With `extendEnv: false`, `env` must
   itself carry everything the child needs, including `PATH`. With
   `extendEnv: true`, inherited variables that outrank the ones you pass must be
   cleared: a spawn scoped to an explicit AWS profile has to drop every ambient

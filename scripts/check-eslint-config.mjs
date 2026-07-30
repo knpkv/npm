@@ -1502,3 +1502,23 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-computed-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const real = ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-effect-import-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "./foreign-child-process.js"
+    const foreign = ChildProcess.make("tool", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-foreign-name-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
