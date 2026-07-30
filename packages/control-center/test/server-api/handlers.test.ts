@@ -3069,10 +3069,10 @@ describe("Control Center API handlers", () => {
       ])
     }))
 
-  it.effect("rejects review-suggestion writes after server drain begins", () =>
+  it.effect("rejects authority-bearing review-suggestion operations after server drain begins", () =>
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle.make
-      const applicationCalls = yield* Ref.make(0)
+      const authorityBearingCalls = yield* Ref.make(0)
       const entityId = EntityId.make("01890f6f-6d6a-7cc0-98d2-000000000023")
       const jobId = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000025")
       const suggestionId = PrReviewSuggestionId.make(`sha256:${"4".repeat(64)}`)
@@ -3102,8 +3102,8 @@ describe("Control Center API handlers", () => {
           relativeFileVersion: "AFTER"
         }
       })
-      const blockedMutation = Ref.update(applicationCalls, (count) => count + 1).pipe(
-        Effect.andThen(Effect.die("review mutation crossed the drain guard"))
+      const blockedMutation = Ref.update(authorityBearingCalls, (count) => count + 1).pipe(
+        Effect.andThen(Effect.die("authority-bearing review operation crossed the drain guard"))
       )
       const reviews = Layer.succeed(PullRequestReviews, {
         thread: () => Effect.die("not used"),
@@ -3112,7 +3112,7 @@ describe("Control Center API handlers", () => {
         revisions: () => Effect.die("not used"),
         editSuggestion: () => blockedMutation,
         dismissSuggestion: () => blockedMutation,
-        previewPublication: () => Effect.die("not used"),
+        previewPublication: () => blockedMutation,
         publishSuggestion: () => blockedMutation
       })
       const handler = agentHandlersLayer.pipe(
@@ -3144,6 +3144,10 @@ describe("Control Center API handlers", () => {
             expectedSequence: sequence
           }
         }).pipe(Effect.result)
+        const previewed = yield* client.agent.previewReviewSuggestionPublication({
+          params: { entityId, jobId, suggestionId },
+          query: { revisionId }
+        }).pipe(Effect.result)
         const published = yield* client.agent.publishReviewSuggestion({
           params: { entityId },
           payload: {
@@ -3156,7 +3160,7 @@ describe("Control Center API handlers", () => {
             )
           }
         }).pipe(Effect.result)
-        return { dismissed, edited, published }
+        return { dismissed, edited, previewed, published }
       }).pipe(Effect.provide([
         NodeHttpServer.layerHttpServices,
         mutationMiddlewareLayer,
@@ -3172,11 +3176,15 @@ describe("Control Center API handlers", () => {
       if (Result.isFailure(result.dismissed)) {
         assert.strictEqual(result.dismissed.failure._tag, "ServiceUnavailableApiError")
       }
+      assert.isTrue(Result.isFailure(result.previewed))
+      if (Result.isFailure(result.previewed)) {
+        assert.strictEqual(result.previewed.failure._tag, "ServiceUnavailableApiError")
+      }
       assert.isTrue(Result.isFailure(result.published))
       if (Result.isFailure(result.published)) {
         assert.strictEqual(result.published.failure._tag, "ServiceUnavailableApiError")
       }
-      assert.strictEqual(yield* Ref.get(applicationCalls), 0)
+      assert.strictEqual(yield* Ref.get(authorityBearingCalls), 0)
     }))
 
   it.effect("returns only the redacted agent provider catalog to an owner", () =>

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { AppThemeProvider, readStoredAppTheme, useAppTheme } from "../../src/client/AppProviders.js"
 import { CorrelationId, UnauthorizedApiError } from "../../src/api/errors.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
+import { WorkspaceSettingsReadModel } from "../../src/api/workspaceSettings.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { SettingsForm, WorkspaceSettingsPage } from "../../src/client/settings/WorkspaceSettingsPage.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
@@ -37,6 +38,15 @@ const session = Schema.decodeSync(SessionSummary)({
   revokedAt: null
 })
 const mutationId = Schema.decodeSync(WorkspaceSettingsMutationId)("01890f6f-6d6a-7cc0-98d2-000000000304")
+const settingsReadModel = Schema.decodeSync(WorkspaceSettingsReadModel)({
+  workspaceId,
+  revision: 1,
+  etag: '"workspace-settings-v1-1"',
+  settings: DEFAULT_WORKSPACE_SETTINGS,
+  createdAt: "2026-07-30T09:00:00.000Z",
+  updatedAt: "2026-07-30T09:00:00.000Z",
+  updatedByPersonId: Schema.decodeSync(PersonId)("01890f6f-6d6a-7cc0-98d2-000000000303")
+})
 
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
@@ -132,6 +142,38 @@ const changeInput = async (input: HTMLInputElement, value: string): Promise<void
     )
     input.dispatchEvent(new Event("change", { bubbles: true }))
   })
+}
+
+const renderConfirmedRetentionChange = async (): Promise<{
+  readonly confirmation: HTMLInputElement
+  readonly host: HTMLElement
+  readonly save: HTMLButtonElement
+}> => {
+  const host = await renderSettingsPage({
+    load: () => Promise.resolve(settingsReadModel),
+    makeMutationId: () => Promise.resolve(mutationId),
+    update: () => Promise.reject(new Error("unexpected settings update"))
+  })
+  await act(async () => sessionControls?.establishSession(Schema.decodeSync(CsrfToken)("a".repeat(64)), session))
+  await vi.waitFor(() => expect(host.textContent).toContain("Workspace settings"))
+  const contentRetention = Array.from(host.querySelectorAll("label"))
+    .find((candidate) => candidate.textContent?.includes("Content (days)"))
+    ?.querySelector<HTMLInputElement>("input")
+  if (contentRetention === undefined || contentRetention === null) {
+    throw new Error("expected content retention input")
+  }
+  await changeInput(contentRetention, "91")
+  const confirmation = Array.from(host.querySelectorAll("label"))
+    .find((candidate) => candidate.textContent?.includes("governed retention policy change"))
+    ?.querySelector<HTMLInputElement>("input")
+  const save = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+    (candidate) => candidate.textContent === "Save settings"
+  )
+  if (confirmation === undefined || confirmation === null || save === undefined) {
+    throw new Error("expected governed confirmation and save controls")
+  }
+  await act(async () => confirmation.click())
+  return { confirmation, host, save }
 }
 
 describe("workspace settings browser acceptance", () => {
@@ -288,6 +330,29 @@ describe("workspace settings browser acceptance", () => {
     expect(host.querySelector('[data-testid="maximum-attempts"]')?.textContent).toBe(
       String(DEFAULT_WORKSPACE_SETTINGS.pipeline.maximumAttempts)
     )
+  })
+
+  it("keeps save enabled while the confirmed governed draft is unchanged", async () => {
+    const { confirmation, save } = await renderConfirmedRetentionChange()
+
+    expect(confirmation.checked).toBe(true)
+    expect(save.disabled).toBe(false)
+  })
+
+  it("clears confirmation when the exact governed draft changes", async () => {
+    const { confirmation, host, save } = await renderConfirmedRetentionChange()
+    const allowedProviders = Array.from(host.querySelectorAll("label"))
+      .find((candidate) => candidate.textContent?.includes("Allowed providers"))
+      ?.querySelector<HTMLInputElement>("input")
+    if (allowedProviders === undefined || allowedProviders === null) {
+      throw new Error("expected allowed providers input")
+    }
+
+    await changeInput(allowedProviders, "codex")
+
+    expect(confirmation.checked).toBe(false)
+    expect(save.disabled).toBe(true)
+    expect(confirmation.parentElement?.textContent).toContain("governed agent, retention policy changes")
   })
 
   it("persists only system, light, and dark at narrow and wide viewport sizes", async () => {

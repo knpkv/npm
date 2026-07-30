@@ -1357,25 +1357,32 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             )
           ))
         .handle("previewReviewSuggestionPublication", ({ params, query }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (session.actor._tag !== "human") {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            yield* requireWorkspaceRead(session)
-            return yield* reviews.previewPublication({
-              workspaceId: session.workspaceId,
-              entityId: params.entityId,
-              jobId: params.jobId,
-              suggestionId: params.suggestionId,
-              revisionId: query.revisionId,
-              publishingOperator: session.actor.personId
-            }).pipe(Effect.catchTags({
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.actor._tag !== "human") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              yield* requireWorkspaceRead(session)
+              return yield* reviews.previewPublication({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId,
+                suggestionId: params.suggestionId,
+                revisionId: query.revisionId,
+                publishingOperator: session.actor.personId
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("publishReviewSuggestion", ({ params, payload }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {

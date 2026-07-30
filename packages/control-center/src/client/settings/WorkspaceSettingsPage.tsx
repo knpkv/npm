@@ -544,11 +544,7 @@ export const WorkspaceSettingsPage = ({
   const sessionKey = routeMatchesSession ? browserReadableSessionKey(browserSession.state) : null
   const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession, transport)
   const theme = useAppTheme()
-  const [governedChangeConfirmed, setGovernedChangeConfirmed] = useState(false)
-  const confirmationRevision = controller.state._tag === "ready" ? controller.state.server.revision : null
-  useEffect(() => {
-    setGovernedChangeConfirmed(false)
-  }, [confirmationRevision, controller.state._tag])
+  const [confirmedGovernedChangeFingerprint, setConfirmedGovernedChangeFingerprint] = useState<string | null>(null)
   const canEdit = browserSession.state._tag === "authenticated" && session?.permission === "workspace-owner"
 
   if (!routeMatchesSession) {
@@ -632,6 +628,11 @@ export const WorkspaceSettingsPage = ({
     isGovernedWorkspaceSettingsSection
   )
   const requiresGovernedConfirmation = governedChanges.length > 0
+  const governedChangeFingerprint = requiresGovernedConfirmation
+    ? JSON.stringify([server.revision, ...governedChanges.map((section) => [section, draft[section]])])
+    : null
+  const governedChangeConfirmed =
+    governedChangeFingerprint !== null && confirmedGovernedChangeFingerprint === governedChangeFingerprint
   const draftIsValid = Schema.is(WorkspaceSettingsV1)(draft)
   const localProfileUnavailable = draft.agent.profilePolicy === "local-profile"
   return (
@@ -700,7 +701,9 @@ export const WorkspaceSettingsPage = ({
             label={`I reviewed the governed ${governedChanges.join(
               ", "
             )} policy change${governedChanges.length === 1 ? "" : "s"} and authorize this exact revision.`}
-            onChange={setGovernedChangeConfirmed}
+            onChange={(confirmed) =>
+              setConfirmedGovernedChangeFingerprint(confirmed ? governedChangeFingerprint : null)
+            }
           />
         </Surface>
       ) : null}
@@ -733,7 +736,7 @@ export const WorkspaceSettingsPage = ({
         canEdit={canEdit && status !== "saving"}
         draft={draft}
         onChange={(nextDraft) => {
-          setGovernedChangeConfirmed(false)
+          setConfirmedGovernedChangeFingerprint(null)
           controller.edit(nextDraft)
         }}
       />
