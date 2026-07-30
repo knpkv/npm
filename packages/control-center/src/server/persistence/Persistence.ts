@@ -66,6 +66,8 @@ import {
   type RelationshipRepairProposalRepositoryService,
   ReleaseRepository,
   type ReleaseRepositoryService,
+  RetentionRepository,
+  type RetentionRepositoryService,
   type TimelineExportAuditInputError,
   TimelineExportAuditRepository,
   type TimelineExportAuditRepositoryService,
@@ -297,6 +299,7 @@ const makePersistence = Effect.gen(function*() {
   const readiness = yield* ReadinessRepository
   const relationshipRepairProposals = yield* RelationshipRepairProposalRepository
   const releases = yield* ReleaseRepository
+  const retention = yield* RetentionRepository
   const timeline = yield* TimelineRepository
   const timelineExportAudits = yield* TimelineExportAuditRepository
   const workspaces = yield* WorkspaceRepository
@@ -647,6 +650,26 @@ const makePersistence = Effect.gen(function*() {
       list: (...args: Parameters<ReleaseRepositoryService["list"]>) =>
         publicOperation("release.list", releases.list(...args))
     },
+    retention: {
+      listRuns: (...args: Parameters<RetentionRepositoryService["listRuns"]>) =>
+        publicOperation("retention.list-runs", retention.listRuns(...args)),
+      recordSandboxReconciliation: (
+        ...args: Parameters<
+          RetentionRepositoryService["recordSandboxReconciliation"]
+        >
+      ) =>
+        publicOperation(
+          "retention.record-sandbox-reconciliation",
+          retention.recordSandboxReconciliation(...args)
+        ),
+      sweepWorkspace: (...args: Parameters<RetentionRepositoryService["sweepWorkspace"]>) =>
+        publicOperation(
+          "retention.sweep-workspace",
+          retention.sweepWorkspace(...args).pipe(
+            Effect.tap(() => sweepDiffContentCacheCleanup(database, content, diffContentCache))
+          )
+        )
+    },
     timeline: {
       detail: (...args: Parameters<TimelineRepositoryService["detail"]>) =>
         publicOperation("timeline.detail", timeline.detail(...args)),
@@ -722,6 +745,7 @@ export const persistenceLayerFromDatabase = (
         const timelineExportAudits = TimelineExportAuditRepository.layer
         const workspaces = WorkspaceRepository.layer.pipe(Layer.provide(foundation))
         const workspaceSettings = WorkspaceSettingsRepository.layer.pipe(Layer.provide(foundation))
+        const retention = RetentionRepository.layer.pipe(Layer.provide(workspaceSettings))
         const blobs = BlobStore.layer({ blobRoot: config.blobRoot })
         const diffContentCache = DiffContentCacheRepository.layer
         const content = ContentStore.layer.pipe(
@@ -745,6 +769,7 @@ export const persistenceLayerFromDatabase = (
           readiness,
           relationshipRepairProposals,
           release,
+          retention,
           timeline,
           timelineExportAudits,
           content,

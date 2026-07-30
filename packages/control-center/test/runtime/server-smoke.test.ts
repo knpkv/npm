@@ -634,7 +634,7 @@ describe("Control Center closed runtime", () => {
 
   it.effect("runs explicit cache-backed plugin synchronization before serving the authenticated portfolio", () =>
     Effect.gen(function*() {
-      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const staticRoot = yield* makeStaticFixture
@@ -748,7 +748,6 @@ describe("Control Center closed runtime", () => {
           0
         )
 
-        yield* TestClock.setTime(DateTime.toEpochMillis(GOVERNED_FIXTURE_TIME))
         assert.deepStrictEqual(
           yield* privateExecution.advance({
             workspaceId: AUTHORIZED_WORKSPACE,
@@ -768,7 +767,6 @@ describe("Control Center closed runtime", () => {
           afterAuthorized.calls.filter(({ operation }) => operation === "execute-authorized-action"),
           1
         )
-        yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
       }
       assert.strictEqual(persistedRuntime.health._tag, "healthy")
       assert.deepStrictEqual(synchronizationState, {
@@ -1227,6 +1225,7 @@ describe("Control Center closed runtime", () => {
         pluginConnectionId: PLUGIN_ID,
         subject
       })
+      const retentionRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
 
       assert.isTrue(Option.isSome(latest))
       if (Option.isSome(latest)) {
@@ -1239,6 +1238,20 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(sourceUses, 0)
       assert.strictEqual(sandboxCalls, 1)
       assert.strictEqual(providerCalls, 4)
+      assert.deepStrictEqual(
+        retentionRuns.map(({ deletedCount, retentionClass, selectedCount }) => ({
+          deletedCount,
+          retentionClass,
+          selectedCount
+        })),
+        [
+          {
+            deletedCount: 0,
+            retentionClass: "sandbox-artifact",
+            selectedCount: 0
+          }
+        ]
+      )
       assert.deepStrictEqual(sandboxOperations.slice(0, 3), [
         "listFiles",
         `git show ${subject.baseRevision}:AGENTS.md`,

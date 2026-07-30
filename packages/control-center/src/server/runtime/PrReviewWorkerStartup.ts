@@ -5,10 +5,12 @@ import * as Data from "effect/Data"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
 import { PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
+import { Persistence } from "../persistence/Persistence.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const DEFAULT_IDLE_POLL_INTERVAL = Duration.seconds(1)
@@ -40,9 +42,26 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const lifecycle = yield* ServerLifecycle
   const worker = yield* AgentJobWorker
   const sandboxes = yield* PrReviewSandboxSessions
-  yield* sandboxes.reconcile().pipe(
-    Effect.catch((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
+  const persistence = yield* Effect.serviceOption(Persistence)
+  const reconciliation = yield* sandboxes.reconcile().pipe(
+    Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure)),
+    Effect.option
   )
+  if (Option.isSome(reconciliation) && Option.isSome(persistence)) {
+    yield* persistence.value.retention
+      .recordSandboxReconciliation(
+        options.workspaceId,
+        reconciliation.value.removedSandboxes.length
+      )
+      .pipe(
+        Effect.catch((failure) =>
+          Effect.logError(
+            "PR review sandbox reconciliation audit failed",
+            failure
+          )
+        )
+      )
+  }
   const idlePollInterval = Duration.fromInputUnsafe(
     options.idlePollInterval ?? DEFAULT_IDLE_POLL_INTERVAL
   )

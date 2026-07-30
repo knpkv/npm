@@ -35,6 +35,7 @@ export class DatabaseInitializationError extends Schema.TaggedErrorClass<Databas
       "connect",
       "configure",
       "initialize-schema",
+      "verify-integrity",
       "verify-pragmas",
       "verify-schema"
     ])

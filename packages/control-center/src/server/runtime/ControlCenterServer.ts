@@ -9,7 +9,11 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
-import { type AgentJobWorkerOptions, prReviewAgentJobWorkerLayer } from "../agent/AgentJobWorker.js"
+import {
+  agentJobWorkerLayer,
+  type AgentJobWorkerOptions,
+  prReviewAgentJobWorkerLayer
+} from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
 import { AgentJobWorkspacePolicy } from "../agent/internal/AgentJobWorkspacePolicy.js"
 import {
@@ -79,7 +83,7 @@ import {
   persistenceLayerFromDatabase
 } from "../persistence/Persistence.js"
 import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
-import type { AgentLeaseOwner } from "../persistence/repositories/agentJobModels.js"
+import { AgentLeaseOwner } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
@@ -116,12 +120,14 @@ import {
   nodeSecretPlatformLayer
 } from "./NodeTransport.js"
 import { prReviewWorkerStartupLayer, type PrReviewWorkerStartupOptions } from "./PrReviewWorkerStartup.js"
+import { releaseAgentWorkerStartupLayer } from "./ReleaseAgentWorkerStartup.js"
 import {
   type ReleaseSynchronizationStartupError,
   releaseSynchronizationStartupLayer,
   type ReleaseSynchronizationStartupOptions
 } from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
+import { retentionStartupLayer } from "./RetentionStartup.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 type ControlCenterCoreApplicationServices =
@@ -323,6 +329,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer
+  const bootstrap = controlCenterBootstrapLayer(options.bootstrap ?? null)
   const databaseDrain = databaseDrainLayer.pipe(Layer.provide(database))
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence),
@@ -453,6 +460,32 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provide(applicationServices)
   )
+  const releaseAgentWorker = options.releaseAgent === undefined ||
+      options.releaseAgent === null ||
+      options.bootstrap === undefined ||
+      options.bootstrap === null
+    ? Layer.empty
+    : releaseAgentWorkerStartupLayer({
+      workspaceId: options.bootstrap.workspaceId
+    }).pipe(
+      Layer.provide(
+        agentJobWorkerLayer({
+          leaseOwner: AgentLeaseOwner.make("control-center-release-agent-worker"),
+          leaseDuration: "5 minutes"
+        }).pipe(
+          Layer.provide(providerRegistry),
+          Layer.provide(AgentJobRepository.layer.pipe(Layer.provide(database))),
+          Layer.provide(
+            AgentJobWorkspacePolicy.live.pipe(Layer.provide(persistence))
+          )
+        )
+      )
+    )
+  const retention = options.bootstrap === undefined || options.bootstrap === null
+    ? Layer.empty
+    : retentionStartupLayer({
+      workspaceId: options.bootstrap.workspaceId
+    }).pipe(Layer.provide(bootstrap))
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),
@@ -553,9 +586,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     requestUrlBoundaryLayer,
     requestBoundaryLayer,
     governedActionExecution,
+    releaseAgentWorker,
+    retention,
     prReviewWorker,
     releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
-      Layer.provideMerge(controlCenterBootstrapLayer(options.bootstrap ?? null))
+      Layer.provideMerge(bootstrap)
     )
   )
   return {

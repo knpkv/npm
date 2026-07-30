@@ -21,6 +21,7 @@ import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { AtlassianOAuthGrantId, type AtlassianOAuthProviderIntent } from "../../src/api/plugins.js"
 import { SessionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { makeAtlassianOAuthGrants } from "../../src/server/plugins/atlassian/AtlassianOAuthGrants.js"
+import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 
 const owner = {
   sessionId: SessionId.make("0198f6e1-4de2-7a20-8a64-576c88bd9784"),
@@ -184,6 +185,37 @@ const splitProductProviderClient = HttpClient.make((request) => {
 })
 
 describe("AtlassianOAuthGrants", () => {
+  it.effect("releases scheduled grant expiry from the lifecycle work barrier during drain", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-drain-" })
+      const path = yield* Path.Path
+      const configProvider = ConfigProvider.fromUnknown({
+        HOME: home,
+        XDG_CONFIG_HOME: path.join(home, "config")
+      })
+      const lifecycle = yield* ServerLifecycle.make
+      const grants = yield* makeAtlassianOAuthGrants().pipe(
+        Effect.provideService(ServerLifecycle, lifecycle),
+        Effect.provideService(HttpClient.HttpClient, providerClient)
+      )
+      const started = yield* grants.start(
+        owner,
+        "http://127.0.0.1:4173",
+        ["jira"],
+        SHARED_OAUTH_CONFIG
+      ).pipe(Effect.provideService(ConfigProvider.ConfigProvider, configProvider))
+      assert.strictEqual(started._tag, "ready")
+      assert.strictEqual(yield* grants.pendingGrantCount, 1)
+
+      yield* lifecycle.beginDrain
+      yield* lifecycle.awaitWorkDrained
+      assert.strictEqual(yield* grants.pendingGrantCount, 1)
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
   it.effect("configures its own OAuth app without Jira or Confluence CLI stores", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem

@@ -10,6 +10,7 @@ import {
   Database,
   databaseLayer,
   sandboxSchemaTransaction,
+  verifyDatabaseIntegrity,
   withSchemaWriteBarrier
 } from "../../src/server/persistence/Database.js"
 import { decodePersistenceConfig, PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
@@ -91,6 +92,39 @@ describe("Database", () => {
         if (reopened.failure._tag === "DatabaseInitializationError") {
           assert.strictEqual(reopened.failure.operation, "verify-schema")
         }
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects corrupt SQLite page ownership before exposing persistence", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+      const integrity = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* verifyDatabaseIntegrity(database.sql)
+          const sql = database.sql
+          yield* sql`PRAGMA writable_schema = ON`
+          yield* sql`INSERT INTO sqlite_schema (
+              type, name, tbl_name, rootpage, sql
+            ) VALUES (
+              'table', 'corrupt_page_owner', 'corrupt_page_owner', 2147483647,
+              'CREATE TABLE corrupt_page_owner (value TEXT)'
+            )`
+          yield* sql`PRAGMA writable_schema = RESET`
+          return yield* verifyDatabaseIntegrity(database.sql).pipe(Effect.result)
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+      assert.isTrue(Result.isFailure(integrity))
+      if (Result.isFailure(integrity)) {
+        assert.strictEqual(integrity.failure.operation, "verify-integrity")
+      }
+
+      const startup = yield* Effect.scoped(
+        Layer.build(databaseLayer(config)).pipe(Effect.result)
+      )
+      assert.isTrue(Result.isFailure(startup))
+      if (Result.isFailure(startup)) {
+        assert.strictEqual(startup.failure._tag, "DatabaseInitializationError")
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
