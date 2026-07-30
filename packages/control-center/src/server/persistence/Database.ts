@@ -6,7 +6,7 @@ import { SchemaWriteBarrierError } from "./backup/errors.js"
 import { DatabaseInitializationError, type PersistenceConfigError } from "./errors.js"
 import { decodePersistenceConfig, type PersistenceConfig } from "./PersistenceConfig.js"
 import { initializeCurrentSchema, validateCurrentSchema } from "./schema.js"
-import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, JournalModePragmaRow } from "./schemas.js"
+import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, IntegrityCheckPragmaRow, JournalModePragmaRow } from "./schemas.js"
 
 /** Busy timeout used for bounded local write contention. */
 export const BUSY_TIMEOUT_MILLISECONDS = 5_000
@@ -70,6 +70,26 @@ const configureAndVerifyPragmas = Effect.fn("Database.configureAndVerifyPragmas"
     ) return yield* Effect.fail("SQLite pragmas did not retain their required values")
   }).pipe(
     Effect.catchCause(() => new DatabaseInitializationError({ operation: "verify-pragmas" }))
+  )
+})
+
+/** Run the startup SQLite integrity boundary. @internal */
+export const verifyDatabaseIntegrity = Effect.fn("Database.verifyIntegrity")(function*(
+  sql: SqlClient.SqlClient
+): Effect.fn.Return<void, DatabaseInitializationError> {
+  yield* Effect.gen(function*() {
+    const rows = yield* sql`PRAGMA integrity_check`.pipe(
+      Effect.flatMap((result) => decodeRows(IntegrityCheckPragmaRow, result))
+    )
+    if (rows.length !== 1 || rows[0]?.integrityCheck.toLowerCase() !== "ok") {
+      return yield* Effect.fail("SQLite integrity check did not return one ok result")
+    }
+    const foreignKeyRows = yield* sql`PRAGMA foreign_key_check`
+    if (foreignKeyRows.length !== 0) {
+      return yield* Effect.fail("SQLite foreign key check returned violations")
+    }
+  }).pipe(
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-integrity" }))
   )
 })
 
@@ -157,6 +177,7 @@ const initializeDatabase = Effect.fn("Database.initializeDatabase")(function*(co
           Effect.mapError(() => new DatabaseInitializationError({ operation: "connect" }))
         )
         yield* configureAndVerifyPragmas(sql)
+        yield* verifyDatabaseIntegrity(sql)
         yield* withSchemaWriteBarrier(sql, databaseSourceFile, initializeCurrentSchema(sql))
       })
     )
@@ -169,6 +190,7 @@ const databaseFromSql = () =>
     Effect.gen(function*() {
       const sql = yield* SqlClient.SqlClient
       yield* configureAndVerifyPragmas(sql)
+      yield* verifyDatabaseIntegrity(sql)
       yield* validateCurrentSchema(sql)
       return Database.of({
         sql,
@@ -190,7 +212,9 @@ export const validateExistingControlCenterDatabase = Effect.fn(
       const context = yield* Layer.build(
         makeClientLayer(config.busyTimeoutMilliseconds, config.databaseUrl, config.maxConnections)
       )
-      yield* validateCurrentSchema(Context.get(context, SqlClient.SqlClient))
+      const sql = Context.get(context, SqlClient.SqlClient)
+      yield* verifyDatabaseIntegrity(sql)
+      yield* validateCurrentSchema(sql)
     })
   )
 })

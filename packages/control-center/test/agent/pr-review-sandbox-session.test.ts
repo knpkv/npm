@@ -13,11 +13,15 @@ import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrRevie
 
 const JOB_ID = JobId.make("01890f6f-6d6a-7cc0-98d2-000000000071")
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000072")
+const FOREIGN_WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000073")
 const ATTEMPT_ID = "0123456789ab"
 const BASE_REVISION = "1".repeat(40)
 const HEAD_REVISION = "2".repeat(40)
 const SOURCE_ROOT = "/private/review-source"
-const SANDBOX_NAME = `cc-pr-review-${JOB_ID}-${ATTEMPT_ID}`
+const compactUuid = (identifier: string): string => identifier.replaceAll("-", "")
+const WORKSPACE_SANDBOX_PREFIX = `cc-pr-review-${compactUuid(WORKSPACE_ID)}-`
+const SANDBOX_NAME = `${WORKSPACE_SANDBOX_PREFIX}${compactUuid(JOB_ID).slice(-4)}-${ATTEMPT_ID}`
+const UNBOUNDED_SANDBOX_NAME = `cc-pr-review-${WORKSPACE_ID}-${JOB_ID}-${ATTEMPT_ID}`
 const CODEX_API_KEY_CANARY = "codex-api-key-canary"
 const ANTHROPIC_API_KEY_CANARY = "anthropic-api-key-canary"
 const encoder = new TextEncoder()
@@ -114,6 +118,11 @@ const request = {
 }
 
 describe("PrReviewSandboxSessions", () => {
+  it("keeps the workspace-owned sandbox name within the sbx limit", () => {
+    assert.isAbove(UNBOUNDED_SANDBOX_NAME.length, 63)
+    assert.strictEqual(SANDBOX_NAME.length, 63)
+  })
+
   it.effect("keeps native agent credentials out of typed-tool review sandboxes", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     return Effect.gen(function*() {
@@ -462,25 +471,29 @@ describe("PrReviewSandboxSessions", () => {
     )
   })
 
-  it.effect("reconciles only stale Control Center review sandboxes", () => {
+  it.effect("reconciles only stale review sandboxes owned by the requested workspace", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
+    const ownedA = `${WORKSPACE_SANDBOX_PREFIX}a`
+    const ownedB = `${WORKSPACE_SANDBOX_PREFIX}b`
+    const foreign = `cc-pr-review-${compactUuid(FOREIGN_WORKSPACE_ID)}-a`
+    const legacy = "cc-pr-review-legacy"
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
-      const reconciliation = yield* sessions.reconcile()
+      const reconciliation = yield* sessions.reconcile(WORKSPACE_ID)
       assert.deepStrictEqual(reconciliation.removedSandboxes, [
-        "cc-pr-review-a",
-        "cc-pr-review-b"
+        ownedA,
+        ownedB
       ])
       assert.deepStrictEqual(
         calls.filter(({ args }) => args[0] === "rm").map(({ args }) => args.at(-1)),
-        ["cc-pr-review-a", "cc-pr-review-b"]
+        [ownedA, ownedB]
       )
       assert.strictEqual(calls.filter(({ args }) => args[0] === "ls").length, 1)
     }).pipe(
       Effect.provide(testLayer(
         calls,
         [],
-        "unrelated\ncc-pr-review-b\ncc-pr-review-a"
+        `unrelated\n${foreign}\n${ownedB}\n${legacy}\n${ownedA}`
       ))
     )
   })

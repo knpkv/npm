@@ -111,6 +111,9 @@ The remediation pass must implement the proposed guardrail with the defect fix w
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
+Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
+Lifecycle polling, admission, and drain sequencing shared by multiple workers must live in one private runtime helper.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
@@ -194,6 +197,19 @@ When writing Effect code:
   every ancestor barrel that exports it, public runtime JSDoc, and package README
   section; retained public identifiers and historical documentation still require
   compatibility judgment. Generated and vendor barrels are excluded.
+- When PR-review sandbox naming or reconciliation ownership changes in
+  `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
+  update `packages/control-center/README.md` and
+  `packages/control-center/docs/agentic-pr-review.md` in the same change, and
+  append an amendment to the governing ADR when earlier rationale changes.
+  Current docs must describe the server-private compact workspace-scoped prefix,
+  its 63-character sbx limit, and state that foreign-workspace and legacy names
+  are not automatically removed; a claim that startup removes all
+  `cc-pr-review-*` names is invalid. Keep the focused sandbox-session test
+  proving that the invalid full-UUID shape exceeds the limit while the bounded
+  compact name and foreign-workspace fixture pass. Generated and vendor docs are
+  excluded. Clearly historical implementation plans may remain unchanged, but
+  ADR history requires an amendment rather than a silent rewrite.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

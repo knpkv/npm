@@ -383,6 +383,16 @@
     },
     {
       "type": "table",
+      "name": "retention_cleanup_claims",
+      "sql": "CREATE TABLE retention_cleanup_claims (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL,\n    retention_class TEXT NOT NULL CHECK(retention_class IN ('evidence', 'agent-content')),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 200),\n    PRIMARY KEY (workspace_id, run_id, retention_class, record_key),\n    FOREIGN KEY (workspace_id, run_id, retention_class)\n      REFERENCES retention_cleanup_runs(workspace_id, run_id, retention_class)\n      ON DELETE RESTRICT\n  )"
+    },
+    {
+      "type": "table",
+      "name": "retention_cleanup_runs",
+      "sql": "CREATE TABLE retention_cleanup_runs (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL CHECK(length(run_id) = 36),\n    retention_class TEXT NOT NULL CHECK(retention_class IN (\n      'audit-replay', 'reproducible-content', 'evidence',\n      'agent-content', 'sandbox-artifact'\n    )),\n    policy_revision INTEGER NOT NULL CHECK(policy_revision >= 1),\n    cutoff_at TEXT NOT NULL,\n    batch_limit INTEGER NOT NULL CHECK(batch_limit BETWEEN 1 AND 512),\n    selected_count INTEGER NOT NULL CHECK(selected_count BETWEEN 0 AND batch_limit),\n    deleted_count INTEGER NOT NULL CHECK(deleted_count BETWEEN 0 AND selected_count),\n    completed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, run_id),\n    UNIQUE (workspace_id, run_id, retention_class),\n    FOREIGN KEY (workspace_id, policy_revision)\n      REFERENCES workspace_settings_versions(workspace_id, revision)\n      ON DELETE RESTRICT,\n    CHECK(cutoff_at <= completed_at)\n  )"
+    },
+    {
+      "type": "table",
       "name": "role_assignments",
       "sql": "CREATE TABLE role_assignments (\n    workspace_id TEXT NOT NULL,\n    assignment_id TEXT NOT NULL,\n    actor_kind TEXT NOT NULL CHECK(actor_kind IN ('human', 'agent')),\n    person_id TEXT,\n    agent_id TEXT,\n    role TEXT NOT NULL CHECK(role IN (\n      'workspace-owner', 'workspace-approver', 'release-owner',\n      'release-approver', 'change-owner', 'issue-owner', 'issue-assignee',\n      'page-owner', 'author', 'contributor', 'reviewer', 'operator',\n      'deployment-approver', 'merge-approver', 'watcher'\n    )),\n    scope_kind TEXT NOT NULL CHECK(scope_kind IN (\n      'workspace', 'release', 'environment', 'entity'\n    )),\n    release_id TEXT,\n    environment_id TEXT,\n    entity_id TEXT,\n    lifecycle_kind TEXT NOT NULL CHECK(lifecycle_kind IN ('active', 'ended', 'revoked')),\n    assigned_at TEXT NOT NULL,\n    ended_at TEXT,\n    revoked_at TEXT,\n    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),\n    created_at TEXT NOT NULL,\n    updated_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, assignment_id),\n    FOREIGN KEY (workspace_id) REFERENCES workspaces(workspace_id),\n    FOREIGN KEY (workspace_id, person_id)\n      REFERENCES persons(workspace_id, person_id),\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id),\n    FOREIGN KEY (workspace_id, release_id, environment_id)\n      REFERENCES release_targets(workspace_id, release_id, environment_id),\n    FOREIGN KEY (workspace_id, entity_id)\n      REFERENCES entities(workspace_id, entity_id),\n    CHECK(\n      (actor_kind = 'human' AND person_id IS NOT NULL AND agent_id IS NULL) OR\n      (actor_kind = 'agent' AND agent_id IS NOT NULL AND person_id IS NULL)\n    ),\n    CHECK(\n      (scope_kind = 'workspace' AND release_id IS NULL AND environment_id IS NULL AND entity_id IS NULL) OR\n      (scope_kind = 'release' AND release_id IS NOT NULL AND environment_id IS NULL AND entity_id IS NULL) OR\n      (scope_kind = 'environment' AND release_id IS NOT NULL AND environment_id IS NOT NULL AND entity_id IS NULL) OR\n      (scope_kind = 'entity' AND release_id IS NULL AND environment_id IS NULL AND entity_id IS NOT NULL)\n    ),\n    CHECK(\n      (lifecycle_kind = 'active' AND ended_at IS NULL AND revoked_at IS NULL) OR\n      (lifecycle_kind = 'ended' AND ended_at IS NOT NULL AND revoked_at IS NULL AND assigned_at <= ended_at) OR\n      (lifecycle_kind = 'revoked' AND ended_at IS NULL AND revoked_at IS NOT NULL AND assigned_at <= revoked_at)\n    ),\n    CHECK(created_at <= updated_at)\n  )"
     },
@@ -728,6 +738,11 @@
     },
     {
       "type": "index",
+      "name": "retention_cleanup_claims_record_idx",
+      "sql": "CREATE INDEX retention_cleanup_claims_record_idx\n    ON retention_cleanup_claims(workspace_id, retention_class, record_key)"
+    },
+    {
+      "type": "index",
       "name": "role_assignments_entity_idx",
       "sql": "CREATE INDEX role_assignments_entity_idx\n    ON role_assignments(workspace_id, entity_id, role)"
     },
@@ -764,7 +779,7 @@
     {
       "type": "trigger",
       "name": "agent_review_suggestion_revisions_no_delete",
-      "sql": "CREATE TRIGGER agent_review_suggestion_revisions_no_delete\n    BEFORE DELETE ON agent_review_suggestion_revisions\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review suggestion revisions are immutable');\n    END"
+      "sql": "CREATE TRIGGER agent_review_suggestion_revisions_no_delete\n    BEFORE DELETE ON agent_review_suggestion_revisions\n    WHEN NOT EXISTS (\n      SELECT 1 FROM retention_cleanup_claims claim\n      JOIN retention_cleanup_runs run\n        ON run.workspace_id = claim.workspace_id\n        AND run.run_id = claim.run_id\n        AND run.retention_class = claim.retention_class\n      JOIN agent_jobs job\n        ON job.workspace_id = OLD.workspace_id\n        AND job.job_id = OLD.source_job_id\n      WHERE claim.workspace_id = OLD.workspace_id\n        AND claim.retention_class = 'agent-content'\n        AND claim.record_key = OLD.source_job_id\n        AND job.terminal_at IS NOT NULL\n        AND job.terminal_at <= run.cutoff_at\n        AND OLD.created_at <= run.cutoff_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review suggestion revisions are immutable');\n    END"
     },
     {
       "type": "trigger",
@@ -774,7 +789,7 @@
     {
       "type": "trigger",
       "name": "agent_thread_events_no_delete",
-      "sql": "CREATE TRIGGER agent_thread_events_no_delete\n    BEFORE DELETE ON agent_thread_events\n    BEGIN\n      SELECT RAISE(ABORT, 'agent thread events are immutable');\n    END"
+      "sql": "CREATE TRIGGER agent_thread_events_no_delete\n    BEFORE DELETE ON agent_thread_events\n    WHEN NOT EXISTS (\n      SELECT 1 FROM retention_cleanup_claims claim\n      JOIN retention_cleanup_runs run\n        ON run.workspace_id = claim.workspace_id\n        AND run.run_id = claim.run_id\n        AND run.retention_class = claim.retention_class\n      JOIN agent_jobs job\n        ON job.workspace_id = OLD.workspace_id\n        AND job.job_id = OLD.job_id\n      WHERE claim.workspace_id = OLD.workspace_id\n        AND claim.retention_class = 'agent-content'\n        AND claim.record_key = OLD.job_id\n        AND job.terminal_at IS NOT NULL\n        AND job.terminal_at <= run.cutoff_at\n        AND OLD.occurred_at <= run.cutoff_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'agent thread events are immutable');\n    END"
     },
     {
       "type": "trigger",
@@ -899,7 +914,7 @@
     {
       "type": "trigger",
       "name": "evidence_items_no_delete",
-      "sql": "CREATE TRIGGER evidence_items_no_delete\n    BEFORE DELETE ON evidence_items\n    BEGIN\n      SELECT RAISE(ABORT, 'evidence items are immutable');\n    END"
+      "sql": "CREATE TRIGGER evidence_items_no_delete\n    BEFORE DELETE ON evidence_items\n    WHEN NOT EXISTS (\n      SELECT 1 FROM retention_cleanup_claims claim\n      JOIN retention_cleanup_runs run\n        ON run.workspace_id = claim.workspace_id\n        AND run.run_id = claim.run_id\n        AND run.retention_class = claim.retention_class\n      WHERE claim.workspace_id = OLD.workspace_id\n        AND claim.retention_class = 'evidence'\n        AND claim.record_key = OLD.evidence_id\n        AND OLD.legal_hold = 0\n        AND OLD.retain_until IS NOT NULL\n        AND OLD.retain_until <= run.cutoff_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'evidence items are immutable');\n    END"
     },
     {
       "type": "trigger",
@@ -1500,6 +1515,16 @@
       "type": "trigger",
       "name": "release_targets_no_delete",
       "sql": "CREATE TRIGGER release_targets_no_delete\n    BEFORE DELETE ON release_targets\n    BEGIN\n      SELECT RAISE(ABORT, 'release target identity is durable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "retention_cleanup_runs_no_delete",
+      "sql": "CREATE TRIGGER retention_cleanup_runs_no_delete\n    BEFORE DELETE ON retention_cleanup_runs\n    BEGIN\n      SELECT RAISE(ABORT, 'retention cleanup runs are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "retention_cleanup_runs_no_update",
+      "sql": "CREATE TRIGGER retention_cleanup_runs_no_update\n    BEFORE UPDATE ON retention_cleanup_runs\n    BEGIN\n      SELECT RAISE(ABORT, 'retention cleanup runs are immutable');\n    END"
     },
     {
       "type": "trigger",

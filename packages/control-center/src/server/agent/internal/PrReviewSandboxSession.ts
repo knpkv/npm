@@ -18,6 +18,7 @@ import { PR_REVIEW_AUTHORITY_CONFIG_PATTERN } from "./PrReviewWorkspaceProtocol.
 
 const DEFAULT_SBX_EXECUTABLE = "sbx"
 const SANDBOX_PREFIX = "cc-pr-review-"
+const SANDBOX_JOB_TOKEN_LENGTH = 4
 const CONTROL_TIMEOUT = Duration.seconds(30)
 const SOURCE_HANDOFF_TIMEOUT = Duration.minutes(5)
 const DEFAULT_COMMAND_TIMEOUT_MILLIS = 120_000
@@ -300,7 +301,7 @@ export class PrReviewSandboxSessions extends Context.Service<
       Failure | PrReviewSandboxSessionError,
       Requirements
     >
-    readonly reconcile: () => Effect.Effect<
+    readonly reconcile: (workspaceId: WorkspaceId) => Effect.Effect<
       PrReviewSandboxReconciliation,
       PrReviewSandboxSessionError
     >
@@ -402,7 +403,15 @@ const decodeUtf8 = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 
-const sandboxName = (jobId: JobId, attemptId: string): string => `${SANDBOX_PREFIX}${jobId}-${attemptId}`
+const compactUuid = (identifier: WorkspaceId | JobId): string => identifier.replaceAll("-", "")
+
+const workspaceSandboxPrefix = (workspaceId: WorkspaceId): string => `${SANDBOX_PREFIX}${compactUuid(workspaceId)}-`
+
+const sandboxName = (
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptId: string
+): string => `${workspaceSandboxPrefix(workspaceId)}${compactUuid(jobId).slice(-SANDBOX_JOB_TOKEN_LENGTH)}-${attemptId}`
 
 const visiblePrefix = (bytes: Uint8Array): Uint8Array => {
   let end = Math.min(bytes.byteLength, MAXIMUM_VISIBLE_OUTPUT_BYTES)
@@ -519,7 +528,7 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     const request = yield* Schema.decodeUnknownEffect(SessionRequest)(unknownRequest).pipe(
       Effect.mapError(() => sessionError("invalid-request"))
     )
-    const name = sandboxName(request.jobId, request.attemptId)
+    const name = sandboxName(request.workspaceId, request.jobId, request.attemptId)
     const nativeCodex = request.reviewExecution === "native-codex"
     const nativeClaude = request.reviewExecution === "native-claude"
     const nativeAgent = nativeCodex || nativeClaude
@@ -926,12 +935,15 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
     )
   })
 
-  const reconcile = Effect.fn("PrReviewSandboxSessions.reconcile")(function*() {
+  const reconcile = Effect.fn("PrReviewSandboxSessions.reconcile")(function*(
+    workspaceId: WorkspaceId
+  ) {
     const listed = yield* runControl(["ls", "--quiet"])
     if (!successful(listed)) return yield* sessionError("sandbox-unavailable")
     const text = yield* decodeUtf8(listed.stdout, "sandbox-unavailable")
+    const ownedPrefix = workspaceSandboxPrefix(workspaceId)
     const names = text.split("\n")
-      .filter((name) => name.startsWith(SANDBOX_PREFIX))
+      .filter((name) => name.startsWith(ownedPrefix))
       .sort()
     for (const name of names) {
       yield* forceRemoveSandbox(name)

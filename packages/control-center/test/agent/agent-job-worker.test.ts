@@ -39,6 +39,11 @@ import {
   MAXIMUM_AGENT_ATTEMPT_OUTPUT_BYTES
 } from "../../src/server/persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../../src/server/persistence/repositories/agentJobRepository.js"
+import {
+  ReleaseAgentWorkerStartup,
+  releaseAgentWorkerStartupLayer
+} from "../../src/server/runtime/ReleaseAgentWorkerStartup.js"
+import { ServerLifecycle } from "../../src/server/runtime/ServerLifecycle.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
@@ -994,6 +999,65 @@ describe("agent job worker", () => {
         assert.deepStrictEqual(result, { _tag: "completed", jobId: JOB_ID, outcome: "cancelled" })
         assert.strictEqual(runtimeCalls, 0)
         assert.strictEqual((yield* replay).events.at(-1)?.eventKind, "job-completed")
+      })
+    )
+  })
+
+  it.effect("reclaims an expired release-chat lease through supervised startup", () => {
+    let runtimeCalls = 0
+    const runtime = makeAgentRuntime({
+      run: () => {
+        runtimeCalls += 1
+        return Stream.fromIterable(completedEvents)
+      }
+    })
+    return withWorker(
+      runtime,
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        const worker = yield* AgentJobWorker
+        const lifecycle = yield* ServerLifecycle.make
+        const completed = yield* Deferred.make<void>()
+        yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
+        yield* setupFoundation
+        yield* enqueue()
+        const original = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["release-chat"],
+          leaseOwner: AgentLeaseOwner.make("abandoned-release-worker"),
+          leaseToken: Schema.decodeSync(AgentLeaseToken)("9".repeat(64)),
+          claimedAt: STARTED_AT,
+          leaseExpiresAt: DateTime.addDuration(STARTED_AT, "1 minute")
+        })
+        assert.isTrue(Option.isSome(original))
+        yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.addDuration(STARTED_AT, "2 minutes")))
+        const observedWorker = AgentJobWorker.of({
+          runOnce: (workspaceId) =>
+            worker.runOnce(workspaceId).pipe(
+              Effect.tap(() => Deferred.succeed(completed, undefined))
+            )
+        })
+        const startup = releaseAgentWorkerStartupLayer({
+          workspaceId: WORKSPACE_ID,
+          idlePollInterval: "1 hour"
+        }).pipe(
+          Layer.provide(Layer.mergeAll(
+            Layer.succeed(AgentJobWorker, observedWorker),
+            Layer.succeed(ServerLifecycle, lifecycle)
+          ))
+        )
+
+        const events = yield* Effect.gen(function*() {
+          yield* ReleaseAgentWorkerStartup
+          yield* Deferred.await(completed)
+          const recovered = (yield* replay).events
+          yield* lifecycle.beginDrain
+          yield* lifecycle.awaitWorkDrained
+          return recovered
+        }).pipe(Effect.provide(startup))
+
+        assert.strictEqual(runtimeCalls, 1)
+        assert.strictEqual(events.at(-1)?.eventKind, "job-completed")
       })
     )
   })

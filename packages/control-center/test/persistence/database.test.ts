@@ -10,6 +10,7 @@ import {
   Database,
   databaseLayer,
   sandboxSchemaTransaction,
+  verifyDatabaseIntegrity,
   withSchemaWriteBarrier
 } from "../../src/server/persistence/Database.js"
 import { decodePersistenceConfig, PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
@@ -90,6 +91,73 @@ describe("Database", () => {
         assert.strictEqual(reopened.failure._tag, "DatabaseInitializationError")
         if (reopened.failure._tag === "DatabaseInitializationError") {
           assert.strictEqual(reopened.failure.operation, "verify-schema")
+        }
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects corrupt SQLite page ownership before exposing persistence", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+      const integrity = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* verifyDatabaseIntegrity(database.sql)
+          const sql = database.sql
+          yield* sql`PRAGMA writable_schema = ON`
+          yield* sql`INSERT INTO sqlite_schema (
+              type, name, tbl_name, rootpage, sql
+            ) VALUES (
+              'table', 'corrupt_page_owner', 'corrupt_page_owner', 2147483647,
+              'CREATE TABLE corrupt_page_owner (value TEXT)'
+            )`
+          yield* sql`PRAGMA writable_schema = RESET`
+          return yield* verifyDatabaseIntegrity(database.sql).pipe(Effect.result)
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+      assert.isTrue(Result.isFailure(integrity))
+      if (Result.isFailure(integrity)) {
+        assert.strictEqual(integrity.failure.operation, "verify-integrity")
+      }
+
+      const startup = yield* Effect.scoped(
+        Layer.build(databaseLayer(config)).pipe(Effect.result)
+      )
+      assert.isTrue(Result.isFailure(startup))
+      if (Result.isFailure(startup)) {
+        assert.strictEqual(startup.failure._tag, "DatabaseInitializationError")
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects orphaned rows before exposing persistence", () =>
+    Effect.gen(function*() {
+      const config = yield* testConfig.pipe(Effect.flatMap(decodePersistenceConfig))
+      const integrity = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const database = yield* Database
+          yield* database.sql`PRAGMA foreign_keys = OFF`
+          yield* database.sql`INSERT INTO domain_event_streams (
+            workspace_id, next_cursor, pruned_through_cursor, updated_at
+          ) VALUES (
+            '01890f6f-6d6a-7cc0-98d2-000000000098', 1, 0,
+            '2026-07-30T12:00:00.000Z'
+          )`
+          yield* database.sql`PRAGMA foreign_keys = ON`
+          return yield* verifyDatabaseIntegrity(database.sql).pipe(Effect.result)
+        }).pipe(Effect.provide(databaseLayer(config)))
+      )
+      assert.isTrue(Result.isFailure(integrity))
+      if (Result.isFailure(integrity)) {
+        assert.strictEqual(integrity.failure.operation, "verify-integrity")
+      }
+
+      const startup = yield* Effect.scoped(
+        Layer.build(databaseLayer(config)).pipe(Effect.result)
+      )
+      assert.isTrue(Result.isFailure(startup))
+      if (Result.isFailure(startup)) {
+        assert.strictEqual(startup.failure._tag, "DatabaseInitializationError")
+        if (startup.failure._tag === "DatabaseInitializationError") {
+          assert.strictEqual(startup.failure.operation, "verify-integrity")
         }
       }
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))

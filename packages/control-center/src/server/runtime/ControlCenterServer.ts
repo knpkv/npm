@@ -9,7 +9,11 @@ import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpRouter from "effect/unstable/http/HttpRouter"
 import type { ServeError } from "effect/unstable/http/HttpServerError"
 
-import { type AgentJobWorkerOptions, prReviewAgentJobWorkerLayer } from "../agent/AgentJobWorker.js"
+import {
+  agentJobWorkerLayer,
+  type AgentJobWorkerOptions,
+  prReviewAgentJobWorkerLayer
+} from "../agent/AgentJobWorker.js"
 import { agentProviderRuntimeRegistryLayer } from "../agent/AgentRuntimeRegistry.js"
 import { AgentJobWorkspacePolicy } from "../agent/internal/AgentJobWorkspacePolicy.js"
 import {
@@ -56,7 +60,8 @@ import {
   portfolioSnapshotsLayer,
   pullRequestReviewsLayer,
   relationshipRepairProposalsLayer,
-  releaseAgentJobsLayer,
+  releaseAgentJobsLayerForWorkerWorkspace,
+  releaseAgentJobsUnavailableLayer,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
@@ -79,7 +84,7 @@ import {
   persistenceLayerFromDatabase
 } from "../persistence/Persistence.js"
 import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
-import type { AgentLeaseOwner } from "../persistence/repositories/agentJobModels.js"
+import { AgentLeaseOwner } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
@@ -116,12 +121,14 @@ import {
   nodeSecretPlatformLayer
 } from "./NodeTransport.js"
 import { prReviewWorkerStartupLayer, type PrReviewWorkerStartupOptions } from "./PrReviewWorkerStartup.js"
+import { releaseAgentWorkerStartupLayer } from "./ReleaseAgentWorkerStartup.js"
 import {
   type ReleaseSynchronizationStartupError,
   releaseSynchronizationStartupLayer,
   type ReleaseSynchronizationStartupOptions
 } from "./ReleaseSynchronizationStartup.js"
 import { requestUrlBoundaryLayer } from "./RequestUrlBoundary.js"
+import { retentionStartupLayer } from "./RetentionStartup.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 type ControlCenterCoreApplicationServices =
@@ -152,8 +159,6 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly leaseDuration?: Duration.Input
   readonly idlePollInterval?: Duration.Input
   readonly failurePollInterval?: Duration.Input
-  /** Deterministic composition-test hook; production omits it. @internal */
-  readonly runOnceBeforeSupervision?: boolean
   readonly maximumSandboxDurationMillis?: number
   readonly maximumSourceDuration?: Duration.Input
   /** Deterministic composition seam; production omits it. @internal */
@@ -323,6 +328,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer
+  const bootstrap = controlCenterBootstrapLayer(options.bootstrap ?? null)
   const databaseDrain = databaseDrainLayer.pipe(Layer.provide(database))
   const applicationServices = selectedApplicationServices.pipe(
     Layer.provide(persistence),
@@ -381,10 +387,22 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           })
       }
   )
-  const releaseAgentJobs = releaseAgentJobsLayer.pipe(
-    Layer.provide(providerRegistry),
+  const releaseAgentWorkerWorkspaceId = options.releaseAgent === undefined ||
+      options.releaseAgent === null
+    ? null
+    : options.releaseAgent.workerWorkspaceId ??
+      options.bootstrap?.workspaceId ??
+      null
+  const agentJobRepository = AgentJobRepository.layer.pipe(Layer.provide(database))
+  const agentJobWorkspacePolicy = AgentJobWorkspacePolicy.live.pipe(
     Layer.provide(persistence)
   )
+  const releaseAgentJobs = (releaseAgentWorkerWorkspaceId === null
+    ? releaseAgentJobsUnavailableLayer
+    : releaseAgentJobsLayerForWorkerWorkspace(releaseAgentWorkerWorkspaceId)).pipe(
+      Layer.provide(providerRegistry),
+      Layer.provide(persistence)
+    )
   const governedActionConfiguration = options.governedActionExecution ?? null
   const governedActionExecutionReady = governedActionConfiguration !== null &&
     (governedActionConfiguration.pluginRuntimes !== undefined || firstPartyPluginRuntime)
@@ -453,6 +471,27 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provide(applicationServices)
   )
+  const releaseAgentWorker = releaseAgentWorkerWorkspaceId === null
+    ? Layer.empty
+    : releaseAgentWorkerStartupLayer({
+      workspaceId: releaseAgentWorkerWorkspaceId
+    }).pipe(
+      Layer.provide(
+        agentJobWorkerLayer({
+          leaseOwner: AgentLeaseOwner.make("control-center-release-agent-worker"),
+          leaseDuration: "5 minutes"
+        }).pipe(
+          Layer.provide(providerRegistry),
+          Layer.provide(agentJobRepository),
+          Layer.provide(agentJobWorkspacePolicy)
+        )
+      )
+    )
+  const retention = options.bootstrap === undefined || options.bootstrap === null
+    ? Layer.empty
+    : retentionStartupLayer({
+      workspaceId: options.bootstrap.workspaceId
+    }).pipe(Layer.provide(bootstrap))
   const liveEventRuntime = liveEventsLayer.pipe(
     Layer.provide(applicationServices),
     Layer.provide(persistence),
@@ -489,7 +528,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
           Layer.provide(
             prReviewWorkspaceLeaseGuardLayer(configured.workspaceId).pipe(
-              Layer.provide(AgentJobRepository.layer.pipe(Layer.provide(database)))
+              Layer.provide(agentJobRepository)
             )
           )
         )
@@ -503,7 +542,6 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
             : { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
         }).pipe(Layer.provide(sourceWorkspace))
         : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
-      const repository = AgentJobRepository.layer.pipe(Layer.provide(database))
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,
         leaseDuration: configured.leaseDuration ?? "5 minutes"
@@ -511,10 +549,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       const worker = prReviewAgentJobWorkerLayer(workerOptions).pipe(
         Layer.provide(providerRegistry),
         Layer.provide(sandboxes),
-        Layer.provide(repository),
-        Layer.provide(
-          AgentJobWorkspacePolicy.live.pipe(Layer.provide(persistence))
-        )
+        Layer.provide(agentJobRepository),
+        Layer.provide(agentJobWorkspacePolicy)
       )
       return prReviewWorkerStartupLayer({
         workspaceId: configured.workspaceId,
@@ -523,13 +559,12 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           : { idlePollInterval: configured.idlePollInterval }),
         ...(configured.failurePollInterval === undefined
           ? {}
-          : { failurePollInterval: configured.failurePollInterval }),
-        ...(configured.runOnceBeforeSupervision === undefined
-          ? {}
-          : { runOnceBeforeSupervision: configured.runOnceBeforeSupervision })
+          : { failurePollInterval: configured.failurePollInterval })
       }).pipe(
         Layer.provide(worker),
-        Layer.provide(sandboxes)
+        Layer.provide(sandboxes),
+        Layer.provide(persistence),
+        Layer.provide(bootstrap)
       )
     })()
   const runtimeServices = Layer.mergeAll(
@@ -553,9 +588,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     requestUrlBoundaryLayer,
     requestBoundaryLayer,
     governedActionExecution,
+    releaseAgentWorker,
+    retention,
     prReviewWorker,
     releaseSynchronizationStartupLayer(options.releaseSynchronization ?? null).pipe(
-      Layer.provideMerge(controlCenterBootstrapLayer(options.bootstrap ?? null))
+      Layer.provideMerge(bootstrap)
     )
   )
   return {

@@ -36,6 +36,7 @@ import * as Effect from "effect/Effect"
 import * as Encoding from "effect/Encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -58,6 +59,7 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable
 } from "../../api/ApplicationServices.js"
+import { ServerLifecycle } from "../../runtime/ServerLifecycle.js"
 import { CONTROL_CENTER_AUTH_STORE_NAME } from "./AtlassianProfiles.js"
 
 const ATLASSIAN_CALLBACK_PATH = "/services/oauth/atlassian/callback"
@@ -444,6 +446,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const httpClient = yield* HttpClient.HttpClient
   const path = yield* Path.Path
   const scope = yield* Scope.Scope
+  const lifecycle = yield* Effect.serviceOption(ServerLifecycle)
   const grants = yield* Ref.make<PendingGrants>(new Map())
   const profileStoreLock = yield* Semaphore.make(1)
   const localStorageLayer = Layer.mergeAll(
@@ -455,22 +458,34 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
   const scheduleExpiry = (
     grantId: AtlassianOAuthGrantId,
     createdAtMilliseconds: number
-  ): Effect.Effect<void> =>
-    Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(
-      Effect.andThen(
-        Ref.update(grants, (current) => {
-          const grant = current.get(grantId)
-          if (grant?.createdAtMilliseconds === createdAtMilliseconds) {
-            const next = new Map(current)
-            next.delete(grantId)
-            return next
-          }
-          return current
-        })
+  ): Effect.Effect<void> => {
+    const expire = Effect.sleep(GRANT_TTL_MILLISECONDS).pipe(Effect.as(true))
+    const scheduled = Option.isSome(lifecycle)
+      ? lifecycle.value.runBackground(
+        Effect.raceFirst(
+          expire,
+          lifecycle.value.awaitDrain.pipe(Effect.as(false))
+        )
+      ).pipe(Effect.catchTag("ServerDraining", () => Effect.succeed(false)))
+      : expire
+    return scheduled.pipe(
+      Effect.flatMap((didExpire) =>
+        didExpire
+          ? Ref.update(grants, (current) => {
+            const grant = current.get(grantId)
+            if (grant?.createdAtMilliseconds === createdAtMilliseconds) {
+              const next = new Map(current)
+              next.delete(grantId)
+              return next
+            }
+            return current
+          })
+          : Effect.void
       ),
       Effect.forkIn(scope),
       Effect.asVoid
     )
+  }
 
   const start: AtlassianOAuthGrantOperations["start"] = Effect.fn("AtlassianOAuthGrants.start")(function*(
     owner,

@@ -14,3 +14,8 @@ export const JournalModePragmaRow = Schema.Struct({
 export const BusyTimeoutPragmaRow = Schema.Struct({
   timeout: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 })
+
+/** Decoded SQLite database-integrity diagnostic. */
+export const IntegrityCheckPragmaRow = Schema.Struct({
+  integrityCheck: Schema.String
+})
