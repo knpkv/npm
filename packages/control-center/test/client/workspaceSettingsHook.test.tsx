@@ -171,33 +171,36 @@ describe("useWorkspaceSettings", () => {
     const unsubscribe = subscribeWorkspaceSettings(({ revision }) => {
       publishedRevisions.push(revision)
     })
-    const load = vi
-      .fn()
-      .mockResolvedValueOnce(initial)
-      .mockRejectedValueOnce(new Error("latest unavailable"))
-      .mockResolvedValueOnce(saved)
-    const transport = {
-      load,
-      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
-      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
-    } satisfies WorkspaceSettingsTransport
-    const host = document.createElement("div")
-    document.body.append(host)
-    mountedRoot = createRoot(host)
-    await act(async () => mountedRoot?.render(<Harness transport={transport} />))
-    await act(async () => Promise.resolve())
+    try {
+      const load = vi
+        .fn()
+        .mockResolvedValueOnce(initial)
+        .mockRejectedValueOnce(new Error("latest unavailable"))
+        .mockResolvedValueOnce(saved)
+      const transport = {
+        load,
+        makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+        update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+      } satisfies WorkspaceSettingsTransport
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+      await act(async () => mountedRoot?.render(<Harness transport={transport} />))
+      await act(async () => Promise.resolve())
 
-    await click(host.querySelectorAll("button").item(0))
-    await click(host.querySelectorAll("button").item(1))
-    await act(async () => Promise.resolve())
+      await click(host.querySelectorAll("button").item(0))
+      await click(host.querySelectorAll("button").item(1))
+      await act(async () => Promise.resolve())
 
-    expect(host.textContent).toContain("conflict-recovery-failed:compact")
-    expect(publishedRevisions).toEqual([1])
-    await click(host.querySelector("button")!)
-    await act(async () => Promise.resolve())
-    expect(host.textContent).toContain("conflict:compact")
-    expect(publishedRevisions).toEqual([1, 2])
-    unsubscribe()
+      expect(host.textContent).toContain("conflict-recovery-failed:compact")
+      expect(publishedRevisions).toEqual([1])
+      await click(host.querySelector("button")!)
+      await act(async () => Promise.resolve())
+      expect(host.textContent).toContain("conflict:compact")
+      expect(publishedRevisions).toEqual([1, 2])
+    } finally {
+      unsubscribe()
+    }
   })
 
   it("expires the session when the conflict recovery load is unauthorized", async () => {

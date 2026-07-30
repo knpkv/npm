@@ -16,7 +16,7 @@ import {
   PluginTimeoutFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
-import { withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
+import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import {
   decodeJiraProviderPathIdentifier,
   JiraProviderPathIdentifier,
@@ -31,11 +31,6 @@ interface JiraGovernedActionConfiguration {
 const JiraProjectId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraIssueKey = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
 const JiraProviderIdentity = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-const JiraDescriptionDocument = Schema.Struct({
-  type: Schema.Literal("doc"),
-  version: Schema.Literal(1),
-  content: Schema.Array(Schema.Json)
-})
 const ReplyCommentRequestPayload = Schema.Struct({
   parentCommentId: JiraProviderPathIdentifier,
   body: JiraDescriptionDocument

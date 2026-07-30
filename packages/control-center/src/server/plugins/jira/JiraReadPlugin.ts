@@ -35,7 +35,7 @@ import type { PluginConnectionV1 } from "../PluginConnection.js"
 import { buildPluginDefinitionLayer, definePluginV1, type PluginDefinitionServices } from "../PluginDefinition.js"
 import type { PluginDefinitionV1 } from "../PluginDefinitionV1.js"
 import type { AuthorizedPluginExecutorV1 } from "../PluginExecutor.js"
-import { withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
+import { JiraDescriptionDocument, withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import { makeJiraGovernedActions } from "./JiraGovernedActions.js"
 import { type JiraFetchedCollection, normalizeJiraIssue, normalizeJiraIssueEvents } from "./JiraIssueNormalization.js"
 import {
@@ -276,11 +276,6 @@ const unsupported = (
     diagnosticCode: "jira-capability-unnegotiated"
   })
 
-const JiraDescriptionDocument = Schema.Struct({
-  type: Schema.Literal("doc"),
-  version: Schema.Literal(1),
-  content: Schema.Array(Schema.Json)
-})
 const AddCommentRequestPayload = Schema.Struct({
   body: JiraDescriptionDocument
 })
