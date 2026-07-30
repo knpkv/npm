@@ -205,11 +205,13 @@ When writing Effect code:
   correct — two things still need judgment. With `extendEnv: false`, `env` must
   itself carry everything the child needs, including `PATH`. With
   `extendEnv: true`, inherited variables that outrank the ones you pass must be
-  cleared: a spawn scoped to an explicit AWS profile has to drop ambient
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and
-  `AWS_REGION`, since the AWS credential chain resolves environment variables
-  above profile configuration. Use `ChildEnv.profileScopedEnv` in the
-  `codecommit` packages rather than rebuilding the exclusion list.
+  cleared: a spawn scoped to an explicit AWS profile has to drop every ambient
+  environment credential provider, which means the static keys _and_ the
+  web-identity variables, plus `AWS_REGION`, since the AWS credential chain
+  resolves environment variables above profile configuration. Use
+  `ChildEnv.profileScopedEnv` in the `codecommit` packages rather than
+  rebuilding the exclusion list; it documents which variables are deliberately
+  left alone and why.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

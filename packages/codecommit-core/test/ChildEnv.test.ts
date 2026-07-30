@@ -38,7 +38,7 @@ const childEnvironment = (env: Record<string, string | undefined>) =>
   })
 
 describe("ChildEnv.profileScopedEnv", () => {
-  it.effect("drops ambient AWS credentials that would outrank the requested profile", () =>
+  it.effect("drops ambient static credentials that would outrank the requested profile", () =>
     Effect.gen(function*() {
       vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIAAMBIENTEXAMPLE")
       vi.stubEnv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
@@ -59,6 +59,42 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.strictEqual(env.AWS_PROFILE, "target-profile")
       assert.strictEqual(env.AWS_DEFAULT_REGION, "eu-central-1")
+
+      vi.unstubAllEnvs()
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("drops the ambient web-identity provider, not just static credentials", () =>
+    Effect.gen(function*() {
+      // AWS_ROLE_ARN plus AWS_WEB_IDENTITY_TOKEN_FILE activate a second
+      // environment credential provider that also outranks the profile.
+      vi.stubEnv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/ambient-web-identity")
+      vi.stubEnv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/ambient-token")
+      vi.stubEnv("AWS_ROLE_SESSION_NAME", "ambient-session")
+
+      const env = yield* childEnvironment(
+        ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile", AWS_DEFAULT_REGION: "eu-central-1" })
+      )
+
+      assert.isFalse("AWS_ROLE_ARN" in env)
+      assert.isFalse("AWS_WEB_IDENTITY_TOKEN_FILE" in env)
+      assert.isFalse("AWS_ROLE_SESSION_NAME" in env)
+
+      assert.strictEqual(env.AWS_PROFILE, "target-profile")
+
+      vi.unstubAllEnvs()
+    }).pipe(Effect.provide(NodeServices.layer)))
+
+  it.effect("keeps the config-file locators the parent resolved the profile against", () =>
+    Effect.gen(function*() {
+      // These select *which* file the profile is read from and resolve below the
+      // environment tier, so clearing them would break custom config locations.
+      vi.stubEnv("AWS_CONFIG_FILE", "/custom/config")
+      vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", "/custom/credentials")
+
+      const env = yield* childEnvironment(ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" }))
+
+      assert.strictEqual(env.AWS_CONFIG_FILE, "/custom/config")
+      assert.strictEqual(env.AWS_SHARED_CREDENTIALS_FILE, "/custom/credentials")
 
       vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))

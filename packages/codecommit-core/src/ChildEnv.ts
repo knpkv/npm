@@ -20,8 +20,22 @@
 /**
  * Credential and region variables that outrank profile configuration.
  *
- * `AWS_SECURITY_TOKEN` is the legacy alias for `AWS_SESSION_TOKEN` and is still
- * honoured by the CLI, so it has to be cleared alongside it.
+ * Two environment credential providers sit above the profile in the chain, so
+ * both have to be cleared:
+ *
+ * - Static credentials, including `AWS_SECURITY_TOKEN` — the legacy alias for
+ *   `AWS_SESSION_TOKEN`, still honoured by the CLI.
+ * - Web identity, which activates from `AWS_ROLE_ARN` plus
+ *   `AWS_WEB_IDENTITY_TOKEN_FILE` and would otherwise assume an ambient role.
+ *
+ * Deliberately *not* cleared:
+ *
+ * - `AWS_CONTAINER_CREDENTIALS_*` and IMDS resolve *below* the shared config
+ *   file, so they cannot outrank an explicit profile.
+ * - `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` select which file the
+ *   profile is read from. The parent resolved the profile name against those
+ *   same paths, so clearing them would point the child at a different file and
+ *   break legitimate custom config locations.
  */
 const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_ACCESS_KEY_ID",
@@ -29,6 +43,9 @@ const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_SESSION_TOKEN",
   "AWS_SECURITY_TOKEN",
   "AWS_CREDENTIAL_EXPIRATION",
+  "AWS_ROLE_ARN",
+  "AWS_WEB_IDENTITY_TOKEN_FILE",
+  "AWS_ROLE_SESSION_NAME",
   "AWS_REGION"
 ]
 
