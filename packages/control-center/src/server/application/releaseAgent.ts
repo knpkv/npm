@@ -127,8 +127,6 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
     runTurn: Effect.fn("ReleaseAgentTurns.runTurn")(function*(input) {
       const provider = resolveProvider(options, input.provider)
       if (provider === undefined) return yield* unavailable()
-      const settings = yield* workspaceSettings.read(input.workspaceId)
-      yield* assertAgentProviderAllowed(settings.settings.agent, provider)
 
       const snapshot = yield* portfolio.snapshot(input.workspaceId)
       const release = snapshot.releases.find(({ releaseId }) => releaseId === input.releaseId)
@@ -163,9 +161,11 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
           })),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, processSpawner)
         )
-      const response = yield* processAdmission.withPermits(1)(
-        modelTurn.pipe(Effect.mapError(() => unavailable()))
-      )
+      const response = yield* processAdmission.withPermits(1)(Effect.gen(function*() {
+        const settings = yield* workspaceSettings.read(input.workspaceId)
+        yield* assertAgentProviderAllowed(settings.settings.agent, provider)
+        return yield* modelTurn.pipe(Effect.mapError(() => unavailable()))
+      }))
 
       const reply = response.text.trim()
       if (reply.length === 0 || reply.length > MAXIMUM_REPLY_CHARACTERS) return yield* unavailable()
