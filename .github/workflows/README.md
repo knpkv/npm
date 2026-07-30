@@ -218,6 +218,24 @@ concurrency:
 
 This prevents resource waste and speeds up CI feedback.
 
+---
+
+### Control Center Live Integration (`control-center-live-integration.yml`)
+
+**Purpose**: Prove the real Control Center owner API and production provider runtimes against
+controlled read-only CodeCommit, CodePipeline, Jira, and Confluence fixtures.
+
+The workflow runs weekly and by manual dispatch in the protected
+`control-center-live-integration` environment. Its single 15-minute job receives `contents: read`
+and `id-token: write`; repository-wide permissions remain empty. AWS credentials are temporary and
+come from `aws-actions/configure-aws-credentials` using
+`CONTROL_CENTER_TEST_AWS_ROLE_ARN`. Long-lived AWS access-key secrets are forbidden.
+
+Stable provider locators are environment variables, while Jira and Confluence email/API-token pairs
+are environment secrets. The test uploads no artifacts, prints no raw provider payloads, and fails
+before allocating its scoped temporary server when configuration is incomplete. Local invocation and
+the complete variable list are documented in `packages/control-center/README.md`.
+
 ## Dependency Install Protection
 
 Dependency installs run through Socket Firewall in `.github/actions/setup`.

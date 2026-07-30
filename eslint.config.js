@@ -193,6 +193,12 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/control-center/test/integration/live*.test.ts"],
+    rules: {
+      "local-rules/no-echoing-secret-assertions": "error"
+    }
+  },
+  {
     files: ["packages/control-center/e2e/**/*.spec.ts"],
     rules: {
       "local-rules/require-playwright-clock-before-navigation": "error"

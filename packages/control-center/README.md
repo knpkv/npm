@@ -472,6 +472,35 @@ The shared `@knpkv/control-center/api` entry exports the versioned `HttpApi` con
 
 An owner can run a live connection test from the Services page. The CSRF-protected endpoint acquires the workspace-scoped provider runtime, calls its health and discovery operations, and returns only a normalized provider identity, checked time, latency, and safe failure classification. Credentials, headers, provider response bodies, and executor authority never enter the response. The ordinary `start` command installs the first-party runtime map; embedded server compositions may still inject `pluginConnections` for tests or specialized hosting.
 
+The opt-in four-provider acceptance command is `pnpm --filter @knpkv/control-center test:integration:live`.
+It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixture configuration:
+
+- AWS: `CONTROL_CENTER_TEST_AWS_REGION`, `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
+  `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
+  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC.
+- Atlassian locators: `CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL`,
+  `CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID`, `CONTROL_CENTER_TEST_JIRA_PROJECT_ID`,
+  `CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID`, and `CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID`.
+  The workflow injects these non-secret fixture coordinates as environment variables. Once the
+  owner creates a connection, its safe adapter settings—including the site URL and selected
+  project, space, or page locator—are persisted in SQL and may cross the authenticated owner
+  configuration boundary. They never enter public health responses or workflow artifacts.
+- Atlassian credentials: `JIRA_EMAIL`, `JIRA_API_KEY`, `CONFLUENCE_EMAIL`, and
+  `CONFLUENCE_API_KEY`. They enter only the owner setup request, become machine-local SecretStore
+  references, and are neither written to SQL nor emitted in results or artifacts.
+
+The command fails before allocating a server when any value is absent or invalid. It starts a real
+server on an ephemeral loopback port with a scoped temporary data root, pairs the bootstrap owner
+through the public API, creates and retests all four production connections, performs one bounded
+sync per provider, and verifies account/resource bindings, canonical Items, Timeline activity, and
+one exact CodeCommit diff inventory. A successful manual run reports only an allowlisted summary of
+the normalized provider identities and account/resource bindings. Scope finalization closes the
+server and removes the database, blob, static, and secret roots after success, failure, timeout, or
+interruption. The scheduled/manual workflow uses the protected `control-center-live-integration`
+environment; ordinary pull-request tests never select this entry. External read-only AWS role and
+fixture provisioning remains tracked by issue #241, while interactive Atlassian OAuth consent
+remains tracked by #242.
+
 Fresh workspaces also see the fixed CodeCommit, CodePipeline, Jira, Confluence, and Clockify catalog. The safe provider identities are visible before pairing; choosing one carries that selection through pairing and opens its setup form immediately. `GET /api/v1/plugins` retains its original connection-summary array for existing v1 clients; after pairing, the Services page reads the additive `{ catalog, connections }` response from `GET /api/v1/plugins/overview`. A workspace owner can submit one bounded CSRF-protected setup request whose browser-generated connection ID, typed adapter settings, and transport-only credential strings are validated before writes. Secret strings are converted to opaque `SecretStore` references; the canonical SQL configuration contains references only. The application creates disabled metadata, inserts configuration with expected revision zero, accepts the catalog descriptor, enables with metadata CAS, invalidates the scoped connection map, and then runs the live identity test. Provider authentication or health failure is returned as the usable test result and does not roll back the enabled connection. Failure before configuration removes newly created secrets; later setup failure retains a visible disabled draft.
 
 Configured connections can be enabled or disabled directly from Services through an owner-only, CSRF-protected transition. A changed connection invalidates only its scoped provider runtime; an idempotent transition performs no invalidation. Re-enabling immediately runs the same redacted live identity test. An empty Overview renders the complete branded first-party service launcher; choosing a service opens its setup form immediately.

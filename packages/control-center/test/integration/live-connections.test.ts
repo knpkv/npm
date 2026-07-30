@@ -1,0 +1,490 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { assert, describe, it } from "@effect/vitest"
+import * as Context from "effect/Context"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
+import * as Redacted from "effect/Redacted"
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import { createServer } from "node:net"
+
+import { makeControlCenterApiClient } from "../../src/api/client.js"
+import {
+  type CreatePluginConnectionRequest,
+  type CreatePluginConnectionValue,
+  PluginConfigurationKey
+} from "../../src/api/plugins.js"
+import { PairingCode } from "../../src/api/session.js"
+import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import { BlobRoot, LocalDatabaseUrl, type PersistenceConfig } from "../../src/server/persistence/PersistenceConfig.js"
+import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
+import { makeControlCenterServer } from "../../src/server/runtime/ControlCenterServer.js"
+import { SecretRoot } from "../../src/server/secrets/SecretStore.js"
+import { decodeBindConfig } from "../../src/server/security/BindConfig.js"
+import { type LiveConnectionConfiguration, loadLiveConnectionConfiguration } from "./liveConnectionConfiguration.js"
+import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
+
+const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-0000000000a0")
+const OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-0000000000a1")
+const CONNECTIONS = {
+  codecommit: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000a2"),
+  codepipeline: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000a3"),
+  jira: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000a4"),
+  confluence: PluginConnectionId.make("01890f6f-6d6a-7cc0-98d2-0000000000a5")
+}
+const AUTHENTICATION_REGRESSION_CONNECTION_ID = PluginConnectionId.make(
+  "01890f6f-6d6a-7cc0-98d2-0000000000a6"
+)
+const INVALID_API_TOKEN = "control-center-live-invalid-api-token"
+
+const acquireEphemeralPort = Effect.tryPromise({
+  try: () =>
+    new Promise<number>((resolve, reject) => {
+      const probe = createServer()
+      probe.once("error", reject)
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address()
+        if (address === null || typeof address === "string") {
+          probe.close()
+          reject(new Error("ephemeral listener did not expose an internet port"))
+          return
+        }
+        probe.close((error) => error === undefined ? resolve(address.port) : reject(error))
+      })
+    }),
+  catch: (cause) => new Error("could not reserve a live-integration port", { cause })
+})
+
+const text = (key: string, value: string): CreatePluginConnectionValue => ({
+  _tag: "text",
+  key: PluginConfigurationKey.make(key),
+  value
+})
+const url = (key: string, value: string): CreatePluginConnectionValue => ({
+  _tag: "url",
+  key: PluginConfigurationKey.make(key),
+  value
+})
+const integer = (key: string, value: number): CreatePluginConnectionValue => ({
+  _tag: "integer",
+  key: PluginConfigurationKey.make(key),
+  value
+})
+const secret = (key: string, value: string): CreatePluginConnectionValue => ({
+  _tag: "secret",
+  key: PluginConfigurationKey.make(key),
+  value
+})
+
+const connectionRequests = (
+  configuration: LiveConnectionConfiguration
+): ReadonlyArray<CreatePluginConnectionRequest> => [
+  {
+    pluginConnectionId: CONNECTIONS.codecommit,
+    providerId: "codecommit",
+    displayName: `Live CodeCommit · ${configuration.codeCommitRepository}`,
+    values: [
+      text("profile", "default"),
+      text("region", configuration.awsRegion),
+      text("repositoryName", configuration.codeCommitRepository)
+    ]
+  },
+  {
+    pluginConnectionId: CONNECTIONS.codepipeline,
+    providerId: "codepipeline",
+    displayName: `Live CodePipeline · ${configuration.codePipelinePipeline}`,
+    values: [
+      text("profile", "default"),
+      text("region", configuration.awsRegion),
+      text("pipelineName", configuration.codePipelinePipeline),
+      integer("maximumExecutionPages", 5),
+      integer("actionPageSize", 50),
+      integer("maximumActionPages", 3),
+      integer("maximumActionsPerExecution", 100),
+      integer("maximumLogBytes", 262_144),
+      integer("operationTimeoutMillis", 30_000)
+    ]
+  },
+  {
+    pluginConnectionId: CONNECTIONS.jira,
+    providerId: "jira",
+    displayName: `Live Jira · ${configuration.jiraProjectId}`,
+    values: [
+      url("webBaseUrl", configuration.atlassianSiteUrl),
+      text("siteId", configuration.atlassianSiteId),
+      text("projectId", configuration.jiraProjectId),
+      text("authMode", "api-token"),
+      text("email", configuration.jiraEmail),
+      secret("apiToken", Redacted.value(configuration.jiraApiKey)),
+      integer("pageSize", 50),
+      integer("maximumPages", 5),
+      integer("operationTimeoutMillis", 30_000)
+    ]
+  },
+  {
+    pluginConnectionId: CONNECTIONS.confluence,
+    providerId: "confluence",
+    displayName: `Live Confluence · ${configuration.confluenceSpaceId}`,
+    values: [
+      url("siteBaseUrl", configuration.atlassianSiteUrl),
+      text("authMode", "api-token"),
+      text("email", configuration.confluenceEmail),
+      secret("apiToken", Redacted.value(configuration.confluenceApiKey)),
+      text("siteId", configuration.atlassianSiteId),
+      text("spaceId", configuration.confluenceSpaceId),
+      text("probePageId", configuration.confluenceProbePageId)
+    ]
+  }
+]
+
+const requestHeaders = (
+  client: HttpClient.HttpClient,
+  headers: Readonly<Record<string, string>>
+) => client.pipe(HttpClient.mapRequest(HttpClientRequest.setHeaders(headers)))
+
+const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney")(function*(
+  configuration: LiveConnectionConfiguration
+) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const dataRoot = yield* fileSystem.makeTempDirectoryScoped({
+    prefix: "control-center-live-integration-"
+  })
+  yield* fileSystem.chmod(dataRoot, 0o700)
+  const staticRoot = path.join(dataRoot, "static")
+  yield* fileSystem.makeDirectory(staticRoot)
+  yield* fileSystem.writeFileString(
+    path.join(staticRoot, "index.html"),
+    "<main>Control Center live integration</main>"
+  )
+  const port = yield* acquireEphemeralPort
+  const origin = `http://127.0.0.1:${port}`
+  const persistenceConfig: PersistenceConfig = {
+    blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+    busyTimeoutMilliseconds: 5_000,
+    databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+    maxConnections: 1
+  }
+  const runtime = yield* Layer.build(makeControlCenterServer({
+    bindConfig: yield* decodeBindConfig({ port }),
+    persistenceConfig,
+    secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+    staticAssets: { root: staticRoot },
+    bootstrap: {
+      workspaceId: WORKSPACE_ID,
+      workspaceName: WorkspaceName.make("Live provider acceptance"),
+      owner: { _tag: "human", personId: OWNER_ID }
+    },
+    firstPartyPluginRuntime: true
+  }))
+  const bootstrap = Context.get(runtime, ControlCenterBootstrap)
+  if (bootstrap._tag !== "pairing-issued") {
+    return yield* Effect.die("live integration did not issue the first owner pairing code")
+  }
+
+  const pairClient = yield* makeControlCenterApiClient({
+    baseUrl: origin,
+    transformClient: (client) => requestHeaders(client, { origin })
+  })
+  const [paired, pairResponse] = yield* pairClient.session.pair({
+    payload: { pairingCode: PairingCode.make(Redacted.value(bootstrap.pairingCode)) },
+    responseMode: "decoded-and-response"
+  })
+  const sessionCookie = pairResponse.cookies.cookies.cc_session
+  if (sessionCookie === undefined) {
+    return yield* Effect.die("live integration pairing did not issue a session cookie")
+  }
+  const cookie = `cc_session=${sessionCookie.valueEncoded}`
+  const authenticatedClient = yield* makeControlCenterApiClient({
+    baseUrl: origin,
+    transformClient: (client) => requestHeaders(client, { cookie, origin })
+  })
+  const mutationClient = yield* makeControlCenterApiClient({
+    baseUrl: origin,
+    transformClient: (client) =>
+      requestHeaders(client, {
+        cookie,
+        origin,
+        "x-csrf-token": paired.csrfToken
+      })
+  })
+
+  const setupResponses = []
+  for (const request of connectionRequests(configuration)) {
+    setupResponses.push(yield* mutationClient.plugins.createConnection({ payload: request }))
+  }
+  assert.isTrue(setupResponses.every(({ test }) => test._tag === "healthy"))
+  const serializedSetup = JSON.stringify(setupResponses)
+  for (
+    const forbidden of [
+      Redacted.value(configuration.jiraApiKey),
+      Redacted.value(configuration.confluenceApiKey),
+      configuration.jiraEmail,
+      configuration.confluenceEmail
+    ]
+  ) {
+    assertSensitiveTextAbsent(serializedSetup, forbidden)
+  }
+
+  const repeatedTests = []
+  for (const pluginConnectionId of Object.values(CONNECTIONS)) {
+    repeatedTests.push(
+      yield* mutationClient.plugins.testConnection({ params: { pluginConnectionId } })
+    )
+  }
+  assert.isTrue(repeatedTests.every((result) => result._tag === "healthy"))
+  const awsIdentities = repeatedTests.filter(
+    (result) =>
+      result._tag === "healthy" &&
+      (result.providerId === "codecommit" || result.providerId === "codepipeline")
+  )
+  assert.lengthOf(awsIdentities, 2)
+  if (awsIdentities[0]?._tag === "healthy" && awsIdentities[1]?._tag === "healthy") {
+    assert.match(awsIdentities[0].identity.providerImmutableId, /^[0-9]{12}$/u)
+    assert.strictEqual(
+      awsIdentities[0].identity.providerImmutableId,
+      awsIdentities[1].identity.providerImmutableId
+    )
+  }
+
+  const synchronizations = []
+  for (const pluginConnectionId of Object.values(CONNECTIONS)) {
+    synchronizations.push(
+      yield* mutationClient.plugins.synchronizeConnection({ params: { pluginConnectionId } })
+    )
+  }
+  assert.isTrue(
+    synchronizations.every(
+      ({ pagesCommitted, result }) => result === "synchronized" && pagesCommitted >= 1
+    )
+  )
+
+  const overview = yield* authenticatedClient.plugins.overview()
+  assert.lengthOf(overview.connections, 4)
+  assert.deepStrictEqual(
+    [...new Set(overview.accounts.map(({ providerFamily }) => providerFamily))].sort(),
+    ["atlassian", "aws"]
+  )
+  assert.deepStrictEqual(
+    overview.accounts
+      .flatMap(({ resources }) => resources.map(({ providerId }) => providerId))
+      .sort(),
+    ["codecommit", "codepipeline", "confluence", "jira"]
+  )
+  assert.isTrue(
+    overview.connections.every(
+      ({ followedResourceId, providerAccountId }) => followedResourceId !== null && providerAccountId !== null
+    )
+  )
+
+  const items = yield* authenticatedClient.deliveryGraph.workspaceEntityProjections({ query: {} })
+  assert.isFalse(items.truncated)
+  const inspections = []
+  for (const item of items.items) {
+    inspections.push(
+      yield* authenticatedClient.deliveryGraph.workspaceEntity({
+        params: { entityId: item.projection.entityId }
+      })
+    )
+  }
+  assert.deepStrictEqual(
+    [...new Set(inspections.map(({ source }) => source.providerId))].sort(),
+    ["codecommit", "codepipeline", "confluence", "jira"]
+  )
+  const jiraIssues = inspections.filter(
+    ({ entity, source }) => source.providerId === "jira" && entity.projection.details._tag === "issue"
+  )
+  if (jiraIssues.length === 0) {
+    return yield* Effect.die("live Jira synchronization produced no canonical issue")
+  }
+  assert.isTrue(
+    jiraIssues.every(
+      ({ entity }) =>
+        entity.projection.details._tag === "issue" &&
+        entity.projection.details.project?.sourceId === configuration.jiraProjectId
+    )
+  )
+  assert.isTrue(
+    jiraIssues.some(
+      ({ entity }) =>
+        entity.projection.details._tag === "issue" &&
+        (entity.projection.details.comments?.length ?? 0) > 0 &&
+        (entity.projection.details.history?.length ?? 0) > 0
+    )
+  )
+
+  const confluencePages = inspections.filter(
+    ({ entity, source }) => source.providerId === "confluence" && entity.projection.details._tag === "page"
+  )
+  if (confluencePages.length === 0) {
+    return yield* Effect.die("live Confluence synchronization produced no canonical page")
+  }
+  assert.isTrue(
+    confluencePages.every(
+      ({ entity }) =>
+        entity.projection.details._tag === "page" &&
+        entity.projection.details.sourceSpaceId === configuration.confluenceSpaceId
+    )
+  )
+  assert.isTrue(
+    confluencePages.some(
+      ({ entity }) =>
+        entity.projection.details._tag === "page" &&
+        (entity.projection.details.versions?.length ?? 0) > 0 &&
+        (entity.projection.details.contributors?.length ?? 0) > 0
+    )
+  )
+
+  const pipelineExecution = inspections.find(
+    ({ entity, source }) =>
+      source.providerId === "codepipeline" &&
+      entity.projection.details._tag === "pipeline-execution"
+  )
+  if (pipelineExecution?.entity.projection.details._tag !== "pipeline-execution") {
+    return yield* Effect.die("live CodePipeline synchronization produced no canonical execution")
+  }
+  assert.strictEqual(
+    pipelineExecution.entity.projection.details.pipelineName,
+    configuration.codePipelinePipeline
+  )
+
+  const pullRequest = inspections.find(
+    ({ entity, source }) =>
+      source.providerId === "codecommit" &&
+      entity.projection.entityType === "pull-request"
+  )
+  if (pullRequest === undefined) {
+    return yield* Effect.die("live CodeCommit synchronization produced no canonical pull request")
+  }
+  const inventory = yield* authenticatedClient.diff.inventory({
+    params: {
+      pluginConnectionId: pullRequest.source.pluginConnectionId,
+      vendorImmutableId: pullRequest.source.vendorImmutableId
+    },
+    query: { revision: pullRequest.source.revision }
+  })
+  assert.isTrue(inventory.ready)
+  assert.isAbove(inventory.entries.length, 0)
+
+  const timeline = yield* authenticatedClient.timeline.page({ query: { limit: 100 } })
+  assert.deepStrictEqual(
+    [...new Set(timeline.events.flatMap(({ service }) => service === null ? [] : [service]))]
+      .filter((service) =>
+        service === "codecommit" ||
+        service === "codepipeline" ||
+        service === "confluence" ||
+        service === "jira"
+      )
+      .sort(),
+    ["codecommit", "codepipeline", "confluence", "jira"]
+  )
+
+  const authenticationRegression = yield* mutationClient.plugins.createConnection({
+    payload: {
+      pluginConnectionId: AUTHENTICATION_REGRESSION_CONNECTION_ID,
+      providerId: "jira",
+      displayName: "Live Jira authentication regression",
+      values: [
+        url("webBaseUrl", configuration.atlassianSiteUrl),
+        text("siteId", configuration.atlassianSiteId),
+        text("projectId", configuration.jiraProjectId),
+        text("authMode", "api-token"),
+        text("email", configuration.jiraEmail),
+        secret("apiToken", INVALID_API_TOKEN),
+        integer("pageSize", 50),
+        integer("maximumPages", 1),
+        integer("operationTimeoutMillis", 30_000)
+      ]
+    }
+  })
+  assert.strictEqual(authenticationRegression.test._tag, "failed")
+  if (authenticationRegression.test._tag === "failed") {
+    assert.include(
+      ["authentication", "authorization"],
+      authenticationRegression.test.failureClass
+    )
+    assertSensitiveTextAbsent(JSON.stringify(authenticationRegression.test), INVALID_API_TOKEN)
+    assertSensitiveTextAbsent(JSON.stringify(authenticationRegression.test), configuration.jiraEmail)
+  }
+
+  const inspectionDatabaseContext = yield* Layer.build(databaseLayer(persistenceConfig))
+  const database = Context.get(inspectionDatabaseContext, Database)
+  const storedConfigurations = yield* database.sql<{ readonly configurationJson: string }>`SELECT
+    configuration_json AS configuration_json
+    FROM plugin_configurations
+    ORDER BY plugin_connection_id`
+  const serializedDatabaseConfiguration = JSON.stringify(storedConfigurations)
+  const credentialStorageViolations = yield* database.sql<{ readonly count: number }>`SELECT
+    COUNT(*) AS count
+    FROM plugin_configurations, json_each(plugin_configurations.configuration_json)
+    WHERE json_extract(json_each.value, '$.key') IN ('email', 'apiToken')
+      AND json_extract(json_each.value, '$._tag') <> 'secret-reference'`
+  assert.strictEqual(credentialStorageViolations[0]?.count, 0)
+  for (
+    const forbidden of [
+      Redacted.value(configuration.jiraApiKey),
+      Redacted.value(configuration.confluenceApiKey),
+      INVALID_API_TOKEN,
+      configuration.jiraEmail,
+      configuration.confluenceEmail
+    ]
+  ) {
+    assertSensitiveTextAbsent(serializedDatabaseConfiguration, forbidden)
+  }
+
+  return {
+    dataRoot,
+    bindings: overview.accounts.map(({ displayName, providerFamily, resources }) => ({
+      displayName,
+      providerFamily,
+      resources: resources.map(({ displayName, providerId }) => ({ displayName, providerId }))
+    })),
+    identities: repeatedTests.map((result) =>
+      result._tag === "healthy"
+        ? {
+          providerId: result.providerId,
+          kind: result.identity.kind,
+          displayName: result.identity.displayName,
+          providerImmutableId: result.identity.providerImmutableId
+        }
+        : {
+          providerId: result.providerId,
+          kind: "failed",
+          displayName: result.safeMessage,
+          providerImmutableId: result.failureClass
+        }
+    )
+  }
+})
+
+describe("Control Center live provider integration", () => {
+  it.effect("pairs an owner and materializes four production provider connections", () =>
+    Effect.gen(function*() {
+      const configuration = yield* loadLiveConnectionConfiguration
+      const evidence = yield* Effect.scoped(executeLiveJourney(configuration))
+      const fileSystem = yield* FileSystem.FileSystem
+
+      assert.isFalse(yield* fileSystem.exists(evidence.dataRoot))
+      assert.lengthOf(evidence.identities, 4)
+      assert.deepStrictEqual(
+        evidence.identities.map(({ providerId }) => providerId).sort(),
+        ["codecommit", "codepipeline", "confluence", "jira"]
+      )
+      assert.isTrue(
+        evidence.identities.every(
+          ({ kind, providerImmutableId }) => kind !== "failed" && providerImmutableId.length > 0
+        )
+      )
+      yield* Effect.logInfo("Control Center live provider identities", {
+        bindings: evidence.bindings,
+        identities: evidence.identities
+      })
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer])
+    ))
+})

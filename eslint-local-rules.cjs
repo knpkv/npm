@@ -1488,6 +1488,40 @@ module.exports = {
       }
     }
   },
+  "no-echoing-secret-assertions": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "prevent live-integration assertions from echoing sensitive operands",
+        category: "Security",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        echoingAssertion:
+          "Do not pass sensitive operands to assert.notInclude(); use a constant-message redaction helper."
+      }
+    },
+    create(context) {
+      return {
+        CallExpression(node) {
+          if (
+            node.callee.type !== "MemberExpression" ||
+            node.callee.computed ||
+            node.callee.object.type !== "Identifier" ||
+            staticPropertyName(node.callee.property) !== "notInclude" ||
+            !isNamedImportFrom(context, node.callee.object, ["@effect/vitest"], ["assert"])
+          ) {
+            return
+          }
+          context.report({
+            messageId: "echoingAssertion",
+            node
+          })
+        }
+      }
+    }
+  },
   "no-invalid-branded-uuid-literal": {
     meta: {
       type: "problem",

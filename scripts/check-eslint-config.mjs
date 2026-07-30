@@ -123,6 +123,26 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { assert } from "@effect/vitest"
+    assert.notInclude(serialized, Redacted.value(configuration.jiraApiKey))
+  `,
+  expected: 1,
+  filePath: "packages/control-center/test/integration/live-secret-assertion-invalid.test.ts",
+  ruleId: "local-rules/no-echoing-secret-assertions"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
+    assertSensitiveTextAbsent(serialized, Redacted.value(configuration.jiraApiKey))
+  `,
+  expected: 0,
+  filePath: "packages/control-center/test/integration/live-secret-assertion-valid.test.ts",
+  ruleId: "local-rules/no-echoing-secret-assertions"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as Identifiers from "../../src/domain/identifiers.js"
     Identifiers.WorkspaceId.make("00000000-0000-4000-8000-000000000000")
     Identifiers["WorkspaceId"].make("not-a-uuid")
