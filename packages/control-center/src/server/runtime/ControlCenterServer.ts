@@ -388,11 +388,11 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       }
   )
   const releaseAgentWorkerWorkspaceId = options.releaseAgent === undefined ||
-      options.releaseAgent === null ||
-      options.bootstrap === undefined ||
-      options.bootstrap === null
+      options.releaseAgent === null
     ? null
-    : options.bootstrap.workspaceId
+    : options.releaseAgent.workerWorkspaceId ??
+      options.bootstrap?.workspaceId ??
+      null
   const agentJobRepository = AgentJobRepository.layer.pipe(Layer.provide(database))
   const agentJobWorkspacePolicy = AgentJobWorkspacePolicy.live.pipe(
     Layer.provide(persistence)

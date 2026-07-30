@@ -16,6 +16,7 @@ import type {
   ReleaseAgentTurnResponse
 } from "../../api/agent.js"
 import type { PortfolioReleaseSummary } from "../../api/portfolio.js"
+import type { WorkspaceId } from "../../domain/identifiers.js"
 import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
@@ -34,6 +35,8 @@ const MAXIMUM_CONCURRENT_AGENT_TURNS = 2
 export interface ReleaseAgentRuntimeOptions {
   readonly cwd: string
   readonly enabledProviders: ReadonlyArray<AgentProvider>
+  /** Workspace whose durable release-chat queue is owned by this runtime worker. */
+  readonly workerWorkspaceId?: WorkspaceId
   readonly codexExecutable?: string
   readonly codexModel?: AgentModelId
   readonly claudeExecutable?: string

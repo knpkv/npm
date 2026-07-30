@@ -54,6 +54,7 @@ import {
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
 import { ReleaseAgentJobs } from "../../src/server/api/ApplicationServices.js"
+import { synchronizeFakeReleaseFromMap } from "../../src/server/application/releaseSynchronization.js"
 import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { authorizeWorkspaceSettingsGovernanceRequest } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
 import { makeWorkspaceGovernedActionPolicyDefinitions } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
@@ -86,12 +87,13 @@ import { pluginRuntimeAuthoritySourceLayer } from "../../src/server/plugins/inte
 import { PluginRuntimeAuthoritySource } from "../../src/server/plugins/internal/PluginRuntimeAuthoritySource.js"
 import { PluginRuntimeRegistry } from "../../src/server/plugins/internal/PluginRuntimeRegistry.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
-import type { PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
+import { PluginConnectionMap, type PluginConnectionMapV1 } from "../../src/server/plugins/PluginConnectionMap.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
 import {
   makeControlCenterApplicationComposition,
   makeControlCenterServer
 } from "../../src/server/runtime/ControlCenterServer.js"
+import { DomainEventWakeups } from "../../src/server/runtime/DomainEventWakeups.js"
 import {
   GovernedActionExecutionStartup,
   governedActionExecutionStartupFromRegistryLayer
@@ -131,6 +133,11 @@ const GOVERNED_FIXTURE_TIME = Schema.decodeSync(UtcTimestamp)("2026-07-15T10:02:
 const AUTHORIZED_WORKSPACE = Schema.decodeSync(WorkspaceId)(AUTHORIZED_WORKSPACE_ID)
 const AUTHORIZED_CONNECTION = Schema.decodeSync(PluginConnectionId)(AUTHORIZED_CONNECTION_ID)
 const AUTHORIZED_ACTION = Schema.decodeSync(GovernedActionId)(AUTHORIZED_ACTION_ID)
+const SETTINGS_OWNER_ID = PersonId.make("01890f6f-6d6a-7cc0-98d2-000000000091")
+const SETTINGS_SESSION_ID = SessionId.make("01890f6f-6d6a-7cc0-98d2-000000000092")
+const SETTINGS_MUTATION_ID = WorkspaceSettingsMutationId.make(
+  "01890f6f-6d6a-7cc0-98d2-000000000093"
+)
 
 const fakeDescriptor = {
   contractId: "dev.knpkv.control-center.plugin",
@@ -294,10 +301,88 @@ const makeCodexCliFixture = Effect.gen(function*() {
   const executable = path.join(root, "codex")
   yield* fileSystem.writeFileString(
     executable,
-    "#!/bin/sh\nprintf '%s\\n' 'codex-cli 1.2.3'\n"
+    [
+      "#!/bin/sh",
+      "if [ \"$1\" = \"--version\" ]; then",
+      "  printf '%s\\n' 'codex-cli 1.2.3'",
+      "  exit 0",
+      "fi",
+      "printf '%s\\n' \\",
+      "  '{\"thread_id\":\"runtime-thread\",\"type\":\"thread.started\"}' \\",
+      "  '{\"item\":{\"text\":\"Release context is ready.\",\"type\":\"agent_message\"},\"type\":\"item.completed\"}' \\",
+      "  '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":7,\"output_tokens\":3}}'"
+    ].join("\n")
   )
   yield* fileSystem.chmod(executable, 0o700)
   return executable
+})
+
+const enableCodexAgentProvider = Effect.fn(
+  "ControlCenterServerSmoke.enableCodexAgentProvider"
+)(function*() {
+  const database = yield* Database
+  const persistence = yield* Persistence
+  yield* database.sql`INSERT INTO persons (
+    workspace_id, person_id, display_name, avatar_json, is_active,
+    revision, created_at, updated_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${SETTINGS_OWNER_ID}, 'Settings Owner',
+    '{"_tag":"initials","text":"SO"}', 1, 1,
+    ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT}
+  )`
+  yield* database.sql`INSERT INTO sessions (
+    workspace_id, session_id, token_hash, csrf_hash, actor_kind,
+    person_id, agent_id, permission, created_at, last_seen_at,
+    idle_expires_at, absolute_expires_at, revoked_at
+  ) VALUES (
+    ${WORKSPACE_ID}, ${SETTINGS_SESSION_ID}, ${"c".repeat(64)}, ${"d".repeat(64)},
+    'human', ${SETTINGS_OWNER_ID}, NULL, 'workspace-owner',
+    ${FIXTURE_TIME_INPUT}, ${FIXTURE_TIME_INPUT},
+    '2026-07-31T09:00:00.000Z', '2026-08-30T09:00:00.000Z', NULL
+  )`
+  const current = yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+  const settings: WorkspaceSettingsV1 = {
+    ...current.settings,
+    agent: {
+      ...current.settings.agent,
+      allowedProviders: ["codex"]
+    }
+  }
+  const acknowledgedGovernedSections = GovernedWorkspaceSettingsSections.make(["agent"])
+  const request = {
+    workspaceId: WORKSPACE_ID,
+    mutationId: SETTINGS_MUTATION_ID,
+    expectedRevision: current.revision,
+    settings,
+    acknowledgedGovernedSections,
+    actorPersonId: SETTINGS_OWNER_ID,
+    sessionId: SETTINGS_SESSION_ID
+  }
+  const governanceAuthority = yield* authorizeWorkspaceSettingsGovernanceRequest(
+    Schema.decodeSync(SessionSummary)({
+      sessionId: SETTINGS_SESSION_ID,
+      workspaceId: WORKSPACE_ID,
+      actor: { _tag: "human", personId: SETTINGS_OWNER_ID },
+      permission: "workspace-owner",
+      createdAt: FIXTURE_TIME_INPUT,
+      lastSeenAt: FIXTURE_TIME_INPUT,
+      idleExpiresAt: "2026-07-31T09:00:00.000Z",
+      absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
+      revokedAt: null
+    }),
+    request,
+    FIXTURE_TIME
+  )
+  yield* persistence.workspaceSettings.update(WORKSPACE_ID, {
+    mutationId: SETTINGS_MUTATION_ID,
+    expectedRevision: current.revision,
+    settings,
+    acknowledgedGovernedSections,
+    actorPersonId: SETTINGS_OWNER_ID,
+    sessionId: SETTINGS_SESSION_ID,
+    governanceAuthority,
+    updatedAt: FIXTURE_TIME
+  })
 })
 
 const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuthorizedRuntimeAction")(function*(
@@ -885,6 +970,120 @@ describe("Control Center closed runtime", () => {
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
         "job-started"
+      )
+    }).pipe(
+      Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
+      Effect.scoped
+    ))
+
+  it.effect("runs durable release chat for an initialized workspace without bootstrap", () =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const staticRoot = yield* makeStaticFixture
+      const codexExecutable = yield* makeCodexCliFixture
+      const dataRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-runtime-release-agent-no-bootstrap-"
+      })
+      yield* fileSystem.chmod(dataRoot, 0o700)
+      const port = yield* acquireEphemeralPort
+      const bindConfig = yield* decodeBindConfig({ port })
+      const persistenceConfig: PersistenceConfig = {
+        blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+        busyTimeoutMilliseconds: 5_000,
+        databaseUrl: LocalDatabaseUrl.make(
+          `file:${path.join(dataRoot, "control-center.db")}`
+        ),
+        maxConnections: 1
+      }
+      const seedDatabase = databaseLayer(persistenceConfig)
+      const seedPersistence = persistenceLayerFromDatabase(persistenceConfig).pipe(
+        Layer.provideMerge(seedDatabase)
+      )
+      const pluginConnections = yield* makeFakeConnectionMap
+      yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Runtime release agent"),
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.pluginConnections.create(WORKSPACE_ID, {
+          pluginConnectionId: PLUGIN_ID,
+          providerId: "jira",
+          displayName: PluginConnectionDisplayName.make("Runtime Jira"),
+          isEnabled: true,
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.pluginRuntime.acceptPluginDescriptor(
+          WORKSPACE_ID,
+          PLUGIN_ID,
+          "jira",
+          fakeDescriptor,
+          0,
+          FIXTURE_TIME
+        )
+        yield* enableCodexAgentProvider()
+        yield* synchronizeFakeReleaseFromMap({
+          workspaceId: WORKSPACE_ID,
+          pluginConnectionId: PLUGIN_ID,
+          streamKey: "releases"
+        }).pipe(
+          Effect.provideService(PluginConnectionMap, pluginConnections)
+        )
+      }).pipe(
+        Effect.provide(seedPersistence),
+        Effect.provide(DomainEventWakeups.layer),
+        Effect.scoped
+      )
+      const runtime = yield* Layer.build(makeControlCenterServer({
+        bindConfig,
+        persistenceConfig,
+        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+        staticAssets: { root: staticRoot },
+        bootstrap: null,
+        releaseAgent: {
+          cwd: staticRoot,
+          enabledProviders: ["codex"],
+          workerWorkspaceId: WORKSPACE_ID,
+          codexExecutable
+        }
+      }))
+      assert.deepStrictEqual(
+        Context.get(runtime, ControlCenterBootstrap),
+        { _tag: "disabled" }
+      )
+      const persistence = Context.get(runtime, Persistence)
+      const enqueued = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "Explain the initialized release."
+        }
+      })
+      assert.strictEqual(enqueued.state, "queued")
+      yield* TestClock.adjust("1 second")
+      const terminalThread = yield* Effect.gen(function*() {
+        yield* Effect.yieldNow
+        const page = yield* persistence.agentJobs.threadAfter({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        return page.events.some(({ eventKind }) => eventKind === "job-completed" || eventKind === "job-failed")
+          ? page
+          : yield* Effect.fail("release worker has not completed its claim")
+      }).pipe(
+        Effect.tapError(() => TestClock.adjust("1 second")),
+        Effect.retry({ times: 50 })
+      )
+      assert.include(
+        terminalThread.events.map(({ eventKind }) => eventKind),
+        "job-completed"
       )
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),

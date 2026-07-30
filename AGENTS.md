@@ -197,6 +197,17 @@ When writing Effect code:
   every ancestor barrel that exports it, public runtime JSDoc, and package README
   section; retained public identifiers and historical documentation still require
   compatibility judgment. Generated and vendor barrels are excluded.
+- When PR-review sandbox naming or reconciliation ownership changes in
+  `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
+  update `packages/control-center/README.md` and
+  `packages/control-center/docs/agentic-pr-review.md` in the same change, and
+  append an amendment to the governing ADR when earlier rationale changes.
+  Current docs must describe the server-private workspace-scoped prefix and
+  state that foreign-workspace and legacy names are not automatically removed;
+  a claim that startup removes all `cc-pr-review-*` names is invalid. Generated
+  and vendor docs are excluded. Clearly historical implementation plans may
+  remain unchanged, but ADR history requires an amendment rather than a silent
+  rewrite.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,

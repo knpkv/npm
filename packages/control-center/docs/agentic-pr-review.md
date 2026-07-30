@@ -293,6 +293,8 @@ fetch. Control Center creates a named shell sandbox from that source with
 executes a credential-free initialization command inside the sandbox. That
 command removes Git remotes and credential helpers and verifies the exact head
 again before any Review Sandbox tool can run.
+The name belongs to a server-private workspace namespace beginning with
+`cc-pr-review-<workspace-id>-`; callers do not construct or interpret it.
 
 Every contained command uses `sbx exec` with an explicit work directory and a
 fixed minimal environment. Host environment inheritance and shell
@@ -327,7 +329,8 @@ Run statuses are preparing, running, completed, cancelled, interrupted, failed, 
 
 On startup, Control Center:
 
-- Removes stale `cc-pr-review-*` sbx sandboxes.
+- Removes stale sbx sandboxes in the configured PR worker workspace's
+  `cc-pr-review-<workspace-id>-` namespace.
 - Recovers durable queued or lease-expired review jobs through the worker.
 - Starts a fresh sandbox for a recovered attempt rather than simulating provider-session recovery.
 
@@ -336,7 +339,9 @@ timeout, copy/start failure, callback failure, and normal completion all force
 sbx sandbox removal. A command timeout fails the session before
 returning its typed failure, and model-requested timeouts cannot exceed the
 locally configured command cap. Startup reconciliation lists sbx sandboxes and
-removes only names with the `cc-pr-review-` prefix.
+removes only names with the exact configured workspace prefix. Names owned by
+another workspace and legacy unscoped `cc-pr-review-*` names remain untouched
+because the current worker cannot safely attribute them.
 
 Malformed tool arguments or final output receive one schema-guided repair attempt. A second invalid response ends as Unable to Conclude; missing data is never guessed.
 

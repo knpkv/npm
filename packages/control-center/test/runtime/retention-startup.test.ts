@@ -4,6 +4,7 @@ import { DateTime, Deferred, Effect, Layer } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { databaseLayer } from "../../src/server/persistence/Database.js"
+import { PersistenceOperationError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { ControlCenterBootstrap } from "../../src/server/runtime/Bootstrap.js"
@@ -167,6 +168,95 @@ describe("retention startup", () => {
           yield* Deferred.await(drained)
           yield* Deferred.await(thirdSweepCompleted)
           assert.strictEqual(sweepCount, 3)
+        }).pipe(Effect.provide(startup))
+      }).pipe(
+        Effect.provide(persistenceLayer),
+        Effect.scoped
+      )
+    }).pipe(
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+
+  it.effect("retries a transient sweep failure before the normal retention interval", () =>
+    Effect.gen(function*() {
+      const config = yield* makePersistenceTestConfig("control-center-retention-retry-")
+      const database = databaseLayer(config)
+      const persistenceLayer = persistenceLayerFromDatabase(config).pipe(
+        Layer.provide(database)
+      )
+      const lifecycle = yield* ServerLifecycle.make
+      const retryCompleted = yield* Deferred.make<void>()
+      yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
+
+      yield* Effect.gen(function*() {
+        const persistence = yield* Persistence
+        yield* persistence.workspaces.create(WORKSPACE_ID, {
+          displayName: WorkspaceName.make("Retention retry fixture"),
+          createdAt: FIXTURE_TIME
+        })
+        yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+        let sweepCount = 0
+        const observedPersistence = Persistence.of({
+          ...persistence,
+          retention: {
+            ...persistence.retention,
+            sweepWorkspace: (...args) =>
+              Effect.suspend(() => {
+                sweepCount += 1
+                return sweepCount === 1
+                  ? Effect.fail(
+                    new PersistenceOperationError({
+                      operation: "retention-test.transient-sweep"
+                    })
+                  )
+                  : persistence.retention.sweepWorkspace(...args).pipe(
+                    Effect.tap(() => Deferred.succeed(retryCompleted, undefined))
+                  )
+              })
+          }
+        })
+        const startup = retentionStartupLayer({
+          workspaceId: WORKSPACE_ID,
+          interval: "1 hour",
+          failureInterval: "1 minute"
+        }).pipe(
+          Layer.provide(
+            Layer.mergeAll(
+              Layer.succeed(Persistence, observedPersistence),
+              Layer.succeed(ControlCenterBootstrap, {
+                _tag: "already-initialized",
+                workspaceId: WORKSPACE_ID
+              }),
+              Layer.succeed(ServerLifecycle, lifecycle)
+            )
+          )
+        )
+
+        yield* Effect.gen(function*() {
+          yield* RetentionStartup
+          assert.strictEqual(sweepCount, 1)
+          assert.isEmpty(yield* persistence.retention.listRuns(WORKSPACE_ID))
+          yield* TestClock.adjust("59 seconds")
+          assert.strictEqual(sweepCount, 1)
+          yield* TestClock.adjust("1 second")
+          yield* Deferred.await(retryCompleted)
+          assert.strictEqual(sweepCount, 2)
+          assert.deepStrictEqual(
+            (yield* persistence.retention.listRuns(WORKSPACE_ID))
+              .map(({ retentionClass }) => retentionClass)
+              .sort(),
+            [
+              "agent-content",
+              "audit-replay",
+              "evidence",
+              "reproducible-content"
+            ]
+          )
+          yield* TestClock.adjust("59 minutes")
+          assert.strictEqual(sweepCount, 2)
+          yield* lifecycle.beginDrain
+          yield* lifecycle.awaitWorkDrained
         }).pipe(Effect.provide(startup))
       }).pipe(
         Effect.provide(persistenceLayer),

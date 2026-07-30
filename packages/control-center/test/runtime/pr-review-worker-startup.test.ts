@@ -54,6 +54,7 @@ describe("PR review worker startup", () => {
       const persistence = yield* makeTestPersistence(true)
       const started = yield* Deferred.make<void>()
       let observedWorkspaceId: WorkspaceId | undefined
+      let reconciledWorkspaceId: WorkspaceId | undefined
       const worker = AgentJobWorker.of({
         runOnce: (workspaceId) =>
           Effect.sync(() => {
@@ -65,7 +66,11 @@ describe("PR review worker startup", () => {
       })
       const sandboxes = PrReviewSandboxSessions.of({
         withSession: () => Effect.die("not used"),
-        reconcile: () => Effect.succeed({ removedSandboxes: ["/stale/sandbox"] })
+        reconcile: (workspaceId) =>
+          Effect.sync(() => {
+            reconciledWorkspaceId = workspaceId
+            return { removedSandboxes: ["/stale/sandbox"] }
+          })
       })
       const startup = prReviewWorkerStartupLayer({
         workspaceId: WORKSPACE_ID,
@@ -109,6 +114,7 @@ describe("PR review worker startup", () => {
       assert.instanceOf(running, PrReviewWorkerRunning)
       assert.strictEqual(running.workspaceId, WORKSPACE_ID)
       assert.strictEqual(observedWorkspaceId, WORKSPACE_ID)
+      assert.strictEqual(reconciledWorkspaceId, WORKSPACE_ID)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("fails before polling when stale-sandbox reconciliation is unavailable", () =>

@@ -42,7 +42,7 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const sandboxes = yield* PrReviewSandboxSessions
   const persistence = yield* Persistence
   yield* ControlCenterBootstrap
-  const reconciliation = yield* sandboxes.reconcile().pipe(
+  const reconciliation = yield* sandboxes.reconcile(options.workspaceId).pipe(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure))
   )
   yield* persistence.retention
