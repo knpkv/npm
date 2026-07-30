@@ -28,6 +28,12 @@ files:
   - "packages/*/scripts/**/*.ts"
 
 note: |
+  This is the fast direct-shape check. It only sees an options object written
+  inline at the call, so the binding-aware local ESLint rule
+  `local-rules/require-explicit-child-process-env-inheritance` owns the complete
+  invariant, including namespace/named import aliases and options extracted into
+  a `const` binding.
+
   `extendEnv` defaults to falsy, so passing `env` alone REPLACES the child
   environment instead of augmenting it. The child then loses `PATH` and any
   PATH-resolved executable fails with `NotFound: ChildProcess.spawn (...)`.

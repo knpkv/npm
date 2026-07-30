@@ -1292,3 +1292,51 @@ await assertRuleDiagnostics({
   filePath: "packages/control-center/src/server/plugins/provider/eslint-opaque-locator-valid.ts",
   ruleId: "local-rules/require-structured-reconciliation-key-schema"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const inlineOptions = ChildProcess.make("assume", ["-cd", link, profile], {
+      stdout: "inherit",
+      env: { GRANTED_ALIAS_CONFIGURED: "true" }
+    })
+    const extracted = { env: { AWS_PROFILE: profile } }
+    const viaBinding = ChildProcess.make("git", args, extracted)
+    const frozen = Object.freeze({ env: { AWS_PROFILE: profile } })
+    const viaFrozenBinding = ChildProcess.make("git", args, frozen)
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-inheritance-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    const namespaced = ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-namespace-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const augmented = ChildProcess.make("assume", ["-cd", link, profile], {
+      env: { GRANTED_ALIAS_CONFIGURED: "true" },
+      extendEnv: true
+    })
+    const isolated = { env: gitEnvironment, extendEnv: false }
+    const viaBinding = ChildProcess.make("git", args, isolated)
+    const noEnvironment = ChildProcess.make("aws", ["sso", "login", "--profile", profile], {
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+    const noOptions = ChildProcess.make("open", [url])
+    const argsOnlyBinding = ChildProcess.make("node", cliArgs)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-inheritance-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})

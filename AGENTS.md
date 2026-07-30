@@ -199,6 +199,17 @@ When writing Effect code:
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+- `ChildProcess.make` options that set `env` must also state `extendEnv`; it
+  defaults to falsy, so `env` alone replaces the child environment and drops
+  `PATH`. The static rules enforce that the choice is stated, not that it is
+  correct — two things still need judgment. With `extendEnv: false`, `env` must
+  itself carry everything the child needs, including `PATH`. With
+  `extendEnv: true`, inherited variables that outrank the ones you pass must be
+  cleared: a spawn scoped to an explicit AWS profile has to drop ambient
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, and
+  `AWS_REGION`, since the AWS credential chain resolves environment variables
+  above profile configuration. Use `ChildEnv.profileScopedEnv` in the
+  `codecommit` packages rather than rebuilding the exclusion list.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

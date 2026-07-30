@@ -162,6 +162,16 @@ export default tseslint.config(
     }
   },
   {
+    files: [
+      "packages/*/src/**/*.{ts,tsx}",
+      "packages/*/test/**/*.{ts,tsx}",
+      "packages/*/scripts/**/*.ts"
+    ],
+    rules: {
+      "local-rules/require-explicit-child-process-env-inheritance": "error"
+    }
+  },
+  {
     files: ["packages/control-center/src/server/plugins/jira/**/*.{ts,tsx}"],
     rules: {
       "local-rules/require-jira-path-identifier-schema": "error"

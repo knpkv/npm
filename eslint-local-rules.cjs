@@ -406,6 +406,39 @@ const directChildProcessMakeCall = (identifier) => {
   return call?.type === "CallExpression" && call.callee === member ? call : undefined
 }
 
+/**
+ * Resolves the options argument of a `ChildProcess.make` call to the object
+ * literal that produced it, following one level of `const` binding and any
+ * `Object.freeze` wrapper.
+ *
+ * Returns undefined when the shape cannot be established statically — a
+ * reassignable binding, a call result, a spread-only construction, or the args
+ * array of a two-argument call. Those are left to review rather than guessed at,
+ * since interprocedural inference would trade real false positives for coverage.
+ */
+const resolvedChildProcessOptions = (context, argument, depth = 0) => {
+  if (argument === undefined || argument.type === "SpreadElement" || depth > 1) return undefined
+  const expression = unwrapTypeExpression(argument)
+  const unfrozen = frozenArgument(context, expression) ?? expression
+  if (unfrozen.type === "ObjectExpression") return unfrozen
+  if (unfrozen.type !== "Identifier") return undefined
+  const variable = resolvedVariable(context, unfrozen)
+  if (variable === undefined || variable.defs.length !== 1) return undefined
+  const [definition] = variable.defs
+  if (
+    definition.type !== "Variable" ||
+    definition.parent.kind !== "const" ||
+    definition.node.type !== "VariableDeclarator" ||
+    definition.node.init === null
+  ) {
+    return undefined
+  }
+  if (variable.references.some((reference) => reference.isWrite() && reference.identifier !== definition.name)) {
+    return undefined
+  }
+  return resolvedChildProcessOptions(context, definition.node.init, depth + 1)
+}
+
 const isEffectModule = (context, expression) => {
   if (expression.type === "Identifier") {
     return (
@@ -1188,6 +1221,55 @@ module.exports = {
           for (const reference of context.sourceCode.getScope(node).through) {
             if (reference.identifier.name === "process" && (!reference.isTypeReference || reference.isValueReference)) {
               report(reference.identifier, "rawProcessForbidden")
+            }
+          }
+        }
+      }
+    }
+  },
+  "require-explicit-child-process-env-inheritance": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require ChildProcess.make options that set env to also declare extendEnv explicitly",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        implicitInheritance:
+          "Declare extendEnv explicitly next to env. It defaults to falsy, so env alone replaces the child environment and drops PATH; use extendEnv: true to augment, or extendEnv: false with an env that carries PATH itself."
+      }
+    },
+    create(context) {
+      const childProcessBindings = []
+
+      return {
+        ImportDeclaration(node) {
+          if (node.source.value !== CHILD_PROCESS_MODULE && node.source.value !== CHILD_PROCESS_BARREL) return
+          const variables = context.sourceCode.getDeclaredVariables(node)
+          for (const specifier of node.specifiers) {
+            if (!isSensitiveChildProcessSpecifier(node, specifier)) continue
+            const binding = variables.find((variable) => variable.name === specifier.local.name)
+            if (binding !== undefined) childProcessBindings.push(binding)
+          }
+        },
+        "Program:exit"() {
+          for (const binding of childProcessBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = directChildProcessMakeCall(reference.identifier)
+              if (call === undefined) continue
+              const options = resolvedChildProcessOptions(context, call.arguments.at(-1))
+              if (options === undefined) continue
+              const named = (name) =>
+                options.properties.filter(
+                  (property) =>
+                    property.type === "Property" && !property.computed && staticPropertyName(property.key) === name
+                )
+              if (named("env").length > 0 && named("extendEnv").length === 0) {
+                context.report({ node: options, messageId: "implicitInheritance" })
+              }
             }
           }
         }
