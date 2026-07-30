@@ -346,7 +346,7 @@ test("requires compact landmarks and primary actions to intersect the viewport",
 })
 
 test("requires discernible system paint in forced-colors mode", async ({ page }) => {
-  const content = (forcedColorPaint: string, labelPaint = "", ancestorOpacity = "1"): string => `
+  const content = (forcedColorPaint: string, labelPaint = "", forcedColorAncestorOpacity = "1"): string => `
     <!doctype html>
     <html lang="en">
       <head>
@@ -354,6 +354,9 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
         <style>
           button:focus-visible { outline: 3px solid currentColor; }
           @media (forced-colors: active) {
+            main {
+              opacity: ${forcedColorAncestorOpacity};
+            }
             button {
               forced-color-adjust: none;
               ${forcedColorPaint}
@@ -365,7 +368,7 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
         </style>
       </head>
       <body>
-        <main style="opacity: ${ancestorOpacity}">
+        <main>
           <h1>Forced color fixture</h1>
           <button onclick="this.textContent='Continued'"><span>Continue</span></button>
         </main>
