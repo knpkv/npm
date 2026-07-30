@@ -608,15 +608,25 @@ export const WorkspaceSettingsPage = ({
           action={
             <div className={styles.actions}>
               <Button onClick={controller.discardConflict}>Use latest</Button>
-              <Button onClick={controller.reapplyConflict} variant="primary">
-                Reapply my changes
-              </Button>
+              {controller.state.reapplyFailed ? null : (
+                <Button onClick={controller.reapplyConflict} variant="primary">
+                  Reapply my changes
+                </Button>
+              )}
             </div>
           }
-          description={`Another session saved revision ${String(
-            controller.state.latest.revision
-          )}. Choose the latest document or reapply only the fields you changed, then review and save.`}
-          title="Settings changed in another session"
+          description={
+            controller.state.reapplyFailed
+              ? "Your changed fields cannot be combined safely with the latest settings. Use the latest document, then re-enter and review your changes."
+              : `Another session saved revision ${String(
+                  controller.state.latest.revision
+                )}. Choose the latest document or reapply only the fields you changed, then review and save.`
+          }
+          title={
+            controller.state.reapplyFailed
+              ? "Settings conflict needs manual recovery"
+              : "Settings changed in another session"
+          }
           tone="caution"
         />
       </div>

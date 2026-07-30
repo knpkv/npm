@@ -1,4 +1,5 @@
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import type { WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
@@ -6,7 +7,7 @@ import type { WorkspaceSettingsMutationId } from "../../domain/identifiers.js"
 import {
   changedWorkspaceSettingsSections,
   isGovernedWorkspaceSettingsSection,
-  type WorkspaceSettingsV1
+  WorkspaceSettingsV1
 } from "../../domain/workspaceSettings.js"
 import { publishWorkspaceSettings } from "./workspaceSettingsSignals.js"
 import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
@@ -27,6 +28,7 @@ export type WorkspaceSettingsState =
     readonly base: WorkspaceSettingsReadModel
     readonly candidate: WorkspaceSettingsV1
     readonly latest: WorkspaceSettingsReadModel
+    readonly reapplyFailed: boolean
   }
   | {
     readonly _tag: "conflict-recovery-failed"
@@ -49,16 +51,49 @@ const localChangeOrLatest = <Value>(
   equivalent: (left: Value, right: Value) => boolean = Object.is
 ): Value => equivalent(base, candidate) ? latest : candidate
 
+const stringArraysEqual = (
+  left: ReadonlyArray<string>,
+  right: ReadonlyArray<string>
+): boolean =>
+  left.length === right.length &&
+  left.every((value, index) => value === right[index])
+
 /** Reapply locally changed fields over a freshly loaded server document. */
 export const reapplyWorkspaceSettingsCandidate = (
   base: WorkspaceSettingsV1,
   candidate: WorkspaceSettingsV1,
   latest: WorkspaceSettingsV1
-): WorkspaceSettingsV1 => {
-  const locallyChangedSections = changedWorkspaceSettingsSections(base, candidate)
-  return {
+): WorkspaceSettingsV1 | null => {
+  const recovered = {
     schemaVersion: 1,
-    agent: locallyChangedSections.includes("agent") ? candidate.agent : latest.agent,
+    agent: {
+      allowedProviders: localChangeOrLatest(
+        base.agent.allowedProviders,
+        candidate.agent.allowedProviders,
+        latest.agent.allowedProviders,
+        stringArraysEqual
+      ),
+      defaultModel: localChangeOrLatest(
+        base.agent.defaultModel,
+        candidate.agent.defaultModel,
+        latest.agent.defaultModel
+      ),
+      defaultProvider: localChangeOrLatest(
+        base.agent.defaultProvider,
+        candidate.agent.defaultProvider,
+        latest.agent.defaultProvider
+      ),
+      profilePolicy: localChangeOrLatest(
+        base.agent.profilePolicy,
+        candidate.agent.profilePolicy,
+        latest.agent.profilePolicy
+      ),
+      toolPolicy: localChangeOrLatest(
+        base.agent.toolPolicy,
+        candidate.agent.toolPolicy,
+        latest.agent.toolPolicy
+      )
+    },
     inference: {
       enabled: localChangeOrLatest(
         base.inference.enabled,
@@ -119,11 +154,52 @@ export const reapplyWorkspaceSettingsCandidate = (
         latest.presentation.density
       )
     },
-    retention: locallyChangedSections.includes("retention") ? candidate.retention : latest.retention,
-    synchronization: locallyChangedSections.includes("synchronization")
-      ? candidate.synchronization
-      : latest.synchronization
+    retention: {
+      agentActivityDays: localChangeOrLatest(
+        base.retention.agentActivityDays,
+        candidate.retention.agentActivityDays,
+        latest.retention.agentActivityDays
+      ),
+      auditDays: localChangeOrLatest(
+        base.retention.auditDays,
+        candidate.retention.auditDays,
+        latest.retention.auditDays
+      ),
+      contentDays: localChangeOrLatest(
+        base.retention.contentDays,
+        candidate.retention.contentDays,
+        latest.retention.contentDays
+      ),
+      evidenceDays: localChangeOrLatest(
+        base.retention.evidenceDays,
+        candidate.retention.evidenceDays,
+        latest.retention.evidenceDays
+      ),
+      sandboxArtifactDays: localChangeOrLatest(
+        base.retention.sandboxArtifactDays,
+        candidate.retention.sandboxArtifactDays,
+        latest.retention.sandboxArtifactDays
+      )
+    },
+    synchronization: {
+      cadence: localChangeOrLatest(
+        base.synchronization.cadence,
+        candidate.synchronization.cadence,
+        latest.synchronization.cadence
+      ),
+      intervalMinutes: localChangeOrLatest(
+        base.synchronization.intervalMinutes,
+        candidate.synchronization.intervalMinutes,
+        latest.synchronization.intervalMinutes
+      ),
+      staleAfterMinutes: localChangeOrLatest(
+        base.synchronization.staleAfterMinutes,
+        candidate.synchronization.staleAfterMinutes,
+        latest.synchronization.staleAfterMinutes
+      )
+    }
   }
+  return Schema.is(WorkspaceSettingsV1)(recovered) ? recovered : null
 }
 
 /** Own one session-isolated settings document and its explicit stale-write recovery. */
@@ -251,7 +327,7 @@ export const useWorkspaceSettings = (
               (latest) => {
                 if (!request.signal.aborted) {
                   publishWorkspaceSettings(latest)
-                  setState({ _tag: "conflict", base, candidate, latest })
+                  setState({ _tag: "conflict", base, candidate, latest, reapplyFailed: false })
                 }
               },
               (failure) => {
@@ -301,6 +377,10 @@ export const useWorkspaceSettings = (
       current.candidate,
       current.latest.settings
     )
+    if (draft === null) {
+      setState({ ...current, reapplyFailed: true })
+      return
+    }
     setState({
       _tag: "ready",
       draft,
@@ -324,7 +404,7 @@ export const useWorkspaceSettings = (
       (latest) => {
         if (!request.signal.aborted) {
           publishWorkspaceSettings(latest)
-          setState({ _tag: "conflict", base, candidate, latest })
+          setState({ _tag: "conflict", base, candidate, latest, reapplyFailed: false })
         }
       },
       (failure) => {

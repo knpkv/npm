@@ -10,6 +10,7 @@ const reapplyValidWorkspaceSettingsCandidate = (
   latest: WorkspaceSettingsV1
 ): WorkspaceSettingsV1 => {
   const recovered = reapplyWorkspaceSettingsCandidate(base, candidate, latest)
+  if (recovered === null) assert.fail("expected a schema-valid recovered document")
   assert.isTrue(Schema.is(WorkspaceSettingsV1)(recovered))
   return recovered
 }
@@ -41,7 +42,7 @@ describe("workspace settings conflict recovery", () => {
     assert.strictEqual(recovered.presentation.defaultLanding, "active-work")
   })
 
-  it("keeps dependent agent fields coherent when concurrent edits cross", () => {
+  it("preserves unrelated remote agent changes while reapplying a local field", () => {
     const base = WorkspaceSettingsV1.make({
       ...DEFAULT_WORKSPACE_SETTINGS,
       agent: {
@@ -54,24 +55,53 @@ describe("workspace settings conflict recovery", () => {
       ...base,
       agent: {
         ...base.agent,
-        allowedProviders: ["codex"]
+        toolPolicy: "review-sandbox"
       }
     })
     const latest = WorkspaceSettingsV1.make({
       ...base,
       agent: {
         ...base.agent,
+        allowedProviders: ["claude"],
         defaultProvider: "claude"
       }
     })
 
     const recovered = reapplyValidWorkspaceSettingsCandidate(base, candidate, latest)
 
-    assert.deepStrictEqual(recovered.agent.allowedProviders, ["codex"])
-    assert.strictEqual(recovered.agent.defaultProvider, "codex")
+    assert.deepStrictEqual(recovered.agent.allowedProviders, ["claude"])
+    assert.strictEqual(recovered.agent.defaultProvider, "claude")
+    assert.strictEqual(recovered.agent.toolPolicy, "review-sandbox")
   })
 
-  it("keeps dependent retention and synchronization fields coherent", () => {
+  it("leaves schema-invalid dependent cross-edits unresolved", () => {
+    const agentBase = WorkspaceSettingsV1.make({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      agent: {
+        ...DEFAULT_WORKSPACE_SETTINGS.agent,
+        allowedProviders: ["claude", "codex"],
+        defaultProvider: "codex"
+      }
+    })
+    const agentCandidate = WorkspaceSettingsV1.make({
+      ...agentBase,
+      agent: {
+        ...agentBase.agent,
+        allowedProviders: ["codex"]
+      }
+    })
+    const agentLatest = WorkspaceSettingsV1.make({
+      ...agentBase,
+      agent: {
+        ...agentBase.agent,
+        defaultProvider: "claude"
+      }
+    })
+
+    assert.isNull(
+      reapplyWorkspaceSettingsCandidate(agentBase, agentCandidate, agentLatest)
+    )
+
     const retentionBase = WorkspaceSettingsV1.make({
       ...DEFAULT_WORKSPACE_SETTINGS,
       retention: {
@@ -93,16 +123,12 @@ describe("workspace settings conflict recovery", () => {
         evidenceDays: 365
       }
     })
-    const recoveredRetention = reapplyValidWorkspaceSettingsCandidate(
-      retentionBase,
-      retentionCandidate,
-      retentionLatest
+
+    assert.isNull(
+      reapplyWorkspaceSettingsCandidate(retentionBase, retentionCandidate, retentionLatest)
     )
 
-    assert.strictEqual(recoveredRetention.retention.evidenceDays, 100)
-    assert.strictEqual(recoveredRetention.retention.auditDays, 100)
-
-    const synchronizationCandidate = WorkspaceSettingsV1.make({
+    const synchronizationBase = WorkspaceSettingsV1.make({
       ...DEFAULT_WORKSPACE_SETTINGS,
       synchronization: {
         cadence: "interval",
@@ -110,24 +136,28 @@ describe("workspace settings conflict recovery", () => {
         staleAfterMinutes: DEFAULT_WORKSPACE_SETTINGS.synchronization.staleAfterMinutes
       }
     })
-    const synchronizationLatest = WorkspaceSettingsV1.make({
-      ...DEFAULT_WORKSPACE_SETTINGS,
+    const synchronizationCandidate = WorkspaceSettingsV1.make({
+      ...synchronizationBase,
       synchronization: {
-        ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
-        staleAfterMinutes: 60
+        ...synchronizationBase.synchronization,
+        intervalMinutes: 60
       }
     })
-    const recoveredSynchronization = reapplyValidWorkspaceSettingsCandidate(
-      DEFAULT_WORKSPACE_SETTINGS,
-      synchronizationCandidate,
-      synchronizationLatest
-    )
+    const synchronizationLatest = WorkspaceSettingsV1.make({
+      ...synchronizationBase,
+      synchronization: {
+        ...synchronizationBase.synchronization,
+        cadence: "manual",
+        intervalMinutes: null
+      }
+    })
 
-    assert.strictEqual(recoveredSynchronization.synchronization.cadence, "interval")
-    assert.strictEqual(recoveredSynchronization.synchronization.intervalMinutes, 30)
-    assert.strictEqual(
-      recoveredSynchronization.synchronization.staleAfterMinutes,
-      DEFAULT_WORKSPACE_SETTINGS.synchronization.staleAfterMinutes
+    assert.isNull(
+      reapplyWorkspaceSettingsCandidate(
+        synchronizationBase,
+        synchronizationCandidate,
+        synchronizationLatest
+      )
     )
   })
 })

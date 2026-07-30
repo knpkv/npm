@@ -10,12 +10,16 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { AppThemeProvider, readStoredAppTheme, useAppTheme } from "../../src/client/AppProviders.js"
 import { CorrelationId, UnauthorizedApiError } from "../../src/api/errors.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
-import { WorkspaceSettingsReadModel } from "../../src/api/workspaceSettings.js"
+import {
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision,
+  workspaceSettingsEtag
+} from "../../src/api/workspaceSettings.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { SettingsForm, WorkspaceSettingsPage } from "../../src/client/settings/WorkspaceSettingsPage.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
 import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
-import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
+import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -353,6 +357,73 @@ describe("workspace settings browser acceptance", () => {
     expect(confirmation.checked).toBe(false)
     expect(save.disabled).toBe(true)
     expect(confirmation.parentElement?.textContent).toContain("governed agent, retention policy changes")
+  })
+
+  it("leaves a schema-invalid field-level reapply explicitly unresolved", async () => {
+    const base = WorkspaceSettingsReadModel.make({
+      ...settingsReadModel,
+      settings: WorkspaceSettingsV1.make({
+        ...settingsReadModel.settings,
+        agent: {
+          ...settingsReadModel.settings.agent,
+          allowedProviders: ["claude", "codex"],
+          defaultProvider: "codex"
+        }
+      })
+    })
+    const latestRevision = WorkspaceSettingsRevision.make(2)
+    const latest = WorkspaceSettingsReadModel.make({
+      ...base,
+      revision: latestRevision,
+      etag: workspaceSettingsEtag(latestRevision),
+      settings: WorkspaceSettingsV1.make({
+        ...base.settings,
+        agent: {
+          ...base.settings.agent,
+          defaultProvider: "claude"
+        }
+      })
+    })
+    const transport = {
+      load: vi.fn().mockResolvedValueOnce(base).mockResolvedValueOnce(latest),
+      makeMutationId: () => Promise.resolve(mutationId),
+      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    } satisfies WorkspaceSettingsTransport
+    const host = await renderSettingsPage(transport)
+    await act(async () => sessionControls?.establishSession(Schema.decodeSync(CsrfToken)("a".repeat(64)), session))
+    await vi.waitFor(() => expect(host.textContent).toContain("Workspace settings"))
+
+    const allowedProviders = Array.from(host.querySelectorAll("label"))
+      .find((candidate) => candidate.textContent?.includes("Allowed providers"))
+      ?.querySelector<HTMLInputElement>("input")
+    if (allowedProviders === undefined || allowedProviders === null) {
+      throw new Error("expected allowed providers input")
+    }
+    await changeInput(allowedProviders, "codex")
+    const confirmation = Array.from(host.querySelectorAll("label"))
+      .find((candidate) => candidate.textContent?.includes("governed agent policy change"))
+      ?.querySelector<HTMLInputElement>("input")
+    const save = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Save settings"
+    )
+    if (confirmation === undefined || confirmation === null || save === undefined) {
+      throw new Error("expected governed confirmation and save controls")
+    }
+    await act(async () => confirmation.click())
+    await act(async () => save.click())
+    await vi.waitFor(() => expect(host.textContent).toContain("Settings changed in another session"))
+
+    const reapply = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(
+      (candidate) => candidate.textContent === "Reapply my changes"
+    )
+    if (reapply === undefined) throw new Error("expected conflict reapply control")
+    await act(async () => reapply.click())
+
+    expect(host.textContent).toContain("Settings conflict needs manual recovery")
+    expect(host.textContent).toContain("cannot be combined safely")
+    expect(host.textContent).toContain("Use latest")
+    expect(host.textContent).not.toContain("Reapply my changes")
+    expect(transport.update).toHaveBeenCalledTimes(1)
   })
 
   it("persists only system, light, and dark at narrow and wide viewport sizes", async () => {
