@@ -101,7 +101,7 @@ describe("workspace package artifacts", () => {
       assert.strictEqual(yield* fileSystem.exists(sourceMarker), true)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("changes the dependency fingerprint for source and resolved build configuration, but not tests or docs", () =>
+  it.effect("changes the dependency fingerprint for every local build input, but not tests or docs", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -113,13 +113,22 @@ describe("workspace package artifacts", () => {
       const testPath = path.join(packageRoot, "test", "index.test.ts")
       const readmePath = path.join(packageRoot, "README.md")
       const sharedConfigPath = path.join(workspaceRoot, "tsconfig.base.jsonc")
+      const boundedViteConfigPath = path.join(packageRoot, "vite.bounded.config.ts")
+      const manifestMetadataPath = path.join(packageRoot, "manifest", "registry-metadata.ts")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
       yield* fileSystem.makeDirectory(path.dirname(testPath), { recursive: true })
+      yield* fileSystem.makeDirectory(path.dirname(manifestMetadataPath), { recursive: true })
       yield* fileSystem.writeFileString(path.join(packageRoot, "package.json"), "{\"name\":\"@example/package\"}")
+      yield* fileSystem.writeFileString(
+        path.join(packageRoot, "component-manifest.ts"),
+        "export { metadata } from \"./manifest/registry-metadata.js\"\n"
+      )
       yield* fileSystem.writeFileString(
         path.join(packageRoot, "tsconfig.json"),
         "{\"extends\":\"../../tsconfig.base.jsonc\"}"
       )
+      yield* fileSystem.writeFileString(boundedViteConfigPath, "export default { build: { emptyOutDir: false } }\n")
+      yield* fileSystem.writeFileString(manifestMetadataPath, "export const metadata = { state: \"stable\" }\n")
       yield* fileSystem.writeFileString(sharedConfigPath, "{\"compilerOptions\":{\"strict\":true}}")
       yield* fileSystem.writeFileString(sourcePath, "export const value = 1\n")
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(1)\n")
@@ -131,9 +140,17 @@ describe("workspace package artifacts", () => {
       yield* fileSystem.writeFileString(readmePath, "Updated package documentation\n")
       assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
 
+      yield* fileSystem.writeFileString(manifestMetadataPath, "export const metadata = { state: \"experimental\" }\n")
+      const manifestChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(manifestChanged, initial)
+
+      yield* fileSystem.writeFileString(boundedViteConfigPath, "export default { build: { emptyOutDir: true } }\n")
+      const boundedConfigChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(boundedConfigChanged, manifestChanged)
+
       yield* fileSystem.writeFileString(sharedConfigPath, "{\"compilerOptions\":{\"strict\":false}}")
       const sharedConfigChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
-      assert.notStrictEqual(sharedConfigChanged, initial)
+      assert.notStrictEqual(sharedConfigChanged, boundedConfigChanged)
 
       yield* fileSystem.writeFileString(sourcePath, "export const value = 2\n")
       const sourceChanged = yield* workspaceArtifactInputFingerprint(packageRoot)

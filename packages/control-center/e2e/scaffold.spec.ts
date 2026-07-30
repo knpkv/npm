@@ -180,6 +180,12 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
+      audit: productionRouteAuditCase("scaffold", "items", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
       audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByText("Page not found", { exact: true }),

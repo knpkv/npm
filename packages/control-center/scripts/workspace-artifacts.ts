@@ -110,8 +110,19 @@ export const packagesRequiringPublishedArtifactBuild = (
 
 const workspaceArtifactInputDirectories = new Set(["scripts", "src"])
 const workspaceArtifactInputRootFiles =
-  /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.jsonc?|vite\.config\.[cm]?[jt]s)$/u
+  /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.jsonc?|vite(?:\.[^.]+)*\.config\.[cm]?[jt]s)$/u
 const workspaceArtifactTsconfig = /^tsconfig(?:\.[^.]+)*\.jsonc?$/u
+const workspaceArtifactSourceModule = /\.[cm]?[jt]sx?$/u
+const workspaceArtifactSourceExtensions: ReadonlyArray<string> = [
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".jsx",
+  ".mjs",
+  ".cjs"
+]
 
 const isExcludedExternalBuildInput = (candidate: string): boolean =>
   candidate.split(/[\\/]/u).some((segment) => segment === "node_modules" || segment === "repos" || segment === "vendor")
@@ -194,6 +205,51 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
       if (resolved === undefined || inputPaths.has(resolved)) continue
       inputPaths.add(resolved)
       configQueue.push(resolved)
+    }
+  }
+
+  const sourceQueue = Array.from(inputPaths).filter((inputPath) => workspaceArtifactSourceModule.test(inputPath))
+  const visitedSources = new Set<string>()
+  while (sourceQueue.length > 0) {
+    const sourcePath = sourceQueue.pop()
+    if (sourcePath === undefined || visitedSources.has(sourcePath)) continue
+    visitedSources.add(sourcePath)
+    const source = yield* fileSystem.readFileString(sourcePath).pipe(
+      Effect.mapError(
+        () =>
+          new WorkspaceArtifactError({
+            reason: `could not read build input ${path.relative(packageRoot, sourcePath)}`
+          })
+      )
+    )
+    for (const { fileName } of TypeScript.preProcessFile(source, true, true).importedFiles) {
+      if (!fileName.startsWith(".") && !fileName.startsWith("/")) continue
+      const unresolved = path.resolve(path.dirname(sourcePath), fileName)
+      const extension = path.extname(unresolved)
+      const stem = workspaceArtifactSourceModule.test(unresolved)
+        ? unresolved.slice(0, Math.max(0, unresolved.length - extension.length))
+        : unresolved
+      const candidates = Array.from(
+        new Set([
+          unresolved,
+          ...workspaceArtifactSourceExtensions.map((candidateExtension) => `${stem}${candidateExtension}`),
+          ...workspaceArtifactSourceExtensions.map((candidateExtension) =>
+            path.join(unresolved, `index${candidateExtension}`)
+          )
+        ])
+      )
+      let resolved: string | undefined
+      for (const candidate of candidates) {
+        if (isExcludedExternalBuildInput(candidate) || !(yield* fileSystem.exists(candidate))) continue
+        const info = yield* fileSystem.stat(candidate).pipe(Effect.mapError(enumerateFailure))
+        if (info.type === "File") {
+          resolved = candidate
+          break
+        }
+      }
+      if (resolved === undefined || inputPaths.has(resolved)) continue
+      inputPaths.add(resolved)
+      if (workspaceArtifactSourceModule.test(resolved)) sourceQueue.push(resolved)
     }
   }
 
