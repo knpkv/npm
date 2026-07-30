@@ -57,6 +57,17 @@ snapshots:
         start: 51
         end: 70
   ? |
+    ChildProcess.make("pbcopy", { env })
+  : labels:
+      - source: ChildProcess.make("pbcopy", { env })
+        style: primary
+        start: 0
+        end: 36
+      - source: env
+        style: secondary
+        start: 30
+        end: 33
+  ? |
     ChildProcess.make("pbcopy", { env: childEnv, stdin })
   : labels:
       - source: 'ChildProcess.make("pbcopy", { env: childEnv, stdin })'
@@ -83,3 +94,14 @@ snapshots:
         style: secondary
         start: 69
         end: 82
+  ? |
+    Process.ChildProcess.make("git", args, { env })
+  : labels:
+      - source: Process.ChildProcess.make("git", args, { env })
+        style: primary
+        start: 0
+        end: 47
+      - source: env
+        style: secondary
+        start: 41
+        end: 44

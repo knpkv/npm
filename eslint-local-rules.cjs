@@ -409,6 +409,54 @@ const directChildProcessMakeCall = (identifier) => {
 const CHILD_PROCESS_OPTION_DEPTH_LIMIT = 8
 
 /**
+ * True when the binding is reassigned or has a property written to it.
+ *
+ * ESLint counts `options.extendEnv = true` as a *read* of `options`, so a
+ * write-reference check alone concludes the initializer is the whole story and
+ * reports a missing `extendEnv` that the next statement supplies. Reporting
+ * valid configuration is worse than missing an invalid one, so any mutation makes
+ * the shape unresolvable rather than assumed-complete.
+ */
+const isMutatedChildProcessOptionsBinding = (variable, definition) =>
+  variable.references.some((reference) => {
+    if (reference.isWrite() && reference.identifier !== definition.name) return true
+    const member = reference.identifier.parent
+    if (member?.type !== "MemberExpression" || member.object !== reference.identifier) return false
+    const target = member.parent
+    return (
+      (target?.type === "AssignmentExpression" && target.left === member) ||
+      (target?.type === "UpdateExpression" && target.argument === member) ||
+      (target?.type === "UnaryExpression" && target.operator === "delete" && target.argument === member)
+    )
+  })
+
+/**
+ * Resolves `Process.ChildProcess.make(...)`, the barrel namespace form, to its
+ * call expression. The plain `ChildProcess.make(...)` shape is handled by
+ * `directChildProcessMakeCall`; here the binding is one member hop further out.
+ */
+const barrelChildProcessMakeCall = (identifier) => {
+  const namespaced = identifier.parent
+  if (
+    namespaced?.type !== "MemberExpression" ||
+    namespaced.object !== identifier ||
+    staticPropertyName(namespaced.property) !== "ChildProcess"
+  ) {
+    return undefined
+  }
+  const member = namespaced.parent
+  if (
+    member?.type !== "MemberExpression" ||
+    member.object !== namespaced ||
+    staticPropertyName(member.property) !== "make"
+  ) {
+    return undefined
+  }
+  const call = member.parent
+  return call?.type === "CallExpression" && call.callee === member ? call : undefined
+}
+
+/**
  * Resolves the options argument of a `ChildProcess.make` call to the object
  * literal that produced it, following `const` bindings and any `Object.freeze`
  * wrapper.
@@ -436,9 +484,7 @@ const resolvedChildProcessOptions = (context, argument, depth = 0) => {
   ) {
     return undefined
   }
-  if (variable.references.some((reference) => reference.isWrite() && reference.identifier !== definition.name)) {
-    return undefined
-  }
+  if (isMutatedChildProcessOptionsBinding(variable, definition)) return undefined
   return resolvedChildProcessOptions(context, definition.node.init, depth + 1)
 }
 
@@ -1276,6 +1322,8 @@ module.exports = {
     create(context) {
       // Namespace or `ChildProcess`-object bindings, used as `ChildProcess.make(...)`.
       const moduleBindings = []
+      // Barrel namespace bindings, used as `Process.ChildProcess.make(...)`.
+      const barrelBindings = []
       // `make` imported directly from the module, possibly aliased, and called
       // bare. Resolving the binding is what separates this from every unrelated
       // function named `make`, which is why ast-grep cannot own this case.
@@ -1303,8 +1351,12 @@ module.exports = {
               node.source.value === CHILD_PROCESS_MODULE &&
               specifier.type === "ImportSpecifier" &&
               staticPropertyName(specifier.imported) === "make"
+            const importsBarrelNamespace =
+              node.source.value === CHILD_PROCESS_BARREL && specifier.type === "ImportNamespaceSpecifier"
             if (importsMakeDirectly) {
               makeBindings.push(binding)
+            } else if (importsBarrelNamespace) {
+              barrelBindings.push(binding)
             } else {
               moduleBindings.push(binding)
             }
@@ -1315,6 +1367,13 @@ module.exports = {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = directChildProcessMakeCall(reference.identifier)
+              if (call !== undefined) checkCall(call)
+            }
+          }
+          for (const binding of barrelBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = barrelChildProcessMakeCall(reference.identifier)
               if (call !== undefined) checkCall(call)
             }
           }

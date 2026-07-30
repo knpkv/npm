@@ -13,6 +13,9 @@ rule:
   any:
     - pattern: ChildProcess.make($COMMAND, $ARGUMENTS, $OPTIONS)
     - pattern: ChildProcess.make($COMMAND, $OPTIONS)
+    # Barrel namespace form: `import * as Process from "effect/unstable/process"`.
+    - pattern: $NAMESPACE.ChildProcess.make($COMMAND, $ARGUMENTS, $OPTIONS)
+    - pattern: $NAMESPACE.ChildProcess.make($COMMAND, $OPTIONS)
 
 # `has` defaults to direct children, so these see the options object's own
 # properties rather than anything nested inside a property value.

@@ -1405,3 +1405,41 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-direct-make-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Process from "effect/unstable/process"
+    const barrel = Process.ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
+    const barrelTwoArg = Process.ChildProcess.make("pbcopy", { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-barrel-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import * as Process from "effect/unstable/process"
+    import * as Unrelated from "./unrelated.js"
+    const barrel = Process.ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreign = Unrelated.ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-barrel-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const completed = { env: gitEnvironment }
+    completed.extendEnv = true
+    const viaMutation = ChildProcess.make("git", args, completed)
+    const trimmed = { env: gitEnvironment, extendEnv: true }
+    delete trimmed.extendEnv
+    const viaDelete = ChildProcess.make("git", args, trimmed)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutated-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
