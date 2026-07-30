@@ -93,6 +93,55 @@ test("requires keyboard focus to add a visible indicator", async ({ page }) => {
         <title>Focus fixture</title>
         <style>
           body { background: white; }
+          button { background: black; border: 0; color: white; outline: none; }
+          button:focus-visible { background: white; color: white; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: black; border: 0; color: white; outline: none; }
+          button:focus-visible { background: white; color: black; }
+          @media (forced-colors: active) {
+            button:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
+          }
+        </style>
+      </head>
+      <body>
+        <main><h1>Focus fixture</h1><button onclick="this.textContent='Continued'">Continue</button></main>
+      </body>
+    </html>
+  `)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Focus fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
           button { background: transparent; border: 0; color: black; outline: none; }
           button:focus-visible { background: white; }
         </style>

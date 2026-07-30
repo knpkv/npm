@@ -371,17 +371,26 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     (focused.color !== unfocused.color &&
       !transparentPaint(focused.color) &&
       focused.color !== focused.effectiveBackgroundColor)
+  const focusedPaintIsDiscernible = (
+    !transparentPaint(focused.color) &&
+    focused.color !== focused.effectiveBackgroundColor
+  ) || (
+    !transparentPaint(focused.effectiveBackgroundColor) &&
+    focused.effectiveBackgroundColor !== focused.effectiveBackdropColor
+  )
 
   expect(
     focused.focusVisible &&
       focused.width > 0 &&
       focused.height > 0 &&
+      focusedPaintIsDiscernible &&
       (outlineChangedAndPainted || shadowChangedAndPainted || borderChangedAndPainted || equivalentPaintChanged),
     `primary action keyboard focus has no focus-specific visual indicator: ${
       JSON.stringify({
         borderChangedAndPainted,
         equivalentPaintChanged,
         focused,
+        focusedPaintIsDiscernible,
         outlineChangedAndPainted,
         shadowChangedAndPainted,
         unfocused

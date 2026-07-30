@@ -4,6 +4,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
@@ -363,7 +364,9 @@ const disposeAll = async (
 }
 
 export interface RealRuntimeFixture {
+  readonly applicationLogEntries: () => ReadonlyArray<string>
   readonly dispose: () => Promise<void>
+  readonly emitApplicationLogFixture: (message: string) => Promise<void>
   readonly lifecycleEvidence: () => RealRuntimeLifecycleEvidence
   readonly origin: string
   readonly pairThroughUi: (page: Page) => Promise<{ readonly consumedPairingCode: string }>
@@ -390,6 +393,18 @@ export interface RealRuntimePersistenceEvidence {
   readonly persistedReleases: number
 }
 
+/** Fail closed when the bounded release read observes either missing or surplus durable heads. */
+export const validateBenchmarkReleaseCardinality = Effect.fn(
+  "controlCenter.validateBenchmarkReleaseCardinality"
+)(function*(persistedReleases: number) {
+  if (persistedReleases !== CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases) {
+    return yield* new BenchmarkInvariantError({
+      reason: "Benchmark releases do not match the exact target cardinality."
+    })
+  }
+  return persistedReleases
+})
+
 /** Start one real Control Center server whose resources remain owned until explicit fixture disposal. */
 export const startRealRuntimeFixture = async (
   options: StartRealRuntimeFixtureOptions = {}
@@ -399,6 +414,10 @@ export const startRealRuntimeFixture = async (
   let trustedHttpsProxy: TrustedHttpsProxy | undefined
   try {
     await Effect.runPromise(seedFixture(allocated))
+    const applicationLogEntries: Array<string> = []
+    const applicationLogCapture = Logger.make<unknown, void>((options) => {
+      applicationLogEntries.push(Logger.formatJson.log(options))
+    })
     const fakeRuntime = await Effect.runPromise(makeFakePluginRuntime(realFakeScenario))
     const pluginConnections: PluginConnectionMapV1 = {
       contextEffect: () =>
@@ -432,7 +451,10 @@ export const startRealRuntimeFixture = async (
           owner: { _tag: "human", personId: REAL_OWNER_ID }
         },
         releaseSynchronization: { input: SYNCHRONIZATION_INPUT, pluginConnections }
-      }).pipe(Layer.provideMerge(NodeServices.layer))
+      }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Logger.layer([applicationLogCapture]))
+      )
     )
     serverRuntime = typedServerRuntime
     const context = await typedServerRuntime.context()
@@ -458,6 +480,10 @@ export const startRealRuntimeFixture = async (
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
     return {
+      applicationLogEntries: () => [...applicationLogEntries],
+      emitApplicationLogFixture: async (message) => {
+        await typedServerRuntime.runPromise(Effect.logInfo(message))
+      },
       seedBenchmarkPersistence: async () => {
         const fixture = generateControlCenterBenchmarkFixture()
         const persistence = Context.get(context, Persistence)
@@ -555,7 +581,7 @@ export const startRealRuntimeFixture = async (
             )
             const releases = yield* persistence.releases.list(
               REAL_WORKSPACE_ID,
-              CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases
+              CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases + 1
             )
             const entities = yield* persistence.entities.list(REAL_WORKSPACE_ID)
             const events = yield* persistence.events.streamState(REAL_WORKSPACE_ID)
@@ -566,7 +592,7 @@ export const startRealRuntimeFixture = async (
               generatedFiles: fixture.files.length,
               persistedEntities: entities.length,
               persistedEvents: events.headCursor,
-              persistedReleases: releases.length
+              persistedReleases: yield* validateBenchmarkReleaseCardinality(releases.length)
             }
           })
         )

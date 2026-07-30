@@ -183,6 +183,23 @@ describe("control center runtime benchmark report", () => {
       expect(Result.isFailure(yield* decodeResult(contradictory))).toBe(true)
     }))
 
+  it.effect("rejects one extra durable release while preserving the exact fixture cardinality", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      expect(Result.isSuccess(yield* decodeResult(valid))).toBe(true)
+      expect(
+        Result.isFailure(
+          yield* decodeResult({
+            ...valid,
+            cardinalities: {
+              ...valid.cardinalities,
+              persistedReleases: CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases + 1
+            }
+          })
+        )
+      ).toBe(true)
+    }))
+
   it.effect("keeps over-budget timing informational on an ineligible machine", () =>
     Effect.gen(function*() {
       const valid = validReportInput()

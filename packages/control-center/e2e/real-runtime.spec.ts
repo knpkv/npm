@@ -1,6 +1,8 @@
 import { expect } from "@playwright/test"
+import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
+import { CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS } from "../scripts/benchmarkFixture.js"
 import {
   CONTROL_CENTER_BENCHMARK_CAPS,
   CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
@@ -10,13 +12,14 @@ import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntime
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { DEFAULT_REQUEST_LIMIT_POLICY } from "../src/server/api/RequestLimits.js"
+import { type ApplicationLogSurface, exposedApplicationLogForbiddenValues } from "./applicationLogSurface.js"
 import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
   exposedBrowserForbiddenValues,
   snapshotBrowserReadableSurface
 } from "./browserSecretSurface.js"
-import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
+import { startRealRuntimeFixture, test, validateBenchmarkReleaseCardinality } from "./realRuntimeFixture.js"
 import {
   INITIAL_RELEASE_VERSION,
   REAL_RELEASE_ID,
@@ -54,6 +57,19 @@ const EXPECTED_TRUSTED_HTTPS_SECURITY_HEADERS = {
 } satisfies Readonly<Record<string, string>>
 
 test.describe("repository-managed real runtime", () => {
+  test("rejects one extra durable release before constructing benchmark evidence", async () => {
+    expect(
+      await Effect.runPromise(
+        validateBenchmarkReleaseCardinality(CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases)
+      )
+    ).toBe(CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases)
+    await expect(
+      Effect.runPromise(
+        validateBenchmarkReleaseCardinality(CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases + 1)
+      )
+    ).rejects.toMatchObject({ _tag: "BenchmarkInvariantError" })
+  })
+
   test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
     test.setTimeout(60_000)
     const fixture = await startRealRuntimeFixture({ trustedHttpsProxy: true })
@@ -68,6 +84,18 @@ test.describe("repository-managed real runtime", () => {
       })
       try {
         const page = await context.newPage()
+        const browserConsoleEntries: Array<string> = []
+        page.on("console", (message) => {
+          const sourceUrl = message.location().url
+          const effectiveSourceUrl = sourceUrl.length === 0 ? page.url() : sourceUrl
+          let sourceIsApplicationOrigin = false
+          try {
+            sourceIsApplicationOrigin = new URL(effectiveSourceUrl).origin === fixture.origin
+          } catch {
+            // Chromium and Playwright diagnostics without an application URL are outside this contract.
+          }
+          if (sourceIsApplicationOrigin) browserConsoleEntries.push(message.text())
+        })
         const response = await page.goto(`${fixture.origin}/services`)
         expect(response?.status()).toBe(200)
         const headers = response?.headers() ?? {}
@@ -102,6 +130,29 @@ test.describe("repository-managed real runtime", () => {
         const csrfProof = await page.evaluate<string | null>(`sessionStorage.getItem("cc_csrf")`)
         if (csrfProof === null) throw new Error("trusted HTTPS pairing did not expose its browser-owned CSRF proof")
         expect(browserSurfaceExposesSecret(browserSurface, csrfProof)).toBe(true)
+        await page.evaluate(`console.info("ordinary browser diagnostic [REDACTED]")`)
+        await fixture.emitApplicationLogFixture("ordinary managed-runtime diagnostic [REDACTED]")
+        const applicationLogs = (): ApplicationLogSurface => ({
+          browserConsole: [...browserConsoleEntries],
+          managedRuntime: fixture.applicationLogEntries()
+        })
+        expect(
+          exposedApplicationLogForbiddenValues(applicationLogs(), [
+            { label: "HttpOnly session cookie", value: sessionCookie.value },
+            { label: "consumed pairing code", value: consumedPairingCode }
+          ])
+        ).toEqual([])
+
+        const browserLogFixtureSecret = "browser-console-forbidden-fixture"
+        const managedRuntimeLogFixtureSecret = "managed-runtime-log-forbidden-fixture"
+        await page.evaluate(`console.info(${JSON.stringify(browserLogFixtureSecret)})`)
+        await fixture.emitApplicationLogFixture(managedRuntimeLogFixtureSecret)
+        expect(
+          exposedApplicationLogForbiddenValues(applicationLogs(), [
+            { label: "browser console fixture", value: browserLogFixtureSecret },
+            { label: "managed runtime fixture", value: managedRuntimeLogFixtureSecret }
+          ])
+        ).toEqual(["browser console fixture", "managed runtime fixture"])
 
         const indexedDbFixtureSecret = "indexed-db-forbidden-fixture"
         const cacheStorageFixtureSecret = "cache-storage-forbidden-fixture"
