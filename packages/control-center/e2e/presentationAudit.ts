@@ -43,8 +43,28 @@ interface FocusedVisualSnapshot extends FocusVisualSnapshot {
   readonly width: number
 }
 
+interface FocusComputedStyle extends FocusVisualSnapshot {
+  readonly borderBottomColor: string
+  readonly borderBottomStyle: string
+  readonly borderBottomWidth: string
+  readonly borderLeftColor: string
+  readonly borderLeftStyle: string
+  readonly borderLeftWidth: string
+  readonly borderRightColor: string
+  readonly borderRightStyle: string
+  readonly borderRightWidth: string
+  readonly borderTopColor: string
+  readonly borderTopStyle: string
+  readonly borderTopWidth: string
+  readonly forcedColorAdjust: string
+}
+
+interface FocusBrowserGlobal {
+  readonly getComputedStyle?: (element: unknown) => FocusComputedStyle
+}
+
 declare const document: { readonly activeElement: unknown }
-declare const window: AxeBrowserGlobal
+declare const window: AxeBrowserGlobal & FocusBrowserGlobal
 
 export type ProductionRoutePresentationAudit =
   & {
@@ -102,16 +122,11 @@ export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<Ax
 
 const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator): Promise<void> => {
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
-  await primaryAction.evaluate((element) => {
-    if (!("setAttribute" in element) || typeof element.setAttribute !== "function") {
-      throw new Error("primary action cannot receive an audit marker")
+  const unfocused = await primaryAction.evaluate((element): FocusVisualSnapshot => {
+    if (window.getComputedStyle === undefined) {
+      throw new Error("primary action has no computed-style view")
     }
-    element.setAttribute("data-control-center-focus-audit", "")
-  })
-  const unfocused = await page.evaluate<FocusVisualSnapshot>(`(() => {
-    const element = document.querySelector("[data-control-center-focus-audit]")
-    if (!(element instanceof HTMLElement)) throw new Error("primary action is not an HTML element")
-    const style = getComputedStyle(element)
+    const style = window.getComputedStyle(element)
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
@@ -124,19 +139,26 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
       outlineOffset: style.outlineOffset,
       outlineStyle: style.outlineStyle,
       outlineWidth: style.outlineWidth
-    };
-  })()`)
+    }
+  })
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await page.keyboard.press("Tab")
     const reachedPrimaryAction = await primaryAction.evaluate((element) => element === document.activeElement)
     if (reachedPrimaryAction) break
   }
   await expect(primaryAction).toBeFocused()
-  const focused = await page.evaluate<FocusedVisualSnapshot>(`(() => {
-    const element = document.querySelector("[data-control-center-focus-audit]")
-    if (!(element instanceof HTMLElement)) throw new Error("primary action is not an HTML element")
+  const focused = await primaryAction.evaluate((element): FocusedVisualSnapshot => {
+    if (
+      window.getComputedStyle === undefined ||
+      !("getBoundingClientRect" in element) ||
+      typeof element.getBoundingClientRect !== "function" ||
+      !("matches" in element) ||
+      typeof element.matches !== "function"
+    ) {
+      throw new Error("primary action cannot provide a focused visual snapshot")
+    }
     const bounds = element.getBoundingClientRect()
-    const style = getComputedStyle(element)
+    const style = window.getComputedStyle(element)
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
@@ -152,13 +174,7 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
       outlineStyle: style.outlineStyle,
       outlineWidth: style.outlineWidth,
       width: bounds.width
-    };
-  })()`)
-  await primaryAction.evaluate((element) => {
-    if (!("removeAttribute" in element) || typeof element.removeAttribute !== "function") {
-      throw new Error("primary action cannot remove its audit marker")
     }
-    element.removeAttribute("data-control-center-focus-audit")
   })
   const outlineChangedAndPainted = (focused.outlineColor !== unfocused.outlineColor ||
     focused.outlineOffset !== unfocused.outlineOffset ||
@@ -179,7 +195,51 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     focused.focusVisible &&
       focused.width > 0 &&
       focused.height > 0 &&
-      (outlineChangedAndPainted || shadowChangedAndPainted || borderChanged || equivalentPaintChanged)
+      (outlineChangedAndPainted || shadowChangedAndPainted || borderChanged || equivalentPaintChanged),
+    "primary action keyboard focus has no focus-specific visual indicator"
+  ).toBe(true)
+}
+
+const transparentPaint = (value: string): boolean =>
+  value === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\)$/u.test(value)
+
+const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string): Promise<void> => {
+  const snapshot = await locator.evaluate((element) => {
+    if (window.getComputedStyle === undefined) throw new Error("forced-color target has no computed-style view")
+    const style = window.getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      borderBottom: [style.borderBottomColor, style.borderBottomStyle, style.borderBottomWidth],
+      borderLeft: [style.borderLeftColor, style.borderLeftStyle, style.borderLeftWidth],
+      borderRight: [style.borderRightColor, style.borderRightStyle, style.borderRightWidth],
+      borderTop: [style.borderTopColor, style.borderTopStyle, style.borderTopWidth],
+      color: style.color,
+      forcedColorAdjust: style.forcedColorAdjust,
+      outline: [style.outlineColor, style.outlineStyle, style.outlineWidth]
+    }
+  })
+  const paintedBoundary = [
+    ...snapshot.borderBottom,
+    ...snapshot.borderLeft,
+    ...snapshot.borderRight,
+    ...snapshot.borderTop
+  ]
+    .some((value, index, values) => {
+      if (index % 3 !== 0) return false
+      const style = values[index + 1] ?? "none"
+      const width = values[index + 2] ?? "0"
+      return style !== "none" && style !== "hidden" && Number.parseFloat(width) > 0 && !transparentPaint(value)
+    })
+  const paintedOutline = snapshot.outline[1] !== "none" &&
+    snapshot.outline[1] !== "hidden" &&
+    Number.parseFloat(snapshot.outline[2] ?? "0") > 0 &&
+    !transparentPaint(snapshot.outline[0] ?? "transparent")
+  expect(
+    !transparentPaint(snapshot.color) ||
+      !transparentPaint(snapshot.backgroundColor) ||
+      paintedBoundary ||
+      paintedOutline,
+    `${label} has no discernible forced-color paint (${snapshot.forcedColorAdjust})`
   ).toBe(true)
 }
 
@@ -191,7 +251,9 @@ export const auditProductionRoutePresentation = async (
   await page.setViewportSize({ height: 800, width: 1_280 })
   await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
   await expect(audit.landmark).toBeVisible()
-  expect(await seriousAxeViolations(page)).toEqual([])
+  expect(await seriousAxeViolations(page), "desktop layout has serious or critical accessibility violations").toEqual(
+    []
+  )
 
   if (audit.primaryAction === null) {
     expect(audit.noActionReason.trim().length).toBeGreaterThan(0)
@@ -213,10 +275,14 @@ export const auditProductionRoutePresentation = async (
   expect(
     await page.evaluate<boolean>("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
   ).toBe(true)
-  expect(await seriousAxeViolations(page)).toEqual([])
+  expect(
+    await seriousAxeViolations(page),
+    "compact layout has serious or critical accessibility violations"
+  ).toEqual([])
 
   await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
   await expect(audit.landmark).toBeVisible()
+  await expectDiscernibleForcedColorPaint(audit.landmark, "route landmark")
   expect(
     await page.evaluate<boolean>(
       "matchMedia('(forced-colors: active)').matches && matchMedia('(prefers-reduced-motion: reduce)').matches"
@@ -225,6 +291,7 @@ export const auditProductionRoutePresentation = async (
 
   if (audit.primaryAction !== null) {
     await expect(audit.primaryAction).toBeVisible()
+    await expectDiscernibleForcedColorPaint(audit.primaryAction, "primary action")
     await focusPrimaryActionByKeyboard(page, audit.primaryAction)
     await audit.exercise(audit.primaryAction)
     await audit.expectOutcome()

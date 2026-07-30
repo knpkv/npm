@@ -61,7 +61,7 @@ test("requires keyboard focus to add a visible indicator", async ({ page }) => {
       landmark: page.getByRole("heading", { name: "Focus fixture" }),
       primaryAction: page.getByRole("button", { name: "Continue" })
     })
-  ).rejects.toThrow()
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
 
   await page.setContent(`
     <!doctype html>
@@ -115,7 +115,7 @@ test("reruns the serious accessibility gate after compact-layout content appears
       landmark: page.getByRole("heading", { name: "Compact fixture" }),
       primaryAction: page.getByRole("button", { name: "Continue" })
     })
-  ).rejects.toThrow()
+  ).rejects.toThrow("compact layout has serious or critical accessibility violations")
 
   await page.setContent(content(" aria-label=\"Open mobile navigation\""))
   await auditProductionRoutePresentation(page, {
@@ -126,8 +126,55 @@ test("reruns the serious accessibility gate after compact-layout content appears
   })
 })
 
+test("requires discernible system paint in forced-colors mode", async ({ page }) => {
+  const content = (forcedColorPaint: string): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Forced color fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          @media (forced-colors: active) {
+            button {
+              forced-color-adjust: none;
+              ${forcedColorPaint}
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Forced color fixture</h1>
+          <button onclick="this.textContent='Continued'">Continue</button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(
+    content(
+      "background: transparent; border-color: transparent; color: transparent; outline-color: transparent;"
+    )
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
+  await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
 test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
-  test.setTimeout(30_000)
+  test.setTimeout(60_000)
   await context.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
@@ -142,19 +189,19 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
   })
   const routes: ReadonlyArray<UnauthenticatedPresentationRoute> = [
     {
-      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated", "<index>"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Every release. One view." }),
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "services", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "services", "unauthenticated", "services"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Services" }),
       primaryAction: () => page.getByRole("button", { name: "Pair to enable" }).first()
     },
     {
-      audit: productionRouteAuditCase("scaffold", "pair", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "pair", "unauthenticated", "pair"),
       exercise: async () => page.getByRole("textbox", { name: "Pairing code" }).fill("presentation-audit"),
       expectOutcome: async () =>
         expect(page.getByRole("textbox", { name: "Pairing code" })).toHaveValue("presentation-audit"),
@@ -162,44 +209,59 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       primaryAction: () => page.getByRole("textbox", { name: "Pairing code" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Ask in context." }),
       primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "atlassian-oauth-callback", "unauthenticated"),
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "atlassian-oauth-callback",
+        "unauthenticated",
+        "services/oauth/atlassian/callback"
+      ),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Services" })).toBeVisible(),
       landmark: () => page.getByText("Paired session required", { exact: true }),
       primaryAction: () => page.getByRole("button", { name: "Return to Services" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "authorized-share", "unauthenticated"),
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "authorized-share",
+        "unauthenticated",
+        "shares/:workspaceId/:shareId"
+      ),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByText("Authentication required", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "items", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "items", "unauthenticated", "items"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByText("Release facts stay private", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "item", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "item", "unauthenticated", "items/:entityId"),
       expectOutcome: async () => expect(page.getByText("Release facts stay private", { exact: true })).toBeVisible(),
       landmark: () => page.getByText("Entity unavailable", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Back to items" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated", "*"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByText("Page not found", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Return to Control Center" })
     },
     {
-      audit: productionRouteAuditCase("scaffold", "settings", "unauthenticated"),
+      audit: productionRouteAuditCase("scaffold", "settings", "unauthenticated", "settings"),
       landmark: () => page.getByText("Authentication required", { exact: true }),
+      primaryAction: () => null
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "timeline", "unauthenticated", "timeline"),
+      landmark: () => page.getByText("Loading Timeline", { exact: true }),
       primaryAction: () => null
     }
   ]
@@ -241,7 +303,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     })
   })
   const authenticatedAgent = {
-    audit: productionRouteAuditCase("scaffold", "agent", "authenticated"),
+    audit: productionRouteAuditCase("scaffold", "agent", "authenticated", "agent"),
     landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
     primaryAction: page.getByRole("link", { name: "Return to Overview" })
   }

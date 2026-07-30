@@ -140,7 +140,12 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")
 
-  const presentationAudit = productionRouteAuditCase("workspace-settings", "settings", "authenticated")
+  const presentationAudit = productionRouteAuditCase(
+    "workspace-settings",
+    "settings",
+    "authenticated",
+    "settings"
+  )
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => {
       await primaryAction.selectOption("light")

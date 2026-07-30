@@ -257,11 +257,17 @@ describe("control center runtime benchmark report", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const packagePath = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
-        return yield* fileSystem.readFileString(packagePath)
+        const workflowPath = yield* path.fromFileUrl(
+          new URL("../../../../.github/workflows/check.yml", import.meta.url)
+        )
+        return {
+          manifest: yield* fileSystem.readFileString(packagePath),
+          workflow: yield* fileSystem.readFileString(workflowPath)
+        }
       }).pipe(Effect.provide(NodeServices.layer))
       const manifest = Schema.decodeUnknownSync(
         Schema.fromJsonString(Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) }))
-      )(packageJson)
+      )(packageJson.manifest)
       const command = manifest.scripts["benchmark:runtime"]
       const preparedCommand = manifest.scripts["benchmark:runtime:prepared"]
       const validationCommand = manifest.scripts["benchmark:validate-runtime"]
@@ -274,6 +280,9 @@ describe("control center runtime benchmark report", () => {
       )
       expect(preparedCommand).toContain("pnpm benchmark:validate-runtime")
       expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
+      expect(packageJson.workflow).toMatch(
+        /name: Upload Control Center runtime benchmark evidence[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*uses: actions\/upload-artifact@v7[\s\S]*path: test-results\/control-center\/runtime-benchmark\.json/u
+      )
     }))
 
   it.effect("rejects aggregates that do not match their samples", () =>

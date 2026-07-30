@@ -327,6 +327,17 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
   {
     audits: [
       {
+        action: {
+          kind: "none",
+          reason: "Timeline remains idle without a paired browser and exposes no route-owned action."
+        },
+        canonicalPath: `/w/${WORKSPACE_ID}/timeline`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "timeline",
+        surface: "boundary"
+      },
+      {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/timeline`,
         owner: "release-routes",
@@ -363,14 +374,18 @@ export const productionRouteAuditKey = (
 export const productionRouteAuditCase = (
   owner: ProductionRouteAuditOwner,
   family: ProductionRouteFamily,
-  presentation: ProductionRoutePresentation
+  presentation: ProductionRoutePresentation,
+  routerLiteral: string
 ): ProductionRouteAuditRequirement => {
   const descriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find((candidate) => candidate.family === family)
   const audit = descriptor?.audits.find(
-    (candidate) => candidate.owner === owner && candidate.presentation === presentation
+    (candidate) =>
+      candidate.owner === owner &&
+      candidate.presentation === presentation &&
+      candidate.routerLiteral === routerLiteral
   )
   if (audit === undefined) {
-    throw new Error(`Production route audit ${family}:${presentation} is not owned by ${owner}`)
+    throw new Error(`Production route audit ${routerLiteral}:${family}:${presentation} is not owned by ${owner}`)
   }
   return { ...audit, family }
 }
@@ -404,7 +419,8 @@ export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_LEAVES: ReadonlyArray<Produc
   { family: "item", routerLiteral: "items/:entityId" },
   { family: "items", routerLiteral: "items" },
   { family: "services", routerLiteral: "services" },
-  { family: "settings", routerLiteral: "settings" }
+  { family: "settings", routerLiteral: "settings" },
+  { family: "timeline", routerLiteral: "timeline" }
 ]
 
 /** Literal leaves deliberately represented by another identical or redirecting browser presentation. */

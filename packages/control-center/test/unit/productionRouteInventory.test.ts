@@ -95,15 +95,20 @@ describe("Control Center production route presentation inventory", () => {
     )
 
     expect(new Set(assignedKeys).size).toBe(assignedKeys.length)
-    expect(() => productionRouteAuditCase("scaffold", "settings", "authenticated")).toThrow(
-      "settings:authenticated is not owned by scaffold"
+    expect(() => productionRouteAuditCase("scaffold", "settings", "authenticated", "settings")).toThrow(
+      "settings:settings:authenticated is not owned by scaffold"
     )
-    expect(productionRouteAuditCase("release-routes", "item", "authenticated").canonicalPath).toContain(
-      "/items/01890f6f"
-    )
+    expect(productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId").canonicalPath)
+      .toContain(
+        "/items/01890f6f"
+      )
     expect(
-      productionRouteAuditKey(productionRouteAuditCase("scaffold", "agent", "authenticated"))
-    ).not.toBe(productionRouteAuditKey(productionRouteAuditCase("release-routes", "agent", "authenticated")))
+      productionRouteAuditKey(productionRouteAuditCase("scaffold", "agent", "authenticated", "agent"))
+    ).not.toBe(
+      productionRouteAuditKey(
+        productionRouteAuditCase("release-routes", "agent", "authenticated", "releases/:releaseId/agent")
+      )
+    )
   })
 
   it("requires both session variants on each declared leaf and a primary audit for every ready route family", () => {
@@ -176,6 +181,22 @@ describe("Control Center production route presentation inventory", () => {
       )
     ).toEqual(["item (items/:entityId) is missing its unauthenticated presentation"])
 
+    const timelineDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(
+      ({ family }) => family === "timeline"
+    )
+    if (timelineDescriptor === undefined) throw new Error("expected the Timeline route descriptor")
+    const authenticatedTimelineAudit = timelineDescriptor.audits.find(
+      ({ presentation }) => presentation === "authenticated"
+    )
+    if (authenticatedTimelineAudit === undefined) throw new Error("expected the authenticated Timeline audit")
+    expect(
+      productionRouteCoverageFailures(
+        [{ ...timelineDescriptor, audits: [authenticatedTimelineAudit] }],
+        [{ family: "timeline", routerLiteral: "timeline" }],
+        []
+      )
+    ).toEqual(["timeline (timeline) is missing its unauthenticated presentation"])
+
     const agentDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(({ family }) => family === "agent")
     if (agentDescriptor === undefined) throw new Error("expected the agent route descriptor")
     const anonymousAgentAudit = agentDescriptor.audits.find(
@@ -211,14 +232,17 @@ describe("Control Center production route presentation inventory", () => {
   })
 
   it("requires every router leaf literal to own an audit or a documented exemption", () => {
-    for (const descriptor of CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS) {
-      for (const routerLiteral of new Set(descriptor.routerLiterals)) {
+    const unownedLeaves = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.flatMap((descriptor) =>
+      Array.from(new Set(descriptor.routerLiterals)).flatMap((routerLiteral) => {
         const audited = descriptor.audits.some((audit) => audit.routerLiteral === routerLiteral)
         const exemption = CONTROL_CENTER_PRODUCTION_ROUTE_LEAF_EXEMPTIONS.find(
           (candidate) => candidate.family === descriptor.family && candidate.routerLiteral === routerLiteral
         )
-        expect(audited || (exemption !== undefined && exemption.reason.trim().length > 0)).toBe(true)
-      }
-    }
+        return audited || (exemption !== undefined && exemption.reason.trim().length > 0)
+          ? []
+          : [`${descriptor.family}:${routerLiteral}`]
+      })
+    )
+    expect(unownedLeaves).toEqual([])
   })
 })

@@ -62,12 +62,19 @@ test.describe("repository-managed real runtime", () => {
         })
         const browserSurface = await page.evaluate<BrowserSecretSurface>(`(() => {
           const liveFormControlValues = [];
+          const openShadowRootContent = [];
           const visitRoot = (root) => {
             for (const control of root.querySelectorAll("input, textarea, select")) {
               liveFormControlValues.push(control.value);
             }
             for (const element of root.querySelectorAll("*")) {
-              if (element.shadowRoot !== null) visitRoot(element.shadowRoot);
+              if (element.shadowRoot !== null) {
+                openShadowRootContent.push({
+                  html: element.shadowRoot.innerHTML,
+                  text: element.shadowRoot.textContent
+                });
+                visitRoot(element.shadowRoot);
+              }
             }
           };
           visitRoot(document);
@@ -75,6 +82,7 @@ test.describe("repository-managed real runtime", () => {
             documentHtml: document.documentElement.outerHTML,
             liveFormControlValues: JSON.stringify(liveFormControlValues),
             localStorage: JSON.stringify(Object.entries(localStorage)),
+            openShadowRootContent: JSON.stringify(openShadowRootContent),
             sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
             url: location.href
           };

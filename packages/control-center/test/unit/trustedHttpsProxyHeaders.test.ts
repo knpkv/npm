@@ -19,4 +19,17 @@ describe("trusted HTTPS proxy headers", () => {
       "x-content-type-options": "nosniff"
     })
   })
+
+  it("removes hop-by-hop headers regardless of casing", () => {
+    expect(
+      forwardedProxyHeaders({
+        Connection: "close",
+        "Content-Type": "text/css",
+        "Keep-Alive": "timeout=5",
+        TE: "trailers"
+      })
+    ).toEqual({
+      "Content-Type": "text/css"
+    })
+  })
 })

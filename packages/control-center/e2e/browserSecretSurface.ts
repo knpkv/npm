@@ -3,6 +3,7 @@ export interface BrowserSecretSurface {
   readonly documentHtml: string
   readonly liveFormControlValues: string
   readonly localStorage: string
+  readonly openShadowRootContent: string
   readonly sessionStorage: string
   readonly url: string
 }

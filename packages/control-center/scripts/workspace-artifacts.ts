@@ -230,6 +230,18 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
     }
   }
 
+  let workspaceDirectory = packageRoot
+  while (true) {
+    const lockfilePath = path.join(workspaceDirectory, "pnpm-lock.yaml")
+    if (yield* fileSystem.exists(lockfilePath)) {
+      inputPaths.add(lockfilePath)
+      break
+    }
+    const parent = path.dirname(workspaceDirectory)
+    if (parent === workspaceDirectory) break
+    workspaceDirectory = parent
+  }
+
   const configQueue = Array.from(inputPaths).filter((inputPath) =>
     workspaceArtifactTsconfig.test(path.basename(inputPath))
   )
@@ -279,6 +291,7 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
   }
 
   const sourceQueue = Array.from(inputPaths).filter((inputPath) => workspaceArtifactSourceModule.test(inputPath))
+  const sourceInputs = new Map<string, string>()
   const visitedSources = new Set<string>()
   while (sourceQueue.length > 0) {
     const sourcePath = sourceQueue.pop()
@@ -292,6 +305,7 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
           })
       )
     )
+    sourceInputs.set(sourcePath, source)
     for (const { fileName } of TypeScript.preProcessFile(source, true, true).importedFiles) {
       if (!fileName.startsWith(".") && !fileName.startsWith("/")) continue
       const unresolved = path.resolve(path.dirname(sourcePath), fileName)
@@ -326,11 +340,12 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
   const encodedInputs: Array<string> = []
   for (const inputPath of Array.from(inputPaths).sort()) {
     const relativePath = path.relative(packageRoot, inputPath)
-    const source = yield* fileSystem.readFileString(inputPath).pipe(
-      Effect.mapError(
-        () => new WorkspaceArtifactError({ reason: `could not read build input ${relativePath}` })
-      )
-    )
+    const source = sourceInputs.get(inputPath) ??
+      (yield* fileSystem.readFileString(inputPath).pipe(
+        Effect.mapError(
+          () => new WorkspaceArtifactError({ reason: `could not read build input ${relativePath}` })
+        )
+      ))
     encodedInputs.push(`${relativePath.length}:${relativePath}${source.length}:${source}`)
   }
   const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(encodedInputs.join(""))).pipe(

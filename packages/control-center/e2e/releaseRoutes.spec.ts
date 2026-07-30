@@ -635,34 +635,34 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
   })
   const routes: ReadonlyArray<AuthenticatedPresentationRoute> = [
     {
-      audit: productionRouteAuditCase("release-routes", "overview", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "overview", "authenticated", "overview"),
       expectOutcome: async () =>
         expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { level: 1, name: "Every release. One view." }),
       primaryAction: () => page.getByRole("button", { name: "Preview Solar Grove" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "work", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "work", "authenticated", "work"),
       expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { level: 1, name: /Decisions,\s+not tickets\./u }),
       primaryAction: () => page.getByRole("link", { name: "Open full release" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "items", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "items", "authenticated", "items"),
       exercise: async (primaryAction) => primaryAction.fill("OPS-428"),
       expectOutcome: async () => expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("OPS-428"),
       landmark: () => page.getByRole("heading", { level: 1, name: "Find release work." }),
       primaryAction: () => page.getByRole("searchbox", { name: "Search" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "item", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId"),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Review payment capture safeguards" }),
       primaryAction: () => page.getByRole("link", { name: "Back to items" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "timeline", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "timeline", "authenticated", "timeline"),
       exercise: async (primaryAction) => {
         await primaryAction.selectOption("human")
       },
@@ -671,21 +671,31 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       primaryAction: () => page.getByRole("combobox", { name: "Actor" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "release-preview", "authenticated"),
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "release-preview",
+        "authenticated",
+        "releases/:releaseId/preview"
+      ),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" }),
       primaryAction: () => page.getByRole("button", { name: /^Close(?: preview| Release preview:)/u })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "release", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "release", "authenticated", "releases/:releaseId"),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByRole("heading", { level: 1, name: "payments-api" }),
       primaryAction: () => page.getByRole("link", { name: "Back to overview" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "agent", "authenticated"),
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "agent",
+        "authenticated",
+        "releases/:releaseId/agent"
+      ),
       exercise: async (primaryAction) => primaryAction.press("Enter"),
       expectOutcome: async () =>
         expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
@@ -695,26 +705,36 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       primaryAction: () => page.getByRole("button", { name: "Which evidence is still missing?" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "not-found", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "not-found", "authenticated", "*"),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByText("Page not found", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Open workspace overview" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "services", "authenticated"),
+      audit: productionRouteAuditCase("release-routes", "services", "authenticated", "services"),
       expectOutcome: async () => expect(page.getByLabel("Account name")).toBeVisible(),
       landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
       primaryAction: () => page.getByRole("button", { name: "Configure AWS account" }).first()
     },
     {
-      audit: productionRouteAuditCase("release-routes", "atlassian-oauth-callback", "authenticated"),
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated",
+        "services/oauth/atlassian/callback"
+      ),
       expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
       landmark: () => page.getByText("Atlassian sign-in did not finish", { exact: true }),
       primaryAction: () => page.getByRole("button", { name: "Try again" })
     },
     {
-      audit: productionRouteAuditCase("release-routes", "authorized-share", "authenticated"),
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "authorized-share",
+        "authenticated",
+        "shares/:workspaceId/:shareId"
+      ),
       landmark: () => page.getByRole("heading", { level: 1, name: "Exact scope. Nothing adjacent." }),
       primaryAction: () => null
     }

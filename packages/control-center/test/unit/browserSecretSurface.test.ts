@@ -10,6 +10,7 @@ const safeSurface: BrowserSecretSurface = {
   documentHtml: "<html><body>Control Center</body></html>",
   liveFormControlValues: JSON.stringify(["ordinary search"]),
   localStorage: JSON.stringify([["theme", "dark"]]),
+  openShadowRootContent: JSON.stringify([]),
   sessionStorage: JSON.stringify([["cc_csrf", "proof"]]),
   url: "https://127.0.0.1:4173/w/workspace/overview"
 }
@@ -49,6 +50,23 @@ describe("browser secret surface detection", () => {
       )
     ).toBe(true)
     expect(browserSurfaceExposesSecret(safeSurface, "ordinary search")).toBe(true)
+  })
+
+  it("detects forbidden text and attributes inside an open shadow root", () => {
+    const secret = "shadow-session-secret"
+    expect(
+      browserSurfaceExposesSecret(
+        {
+          ...safeSurface,
+          openShadowRootContent: JSON.stringify([
+            `<span data-session="${secret}">ordinary text</span>`,
+            `<span>${secret}</span>`
+          ])
+        },
+        secret
+      )
+    ).toBe(true)
+    expect(browserSurfaceExposesSecret(safeSurface, secret)).toBe(false)
   })
 
   it("rejects any known browser-forbidden value while permitting the browser-owned CSRF proof", () => {

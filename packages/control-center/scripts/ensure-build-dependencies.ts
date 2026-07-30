@@ -101,7 +101,7 @@ const program = Effect.gen(function*() {
         workspaceDependencies: workspacePackage.workspaceDependencies
       }
     }),
-    { concurrency: "unbounded" }
+    { concurrency: 8 }
   )
   const effectiveFingerprints = yield* resolveWorkspaceArtifactFingerprints(fingerprintNodes)
   const contracts: Array<WorkspaceArtifactContract> = []

@@ -109,3 +109,11 @@ jobs:
         run: pnpm --filter @knpkv/control-center benchmark:contracts
       - name: Validate Control Center runtime benchmark evidence
         run: pnpm --filter @knpkv/control-center benchmark:validate-runtime
+      - name: Upload Control Center runtime benchmark evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: control-center-runtime-benchmark
+          path: test-results/control-center/runtime-benchmark.json
+          if-no-files-found: warn
+          retention-days: 14

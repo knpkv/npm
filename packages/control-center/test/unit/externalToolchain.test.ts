@@ -11,8 +11,8 @@ describe("Control Center external toolchain", () => {
       const path = yield* Path.Path
       const executables = new Set<string>()
       const directories = [
-        new URL("../../e2e/", import.meta.url).pathname,
-        new URL("../../scripts/", import.meta.url).pathname
+        yield* path.fromFileUrl(new URL("../../e2e/", import.meta.url)),
+        yield* path.fromFileUrl(new URL("../../scripts/", import.meta.url))
       ]
       while (directories.length > 0) {
         const directory = directories.pop()
@@ -32,7 +32,8 @@ describe("Control Center external toolchain", () => {
       }
       expect(Array.from(executables).sort()).toEqual(["git", "node", "openssl", "pnpm"])
 
-      const flakeSource = yield* fileSystem.readFileString(new URL("../../../../flake.nix", import.meta.url).pathname)
+      const flakePath = yield* path.fromFileUrl(new URL("../../../../flake.nix", import.meta.url))
+      const flakeSource = yield* fileSystem.readFileString(flakePath)
       for (const packageName of ["git", "nodejs", "openssl", "pnpm"]) {
         expect(flakeSource).toMatch(new RegExp(`^\\s+${packageName}$`, "mu"))
       }

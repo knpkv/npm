@@ -114,6 +114,7 @@ describe("workspace package artifacts", () => {
       const testPath = path.join(packageRoot, "test", "index.test.ts")
       const readmePath = path.join(packageRoot, "README.md")
       const sharedConfigPath = path.join(workspaceRoot, "tsconfig.base.jsonc")
+      const lockfilePath = path.join(workspaceRoot, "pnpm-lock.yaml")
       const boundedViteConfigPath = path.join(packageRoot, "vite.bounded.config.ts")
       const manifestMetadataPath = path.join(packageRoot, "manifest", "registry-metadata.ts")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
@@ -131,6 +132,10 @@ describe("workspace package artifacts", () => {
       yield* fileSystem.writeFileString(boundedViteConfigPath, "export default { build: { emptyOutDir: false } }\n")
       yield* fileSystem.writeFileString(manifestMetadataPath, "export const metadata = { state: \"stable\" }\n")
       yield* fileSystem.writeFileString(sharedConfigPath, "{\"compilerOptions\":{\"strict\":true}}")
+      yield* fileSystem.writeFileString(
+        lockfilePath,
+        "lockfileVersion: '9.0'\nimporters:\n  packages/example:\n    dependencies:\n      bundled:\n        version: 1.0.0\n"
+      )
       yield* fileSystem.writeFileString(sourcePath, "export const value = 1\n")
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(1)\n")
       yield* fileSystem.writeFileString(readmePath, "Example package\n")
@@ -158,7 +163,14 @@ describe("workspace package artifacts", () => {
       assert.notStrictEqual(sourceChanged, sharedConfigChanged)
 
       yield* fileSystem.writeFileString(path.join(packageRoot, "tsconfig.build.json"), "{\"compilerOptions\":{}}")
-      assert.notStrictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), sourceChanged)
+      const buildConfigChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(buildConfigChanged, sourceChanged)
+
+      yield* fileSystem.writeFileString(
+        lockfilePath,
+        "lockfileVersion: '9.0'\nimporters:\n  packages/example:\n    dependencies:\n      bundled:\n        version: 2.0.0\n"
+      )
+      assert.notStrictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), buildConfigChanged)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   it.effect("rebuilds workspace consumers when an emitted dependency changes", () =>
