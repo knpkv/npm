@@ -29,6 +29,12 @@ valid:
       env: childEnv,
       extendEnv: true
     })
+  - |
+    ChildProcess.make("git", args, { env, extendEnv })
+  - |
+    ChildProcess.make("git", args, { env: childEnv, extendEnv })
+  - |
+    ChildProcess.make("git", args, { env, extendEnv: true })
 invalid:
   - |
     ChildProcess.make("assume", ["-cd", link, profile], {
@@ -45,3 +51,7 @@ invalid:
     ChildProcess.make("tool", [JSON.stringify({ extendEnv: true })], {
       env: childEnv
     })
+  - |
+    ChildProcess.make("git", args, { env })
+  - |
+    ChildProcess.make("git", args, { env, stderr: "pipe" })

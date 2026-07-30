@@ -16,21 +16,38 @@ rule:
 
 # `has` defaults to direct children, so these see the options object's own
 # properties rather than anything nested inside a property value.
+#
+# Each check covers both `key: value` pairs and shorthand entries: `{ env }` is a
+# `shorthand_property_identifier`, not a `pair`, so a pair-only selector missed
+# `{ env }` entirely and — worse — would have reported `{ env: x, extendEnv }`
+# because it could not see the shorthand `extendEnv` either.
 constraints:
   OPTIONS:
     kind: object
     all:
-      - has:
-          pattern:
-            context: |
-              const $_ = { env: $ENV }
-            selector: pair
+      - any:
+          - has:
+              pattern:
+                context: |
+                  const $_ = { env: $ENV }
+                selector: pair
+          - has:
+              pattern:
+                context: |
+                  const $_ = { env }
+                selector: shorthand_property_identifier
       - not:
-          has:
-            pattern:
-              context: |
-                const $_ = { extendEnv: $EXTEND }
-              selector: pair
+          any:
+            - has:
+                pattern:
+                  context: |
+                    const $_ = { extendEnv: $EXTEND }
+                  selector: pair
+            - has:
+                pattern:
+                  context: |
+                    const $_ = { extendEnv }
+                  selector: shorthand_property_identifier
 
 files:
   - "packages/*/src/**/*.ts"

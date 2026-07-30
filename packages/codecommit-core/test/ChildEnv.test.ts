@@ -23,6 +23,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { fileURLToPath } from "node:url"
 import { afterEach, vi } from "vitest"
 import * as ChildEnv from "../src/ChildEnv.js"
 
@@ -50,8 +51,13 @@ const childEnvironmentUnder = (runtime: string) => (env: Record<string, string |
 
 const childEnvironment = childEnvironmentUnder("node")
 
-/** Resolved from this module rather than the working directory. */
-const BUN_FIXTURE = new URL("./fixtures/bunChildEnv.ts", import.meta.url).pathname
+/**
+ * Resolved from this module rather than the working directory.
+ *
+ * `fileURLToPath` rather than `.pathname`, which leaves percent-escapes in place
+ * and would break on a checkout path containing a space.
+ */
+const BUN_FIXTURE = fileURLToPath(new URL("./fixtures/bunChildEnv.ts", import.meta.url))
 
 /**
  * Resolved at collection time so the Bun case can be genuinely skipped rather
