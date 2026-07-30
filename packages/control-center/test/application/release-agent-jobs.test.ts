@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { AgentProviderError, AgentProviderId, makeAgentRuntime } from "@knpkv/ai-runtime"
-import { DateTime, Effect, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Effect, Layer, Ref, Result, Schema, Stream } from "effect"
 import type * as Crypto from "effect/Crypto"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -27,7 +27,8 @@ import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import { makeReleaseAgentJobs } from "../../src/server/application/releaseAgentJobs.js"
-import { Persistence, persistenceLayer } from "../../src/server/persistence/Persistence.js"
+import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import {
   AgentEventCursor,
   AgentThreadEvent,
@@ -225,13 +226,21 @@ const configuredRegistry = AgentRuntimeRegistry.of({
 })
 
 const withPersistence = <Success, Failure>(
-  use: Effect.Effect<Success, Failure, AgentRuntimeRegistry | Crypto.Crypto | Persistence>
+  use: Effect.Effect<
+    Success,
+    Failure,
+    AgentRuntimeRegistry | Crypto.Crypto | Database | Persistence
+  >
 ) =>
   Effect.gen(function*() {
     const config = yield* makePersistenceTestConfig("control-center-release-agent-jobs-")
+    const database = databaseLayer(config)
+    const persistence = persistenceLayerFromDatabase(config).pipe(
+      Layer.provideMerge(database)
+    )
     return yield* use.pipe(
       Effect.provideService(AgentRuntimeRegistry, configuredRegistry),
-      Effect.provide(persistenceLayer(config))
+      Effect.provide(persistence)
     )
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
@@ -459,6 +468,51 @@ describe("release agent jobs", () => {
       }
     })))
 
+  it.effect("retains malformed settings quarantine when enqueue rolls back", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const { sql } = yield* Database
+      yield* persistence.workspaces.create(WORKSPACE_ID, {
+        displayName: WorkspaceName.make("Release agent quarantine"),
+        createdAt: STARTED_AT
+      })
+      yield* persistence.releases.create(WORKSPACE_ID, release)
+      yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+      yield* sql`UPDATE workspace_settings
+        SET settings_digest = ${"0".repeat(64)}
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      const service = yield* makeReleaseAgentJobs
+
+      const rejected = yield* service.enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only",
+          prompt: "Explain the release."
+        }
+      }).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(rejected))
+      if (Result.isFailure(rejected)) {
+        assert.strictEqual(rejected.failure._tag, "ApplicationServiceUnavailable")
+      }
+      const jobRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM agent_jobs
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      assert.strictEqual(jobRows[0]?.count, 0)
+      const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+        diagnostic_code AS diagnosticCode
+      FROM quarantined_records
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND record_kind = 'workspace-settings'`
+      assert.deepStrictEqual(
+        quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+        ["workspace-settings-digest-mismatch"]
+      )
+    })))
+
   it.effect("derives immutable job context and returns a redacted ordered replay", () =>
     withPersistence(Effect.gen(function*() {
       yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
@@ -472,13 +526,6 @@ describe("release agent jobs", () => {
       >(["codex"])
       const fakePersistence = Persistence.of({
         ...persistence,
-        transact: <Success, Failure, Requirements>(
-          effect: Effect.Effect<Success, Failure, Requirements>
-        ) =>
-          Ref.set(transactionActive, true).pipe(
-            Effect.andThen(persistence.transact(effect)),
-            Effect.ensuring(Ref.set(transactionActive, false))
-          ),
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueuedInput, input).pipe(Effect.as(THREAD_ID)),
@@ -493,11 +540,13 @@ describe("release agent jobs", () => {
         },
         workspaceSettings: {
           ...persistence.workspaceSettings,
-          get: () =>
-            Ref.get(transactionActive).pipe(
+          readAtomically: (_workspaceId, use) =>
+            Ref.set(transactionActive, true).pipe(
+              Effect.andThen(Ref.get(transactionActive)),
               Effect.tap((isActive) => Ref.update(settingsAdmissionReads, (reads) => [...reads, isActive])),
               Effect.andThen(Ref.get(allowedProviders)),
-              Effect.map(workspaceSettingsRecord)
+              Effect.flatMap((providers) => use(workspaceSettingsRecord(providers))),
+              Effect.ensuring(Ref.set(transactionActive, false))
             )
         }
       })

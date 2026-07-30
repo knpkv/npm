@@ -177,31 +177,38 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         subjectRevision
       })
       const createdAt = yield* DateTime.now
-      yield* persistence.transact(Effect.gen(function*() {
-        const settings = yield* mapPersistenceRead(
-          persistence.workspaceSettings.get(input.workspaceId)
+      yield* persistence.workspaceSettings.readAtomically(input.workspaceId, (settings) =>
+        Effect.gen(function*() {
+          yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+          yield* persistence.agentJobs.enqueue({
+            workspaceId: input.workspaceId,
+            releaseId: input.releaseId,
+            jobId,
+            providerId,
+            model: input.request.model,
+            access: input.request.profile,
+            userPrompt: input.request.prompt,
+            prompt: providerPrompt,
+            contextFingerprint,
+            subjectRevision,
+            task: { _tag: "release-chat" },
+            createdAt
+          }).pipe(
+            Effect.mapError(mapPersistenceWriteError),
+            Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
+          )
+        })).pipe(
+          Effect.mapError((error) => {
+            switch (error._tag) {
+              case "ApplicationInvalidRequest":
+              case "ApplicationResourceNotFound":
+              case "ApplicationServiceUnavailable":
+                return error
+              default:
+                return unavailable()
+            }
+          })
         )
-        yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
-        yield* persistence.agentJobs.enqueue({
-          workspaceId: input.workspaceId,
-          releaseId: input.releaseId,
-          jobId,
-          providerId,
-          model: input.request.model,
-          access: input.request.profile,
-          userPrompt: input.request.prompt,
-          prompt: providerPrompt,
-          contextFingerprint,
-          subjectRevision,
-          task: { _tag: "release-chat" },
-          createdAt
-        }).pipe(
-          Effect.mapError(mapPersistenceWriteError),
-          Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
-        )
-      })).pipe(
-        Effect.mapError((error) => error._tag === "PersistenceOperationError" ? unavailable() : error)
-      )
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
     providers: Effect.fn("ReleaseAgentJobs.providers")(function*(workspaceId) {

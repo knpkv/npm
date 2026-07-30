@@ -839,53 +839,63 @@ const makePullRequestReviews = Effect.gen(function*() {
         Effect.mapError(unavailable)
       )
       const createdAt = yield* DateTime.now
-      return yield* persistence.transact(Effect.gen(function*() {
-        const settings = yield* mapPersistenceRead(
-          persistence.workspaceSettings.get(input.workspaceId)
-        )
-        yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
-        yield* assertPullRequestReviewAllowed(settings.settings.agent)
-        const existing = yield* currentFor(input.workspaceId, target)
-        if (existing._tag === "pending") return existing
-        yield* persistence.agentJobs.enqueue({
-          workspaceId: input.workspaceId,
-          releaseId: target.releaseId,
-          jobId,
-          providerId,
-          model: input.request.model,
-          access: input.request.profile,
-          userPrompt,
-          prompt,
-          contextFingerprint,
-          subjectRevision: target.subject.headRevision,
-          task: {
-            _tag: "pr-review",
-            pluginConnectionId: target.pluginConnectionId,
-            subject: target.subject,
-            reviewProfile
-          },
-          createdAt
-        }).pipe(
-          Effect.mapError(mapPersistenceWriteError),
-          Effect.mapError((error) =>
-            error._tag === "ApplicationInvalidRequest" ||
-              error._tag === "ApplicationResourceNotFound"
-              ? error
-              : unavailable()
-          )
-        )
-        return new PullRequestReviewPending({
-          subject: target.subject,
-          jobId,
-          providerId: input.request.providerId,
-          model: input.request.model,
-          reviewProfile,
-          activity: { events: [], truncated: false },
-          requestedAt: createdAt,
-          state: "queued"
+      return yield* persistence.workspaceSettings.readAtomically(
+        input.workspaceId,
+        (settings) =>
+          Effect.gen(function*() {
+            yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+            yield* assertPullRequestReviewAllowed(settings.settings.agent)
+            const existing = yield* currentFor(input.workspaceId, target)
+            if (existing._tag === "pending") return existing
+            yield* persistence.agentJobs.enqueue({
+              workspaceId: input.workspaceId,
+              releaseId: target.releaseId,
+              jobId,
+              providerId,
+              model: input.request.model,
+              access: input.request.profile,
+              userPrompt,
+              prompt,
+              contextFingerprint,
+              subjectRevision: target.subject.headRevision,
+              task: {
+                _tag: "pr-review",
+                pluginConnectionId: target.pluginConnectionId,
+                subject: target.subject,
+                reviewProfile
+              },
+              createdAt
+            }).pipe(
+              Effect.mapError(mapPersistenceWriteError),
+              Effect.mapError((error) =>
+                error._tag === "ApplicationInvalidRequest" ||
+                  error._tag === "ApplicationResourceNotFound"
+                  ? error
+                  : unavailable()
+              )
+            )
+            return new PullRequestReviewPending({
+              subject: target.subject,
+              jobId,
+              providerId: input.request.providerId,
+              model: input.request.model,
+              reviewProfile,
+              activity: { events: [], truncated: false },
+              requestedAt: createdAt,
+              state: "queued"
+            })
+          })
+      ).pipe(
+        Effect.mapError((error) => {
+          switch (error._tag) {
+            case "ApplicationInvalidRequest":
+            case "ApplicationResourceNotFound":
+            case "ApplicationServiceUnavailable":
+              return error
+            default:
+              return unavailable()
+          }
         })
-      })).pipe(
-        Effect.mapError((error) => error._tag === "PersistenceOperationError" ? unavailable() : error)
       )
     }),
     revisions: Effect.fn("PullRequestReviews.revisions")(function*(input) {
