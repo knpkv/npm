@@ -90,6 +90,8 @@ export const snapshotBrowserReadableSurface = async (
           body: await response.clone().text(),
           cache: cacheName,
           method: request.method,
+          requestHeaders: Array.from(request.headers.entries()),
+          responseHeaders: Array.from(response.headers.entries()),
           url: request.url
         });
       }

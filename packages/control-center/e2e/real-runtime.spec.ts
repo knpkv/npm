@@ -12,7 +12,11 @@ import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntime
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { DEFAULT_REQUEST_LIMIT_POLICY } from "../src/server/api/RequestLimits.js"
-import { type ApplicationLogSurface, exposedApplicationLogForbiddenValues } from "./applicationLogSurface.js"
+import {
+  type ApplicationLogSurface,
+  exposedApplicationLogForbiddenValues,
+  serializeApplicationConsoleMessage
+} from "./applicationLogSurface.js"
 import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
@@ -85,16 +89,13 @@ test.describe("repository-managed real runtime", () => {
       try {
         const page = await context.newPage()
         const browserConsoleEntries: Array<string> = []
+        const browserConsoleCaptures: Array<Promise<void>> = []
         page.on("console", (message) => {
-          const sourceUrl = message.location().url
-          const effectiveSourceUrl = sourceUrl.length === 0 ? page.url() : sourceUrl
-          let sourceIsApplicationOrigin = false
-          try {
-            sourceIsApplicationOrigin = new URL(effectiveSourceUrl).origin === fixture.origin
-          } catch {
-            // Chromium and Playwright diagnostics without an application URL are outside this contract.
-          }
-          if (sourceIsApplicationOrigin) browserConsoleEntries.push(message.text())
+          browserConsoleCaptures.push(
+            serializeApplicationConsoleMessage(page, message, fixture.origin).then((entry) => {
+              if (entry !== null) browserConsoleEntries.push(entry)
+            })
+          )
         })
         const response = await page.goto(`${fixture.origin}/services`)
         expect(response?.status()).toBe(200)
@@ -132,33 +133,49 @@ test.describe("repository-managed real runtime", () => {
         expect(browserSurfaceExposesSecret(browserSurface, csrfProof)).toBe(true)
         await page.evaluate(`console.info("ordinary browser diagnostic [REDACTED]")`)
         await fixture.emitApplicationLogFixture("ordinary managed-runtime diagnostic [REDACTED]")
-        const applicationLogs = (): ApplicationLogSurface => ({
-          browserConsole: [...browserConsoleEntries],
-          managedRuntime: fixture.applicationLogEntries()
-        })
+        const applicationLogs = async (): Promise<ApplicationLogSurface> => {
+          await Promise.all([...browserConsoleCaptures])
+          return {
+            browserConsole: [...browserConsoleEntries],
+            managedRuntime: fixture.applicationLogEntries()
+          }
+        }
         expect(
-          exposedApplicationLogForbiddenValues(applicationLogs(), [
+          exposedApplicationLogForbiddenValues(await applicationLogs(), [
             { label: "HttpOnly session cookie", value: sessionCookie.value },
             { label: "consumed pairing code", value: consumedPairingCode }
           ])
         ).toEqual([])
 
         const browserLogFixtureSecret = "browser-console-forbidden-fixture"
+        const nestedBrowserLogFixtureSecret = "nested-browser-console-forbidden-fixture"
         const managedRuntimeLogFixtureSecret = "managed-runtime-log-forbidden-fixture"
         await page.evaluate(`console.info(${JSON.stringify(browserLogFixtureSecret)})`)
+        await page.evaluate(
+          `console.info({ auth: { token: ${JSON.stringify(nestedBrowserLogFixtureSecret)} } })`
+        )
         await fixture.emitApplicationLogFixture(managedRuntimeLogFixtureSecret)
         expect(
-          exposedApplicationLogForbiddenValues(applicationLogs(), [
+          exposedApplicationLogForbiddenValues(await applicationLogs(), [
             { label: "browser console fixture", value: browserLogFixtureSecret },
+            { label: "nested browser console fixture", value: nestedBrowserLogFixtureSecret },
             { label: "managed runtime fixture", value: managedRuntimeLogFixtureSecret }
           ])
-        ).toEqual(["browser console fixture", "managed runtime fixture"])
+        ).toEqual([
+          "browser console fixture",
+          "nested browser console fixture",
+          "managed runtime fixture"
+        ])
 
         const indexedDbFixtureSecret = "indexed-db-forbidden-fixture"
         const cacheStorageFixtureSecret = "cache-storage-forbidden-fixture"
+        const cacheStorageRequestHeaderFixtureSecret = "cache-storage-request-header-forbidden-fixture"
+        const cacheStorageResponseHeaderFixtureSecret = "cache-storage-response-header-forbidden-fixture"
         await page.evaluate(`(async () => {
           const indexedDbSecret = ${JSON.stringify(indexedDbFixtureSecret)};
           const cacheStorageSecret = ${JSON.stringify(cacheStorageFixtureSecret)};
+          const cacheStorageRequestHeaderSecret = ${JSON.stringify(cacheStorageRequestHeaderFixtureSecret)};
+          const cacheStorageResponseHeaderSecret = ${JSON.stringify(cacheStorageResponseHeaderFixtureSecret)};
           await new Promise((resolve, reject) => {
             const open = indexedDB.open("browser-secret-surface-fixture", 1);
             open.addEventListener(
@@ -188,8 +205,12 @@ test.describe("repository-managed real runtime", () => {
           });
           const cache = await caches.open("browser-secret-surface-fixture");
           await cache.put(
-            new Request(location.origin + "/browser-secret-surface-fixture"),
-            new Response(cacheStorageSecret)
+            new Request(location.origin + "/browser-secret-surface-fixture", {
+              headers: { authorization: cacheStorageRequestHeaderSecret }
+            }),
+            new Response(cacheStorageSecret, {
+              headers: { "x-session-token": cacheStorageResponseHeaderSecret }
+            })
           );
         })()`)
         try {
@@ -197,9 +218,16 @@ test.describe("repository-managed real runtime", () => {
           expect(
             exposedBrowserForbiddenValues(fixtureSurface, [
               { label: "IndexedDB fixture", value: indexedDbFixtureSecret },
-              { label: "Cache Storage fixture", value: cacheStorageFixtureSecret }
+              { label: "Cache Storage fixture", value: cacheStorageFixtureSecret },
+              { label: "Cache Storage request header fixture", value: cacheStorageRequestHeaderFixtureSecret },
+              { label: "Cache Storage response header fixture", value: cacheStorageResponseHeaderFixtureSecret }
             ])
-          ).toEqual(["IndexedDB fixture", "Cache Storage fixture"])
+          ).toEqual([
+            "IndexedDB fixture",
+            "Cache Storage fixture",
+            "Cache Storage request header fixture",
+            "Cache Storage response header fixture"
+          ])
         } finally {
           await page.evaluate(`(async () => {
             await caches.delete("browser-secret-surface-fixture");

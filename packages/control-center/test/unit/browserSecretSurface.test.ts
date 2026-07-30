@@ -40,9 +40,11 @@ describe("browser secret surface detection", () => {
     ).toBe(true)
   })
 
-  it("detects forbidden IndexedDB values and Cache Storage response bodies", () => {
+  it("detects forbidden IndexedDB values and Cache Storage bodies or headers", () => {
     const indexedDbSecret = "indexed-db-session-secret"
     const cacheStorageSecret = "cache-storage-pairing-secret"
+    const cacheRequestHeaderSecret = "cache-request-session-secret"
+    const cacheResponseHeaderSecret = "cache-response-session-secret"
 
     expect(
       exposedBrowserForbiddenValues(
@@ -60,14 +62,30 @@ describe("browser secret surface detection", () => {
         {
           ...safeSurface,
           cacheStorage: JSON.stringify([
-            { body: cacheStorageSecret, cache: "control-center", url: "/cached-pairing" }
+            {
+              body: cacheStorageSecret,
+              cache: "control-center",
+              requestHeaders: [["authorization", cacheRequestHeaderSecret]],
+              responseHeaders: [["x-session-token", cacheResponseHeaderSecret]],
+              url: "/cached-pairing"
+            }
           ])
         },
-        [{ label: "Cache Storage pairing code", value: cacheStorageSecret }]
+        [
+          { label: "Cache Storage pairing code", value: cacheStorageSecret },
+          { label: "Cache Storage request header", value: cacheRequestHeaderSecret },
+          { label: "Cache Storage response header", value: cacheResponseHeaderSecret }
+        ]
       )
-    ).toEqual(["Cache Storage pairing code"])
+    ).toEqual([
+      "Cache Storage pairing code",
+      "Cache Storage request header",
+      "Cache Storage response header"
+    ])
     expect(browserSurfaceExposesSecret(safeSurface, indexedDbSecret)).toBe(false)
     expect(browserSurfaceExposesSecret(safeSurface, cacheStorageSecret)).toBe(false)
+    expect(browserSurfaceExposesSecret(safeSurface, cacheRequestHeaderSecret)).toBe(false)
+    expect(browserSurfaceExposesSecret(safeSurface, cacheResponseHeaderSecret)).toBe(false)
   })
 
   it("keeps unrelated browser-readable content valid", () => {

@@ -61,7 +61,12 @@ interface FocusedVisualSnapshot extends FocusVisualSnapshot {
 }
 
 interface FocusComputedStyle extends FocusStyleSnapshot {
+  readonly display: string
+  readonly fill: string
   readonly forcedColorAdjust: string
+  readonly opacity: string
+  readonly stroke: string
+  readonly visibility: string
 }
 
 interface FocusBrowserGlobal {
@@ -84,6 +89,14 @@ interface PaintDocument {
 interface PaintContextElement {
   readonly ownerDocument: PaintDocument
   readonly parentElement: PaintContextElement | null
+}
+
+interface ForcedColorPaintElement extends PaintContextElement {
+  readonly childNodes: ReadonlyArray<{ readonly nodeType: number; readonly textContent: string | null }>
+  readonly getAttribute: (name: string) => string | null
+  readonly getBoundingClientRect: () => { readonly height: number; readonly width: number }
+  readonly querySelectorAll: (selectors: string) => ReadonlyArray<ForcedColorPaintElement>
+  readonly tagName: string
 }
 
 interface ViewportContextElement {
@@ -401,22 +414,29 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
 
 const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string): Promise<void> => {
   const snapshot = await locator.evaluate((element) => {
-    if (window.getComputedStyle === undefined) throw new Error("forced-color target has no computed-style view")
-    const hasPaintContext = (
-      candidate: SVGElement | HTMLElement
-    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
-      "parentElement" in candidate && "ownerDocument" in candidate
-    if (!hasPaintContext(element)) {
+    const getComputedStyle = window.getComputedStyle
+    if (getComputedStyle === undefined) throw new Error("forced-color target has no computed-style view")
+    const hasForcedColorPaintContext = (candidate: unknown): candidate is ForcedColorPaintElement =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      "childNodes" in candidate &&
+      "getAttribute" in candidate &&
+      "getBoundingClientRect" in candidate &&
+      "ownerDocument" in candidate &&
+      "parentElement" in candidate &&
+      "querySelectorAll" in candidate &&
+      "tagName" in candidate
+    if (!hasForcedColorPaintContext(element)) {
       throw new Error("forced-color target has no HTML paint context")
     }
-    const style = window.getComputedStyle(element)
+    const style = getComputedStyle(element)
     const isTransparent = (value: string): boolean =>
       value === "transparent" ||
       /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
     let effectiveBackgroundColor = style.backgroundColor
     let ancestor = element.parentElement
     while (isTransparent(effectiveBackgroundColor) && ancestor !== null) {
-      effectiveBackgroundColor = window.getComputedStyle(ancestor).backgroundColor
+      effectiveBackgroundColor = getComputedStyle(ancestor).backgroundColor
       ancestor = ancestor.parentElement
     }
     if (isTransparent(effectiveBackgroundColor)) {
@@ -424,9 +444,45 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
       canvasProbe.style.backgroundColor = "Canvas"
       canvasProbe.style.display = "none"
       element.ownerDocument.documentElement.append(canvasProbe)
-      effectiveBackgroundColor = window.getComputedStyle(canvasProbe).backgroundColor
+      effectiveBackgroundColor = getComputedStyle(canvasProbe).backgroundColor
       canvasProbe.remove()
     }
+    const labelPaint = [element, ...element.querySelectorAll("*")].flatMap((candidate) => {
+      const candidateStyle = getComputedStyle(candidate)
+      const bounds = candidate.getBoundingClientRect()
+      const hasDirectText = [...candidate.childNodes].some((node) =>
+        node.nodeType === 3 && (node.textContent?.trim().length ?? 0) > 0
+      )
+      const hasAccessibleIcon = (
+            candidate.getAttribute("aria-label")?.trim().length ?? 0
+          ) > 0 || (
+          candidate.tagName.toLowerCase() === "img" &&
+          (candidate.getAttribute("alt")?.trim().length ?? 0) > 0
+        )
+      if (
+        !hasDirectText && !hasAccessibleIcon ||
+        candidateStyle.display === "none" ||
+        candidateStyle.visibility !== "visible" ||
+        Number.parseFloat(candidateStyle.opacity) <= 0 ||
+        candidateStyle.display !== "contents" && (bounds.width <= 0 || bounds.height <= 0)
+      ) {
+        return []
+      }
+      let candidateBackground = candidateStyle.backgroundColor
+      let candidateAncestor = candidate.parentElement
+      while (isTransparent(candidateBackground) && candidateAncestor !== null) {
+        candidateBackground = getComputedStyle(candidateAncestor).backgroundColor
+        candidateAncestor = candidateAncestor.parentElement
+      }
+      if (isTransparent(candidateBackground)) candidateBackground = effectiveBackgroundColor
+      return [{
+        color: candidateStyle.color,
+        effectiveBackgroundColor: candidateBackground,
+        fill: candidateStyle.fill,
+        icon: hasAccessibleIcon,
+        stroke: candidateStyle.stroke
+      }]
+    })
     return {
       borderBottom: {
         color: style.borderBottomColor,
@@ -451,6 +507,7 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
       color: style.color,
       effectiveBackgroundColor,
       forcedColorAdjust: style.forcedColorAdjust,
+      labelPaint,
       outline: { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth }
     }
   })
@@ -471,9 +528,21 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
     snapshot.outline.style !== "hidden" &&
     Number.parseFloat(snapshot.outline.width) > 0 &&
     contrastsWithBackground(snapshot.outline.color)
+  const labelsArePainted = snapshot.labelPaint.length === 0 ||
+    snapshot.labelPaint.every((paint) => {
+      const contrastsWithLabelBackground = (value: string): boolean =>
+        !transparentPaint(value) && value !== paint.effectiveBackgroundColor
+      return contrastsWithLabelBackground(paint.color) ||
+        paint.icon && (
+            contrastsWithLabelBackground(paint.fill) ||
+            contrastsWithLabelBackground(paint.stroke)
+          )
+    })
   expect(
-    contrastsWithBackground(snapshot.color) || paintedBoundary || paintedOutline,
-    `${label} has no discernible forced-color paint (${snapshot.forcedColorAdjust})`
+    (contrastsWithBackground(snapshot.color) || paintedBoundary || paintedOutline) && labelsArePainted,
+    `${label} has no discernible forced-color paint (${snapshot.forcedColorAdjust}; labels: ${
+      JSON.stringify(snapshot.labelPaint)
+    })`
   ).toBe(true)
 }
 

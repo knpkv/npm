@@ -342,7 +342,7 @@ test("requires compact landmarks and primary actions to intersect the viewport",
 })
 
 test("requires discernible system paint in forced-colors mode", async ({ page }) => {
-  const content = (forcedColorPaint: string): string => `
+  const content = (forcedColorPaint: string, labelPaint = ""): string => `
     <!doctype html>
     <html lang="en">
       <head>
@@ -354,13 +354,16 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
               forced-color-adjust: none;
               ${forcedColorPaint}
             }
+            button > span {
+              ${labelPaint}
+            }
           }
         </style>
       </head>
       <body>
         <main>
           <h1>Forced color fixture</h1>
-          <button onclick="this.textContent='Continued'">Continue</button>
+          <button onclick="this.textContent='Continued'"><span>Continue</span></button>
         </main>
       </body>
     </html>
@@ -390,6 +393,34 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
   ).rejects.toThrow("primary action has no discernible forced-color paint")
 
   await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(
+    content(
+      "background: Canvas; border-color: CanvasText; color: CanvasText;",
+      "forced-color-adjust: none; background: Canvas; color: Canvas;"
+    )
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
+  await page.setContent(
+    content(
+      "background: Canvas; border-color: CanvasText; color: CanvasText;",
+      "forced-color-adjust: none; background: Canvas; color: CanvasText;"
+    )
+  )
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => primaryAction.press("Enter"),
     expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
