@@ -11,25 +11,36 @@
  *    valid credential to the AWS chain and still outrank `AWS_PROFILE`.
  *
  * Asserting on a mock would confirm neither.
+ *
+ * Mechanism 2 is runtime-specific, and this CLI ships on both Node and Bun — the
+ * TUI's `assume` path runs under Bun. The clearing cases therefore run against
+ * each available runtime. Bun is not installed in CI, so its case reports as
+ * skipped there rather than passing vacuously; that skip is visible in the
+ * runner output instead of being hidden inside a conditional assertion.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { vi } from "vitest"
+import { afterEach, vi } from "vitest"
 import * as ChildEnv from "../src/ChildEnv.js"
 
 const decodeEnvironment = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.String))
 )
 
-/** Reads the child's own environment back as JSON. */
-const childEnvironment = (env: Record<string, string | undefined>) =>
+/**
+ * Reads the child's own environment back as JSON, under the given runtime.
+ *
+ * `-e` with an explicit stdout write is used rather than `-p` because it behaves
+ * identically on both runtimes.
+ */
+const childEnvironmentUnder = (runtime: string) => (env: Record<string, string | undefined>) =>
   Effect.gen(function*() {
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const output = yield* spawner.string(
-      ChildProcess.make("node", ["-p", "JSON.stringify(process.env)"], {
+      ChildProcess.make(runtime, ["-e", "process.stdout.write(JSON.stringify(process.env))"], {
         env,
         extendEnv: true
       })
@@ -37,7 +48,30 @@ const childEnvironment = (env: Record<string, string | undefined>) =>
     return yield* decodeEnvironment(output)
   })
 
+const childEnvironment = childEnvironmentUnder("node")
+
+/**
+ * Resolved at collection time so the Bun case can be genuinely skipped rather
+ * than degrading into a test that asserts nothing.
+ */
+const bunAvailable = await Effect.runPromise(
+  ChildProcessSpawner.ChildProcessSpawner.pipe(
+    Effect.flatMap((spawner) => spawner.exitCode(ChildProcess.make("bun", ["--version"]))),
+    Effect.map((code) => code === 0),
+    Effect.catchIf(() => true, () => Effect.succeed(false)),
+    Effect.scoped,
+    Effect.provide(NodeServices.layer)
+  )
+)
+
 describe("ChildEnv.profileScopedEnv", () => {
+  // Registered as a hook rather than trailing each test: a thrown assertion or
+  // spawn error would skip success-path cleanup and leak the stubbed ambient
+  // credentials into later cases, which assert on those variables being absent.
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
   it.effect("drops ambient static credentials that would outrank the requested profile", () =>
     Effect.gen(function*() {
       vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIAAMBIENTEXAMPLE")
@@ -59,8 +93,6 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.strictEqual(env.AWS_PROFILE, "target-profile")
       assert.strictEqual(env.AWS_DEFAULT_REGION, "eu-central-1")
-
-      vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("drops the ambient web-identity provider, not just static credentials", () =>
@@ -80,8 +112,6 @@ describe("ChildEnv.profileScopedEnv", () => {
       assert.isFalse("AWS_ROLE_SESSION_NAME" in env)
 
       assert.strictEqual(env.AWS_PROFILE, "target-profile")
-
-      vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("keeps the config-file locators the parent resolved the profile against", () =>
@@ -95,8 +125,6 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.strictEqual(env.AWS_CONFIG_FILE, "/custom/config")
       assert.strictEqual(env.AWS_SHARED_CREDENTIALS_FILE, "/custom/credentials")
-
-      vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("lets an explicitly requested region outrank both ambient region variables", () =>
@@ -114,8 +142,6 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.strictEqual(env.AWS_REGION, "eu-central-1")
       assert.strictEqual(env.AWS_DEFAULT_REGION, "eu-central-1")
-
-      vi.unstubAllEnvs()
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("clears both region variables when the caller requests none", () =>
@@ -132,8 +158,36 @@ describe("ChildEnv.profileScopedEnv", () => {
 
       assert.isFalse("AWS_REGION" in env)
       assert.isFalse("AWS_DEFAULT_REGION" in env)
+    }).pipe(Effect.provide(NodeServices.layer)))
 
-      vi.unstubAllEnvs()
+  // Bun is the runtime behind the TUI's `assume` path. If it treated an
+  // `undefined` env value as the string "undefined" instead of dropping the
+  // variable, every clearing case above would still pass while the shipped
+  // binary leaked ambient credentials.
+  it.effect.skipIf(!bunAvailable)("clears the same variables under Bun", () =>
+    Effect.gen(function*() {
+      vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIAAMBIENTEXAMPLE")
+      vi.stubEnv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+      vi.stubEnv("AWS_SESSION_TOKEN", "ambient-token")
+      vi.stubEnv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/ambient-web-identity")
+      vi.stubEnv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/ambient-token")
+      vi.stubEnv("AWS_REGION", "us-west-1")
+      vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
+
+      const env = yield* childEnvironmentUnder("bun")(
+        ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" })
+      )
+
+      assert.isFalse("AWS_ACCESS_KEY_ID" in env)
+      assert.isFalse("AWS_SECRET_ACCESS_KEY" in env)
+      assert.isFalse("AWS_SESSION_TOKEN" in env)
+      assert.isFalse("AWS_ROLE_ARN" in env)
+      assert.isFalse("AWS_WEB_IDENTITY_TOKEN_FILE" in env)
+      assert.isFalse("AWS_REGION" in env)
+      assert.isFalse("AWS_DEFAULT_REGION" in env)
+
+      assert.strictEqual(env.AWS_PROFILE, "target-profile")
+      assert.isTrue((env.PATH ?? "").length > 0)
     }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("preserves the inherited PATH so the executable still resolves", () =>
