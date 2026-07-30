@@ -49,49 +49,16 @@ const localChangeOrLatest = <Value>(
   equivalent: (left: Value, right: Value) => boolean = Object.is
 ): Value => equivalent(base, candidate) ? latest : candidate
 
-const stringArraysEqual = (
-  left: ReadonlyArray<string>,
-  right: ReadonlyArray<string>
-): boolean =>
-  left.length === right.length &&
-  left.every((value, index) => value === right[index])
-
 /** Reapply locally changed fields over a freshly loaded server document. */
 export const reapplyWorkspaceSettingsCandidate = (
   base: WorkspaceSettingsV1,
   candidate: WorkspaceSettingsV1,
   latest: WorkspaceSettingsV1
 ): WorkspaceSettingsV1 => {
+  const locallyChangedSections = changedWorkspaceSettingsSections(base, candidate)
   return {
     schemaVersion: 1,
-    agent: {
-      allowedProviders: localChangeOrLatest(
-        base.agent.allowedProviders,
-        candidate.agent.allowedProviders,
-        latest.agent.allowedProviders,
-        stringArraysEqual
-      ),
-      defaultModel: localChangeOrLatest(
-        base.agent.defaultModel,
-        candidate.agent.defaultModel,
-        latest.agent.defaultModel
-      ),
-      defaultProvider: localChangeOrLatest(
-        base.agent.defaultProvider,
-        candidate.agent.defaultProvider,
-        latest.agent.defaultProvider
-      ),
-      profilePolicy: localChangeOrLatest(
-        base.agent.profilePolicy,
-        candidate.agent.profilePolicy,
-        latest.agent.profilePolicy
-      ),
-      toolPolicy: localChangeOrLatest(
-        base.agent.toolPolicy,
-        candidate.agent.toolPolicy,
-        latest.agent.toolPolicy
-      )
-    },
+    agent: locallyChangedSections.includes("agent") ? candidate.agent : latest.agent,
     inference: {
       enabled: localChangeOrLatest(
         base.inference.enabled,
@@ -152,50 +119,10 @@ export const reapplyWorkspaceSettingsCandidate = (
         latest.presentation.density
       )
     },
-    retention: {
-      agentActivityDays: localChangeOrLatest(
-        base.retention.agentActivityDays,
-        candidate.retention.agentActivityDays,
-        latest.retention.agentActivityDays
-      ),
-      auditDays: localChangeOrLatest(
-        base.retention.auditDays,
-        candidate.retention.auditDays,
-        latest.retention.auditDays
-      ),
-      contentDays: localChangeOrLatest(
-        base.retention.contentDays,
-        candidate.retention.contentDays,
-        latest.retention.contentDays
-      ),
-      evidenceDays: localChangeOrLatest(
-        base.retention.evidenceDays,
-        candidate.retention.evidenceDays,
-        latest.retention.evidenceDays
-      ),
-      sandboxArtifactDays: localChangeOrLatest(
-        base.retention.sandboxArtifactDays,
-        candidate.retention.sandboxArtifactDays,
-        latest.retention.sandboxArtifactDays
-      )
-    },
-    synchronization: {
-      cadence: localChangeOrLatest(
-        base.synchronization.cadence,
-        candidate.synchronization.cadence,
-        latest.synchronization.cadence
-      ),
-      intervalMinutes: localChangeOrLatest(
-        base.synchronization.intervalMinutes,
-        candidate.synchronization.intervalMinutes,
-        latest.synchronization.intervalMinutes
-      ),
-      staleAfterMinutes: localChangeOrLatest(
-        base.synchronization.staleAfterMinutes,
-        candidate.synchronization.staleAfterMinutes,
-        latest.synchronization.staleAfterMinutes
-      )
-    }
+    retention: locallyChangedSections.includes("retention") ? candidate.retention : latest.retention,
+    synchronization: locallyChangedSections.includes("synchronization")
+      ? candidate.synchronization
+      : latest.synchronization
   }
 }
 

@@ -194,6 +194,7 @@ export {
 } from "./timeline.js"
 export {
   UpdateWorkspaceSettingsRequest,
+  WorkspacePresentationReadModel,
   WorkspaceSettingsApiGroup,
   WorkspaceSettingsEtag,
   workspaceSettingsEtag,

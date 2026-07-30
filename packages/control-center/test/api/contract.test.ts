@@ -28,6 +28,7 @@ import {
   SessionMutationAuth,
   SharesApiGroup,
   TimelineApiGroup,
+  WorkspacePresentationReadModel,
   WorkspaceSettingsApiGroup
 } from "../../src/api/index.js"
 import { LedgerRevision } from "../../src/domain/deliveryGraph.js"
@@ -87,7 +88,22 @@ const pluginOverviewCompatibilityFixture: typeof PluginOverviewResponse.Encoded 
   accounts: []
 }
 
+const collaboratorPresentationCompatibilityFixture: typeof WorkspacePresentationReadModel.Encoded = {
+  workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001",
+  revision: 2,
+  presentation: {
+    density: "compact",
+    defaultLanding: "active-work"
+  }
+}
+
 describe("ControlCenterApi contract", () => {
+  it("exports the collaborator presentation validator from the public API", () => {
+    assert.isTrue(
+      Schema.is(WorkspacePresentationReadModel)(collaboratorPresentationCompatibilityFixture)
+    )
+  })
+
   it("preserves opaque credential bytes while rejecting blank replacements", () => {
     const decode = Schema.decodeUnknownSync(ReauthorizePluginConnectionRequest)
     const request = decode({
