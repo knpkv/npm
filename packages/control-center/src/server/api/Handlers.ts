@@ -1165,39 +1165,53 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             )
           ))
         .handle("turn", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (session.permission !== "workspace-owner") {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* agent.runTurn({
-              history: payload.history,
-              prompt: payload.prompt,
-              provider: payload.provider,
-              releaseId: params.releaseId,
-              workspaceId: session.workspaceId
-            }).pipe(Effect.catchTags({
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* agent.runTurn({
+                history: payload.history,
+                prompt: payload.prompt,
+                provider: payload.provider,
+                releaseId: params.releaseId,
+                workspaceId: session.workspaceId
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("enqueueJob", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (session.permission !== "workspace-owner") {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* jobs.enqueue({
-              workspaceId: session.workspaceId,
-              releaseId: params.releaseId,
-              request: payload
-            }).pipe(Effect.catchTags({
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* jobs.enqueue({
+                workspaceId: session.workspaceId,
+                releaseId: params.releaseId,
+                request: payload
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("replayThread", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
@@ -1243,21 +1257,28 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             }))
           }))
         .handle("enqueuePullRequestReview", ({ params, payload }) =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (session.permission !== "workspace-owner") {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* reviews.enqueue({
-              workspaceId: session.workspaceId,
-              entityId: params.entityId,
-              request: payload
-            }).pipe(Effect.catchTags({
-              ApplicationInvalidRequest: mapApplicationInvalidRequest,
-              ApplicationResourceNotFound: mapApplicationNotFound,
-              ApplicationServiceUnavailable: mapApplicationUnavailable
-            }))
-          }))
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.enqueue({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                request: payload
+              }).pipe(Effect.catchTags({
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
         .handle("reviewSuggestionRevisions", ({ params, query }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

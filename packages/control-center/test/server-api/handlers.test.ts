@@ -2389,6 +2389,62 @@ describe("Control Center API handlers", () => {
       assert.strictEqual(result.reply, "The release is waiting for approval.")
     }))
 
+  it.effect("admits release turns only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const releaseSnapshot = makeNodePortfolioSnapshot()
+      const release = releaseSnapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+      const turnCalls = yield* Ref.make(0)
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(releaseAgentJobsLayer),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, {
+          runTurn: (input) =>
+            Ref.update(turnCalls, (count) => count + 1).pipe(
+              Effect.as({
+                eventCursor: releaseSnapshot.eventCursor,
+                provider: input.provider,
+                release,
+                releaseId: release.releaseId,
+                reply: "The release is waiting for approval."
+              })
+            )
+        }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(turnCalls), 0)
+        const accepted = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this ship?", provider: "codex" }
+        })
+        assert.strictEqual(yield* Ref.get(turnCalls), 1)
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.turn({
+          params: { releaseId: release.releaseId },
+          payload: { history: [], prompt: "Can this still ship?", provider: "codex" }
+        }).pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(Effect.provide([
+        NodeHttpServer.layerHttpServices,
+        mutationMiddlewareLayer,
+        sessionMiddlewareLayer,
+        handler
+      ]))
+
+      assert.strictEqual(result.accepted.releaseId, release.releaseId)
+      assert.strictEqual(yield* Ref.get(turnCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("enqueues a durable agent job in the owner session workspace", () =>
     Effect.gen(function*() {
       const releaseId = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000021")

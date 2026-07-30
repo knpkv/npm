@@ -82,13 +82,19 @@ const CanonicalAgent = ({
   </MemoryRouter>
 )
 
-const ConnectedCanonicalAgent = ({ loadPresets }: { readonly loadPresets: ReleaseAgentPresetLoader }) => (
+const ConnectedCanonicalAgent = ({
+  loadPresets,
+  runTurn = async () => Promise.reject()
+}: {
+  readonly loadPresets: ReleaseAgentPresetLoader
+  readonly runTurn?: ReleaseAgentTurn
+}) => (
   <MemoryRouter initialEntries={[agentPath]}>
     <Routes>
       <Route element={<Outlet context={readyContext} />}>
         <Route
           path="/w/:workspaceId/releases/:releaseId/agent"
-          element={<ConnectedAgentPage loadPresets={loadPresets} runTurn={async () => Promise.reject()} />}
+          element={<ConnectedAgentPage loadPresets={loadPresets} runTurn={runTurn} />}
         />
       </Route>
     </Routes>
@@ -263,6 +269,86 @@ describe("AgentPage context", () => {
     expect(codex?.disabled).toBe(true)
     expect(claude?.disabled).toBe(false)
     expect(host.querySelector<HTMLTextAreaElement>("textarea")?.disabled).toBe(false)
+  })
+
+  const orderedProviderCases: ReadonlyArray<readonly [ReadonlyArray<"claude" | "codex">, "claude" | "codex"]> = [
+    [["claude", "codex"], "claude"],
+    [["codex", "claude"], "codex"]
+  ]
+
+  it.each(orderedProviderCases)(
+    "uses the first ordered connected preset as the untouched default",
+    async (providers, expectedProvider) => {
+      const currentRelease = snapshot.releases[0]
+      if (currentRelease === undefined) throw new Error("Expected a release turn fixture")
+      const runTurn = vi.fn<ReleaseAgentTurn>(async (input) => ({
+        eventCursor: EventCursor.make(11),
+        provider: input.provider,
+        release: currentRelease,
+        reply: "The configured default answered."
+      }))
+      const host = document.createElement("div")
+      document.body.append(host)
+      mountedRoot = createRoot(host)
+      await act(async () =>
+        mountedRoot?.render(
+          <ConnectedCanonicalAgent
+            loadPresets={vi.fn<ReleaseAgentPresetLoader>().mockResolvedValue(providers)}
+            runTurn={runTurn}
+          />
+        )
+      )
+
+      const suggestion = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+        ({ textContent }) => textContent?.includes("Which evidence is still missing?") === true
+      )
+      if (suggestion === undefined) throw new Error("Expected an agent suggestion")
+      await act(async () => suggestion.click())
+      const form = host.querySelector<HTMLTextAreaElement>("textarea")?.closest("form")
+      if (form === null || form === undefined) throw new Error("Expected the release agent form")
+      await act(async () => form.requestSubmit())
+
+      expect(runTurn).toHaveBeenCalledOnce()
+      expect(runTurn.mock.calls[0]?.[0].provider).toBe(expectedProvider)
+    }
+  )
+
+  it("keeps an explicit provider selection over the ordered connected default", async () => {
+    const currentRelease = snapshot.releases[0]
+    if (currentRelease === undefined) throw new Error("Expected a release turn fixture")
+    const runTurn = vi.fn<ReleaseAgentTurn>(async (input) => ({
+      eventCursor: EventCursor.make(11),
+      provider: input.provider,
+      release: currentRelease,
+      reply: "The selected provider answered."
+    }))
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <ConnectedCanonicalAgent
+          loadPresets={vi.fn<ReleaseAgentPresetLoader>().mockResolvedValue(["claude", "codex"])}
+          runTurn={runTurn}
+        />
+      )
+    )
+
+    const codex = [...host.querySelectorAll<HTMLButtonElement>("[role='radio']")].find(
+      ({ textContent }) => textContent?.includes("Run with Codex") === true
+    )
+    if (codex === undefined) throw new Error("Expected the Codex preset")
+    await act(async () => codex.click())
+    const suggestion = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent?.includes("Which evidence is still missing?") === true
+    )
+    if (suggestion === undefined) throw new Error("Expected an agent suggestion")
+    await act(async () => suggestion.click())
+    const form = host.querySelector<HTMLTextAreaElement>("textarea")?.closest("form")
+    if (form === null || form === undefined) throw new Error("Expected the release agent form")
+    await act(async () => form.requestSubmit())
+
+    expect(runTurn.mock.calls[0]?.[0].provider).toBe("codex")
   })
 
   it("keeps a successfully loaded empty provider catalog definitive", async () => {

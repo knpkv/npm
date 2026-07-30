@@ -26,6 +26,7 @@ import {
   workspaceSettingsGovernanceAuthorityMatches
 } from "../../governance/GovernedHumanMutationPolicyEvaluator.js"
 import { Database } from "../Database.js"
+import type { QuarantineWriteError } from "../errors.js"
 import {
   PersistedRecordError,
   PersistenceOperationError,
@@ -595,6 +596,45 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
   })
 
   /**
+   * Run a settings-dependent workflow in the repository-owned transaction so
+   * malformed-row quarantine is written only after the complete workflow rolls back.
+   */
+  const readAtomically = <Value, Failure, Requirements>(
+    workspaceId: WorkspaceId,
+    use: (
+      current: WorkspaceSettingsRecord
+    ) => Effect.Effect<Value, Failure, Requirements>
+  ): Effect.Effect<
+    Value,
+    | Failure
+    | PersistedRecordError
+    | PersistenceOperationError
+    | QuarantineWriteError
+    | RecordNotFoundError,
+    Requirements
+  > =>
+    database.transaction(
+      Effect.gen(function*() {
+        const current = yield* readCurrent(workspaceId, "deferred").pipe(
+          Effect.catchTag("RecordNotFoundError", () =>
+            ensureDefault(workspaceId).pipe(
+              Effect.andThen(readCurrent(workspaceId, "deferred"))
+            ))
+        )
+        return yield* use(current)
+      })
+    ).pipe(
+      Effect.result,
+      Effect.flatMap((result) => {
+        if (Result.isSuccess(result)) return Effect.succeed(result.success)
+        return isMalformedWorkspaceSettingsRecord(result.failure)
+          ? quarantineAfterRollback(result.failure)
+          : Effect.fail(result.failure)
+      }),
+      mapPersistenceOperation("workspace-settings.read-atomically")
+    )
+
+  /**
    * Extend the repository-owned settings transaction with a dependent durable
    * update. Keeping transaction ownership here lets malformed-row quarantine
    * run only after the complete transaction has rolled back.
@@ -619,7 +659,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     return yield* Effect.forEach(rows, decodeAudit)
   })
 
-  return { audits, get, update, updateAtomically }
+  return { audits, get, readAtomically, update, updateAtomically }
 })
 
 /** Durable workspace-settings persistence with CAS and transactional audit. */

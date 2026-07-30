@@ -42,6 +42,7 @@ import { Persistence } from "../persistence/Persistence.js"
 import { DeliveryGraphWriteBatch } from "../persistence/repositories/deliveryGraphRepository.js"
 import type { EntityRecord, RoleAssignmentRecord } from "../persistence/repositories/models.js"
 import { type PluginCacheRecord, type PluginStreamKey } from "../persistence/repositories/pluginRuntimeModels.js"
+import type { WorkspaceSettingsRecord } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { ConfluencePageAttributesV1 } from "../plugins/confluence/ConfluencePageSchemas.js"
 import type { PluginConflictFailure } from "../plugins/failures.js"
 import {
@@ -1848,11 +1849,13 @@ export const materializeNormalizedPluginPage = Effect.fn(
 > {
   const cryptoService = yield* Crypto.Crypto
   const persistence = yield* Persistence
-  return yield* persistence.transact(Effect.gen(function*() {
+  const materializeWithSettings = Effect.fn(
+    "NormalizedPluginPageMaterialization.materializeWithSettings"
+  )(function*(settingsRecord: WorkspaceSettingsRecord) {
     if (scope.expectedAuthority !== undefined) {
       yield* verifyPluginSynchronizationAuthority(persistence, scope.expectedAuthority)
     }
-    const settings = (yield* persistence.workspaceSettings.get(scope.workspaceId)).settings
+    const settings = settingsRecord.settings
     const materializationPage = yield* sequenceClockifyPersonEvents(persistence, scope, page)
     const pipelineTombstones = materializationPage.events.filter(isCodePipelineTombstone)
     const previousPipelineRecords = pipelineTombstones.length === 0
@@ -2093,5 +2096,9 @@ export const materializeNormalizedPluginPage = Effect.fn(
       relationshipCount,
       skippedEntityCount
     }
-  }))
+  })
+  return yield* persistence.workspaceSettings.readAtomically(
+    scope.workspaceId,
+    materializeWithSettings
+  )
 })

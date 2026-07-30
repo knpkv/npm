@@ -1,6 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect"
+import { DateTime, Effect, Layer, Option, Ref, Result, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 
 import { WorkspaceEntityInspection } from "../../src/api/deliveryGraph.js"
@@ -797,6 +797,11 @@ const persistenceWithWorkspaceSettings = (
       get: (workspaceId) =>
         persistence.workspaceSettings.get(workspaceId).pipe(
           Effect.map((record) => ({ ...record, settings }))
+        ),
+      readAtomically: (workspaceId, use) =>
+        persistence.workspaceSettings.readAtomically(
+          workspaceId,
+          (record) => use({ ...record, settings })
         )
     }
   })
@@ -892,6 +897,45 @@ describe("normalized plugin page materialization", () => {
     ]
     for (const [status, expected] of cases) assert.strictEqual(pipelineStatus(status), expected)
   })
+
+  it.effect("preserves malformed settings quarantine after materialization rollback", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const { sql } = yield* Database
+      yield* setup
+      yield* persistence.workspaceSettings.get(WORKSPACE_ID)
+      yield* sql`UPDATE workspace_settings
+        SET settings_digest = ${"0".repeat(64)}
+        WHERE workspace_id = ${WORKSPACE_ID}`
+
+      const failure = yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T1,
+        successfulHealth: { _tag: "healthy", checkedAt: T1 }
+      }, materializedPage).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(failure))
+      if (Result.isFailure(failure)) {
+        assert.strictEqual(failure.failure._tag, "PersistedRecordError")
+      }
+      const quarantineRows = yield* sql<{ readonly diagnosticCode: string }>`SELECT
+        diagnostic_code AS diagnosticCode
+      FROM quarantined_records
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND record_kind = 'workspace-settings'`
+      assert.deepStrictEqual(
+        quarantineRows.map(({ diagnosticCode }) => diagnosticCode),
+        ["workspace-settings-digest-mismatch"]
+      )
+      const entityRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+        FROM entities
+        WHERE workspace_id = ${WORKSPACE_ID}`
+      assert.strictEqual(entityRows[0]?.count, 0)
+    })))
 
   it.effect("materializes one bounded, credential-free CodePipeline execution document", () =>
     withMaterializer(Effect.gen(function*() {
