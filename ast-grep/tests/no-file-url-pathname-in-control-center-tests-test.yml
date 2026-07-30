@@ -1,0 +1,9 @@
+id: no-file-url-pathname-in-control-center-tests
+valid:
+  - |
+    const filePath = yield* path.fromFileUrl(new URL("./fixture.json", import.meta.url))
+  - |
+    const routeName = new URL(request.url).pathname
+invalid:
+  - |
+    const filePath = new URL("./fixture.json", import.meta.url).pathname

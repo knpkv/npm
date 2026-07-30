@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-file-url-pathname-in-control-center-tests
+language: tsx
+severity: error
+message: "Convert file URLs with Path.fromFileUrl instead of reading URL.pathname"
+
+rule:
+  pattern: new URL($PATH, import.meta.url).pathname
+
+files:
+  - "packages/control-center/test/**/*.ts"
+  - "packages/control-center/test/**/*.tsx"
+
+note: |
+  URL.pathname is not a decoded, platform-native filesystem path. Control Center
+  Effect tests already provide NodeServices, so acquire Path.Path and convert
+  URLs with `yield* path.fromFileUrl(new URL(..., import.meta.url))`. This rule
+  deliberately excludes general HTTP URL inspection and synchronous framework
+  configuration.

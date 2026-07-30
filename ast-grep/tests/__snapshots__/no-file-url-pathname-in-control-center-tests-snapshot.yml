@@ -1,0 +1,9 @@
+id: no-file-url-pathname-in-control-center-tests
+snapshots:
+  ? |
+    const filePath = new URL("./fixture.json", import.meta.url).pathname
+  : labels:
+      - source: new URL("./fixture.json", import.meta.url).pathname
+        style: primary
+        start: 17
+        end: 68

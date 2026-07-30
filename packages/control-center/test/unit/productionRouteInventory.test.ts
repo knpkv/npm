@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
 
 import {
   CONTROL_CENTER_LAYOUT_ONLY_ROUTE_LITERALS,
@@ -22,8 +23,9 @@ describe("Control Center production route presentation inventory", () => {
     Effect.gen(function*() {
       const routerSource = yield* Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
-        const routerUrl = new URL("../../src/client/router.tsx", import.meta.url)
-        return yield* fileSystem.readFileString(routerUrl.pathname)
+        const path = yield* Path.Path
+        const routerPath = yield* path.fromFileUrl(new URL("../../src/client/router.tsx", import.meta.url))
+        return yield* fileSystem.readFileString(routerPath)
       }).pipe(Effect.provide(NodeServices.layer))
 
       const declaredLiterals = Array.from(routerSource.matchAll(/\bpath: "([^"]+)"/gu), ([, path]) => path).sort()
