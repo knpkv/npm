@@ -364,6 +364,10 @@ const disposeAll = async (
 }
 
 export interface RealRuntimeFixture {
+  readonly applicationLogForbiddenValues: () => ReadonlyArray<{
+    readonly label: string
+    readonly value: string
+  }>
   readonly applicationLogEntries: () => ReadonlyArray<string>
   readonly dispose: () => Promise<void>
   readonly emitApplicationLogFixture: (message: string) => Promise<void>
@@ -471,6 +475,10 @@ export const startRealRuntimeFixture = async (
     }
     const ownerSessionToken = (await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode)))
       .sessionToken
+    const applicationLogForbiddenValues = [
+      { label: "bootstrap pairing code", value: Redacted.value(bootstrap.pairingCode) },
+      { label: "bootstrap owner session token", value: Redacted.value(ownerSessionToken) }
+    ]
     if (allocated.trustedHttpsProxyPort !== null) {
       trustedHttpsProxy = await Effect.runPromise(
         startTrustedHttpsProxy(allocated).pipe(Effect.provide(NodeServices.layer))
@@ -480,6 +488,7 @@ export const startRealRuntimeFixture = async (
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
     return {
+      applicationLogForbiddenValues: () => [...applicationLogForbiddenValues],
       applicationLogEntries: () => [...applicationLogEntries],
       emitApplicationLogFixture: async (message) => {
         await typedServerRuntime.runPromise(Effect.logInfo(message))

@@ -53,6 +53,7 @@ export interface ProductionRouteLeafExemption extends ProductionRouteLeaf {
 export const CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS = Object.freeze({
   atlassianOAuthGrantId: "a".repeat(43),
   entityId: "01890f6f-6d6a-7cc0-98d3-000000000001",
+  pairingCode: "a".repeat(64),
   releaseId: "01890f6f-6d6a-7cc0-98d2-000000000011",
   shareId: "01890f6f-6d6a-7cc0-98d2-000000000090",
   workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001"

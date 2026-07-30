@@ -169,12 +169,23 @@ test.describe("repository-managed real runtime", () => {
             managedRuntime: fixture.applicationLogEntries()
           }
         }
+        const realApplicationLogForbiddenValues = [
+          ...fixture.applicationLogForbiddenValues(),
+          { label: "HttpOnly session cookie", value: sessionCookie.value },
+          { label: "consumed pairing code", value: consumedPairingCode }
+        ]
         expect(
-          exposedApplicationLogForbiddenValues(await applicationLogs(), [
-            { label: "HttpOnly session cookie", value: sessionCookie.value },
-            { label: "consumed pairing code", value: consumedPairingCode }
-          ])
+          exposedApplicationLogForbiddenValues(await applicationLogs(), realApplicationLogForbiddenValues)
         ).toEqual([])
+
+        const realCredentialFixtureCheckpoint = browserConsoleEntries.length
+        for (const forbidden of realApplicationLogForbiddenValues) {
+          await page.evaluate((value) => console.info(value), forbidden.value)
+        }
+        expect(
+          exposedApplicationLogForbiddenValues(await applicationLogs(), realApplicationLogForbiddenValues)
+        ).toEqual(realApplicationLogForbiddenValues.map(({ label }) => label))
+        browserConsoleEntries.splice(realCredentialFixtureCheckpoint)
 
         const browserLogFixtureSecret = "browser-console-forbidden-fixture"
         const nestedBrowserLogFixtureSecret = "nested-browser-console-forbidden-fixture"
@@ -301,6 +312,11 @@ test.describe("repository-managed real runtime", () => {
         }
         expect(firstClientExhausted).toBe(true)
         expect(await requestAsProxyClient("rate-limit-b")).toBe(200)
+        await page.evaluate(`console.info("late ordinary browser diagnostic [REDACTED]")`)
+        await fixture.emitApplicationLogFixture("late ordinary managed-runtime diagnostic [REDACTED]")
+        expect(
+          exposedApplicationLogForbiddenValues(await applicationLogs(), realApplicationLogForbiddenValues)
+        ).toEqual([])
       } finally {
         await context.close()
       }

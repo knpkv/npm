@@ -155,6 +155,13 @@ export type ProductionRoutePresentationAudit =
     }
   )
 
+interface ProductionRouteEntryPresentation {
+  readonly forcedColors: boolean
+  readonly height: number
+  readonly reducedMotion: boolean
+  readonly width: number
+}
+
 const AxeCoreModule = Schema.Struct({ source: Schema.String })
 const axeSource = Schema.decodeUnknownSync(AxeCoreModule)(createRequire(import.meta.url)("axe-core")).source
 
@@ -558,6 +565,26 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
   ).toBe(true)
 }
 
+const expectEffectiveOpacity = async (locator: Locator, label: string): Promise<void> => {
+  const hasEffectiveOpacity = await locator.evaluate((element) => {
+    const getComputedStyle = window.getComputedStyle
+    if (getComputedStyle === undefined) throw new Error("opacity target has no computed-style view")
+    const hasPaintContext = (candidate: unknown): candidate is PaintContextElement =>
+      typeof candidate === "object" &&
+      candidate !== null &&
+      "ownerDocument" in candidate &&
+      "parentElement" in candidate
+    if (!hasPaintContext(element)) throw new Error("opacity target has no paint context")
+    let current: PaintContextElement | null = element
+    while (current !== null) {
+      if (Number.parseFloat(getComputedStyle(current).opacity) <= 0) return false
+      current = current.parentElement
+    }
+    return true
+  })
+  expect(hasEffectiveOpacity, `${label} has no effective opacity`).toBe(true)
+}
+
 const expectViewportIntersection = async (locator: Locator, label: string): Promise<void> => {
   const snapshot = await locator.evaluate(async (element) =>
     await new Promise<{
@@ -600,14 +627,42 @@ const scrollDocumentVerticallyTo = async (locator: Locator): Promise<void> => {
   })
 }
 
+const productionRouteEntryPresentation = async (page: Page): Promise<ProductionRouteEntryPresentation> =>
+  await page.evaluate<ProductionRouteEntryPresentation>(`(() => ({
+    forcedColors: matchMedia("(forced-colors: active)").matches,
+    height: innerHeight,
+    reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
+    width: innerWidth
+  }))()`)
+
+/** Assert that a route is about to mount in the canonical desktop and reduced-motion presentation. */
+export const expectProductionRouteEntryPresentation = async (page: Page): Promise<void> => {
+  expect(await productionRouteEntryPresentation(page), "production route mounted outside its entry presentation")
+    .toEqual(
+      {
+        forcedColors: false,
+        height: 800,
+        reducedMotion: true,
+        width: 1_280
+      }
+    )
+}
+
+/** Reset persistent Playwright presentation state before navigating to a production route. */
+export const resetProductionRouteEntryPresentation = async (page: Page): Promise<void> => {
+  await page.setViewportSize({ height: 800, width: 1_280 })
+  await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
+  await expectProductionRouteEntryPresentation(page)
+}
+
 /** Prove one production route and its primary interaction remain usable in every required presentation mode. */
 export const auditProductionRoutePresentation = async (
   page: Page,
   audit: ProductionRoutePresentationAudit
 ): Promise<void> => {
-  await page.setViewportSize({ height: 800, width: 1_280 })
-  await page.emulateMedia({ forcedColors: "none", reducedMotion: "reduce" })
+  await resetProductionRouteEntryPresentation(page)
   await expect(audit.landmark).toBeVisible()
+  await expectEffectiveOpacity(audit.landmark, "route landmark")
   expect(await seriousAxeViolations(page), "desktop layout has serious or critical accessibility violations").toEqual(
     []
   )
@@ -623,16 +678,19 @@ export const auditProductionRoutePresentation = async (
     ).toBe(true)
   } else {
     await expect(audit.primaryAction).toBeVisible()
+    await expectEffectiveOpacity(audit.primaryAction, "primary action")
     await expect(audit.primaryAction).toBeEnabled()
     await focusPrimaryActionByKeyboard(page, audit.primaryAction)
   }
 
   await page.setViewportSize({ height: 800, width: 320 })
   await expect(audit.landmark).toBeVisible()
+  await expectEffectiveOpacity(audit.landmark, "route landmark")
   await scrollDocumentVerticallyTo(audit.landmark)
   await expectViewportIntersection(audit.landmark, "route landmark")
   if (audit.primaryAction !== null) {
     await expect(audit.primaryAction).toBeVisible()
+    await expectEffectiveOpacity(audit.primaryAction, "primary action")
     await scrollDocumentVerticallyTo(audit.primaryAction)
     await expectViewportIntersection(audit.primaryAction, "primary action")
   }

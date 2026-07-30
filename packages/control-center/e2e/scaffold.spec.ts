@@ -2,9 +2,12 @@ import { expect, type Locator, test } from "@playwright/test"
 import {
   auditProductionRoutePresentation,
   CONTROL_CENTER_AXE_WCAG_TAGS,
+  expectProductionRouteEntryPresentation,
+  resetProductionRouteEntryPresentation,
   seriousAxeViolations
 } from "./presentationAudit.js"
 import {
+  CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
   productionRouteAuditCase,
   productionRouteAuditKey,
   type ProductionRouteAuditRequirement,
@@ -29,6 +32,7 @@ interface UnauthenticatedPresentationRoute {
   readonly exercise?: (primaryAction: Locator) => Promise<void>
   readonly expectOutcome?: () => Promise<void>
   readonly landmark: () => Locator
+  readonly prepare?: () => Promise<void>
   readonly primaryAction: () => Locator | null
 }
 
@@ -448,6 +452,102 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
   })
 })
 
+test("rejects transparent landmarks and actions in the normal presentation", async ({ page }) => {
+  const content = (opacity: number): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Opacity fixture</title>
+        <style>
+          main { opacity: ${opacity}; }
+          @media (forced-colors: active) { main { opacity: 1; } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Opacity fixture</h1>
+          <button onclick="this.textContent='Continued'">Continue</button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content(0))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Opacity fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("route landmark has no effective opacity")
+
+  await page.setContent(content(1))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Opacity fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("resets persistent browser presentation state before a second route mounts", async ({ page }) => {
+  const mountedPresentation = async (): Promise<{
+    readonly forcedColors: boolean
+    readonly height: number
+    readonly reducedMotion: boolean
+    readonly width: number
+  }> => {
+    await page.setContent(`
+      <main
+        data-forced-colors=""
+        data-height=""
+        data-reduced-motion=""
+        data-width=""
+      >Route fixture</main>
+      <script>
+        (() => {
+          const route = document.querySelector("main");
+          route.dataset.forcedColors = String(matchMedia("(forced-colors: active)").matches);
+          route.dataset.height = String(innerHeight);
+          route.dataset.reducedMotion = String(matchMedia("(prefers-reduced-motion: reduce)").matches);
+          route.dataset.width = String(innerWidth);
+        })();
+      </script>
+    `)
+    return await page.getByRole("main").evaluate((element) => {
+      if (!("getAttribute" in element) || typeof element.getAttribute !== "function") {
+        throw new Error("route fixture has no attribute surface")
+      }
+      return {
+        forcedColors: element.getAttribute("data-forced-colors") === "true",
+        height: Number(element.getAttribute("data-height")),
+        reducedMotion: element.getAttribute("data-reduced-motion") === "true",
+        width: Number(element.getAttribute("data-width"))
+      }
+    })
+  }
+
+  await page.setViewportSize({ height: 800, width: 320 })
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
+  expect(await mountedPresentation()).toEqual({
+    forcedColors: true,
+    height: 800,
+    reducedMotion: true,
+    width: 320
+  })
+  await expect(expectProductionRouteEntryPresentation(page)).rejects.toThrow(
+    "production route mounted outside its entry presentation"
+  )
+
+  await resetProductionRouteEntryPresentation(page)
+  expect(await mountedPresentation()).toEqual({
+    forcedColors: false,
+    height: 800,
+    reducedMotion: true,
+    width: 1_280
+  })
+})
+
 test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
   test.setTimeout(60_000)
   await context.route("**/api/v1/session/current", async (route) => {
@@ -457,6 +557,18 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
         code: "unauthorized",
         correlationId: "public-route-presentation-audit",
         message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+  await context.route("**/api/v1/session/pair", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "public-route-pairing-presentation-audit",
+        message: "Pairing credential was rejected"
       }),
       contentType: "application/json",
       status: 401
@@ -483,11 +595,14 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     },
     {
       audit: productionRouteAuditCase("scaffold", "pair", "unauthenticated", "pair"),
-      exercise: async () => page.getByRole("textbox", { name: "Pairing code" }).fill("presentation-audit"),
       expectOutcome: async () =>
-        expect(page.getByRole("textbox", { name: "Pairing code" })).toHaveValue("presentation-audit"),
+        expect(page.getByText("That code is invalid, expired, or already used.")).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Pair this browser" }),
-      primaryAction: () => page.getByRole("textbox", { name: "Pairing code" })
+      prepare: async () =>
+        page
+          .getByRole("textbox", { name: "Pairing code" })
+          .fill(CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.pairingCode),
+      primaryAction: () => page.getByRole("button", { name: "Pair browser" })
     },
     {
       audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
@@ -581,7 +696,9 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
   ]
 
   for (const route of routes) {
+    await resetProductionRouteEntryPresentation(page)
     await page.goto(route.audit.canonicalPath)
+    await route.prepare?.()
     const primaryAction = route.primaryAction()
     if (primaryAction === null) {
       if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
@@ -621,6 +738,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
     primaryAction: page.getByRole("link", { name: "Return to Overview" })
   }
+  await resetProductionRouteEntryPresentation(page)
   await page.goto(authenticatedAgent.audit.canonicalPath)
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => primaryAction.press("Enter"),

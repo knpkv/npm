@@ -13,7 +13,7 @@ import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
-import { auditProductionRoutePresentation } from "./presentationAudit.js"
+import { auditProductionRoutePresentation, resetProductionRouteEntryPresentation } from "./presentationAudit.js"
 import {
   CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
   productionRouteAuditCase,
@@ -790,6 +790,7 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
   ]
 
   for (const route of routes) {
+    await resetProductionRouteEntryPresentation(page)
     await page.goto(route.audit.canonicalPath)
     const primaryAction = route.primaryAction()
     if (primaryAction === null) {
