@@ -1443,3 +1443,37 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-mutated-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Process from "effect/unstable/process"
+    const { make } = ChildProcess
+    const destructured = make("git", args, { env: gitEnvironment })
+    const { make: spawn } = ChildProcess
+    const renamed = spawn("git", args, { env: gitEnvironment })
+    const Aliased = ChildProcess
+    const aliased = Aliased.make("git", args, { env: gitEnvironment })
+    const FromBarrel = Process.ChildProcess
+    const barrelAliased = FromBarrel.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/eslint-child-env-alias-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const Aliased = ChildProcess
+    const explicit = Aliased.make("git", args, { env: gitEnvironment, extendEnv: true })
+    let mutableAlias = ChildProcess
+    const viaMutableAlias = mutableAlias.make("git", args, { env: gitEnvironment })
+    const built = buildOptions()
+    const viaCallResult = ChildProcess.make("git", args, built)
+    const viaTernary = ChildProcess.make("git", args, ready ? { env: gitEnvironment, extendEnv: true } : baseOptions)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-alias-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})

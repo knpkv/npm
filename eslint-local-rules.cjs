@@ -430,6 +430,63 @@ const isMutatedChildProcessOptionsBinding = (variable, definition) =>
     )
   })
 
+/** Bound on alias-chain following; chains this long do not occur in practice. */
+const CHILD_PROCESS_ALIAS_ROUNDS = 4
+
+/**
+ * Given a reference to a known ChildProcess binding, returns any `const` aliases
+ * declared from it.
+ *
+ * Handles `const Local = ChildProcess`, `const Local = Process.ChildProcess`, and
+ * `const { make } = ChildProcess` including a renamed key. Anything else — `let`,
+ * a call result, a computed key, a nested pattern — yields nothing, leaving the
+ * call unchecked rather than guessed at.
+ */
+const aliasedChildProcessBindings = (context, identifier, isBarrel) => {
+  const empty = { moduleBindings: [], makeBindings: [] }
+  // For a barrel binding the module object is `Process.ChildProcess`, one hop out.
+  let initializer = identifier
+  if (isBarrel) {
+    const member = identifier.parent
+    if (
+      member?.type !== "MemberExpression" ||
+      member.object !== identifier ||
+      staticPropertyName(member.property) !== "ChildProcess"
+    ) {
+      return empty
+    }
+    initializer = member
+  }
+  const declarator = initializer.parent
+  if (
+    declarator?.type !== "VariableDeclarator" ||
+    declarator.init !== initializer ||
+    declarator.parent?.kind !== "const"
+  ) {
+    return empty
+  }
+  const declared = context.sourceCode.getDeclaredVariables(declarator)
+  if (declarator.id.type === "Identifier") {
+    const binding = declared.find((variable) => variable.name === declarator.id.name)
+    return binding === undefined ? empty : { moduleBindings: [binding], makeBindings: [] }
+  }
+  if (declarator.id.type !== "ObjectPattern") return empty
+  const makeBindings = []
+  for (const property of declarator.id.properties) {
+    if (
+      property.type !== "Property" ||
+      property.computed ||
+      staticPropertyName(property.key) !== "make" ||
+      property.value.type !== "Identifier"
+    ) {
+      continue
+    }
+    const binding = declared.find((variable) => variable.name === property.value.name)
+    if (binding !== undefined) makeBindings.push(binding)
+  }
+  return { moduleBindings: [], makeBindings }
+}
+
 /**
  * Resolves `Process.ChildProcess.make(...)`, the barrel namespace form, to its
  * call expression. The plain `ChildProcess.make(...)` shape is handled by
@@ -1339,6 +1396,42 @@ module.exports = {
         }
       }
 
+      /**
+       * Follows `const` aliases of an already-known binding, so
+       * `const Local = ChildProcess` and `const { make } = ChildProcess` are
+       * tracked as the module object and as `make` respectively.
+       *
+       * Only immutable `const` declarations are followed, and only in this
+       * declarative form. A reassignable alias, a call result, or a computed
+       * destructuring key stays unresolved — the same conservative direction as
+       * the options resolver, since a false report is worse than a missed one.
+       */
+      const followAliases = () => {
+        for (let round = 0; round < CHILD_PROCESS_ALIAS_ROUNDS; round += 1) {
+          let discovered = false
+          for (const binding of [...moduleBindings, ...barrelBindings]) {
+            const isBarrel = barrelBindings.includes(binding)
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const aliased = aliasedChildProcessBindings(context, reference.identifier, isBarrel)
+              for (const found of aliased.moduleBindings) {
+                if (!moduleBindings.includes(found)) {
+                  moduleBindings.push(found)
+                  discovered = true
+                }
+              }
+              for (const found of aliased.makeBindings) {
+                if (!makeBindings.includes(found)) {
+                  makeBindings.push(found)
+                  discovered = true
+                }
+              }
+            }
+          }
+          if (!discovered) return
+        }
+      }
+
       return {
         ImportDeclaration(node) {
           if (node.source.value !== CHILD_PROCESS_MODULE && node.source.value !== CHILD_PROCESS_BARREL) return
@@ -1363,6 +1456,7 @@ module.exports = {
           }
         },
         "Program:exit"() {
+          followAliases()
           for (const binding of moduleBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
