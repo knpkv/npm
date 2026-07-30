@@ -5,6 +5,7 @@
     "jsx": "react-jsx",
     "lib": ["ES2022"],
     "noEmit": true,
+    "resolveJsonModule": true,
     "rootDir": ".",
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.node.tsbuildinfo",
     "types": ["node", "vitest/globals"]

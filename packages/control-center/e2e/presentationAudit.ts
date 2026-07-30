@@ -9,13 +9,41 @@ interface AxeViolation {
   readonly nodes: ReadonlyArray<{ readonly target: ReadonlyArray<string> }>
 }
 
-export interface ProductionRoutePresentationAudit {
-  readonly exercise?: (primaryAction: Locator) => Promise<void>
-  readonly expectOutcome?: () => Promise<void>
-  readonly landmark: Locator
-  readonly noActionReason?: string
-  readonly primaryAction: Locator | null
+interface AxeRunner {
+  readonly run: (
+    root: unknown,
+    options: {
+      readonly rules: Readonly<Record<string, { readonly enabled: boolean }>>
+      readonly runOnly: { readonly type: "tag"; readonly values: ReadonlyArray<string> }
+    }
+  ) => Promise<{ readonly violations: ReadonlyArray<AxeViolation> }>
 }
+
+interface AxeBrowserGlobal {
+  readonly axe?: AxeRunner
+}
+
+declare const document: { readonly activeElement: unknown }
+declare const window: AxeBrowserGlobal
+
+export type ProductionRoutePresentationAudit =
+  & {
+    readonly landmark: Locator
+  }
+  & (
+    | {
+      readonly exercise?: never
+      readonly expectOutcome?: never
+      readonly noActionReason: string
+      readonly primaryAction: null
+    }
+    | {
+      readonly exercise: (primaryAction: Locator) => Promise<void>
+      readonly expectOutcome: () => Promise<void>
+      readonly noActionReason?: never
+      readonly primaryAction: Locator
+    }
+  )
 
 const AxeCoreModule = Schema.Struct({ source: Schema.String })
 const axeSource = Schema.decodeUnknownSync(AxeCoreModule)(createRequire(import.meta.url)("axe-core")).source
@@ -31,13 +59,16 @@ export const CONTROL_CENTER_AXE_WCAG_TAGS: ReadonlyArray<string> = [
 
 /** Return the serious/critical WCAG failures used by every production-route audit. */
 export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<AxeViolation>> => {
-  await page.evaluate(axeSource)
-  return await page.evaluate<ReadonlyArray<AxeViolation>>(
-    `(async () => {
-    const result = await window.axe.run(document, {
-      runOnly: { type: "tag", values: ${JSON.stringify(CONTROL_CENTER_AXE_WCAG_TAGS)} },
-      rules: { "label-content-name-mismatch": { enabled: true } }
-    });
+  if (!(await page.evaluate(() => window.axe !== undefined))) {
+    await page.evaluate(axeSource)
+  }
+  return await page.evaluate(async (tags) => {
+    const axe = window.axe
+    if (axe === undefined) throw new Error("axe-core was not available in the audited document")
+    const result = await axe.run(document, {
+      rules: { "label-content-name-mismatch": { enabled: true } },
+      runOnly: { type: "tag", values: tags }
+    })
     return result.violations
       .filter(({ impact }) => impact === "serious" || impact === "critical")
       .map(({ help, id, impact, nodes }) => ({
@@ -45,21 +76,15 @@ export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<Ax
         id,
         impact,
         nodes: nodes.map(({ target }) => ({ target }))
-      }));
-  })()`
-  )
+      }))
+  }, CONTROL_CENTER_AXE_WCAG_TAGS)
 }
 
 const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator): Promise<void> => {
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await page.keyboard.press("Tab")
-    const reachedPrimaryAction = await expect(primaryAction)
-      .toBeFocused({ timeout: 25 })
-      .then(
-        () => true,
-        () => false
-      )
+    const reachedPrimaryAction = await primaryAction.evaluate((element) => element === document.activeElement)
     if (reachedPrimaryAction) break
   }
   await expect(primaryAction).toBeFocused()
@@ -93,7 +118,7 @@ export const auditProductionRoutePresentation = async (
   expect(await seriousAxeViolations(page)).toEqual([])
 
   if (audit.primaryAction === null) {
-    expect(audit.noActionReason?.trim().length ?? 0).toBeGreaterThan(0)
+    expect(audit.noActionReason.trim().length).toBeGreaterThan(0)
     expect(
       await page.evaluate<boolean>(`(() => {
         return document.querySelector("main")?.querySelector(
@@ -124,9 +149,7 @@ export const auditProductionRoutePresentation = async (
   if (audit.primaryAction !== null) {
     await expect(audit.primaryAction).toBeVisible()
     await focusPrimaryActionByKeyboard(page, audit.primaryAction)
-    expect(audit.exercise).toBeDefined()
-    expect(audit.expectOutcome).toBeDefined()
-    await audit.exercise?.(audit.primaryAction)
-    await audit.expectOutcome?.()
+    await audit.exercise(audit.primaryAction)
+    await audit.expectOutcome()
   }
 }

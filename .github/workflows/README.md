@@ -64,6 +64,15 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Exercises second-machine pairing through the trusted HTTPS proxy fixture
 - Runs the deterministic large-fixture contract benchmark and validates the
   browser-runtime cardinality, cleanup, and machine-qualified timing report
+- Treats the GitHub-hosted runner's `local-ssd` declaration as a trusted CI
+  configuration input rather than hardware attestation. The validator fails
+  when that declaration is missing or renamed, so timing cannot silently become
+  informational in CI.
+- Does not automatically retry a timing failure. A timing-only failure is
+  quarantined for one deliberate workflow rerun after confirming the declared
+  Node, CPU, memory, platform, architecture, and storage class. A second timing
+  failure on the eligible class is a release-gate failure; other failures are
+  never retried as noise.
 - **Commands**:
   - `pnpm test:browser`
   - `pnpm --filter @knpkv/control-center benchmark:contracts`

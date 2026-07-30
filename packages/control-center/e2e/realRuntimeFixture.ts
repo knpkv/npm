@@ -6,6 +6,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -133,11 +134,22 @@ class TrustedHttpsProxyFixtureError extends Schema.TaggedErrorClass<TrustedHttps
   { reason: Schema.String }
 ) {}
 
-const closeHttpsProxy = (server: HttpsServer): Promise<void> =>
-  new Promise((resolve, reject) => {
-    server.close((error) => (error === undefined ? resolve() : reject(error)))
-    server.closeAllConnections()
+interface TrustedHttpsProxy {
+  readonly failure: () => TrustedHttpsProxyFixtureError | null
+  readonly server: HttpsServer
+}
+
+const shortFailureDescription = (failure: unknown): string =>
+  Predicate.isError(failure) && failure.message.length > 0 ? failure.message : String(failure)
+
+const closeHttpsProxy = async (proxy: TrustedHttpsProxy): Promise<void> => {
+  await new Promise<void>((resolve, reject) => {
+    proxy.server.close((error) => (error === undefined ? resolve() : reject(error)))
+    proxy.server.closeAllConnections()
   })
+  const failure = proxy.failure()
+  if (failure !== null) throw failure
+}
 
 const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")(function*(
   allocated: AllocatedFixture
@@ -196,7 +208,9 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
 
   return yield* Effect.tryPromise({
     try: () =>
-      new Promise<HttpsServer>((resolve, reject) => {
+      new Promise<TrustedHttpsProxy>((resolve, reject) => {
+        let runtimeFailure: TrustedHttpsProxyFixtureError | null = null
+        let started = false
         const server = createHttpsServer(
           {
             cert: Buffer.from(certificate),
@@ -233,13 +247,25 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
             request.pipe(proxyRequest)
           }
         )
-        server.once("error", reject)
+        server.on("error", (cause) => {
+          const failure = new TrustedHttpsProxyFixtureError({
+            reason: `test HTTPS proxy failed: ${shortFailureDescription(cause)}`
+          })
+          if (!started) {
+            reject(failure)
+            return
+          }
+          runtimeFailure = failure
+        })
         server.listen(trustedHttpsProxyPort, "127.0.0.1", () => {
-          server.removeListener("error", reject)
-          resolve(server)
+          started = true
+          resolve({ failure: () => runtimeFailure, server })
         })
       }),
-    catch: () => new TrustedHttpsProxyFixtureError({ reason: "could not start the test HTTPS proxy" })
+    catch: (cause) =>
+      new TrustedHttpsProxyFixtureError({
+        reason: `could not start the test HTTPS proxy: ${shortFailureDescription(cause)}`
+      })
   })
 })
 
@@ -279,7 +305,7 @@ const removeDataRoot = (dataRoot: string): Promise<void> =>
   )
 
 const disposeAll = async (
-  trustedHttpsProxy: HttpsServer | undefined,
+  trustedHttpsProxy: TrustedHttpsProxy | undefined,
   serverRuntime: { readonly dispose: () => Promise<void> } | undefined,
   dataRoot: string
 ): Promise<void> => {
@@ -335,7 +361,7 @@ export const startRealRuntimeFixture = async (
 ): Promise<RealRuntimeFixture> => {
   const allocated = await Effect.runPromise(allocateFixture(options))
   let serverRuntime: { readonly dispose: () => Promise<void> } | undefined
-  let trustedHttpsProxy: HttpsServer | undefined
+  let trustedHttpsProxy: TrustedHttpsProxy | undefined
   try {
     await Effect.runPromise(seedFixture(allocated))
     const fakeRuntime = await Effect.runPromise(makeFakePluginRuntime(realFakeScenario))

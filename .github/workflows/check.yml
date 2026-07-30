@@ -88,6 +88,8 @@ jobs:
   browser:
     name: Browser
     runs-on: ubuntu-latest
+    # GitHub-hosted storage is declared, not attested. The timing-noise quarantine
+    # and rerun policy is documented in .github/workflows/README.md.
     env:
       CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:

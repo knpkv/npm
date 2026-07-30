@@ -10,9 +10,11 @@ import {
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
+import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
 import { auditProductionRoutePresentation } from "./presentationAudit.js"
 import {
+  CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
   productionRouteAuditCase,
   productionRouteAuditKey,
   type ProductionRouteAuditRequirement,
@@ -443,7 +445,7 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
           expiresAt: "2026-07-21T10:00:00.000Z",
           granteePersonId: pairedSession.actor.personId,
           revokedAt: null,
-          shareId: "01890f6f-6d6a-7cc0-98d2-000000000090"
+          shareId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.shareId
         }
       }),
       contentType: "application/json",
@@ -582,7 +584,70 @@ interface AuthenticatedPresentationRoute {
 }
 
 test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
-  test.setTimeout(180_000)
+  test.setTimeout(60_000)
+  let recoverItems = false
+  let recoverServices = false
+  let recoverTimeline = false
+  await page.route("**/api/v1/items**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/items") {
+      await route.fallback()
+      return
+    }
+    if (!recoverItems) {
+      await route.abort("failed")
+      return
+    }
+    const items = encodedWorkset.entityProjections.map((entry) => ({
+      ...entry,
+      canonicalReleaseId: encodedWorkset.releaseId,
+      owners: [],
+      ownersTruncated: false,
+      releaseIds: [encodedWorkset.releaseId],
+      releaseMembershipsTruncated: false
+    }))
+    await route.fulfill({
+      body: JSON.stringify({
+        items,
+        matchedCount: items.length,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
+        totalCount: items.length,
+        truncated: false
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/timeline**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/timeline") {
+      await route.fallback()
+      return
+    }
+    if (!recoverTimeline) {
+      await route.abort("failed")
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({ events: [], nextCursor: null }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/plugins/overview", async (route) => {
+    if (!recoverServices) {
+      await route.abort("failed")
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [],
+        catalog: firstPartyServiceCatalog.map(({ metadata }) => metadata),
+        connections: []
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   const routes: ReadonlyArray<AuthenticatedPresentationRoute> = [
     {
       audit: productionRouteAuditCase("release-routes", "overview", "authenticated"),
@@ -599,19 +664,34 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     },
     {
       audit: productionRouteAuditCase("release-routes", "items", "authenticated"),
-      expectOutcome: async () => expect(page.getByText("Items unavailable", { exact: true })).toBeVisible(),
+      exercise: async (primaryAction) => {
+        recoverItems = true
+        await primaryAction.press("Enter")
+      },
+      expectOutcome: async () => {
+        await expect(page.getByText("Items unavailable", { exact: true })).toHaveCount(0)
+        await expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible()
+      },
       landmark: () => page.getByText("Items unavailable", { exact: true }),
       primaryAction: () => page.getByRole("button", { name: "Try again" })
     },
     {
       audit: productionRouteAuditCase("release-routes", "item", "authenticated"),
-      expectOutcome: async () => expect(page.getByText("Items unavailable", { exact: true })).toBeVisible(),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Review payment capture safeguards" }),
       primaryAction: () => page.getByRole("link", { name: "Back to items" })
     },
     {
       audit: productionRouteAuditCase("release-routes", "timeline", "authenticated"),
-      expectOutcome: async () => expect(page.getByText("Timeline unavailable", { exact: true })).toBeVisible(),
+      exercise: async (primaryAction) => {
+        recoverTimeline = true
+        await primaryAction.press("Enter")
+      },
+      expectOutcome: async () => {
+        await expect(page.getByText("Timeline unavailable", { exact: true })).toHaveCount(0)
+        await expect(page.getByRole("heading", { level: 1, name: "Everything that moved." })).toBeVisible()
+      },
       landmark: () => page.getByText("Timeline unavailable", { exact: true }),
       primaryAction: () => page.getByRole("button", { name: "Try again" })
     },
@@ -648,7 +728,18 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     },
     {
       audit: productionRouteAuditCase("release-routes", "services", "authenticated"),
-      expectOutcome: async () => expect(page.getByText("Connections unavailable", { exact: true })).toBeVisible(),
+      exercise: async (primaryAction) => {
+        recoverServices = true
+        await primaryAction.press("Enter")
+      },
+      expectOutcome: async () => {
+        await expect(page.getByText("Connections unavailable", { exact: true })).toHaveCount(0)
+        await expect(
+          page.getByText(
+            "Choose a service below. Control Center will enable it and verify the exact account before using it."
+          )
+        ).toBeVisible()
+      },
       landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
       primaryAction: () => page.getByRole("button", { name: "Try again" })
     },

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, test } from "@playwright/test"
 import {
   auditProductionRoutePresentation,
   CONTROL_CENTER_AXE_WCAG_TAGS,
@@ -7,6 +7,7 @@ import {
 import {
   productionRouteAuditCase,
   productionRouteAuditKey,
+  type ProductionRouteAuditRequirement,
   requiredProductionRouteAuditsFor
 } from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
@@ -23,6 +24,14 @@ const pairedSession = {
   workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001"
 }
 
+interface UnauthenticatedPresentationRoute {
+  readonly audit: ProductionRouteAuditRequirement
+  readonly exercise?: (primaryAction: Locator) => Promise<void>
+  readonly expectOutcome: () => Promise<void>
+  readonly landmark: () => Locator
+  readonly primaryAction: () => Locator
+}
+
 test("includes WCAG 2.1 A label-content matching in the serious accessibility gate", async ({ page }) => {
   expect(CONTROL_CENTER_AXE_WCAG_TAGS).toContain("wcag21a")
   await page.setContent("<button aria-label=\"Remove\">Delete</button>")
@@ -35,7 +44,7 @@ test("includes WCAG 2.1 A label-content matching in the serious accessibility ga
 })
 
 test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
-  test.setTimeout(60_000)
+  test.setTimeout(30_000)
   await context.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
@@ -48,7 +57,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       status: 401
     })
   })
-  const routes = [
+  const routes: ReadonlyArray<UnauthenticatedPresentationRoute> = [
     {
       audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
@@ -128,7 +137,7 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center" })).toBeFocused()
+  await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
   for (const name of ["Overview", "Releases", "Services", "Ask Relay"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
@@ -148,7 +157,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.goto("/")
 
   const navigationBox = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
-  const brandBox = await page.getByRole("link", { name: "Control Center" }).boundingBox()
+  const brandBox = await page.getByRole("link", { exact: true, name: "Control Center" }).boundingBox()
   const agentBox = await page.getByRole("link", { name: "Ask Relay" }).boundingBox()
   if (navigationBox === null || brandBox === null || agentBox === null) {
     throw new Error("mobile application chrome must remain measurable")
@@ -158,7 +167,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   expect(Math.abs(844 - (navigationBox.y + navigationBox.height) - 16)).toBeLessThan(2)
 
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center" })).toBeFocused()
+  await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Ask Relay" })).toBeFocused()
   await page.keyboard.press("Tab")

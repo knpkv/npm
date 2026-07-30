@@ -1,7 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import { describe, expect, it } from "vitest"
 
 import {
   CONTROL_CENTER_LAYOUT_ONLY_ROUTE_LITERALS,
@@ -13,25 +13,25 @@ import {
 } from "../../e2e/productionRouteInventory.js"
 
 describe("Control Center production route presentation inventory", () => {
-  it("fails when a declared router path has no browser presentation owner", async () => {
-    const routerSource = await Effect.runPromise(
-      Effect.gen(function*() {
+  it.effect("fails when a declared router path has no browser presentation owner", () =>
+    Effect.gen(function*() {
+      const routerSource = yield* Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
         const routerUrl = new URL("../../src/client/router.tsx", import.meta.url)
         return yield* fileSystem.readFileString(routerUrl.pathname)
       }).pipe(Effect.provide(NodeServices.layer))
-    )
-    const declaredLiterals = Array.from(routerSource.matchAll(/\bpath: "([^"]+)"/gu), ([, path]) => path).sort()
-    const declaredIndexRouteCount = Array.from(routerSource.matchAll(/\bindex: true\b/gu)).length
 
-    expect(declaredLiterals).toEqual(CONTROL_CENTER_PRODUCTION_ROUTE_LITERALS)
-    expect(CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.filter(({ ownsIndexRoute }) => ownsIndexRoute).length).toBe(
-      declaredIndexRouteCount
-    )
-    expect(CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(({ ownsIndexRoute }) => ownsIndexRoute)?.family).toBe(
-      "overview"
-    )
-  })
+      const declaredLiterals = Array.from(routerSource.matchAll(/\bpath: "([^"]+)"/gu), ([, path]) => path).sort()
+      const declaredIndexRouteCount = Array.from(routerSource.matchAll(/\bindex: true\b/gu)).length
+
+      expect(declaredLiterals).toEqual(CONTROL_CENTER_PRODUCTION_ROUTE_LITERALS)
+      expect(CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.filter(({ ownsIndexRoute }) => ownsIndexRoute).length).toBe(
+        declaredIndexRouteCount
+      )
+      expect(CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(({ ownsIndexRoute }) => ownsIndexRoute)?.family).toBe(
+        "overview"
+      )
+    }))
 
   it("keeps every acceptance surface assigned to a distinct typed route family", () => {
     expect(new Set(CONTROL_CENTER_PRODUCTION_ROUTE_FAMILIES).size).toBe(CONTROL_CENTER_PRODUCTION_ROUTE_FAMILIES.length)

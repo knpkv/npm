@@ -140,9 +140,6 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")
 
-  await page.setViewportSize({ height: 800, width: 320 })
-  await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible()
-  expect(await page.evaluate<boolean>("document.documentElement.scrollWidth <= window.innerWidth")).toBe(true)
   const presentationAudit = productionRouteAuditCase("workspace-settings", "settings", "authenticated")
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => {

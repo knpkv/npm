@@ -10,6 +10,7 @@ import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntime
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { securityHeaders } from "../src/server/http/security/SecurityHeaders.js"
+import { type BrowserSecretSurface, browserSurfaceExposesSecret } from "./browserSecretSurface.js"
 import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
 import {
   INITIAL_RELEASE_VERSION,
@@ -17,16 +18,6 @@ import {
   REAL_WORKSPACE_ID,
   UPDATED_RELEASE_VERSION
 } from "./realRuntimeScenario.js"
-
-interface BrowserSecretSurface {
-  readonly documentHtml: string
-  readonly localStorage: string
-  readonly sessionStorage: string
-  readonly url: string
-}
-
-const browserSurfaceExposesSecret = (surface: BrowserSecretSurface, secret: string): boolean =>
-  Object.values(surface).some((value) => value.includes(secret))
 
 test.describe("repository-managed real runtime", () => {
   test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
@@ -58,12 +49,12 @@ test.describe("repository-managed real runtime", () => {
         await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
 
         const sessionCookie = (await context.cookies()).find(({ name }) => name === "cc_session")
+        if (sessionCookie === undefined) throw new Error("trusted HTTPS pairing did not issue its session cookie")
         expect(sessionCookie).toMatchObject({
           httpOnly: true,
           sameSite: "Strict",
           secure: true
         })
-        if (sessionCookie === undefined) throw new Error("trusted HTTPS pairing did not issue its session cookie")
         const browserSurface = await page.evaluate<BrowserSecretSurface>(`({
           documentHtml: document.documentElement.outerHTML,
           localStorage: JSON.stringify(Object.entries(localStorage)),
@@ -71,21 +62,6 @@ test.describe("repository-managed real runtime", () => {
           url: location.href
         })`)
         expect(browserSurfaceExposesSecret(browserSurface, sessionCookie.value)).toBe(false)
-        expect(
-          browserSurfaceExposesSecret(
-            { ...browserSurface, localStorage: JSON.stringify([[`session-${sessionCookie.value}`, "safe"]]) },
-            sessionCookie.value
-          )
-        ).toBe(true)
-        expect(
-          browserSurfaceExposesSecret(
-            {
-              ...browserSurface,
-              sessionStorage: JSON.stringify([["session", { token: sessionCookie.value }]])
-            },
-            sessionCookie.value
-          )
-        ).toBe(true)
       } finally {
         await context.close()
       }

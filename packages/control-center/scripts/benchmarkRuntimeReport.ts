@@ -72,7 +72,7 @@ const TimingAcceptance = Schema.Union([
 /** Return whether absolute timing is comparable to the documented CI baseline. */
 export const controlCenterBenchmarkMachineIsTimingEligible = (machine: ControlCenterBenchmarkMachine): boolean => {
   const nodeVersionMatch = CONTROL_CENTER_NODE_VERSION_PATTERN.exec(machine.nodeVersion)
-  const nodeMajorVersion = Number.parseInt(nodeVersionMatch?.[0].slice(1).split(".")[0] ?? "", 10)
+  const nodeMajorVersion = Number.parseInt(nodeVersionMatch?.groups?.major ?? "", 10)
   return (
     machine.platform === "linux" &&
     (machine.architecture === "x64" || machine.architecture === "arm64") &&
@@ -82,6 +82,17 @@ export const controlCenterBenchmarkMachineIsTimingEligible = (machine: ControlCe
     machine.totalMemoryBytes >= CONTROL_CENTER_TIMING_ELIGIBILITY.totalMemoryBytes
   )
 }
+
+/** Keep an omitted or renamed CI machine declaration from silently disabling the timing gate. */
+export const validateControlCenterRuntimeBenchmarkCiAcceptance = Effect.fn(
+  "ControlCenterBenchmark.validateCiAcceptance"
+)(function*(report: ControlCenterRuntimeBenchmarkReport, isCi: boolean) {
+  if (isCi && !report.timingIsAcceptanceAssertion) {
+    return yield* new BenchmarkReportError({
+      reason: "CI requires an eligible machine and an asserted runtime benchmark timing result."
+    })
+  }
+})
 
 /** Durable proof that authenticated HTTP/SSE paths ran and every owned resource was released. */
 export const ControlCenterRuntimeBenchmarkReport = Schema.Struct({

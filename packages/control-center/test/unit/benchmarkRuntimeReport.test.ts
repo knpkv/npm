@@ -1,10 +1,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { describe, expect, it } from "vitest"
 
 import { CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS } from "../../scripts/benchmarkFixture.js"
 import {
@@ -19,7 +19,8 @@ import {
   controlCenterBenchmarkMachineIsTimingEligible,
   ControlCenterRuntimeBenchmarkReport,
   decodeControlCenterRuntimeBenchmarkReportJson,
-  readControlCenterRuntimeBenchmarkReport
+  readControlCenterRuntimeBenchmarkReport,
+  validateControlCenterRuntimeBenchmarkCiAcceptance
 } from "../../scripts/benchmarkRuntimeReport.js"
 
 const machine = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
@@ -80,28 +81,27 @@ const validReportInput = () => ({
 })
 
 const decodeResult = (input: unknown) =>
-  Effect.runPromise(decodeControlCenterRuntimeBenchmarkReportJson(JSON.stringify(input)).pipe(Effect.result))
+  decodeControlCenterRuntimeBenchmarkReportJson(JSON.stringify(input)).pipe(Effect.result)
 
 describe("control center runtime benchmark report", () => {
-  it("decodes exact-five samples with correctly derived median and p95", async () => {
-    const report = await Effect.runPromise(
-      decodeControlCenterRuntimeBenchmarkReportJson(JSON.stringify(validReportInput()))
-    )
+  it.effect("decodes exact-five samples with correctly derived median and p95", () =>
+    Effect.gen(function*() {
+      const report = yield* decodeControlCenterRuntimeBenchmarkReportJson(JSON.stringify(validReportInput()))
 
-    expect(report.machine.logicalCpuCount).toBe(4)
-    expect(report.measurements.portfolio.timing.samplesMilliseconds).toHaveLength(5)
-    expect(report.measurements.portfolio.timing.medianMilliseconds).toBe(9)
-    expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(13)
-    expect(report.measurements.sse.timing.medianMilliseconds).toBe(9)
-    expect(report.measurements.sse.timing.p95Milliseconds).toBe(13)
-    expect(report.timingAcceptance).toEqual({
-      budgetMilliseconds: 2_000,
-      eligible: true,
-      passed: true,
-      reason: "eligible-and-within-budget"
-    })
-    expect(report.timingIsAcceptanceAssertion).toBe(true)
-  })
+      expect(report.machine.logicalCpuCount).toBe(4)
+      expect(report.measurements.portfolio.timing.samplesMilliseconds).toHaveLength(5)
+      expect(report.measurements.portfolio.timing.medianMilliseconds).toBe(9)
+      expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(13)
+      expect(report.measurements.sse.timing.medianMilliseconds).toBe(9)
+      expect(report.measurements.sse.timing.p95Milliseconds).toBe(13)
+      expect(report.timingAcceptance).toEqual({
+        budgetMilliseconds: 2_000,
+        eligible: true,
+        passed: true,
+        reason: "eligible-and-within-budget"
+      })
+      expect(report.timingIsAcceptanceAssertion).toBe(true)
+    }))
 
   it("qualifies only the documented Node 24, CPU, memory, platform, and architecture baseline", () => {
     expect(controlCenterBenchmarkMachineIsTimingEligible(machine)).toBe(true)
@@ -147,34 +147,35 @@ describe("control center runtime benchmark report", () => {
     expect(controlCenterBenchmarkMachineIsTimingEligible(supportedPrerelease)).toBe(true)
   })
 
-  it("rejects an over-budget or contradictory eligible timing claim", async () => {
-    const valid = validReportInput()
-    const overBudget = {
-      ...valid,
-      measurements: {
-        ...valid.measurements,
-        portfolio: {
-          ...valid.measurements.portfolio,
-          timing: summarizeBenchmarkTimingSamples([2_001, 2_002, 2_003, 2_004, 2_005])
+  it.effect("rejects an over-budget or contradictory eligible timing claim", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      const overBudget = {
+        ...valid,
+        measurements: {
+          ...valid.measurements,
+          portfolio: {
+            ...valid.measurements.portfolio,
+            timing: summarizeBenchmarkTimingSamples([2_001, 2_002, 2_003, 2_004, 2_005])
+          }
         }
       }
-    }
-    const contradictory = {
-      ...valid,
-      timingAcceptance: {
-        ...valid.timingAcceptance,
-        passed: false
+      const contradictory = {
+        ...valid,
+        timingAcceptance: {
+          ...valid.timingAcceptance,
+          passed: false
+        }
       }
-    }
 
-    expect(Result.isFailure(await decodeResult(overBudget))).toBe(true)
-    expect(Result.isFailure(await decodeResult(contradictory))).toBe(true)
-  })
+      expect(Result.isFailure(yield* decodeResult(overBudget))).toBe(true)
+      expect(Result.isFailure(yield* decodeResult(contradictory))).toBe(true)
+    }))
 
-  it("keeps over-budget timing informational on an ineligible machine", async () => {
-    const valid = validReportInput()
-    const report = await Effect.runPromise(
-      decodeControlCenterRuntimeBenchmarkReportJson(
+  it.effect("keeps over-budget timing informational on an ineligible machine", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      const report = yield* decodeControlCenterRuntimeBenchmarkReportJson(
         JSON.stringify({
           ...valid,
           machine: { ...machine, logicalCpuCount: 2 },
@@ -194,51 +195,51 @@ describe("control center runtime benchmark report", () => {
           timingIsAcceptanceAssertion: false
         })
       )
-    )
 
-    expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(2_005)
-    expect(report.timingAcceptance.reason).toBe("ineligible-machine")
-  })
+      expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(2_005)
+      expect(report.timingAcceptance.reason).toBe("ineligible-machine")
+    }))
 
-  it("rejects reports with missing machine or timing aggregates", async () => {
-    const valid = validReportInput()
-    const { machine: _machine, ...missingMachine } = valid
-    const { medianMilliseconds: _median, ...missingMedianTiming } = valid.measurements.portfolio.timing
-    const { p95Milliseconds: _p95, ...missingP95Timing } = valid.measurements.sse.timing
-    const missingMedian = {
-      ...valid,
-      measurements: {
-        ...valid.measurements,
-        portfolio: {
-          ...valid.measurements.portfolio,
-          timing: missingMedianTiming
+  it.effect("rejects reports with missing machine or timing aggregates", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      const { machine: _machine, ...missingMachine } = valid
+      const { medianMilliseconds: _median, ...missingMedianTiming } = valid.measurements.portfolio.timing
+      const { p95Milliseconds: _p95, ...missingP95Timing } = valid.measurements.sse.timing
+      const missingMedian = {
+        ...valid,
+        measurements: {
+          ...valid.measurements,
+          portfolio: {
+            ...valid.measurements.portfolio,
+            timing: missingMedianTiming
+          }
         }
       }
-    }
-    const missingP95 = {
-      ...valid,
-      measurements: {
-        ...valid.measurements,
-        sse: {
-          ...valid.measurements.sse,
-          timing: missingP95Timing
+      const missingP95 = {
+        ...valid,
+        measurements: {
+          ...valid.measurements,
+          sse: {
+            ...valid.measurements.sse,
+            timing: missingP95Timing
+          }
         }
       }
-    }
 
-    for (const invalid of [missingMachine, missingMedian, missingP95]) {
-      expect(Result.isFailure(await decodeResult(invalid))).toBe(true)
-    }
-  })
+      for (const invalid of [missingMachine, missingMedian, missingP95]) {
+        expect(Result.isFailure(yield* decodeResult(invalid))).toBe(true)
+      }
+    }))
 
-  it("rejects a pruned JSON report and a missing report file", async () => {
-    const pruned = await Effect.runPromise(
-      decodeControlCenterRuntimeBenchmarkReportJson("{\"version\":1,\"machine\":").pipe(Effect.result)
-    )
-    expect(Result.isFailure(pruned)).toBe(true)
+  it.effect("rejects a pruned JSON report and a missing report file", () =>
+    Effect.gen(function*() {
+      const pruned = yield* decodeControlCenterRuntimeBenchmarkReportJson("{\"version\":1,\"machine\":").pipe(
+        Effect.result
+      )
+      expect(Result.isFailure(pruned)).toBe(true)
 
-    const missing = await Effect.runPromise(
-      Effect.gen(function*() {
+      const missing = yield* Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const root = yield* fileSystem.makeTempDirectory({ prefix: "control-center-runtime-report-test-" })
@@ -247,53 +248,81 @@ describe("control center runtime benchmark report", () => {
           Effect.ensuring(fileSystem.remove(root, { force: true, recursive: true }).pipe(Effect.orDie))
         )
       }).pipe(Effect.provide(NodeServices.layer))
-    )
-    expect(Result.isFailure(missing)).toBe(true)
-  })
+      expect(Result.isFailure(missing)).toBe(true)
+    }))
 
-  it("keeps the package command deterministic and validates the durable report", async () => {
-    const packageJson = await Effect.runPromise(
-      Effect.gen(function*() {
+  it.effect("keeps the package command deterministic and validates the durable report", () =>
+    Effect.gen(function*() {
+      const packageJson = yield* Effect.gen(function*() {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const packagePath = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
         return yield* fileSystem.readFileString(packagePath)
       }).pipe(Effect.provide(NodeServices.layer))
-    )
-    const manifest = Schema.decodeUnknownSync(
-      Schema.fromJsonString(Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) }))
-    )(packageJson)
-    const command = manifest.scripts["benchmark:runtime"]
-    const preparedCommand = manifest.scripts["benchmark:runtime:prepared"]
-    const validationCommand = manifest.scripts["benchmark:validate-runtime"]
+      const manifest = Schema.decodeUnknownSync(
+        Schema.fromJsonString(Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) }))
+      )(packageJson)
+      const command = manifest.scripts["benchmark:runtime"]
+      const preparedCommand = manifest.scripts["benchmark:runtime:prepared"]
+      const validationCommand = manifest.scripts["benchmark:validate-runtime"]
 
-    expect(command).toContain("pnpm build")
-    expect(command).toContain("pnpm benchmark:runtime:prepared")
-    expect(preparedCommand).toContain(`rimraf ${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`)
-    expect(preparedCommand).toContain(
-      `CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`
-    )
-    expect(preparedCommand).toContain("pnpm benchmark:validate-runtime")
-    expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
-  })
+      expect(command).toContain("pnpm build")
+      expect(command).toContain("pnpm benchmark:runtime:prepared")
+      expect(preparedCommand).toContain(`rimraf ${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`)
+      expect(preparedCommand).toContain(
+        `CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`
+      )
+      expect(preparedCommand).toContain("pnpm benchmark:validate-runtime")
+      expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
+    }))
 
-  it("rejects aggregates that do not match their samples", async () => {
-    const valid = validReportInput()
-    const invalid = {
-      ...valid,
-      measurements: {
-        ...valid.measurements,
-        portfolio: {
-          ...valid.measurements.portfolio,
-          timing: {
-            ...valid.measurements.portfolio.timing,
-            medianMilliseconds: 10
+  it.effect("rejects aggregates that do not match their samples", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      const invalid = {
+        ...valid,
+        measurements: {
+          ...valid.measurements,
+          portfolio: {
+            ...valid.measurements.portfolio,
+            timing: {
+              ...valid.measurements.portfolio.timing,
+              medianMilliseconds: 10
+            }
           }
         }
       }
-    }
 
-    expect(Result.isFailure(await decodeResult(invalid))).toBe(true)
-    expect(() => Schema.decodeUnknownSync(ControlCenterRuntimeBenchmarkReport)(invalid)).toThrow()
-  })
+      expect(Result.isFailure(yield* decodeResult(invalid))).toBe(true)
+      expect(() => Schema.decodeUnknownSync(ControlCenterRuntimeBenchmarkReport)(invalid)).toThrow()
+    }))
+
+  it.effect("requires an eligible timing assertion in CI but keeps local evidence informational", () =>
+    Effect.gen(function*() {
+      const valid = validReportInput()
+      const ineligibleReport = yield* decodeControlCenterRuntimeBenchmarkReportJson(
+        JSON.stringify({
+          ...valid,
+          machine: { ...machine, storageClass: "unverified" },
+          timingAcceptance: {
+            budgetMilliseconds: CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
+            eligible: false,
+            passed: false,
+            reason: "ineligible-machine"
+          },
+          timingIsAcceptanceAssertion: false
+        })
+      )
+
+      expect(
+        Result.isFailure(
+          yield* validateControlCenterRuntimeBenchmarkCiAcceptance(ineligibleReport, true).pipe(Effect.result)
+        )
+      ).toBe(true)
+      expect(
+        Result.isSuccess(
+          yield* validateControlCenterRuntimeBenchmarkCiAcceptance(ineligibleReport, false).pipe(Effect.result)
+        )
+      ).toBe(true)
+    }))
 })

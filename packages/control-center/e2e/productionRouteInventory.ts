@@ -37,10 +37,20 @@ interface ProductionRouteFamilyDescriptor {
   readonly routerLiterals: ReadonlyArray<string>
 }
 
-const WORKSPACE_ID = "01890f6f-6d6a-7cc0-98d2-000000000001"
-const RELEASE_ID = "01890f6f-6d6a-7cc0-98d2-000000000011"
-const ENTITY_ID = "01890f6f-6d6a-7cc0-98d3-000000000001"
-const SHARE_ID = "01890f6f-6d6a-7cc0-98d2-000000000090"
+/** Stable identities shared by canonical paths and their browser response fixtures. */
+export const CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS = Object.freeze({
+  entityId: "01890f6f-6d6a-7cc0-98d3-000000000001",
+  releaseId: "01890f6f-6d6a-7cc0-98d2-000000000011",
+  shareId: "01890f6f-6d6a-7cc0-98d2-000000000090",
+  workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001"
+})
+
+const {
+  entityId: ENTITY_ID,
+  releaseId: RELEASE_ID,
+  shareId: SHARE_ID,
+  workspaceId: WORKSPACE_ID
+} = CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS
 
 /** Router parents that own layout/context only and deliberately have no leaf presentation. */
 export const CONTROL_CENTER_LAYOUT_ONLY_ROUTE_LITERALS: ReadonlyArray<string> = ["w/:workspaceId"]
