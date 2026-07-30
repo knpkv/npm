@@ -153,15 +153,66 @@ for (const claim of providerClaims) {
 }
 
 const governance = docsSources.get("control-center-governance.mdx") ?? ""
-const providerIdentityFields = new Map([
-  ["CodePipeline", ["authorizationId", "idempotencyKey", "payloadDigest"]],
-  ["Clockify", ["workspaceId", "userId", "entryId", "expectedRevision", "desiredRevision"]]
+const governanceSection = (provider) =>
+  governance.match(new RegExp(`### ${provider}\\n([\\s\\S]*?)(?=\\n### |\\n## )`, "u"))?.[1] ?? ""
+const governanceExample = (provider, kind) => {
+  const section = governanceSection(provider)
+  const marker = `{/* governance-example:${provider}:${kind} */}`
+  const markerIndex = section.indexOf(marker)
+  if (markerIndex < 0) return ""
+  const afterMarker = section.slice(markerIndex + marker.length).trimStart()
+  return /^```text\n([\s\S]*?)\n```/u.exec(afterMarker)?.[1] ?? ""
+}
+const providerExamples = new Map([
+  [
+    "CodePipeline",
+    {
+      canonical: [
+        "governed_actions.envelope_json",
+        "governed_action_authorizations",
+        "authorizationId",
+        "idempotencyKey",
+        "payloadDigest"
+      ],
+      idempotency: ["clientRequestToken", "authorizationId", "idempotencyKey", "payloadDigest"]
+    }
+  ],
+  [
+    "Clockify",
+    {
+      canonical: [
+        "governed_actions.envelope_json",
+        "workspaceId",
+        "userId",
+        "entryId",
+        "expectedRevision",
+        "desiredRevision"
+      ],
+      idempotency: [
+        "idempotencyKey",
+        "schemaVersion",
+        "workspaceId",
+        "entityId",
+        "request",
+        "_tag",
+        "expectedRevision",
+        "jiraIssueKey"
+      ]
+    }
+  ]
 ])
-for (const [provider, fields] of providerIdentityFields) {
-  const section = governance.match(new RegExp(`### ${provider}\\n([\\s\\S]*?)(?=\\n### |\\n## )`, "u"))?.[1] ?? ""
-  for (const field of fields) {
-    if (!section.includes(`\`${field}\``)) {
-      failures.push(`${provider} governance identity is missing ${field}`)
+const rawProviderSecretField =
+  /\b(?:accessKeyId|secretAccessKey|sessionToken|approvalToken|apiToken|clientSecret|password)\b/u
+for (const [provider, examples] of providerExamples) {
+  for (const [kind, fields] of Object.entries(examples)) {
+    const example = governanceExample(provider, kind)
+    for (const field of fields) {
+      if (!example.includes(field)) {
+        failures.push(`${provider} ${kind} example is missing ${field}`)
+      }
+    }
+    if (rawProviderSecretField.test(example)) {
+      failures.push(`${provider} ${kind} example describes a raw provider secret as durable`)
     }
   }
 }

@@ -58,6 +58,36 @@ source revisions, derives its client request token from the same three authoriza
 records the original execution as `retryOf`. Reconciliation locators are decoded and rebound to the
 authorized kind and payload digest before provider access.
 
+The canonical persistence and idempotency boundaries are:
+
+{/* governance-example:CodePipeline:canonical */}
+
+```text
+governed_actions.envelope_json.proposal.request.payload = {
+  pipelineRevision,
+  sourceRevisions,
+  variables
+}
+governed_action_authorizations = {
+  authorizationId,
+  idempotencyKey,
+  payloadDigest
+}
+```
+
+{/* governance-example:CodePipeline:idempotency */}
+
+```text
+clientRequestToken = digest({
+  authorizationId,
+  idempotencyKey,
+  payloadDigest
+})
+```
+
+These durable records contain normalized revisions, variables, identifiers, and digests—not AWS
+credential material or the raw one-time manual-approval token.
+
 ### Jira
 
 Jira constructs revision-inspected proposals for comments, reply fallbacks, exact fix-version
@@ -78,6 +108,41 @@ without replaying publication.
 `entryId`, `expectedRevision`, and `desiredRevision`. A final reread recognizes an already-visible
 desired state; ambiguous provider responses become reconciliation-only. `record-approval` is a
 Control Center-owned ledger decision and does not claim to call a Clockify approval endpoint.
+
+The canonical payload and submission idempotency key are persisted as:
+
+{/* governance-example:Clockify:canonical */}
+
+```text
+governed_actions.envelope_json.proposal.request.payload = {
+  _tag: "correct-association",
+  workspaceId,
+  userId,
+  entryId,
+  expectedRevision,
+  desiredRevision,
+  jiraIssueKey,
+  completeReplacementFields
+}
+```
+
+{/* governance-example:Clockify:idempotency */}
+
+```text
+idempotencyKey = digest({
+  schemaVersion: 1,
+  workspaceId,
+  entityId,
+  request: {
+    _tag: "correct-association",
+    expectedRevision,
+    jiraIssueKey
+  }
+})
+```
+
+The complete replacement fields are normalized time-entry content and provider identifiers. The
+durable payload does not contain Clockify credentials.
 
 ## Secrets and content
 
