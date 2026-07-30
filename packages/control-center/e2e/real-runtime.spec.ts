@@ -1,4 +1,4 @@
-import { expect } from "@playwright/test"
+import { type Browser, type BrowserContext, expect } from "@playwright/test"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 
@@ -60,6 +60,24 @@ const EXPECTED_TRUSTED_HTTPS_SECURITY_HEADERS = {
   "x-frame-options": "DENY"
 } satisfies Readonly<Record<string, string>>
 
+const withOwnedBrowserContext = async <Result>(
+  browser: Browser,
+  use: (context: BrowserContext, close: () => Promise<void>) => Promise<Result>
+): Promise<Result> => {
+  const context = await browser.newContext()
+  let closed = false
+  const close = async (): Promise<void> => {
+    if (closed) return
+    await context.close()
+    closed = true
+  }
+  try {
+    return await use(context, close)
+  } finally {
+    await close()
+  }
+}
+
 test.describe("repository-managed real runtime", () => {
   test("rejects one extra durable release before constructing benchmark evidence", async () => {
     expect(
@@ -72,6 +90,17 @@ test.describe("repository-managed real runtime", () => {
         validateBenchmarkReleaseCardinality(CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases + 1)
       )
     ).rejects.toMatchObject({ _tag: "BenchmarkInvariantError" })
+  })
+
+  test("closes an owned benchmark context when setup fails immediately", async ({ browser }) => {
+    expect(browser.contexts()).toHaveLength(0)
+    await expect(
+      withOwnedBrowserContext(browser, async () => {
+        expect(browser.contexts()).toHaveLength(1)
+        throw new Error("injected benchmark setup failure")
+      })
+    ).rejects.toThrow("injected benchmark setup failure")
+    expect(browser.contexts()).toHaveLength(0)
   })
 
   test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
@@ -149,21 +178,30 @@ test.describe("repository-managed real runtime", () => {
 
         const browserLogFixtureSecret = "browser-console-forbidden-fixture"
         const nestedBrowserLogFixtureSecret = "nested-browser-console-forbidden-fixture"
+        const longBrowserLogFixtureSecret = "long-browser-console-forbidden-fixture"
         const managedRuntimeLogFixtureSecret = "managed-runtime-log-forbidden-fixture"
+        await page.evaluate(() => console.info("ordinary browser diagnostic ".repeat(800)))
+        await page.evaluate(() => console.info(`${"ordinary browser diagnostic ".repeat(800)} [REDACTED]`))
         await page.evaluate(`console.info(${JSON.stringify(browserLogFixtureSecret)})`)
         await page.evaluate(
           `console.info({ auth: { token: ${JSON.stringify(nestedBrowserLogFixtureSecret)} } })`
+        )
+        await page.evaluate(
+          (secret) => console.info(`${"x".repeat(17_000)}${secret}`),
+          longBrowserLogFixtureSecret
         )
         await fixture.emitApplicationLogFixture(managedRuntimeLogFixtureSecret)
         expect(
           exposedApplicationLogForbiddenValues(await applicationLogs(), [
             { label: "browser console fixture", value: browserLogFixtureSecret },
             { label: "nested browser console fixture", value: nestedBrowserLogFixtureSecret },
+            { label: "long browser console fixture", value: longBrowserLogFixtureSecret },
             { label: "managed runtime fixture", value: managedRuntimeLogFixtureSecret }
           ])
         ).toEqual([
           "browser console fixture",
           "nested browser console fixture",
+          "long browser console fixture",
           "managed runtime fixture"
         ])
 
@@ -380,140 +418,141 @@ test.describe("repository-managed real runtime", () => {
   }, testInfo) => {
     test.setTimeout(180_000)
     expect(browser.contexts()).toHaveLength(0)
-    const context = await browser.newContext()
-    expect(browser.contexts()).toHaveLength(CONTROL_CENTER_BENCHMARK_CAPS.browserContexts)
-    const page = await context.newPage()
+    await withOwnedBrowserContext(browser, async (context, closeContext) => {
+      expect(browser.contexts()).toHaveLength(CONTROL_CENTER_BENCHMARK_CAPS.browserContexts)
+      const page = await context.newPage()
 
-    await realRuntime.pairThroughUi(page)
-    const persistence = await realRuntime.seedBenchmarkPersistence()
-    const portfolioRuns = await page.evaluate(
-      async ({ requests, warmupRuns }) => {
-        const payloads: Array<unknown> = []
-        const samplesMilliseconds: Array<number> = []
-        for (let run = 0; run < requests; run += 1) {
-          const startedAt = performance.now()
-          const response = await fetch("/api/v1/portfolio/snapshot", {
-            credentials: "same-origin",
-            headers: { accept: "application/json" }
-          })
-          if (!response.ok) throw new Error(`portfolio benchmark request failed with ${response.status}`)
-          payloads.push(await response.json())
-          const completedAt = performance.now()
-          if (run >= warmupRuns) samplesMilliseconds.push(completedAt - startedAt)
+      await realRuntime.pairThroughUi(page)
+      const persistence = await realRuntime.seedBenchmarkPersistence()
+      const portfolioRuns = await page.evaluate(
+        async ({ requests, warmupRuns }) => {
+          const payloads: Array<unknown> = []
+          const samplesMilliseconds: Array<number> = []
+          for (let run = 0; run < requests; run += 1) {
+            const startedAt = performance.now()
+            const response = await fetch("/api/v1/portfolio/snapshot", {
+              credentials: "same-origin",
+              headers: { accept: "application/json" }
+            })
+            if (!response.ok) throw new Error(`portfolio benchmark request failed with ${response.status}`)
+            payloads.push(await response.json())
+            const completedAt = performance.now()
+            if (run >= warmupRuns) samplesMilliseconds.push(completedAt - startedAt)
+          }
+          return { payloads, samplesMilliseconds }
+        },
+        {
+          requests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
+          warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
         }
-        return { payloads, samplesMilliseconds }
-      },
-      {
-        requests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
-        warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
+      )
+      const portfolios = portfolioRuns.payloads.map((payload) => Schema.decodeUnknownSync(PortfolioSnapshot)(payload))
+      expect(portfolios).toHaveLength(CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS)
+      for (const portfolio of portfolios) {
+        expect(portfolio.releases).toHaveLength(100)
+        expect(portfolio.eventCursor).toBe(20_000)
       }
-    )
-    const portfolios = portfolioRuns.payloads.map((payload) => Schema.decodeUnknownSync(PortfolioSnapshot)(payload))
-    expect(portfolios).toHaveLength(CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS)
-    for (const portfolio of portfolios) {
-      expect(portfolio.releases).toHaveLength(100)
-      expect(portfolio.eventCursor).toBe(20_000)
-    }
 
-    await page.goto(`${realRuntime.origin}/services`)
-    const after = persistence.persistedEvents - CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents
-    const sseRuns = await page.evaluate(
-      async ({ count, cursor, requests, warmupRuns }) => {
-        const replayOnce = () =>
-          new Promise<Array<{ readonly data: string; readonly event: string; readonly id: string }>>(
-            (resolve, reject) => {
-              const source = new EventSource(`/api/v1/events?after=${cursor}`)
-              const events: Array<{ readonly data: string; readonly event: string; readonly id: string }> = []
-              source.addEventListener("portfolio.invalidated", (event) => {
-                const data = "data" in event ? event.data : undefined
-                const lastEventId = "lastEventId" in event ? event.lastEventId : undefined
-                if (typeof data !== "string" || typeof lastEventId !== "string") {
+      await page.goto(`${realRuntime.origin}/services`)
+      const after = persistence.persistedEvents - CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents
+      const sseRuns = await page.evaluate(
+        async ({ count, cursor, requests, warmupRuns }) => {
+          const replayOnce = () =>
+            new Promise<Array<{ readonly data: string; readonly event: string; readonly id: string }>>(
+              (resolve, reject) => {
+                const source = new EventSource(`/api/v1/events?after=${cursor}`)
+                const events: Array<{ readonly data: string; readonly event: string; readonly id: string }> = []
+                source.addEventListener("portfolio.invalidated", (event) => {
+                  const data = "data" in event ? event.data : undefined
+                  const lastEventId = "lastEventId" in event ? event.lastEventId : undefined
+                  if (typeof data !== "string" || typeof lastEventId !== "string") {
+                    source.close()
+                    reject(new Error("benchmark SSE event did not expose its encoded data and cursor"))
+                    return
+                  }
+                  events.push({ data, event: event.type, id: lastEventId })
+                  if (events.length === count) {
+                    source.close()
+                    resolve(events)
+                  }
+                })
+                source.onerror = () => {
                   source.close()
-                  reject(new Error("benchmark SSE event did not expose its encoded data and cursor"))
-                  return
+                  reject(new Error("benchmark SSE stream failed before its bounded tail completed"))
                 }
-                events.push({ data, event: event.type, id: lastEventId })
-                if (events.length === count) {
-                  source.close()
-                  resolve(events)
-                }
-              })
-              source.onerror = () => {
-                source.close()
-                reject(new Error("benchmark SSE stream failed before its bounded tail completed"))
               }
-            }
-          )
-        let rawEvents: Array<{ readonly data: string; readonly event: string; readonly id: string }> = []
-        const samplesMilliseconds: Array<number> = []
-        for (let run = 0; run < requests; run += 1) {
-          const startedAt = performance.now()
-          rawEvents = await replayOnce()
-          const completedAt = performance.now()
-          if (run >= warmupRuns) samplesMilliseconds.push(completedAt - startedAt)
+            )
+          let rawEvents: Array<{ readonly data: string; readonly event: string; readonly id: string }> = []
+          const samplesMilliseconds: Array<number> = []
+          for (let run = 0; run < requests; run += 1) {
+            const startedAt = performance.now()
+            rawEvents = await replayOnce()
+            const completedAt = performance.now()
+            if (run >= warmupRuns) samplesMilliseconds.push(completedAt - startedAt)
+          }
+          return { rawEvents, samplesMilliseconds }
+        },
+        {
+          count: CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents,
+          cursor: after,
+          requests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
+          warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
         }
-        return { rawEvents, samplesMilliseconds }
-      },
-      {
-        count: CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents,
-        cursor: after,
-        requests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
-        warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
+      )
+      const decodedEvents = sseRuns.rawEvents.map((event) => Schema.decodeUnknownSync(ControlCenterLiveEvent)(event))
+      expect(decodedEvents).toHaveLength(CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents)
+      const cursors = decodedEvents.map((event) => event.id)
+      expect(cursors).toStrictEqual(
+        Array.from({ length: CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents }, (_, index) => after + index + 1)
+      )
+      const sseFirstCursor = cursors[0]
+      const sseLastCursor = cursors[cursors.length - 1]
+      if (sseFirstCursor === undefined || sseLastCursor === undefined) {
+        throw new Error("benchmark SSE replay did not contain its required bounded tail")
       }
-    )
-    const decodedEvents = sseRuns.rawEvents.map((event) => Schema.decodeUnknownSync(ControlCenterLiveEvent)(event))
-    expect(decodedEvents).toHaveLength(CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents)
-    const cursors = decodedEvents.map((event) => event.id)
-    expect(cursors).toStrictEqual(
-      Array.from({ length: CONTROL_CENTER_BENCHMARK_CAPS.sseBurstEvents }, (_, index) => after + index + 1)
-    )
-    const sseFirstCursor = cursors[0]
-    const sseLastCursor = cursors[cursors.length - 1]
-    if (sseFirstCursor === undefined || sseLastCursor === undefined) {
-      throw new Error("benchmark SSE replay did not contain its required bounded tail")
-    }
 
-    await context.close()
-    expect(browser.contexts()).toHaveLength(0)
-    const beforeDispose = realRuntime.lifecycleEvidence()
-    expect(beforeDispose.activeManagedServers).toBe(1)
-    await realRuntime.dispose()
-    const afterDispose = realRuntime.lifecycleEvidence()
-    const { outputPath, report } = await realRuntime.writeBenchmarkReport({
-      browserContextsAfterClose: browser.contexts().length,
-      browserContextsPeak: 1,
-      freshIngestionMilliseconds: persistence.freshIngestionMilliseconds,
-      generatedEdges: persistence.generatedEdges,
-      generatedFiles: persistence.generatedFiles,
-      managedServersAfterDispose: afterDispose.activeManagedServers,
-      managedServersPeak: beforeDispose.activeManagedServers,
-      persistedEntities: persistence.persistedEntities,
-      persistedEvents: persistence.persistedEvents,
-      persistedReleases: persistence.persistedReleases,
-      portfolioHttpRequests: portfolios.length,
-      portfolioSamplesMilliseconds: portfolioRuns.samplesMilliseconds,
-      sseDecodedEvents: decodedEvents.length,
-      sseFirstCursor,
-      sseLastCursor,
-      sseOrdered: true,
-      sseReplayRequests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
-      sseSamplesMilliseconds: sseRuns.samplesMilliseconds
-    })
+      await closeContext()
+      expect(browser.contexts()).toHaveLength(0)
+      const beforeDispose = realRuntime.lifecycleEvidence()
+      expect(beforeDispose.activeManagedServers).toBe(1)
+      await realRuntime.dispose()
+      const afterDispose = realRuntime.lifecycleEvidence()
+      const { outputPath, report } = await realRuntime.writeBenchmarkReport({
+        browserContextsAfterClose: browser.contexts().length,
+        browserContextsPeak: 1,
+        freshIngestionMilliseconds: persistence.freshIngestionMilliseconds,
+        generatedEdges: persistence.generatedEdges,
+        generatedFiles: persistence.generatedFiles,
+        managedServersAfterDispose: afterDispose.activeManagedServers,
+        managedServersPeak: beforeDispose.activeManagedServers,
+        persistedEntities: persistence.persistedEntities,
+        persistedEvents: persistence.persistedEvents,
+        persistedReleases: persistence.persistedReleases,
+        portfolioHttpRequests: portfolios.length,
+        portfolioSamplesMilliseconds: portfolioRuns.samplesMilliseconds,
+        sseDecodedEvents: decodedEvents.length,
+        sseFirstCursor,
+        sseLastCursor,
+        sseOrdered: true,
+        sseReplayRequests: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS + CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
+        sseSamplesMilliseconds: sseRuns.samplesMilliseconds
+      })
 
-    expect(report.cardinalities.persistedReleases).toBe(100)
-    expect(report.cardinalities.persistedEntities).toBe(2_000)
-    expect(report.cardinalities.persistedEvents).toBe(20_000)
-    expect(report.cardinalities.generatedEdges).toBe(10_000)
-    expect(report.cardinalities.generatedFiles).toBe(500)
-    expect(report.measurements.portfolio.timing.samplesMilliseconds).toHaveLength(5)
-    expect(report.measurements.sse.timing.samplesMilliseconds).toHaveLength(5)
-    expect(report.timingAcceptance.budgetMilliseconds).toBe(2_000)
-    expect(report.timingIsAcceptanceAssertion).toBe(report.timingAcceptance.eligible)
-    expect(outputPath).not.toHaveLength(0)
-    expect(afterDispose.disposedManagedServers).toBe(1)
-    await testInfo.attach("control-center-runtime-benchmark.json", {
-      body: JSON.stringify(Schema.encodeSync(ControlCenterRuntimeBenchmarkReport)(report), undefined, 2),
-      contentType: "application/json"
+      expect(report.cardinalities.persistedReleases).toBe(100)
+      expect(report.cardinalities.persistedEntities).toBe(2_000)
+      expect(report.cardinalities.persistedEvents).toBe(20_000)
+      expect(report.cardinalities.generatedEdges).toBe(10_000)
+      expect(report.cardinalities.generatedFiles).toBe(500)
+      expect(report.measurements.portfolio.timing.samplesMilliseconds).toHaveLength(5)
+      expect(report.measurements.sse.timing.samplesMilliseconds).toHaveLength(5)
+      expect(report.timingAcceptance.budgetMilliseconds).toBe(2_000)
+      expect(report.timingIsAcceptanceAssertion).toBe(report.timingAcceptance.eligible)
+      expect(outputPath).not.toHaveLength(0)
+      expect(afterDispose.disposedManagedServers).toBe(1)
+      await testInfo.attach("control-center-runtime-benchmark.json", {
+        body: JSON.stringify(Schema.encodeSync(ControlCenterRuntimeBenchmarkReport)(report), undefined, 2),
+        contentType: "application/json"
+      })
     })
   })
 })

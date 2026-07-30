@@ -342,7 +342,7 @@ test("requires compact landmarks and primary actions to intersect the viewport",
 })
 
 test("requires discernible system paint in forced-colors mode", async ({ page }) => {
-  const content = (forcedColorPaint: string, labelPaint = ""): string => `
+  const content = (forcedColorPaint: string, labelPaint = "", ancestorOpacity = "1"): string => `
     <!doctype html>
     <html lang="en">
       <head>
@@ -361,7 +361,7 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
         </style>
       </head>
       <body>
-        <main>
+        <main style="opacity: ${ancestorOpacity}">
           <h1>Forced color fixture</h1>
           <button onclick="this.textContent='Continued'"><span>Continue</span></button>
         </main>
@@ -421,6 +421,25 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
       "forced-color-adjust: none; background: Canvas; color: CanvasText;"
     )
   )
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(
+    content("background: Canvas; border-color: CanvasText; color: CanvasText;", "", "0")
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("route landmark has no discernible forced-color paint")
+  await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => primaryAction.press("Enter"),
     expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),

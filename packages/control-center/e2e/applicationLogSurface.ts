@@ -18,6 +18,7 @@ const serializeConsoleArgument = async (handle: JSHandle): Promise<string> =>
     const maxDepth = 5
     const maxEntries = 50
     const maxStringLength = 16_000
+    if (typeof value === "string") return JSON.stringify(value)
     const seen = new WeakSet<object>()
     const visit = (candidate: unknown, depth: number): unknown => {
       if (typeof candidate === "string") return candidate.slice(0, maxStringLength)

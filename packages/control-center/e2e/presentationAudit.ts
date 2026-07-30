@@ -433,6 +433,15 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
     const isTransparent = (value: string): boolean =>
       value === "transparent" ||
       /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
+    const hasEffectiveOpacity = (candidate: PaintContextElement): boolean => {
+      let current: PaintContextElement | null = candidate
+      while (current !== null) {
+        if (Number.parseFloat(getComputedStyle(current).opacity) <= 0) return false
+        current = current.parentElement
+      }
+      return true
+    }
+    const targetHasEffectiveOpacity = hasEffectiveOpacity(element)
     let effectiveBackgroundColor = style.backgroundColor
     let ancestor = element.parentElement
     while (isTransparent(effectiveBackgroundColor) && ancestor !== null) {
@@ -463,7 +472,7 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
         !hasDirectText && !hasAccessibleIcon ||
         candidateStyle.display === "none" ||
         candidateStyle.visibility !== "visible" ||
-        Number.parseFloat(candidateStyle.opacity) <= 0 ||
+        !hasEffectiveOpacity(candidate) ||
         candidateStyle.display !== "contents" && (bounds.width <= 0 || bounds.height <= 0)
       ) {
         return []
@@ -508,7 +517,8 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
       effectiveBackgroundColor,
       forcedColorAdjust: style.forcedColorAdjust,
       labelPaint,
-      outline: { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth }
+      outline: { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth },
+      targetHasEffectiveOpacity
     }
   })
   const contrastsWithBackground = (value: string): boolean =>
@@ -539,7 +549,9 @@ const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string
           )
     })
   expect(
-    (contrastsWithBackground(snapshot.color) || paintedBoundary || paintedOutline) && labelsArePainted,
+    snapshot.targetHasEffectiveOpacity &&
+      (contrastsWithBackground(snapshot.color) || paintedBoundary || paintedOutline) &&
+      labelsArePainted,
     `${label} has no discernible forced-color paint (${snapshot.forcedColorAdjust}; labels: ${
       JSON.stringify(snapshot.labelPaint)
     })`
