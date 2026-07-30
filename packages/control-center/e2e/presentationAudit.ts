@@ -124,7 +124,10 @@ export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<Ax
     const axe = window.axe
     if (axe === undefined) throw new Error("axe-core was not available in the audited document")
     const result = await axe.run(document, {
-      rules: { "label-content-name-mismatch": { enabled: true } },
+      rules: {
+        "label-content-name-mismatch": { enabled: true },
+        "target-size": { enabled: true }
+      },
       runOnly: { type: "tag", values: tags }
     })
     return result.violations

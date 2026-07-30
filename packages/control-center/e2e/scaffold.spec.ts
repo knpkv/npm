@@ -43,6 +43,29 @@ test("includes WCAG 2.1 A label-content matching in the serious accessibility ga
   expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("label-content-name-mismatch")
 })
 
+test("explicitly enables the WCAG 2.2 AA target-size rule", async ({ page }) => {
+  expect(CONTROL_CENTER_AXE_WCAG_TAGS).toContain("wcag22aa")
+  await page.setContent(`
+    <main>
+      <button style="box-sizing: border-box; height: 20px; padding: 0; width: 20px;">A</button><button
+        style="box-sizing: border-box; height: 20px; padding: 0; width: 20px;"
+      >B</button>
+    </main>
+  `)
+  expect(await seriousAxeViolations(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "target-size" })])
+  )
+
+  await page.setContent(`
+    <main>
+      <button style="box-sizing: border-box; height: 24px; padding: 0; width: 24px;">A</button><button
+        style="box-sizing: border-box; height: 24px; padding: 0; width: 24px;"
+      >B</button>
+    </main>
+  `)
+  expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("target-size")
+})
+
 test("requires keyboard focus to add a visible indicator", async ({ page }) => {
   await page.setContent(`
     <!doctype html>
