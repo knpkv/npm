@@ -496,6 +496,55 @@ describe("Control Center API handlers", () => {
       assertForbidden(attempted)
     }))
 
+  it.effect("admits lazy settings initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = {
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: DEFAULT_WORKSPACE_SETTINGS,
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
+      }
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["workspaceSettings"])
+        const accepted = yield* client.workspaceSettings.read()
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.workspaceSettings.read().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.strictEqual(result.accepted.revision, revision)
+      assert.strictEqual(yield* Ref.get(reads), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
+    }))
+
   it.effect("derives workspace-settings mutation attribution from the owner session", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<unknown>(null)

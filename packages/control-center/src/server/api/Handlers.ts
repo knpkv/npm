@@ -245,18 +245,25 @@ export const workspaceSettingsHandlersLayer = HttpApiBuilder.group(
       const lifecycle = yield* ServerLifecycle
       return handlers
         .handle("read", () =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            yield* requireWorkspaceRead(session)
-            if (Option.isNone(administration)) {
-              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
-            }
-            const result = yield* administration.value.read(session.workspaceId).pipe(
-              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              yield* requireWorkspaceRead(session)
+              if (Option.isNone(administration)) {
+                return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+              }
+              const result = yield* administration.value.read(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+              yield* appendWorkspaceSettingsHeaders(result.etag)
+              return result
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
-            yield* appendWorkspaceSettingsHeaders(result.etag)
-            return result
-          }))
+          ))
         .handle("update", ({ payload }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {

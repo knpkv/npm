@@ -195,7 +195,7 @@ const evidenceFor = Effect.fn("RelationshipInferenceMaterialization.evidenceFor"
     (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(source.lastObservedAt)) / 1_000
   )
   const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
-  const freshness: Freshness = sourceAgeSeconds <= staleAfterSeconds
+  const freshness: Freshness = sourceAgeSeconds < staleAfterSeconds
     ? {
       _tag: "current",
       evaluatedAt: scope.committedAt,

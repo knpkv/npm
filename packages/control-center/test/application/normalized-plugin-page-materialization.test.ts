@@ -831,6 +831,59 @@ const exactFirstProjection = Effect.fn(
   return result.value.projection
 })
 
+const inferredCodeCommitFreshnessAt = (
+  committedAt: UtcTimestamp
+) =>
+  withMaterializer(Effect.gen(function*() {
+    const persistence = yield* Persistence
+    yield* setup
+    yield* setupConnection(CODECOMMIT_PLUGIN_ID, "codecommit")
+    const settings: WorkspaceSettingsV1 = {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      synchronization: {
+        ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
+        staleAfterMinutes: 5
+      }
+    }
+    const configuredPersistence = persistenceWithWorkspaceSettings(persistence, settings)
+    const synchronize = (
+      pluginConnectionId: PluginConnectionId,
+      providerId: "codecommit" | "jira",
+      page: typeof PluginSyncPageV1.Type
+    ) =>
+      materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId,
+        providerId,
+        streamKey: firstPartyStream(providerId),
+        expectedRevision: 0,
+        committedAt,
+        successfulHealth: { _tag: "healthy", checkedAt: committedAt }
+      }, page).pipe(Effect.provideService(Persistence, configuredPersistence))
+
+    yield* synchronize(PLUGIN_ID, "jira", inferenceJiraReleasePage)
+    yield* synchronize(CODECOMMIT_PLUGIN_ID, "codecommit", codeCommitRelationshipPage)
+
+    const release = (yield* persistence.releases.list(WORKSPACE_ID, 1))[0]?.release
+    if (release === undefined) return yield* Effect.die("expected synchronized release")
+    const slice = yield* persistence.deliveryGraph.read(WORKSPACE_ID, {
+      _tag: "releaseSlice",
+      releaseId: release.id,
+      environmentId: null,
+      limit: 100
+    })
+    if (slice._tag !== "releaseSlice") return yield* Effect.die("expected release slice")
+    const evidence = slice.value.evidenceItems.find(
+      ({ attribution, freshness }) =>
+        attribution._tag === "system" &&
+        attribution.component === "relationship-inference" &&
+        freshness.provenance._tag !== "none" &&
+        freshness.provenance.sourceRevision.providerId === "codecommit"
+    )
+    if (evidence === undefined) return yield* Effect.die("expected inferred CodeCommit evidence")
+    return evidence.freshness._tag
+  }))
+
 describe("normalized plugin page materialization", () => {
   it("maps terminal and active CodePipeline statuses", () => {
     const cases: ReadonlyArray<readonly [string, ReturnType<typeof pipelineStatus>]> = [
@@ -2912,6 +2965,135 @@ describe("normalized plugin page materialization", () => {
         DateTime.formatIso(DateTime.add(T5, { days: 7 }))
       )
     })))
+
+  it.effect("uses an exclusive stale boundary for normalized evidence", () =>
+    withMaterializer(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      yield* setup
+      const settings: WorkspaceSettingsV1 = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        inference: {
+          ...DEFAULT_WORKSPACE_SETTINGS.inference,
+          enabled: false
+        },
+        synchronization: {
+          ...DEFAULT_WORKSPACE_SETTINGS.synchronization,
+          staleAfterMinutes: 5
+        }
+      }
+      const boundaryPage = Schema.decodeSync(PluginSyncPageV1)({
+        checkpointAfterPage: "exclusive-evidence-boundary",
+        hasMore: false,
+        events: [
+          {
+            _tag: "UpsertEntity",
+            eventId: "boundary-pr",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "boundary",
+            entityType: "pull-request",
+            vendorImmutableId: "boundary-pr",
+            sourceUrl: null,
+            title: "Boundary pull request",
+            attributes: {
+              repository: "payments-api",
+              sourceBranch: "boundary",
+              targetBranch: "main",
+              headRevision: "boundary",
+              reviewState: "requested"
+            }
+          },
+          {
+            _tag: "AppendEvidence",
+            eventId: "boundary-evidence",
+            observedAt: "2026-07-19T09:02:00.000Z",
+            revision: "boundary",
+            evidenceId: "boundary-evidence",
+            subject: { entityType: "pull-request", vendorImmutableId: "boundary-pr" },
+            evidenceType: "status-observed",
+            summary: "Boundary evidence",
+            capturedAt: "2026-07-19T09:02:00.000Z",
+            data: {}
+          },
+          {
+            _tag: "UpsertEntity",
+            eventId: "inside-pr",
+            observedAt: "2026-07-19T09:02:00.001Z",
+            revision: "inside",
+            entityType: "pull-request",
+            vendorImmutableId: "inside-pr",
+            sourceUrl: null,
+            title: "Inside pull request",
+            attributes: {
+              repository: "payments-api",
+              sourceBranch: "inside",
+              targetBranch: "main",
+              headRevision: "inside",
+              reviewState: "requested"
+            }
+          },
+          {
+            _tag: "AppendEvidence",
+            eventId: "inside-evidence",
+            observedAt: "2026-07-19T09:02:00.001Z",
+            revision: "inside",
+            evidenceId: "inside-evidence",
+            subject: { entityType: "pull-request", vendorImmutableId: "inside-pr" },
+            evidenceType: "status-observed",
+            summary: "Inside evidence",
+            capturedAt: "2026-07-19T09:02:00.001Z",
+            data: {}
+          }
+        ]
+      })
+
+      yield* materializeNormalizedPluginPage({
+        workspaceId: WORKSPACE_ID,
+        pluginConnectionId: PLUGIN_ID,
+        providerId: "jira",
+        streamKey: firstPartyStream("jira"),
+        expectedRevision: 0,
+        committedAt: T5,
+        successfulHealth: { _tag: "healthy", checkedAt: T5 }
+      }, boundaryPage).pipe(
+        Effect.provideService(
+          Persistence,
+          persistenceWithWorkspaceSettings(persistence, settings)
+        )
+      )
+
+      const database = yield* Database
+      const rows = yield* database.sql<{ readonly freshnessJson: string }>`SELECT
+        freshness_json AS freshnessJson
+      FROM evidence_items
+      WHERE workspace_id = ${WORKSPACE_ID}
+        AND origin_kind = 'plugin'`
+      const freshness = yield* Effect.forEach(
+        rows,
+        ({ freshnessJson }) => Schema.decodeUnknownEffect(Schema.fromJsonString(Freshness))(freshnessJson)
+      )
+      const at = (sourceObservedAt: string) =>
+        freshness.find(
+          (item) =>
+            item.sourceObservedAt !== null &&
+            DateTime.formatIso(item.sourceObservedAt) === sourceObservedAt
+        )
+
+      assert.strictEqual(at("2026-07-19T09:02:00.000Z")?._tag, "stale")
+      assert.strictEqual(at("2026-07-19T09:02:00.001Z")?._tag, "current")
+    })))
+
+  it.effect("uses the same exclusive stale boundary for inferred evidence", () =>
+    Effect.gen(function*() {
+      const boundary = yield* inferredCodeCommitFreshnessAt(
+        Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:10.000Z")
+      )
+      const inside = yield* inferredCodeCommitFreshnessAt(
+        Schema.decodeSync(UtcTimestamp)("2026-07-19T09:07:09.999Z")
+      )
+
+      assert.strictEqual(boundary, "stale")
+      assert.strictEqual(inside, "current")
+    }))
 
   it.effect("enforces the workspace inference confidence floor and enabled switch", () =>
     withMaterializer(Effect.gen(function*() {

@@ -1227,7 +1227,7 @@ const materializeRelease = Effect.fn("NormalizedPluginPageMaterialization.upsert
     (DateTime.toEpochMillis(scope.committedAt) - DateTime.toEpochMillis(observedAt)) / 1_000
   )
   const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
-  const freshness: Freshness = sourceAgeSeconds <= staleAfterSeconds
+  const freshness: Freshness = sourceAgeSeconds < staleAfterSeconds
     ? {
       _tag: "current",
       evaluatedAt: scope.committedAt,
@@ -1504,7 +1504,7 @@ const materializeEvidence = Effect.fn("NormalizedPluginPageMaterialization.appen
       ? { _tag: "healthy", checkedAt: scope.committedAt }
       : { ...scope.successfulHealth, checkedAt: scope.committedAt }
   const staleAfterSeconds = settings.synchronization.staleAfterMinutes * 60
-  const freshness: Freshness = ageSeconds <= staleAfterSeconds
+  const freshness: Freshness = ageSeconds < staleAfterSeconds
     ? {
       _tag: "current",
       evaluatedAt: scope.committedAt,

@@ -119,7 +119,7 @@ const CurrentFreshness = Schema.TaggedStruct("current", {
       DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
       (evaluatedAt === undefined || DateTime.Order(pluginHealth.checkedAt, evaluatedAt) <= 0) &&
       sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) >= 0 &&
-      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) <= staleAfterSeconds,
+      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) < staleAfterSeconds,
     {
       expected: "current source data to match its revision and remain within its stale threshold"
     }
@@ -141,7 +141,7 @@ const StaleFreshness = Schema.TaggedStruct("stale", {
       DateTime.Order(provenance.cachedAt, synchronizedAt) <= 0 &&
       DateTime.Order(synchronizedAt, pluginHealth.checkedAt) <= 0 &&
       (evaluatedAt === undefined || DateTime.Order(pluginHealth.checkedAt, evaluatedAt) <= 0) &&
-      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) > staleAfterSeconds,
+      sourceAgeSecondsAt(sourceObservedAt, evaluatedAtOrHealthCheck(evaluatedAt, pluginHealth)) >= staleAfterSeconds,
     {
       expected: "stale cache data to be chronological and beyond its stale threshold"
     }
@@ -185,7 +185,7 @@ export const evaluateFreshnessAt = Effect.fn("Freshness.evaluateAt")(function*(
 ): Effect.fn.Return<Freshness, Schema.SchemaError> {
   if (freshness._tag !== "current" && freshness._tag !== "stale") return freshness
   const isStale = freshness._tag === "stale" ||
-    sourceAgeSecondsAt(freshness.sourceObservedAt, evaluatedAt) > freshness.staleAfterSeconds
+    sourceAgeSecondsAt(freshness.sourceObservedAt, evaluatedAt) >= freshness.staleAfterSeconds
   const provenance = isStale
     ? freshness.provenance._tag === "cache"
       ? freshness.provenance
