@@ -237,7 +237,11 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
   for (const pluginConnectionId of Object.values(CONNECTIONS)) {
     repeatedTests.push(yield* mutationClient.plugins.testConnection({ params: { pluginConnectionId } }))
   }
-  assert.isTrue(repeatedTests.every((result) => result._tag === "healthy"))
+  assert.isTrue(
+    repeatedTests.every(
+      (result) => result._tag === "healthy" && result.identity.providerImmutableId.length > 0
+    )
+  )
   const awsIdentities = repeatedTests.filter(
     (result) =>
       result._tag === "healthy" && (result.providerId === "codecommit" || result.providerId === "codepipeline")

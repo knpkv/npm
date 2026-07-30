@@ -52,17 +52,19 @@ describe("live integration server port", () => {
   })
 
   it.effect("does not retry unrelated startup failures", () =>
-    Effect.gen(function*() {
-      let attempts = 0
-      const result = yield* startWithRetriedPort(
-        Effect.succeed(41_700),
-        () => {
-          attempts += 1
-          return Effect.fail({ code: "EACCES" })
-        }
-      ).pipe(Effect.result)
+    Effect.scoped(
+      Effect.gen(function*() {
+        let attempts = 0
+        const result = yield* startWithRetriedPort(
+          Effect.succeed(41_700),
+          () => {
+            attempts += 1
+            return Effect.fail({ code: "EACCES" })
+          }
+        ).pipe(Effect.result)
 
-      assert.strictEqual(result._tag, "Failure")
-      assert.strictEqual(attempts, 1)
-    }))
+        assert.strictEqual(result._tag, "Failure")
+        assert.strictEqual(attempts, 1)
+      })
+    ))
 })

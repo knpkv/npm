@@ -126,12 +126,13 @@ describe("live connection configuration", () => {
         const rawFailure = new HttpClientError.HttpClientError({
           reason: new HttpClientError.TransportError({
             request,
-            description: "fixture transport failed"
+            description: `fixture transport failed with ${cookieCanary}`
           })
         })
         const rawSerialization = JSON.stringify(rawFailure)
-        assert.isTrue([tokenCanary, csrfCanary].every((canary) => rawSerialization.includes(canary)))
-        assert.isFalse(rawSerialization.includes(cookieCanary))
+        assert.isTrue(
+          [tokenCanary, cookieCanary, csrfCanary].every((canary) => rawSerialization.includes(canary))
+        )
         return Effect.fail(rawFailure)
       })
       const authenticatedClient = failingClient.pipe(
