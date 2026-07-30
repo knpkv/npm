@@ -151,6 +151,14 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/items/${ENTITY_ID}`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "items/:entityId",
+        surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: `/w/${WORKSPACE_ID}/items/${ENTITY_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
         routerLiteral: "items/:entityId",
@@ -393,6 +401,7 @@ export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_LEAVES: ReadonlyArray<Produc
   { family: "agent", routerLiteral: "agent" },
   { family: "authorized-share", routerLiteral: "shares/:workspaceId/:shareId" },
   { family: "atlassian-oauth-callback", routerLiteral: "services/oauth/atlassian/callback" },
+  { family: "item", routerLiteral: "items/:entityId" },
   { family: "items", routerLiteral: "items" },
   { family: "services", routerLiteral: "services" },
   { family: "settings", routerLiteral: "settings" }

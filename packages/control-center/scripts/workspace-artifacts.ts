@@ -50,6 +50,12 @@ export type WorkspaceArtifactContract = {
   readonly packageRoot: string
 }
 
+export interface WorkspaceArtifactFingerprintNode {
+  readonly name: string
+  readonly ownFingerprint: string
+  readonly workspaceDependencies: ReadonlyArray<string>
+}
+
 export type WorkspaceArtifactBuilder = (
   packages: ReadonlyArray<string>
 ) => Effect.Effect<void, WorkspaceArtifactError>
@@ -126,6 +132,70 @@ const workspaceArtifactSourceExtensions: ReadonlyArray<string> = [
 
 const isExcludedExternalBuildInput = (candidate: string): boolean =>
   candidate.split(/[\\/]/u).some((segment) => segment === "node_modules" || segment === "repos" || segment === "vendor")
+
+/** Bind each package's own inputs to the complete emitted-artifact workspace dependency closure. */
+export const resolveWorkspaceArtifactFingerprints = Effect.fn(
+  "controlCenter.resolveWorkspaceArtifactFingerprints"
+)(function*(nodes: ReadonlyArray<WorkspaceArtifactFingerprintNode>) {
+  const cryptoService = yield* Crypto.Crypto
+  const nodesByName = new Map<string, WorkspaceArtifactFingerprintNode>()
+  for (const node of nodes) {
+    if (nodesByName.has(node.name)) {
+      return yield* new WorkspaceArtifactError({ reason: `duplicate workspace package ${node.name}` })
+    }
+    nodesByName.set(node.name, node)
+  }
+
+  for (const node of nodes) {
+    for (const dependency of node.workspaceDependencies) {
+      if (!nodesByName.has(dependency)) {
+        return yield* new WorkspaceArtifactError({
+          reason: `${node.name} references missing workspace dependency ${dependency}`
+        })
+      }
+    }
+  }
+
+  const unresolved = new Map(nodesByName)
+  const resolved = new Map<string, string>()
+  while (unresolved.size > 0) {
+    const ready = Array.from(unresolved.values())
+      .filter((node) => node.workspaceDependencies.every((dependency) => resolved.has(dependency)))
+      .sort((left, right) => left.name.localeCompare(right.name))
+    if (ready.length === 0) {
+      return yield* new WorkspaceArtifactError({
+        reason: `workspace dependency cycle prevents artifact fingerprinting: ${
+          Array.from(unresolved.keys()).sort().join(", ")
+        }`
+      })
+    }
+    for (const node of ready) {
+      const encodedDependencies: Array<string> = []
+      for (const dependency of Array.from(new Set(node.workspaceDependencies)).sort()) {
+        const fingerprint = resolved.get(dependency)
+        if (fingerprint === undefined) {
+          return yield* new WorkspaceArtifactError({
+            reason: `${node.name} has unresolved workspace dependency ${dependency}`
+          })
+        }
+        encodedDependencies.push(`${dependency.length}:${dependency}${fingerprint.length}:${fingerprint}`)
+      }
+      const dependencyMaterial = encodedDependencies.join("")
+      const material = `${node.ownFingerprint.length}:${node.ownFingerprint}${dependencyMaterial}`
+      const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(material)).pipe(
+        Effect.mapError(
+          () => new WorkspaceArtifactError({ reason: `could not fingerprint workspace package ${node.name}` })
+        )
+      )
+      resolved.set(
+        node.name,
+        Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
+      )
+      unresolved.delete(node.name)
+    }
+  }
+  return resolved
+})
 
 /** Hash package source and build configuration, excluding tests, generated output, and vendor trees. */
 export const workspaceArtifactInputFingerprint = Effect.fn(

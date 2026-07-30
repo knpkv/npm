@@ -10,6 +10,7 @@ import {
   packagesMissingPublishedArtifacts,
   packagesRequiringPublishedArtifactBuild,
   publishedArtifactPaths,
+  resolveWorkspaceArtifactFingerprints,
   WorkspaceArtifactError,
   workspaceArtifactInputFingerprint
 } from "../../scripts/workspace-artifacts.js"
@@ -159,6 +160,106 @@ describe("workspace package artifacts", () => {
       yield* fileSystem.writeFileString(path.join(packageRoot, "tsconfig.build.json"), "{\"compilerOptions\":{}}")
       assert.notStrictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), sourceChanged)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rebuilds workspace consumers when an emitted dependency changes", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-workspace-dependency-fingerprint-"
+      })
+      const atlassianRoot = path.join(workspaceRoot, "packages", "atlassian-common")
+      const confluenceRoot = path.join(workspaceRoot, "packages", "confluence-to-markdown")
+      const atlassianSource = path.join(atlassianRoot, "src", "index.ts")
+      const atlassianReadme = path.join(atlassianRoot, "README.md")
+      const confluenceSource = path.join(confluenceRoot, "src", "index.ts")
+      yield* fileSystem.makeDirectory(path.dirname(atlassianSource), { recursive: true })
+      yield* fileSystem.makeDirectory(path.dirname(confluenceSource), { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(atlassianRoot, "package.json"),
+        "{\"name\":\"@knpkv/atlassian-common\"}"
+      )
+      yield* fileSystem.writeFileString(
+        path.join(confluenceRoot, "package.json"),
+        "{\"name\":\"@knpkv/confluence-to-markdown\",\"dependencies\":{\"@knpkv/atlassian-common\":\"workspace:*\"}}"
+      )
+      yield* fileSystem.writeFileString(atlassianSource, "export const api = 1\n")
+      yield* fileSystem.writeFileString(atlassianReadme, "Atlassian common\n")
+      yield* fileSystem.writeFileString(
+        confluenceSource,
+        "export { api } from \"@knpkv/atlassian-common\"\n"
+      )
+
+      const resolveFingerprints = Effect.fn("test.resolveWorkspaceDependencyFingerprints")(function*() {
+        const atlassianFingerprint = yield* workspaceArtifactInputFingerprint(atlassianRoot)
+        const confluenceFingerprint = yield* workspaceArtifactInputFingerprint(confluenceRoot)
+        return yield* resolveWorkspaceArtifactFingerprints([
+          {
+            name: "@knpkv/atlassian-common",
+            ownFingerprint: atlassianFingerprint,
+            workspaceDependencies: []
+          },
+          {
+            name: "@knpkv/confluence-to-markdown",
+            ownFingerprint: confluenceFingerprint,
+            workspaceDependencies: ["@knpkv/atlassian-common"]
+          }
+        ])
+      })
+
+      const initial = yield* resolveFingerprints()
+      yield* fileSystem.writeFileString(atlassianReadme, "Updated Atlassian common documentation\n")
+      const documentationChanged = yield* resolveFingerprints()
+      assert.deepStrictEqual(documentationChanged, initial)
+
+      yield* fileSystem.writeFileString(atlassianSource, "export const api = 2\n")
+      const dependencyChanged = yield* resolveFingerprints()
+      assert.notStrictEqual(
+        dependencyChanged.get("@knpkv/atlassian-common"),
+        initial.get("@knpkv/atlassian-common")
+      )
+      assert.notStrictEqual(
+        dependencyChanged.get("@knpkv/confluence-to-markdown"),
+        initial.get("@knpkv/confluence-to-markdown")
+      )
+
+      const atlassian = contract(atlassianRoot, "@knpkv/atlassian-common")
+      const confluence = contract(confluenceRoot, "@knpkv/confluence-to-markdown")
+      const changedContracts = [
+        { ...atlassian, inputFingerprint: dependencyChanged.get(atlassian.name) ?? "" },
+        { ...confluence, inputFingerprint: dependencyChanged.get(confluence.name) ?? "" }
+      ]
+      const existingArtifacts = new Set([
+        path.join(atlassianRoot, "dist/index.js"),
+        path.join(confluenceRoot, "dist/index.js")
+      ])
+      const existingFingerprints = new Map([
+        [atlassian.fingerprintPath, initial.get(atlassian.name)],
+        [confluence.fingerprintPath, initial.get(confluence.name)]
+      ])
+      assert.deepStrictEqual(
+        packagesRequiringPublishedArtifactBuild(
+          changedContracts,
+          (candidate) => existingArtifacts.has(candidate),
+          (candidate) => existingFingerprints.get(candidate),
+          (root, artifact) => path.join(root, artifact)
+        ),
+        ["@knpkv/atlassian-common", "@knpkv/confluence-to-markdown"]
+      )
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("rejects workspace dependency cycles before computing artifact fingerprints", () =>
+    Effect.gen(function*() {
+      const error = yield* resolveWorkspaceArtifactFingerprints([
+        { name: "@example/a", ownFingerprint: "a", workspaceDependencies: ["@example/b"] },
+        { name: "@example/b", ownFingerprint: "b", workspaceDependencies: ["@example/a"] }
+      ]).pipe(Effect.flip)
+
+      assert.strictEqual(
+        error.reason,
+        "workspace dependency cycle prevents artifact fingerprinting: @example/a, @example/b"
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("fails when a successful dependency build leaves an advertised artifact missing", () =>
     Effect.gen(function*() {

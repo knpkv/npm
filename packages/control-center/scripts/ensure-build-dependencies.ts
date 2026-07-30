@@ -10,6 +10,7 @@ import {
   clearWorkspaceIncrementalBuildState,
   ensureWorkspaceArtifactContracts,
   publishedArtifactPaths,
+  resolveWorkspaceArtifactFingerprints,
   type WorkspaceArtifactContract,
   WorkspaceArtifactError,
   workspaceArtifactInputFingerprint
@@ -41,12 +42,19 @@ const program = Effect.gen(function*() {
   })
 
   const controlCenterManifest = yield* readManifest(controlCenterRoot)
-  const workspaceDependencies = new Set(
+  const directWorkspaceDependencies = new Set(
     Object.entries(controlCenterManifest.dependencies ?? {})
       .filter(([, version]) => version.startsWith("workspace:"))
       .map(([name]) => name)
   )
-  const contracts: Array<WorkspaceArtifactContract> = []
+  const workspacePackages = new Map<
+    string,
+    {
+      readonly manifest: typeof controlCenterManifest
+      readonly packageRoot: string
+      readonly workspaceDependencies: ReadonlyArray<string>
+    }
+  >()
 
   for (const entry of yield* fs.readDirectory(packagesRoot)) {
     const packageRoot = path.join(packagesRoot, entry)
@@ -54,22 +62,67 @@ const program = Effect.gen(function*() {
     if (packageInfo.type !== "Directory") continue
     if (!(yield* fs.exists(path.join(packageRoot, "package.json")))) continue
     const manifest = yield* readManifest(packageRoot)
-    if (!workspaceDependencies.has(manifest.name)) continue
-    const fingerprintPath = path.join(
+    workspacePackages.set(manifest.name, {
+      manifest,
       packageRoot,
+      workspaceDependencies: Object.entries(manifest.dependencies ?? {})
+        .filter(([, version]) => version.startsWith("workspace:"))
+        .map(([name]) => name)
+        .sort()
+    })
+  }
+
+  const dependencyClosure = new Set<string>()
+  const dependencyQueue = Array.from(directWorkspaceDependencies)
+  while (dependencyQueue.length > 0) {
+    const name = dependencyQueue.pop()
+    if (name === undefined || dependencyClosure.has(name)) continue
+    const workspacePackage = workspacePackages.get(name)
+    if (workspacePackage === undefined) {
+      return yield* new WorkspaceArtifactError({ reason: `could not locate workspace package ${name}` })
+    }
+    dependencyClosure.add(name)
+    for (const dependency of workspacePackage.workspaceDependencies) dependencyQueue.push(dependency)
+  }
+
+  const fingerprintNodes = yield* Effect.forEach(
+    Array.from(dependencyClosure).sort(),
+    Effect.fn("controlCenter.fingerprintWorkspaceDependency")(function*(name) {
+      const workspacePackage = workspacePackages.get(name)
+      if (workspacePackage === undefined) {
+        return yield* new WorkspaceArtifactError({ reason: `could not locate workspace package ${name}` })
+      }
+      return {
+        name,
+        ownFingerprint: yield* workspaceArtifactInputFingerprint(workspacePackage.packageRoot).pipe(
+          Effect.provideService(FileSystem.FileSystem, fs),
+          Effect.provideService(Path.Path, path)
+        ),
+        workspaceDependencies: workspacePackage.workspaceDependencies
+      }
+    }),
+    { concurrency: "unbounded" }
+  )
+  const effectiveFingerprints = yield* resolveWorkspaceArtifactFingerprints(fingerprintNodes)
+  const contracts: Array<WorkspaceArtifactContract> = []
+  for (const name of Array.from(dependencyClosure).sort()) {
+    const workspacePackage = workspacePackages.get(name)
+    const inputFingerprint = effectiveFingerprints.get(name)
+    if (workspacePackage === undefined || inputFingerprint === undefined) {
+      return yield* new WorkspaceArtifactError({ reason: `could not fingerprint workspace package ${name}` })
+    }
+    const fingerprintPath = path.join(
+      workspacePackage.packageRoot,
       "node_modules",
       ".cache",
       "control-center-workspace-artifact.sha256"
     )
     contracts.push({
-      artifactPaths: publishedArtifactPaths(manifest),
+      artifactPaths: publishedArtifactPaths(workspacePackage.manifest),
       fingerprintPath,
-      inputFingerprint: yield* workspaceArtifactInputFingerprint(packageRoot).pipe(
-        Effect.provideService(FileSystem.FileSystem, fs),
-        Effect.provideService(Path.Path, path)
-      ),
-      name: manifest.name,
-      packageRoot
+      inputFingerprint,
+      name,
+      packageRoot: workspacePackage.packageRoot
     })
   }
 

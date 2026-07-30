@@ -157,6 +157,25 @@ describe("Control Center production route presentation inventory", () => {
       )
     ).toEqual(["items (items) is missing its unauthenticated presentation"])
 
+    const itemDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(({ family }) => family === "item")
+    if (itemDescriptor === undefined) throw new Error("expected the item route descriptor")
+    const authenticatedItemAudit = itemDescriptor.audits.find(
+      ({ presentation }) => presentation === "authenticated"
+    )
+    if (authenticatedItemAudit === undefined) throw new Error("expected the authenticated item audit")
+    expect(
+      productionRouteCoverageFailures(
+        [
+          {
+            ...itemDescriptor,
+            audits: [authenticatedItemAudit]
+          }
+        ],
+        [{ family: "item", routerLiteral: "items/:entityId" }],
+        []
+      )
+    ).toEqual(["item (items/:entityId) is missing its unauthenticated presentation"])
+
     const agentDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(({ family }) => family === "agent")
     if (agentDescriptor === undefined) throw new Error("expected the agent route descriptor")
     const anonymousAgentAudit = agentDescriptor.audits.find(
