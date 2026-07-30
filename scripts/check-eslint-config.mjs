@@ -1477,3 +1477,28 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-alias-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const literalKey = ChildProcess.make("git", args, { ["env"]: gitEnvironment })
+    const templateKey = ChildProcess.make("git", args, { [\`env\`]: gitEnvironment })
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-computed-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Unrelated from "./unrelated-api.js"
+    const bothComputed = ChildProcess.make("git", args, { ["env"]: gitEnvironment, ["extendEnv"]: true })
+    const dynamicKey = ChildProcess.make("git", args, { env: gitEnvironment, [runtimeKey]: true })
+    const identifierKey = ChildProcess.make("git", args, { [env]: gitEnvironment })
+    const foreignNamespace = Unrelated.ChildProcess.make("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-computed-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})

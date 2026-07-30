@@ -9,13 +9,16 @@ message: "Declare `extendEnv` explicitly whenever `ChildProcess.make` sets `env`
 # the trailing options object only. A single `$$$ARGS` pattern with `stopBy: end`
 # also searched the command and argument expressions, so an unrelated nested
 # object such as `[JSON.stringify({ env: payload })]` was reported.
+# Only the literal `ChildProcess.make` receiver is matched. A wildcard
+# `$NAMESPACE.ChildProcess.make` was tried and reverted: it reported any foreign
+# API that happens to expose `.ChildProcess.make`, which in a mandatory gate
+# blocks unrelated code. Deciding whether a receiver really is Effect's module
+# needs binding resolution, so the barrel namespace form belongs to the ESLint
+# rule, which resolves it.
 rule:
   any:
     - pattern: ChildProcess.make($COMMAND, $ARGUMENTS, $OPTIONS)
     - pattern: ChildProcess.make($COMMAND, $OPTIONS)
-    # Barrel namespace form: `import * as Process from "effect/unstable/process"`.
-    - pattern: $NAMESPACE.ChildProcess.make($COMMAND, $ARGUMENTS, $OPTIONS)
-    - pattern: $NAMESPACE.ChildProcess.make($COMMAND, $OPTIONS)
 
 # `has` defaults to direct children, so these see the options object's own
 # properties rather than anything nested inside a property value.
@@ -51,6 +54,13 @@ constraints:
                   context: |
                     const $_ = { extendEnv }
                   selector: shorthand_property_identifier
+            # A computed key could itself be `extendEnv`, so its presence makes
+            # the object's shape unknowable here. Staying silent is correct: the
+            # binding-aware ESLint rule resolves statically known computed keys.
+            - has:
+                kind: pair
+                has:
+                  kind: computed_property_name
 
 files:
   - "packages/*/src/**/*.ts"

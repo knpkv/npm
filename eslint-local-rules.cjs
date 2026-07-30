@@ -434,6 +434,22 @@ const isMutatedChildProcessOptionsBinding = (variable, definition) =>
 const CHILD_PROCESS_ALIAS_ROUNDS = 4
 
 /**
+ * The static name of a computed property key, when it has one.
+ *
+ * `{ ["env"]: v }` and `` { [`env`]: v } `` name `env` as definitely as `{ env: v }`
+ * does. An identifier or interpolated key returns undefined — deliberately not
+ * treating a variable *named* `env` as the key `"env"`, since its runtime value
+ * is what decides.
+ */
+const staticComputedKeyName = (key) => {
+  if (key.type === "Literal" && typeof key.value === "string") return key.value
+  if (key.type === "TemplateLiteral" && key.expressions.length === 0) {
+    return key.quasis[0]?.value.cooked
+  }
+  return undefined
+}
+
+/**
  * Given a reference to a known ChildProcess binding, returns any `const` aliases
  * declared from it.
  *
@@ -567,7 +583,15 @@ const effectiveChildProcessOptionNames = (context, argument, depth = 0) => {
       for (const name of nested) names.add(name)
       continue
     }
-    if (property.type !== "Property" || property.computed) continue
+    if (property.type !== "Property") continue
+    if (property.computed) {
+      const computed = staticComputedKeyName(property.key)
+      // A key whose value is only known at runtime could be `extendEnv`, so the
+      // object's shape is unknowable and reporting would risk a false positive.
+      if (computed === undefined) return undefined
+      names.add(computed)
+      continue
+    }
     const name = staticPropertyName(property.key)
     if (name !== undefined) names.add(name)
   }

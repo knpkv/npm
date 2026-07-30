@@ -39,6 +39,17 @@ valid:
     ChildProcess.make("pbcopy", { env, extendEnv })
   - |
     Process.ChildProcess.make("git", args, { env, extendEnv: true })
+  # Barrel and foreign namespaces are both unmatched here on purpose: telling
+  # them apart needs binding resolution, so the ESLint rule owns the shape.
+  - |
+    Process.ChildProcess.make("git", args, { env })
+  - |
+    Unrelated.ChildProcess.make("git", args, { env })
+  # A computed key could be `extendEnv`, so the shape is unknowable.
+  - |
+    ChildProcess.make("git", args, { env: childEnv, [dynamicKey]: true })
+  - |
+    ChildProcess.make("git", args, { ["env"]: childEnv })
 invalid:
   - |
     ChildProcess.make("assume", ["-cd", link, profile], {
@@ -61,5 +72,3 @@ invalid:
     ChildProcess.make("git", args, { env, stderr: "pipe" })
   - |
     ChildProcess.make("pbcopy", { env })
-  - |
-    Process.ChildProcess.make("git", args, { env })
