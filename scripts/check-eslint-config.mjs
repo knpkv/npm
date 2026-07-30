@@ -140,6 +140,7 @@ await assertRuleDiagnostics({
     import { assert } from "@effect/vitest"
     const method = "notInclude"
     assert[method](publicSummary, "non-sensitive")
+    assert[method](...[publicSummary, "non-sensitive"])
     const suffix = "Include"
     assert[\`not\${suffix}\`](publicSummary, "non-sensitive")
   `,
@@ -158,8 +159,11 @@ await assertRuleDiagnostics({
     assert.isTrue(identity.providerImmutableId, "constant message")
     assert.isTrue(String(identity.providerImmutableId), "constant message")
     assert.isTrue(pattern.test(identity.providerImmutableId), dynamicMessage)
+    const method = "notInclude"
+    assert[method](serialized, identity.providerImmutableId)
+    assert[method](...[serialized, identity.providerImmutableId])
   `,
-  expected: 7,
+  expected: 9,
   filePath: "packages/control-center/test/integration/live-provider-id-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })

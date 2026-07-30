@@ -1549,10 +1549,11 @@ module.exports = {
           ) {
             return
           }
-          const method = staticPropertyName(node.callee.property)
-          const argumentsWithStableIds = node.arguments.filter(
-            (argument) => argument.type !== "SpreadElement" && containsProviderImmutableId(argument)
-          )
+          const method =
+            node.callee.computed && node.callee.property.type === "Identifier"
+              ? undefined
+              : staticPropertyName(node.callee.property)
+          const argumentsWithStableIds = node.arguments.filter(containsProviderImmutableId)
           const firstArgument = node.arguments[0]
           const booleanAssertionIsUnsafe =
             (method === "isTrue" || method === "isFalse") &&
@@ -1563,11 +1564,14 @@ module.exports = {
               (node.arguments[1] !== undefined && !isStringLiteral(node.arguments[1])))
           const awsIdentityArrayLengthIsUnsafe =
             method === "lengthOf" && firstArgument?.type === "Identifier" && firstArgument.name === "awsIdentities"
+          const dynamicAssertionWithStableIdsIsUnsafe =
+            method === undefined && node.callee.computed && argumentsWithStableIds.length > 0
           const echoesSensitiveOperand =
             method === "notInclude" ||
             (method !== undefined && echoingIdentityMethods.has(method) && argumentsWithStableIds.length > 0) ||
             booleanAssertionIsUnsafe ||
-            awsIdentityArrayLengthIsUnsafe
+            awsIdentityArrayLengthIsUnsafe ||
+            dynamicAssertionWithStableIdsIsUnsafe
           if (!echoesSensitiveOperand) {
             return
           }
