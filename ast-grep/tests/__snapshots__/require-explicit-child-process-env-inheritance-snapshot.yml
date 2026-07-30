@@ -1,0 +1,36 @@
+id: require-explicit-child-process-env-inheritance
+snapshots:
+  ? |
+    ChildProcess.make("assume", ["-cd", link, profile], {
+      stdout: "inherit",
+      env: { GRANTED_ALIAS_CONFIGURED: "true" }
+    })
+  : labels:
+    - source: |-
+        ChildProcess.make("assume", ["-cd", link, profile], {
+          stdout: "inherit",
+          env: { GRANTED_ALIAS_CONFIGURED: "true" }
+        })
+      style: primary
+      start: 0
+      end: 121
+    - source: 'env: { GRANTED_ALIAS_CONFIGURED: "true" }'
+      style: secondary
+      start: 77
+      end: 118
+  ? |
+    ChildProcess.make("node", [CLI_PATH, ...args], {
+      env: { PATH: path }
+    })
+  : labels:
+    - source: |-
+        ChildProcess.make("node", [CLI_PATH, ...args], {
+          env: { PATH: path }
+        })
+      style: primary
+      start: 0
+      end: 73
+    - source: 'env: { PATH: path }'
+      style: secondary
+      start: 51
+      end: 70

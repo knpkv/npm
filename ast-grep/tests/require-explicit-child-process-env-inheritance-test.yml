@@ -1,0 +1,28 @@
+id: require-explicit-child-process-env-inheritance
+valid:
+  - |
+    ChildProcess.make("assume", ["-cd", link, profile], {
+      stdout: "inherit",
+      env: { GRANTED_ALIAS_CONFIGURED: "true" },
+      extendEnv: true
+    })
+  - |
+    ChildProcess.make("git", args, {
+      env: gitEnvironment,
+      extendEnv: false
+    })
+  - |
+    ChildProcess.make("aws", ["sso", "login", "--profile", profile], {
+      stdout: "inherit",
+      stderr: "inherit"
+    })
+invalid:
+  - |
+    ChildProcess.make("assume", ["-cd", link, profile], {
+      stdout: "inherit",
+      env: { GRANTED_ALIAS_CONFIGURED: "true" }
+    })
+  - |
+    ChildProcess.make("node", [CLI_PATH, ...args], {
+      env: { PATH: path }
+    })

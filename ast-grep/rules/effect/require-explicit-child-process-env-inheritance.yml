@@ -1,0 +1,41 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: require-explicit-child-process-env-inheritance
+language: tsx
+severity: error
+message: "Declare `extendEnv` explicitly whenever `ChildProcess.make` sets `env`"
+
+rule:
+  all:
+    - pattern: ChildProcess.make($$$ARGS)
+    - has:
+        pattern:
+          context: |
+            const $_ = { env: $ENV }
+          selector: pair
+        stopBy: end
+    - not:
+        has:
+          pattern:
+            context: |
+              const $_ = { extendEnv: $EXTEND }
+            selector: pair
+          stopBy: end
+
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+  - "packages/*/scripts/**/*.ts"
+
+note: |
+  `extendEnv` defaults to falsy, so passing `env` alone REPLACES the child
+  environment instead of augmenting it. The child then loses `PATH` and any
+  PATH-resolved executable fails with `NotFound: ChildProcess.spawn (...)`.
+
+  Choose deliberately:
+  - `extendEnv: true` to add variables on top of the inherited environment
+    (required whenever the executable is resolved from `PATH`).
+  - `extendEnv: false` for a reviewed isolated environment; then `env` must
+    itself carry every variable the child needs, including `PATH`. See
+    require-isolated-agent-child-environment, which mandates this form for
+    local agent child processes.

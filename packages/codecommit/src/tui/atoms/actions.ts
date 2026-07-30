@@ -129,7 +129,10 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
       exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
         stdout: "inherit",
         stderr: "inherit",
-        env: { GRANTED_ALIAS_CONFIGURED: "true" }
+        // `assume` is resolved from PATH and needs the caller's AWS/SSO env,
+        // so the flag must be merged into the inherited environment.
+        env: { GRANTED_ALIAS_CONFIGURED: "true" },
+        extendEnv: true
       })).pipe(
         Effect.tap(() =>
           notificationRepo.addSystem({

@@ -188,7 +188,10 @@ const makeSandboxService = Effect.gen(function*() {
                   workspacePath
                 ],
                 {
+                  // `git` and the `aws` credential helper both resolve from PATH,
+                  // so the profile overrides must extend the inherited environment.
                   env: { AWS_PROFILE: params.profile, AWS_DEFAULT_REGION: params.region },
+                  extendEnv: true,
                   stderr: "pipe"
                 }
               )

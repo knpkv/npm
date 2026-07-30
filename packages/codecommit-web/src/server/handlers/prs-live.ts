@@ -120,7 +120,10 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const cmd = ChildProcess.make("assume", ["-cd", payload.link, payload.profile], {
             stdout: "inherit",
             stderr: "inherit",
-            env: { GRANTED_ALIAS_CONFIGURED: "true" }
+            // `assume` is resolved from PATH and needs the caller's AWS/SSO env,
+            // so the flag must be merged into the inherited environment.
+            env: { GRANTED_ALIAS_CONFIGURED: "true" },
+            extendEnv: true
           })
           yield* Effect.forkDetach(
             Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd)).pipe(
