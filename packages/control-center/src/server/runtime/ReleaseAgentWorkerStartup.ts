@@ -18,8 +18,6 @@ export interface ReleaseAgentWorkerStartupOptions {
   readonly workspaceId: WorkspaceId
   readonly idlePollInterval?: Duration.Input
   readonly failurePollInterval?: Duration.Input
-  /** Deterministic composition-test hook; production starts through supervision. @internal */
-  readonly runOnceBeforeSupervision?: boolean
 }
 
 /** Diagnostic state proving the release-chat worker is attached to the server scope. */
@@ -44,9 +42,6 @@ const makeStartup = Effect.fn("ReleaseAgentWorkerStartup.make")(function*(
   const failurePollInterval = Duration.fromInputUnsafe(
     options.failurePollInterval ?? DEFAULT_FAILURE_POLL_INTERVAL
   )
-  if (options.runOnceBeforeSupervision === true) {
-    yield* worker.runOnce(options.workspaceId).pipe(Effect.orDie)
-  }
   const cycle = worker.runOnce(options.workspaceId).pipe(
     Effect.flatMap((result) =>
       result._tag === "idle"

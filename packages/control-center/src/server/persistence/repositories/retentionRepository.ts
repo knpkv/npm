@@ -129,12 +129,26 @@ const makeRetentionRepository: Effect.Effect<
     return yield* database
       .transaction(
         Effect.gen(function*() {
-          const selected = yield* sql`SELECT event_cursor AS eventCursor
-        FROM domain_events
-        WHERE workspace_id = ${workspaceId}
-          AND ingested_at <= ${cutoffAt}
-        ORDER BY event_cursor
-        LIMIT ${AUDIT_REPLAY_BATCH_LIMIT}`.pipe(Effect.flatMap((rows) => decodeRows(EventCursorRow, rows)))
+          const selected = yield* sql`WITH RECURSIVE contiguous(event_cursor, selected_count) AS (
+          SELECT stream.pruned_through_cursor + 1, 1
+          FROM domain_event_streams stream
+          JOIN domain_events event
+            ON event.workspace_id = stream.workspace_id
+            AND event.event_cursor = stream.pruned_through_cursor + 1
+          WHERE stream.workspace_id = ${workspaceId}
+            AND event.ingested_at <= ${cutoffAt}
+          UNION ALL
+          SELECT contiguous.event_cursor + 1, contiguous.selected_count + 1
+          FROM contiguous
+          JOIN domain_events event
+            ON event.workspace_id = ${workspaceId}
+            AND event.event_cursor = contiguous.event_cursor + 1
+          WHERE contiguous.selected_count < ${AUDIT_REPLAY_BATCH_LIMIT}
+            AND event.ingested_at <= ${cutoffAt}
+        )
+        SELECT event_cursor AS eventCursor
+        FROM contiguous
+        ORDER BY event_cursor`.pipe(Effect.flatMap((rows) => decodeRows(EventCursorRow, rows)))
           const run = yield* recordRun(
             workspaceId,
             "audit-replay",
@@ -146,16 +160,10 @@ const makeRetentionRepository: Effect.Effect<
             completedAt
           )
           if (selected.length === 0) return run
+          const eventCursors = selected.map(({ eventCursor }) => eventCursor)
           const deleted = yield* sql`DELETE FROM domain_events
         WHERE workspace_id = ${workspaceId}
-          AND event_cursor IN (
-            SELECT event_cursor
-            FROM domain_events
-            WHERE workspace_id = ${workspaceId}
-              AND ingested_at <= ${cutoffAt}
-            ORDER BY event_cursor
-            LIMIT ${AUDIT_REPLAY_BATCH_LIMIT}
-          )
+          AND event_cursor IN ${sql.in(eventCursors)}
         RETURNING event_cursor AS eventCursor`.pipe(Effect.flatMap((rows) => decodeRows(EventCursorRow, rows)))
           if (deleted.length !== selected.length) {
             return yield* new PersistenceOperationError({ operation: "retention.audit-replay-count" })
@@ -196,6 +204,7 @@ const makeRetentionRepository: Effect.Effect<
             completedAt
           )
           if (selected.length === 0) return run
+          const rowIds = selected.map(({ rowId }) => rowId)
           yield* sql`INSERT INTO diff_content_cache_cleanup (
           workspace_id, content_digest, requested_at
         )
@@ -204,25 +213,13 @@ const makeRetentionRepository: Effect.Effect<
         JOIN content_blobs blobs
           ON blobs.workspace_id = entries.workspace_id
           AND blobs.digest = entries.content_digest
-        WHERE entries.rowid IN (
-          SELECT rowid
-          FROM diff_content_cache_entries
-          WHERE workspace_id = ${workspaceId}
-            AND cached_at <= ${cutoffAt}
-          ORDER BY cached_at, rowid
-          LIMIT ${REPRODUCIBLE_CONTENT_BATCH_LIMIT}
-        )
+        WHERE entries.workspace_id = ${workspaceId}
+          AND entries.rowid IN ${sql.in(rowIds)}
           AND blobs.storage_class = 'reproducible-cache'
         ON CONFLICT (workspace_id, content_digest) DO NOTHING`
           const deleted = yield* sql`DELETE FROM diff_content_cache_entries
-        WHERE rowid IN (
-          SELECT rowid
-          FROM diff_content_cache_entries
-          WHERE workspace_id = ${workspaceId}
-            AND cached_at <= ${cutoffAt}
-          ORDER BY cached_at, rowid
-          LIMIT ${REPRODUCIBLE_CONTENT_BATCH_LIMIT}
-        )
+        WHERE workspace_id = ${workspaceId}
+          AND rowid IN ${sql.in(rowIds)}
         RETURNING rowid AS rowId`.pipe(Effect.flatMap((rows) => decodeRows(CacheCandidateRow, rows)))
           if (deleted.length !== selected.length) {
             return yield* new PersistenceOperationError({ operation: "retention.reproducible-content-count" })
@@ -278,6 +275,7 @@ const makeRetentionRepository: Effect.Effect<
             completedAt
           )
           if (selected.length === 0) return run
+          const evidenceIds = selected.map(({ evidenceId }) => evidenceId)
           yield* Effect.forEach(
             selected,
             ({ evidenceId }) =>
@@ -288,31 +286,7 @@ const makeRetentionRepository: Effect.Effect<
           )
           const deleted = yield* sql`DELETE FROM evidence_items
         WHERE workspace_id = ${workspaceId}
-          AND evidence_id IN (
-            SELECT evidence.evidence_id
-            FROM evidence_items evidence
-            WHERE evidence.workspace_id = ${workspaceId}
-              AND evidence.legal_hold = 0
-              AND evidence.retain_until IS NOT NULL
-              AND evidence.retain_until <= ${cutoffAt}
-              AND NOT EXISTS (
-                SELECT 1 FROM evidence_claims claim
-                WHERE claim.workspace_id = evidence.workspace_id
-                  AND claim.evidence_id = evidence.evidence_id
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM readiness_assessment_evidence assessment
-                WHERE assessment.workspace_id = evidence.workspace_id
-                  AND assessment.evidence_id = evidence.evidence_id
-              )
-              AND NOT EXISTS (
-                SELECT 1 FROM readiness_environment_queue queue
-                WHERE queue.workspace_id = evidence.workspace_id
-                  AND queue.source_evidence_id = evidence.evidence_id
-              )
-            ORDER BY evidence.retain_until, evidence.evidence_id
-            LIMIT ${EVIDENCE_BATCH_LIMIT}
-          )
+          AND evidence_id IN ${sql.in(evidenceIds)}
         RETURNING evidence_id AS evidenceId`.pipe(Effect.flatMap((rows) => decodeRows(EvidenceCandidateRow, rows)))
           if (deleted.length !== selected.length) {
             return yield* new PersistenceOperationError({ operation: "retention.evidence-count" })

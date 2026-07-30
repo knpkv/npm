@@ -111,6 +111,8 @@ The remediation pass must implement the proposed guardrail with the defect fix w
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.
 
+Runtime startup tests must observe the natural supervised lifecycle path with synchronization primitives; do not add production control-flow options solely to make tests deterministic.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.

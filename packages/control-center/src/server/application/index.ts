@@ -36,7 +36,12 @@ export {
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer
 } from "./releaseAgent.js"
-export { makeReleaseAgentJobs, releaseAgentJobsLayer, releaseAgentJobsUnavailableLayer } from "./releaseAgentJobs.js"
+export {
+  makeReleaseAgentJobs,
+  releaseAgentJobsLayer,
+  releaseAgentJobsLayerForWorkerWorkspace,
+  releaseAgentJobsUnavailableLayer
+} from "./releaseAgentJobs.js"
 export {
   reconcileFakeReleaseProjection,
   reconcileFakeReleaseSyncAttempts,

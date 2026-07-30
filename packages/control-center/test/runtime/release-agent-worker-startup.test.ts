@@ -17,9 +17,13 @@ describe("release agent worker startup", () => {
     Effect.gen(function*() {
       const lifecycle = yield* ServerLifecycle.make
       const started = yield* Deferred.make<void>()
+      let runCount = 0
       const worker = AgentJobWorker.of({
         runOnce: (workspaceId) =>
-          Deferred.succeed(started, undefined).pipe(
+          Effect.sync(() => {
+            runCount += 1
+          }).pipe(
+            Effect.andThen(Deferred.succeed(started, undefined)),
             Effect.andThen(Effect.succeed({ _tag: "idle" } satisfies AgentJobWorkerRunResult)),
             Effect.tap(() => Effect.sync(() => assert.strictEqual(workspaceId, WORKSPACE_ID)))
           )
@@ -44,40 +48,6 @@ describe("release agent worker startup", () => {
 
       assert.instanceOf(running, ReleaseAgentWorkerRunning)
       assert.strictEqual(running.workspaceId, WORKSPACE_ID)
-    }).pipe(Effect.scoped))
-
-  it.effect("runs an initial reclaim cycle before supervision when requested", () =>
-    Effect.gen(function*() {
-      const lifecycle = yield* ServerLifecycle.make
-      const cycles = yield* Deferred.make<void>()
-      let runCount = 0
-      const worker = AgentJobWorker.of({
-        runOnce: () =>
-          Effect.sync(() => {
-            runCount += 1
-            return runCount
-          }).pipe(
-            Effect.flatMap((current) => current === 1 ? Effect.void : Deferred.succeed(cycles, undefined)),
-            Effect.as({ _tag: "idle" } satisfies AgentJobWorkerRunResult)
-          )
-      })
-      const startup = releaseAgentWorkerStartupLayer({
-        workspaceId: WORKSPACE_ID,
-        idlePollInterval: "1 hour",
-        runOnceBeforeSupervision: true
-      }).pipe(
-        Layer.provide(Layer.mergeAll(
-          Layer.succeed(AgentJobWorker, worker),
-          Layer.succeed(ServerLifecycle, lifecycle)
-        ))
-      )
-
-      yield* Effect.gen(function*() {
-        yield* ReleaseAgentWorkerStartup
-        yield* Deferred.await(cycles)
-        assert.strictEqual(runCount, 2)
-        yield* lifecycle.beginDrain
-        yield* lifecycle.awaitWorkDrained
-      }).pipe(Effect.provide(startup))
+      assert.strictEqual(runCount, 1)
     }).pipe(Effect.scoped))
 })

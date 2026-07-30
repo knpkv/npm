@@ -315,6 +315,30 @@ export const releaseAgentJobsLayer: Layer.Layer<
   makeReleaseAgentJobs
 )
 
+/** Admit durable release-chat work only for the workspace owned by the supervised worker. */
+export const releaseAgentJobsLayerForWorkerWorkspace = (
+  workerWorkspaceId: WorkspaceId
+): Layer.Layer<
+  ReleaseAgentJobs,
+  never,
+  AgentRuntimeRegistry | Crypto.Crypto | Persistence
+> =>
+  Layer.effect(
+    ReleaseAgentJobs,
+    makeReleaseAgentJobs.pipe(
+      Effect.map((jobs) =>
+        ReleaseAgentJobs.of({
+          enqueue: (input) =>
+            input.workspaceId === workerWorkspaceId
+              ? jobs.enqueue(input)
+              : Effect.fail(unavailable()),
+          providers: jobs.providers,
+          replay: jobs.replay
+        })
+      )
+    )
+  )
+
 /** Durable replay remains readable while enqueue is disabled without a configured runtime. */
 export const releaseAgentJobsUnavailableLayer: Layer.Layer<
   ReleaseAgentJobs,

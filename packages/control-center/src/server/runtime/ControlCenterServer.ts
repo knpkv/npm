@@ -60,7 +60,8 @@ import {
   portfolioSnapshotsLayer,
   pullRequestReviewsLayer,
   relationshipRepairProposalsLayer,
-  releaseAgentJobsLayer,
+  releaseAgentJobsLayerForWorkerWorkspace,
+  releaseAgentJobsUnavailableLayer,
   type ReleaseAgentRuntimeOptions,
   releaseAgentTurnsLayer,
   releaseAgentUnavailableLayer,
@@ -388,10 +389,15 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           })
       }
   )
-  const releaseAgentJobs = releaseAgentJobsLayer.pipe(
-    Layer.provide(providerRegistry),
-    Layer.provide(persistence)
-  )
+  const releaseAgentJobs = (options.releaseAgent === undefined ||
+      options.releaseAgent === null ||
+      options.bootstrap === undefined ||
+      options.bootstrap === null
+    ? releaseAgentJobsUnavailableLayer
+    : releaseAgentJobsLayerForWorkerWorkspace(options.bootstrap.workspaceId)).pipe(
+      Layer.provide(providerRegistry),
+      Layer.provide(persistence)
+    )
   const governedActionConfiguration = options.governedActionExecution ?? null
   const governedActionExecutionReady = governedActionConfiguration !== null &&
     (governedActionConfiguration.pluginRuntimes !== undefined || firstPartyPluginRuntime)

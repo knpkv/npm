@@ -52,6 +52,7 @@ import {
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { ReleaseAgentJobs } from "../../src/server/api/ApplicationServices.js"
 import { ReviewSuggestionPublicationGateway } from "../../src/server/application/ReviewSuggestionPublicationGateway.js"
 import { authorizeWorkspaceSettingsGovernanceRequest } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
 import { makeWorkspaceGovernedActionPolicyDefinitions } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
@@ -849,6 +850,24 @@ describe("Control Center closed runtime", () => {
         durableThread.events.map(({ eventKind }) => eventKind),
         ["user-message", "job-queued"]
       )
+      yield* TestClock.adjust("1 second")
+      const terminalThread = yield* Effect.gen(function*() {
+        yield* Effect.yieldNow
+        const page = yield* runtimePersistence.agentJobs.threadAfter({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          after: AgentEventCursor.make(0),
+          limit: AgentThreadEventPageSize.make(128)
+        })
+        const terminal = page.events.some(({ eventKind }) =>
+          eventKind === "job-completed" || eventKind === "job-failed"
+        )
+        return terminal ? page : yield* Effect.fail("release worker has not completed its claim")
+      }).pipe(Effect.eventually)
+      assert.include(
+        terminalThread.events.map(({ eventKind }) => eventKind),
+        "job-started"
+      )
     }).pipe(
       Effect.provide([FetchHttpClient.layer, NodeServices.layer]),
       Effect.scoped
@@ -1220,6 +1239,16 @@ describe("Control Center closed runtime", () => {
         }
       }))
       const persistence = Context.get(runtime, Persistence)
+      const unownedReleaseChat = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
+        workspaceId: WORKSPACE_ID,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("openai-compatible"),
+          model: AgentModelId.make("review-model"),
+          profile: "read-only",
+          prompt: "This workspace has no supervised release-chat worker."
+        }
+      }).pipe(Effect.result)
       const latest = yield* persistence.agentJobs.latestReview({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID,
@@ -1238,6 +1267,10 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(sourceUses, 0)
       assert.strictEqual(sandboxCalls, 1)
       assert.strictEqual(providerCalls, 4)
+      assert.isTrue(Result.isFailure(unownedReleaseChat))
+      if (Result.isFailure(unownedReleaseChat)) {
+        assert.strictEqual(unownedReleaseChat.failure._tag, "ApplicationServiceUnavailable")
+      }
       assert.deepStrictEqual(
         retentionRuns.map(({ deletedCount, retentionClass, selectedCount }) => ({
           deletedCount,
