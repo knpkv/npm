@@ -90,6 +90,14 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/agent`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "releases/:releaseId/agent",
+        surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/agent`,
         owner: "release-routes",
         presentation: "authenticated",
         routerLiteral: "releases/:releaseId/agent",
@@ -225,6 +233,14 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/overview`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "overview",
+        surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: `/w/${WORKSPACE_ID}/overview`,
         owner: "release-routes",
         presentation: "authenticated",
         routerLiteral: "overview",
@@ -254,6 +270,14 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "releases/:releaseId",
+        surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
         routerLiteral: "releases/:releaseId",
@@ -265,6 +289,14 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
   },
   {
     audits: [
+      {
+        action: { kind: "required" },
+        canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/preview`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "releases/:releaseId/preview",
+        surface: "boundary"
+      },
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/preview`,
@@ -352,6 +384,17 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
   {
     audits: [
       {
+        action: {
+          kind: "none",
+          reason: "Active work waits for a paired release portfolio and exposes no action before authentication."
+        },
+        canonicalPath: `/w/${WORKSPACE_ID}/work?release=${RELEASE_ID}`,
+        owner: "scaffold",
+        presentation: "unauthenticated",
+        routerLiteral: "work",
+        surface: "boundary"
+      },
+      {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/work?release=${RELEASE_ID}`,
         owner: "release-routes",
@@ -414,13 +457,18 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_FAMILIES: ReadonlyArray<ProductionR
 /** Exact leaves that deliberately expose distinct paired and unpaired presentations. */
 export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_LEAVES: ReadonlyArray<ProductionRouteLeaf> = [
   { family: "agent", routerLiteral: "agent" },
+  { family: "agent", routerLiteral: "releases/:releaseId/agent" },
   { family: "authorized-share", routerLiteral: "shares/:workspaceId/:shareId" },
   { family: "atlassian-oauth-callback", routerLiteral: "services/oauth/atlassian/callback" },
   { family: "item", routerLiteral: "items/:entityId" },
   { family: "items", routerLiteral: "items" },
+  { family: "overview", routerLiteral: "overview" },
+  { family: "release", routerLiteral: "releases/:releaseId" },
+  { family: "release-preview", routerLiteral: "releases/:releaseId/preview" },
   { family: "services", routerLiteral: "services" },
   { family: "settings", routerLiteral: "settings" },
-  { family: "timeline", routerLiteral: "timeline" }
+  { family: "timeline", routerLiteral: "timeline" },
+  { family: "work", routerLiteral: "work" }
 ]
 
 /** Literal leaves deliberately represented by another identical or redirecting browser presentation. */

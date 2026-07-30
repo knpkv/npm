@@ -226,6 +226,14 @@ describe("Control Center production route presentation inventory", () => {
 
     expect(
       productionRouteCoverageFailures(
+        [{ ...agentDescriptor, audits: [releaseAgentAudit] }],
+        [{ family: "agent", routerLiteral: "releases/:releaseId/agent" }],
+        []
+      )
+    ).toEqual(["agent (releases/:releaseId/agent) is missing its unauthenticated presentation"])
+
+    expect(
+      productionRouteCoverageFailures(
         CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS,
         [{ family: "services", routerLiteral: "services" }],
         ["services"]

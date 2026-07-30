@@ -70,6 +70,28 @@ test("requires keyboard focus to add a visible indicator", async ({ page }) => {
         <title>Focus fixture</title>
         <style>
           button { outline: none; }
+          button:focus-visible { outline: 3px solid transparent; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          button { outline: none; }
           button:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
         </style>
       </head>
@@ -195,6 +217,12 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
+      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated", "overview"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
       audit: productionRouteAuditCase("scaffold", "services", "unauthenticated", "services"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Services" }),
@@ -213,6 +241,17 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByRole("heading", { name: "Ask in context." }),
       primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "agent",
+        "unauthenticated",
+        "releases/:releaseId/agent"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release context unavailable", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
     },
     {
       audit: productionRouteAuditCase(
@@ -249,6 +288,23 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       primaryAction: () => page.getByRole("link", { name: "Back to items" })
     },
     {
+      audit: productionRouteAuditCase("scaffold", "release", "unauthenticated", "releases/:releaseId"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "release-preview",
+        "unauthenticated",
+        "releases/:releaseId/preview"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
       audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated", "*"),
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByText("Page not found", { exact: true }),
@@ -262,6 +318,11 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     {
       audit: productionRouteAuditCase("scaffold", "timeline", "unauthenticated", "timeline"),
       landmark: () => page.getByText("Loading Timeline", { exact: true }),
+      primaryAction: () => null
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "work", "unauthenticated", "work"),
+      landmark: () => page.getByText("Loading active work", { exact: true }),
       primaryAction: () => null
     }
   ]

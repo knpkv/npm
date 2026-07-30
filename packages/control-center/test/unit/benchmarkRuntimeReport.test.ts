@@ -34,6 +34,17 @@ const machine = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
 
 const samples = [11, 7, 13, 5, 9]
 
+const githubWorkflowStep = (workflow: string, name: string): string | undefined => {
+  const lines = workflow.split("\n")
+  const start = lines.findIndex((line) => line.trim() === `- name: ${name}`)
+  if (start < 0) return undefined
+  const indentation = lines[start]?.search(/\S/u) ?? 0
+  const siblingPrefix = `${" ".repeat(indentation)}- `
+  const relativeEnd = lines.slice(start + 1).findIndex((line) => line.startsWith(siblingPrefix))
+  const end = relativeEnd < 0 ? lines.length : start + relativeEnd + 1
+  return lines.slice(start, end).join("\n")
+}
+
 const validReportInput = () => ({
   caps: CONTROL_CENTER_BENCHMARK_CAPS,
   cardinalities: {
@@ -280,10 +291,37 @@ describe("control center runtime benchmark report", () => {
       )
       expect(preparedCommand).toContain("pnpm benchmark:validate-runtime")
       expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
-      expect(packageJson.workflow).toMatch(
-        /name: Upload Control Center runtime benchmark evidence[\s\S]*if: \$\{\{ always\(\) \}\}[\s\S]*uses: actions\/upload-artifact@v7[\s\S]*path: test-results\/control-center\/runtime-benchmark\.json/u
-      )
+      const uploadStep = githubWorkflowStep(packageJson.workflow, "Upload Control Center runtime benchmark evidence")
+      expect(uploadStep).toBeDefined()
+      expect(uploadStep).toContain("if: ${{ always() }}")
+      expect(uploadStep).toContain("uses: actions/upload-artifact@v7")
+      expect(uploadStep).toContain("path: test-results/control-center/runtime-benchmark.json")
     }))
+
+  it("keeps every runtime evidence upload field in the named workflow step", () => {
+    const splitFields = `
+      - name: Upload Control Center runtime benchmark evidence
+        if: \${{ always() }}
+      - name: Different upload
+        uses: actions/upload-artifact@v7
+        with:
+          path: test-results/control-center/runtime-benchmark.json`
+    const completeStep = `
+      - name: Upload Control Center runtime benchmark evidence
+        if: \${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          path: test-results/control-center/runtime-benchmark.json
+      - name: Later step
+        run: pnpm test`
+
+    expect(githubWorkflowStep(splitFields, "Upload Control Center runtime benchmark evidence")).not.toContain(
+      "actions/upload-artifact"
+    )
+    expect(githubWorkflowStep(completeStep, "Upload Control Center runtime benchmark evidence")).toContain(
+      "path: test-results/control-center/runtime-benchmark.json"
+    )
+  })
 
   it.effect("rejects aggregates that do not match their samples", () =>
     Effect.gen(function*() {

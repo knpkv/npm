@@ -26,9 +26,21 @@ interface AxeBrowserGlobal {
 interface FocusVisualSnapshot {
   readonly backgroundColor: string
   readonly borderBottom: string
+  readonly borderBottomColor: string
+  readonly borderBottomStyle: string
+  readonly borderBottomWidth: string
   readonly borderLeft: string
+  readonly borderLeftColor: string
+  readonly borderLeftStyle: string
+  readonly borderLeftWidth: string
   readonly borderRight: string
+  readonly borderRightColor: string
+  readonly borderRightStyle: string
+  readonly borderRightWidth: string
   readonly borderTop: string
+  readonly borderTopColor: string
+  readonly borderTopStyle: string
+  readonly borderTopWidth: string
   readonly boxShadow: string
   readonly color: string
   readonly outlineColor: string
@@ -44,18 +56,6 @@ interface FocusedVisualSnapshot extends FocusVisualSnapshot {
 }
 
 interface FocusComputedStyle extends FocusVisualSnapshot {
-  readonly borderBottomColor: string
-  readonly borderBottomStyle: string
-  readonly borderBottomWidth: string
-  readonly borderLeftColor: string
-  readonly borderLeftStyle: string
-  readonly borderLeftWidth: string
-  readonly borderRightColor: string
-  readonly borderRightStyle: string
-  readonly borderRightWidth: string
-  readonly borderTopColor: string
-  readonly borderTopStyle: string
-  readonly borderTopWidth: string
   readonly forcedColorAdjust: string
 }
 
@@ -120,6 +120,16 @@ export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<Ax
   }, CONTROL_CENTER_AXE_WCAG_TAGS)
 }
 
+const transparentPaint = (value: string): boolean =>
+  value === "transparent" ||
+  /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
+
+const transparentShadowPaint = (value: string): boolean => {
+  if (value === "none") return true
+  const colors = value.match(/rgba?\([^)]*\)|transparent/gu)
+  return colors !== null && colors.every(transparentPaint)
+}
+
 const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator): Promise<void> => {
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
   const unfocused = await primaryAction.evaluate((element): FocusVisualSnapshot => {
@@ -130,9 +140,21 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
+      borderBottomColor: style.borderBottomColor,
+      borderBottomStyle: style.borderBottomStyle,
+      borderBottomWidth: style.borderBottomWidth,
       borderLeft: style.borderLeft,
+      borderLeftColor: style.borderLeftColor,
+      borderLeftStyle: style.borderLeftStyle,
+      borderLeftWidth: style.borderLeftWidth,
       borderRight: style.borderRight,
+      borderRightColor: style.borderRightColor,
+      borderRightStyle: style.borderRightStyle,
+      borderRightWidth: style.borderRightWidth,
       borderTop: style.borderTop,
+      borderTopColor: style.borderTopColor,
+      borderTopStyle: style.borderTopStyle,
+      borderTopWidth: style.borderTopWidth,
       boxShadow: style.boxShadow,
       color: style.color,
       outlineColor: style.outlineColor,
@@ -162,9 +184,21 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
+      borderBottomColor: style.borderBottomColor,
+      borderBottomStyle: style.borderBottomStyle,
+      borderBottomWidth: style.borderBottomWidth,
       borderLeft: style.borderLeft,
+      borderLeftColor: style.borderLeftColor,
+      borderLeftStyle: style.borderLeftStyle,
+      borderLeftWidth: style.borderLeftWidth,
       borderRight: style.borderRight,
+      borderRightColor: style.borderRightColor,
+      borderRightStyle: style.borderRightStyle,
+      borderRightWidth: style.borderRightWidth,
       borderTop: style.borderTop,
+      borderTopColor: style.borderTopColor,
+      borderTopStyle: style.borderTopStyle,
+      borderTopWidth: style.borderTopWidth,
       boxShadow: style.boxShadow,
       color: style.color,
       focusVisible: element.matches(":focus-visible"),
@@ -182,26 +216,54 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     focused.outlineWidth !== unfocused.outlineWidth) &&
     focused.outlineStyle !== "none" &&
     focused.outlineStyle !== "hidden" &&
-    Number.parseFloat(focused.outlineWidth) > 0
-  const shadowChangedAndPainted = focused.boxShadow !== unfocused.boxShadow && focused.boxShadow !== "none"
-  const borderChanged = focused.borderBottom !== unfocused.borderBottom ||
-    focused.borderLeft !== unfocused.borderLeft ||
-    focused.borderRight !== unfocused.borderRight ||
-    focused.borderTop !== unfocused.borderTop
-  const equivalentPaintChanged = focused.backgroundColor !== unfocused.backgroundColor ||
-    focused.color !== unfocused.color
+    Number.parseFloat(focused.outlineWidth) > 0 &&
+    !transparentPaint(focused.outlineColor)
+  const shadowChangedAndPainted = focused.boxShadow !== unfocused.boxShadow &&
+    !transparentShadowPaint(focused.boxShadow)
+  const borderChangedAndPainted = [
+    {
+      changed: focused.borderBottom !== unfocused.borderBottom,
+      color: focused.borderBottomColor,
+      style: focused.borderBottomStyle,
+      width: focused.borderBottomWidth
+    },
+    {
+      changed: focused.borderLeft !== unfocused.borderLeft,
+      color: focused.borderLeftColor,
+      style: focused.borderLeftStyle,
+      width: focused.borderLeftWidth
+    },
+    {
+      changed: focused.borderRight !== unfocused.borderRight,
+      color: focused.borderRightColor,
+      style: focused.borderRightStyle,
+      width: focused.borderRightWidth
+    },
+    {
+      changed: focused.borderTop !== unfocused.borderTop,
+      color: focused.borderTopColor,
+      style: focused.borderTopStyle,
+      width: focused.borderTopWidth
+    }
+  ].some(({ changed, color, style, width }) =>
+    changed &&
+    style !== "none" &&
+    style !== "hidden" &&
+    Number.parseFloat(width) > 0 &&
+    !transparentPaint(color)
+  )
+  const equivalentPaintChanged =
+    (focused.backgroundColor !== unfocused.backgroundColor && !transparentPaint(focused.backgroundColor)) ||
+    (focused.color !== unfocused.color && !transparentPaint(focused.color))
 
   expect(
     focused.focusVisible &&
       focused.width > 0 &&
       focused.height > 0 &&
-      (outlineChangedAndPainted || shadowChangedAndPainted || borderChanged || equivalentPaintChanged),
+      (outlineChangedAndPainted || shadowChangedAndPainted || borderChangedAndPainted || equivalentPaintChanged),
     "primary action keyboard focus has no focus-specific visual indicator"
   ).toBe(true)
 }
-
-const transparentPaint = (value: string): boolean =>
-  value === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\)$/u.test(value)
 
 const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string): Promise<void> => {
   const snapshot = await locator.evaluate((element) => {
