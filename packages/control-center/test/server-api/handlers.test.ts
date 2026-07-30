@@ -2470,7 +2470,9 @@ describe("Control Center API handlers", () => {
 
       const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        assert.strictEqual(yield* Ref.get(providerCalls), 0)
         const accepted = yield* client.agent.providers()
+        assert.strictEqual(yield* Ref.get(providerCalls), 1)
         yield* lifecycle.beginDrain
         const rejected = yield* client.agent.providers().pipe(Effect.result)
         return { accepted, rejected }

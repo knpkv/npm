@@ -21,6 +21,7 @@ import {
   WorkspaceSettingsGovernanceAuthority
 } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
+import { PersistenceOperationError } from "../../src/server/persistence/errors.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
 import { RecordRevision } from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
@@ -228,26 +229,40 @@ describe("WorkspaceSettingsRepository", () => {
         yield* seedAuthority
         const persistence = yield* Persistence
         const { sql } = yield* Database
-        yield* sql`CREATE TRIGGER reject_initial_workspace_settings_version
-          BEFORE INSERT ON workspace_settings_versions
-          WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000170'
-          BEGIN
-            SELECT RAISE(ABORT, 'injected initial settings version failure');
-          END`
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            yield* sql`CREATE TRIGGER reject_initial_workspace_settings_version
+              BEFORE INSERT ON workspace_settings_versions
+              WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000170'
+              BEGIN
+                SELECT RAISE(ABORT, 'injected initial settings version failure');
+              END`
+            yield* Effect.addFinalizer(() =>
+              sql`DROP TRIGGER IF EXISTS reject_initial_workspace_settings_version`.pipe(Effect.orDie)
+            )
 
-        const interrupted = yield* persistence.workspaceSettings.get(workspaceId).pipe(Effect.result)
-        assert.isTrue(Result.isFailure(interrupted))
+            const interrupted = yield* persistence.workspaceSettings.get(workspaceId).pipe(Effect.result)
+            assert.isTrue(Result.isFailure(interrupted))
+            if (Result.isFailure(interrupted)) {
+              assert.deepStrictEqual(
+                interrupted.failure,
+                new PersistenceOperationError({
+                  operation: "workspace-settings.ensure-default"
+                })
+              )
+            }
 
-        const interruptedHeads = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-          FROM workspace_settings
-          WHERE workspace_id = ${workspaceId}`
-        const interruptedVersions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
-          FROM workspace_settings_versions
-          WHERE workspace_id = ${workspaceId}`
-        assert.strictEqual(interruptedHeads[0]?.count, 0)
-        assert.strictEqual(interruptedVersions[0]?.count, 0)
+            const interruptedHeads = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+              FROM workspace_settings
+              WHERE workspace_id = ${workspaceId}`
+            const interruptedVersions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+              FROM workspace_settings_versions
+              WHERE workspace_id = ${workspaceId}`
+            assert.strictEqual(interruptedHeads[0]?.count, 0)
+            assert.strictEqual(interruptedVersions[0]?.count, 0)
+          })
+        )
 
-        yield* sql`DROP TRIGGER reject_initial_workspace_settings_version`
         const repaired = yield* persistence.workspaceSettings.get(workspaceId)
         const repeated = yield* persistence.workspaceSettings.get(workspaceId)
         assert.strictEqual(repaired.revision, 1)
