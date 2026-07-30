@@ -152,6 +152,20 @@ for (const claim of providerClaims) {
   if (!overview.includes(claim)) failures.push(`provider capability summary is missing ${claim}`)
 }
 
+const governance = docsSources.get("control-center-governance.mdx") ?? ""
+const providerIdentityFields = new Map([
+  ["CodePipeline", ["authorizationId", "idempotencyKey", "payloadDigest"]],
+  ["Clockify", ["workspaceId", "userId", "entryId", "expectedRevision", "desiredRevision"]]
+])
+for (const [provider, fields] of providerIdentityFields) {
+  const section = governance.match(new RegExp(`### ${provider}\\n([\\s\\S]*?)(?=\\n### |\\n## )`, "u"))?.[1] ?? ""
+  for (const field of fields) {
+    if (!section.includes(`\`${field}\``)) {
+      failures.push(`${provider} governance identity is missing ${field}`)
+    }
+  }
+}
+
 const routerSource = await readFile(resolve(workspaceRoot, "packages/codecommit-web/src/client/router.tsx"), "utf8")
 if (/prototypes?\/|ControlCenterPrototype/u.test(routerSource)) {
   failures.push("CodeCommit production router still references a prototype")

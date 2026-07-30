@@ -51,11 +51,12 @@ provider. Successful retries replay the durable receipt rather than writing a se
 
 ### CodePipeline
 
-Start binds explicit source revisions and a deterministic AWS client request token. Stop and manual
-approval revalidate the exact pipeline definition plus execution/action revision. Retry starts a new
-execution from captured source revisions and records the original execution as `retryOf`.
-Reconciliation locators are decoded and rebound to the authorized kind and payload digest before
-provider access.
+Start binds explicit source revisions and derives its deterministic AWS client request token from
+`authorizationId`, `idempotencyKey`, and `payloadDigest`. Stop and manual approval revalidate the
+exact pipeline definition plus execution/action revision. Retry starts a new execution from captured
+source revisions, derives its client request token from the same three authorization inputs, and
+records the original execution as `retryOf`. Reconciliation locators are decoded and rebound to the
+authorized kind and payload digest before provider access.
 
 ### Jira
 
@@ -73,10 +74,10 @@ without replaying publication.
 
 ### Clockify
 
-`correct-association` freezes the complete replacement and exact source revision. A final reread
-recognizes an already-visible desired state; ambiguous provider responses become reconciliation-only.
-`record-approval` is a Control Center-owned ledger decision and does not claim to call a Clockify
-approval endpoint.
+`correct-association` freezes the complete replacement and scopes it to `workspaceId`, `userId`,
+`entryId`, `expectedRevision`, and `desiredRevision`. A final reread recognizes an already-visible
+desired state; ambiguous provider responses become reconciliation-only. `record-approval` is a
+Control Center-owned ledger decision and does not claim to call a Clockify approval endpoint.
 
 ## Secrets and content
 
