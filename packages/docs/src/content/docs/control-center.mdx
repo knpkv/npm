@@ -1,116 +1,117 @@
 ---
 title: Control Center
-description: Run the release-aware delivery application and its local Relay agent.
+description: Operate the local release workspace for delivery evidence, governed provider actions, and contained agent review.
 ---
 
-`@knpkv/control-center` is a local delivery application that joins release identity, people, source freshness, provider connections, and release-aware agents without exposing server capabilities to browser code.
+`@knpkv/control-center` is a local, authenticated delivery application. It joins releases, work
+items, pull requests, pipelines, runbooks, collaborators, evidence, and agent review without putting
+provider credentials or server authority in browser code.
 
-## Start locally
+## Start here
+
+Build and start the application:
 
 ```bash
 pnpm --filter @knpkv/control-center build
 pnpm --filter @knpkv/control-center start
 ```
 
-Open `http://127.0.0.1:4173` and enter the single-use pairing code printed by the server. The Vite development server is intentionally loopback-only; use the authenticated application server and the documented TLS proxy setup for another machine.
+Open `http://127.0.0.1:4173` and enter the single-use pairing code printed by the server. The first
+paired person becomes the workspace owner. Durable data is written below `.control-center` unless
+`CONTROL_CENTER_DATA_ROOT` selects another private application directory.
 
-## Release threads
+Continue with:
 
-Open a release, then choose **Ask Relay**. Each canonical release page keeps the release codename, collaborators, lifecycle, version, and source freshness visible before the first question.
+- [Setup and provider connections](/control-center-setup/) for pairing, AWS, Atlassian OAuth,
+  Clockify, local AI, and trusted HTTPS.
+- [Operations](/control-center-operations/) for graceful shutdown, telemetry, owner recovery,
+  backups, retention, and release gates.
+- [Governance and sandboxing](/control-center-governance/) for authorization, durable actions,
+  reconciliation, and contained pull-request review.
+- [Troubleshooting](/control-center-troubleshooting/) for startup, pairing, proxy, OAuth, provider,
+  agent, and benchmark failures.
 
-The browser sends a bounded prompt and local thread history to a typed, CSRF-protected endpoint. The server derives the workspace from the authenticated session, loads the exact release projection, and invokes the configured local CLI read-only. The response includes the release projection and event cursor used for the turn, so answers cannot silently substitute another release.
+## Product model
 
-Release threads currently live in the browser tab. Codex and Claude invocations are ephemeral; their internal session identifiers are not product persistence.
+Control Center stores traceability as a normalized delivery graph. Exact source revisions become
+immutable entity projections. Directional relationships connect Jira work, pull requests, pipeline
+executions, deployments, Confluence pages, and Clockify entries. Evidence has independent
+verification, validity, and retention metadata, so expired evidence can stop proving readiness
+without erasing its audit history.
 
-## Delivery graph
+The browser works with bounded, workspace-scoped projections:
 
-Control Center stores delivery traceability as a normalized graph rather than matching Jira keys, branch names, or labels in the browser. Exact source revisions become immutable entity projections. Releases, environments, and provider entities become explicit nodes, including intentionally missing nodes when a required relationship has not been resolved.
+- **Releases** keeps release identity, lifecycle, version, readiness, collaborators, source
+  freshness, gaps, and related delivery work together.
+- **Items** searches the authenticated workspace and opens canonical, URL-addressable entity pages
+  and relationship evidence.
+- **Services** discovers accounts and sites, configures followed resources, runs redacted connection
+  tests, and exposes synchronization state.
+- **Timeline** merges bounded governed-action, synchronization, relationship, and domain events with
+  redacted export and owner-only inspection.
+- **Active work** keeps durable PR-review jobs separate from the final human decision.
+- **Relay** owns one browser-session thread per canonical release and always reloads the exact current
+  release projection before a local agent turn.
 
-Directional relationships connect Jira work, pull requests, pipeline executions, deployments, pages, and time entries. Every relationship revision records lifecycle, confidence, provenance, actor, release or environment scope, and references to immutable evidence claims. Evidence observations have independent verification, validity, and retention metadata, so an expired observation can stop proving readiness without deleting its audit history.
+## First-party providers
 
-### CodePipeline adapter boundary
+Provider descriptors negotiate each capability independently. The production catalog is
+source-accurate at the current unstable schema snapshot:
 
-The production AWS CodePipeline adapter is currently read-only. For one configured profile, region, and pipeline it Schema-decodes direct `distilled-aws` responses and emits stable pipeline, execution, stage, and action entities through the vendor-neutral plugin contract. Execution synchronization uses one provider execution per atomic plugin page, opaque replayable checkpoints, at most 20 pages per run, and no more than two concurrent provider calls. Action history is independently capped at 100 entries per provider page, five pages, and 200 actions per execution; truncated snapshots say so explicitly.
+| Provider     | Reads and synchronization                                           | Governed actions                                                                  |
+| ------------ | ------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| CodeCommit   | Pull requests, immutable revisions, complete diff inventory/content | Request review, comment, request changes, approve, revoke approval; reconciled    |
+| CodePipeline | Pipelines, executions, stages/actions, bounded logs/artifacts       | Start, stop, manual approval, and retry; reconciled                               |
+| Jira         | Project issues, comments, changelog, people, bounded sync           | Revision-bound proposals only; provider execution and reconciliation are disabled |
+| Confluence   | Space pages, lazy body reads, bounded metadata sync                 | Version-bound page publication and reconciliation                                 |
+| Clockify     | Bounded time-entry reads and synchronization                        | Correct association and record Control Center-owned approval; reconciled          |
 
-Artifact observations contain only names plus S3 bucket/key metadata marked for a future authenticated proxy. Resolved action configuration and credential-bearing provider, revision, artifact, or external-execution URLs are discarded. Start, stop, manual approval, retry, log content, artifact content, receipts, cancellation, and reconciliation are not advertised by this first adapter slice.
+Every provider response is Schema-decoded before normalization. Browser configuration contains
+secret references, never secret bytes. Safe reads can use the bounded retry policy; ambiguous writes
+move to reconciliation and are not blindly replayed.
 
-Server workflows use the durable module through two operations: a bounded atomic `write` and a tagged `read`. SQL rows, digests, table joins, and compatibility handling for older pipeline records remain private implementation details. Browser views consume later authenticated projections; they do not receive raw persistence access.
+## Release-aware agents
 
-Portfolio readiness uses a bounded `effect-qb` plan from `@knpkv/control-center-sql` to read all requested release heads in one transaction. The repository still Schema-decodes every row, verifies digest-bound materialization, and quarantines malformed persisted data before it reaches the application.
+Relay supports explicitly configured local Codex, Claude, and OpenAI-compatible providers. Release
+chat is read-only and receives a bounded frozen release projection. Provider paths, credentials,
+native session values, and raw failures remain server-only.
 
-The MVP database schema is deliberately unstable. Fresh databases are created from one checked-in schema snapshot; existing databases and backups must match it exactly. Schema changes may require recreating local development data. Versioned migrations begin only after the model is stable and a released database must remain readable by a newer build.
+Immutable CodeCommit review is a separate opt-in worker. It clones the exact head into a private
+workspace, strips remotes and credential helpers, verifies the object ID, and runs the selected model
+inside `sbx`. Suggestions must anchor to the immutable diff and remain drafts until a human edits,
+revalidates, and publishes them through the governed-action path.
 
-## Find workspace items
+The underlying packages are documented separately:
 
-The owner-only **Items** route searches current Jira work, pull requests, Confluence pages, pipeline executions, deployments, and time entries across the authenticated workspace. Text, owner, service, type, and lifecycle filters run on the server before the 500-item response bound, so a match cannot be hidden behind an unrelated client-side prefix. Active entity-scoped human ownership assignments provide canonical names and avatar fallbacks; genuinely unassigned work remains labeled **Unassigned**. The response includes authoritative matched and workspace totals plus explicit result and owner-facet truncation flags.
+- [Agent Runtime](/ai-runtime/)
+- [Codex adapter](/ai-codex/)
+- [Claude adapter](/ai-claude/)
 
-Press **⌘K** on macOS or **Ctrl+K** elsewhere from any workspace page to combine the authenticated release portfolio and current item index in one compact command search. Six deterministically ranked matches remain keyboard-selectable, while **Open item results** continues on the URL-backed Items route and **Ask Relay from here** preserves the calling page or opens its exact release thread.
+## Presentation system
 
-Filters remain in the URL for refresh and Back navigation. An item linked to one visible release opens that complete delivery context directly. Items linked to multiple releases retain every bounded current membership and ask you to choose the exact release; current unlinked items stay visible in the workspace index.
+The browser application consumes `@knpkv/rly`. The [rly documentation](/rly/) covers package exports,
+tokens, themes, and registry use. Its published [Storybook component catalog](/rly/catalog/) is the
+visual source of truth for component states and accessibility examples.
 
-Inside the chosen release, the selected object includes a compact delivery trace centered on that exact Jira issue, pull request, page, pipeline execution, deployment, or time entry. The trace distinguishes incoming and outgoing relationships and shows the connected object, lifecycle, confidence, and immutable evidence count from the bounded current release slice.
+The earlier CodeCommit-hosted Control Center prototype is retired from production routing. Approved
+prototype files remain only as unreachable visual references. A build-graph boundary and ast-grep
+rule reject static, computed, or glob imports from production code.
 
-Choose **Details** on a relationship to open its URL-addressable side panel. The panel reads the immutable relationship ledger and the exact evidence observations referenced by the selected revision. It keeps actor, provenance, lifecycle reasons, observation freshness, verification, validity, and retention visible without replacing the compact release view.
+## Public package entries
 
-## Share one exact item
+| Entry                          | Purpose                                                       |
+| ------------------------------ | ------------------------------------------------------------- |
+| `@knpkv/control-center`        | Browser-safe API and domain aggregate                         |
+| `@knpkv/control-center/api`    | Versioned typed HTTP API, client constructor, and URL builder |
+| `@knpkv/control-center/domain` | Schema-backed vendor-neutral domain contracts                 |
+| `@knpkv/control-center/server` | Server composition and first-party provider definitions       |
+| `control-center`               | Application, recovery, backup, verification, and restore CLI  |
 
-Workspace owners can open an item on the **Items** route and create an authenticated link for one explicit person. Every grant names the exact normalized entity, grantee, expiry, creating owner session, and later revocation separately in durable server state. The link contains only a random share identifier; it never carries the session cookie, CSRF proof, or another bearer credential.
+The browser application itself is private. Server composition is available only through the explicit
+`/server` entry.
 
-Opening `/shares/<workspace-id>/<share-id>` first recovers the browser session, including cookie-authenticated reads when mutation-proof browser storage is unavailable, then rechecks the URL workspace, active grantee, expiry, revocation, and current target projection in one server-side snapshot. A valid link returns only that current item projection. The share page removes ordinary workspace navigation, and watcher sessions cannot use the workspace Items, portfolio, live-event, plugin, media, or delivery-graph read surfaces. Workspace owners and approvers retain the broader reads required by their existing roles. Release membership, relationships, evidence, and adjacent entities are not included and cannot expand the grant. A mismatched, inactive, or wrong-workspace person, expired or revoked grant, deleted target, or stale target projection shows a recoverable unavailable state without substituting another workspace or demo data.
+## Stability
 
-The current Items control offers one-hour, one-day, and seven-day expiries and can revoke the newly created link immediately. If a create response is lost, retry preserves the original share identifier and expiry so the durable grant remains idempotent. Broader share administration and release-scoped grants remain future work.
-
-## CodeCommit adapter milestone
-
-The first production CodeCommit adapter is a read-only vertical slice for one configured AWS profile, region, and repository. It normalizes open pull requests, exact PR/base/head revisions, and every cursor-paginated changed-file entry through `entity.read@1`, `sync.incremental@1`, and `diff.inventory@1`. The owning `@knpkv/codecommit-core` package performs the real provider calls and Schema-decodes responses before Control Center normalization.
-
-This slice does not yet register connections in the production runtime catalog or expose provider setup in Settings. Diff content, binary/generated/oversized detection, commits/history, comments, checks, review actions, approval, merge, receipts, and reconciliation remain deferred. No mutation capability is advertised, so the adapter cannot invoke CodeCommit writes.
-
-## Read Jira issues
-
-The server entry exports `makeJiraReadPluginRuntime`, a production `entity.read` adapter backed by the shared `@knpkv/jira-api-client`. Configure a root Jira web URL, activity page size, maximum pages, and per-request timeout; supply credentials only through the Jira client layer.
-
-Reads normalize the issue description, environment, workflow fields, versions, parent and subtasks, comments, changelog, and human collaborators into one bounded `jira.issue` event. Collaborators are deduplicated across assignee, reporter, creator, comment author, editor, and change author roles while preserving avatar URLs. Comments and history paginate independently, stop at their configured request limit, and expose explicit truncation metadata. Oversized fixed fields are omitted deterministically and named in `truncatedFields` rather than failing the read. Cancelling the scoped read interrupts the in-flight Jira request.
-
-This first production slice is read-only. Workspace JQL synchronization, separate `UpsertPerson` sync events, attachment content, and governed Jira mutations remain deferred rather than being represented as supported capabilities.
-
-## Read Clockify time entries
-
-The server entry exports `makeClockifyReadPluginRuntime`, a production read-only adapter backed by `@knpkv/clockify-api-client`. Supply Clockify credentials through that client layer; adapter configuration contains only a web URL, workspace ID, comma-separated user IDs, pagination/concurrency bounds, and a request timeout.
-
-The `time-entries` sync stream reads configured users concurrently up to the explicit limit and emits Schema-decoded `clockify.time-entry` events with stable provider IDs, SHA-256 revisions, billable/project/task/tag facts, provider interval duration, and explicit source freshness. A full last allowed page reports a bounded checkpoint instead of pretending the provider was exhausted. Exact entity reads share the same normalization and typed failure boundary.
-
-People synchronization, Jira association evidence, rollups, approval and attribution state, corrections, and governed writes remain outside this first adapter slice.
-
-## Configure local providers
-
-### Atlassian OAuth
-
-Choose **Sign in with Atlassian** from Services. On first use, Control Center shows the exact callback URL to add to an Atlassian OAuth 2.0 integration and asks for that app's client ID and client secret. It stores the credentials in its own machine-local auth store, then continues the Jira and Confluence sign-in flow. The separate `jira` and `confluence` CLIs do not need to be installed or configured.
-
-For the default local server, register `http://127.0.0.1:4173/services/oauth/atlassian/callback`. A non-loopback deployment uses its configured HTTPS public origin with the same `/services/oauth/atlassian/callback` path. OAuth setup is owner-only, CSRF-protected, and unavailable over insecure LAN mode. A mistyped credential can be corrected until the first profile is saved; after that, existing app credentials are reused and cannot be silently replaced during sign-in.
-
-For Confluence Cloud page reads, see the [Control Center Confluence adapter](/control-center-confluence/). The first production slice is intentionally read-only and server-composed.
-
-Local providers are disabled by default. Install and authenticate a CLI separately, then explicitly select the allowed server-side providers and an owner-controlled, least-privilege checkout:
-
-```bash
-CONTROL_CENTER_AGENT_PROVIDERS=codex,claude \
-CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
-pnpm --filter @knpkv/control-center start
-```
-
-Leave `CONTROL_CENTER_AGENT_PROVIDERS` unset to disable agent execution. Optional executable and model overrides are available through:
-
-- `CONTROL_CENTER_AGENT_CODEX_EXECUTABLE`
-- `CONTROL_CENTER_AGENT_CODEX_MODEL`
-- `CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE`
-- `CONTROL_CENTER_AGENT_CLAUDE_MODEL`
-
-`CONTROL_CENTER_AGENT_CWD` is required whenever a provider is enabled; Control Center never falls back to its launch directory.
-
-Provider paths and options remain server-only. The public API accepts only `codex | claude`, the exact release identifier, a bounded prompt, and bounded history. Only workspace owners over trusted TLS or loopback may execute the local agent; insecure-LAN viewing and watcher sessions cannot. Read-only mode prevents writes but still grants the CLI visibility into its configured checkout, so that directory must contain only material the owner intends the model to read. The server also enforces a dedicated low-rate request budget, subprocess cancellation, and bounded output.
-
-## Review prevention proposals
-
-When Relay is asked for a code review, each actionable finding also asks for a prevention mechanism: an existing or proposed ast-grep rule, ESLint rule, type check, focused test, or repository agent instruction. These are proposals only. Static-analysis changes still require explicit human approval and should include invalid and nearby valid fixtures.
+The persistence schema is deliberately unstable. Fresh databases are created from one checked-in
+snapshot, and existing databases and backups must match it exactly. There are no migrations in this
+phase; recreate development data or restore a backup made for the same snapshot.
