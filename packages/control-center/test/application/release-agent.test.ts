@@ -169,7 +169,7 @@ describe("release agent application", () => {
         workspaceId: snapshot.workspaceId
       }))
 
-      assert.isTrue(result._tag === "Failure" && result.failure._tag === "ApplicationServiceUnavailable")
+      assert.isTrue(result._tag === "Failure" && result.failure._tag === "ApplicationInvalidRequest")
       assert.strictEqual(calls.length, 0)
     }).pipe(Effect.provide([
       Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),

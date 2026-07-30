@@ -11,6 +11,7 @@ import {
   workspaceSettingsEtag
 } from "../../src/api/workspaceSettings.js"
 import { useWorkspaceSettings } from "../../src/client/settings/useWorkspaceSettings.js"
+import { subscribeWorkspaceSettings } from "../../src/client/settings/workspaceSettingsSignals.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
 import { WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
@@ -166,6 +167,10 @@ describe("useWorkspaceSettings", () => {
   })
 
   it("retains the losing draft when loading the conflict revision fails", async () => {
+    const publishedRevisions: Array<number> = []
+    const unsubscribe = subscribeWorkspaceSettings(({ revision }) => {
+      publishedRevisions.push(revision)
+    })
     const load = vi
       .fn()
       .mockResolvedValueOnce(initial)
@@ -187,9 +192,12 @@ describe("useWorkspaceSettings", () => {
     await act(async () => Promise.resolve())
 
     expect(host.textContent).toContain("conflict-recovery-failed:compact")
+    expect(publishedRevisions).toEqual([1])
     await click(host.querySelector("button")!)
     await act(async () => Promise.resolve())
     expect(host.textContent).toContain("conflict:compact")
+    expect(publishedRevisions).toEqual([1, 2])
+    unsubscribe()
   })
 
   it("expires the session when the conflict recovery load is unauthorized", async () => {

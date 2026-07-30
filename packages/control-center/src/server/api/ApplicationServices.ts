@@ -570,7 +570,7 @@ export class ReleaseAgentTurns extends Context.Service<ReleaseAgentTurns, {
     readonly history: ReadonlyArray<AgentHistoryMessage>
   }) => Effect.Effect<
     ReleaseAgentTurnResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
 }>()("@knpkv/control-center/server/api/ReleaseAgentTurns") {}
 
@@ -585,7 +585,7 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
     readonly request: EnqueueReleaseAgentJobRequest
   }) => Effect.Effect<
     EnqueueReleaseAgentJobResponse,
-    ApplicationResourceNotFound | ApplicationServiceUnavailable
+    ApplicationInvalidRequest | ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
   readonly providers: (workspaceId: WorkspaceId) => Effect.Effect<
     AgentProviderCatalog,

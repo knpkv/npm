@@ -323,6 +323,7 @@ export const useWorkspaceSettings = (
             transport.load(request.signal).then(
               (latest) => {
                 if (!request.signal.aborted) {
+                  publishWorkspaceSettings(latest)
                   setState({ _tag: "conflict", base, candidate, latest })
                 }
               },
@@ -395,6 +396,7 @@ export const useWorkspaceSettings = (
     transport.load(request.signal).then(
       (latest) => {
         if (!request.signal.aborted) {
+          publishWorkspaceSettings(latest)
           setState({ _tag: "conflict", base, candidate, latest })
         }
       },

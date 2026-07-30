@@ -149,8 +149,10 @@ const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
   `sha256:${"a".repeat(64)}`
 )
 type AllowedAgentProvider = typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]
+type AgentToolPolicy = typeof WorkspaceSettingsV1.Type["agent"]["toolPolicy"]
 const workspaceSettingsRecord = (
-  allowedProviders: ReadonlyArray<AllowedAgentProvider>
+  allowedProviders: ReadonlyArray<AllowedAgentProvider>,
+  toolPolicy: AgentToolPolicy = "review-sandbox"
 ) =>
   WorkspaceSettingsRecord.make({
     workspaceId: WORKSPACE_ID,
@@ -160,7 +162,8 @@ const workspaceSettingsRecord = (
       ...DEFAULT_WORKSPACE_SETTINGS,
       agent: {
         ...DEFAULT_WORKSPACE_SETTINGS.agent,
-        allowedProviders
+        allowedProviders,
+        toolPolicy
       }
     }),
     settingsDigest: ContentBlobDigest.make("1".repeat(64)),
@@ -489,7 +492,8 @@ const withService = <Success, Failure>(
     publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>,
     publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>,
     revisionInputs: Ref.Ref<ReadonlyArray<unknown>>,
-    allowedProviders: Ref.Ref<ReadonlyArray<AllowedAgentProvider>>
+    allowedProviders: Ref.Ref<ReadonlyArray<AllowedAgentProvider>>,
+    toolPolicy: Ref.Ref<AgentToolPolicy>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
@@ -519,6 +523,7 @@ const withService = <Success, Failure>(
         "claude",
         "openai-compatible"
       ])
+      const toolPolicy = yield* Ref.make<AgentToolPolicy>("review-sandbox")
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
@@ -614,7 +619,8 @@ const withService = <Success, Failure>(
                     new Error("workspace settings admission must run inside the enqueue transaction")
                   )
               ),
-              Effect.map(workspaceSettingsRecord)
+              Effect.zip(Ref.get(toolPolicy)),
+              Effect.map(([providers, policy]) => workspaceSettingsRecord(providers, policy))
             )
         }
       })
@@ -690,7 +696,8 @@ const withService = <Success, Failure>(
         publicationAuthority,
         publicationFailure,
         revisionInputs,
-        allowedProviders
+        allowedProviders,
+        toolPolicy
       )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
@@ -1009,6 +1016,52 @@ describe("pull request reviews", () => {
           assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
         }
         assert.isNull(yield* Ref.get(enqueueInput))
+      })
+    ))
+
+  it.effect("requires review-sandbox tool policy before durable enqueue", () =>
+    withService((
+      service,
+      enqueueInput,
+      _publicationCommands,
+      _publicationAuthority,
+      _publicationFailure,
+      _revisionInputs,
+      _allowedProviders,
+      toolPolicy
+    ) =>
+      Effect.gen(function*() {
+        yield* Ref.set(toolPolicy, "read-only")
+        const rejected = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(rejected))
+        if (Result.isFailure(rejected)) {
+          assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
+        }
+        assert.isNull(yield* Ref.get(enqueueInput))
+
+        yield* Ref.set(toolPolicy, "review-sandbox")
+        const accepted = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        })
+        assert.strictEqual(accepted._tag, "pending")
+        assert.isNotNull(yield* Ref.get(enqueueInput))
       })
     ))
 

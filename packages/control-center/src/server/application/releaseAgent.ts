@@ -23,6 +23,7 @@ import {
   ReleaseAgentTurns,
   WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
+import { assertAgentProviderAllowed } from "./agentWorkspacePolicy.js"
 
 const MAXIMUM_MODEL_OUTPUT_BYTES = 128 * 1024
 const MAXIMUM_MODEL_STDERR_BYTES = 32 * 1024
@@ -127,9 +128,7 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
       const provider = resolveProvider(options, input.provider)
       if (provider === undefined) return yield* unavailable()
       const settings = yield* workspaceSettings.read(input.workspaceId)
-      if (!settings.settings.agent.allowedProviders.includes(provider)) {
-        return yield* unavailable()
-      }
+      yield* assertAgentProviderAllowed(settings.settings.agent, provider)
 
       const snapshot = yield* portfolio.snapshot(input.workspaceId)
       const release = snapshot.releases.find(({ releaseId }) => releaseId === input.releaseId)

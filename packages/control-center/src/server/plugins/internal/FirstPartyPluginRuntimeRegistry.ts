@@ -897,7 +897,11 @@ const boundedConfluenceUserName = (value: string): string => {
   return bounded.trimEnd()
 }
 
-const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loaded: LoadedRuntime) {
+const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(
+  loaded: LoadedRuntime,
+  scope: PluginRuntimeScope
+) {
+  const persistence = yield* Persistence
   // Pre-stability persistence is intentionally breaking: old Jira connections
   // have neither a verified cloud ID nor an immutable project scope. Recreate
   // them rather than silently loading an unscoped reader.
@@ -943,7 +947,13 @@ const jiraLayer = Effect.fn("FirstPartyPluginRuntime.jiraLayer")(function*(loade
   const plugin = Layer.unwrap(
     makeJiraReadPluginRuntime(
       configurationInput,
-      authMode.value === "oauth" ? configuration.siteId : null
+      authMode.value === "oauth" ? configuration.siteId : null,
+      mapConfigurationFailure(
+        "workspace-settings-unavailable",
+        persistence.workspaceSettings.get(scope.workspaceId)
+      ).pipe(
+        Effect.map(({ settings }) => settings.jira.includeControlCenterAttribution)
+      )
     ).pipe(
       Effect.map(({ definition }) =>
         buildPluginDefinitionLayerFromNegotiatedDescriptor(
@@ -1181,12 +1191,13 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
 
 const providerLayer = Effect.fn("FirstPartyPluginRuntime.providerLayer")(function*(
   loaded: LoadedRuntime,
+  scope: PluginRuntimeScope,
   codeCommitClients: CodeCommitClientsLayer,
   codePipelineClient: CodePipelineReadClientService | undefined
 ) {
   switch (loaded.runtime.providerId) {
     case "jira":
-      return yield* jiraLayer(loaded)
+      return yield* jiraLayer(loaded, scope)
     case "clockify":
       return yield* clockifyLayer(loaded)
     case "confluence":
@@ -1225,7 +1236,12 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
       Layer.unwrap(
         Effect.gen(function*() {
           const loaded = yield* loadRuntime(scope)
-          const provider = yield* providerLayer(loaded, codeCommitClients, codePipelineClient)
+          const provider = yield* providerLayer(
+            loaded,
+            scope,
+            codeCommitClients,
+            codePipelineClient
+          )
           const authority = yield* authorityLayer(scope, loaded, provider.credentialGeneration)
           return Layer.mergeAll(readOnlyExecutorLayer, provider.layer, authority.layer).pipe(
             Layer.provide(requirements)

@@ -25,6 +25,7 @@ import {
   type AgentThreadEvent,
   AgentThreadEventPageSize
 } from "../persistence/repositories/agentJobModels.js"
+import { assertAgentProviderAllowed } from "./agentWorkspacePolicy.js"
 import { mapPersistenceRead, mapPersistenceWriteError } from "./errors.js"
 
 const ContextIdentity = Schema.Struct({
@@ -180,13 +181,7 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         const settings = yield* mapPersistenceRead(
           persistence.workspaceSettings.get(input.workspaceId)
         )
-        if (
-          !settings.settings.agent.allowedProviders.some(
-            (allowedProvider) => allowedProvider === String(providerId)
-          )
-        ) {
-          return yield* unavailable()
-        }
+        yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
         yield* persistence.agentJobs.enqueue({
           workspaceId: input.workspaceId,
           releaseId: input.releaseId,
@@ -214,11 +209,31 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         Effect.mapError(unavailable)
       )
       const catalog = yield* runtimes.catalog().pipe(Effect.mapError(unavailable))
+      const providers = catalog.providers.filter(({ providerId }) =>
+        settings.settings.agent.allowedProviders.some(
+          (allowedProvider) => allowedProvider === String(providerId)
+        )
+      )
+      const defaultProvider = settings.settings.agent.defaultProvider
+      const orderedProviders = defaultProvider === null
+        ? providers
+        : [
+          ...providers.filter(({ providerId }) => String(providerId) === defaultProvider),
+          ...providers.filter(({ providerId }) => String(providerId) !== defaultProvider)
+        ]
+      const defaultModel = settings.settings.agent.defaultModel
       return {
-        providers: catalog.providers.filter(({ providerId }) =>
-          settings.settings.agent.allowedProviders.some(
-            (allowedProvider) => allowedProvider === String(providerId)
-          )
+        providers: orderedProviders.map((provider) =>
+          defaultModel !== null && String(provider.providerId) === defaultProvider &&
+            provider.models.some((model) => String(model) === defaultModel)
+            ? {
+              ...provider,
+              models: [
+                ...provider.models.filter((model) => String(model) === defaultModel),
+                ...provider.models.filter((model) => String(model) !== defaultModel)
+              ]
+            }
+            : provider
         )
       }
     }),

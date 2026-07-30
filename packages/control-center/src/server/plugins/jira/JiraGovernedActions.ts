@@ -16,6 +16,7 @@ import {
   PluginTimeoutFailure,
   PluginUnsupportedCapabilityFailure
 } from "../failures.js"
+import { withJiraControlCenterAttribution } from "./JiraCommentAttribution.js"
 import {
   decodeJiraProviderPathIdentifier,
   JiraProviderPathIdentifier,
@@ -173,6 +174,7 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
   provider: JiraReadProvider,
   configuration: JiraGovernedActionConfiguration,
   cryptoService: Crypto.Crypto,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>,
   request: ProposePluginActionRequestV1
 ) {
   if (
@@ -194,6 +196,7 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
   const payload = request.actionKind === "reply-comment"
     ? yield* Effect.gen(function*() {
       const requested = yield* decodePayload(ReplyCommentRequestPayload, request.payload)
+      const attributionEnabled = yield* includeControlCenterAttribution
       const parent = yield* withTimeout(
         "jira-propose-reply-comment",
         configuration.operationTimeoutMillis,
@@ -209,7 +212,7 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
         _tag: "reply-comment",
         issueKey: issue.key,
         parentCommentId: requested.parentCommentId,
-        body: {
+        body: withJiraControlCenterAttribution({
           type: "doc",
           version: 1,
           content: [
@@ -219,7 +222,7 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
             },
             ...requested.body.content
           ]
-        }
+        }, attributionEnabled)
       })
     })
     : request.actionKind === "set-fix-versions"
@@ -388,8 +391,15 @@ const proposeJiraAssociation = Effect.fn("JiraGovernedActions.proposeAction")(fu
 export const makeJiraGovernedActions = (
   provider: JiraReadProvider,
   configuration: JiraGovernedActionConfiguration,
-  cryptoService: Crypto.Crypto
+  cryptoService: Crypto.Crypto,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure>
 ) => ({
   proposeAction: (request: ProposePluginActionRequestV1) =>
-    proposeJiraAssociation(provider, configuration, cryptoService, request)
+    proposeJiraAssociation(
+      provider,
+      configuration,
+      cryptoService,
+      includeControlCenterAttribution,
+      request
+    )
 })

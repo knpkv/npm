@@ -310,6 +310,9 @@ const materializeCandidate = Effect.fn("RelationshipInferenceMaterialization.mat
       evidenceEntity
     )
   const evidenceClaimId = evidence?.claim.evidenceClaimId ?? null
+  // Evidence IDs are content-derived and evidence rows are immutable, so restoring a
+  // relationship reuses the original retention metadata. The current evidenceDays
+  // policy applies only to newly materialized evidence; M5.3 owns lifecycle sweeps.
   const reusesEvidence = evidenceClaimId !== null &&
     previous?.evidenceClaimIds.includes(evidenceClaimId) === true
   if (unchanged(previous, candidate, source.nodeId, target.nodeId, evidenceClaimId)) {

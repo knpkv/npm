@@ -1162,6 +1162,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               releaseId: params.releaseId,
               workspaceId: session.workspaceId
             }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))
@@ -1177,6 +1178,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               releaseId: params.releaseId,
               request: payload
             }).pipe(Effect.catchTags({
+              ApplicationInvalidRequest: mapApplicationInvalidRequest,
               ApplicationResourceNotFound: mapApplicationNotFound,
               ApplicationServiceUnavailable: mapApplicationUnavailable
             }))

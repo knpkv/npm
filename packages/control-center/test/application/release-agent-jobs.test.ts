@@ -59,7 +59,11 @@ const STARTED_AT_STRING = "2026-07-19T12:00:00.000Z"
 const STARTED_AT = Schema.decodeSync(UtcTimestamp)(STARTED_AT_STRING)
 
 const workspaceSettingsRecord = (
-  allowedProviders: ReadonlyArray<typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]>
+  allowedProviders: ReadonlyArray<typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]>,
+  defaults: {
+    readonly defaultModel?: string | null
+    readonly defaultProvider?: string | null
+  } = {}
 ) =>
   WorkspaceSettingsRecord.make({
     workspaceId: WORKSPACE_ID,
@@ -69,7 +73,9 @@ const workspaceSettingsRecord = (
       ...DEFAULT_WORKSPACE_SETTINGS,
       agent: {
         ...DEFAULT_WORKSPACE_SETTINGS.agent,
-        allowedProviders
+        allowedProviders,
+        defaultModel: defaults.defaultModel ?? null,
+        defaultProvider: defaults.defaultProvider ?? null
       }
     }),
     settingsDigest: ContentBlobDigest.make("1".repeat(64)),
@@ -270,6 +276,81 @@ describe("release agent jobs", () => {
       )
     })))
 
+  it.effect("orders the configured default provider and model first in the filtered catalog", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const catalogRegistry = AgentRuntimeRegistry.of({
+        ...configuredRegistry,
+        catalog: () =>
+          Effect.succeed({
+            providers: [
+              {
+                providerId: DurableAgentProviderId.make("claude"),
+                displayName: "Claude",
+                models: [AgentModelId.make("claude-model")],
+                capabilities: ["release-chat"],
+                health: "available"
+              },
+              {
+                providerId: DurableAgentProviderId.make("codex"),
+                displayName: "Codex",
+                models: [AgentModelId.make("fallback"), AgentModelId.make("preferred")],
+                capabilities: ["release-chat"],
+                health: "available"
+              }
+            ]
+          })
+      })
+      const fakePersistence = Persistence.of({
+        ...persistence,
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () =>
+            Effect.succeed(workspaceSettingsRecord(["claude", "codex"], {
+              defaultProvider: "codex",
+              defaultModel: "preferred"
+            }))
+        }
+      })
+      const service = yield* makeReleaseAgentJobs.pipe(
+        Effect.provideService(Persistence, fakePersistence),
+        Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+      )
+
+      const catalog = yield* service.providers(WORKSPACE_ID)
+      assert.deepStrictEqual(
+        catalog.providers.map(({ providerId }) => providerId),
+        ["codex", "claude"]
+      )
+      assert.deepStrictEqual(
+        catalog.providers[0]?.models,
+        [AgentModelId.make("preferred"), AgentModelId.make("fallback")]
+      )
+
+      const nullDefaults = yield* makeReleaseAgentJobs.pipe(
+        Effect.provideService(
+          Persistence,
+          Persistence.of({
+            ...persistence,
+            workspaceSettings: {
+              ...persistence.workspaceSettings,
+              get: () => Effect.succeed(workspaceSettingsRecord(["claude", "codex"]))
+            }
+          })
+        ),
+        Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+      )
+      const unchanged = yield* nullDefaults.providers(WORKSPACE_ID)
+      assert.deepStrictEqual(
+        unchanged.providers.map(({ providerId }) => providerId),
+        ["claude", "codex"]
+      )
+      assert.deepStrictEqual(
+        unchanged.providers[1]?.models,
+        [AgentModelId.make("fallback"), AgentModelId.make("preferred")]
+      )
+    })))
+
   it.effect("returns an empty cursor-preserving replay only for an existing release", () =>
     withPersistence(Effect.gen(function*() {
       const persistence = yield* Persistence
@@ -372,6 +453,9 @@ describe("release agent jobs", () => {
         }
       }).pipe(Effect.result)
       assert.isTrue(Result.isFailure(disallowed))
+      if (Result.isFailure(disallowed)) {
+        assert.strictEqual(disallowed.failure._tag, "ApplicationInvalidRequest")
+      }
       assert.isNull(yield* Ref.get(enqueuedInput))
 
       yield* Ref.set(allowedProviders, ["codex"])

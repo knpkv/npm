@@ -226,9 +226,15 @@ const baseProvider = (overrides: Partial<JiraReadProvider> = {}): JiraReadProvid
 const withConnection = <Value, Error>(
   provider: JiraReadProvider,
   use: Effect.Effect<Value, Error, AuthorizedPluginExecutor | PluginConnection>,
-  configured: unknown = configuration
+  configured: unknown = configuration,
+  includeControlCenterAttribution: Effect.Effect<boolean, PluginFailure> = Effect.succeed(true)
 ): Effect.Effect<Value, Error | PluginFailure> => {
-  const runtime = makeJiraReadPluginRuntimeFromProvider(provider, configured, configuration.siteId)
+  const runtime = makeJiraReadPluginRuntimeFromProvider(
+    provider,
+    configured,
+    configuration.siteId,
+    includeControlCenterAttribution
+  )
   return use.pipe(
     Effect.provide(runtime.layer.pipe(Layer.provide(NodeCrypto.layer))),
     Effect.scoped
@@ -449,7 +455,16 @@ describe("JiraReadPlugin", () => {
           assert.deepStrictEqual(proposal.request.payload, {
             _tag: "add-comment",
             issueKey: issue.key,
-            body: addedCommentBody
+            body: {
+              ...addedCommentBody,
+              content: [
+                ...addedCommentBody.content,
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "Posted by Control Center." }]
+                }
+              ]
+            }
           })
           assert.strictEqual(proposal.summary, "Comment on Jira issue PAY-42")
           assert.deepStrictEqual(
@@ -587,13 +602,61 @@ describe("JiraReadPlugin", () => {
                   type: "paragraph",
                   content: [{ type: "text", text: "Reply to comment c1" }]
                 },
-                ...replyCommentBody.content
+                ...replyCommentBody.content,
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: "Posted by Control Center." }]
+                }
               ]
             }
           })
           assert.deepStrictEqual(yield* Ref.get(parentLookups), [["10042", "c1"]])
         })
       )
+    }))
+
+  it.effect("omits Jira comment attribution before hashing when workspace policy disables it", () =>
+    Effect.gen(function*() {
+      const provider = baseProvider()
+      const disabledAdd = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.proposeAction(addCommentRequest))),
+        configuration,
+        Effect.succeed(false)
+      )
+      const enabledAdd = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.proposeAction(addCommentRequest)))
+      )
+      const disabledReply = yield* withConnection(
+        provider,
+        PluginConnection.pipe(Effect.flatMap((connection) => connection.proposeAction(replyCommentRequest))),
+        configuration,
+        Effect.succeed(false)
+      )
+
+      assert.deepStrictEqual(disabledAdd.request.payload, {
+        _tag: "add-comment",
+        issueKey: issue.key,
+        body: addedCommentBody
+      })
+      assert.deepStrictEqual(disabledReply.request.payload, {
+        _tag: "reply-comment",
+        issueKey: issue.key,
+        parentCommentId: "c1",
+        body: {
+          type: "doc",
+          version: 1,
+          content: [
+            {
+              type: "paragraph",
+              content: [{ type: "text", text: "Reply to comment c1" }]
+            },
+            ...replyCommentBody.content
+          ]
+        }
+      })
+      assert.notStrictEqual(disabledAdd.payloadDigest, enabledAdd.payloadDigest)
     }))
 
   it.effect("rejects a Jira reply when the exact parent is unavailable", () =>

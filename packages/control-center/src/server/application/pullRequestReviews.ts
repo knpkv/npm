@@ -73,6 +73,7 @@ import {
   type PrReviewThreadSubject as PrReviewThreadSubjectType,
   ReviewSuggestionPublicationDigest
 } from "../persistence/repositories/agentJobModels.js"
+import { assertAgentProviderAllowed, assertPullRequestReviewAllowed } from "./agentWorkspacePolicy.js"
 import { mapPersistenceRead, mapPersistenceReadError, mapPersistenceWriteError } from "./errors.js"
 import {
   ReviewSuggestionPublicationGateway,
@@ -842,13 +843,8 @@ const makePullRequestReviews = Effect.gen(function*() {
         const settings = yield* mapPersistenceRead(
           persistence.workspaceSettings.get(input.workspaceId)
         )
-        if (
-          !settings.settings.agent.allowedProviders.some(
-            (allowedProvider) => allowedProvider === String(providerId)
-          )
-        ) {
-          return yield* new ApplicationInvalidRequest()
-        }
+        yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+        yield* assertPullRequestReviewAllowed(settings.settings.agent)
         const existing = yield* currentFor(input.workspaceId, target)
         if (existing._tag === "pending") return existing
         yield* persistence.agentJobs.enqueue({
