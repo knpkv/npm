@@ -1,0 +1,191 @@
+---
+title: Control Center Setup
+description: Configure local storage, provider connections, local agents, and trusted remote access.
+---
+
+## Install and pair
+
+From the workspace:
+
+```bash
+pnpm install
+pnpm --filter @knpkv/control-center build
+pnpm --filter @knpkv/control-center start
+```
+
+The default listener is `http://127.0.0.1:4173`. Open it locally and enter the ten-minute,
+single-use code printed by the server. Pairing creates an opaque `HttpOnly`, `SameSite=Strict`
+session cookie and a separate browser-owned CSRF proof. Pairing codes and session credentials are
+stored only as SHA-256 digests.
+
+`CONTROL_CENTER_DATA_ROOT` defaults to `.control-center`. Use a dedicated owner-controlled pathname;
+Control Center creates a private data root and validates its ownership, mode, identity, and marker on
+every startup.
+
+## Connect providers
+
+Open **Services** as a workspace owner. The catalog always presents CodeCommit, CodePipeline, Jira,
+Confluence, and Clockify. Setup validates adapter fields, converts submitted secrets to opaque
+`SecretStore` references, persists the secret-free configuration, enables the connection, and then
+runs a redacted live identity test.
+
+A live test failure does not pretend setup was rolled back: the enabled connection remains visible
+with its safe failure state so it can be corrected or disabled.
+
+### AWS
+
+Control Center discovers profile names and configured regions from the standard local AWS files. It
+never returns AWS credentials to the browser. Select a profile and region, test STS identity, then
+follow one or more discovered CodeCommit repositories and CodePipeline pipelines. Discovery is
+bounded to five pages and 20 sorted names per service; manual names remain available when listing is
+unavailable.
+
+One verified AWS account card may contain many followed repositories and pipelines. AWS connections
+persist only profile, region, resource name, and bounded adapter settings.
+
+### Atlassian OAuth
+
+Use one Atlassian OAuth 2.0 integration for Jira and Confluence. Register:
+
+```text
+<public-origin>/services/oauth/atlassian/callback
+```
+
+For the default local server, that is:
+
+```text
+http://127.0.0.1:4173/services/oauth/atlassian/callback
+```
+
+Enable the scope union shown by the Services setup flow. Choose **Sign in with Atlassian**, enter the
+client ID and secret on first use, complete PKCE sign-in, then explicitly choose one accessible site.
+The client secret crosses one CSRF-protected request and is written directly to the machine-local
+`control-center` auth store. Provider tokens never enter browser storage or SQL.
+
+One OAuth site can own multiple Jira projects and Confluence spaces. Jira API-token and Confluence
+API-token setup remain explicit fallbacks. They require email, API token, and the provider identity
+fields shown by the form; secret values become opaque references before configuration is persisted.
+
+OAuth grants expire after ten minutes, are bound to the initiating workspace and browser session, and
+are consumed across code exchange and site selection. Non-loopback callbacks require trusted HTTPS;
+insecure LAN mode cannot configure providers.
+
+### Clockify
+
+Clockify setup takes an API key plus the workspace and user scope shown by Services. The key is stored
+in `SecretStore`; the API origin is the server-owned `https://api.clockify.me/api` constant. A
+connection accepts at most ten users and enforces bounded page, concurrency, and timeout settings.
+
+## Configure local AI
+
+Local agents are disabled unless `CONTROL_CENTER_AGENT_PROVIDERS` names an allowed provider.
+`CONTROL_CENTER_AGENT_CWD` is mandatory whenever Codex or Claude is enabled; there is no fallback to
+the launch directory.
+
+```bash
+CONTROL_CENTER_AGENT_PROVIDERS=codex,claude \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+pnpm --filter @knpkv/control-center start
+```
+
+Install and authenticate the selected CLI for the operating-system user running Control Center.
+Release chat grants read-only access to the configured checkout, so that directory should contain only
+material the owner intends the model to read.
+
+An OpenAI-compatible endpoint is independent of the CLI adapters:
+
+```bash
+CONTROL_CENTER_AGENT_OPENAI_API_URL=http://127.0.0.1:11434/v1 \
+CONTROL_CENTER_AGENT_OPENAI_MODEL=review-model \
+CONTROL_CENTER_AGENT_OPENAI_API_KEY=server-only-token \
+pnpm --filter @knpkv/control-center start
+```
+
+The API key is optional for a trusted local endpoint. See [Agent Runtime](/ai-runtime/),
+[Codex](/ai-codex/), and [Claude](/ai-claude/) for the lower-level adapter contracts.
+
+## Enable contained PR review
+
+PR review additionally requires `sbx`, `git`, the AWS credential helper, and a matching enabled
+CodeCommit connection:
+
+```bash
+CONTROL_CENTER_AGENT_PROVIDERS=codex \
+CONTROL_CENTER_AGENT_CWD=/srv/workspaces/payments \
+CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true \
+CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE=sbx \
+CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE=codex \
+pnpm --filter @knpkv/control-center start
+```
+
+Use `CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE` for native Claude review. The OpenAI-compatible
+typed-tool path uses `CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE`. The review budget must not exceed the
+maximum sandbox duration.
+
+## Trusted remote access
+
+The supported remote setup keeps Control Center on loopback and terminates TLS at a proxy on the same
+machine. The proxy must overwrite, rather than append, the forwarded host, protocol, and client
+address:
+
+```nginx
+proxy_set_header X-Forwarded-Host $host;
+proxy_set_header X-Forwarded-Proto https;
+proxy_set_header X-Forwarded-For $remote_addr;
+```
+
+Start the application with the exact public origin, allowlists, and immediate proxy address:
+
+```bash
+CONTROL_CENTER_HOST=127.0.0.1 \
+CONTROL_CENTER_PORT=4173 \
+CONTROL_CENTER_PUBLIC_ORIGIN=https://control.home.arpa \
+CONTROL_CENTER_ALLOWED_HOSTS=control.home.arpa \
+CONTROL_CENTER_ALLOWED_ORIGINS=https://control.home.arpa \
+CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES=127.0.0.1 \
+pnpm --filter @knpkv/control-center start
+```
+
+Trust only the immediate proxy IP, never a client address or subnet. Direct TLS is also supported with
+opaque `SecretStore` references in `CONTROL_CENTER_TLS_CERTIFICATE_REF` and
+`CONTROL_CENTER_TLS_PRIVATE_KEY_REF`; certificate paths and key bytes are not accepted.
+
+`CONTROL_CENTER_ALLOW_INSECURE_LAN=true` is a restricted viewing mode. It blocks pairing, session
+administration, provider configuration, policy changes, secret inspection, and local agent execution,
+so it cannot onboard a new browser.
+
+## Server configuration reference
+
+Blank optional values mean “not configured.”
+
+| Variable                                           | Default           | Purpose                                            |
+| -------------------------------------------------- | ----------------- | -------------------------------------------------- |
+| `CONTROL_CENTER_DATA_ROOT`                         | `.control-center` | Private database, content, workspaces, and secrets |
+| `CONTROL_CENTER_HOST`                              | `127.0.0.1`       | Bind address                                       |
+| `CONTROL_CENTER_PORT`                              | `4173`            | Bind port                                          |
+| `CONTROL_CENTER_PUBLIC_ORIGIN`                     | blank             | Exact externally reachable origin                  |
+| `CONTROL_CENTER_ALLOWED_HOSTS`                     | blank             | Comma-separated exact Host allowlist               |
+| `CONTROL_CENTER_ALLOWED_ORIGINS`                   | blank             | Comma-separated exact Origin allowlist             |
+| `CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES`           | blank             | Comma-separated exact immediate proxy IPs          |
+| `CONTROL_CENTER_TLS_CERTIFICATE_REF`               | blank             | Opaque certificate secret reference                |
+| `CONTROL_CENTER_TLS_PRIVATE_KEY_REF`               | blank             | Opaque private-key secret reference                |
+| `CONTROL_CENTER_ALLOW_INSECURE_LAN`                | `false`           | Restricted non-TLS LAN viewing                     |
+| `CONTROL_CENTER_AGENT_PROVIDERS`                   | blank             | Comma-separated `codex` and/or `claude`            |
+| `CONTROL_CENTER_AGENT_CWD`                         | blank             | Least-privilege release-chat checkout              |
+| `CONTROL_CENTER_AGENT_CODEX_EXECUTABLE`            | blank             | Host Codex executable override                     |
+| `CONTROL_CENTER_AGENT_CODEX_MODEL`                 | blank             | Codex model override                               |
+| `CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE`           | blank             | Host Claude executable override                    |
+| `CONTROL_CENTER_AGENT_CLAUDE_MODEL`                | blank             | Claude model override                              |
+| `CONTROL_CENTER_AGENT_OPENAI_API_URL`              | blank             | OpenAI-compatible endpoint                         |
+| `CONTROL_CENTER_AGENT_OPENAI_MODEL`                | blank             | OpenAI-compatible model                            |
+| `CONTROL_CENTER_AGENT_OPENAI_API_KEY`              | blank             | Optional redacted server credential                |
+| `CONTROL_CENTER_PR_REVIEW_SBX_ENABLED`             | `false`           | Enable immutable contained review                  |
+| `CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE`          | `sbx`             | Host sandbox executable                            |
+| `CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE`            | blank             | Typed-tool sandbox template                        |
+| `CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE`        | `codex`           | Codex executable inside its agent sandbox          |
+| `CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE`       | `claude`          | Claude executable inside its agent sandbox         |
+| `CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS`           | `1200000`         | Review work budget                                 |
+| `CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` | `1200000`         | Maximum sandbox session duration                   |
+
+OpenTelemetry uses the standard `OTEL_*` exporter variables described in
+[Operations](/control-center-operations/).

@@ -7,14 +7,15 @@ The package collection contains product CLIs, generated API clients, shared Atla
 
 ## Product CLIs
 
-| Package                         | Binary         | Purpose                                                 | Docs                                       |
-| ------------------------------- | -------------- | ------------------------------------------------------- | ------------------------------------------ |
-| `@knpkv/jira-cli`               | `jira`         | Export Jira issues and manage project versions.         | [Jira](/jira/)                             |
-| `@knpkv/confluence-to-markdown` | `confluence`   | Sync Confluence Cloud pages to local Markdown.          | [Confluence](/confluence/)                 |
-| `@knpkv/codecommit`             | `codecommit`   | TUI, web launcher, and CLI commands for CodeCommit PRs. | [CodeCommit](/codecommit/)                 |
-| `@knpkv/jira-clockify`          | `jcf`          | Jira-backed Clockify timer and reconciliation tool.     | [Jira Clockify](/jira-clockify/)           |
-| `@knpkv/agent-skills`           | `knpkv-skills` | Shared installer for bundled Codex and Claude skills.   | [Agent Skills](/agent-skills/)             |
-| `@knpkv/atlassian-common`       | `atlassian`    | Unified Atlassian OAuth profile diagnostics and repair. | [Atlassian Profiles](/atlassian-profiles/) |
+| Package                         | Binary           | Purpose                                                                | Docs                                       |
+| ------------------------------- | ---------------- | ---------------------------------------------------------------------- | ------------------------------------------ |
+| `@knpkv/jira-cli`               | `jira`           | Export Jira issues and manage project versions.                        | [Jira](/jira/)                             |
+| `@knpkv/confluence-to-markdown` | `confluence`     | Sync Confluence Cloud pages to local Markdown.                         | [Confluence](/confluence/)                 |
+| `@knpkv/codecommit`             | `codecommit`     | TUI, web launcher, and CLI commands for CodeCommit PRs.                | [CodeCommit](/codecommit/)                 |
+| `@knpkv/jira-clockify`          | `jcf`            | Jira-backed Clockify timer and reconciliation tool.                    | [Jira Clockify](/jira-clockify/)           |
+| `@knpkv/agent-skills`           | `knpkv-skills`   | Shared installer for bundled Codex and Claude skills.                  | [Agent Skills](/agent-skills/)             |
+| `@knpkv/atlassian-common`       | `atlassian`      | Unified Atlassian OAuth profile diagnostics and repair.                | [Atlassian Profiles](/atlassian-profiles/) |
+| `@knpkv/control-center`         | `control-center` | Local release workspace, governed actions, and contained agent review. | [Control Center](/control-center/)         |
 
 ## API Clients
 
@@ -89,14 +90,16 @@ These packages expose local coding-agent CLIs through Effect and provide a share
 | `@knpkv/ai-codex`                   | Uses the Codex CLI's existing local authentication and configuration; the adapter owns no credential store.  |
 | `@knpkv/ai-claude`                  | Uses the Claude CLI's existing local authentication and configuration; the adapter owns no credential store. |
 | `@knpkv/ai-runtime`                 | Owns no state; applications persist jobs and opaque server-side continuation references.                     |
+| `@knpkv/control-center`             | Private configured data root containing SQLite, content-addressed objects, workspaces, and opaque secrets.   |
 
 ## Documentation Surfaces
 
-| Surface                           | Audience               | Role                                                 |
-| --------------------------------- | ---------------------- | ---------------------------------------------------- |
-| `packages/docs`                   | Users and agents       | Canonical CLI-first documentation site.              |
-| [rly catalog](/rly/catalog/)      | Designers and builders | Interactive components, states, and accessibility.   |
-| Package READMEs                   | npm users              | Package-level quick start and API overview.          |
-| `docs/command-surface.md`         | Maintainers            | Design history for the resource-first command model. |
-| `packages/**/effect-explainer.md` | Maintainers and agents | Architecture notes for Effect-heavy modules.         |
-| `docs/adr`                        | Maintainers            | Architecture decisions.                              |
+| Surface                            | Audience               | Role                                                 |
+| ---------------------------------- | ---------------------- | ---------------------------------------------------- |
+| `packages/docs`                    | Users and agents       | Canonical CLI-first documentation site.              |
+| [Control Center](/control-center/) | Operators and builders | Setup, operations, governance, and troubleshooting.  |
+| [rly catalog](/rly/catalog/)       | Designers and builders | Interactive components, states, and accessibility.   |
+| Package READMEs                    | npm users              | Package-level quick start and API overview.          |
+| `docs/command-surface.md`          | Maintainers            | Design history for the resource-first command model. |
+| `packages/**/effect-explainer.md`  | Maintainers and agents | Architecture notes for Effect-heavy modules.         |
+| `docs/adr`                         | Maintainers            | Architecture decisions.                              |

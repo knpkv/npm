@@ -4,11 +4,15 @@
   "type": "module",
   "scripts": {
     "dev": "astro dev",
-    "build": "pnpm build:catalog && astro build && pnpm compose:catalog && pnpm validate:rly",
+    "build": "pnpm build:catalog && astro build && pnpm compose:catalog && pnpm validate",
     "build:catalog": "pnpm --filter @knpkv/rly storybook:build",
     "compose:catalog": "node scripts/compose-rly-catalog.mjs",
     "preview": "astro preview",
-    "check": "astro check && pnpm validate:rly:source",
+    "check": "astro check && pnpm validate:source",
+    "validate": "pnpm validate:rly && pnpm validate:control-center",
+    "validate:source": "pnpm validate:rly:source && pnpm validate:control-center:source",
+    "validate:control-center": "node scripts/validate-control-center-docs.mjs",
+    "validate:control-center:source": "node scripts/validate-control-center-docs.mjs --source-only",
     "validate:rly": "node scripts/validate-rly-docs.mjs",
     "validate:rly:source": "node scripts/validate-rly-docs.mjs --source-only",
     "clean": "rimraf dist .astro"

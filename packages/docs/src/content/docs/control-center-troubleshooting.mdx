@@ -1,0 +1,177 @@
+---
+title: Control Center Troubleshooting
+description: Diagnose startup, pairing, proxy, OAuth, provider, sandbox, and benchmark failures safely.
+---
+
+## Startup rejects the data root
+
+Control Center requires a private, dedicated, owner-controlled data root. Do not point
+`CONTROL_CENTER_DATA_ROOT` at a workspace root, shared directory, symlink alias, or directory with
+unexpected ownership or permissions.
+
+If the configured claim is missing but a `.control-center-incoming-*` sibling remains, stop every
+writer and inspect the marker before changing anything. A bound marker names the exact claim and
+target basenames. Restore that relative relationship only after verifying the complete unit. Do not
+select an old sibling through a new alias.
+
+A schema or SQLite integrity error is not repaired automatically. Restore a verified backup made
+against the same unstable schema snapshot or recreate disposable development state. Do not add an
+ad-hoc migration.
+
+## Pairing code is rejected
+
+Pairing codes expire after ten minutes and are single use. Use the newest code printed by the running
+server and confirm that the browser is reaching that exact process and public origin.
+
+If an owner session still exists, create another device code from session administration. If no owner
+session remains, stop the server and use the terminal-only recovery command documented in
+[Operations](/control-center-operations/#owner-recovery).
+
+Pairing is intentionally blocked in insecure LAN mode. Use loopback or the trusted HTTPS setup.
+
+## Remote browser cannot connect
+
+Check the transport as one exact chain:
+
+1. `CONTROL_CENTER_PUBLIC_ORIGIN` matches the browser URL, including scheme and port.
+2. `CONTROL_CENTER_ALLOWED_HOSTS` contains the exact Host value.
+3. `CONTROL_CENTER_ALLOWED_ORIGINS` contains the exact browser Origin.
+4. `CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES` contains only the immediate proxy IP.
+5. The proxy overwrites `X-Forwarded-Host`, `X-Forwarded-Proto`, and `X-Forwarded-For`.
+6. `X-Forwarded-For` is one client IP literal, not a chain.
+
+If the local proxy connects over IPv6, trust `::1` rather than `127.0.0.1`. Never trust a subnet or
+client address. Forwarded headers from any untrusted immediate peer are ignored.
+
+Direct TLS takes opaque `SecretStore` references for both certificate and key. Filesystem paths or
+inline PEM values are invalid configuration.
+
+## Atlassian OAuth callback fails
+
+The registered callback must exactly match
+`<public-origin>/services/oauth/atlassian/callback`. Non-loopback OAuth requires trusted HTTPS and an
+active owner session.
+
+A grant is bound to the initiating workspace/session, expires after ten minutes, and is consumed
+across exchange and site selection. Restart from Services after expiry, session replacement, or
+state mismatch.
+
+Before the first profile is saved, incorrect app credentials can be corrected. Once the canonical
+`control-center` store contains a profile, the app configuration cannot be silently replaced. Correct
+the machine-local auth store deliberately rather than retrying with a different secret in the
+browser.
+
+Jira and Confluence require the selected OAuth site to grant their requested scope union. A legacy CLI
+profile is a compatibility fallback, not automatically merged into the shared Control Center
+credential.
+
+## Provider setup or synchronization fails
+
+Connection tests intentionally return redacted categories such as authentication, authorization,
+rate limit, timeout, malformed response, outage, or not found. Raw provider bodies and credentials
+are not available in the browser.
+
+For AWS, test identity first. CodeCommit listing and CodePipeline listing are independent, so one
+service may remain usable when the other is unauthorized. Manual resource names can be used when
+listing is unavailable, but the later connection health check still verifies the selected resource.
+
+For Jira and Confluence, confirm immutable site/project/space identity rather than editing a
+connection to point at a different resource. Follow another resource from the verified site card.
+
+A full final provider page can produce a bounded/resumable checkpoint. That is not a failure and must
+not be relabeled as provider exhaustion. Repeated cursors, identity mismatches, or malformed pages
+fail closed and preserve the last valid cache.
+
+## Governed action remains pending
+
+Pending after a timeout or ambiguous provider response is deliberate. Do not resubmit the action
+manually. The reconciler reloads provider state using the authorized locator and payload digest
+without replaying the mutation.
+
+A preflight conflict means the inspected source revision changed after proposal or authorization.
+Reload the entity, create a new proposal, and obtain a new human decision. An older authorization
+cannot be transferred to the new payload.
+
+Jira proposals cannot be executed in the current adapter generation. They remain reviewable proposal
+material until a stable atomic provider guard exists.
+
+## Relay provider is unavailable
+
+Local providers are opt-in:
+
+- `CONTROL_CENTER_AGENT_PROVIDERS` must contain the selected CLI provider.
+- `CONTROL_CENTER_AGENT_CWD` must be a valid least-privilege checkout.
+- the executable must be installed and authenticated for the server user;
+- optional model/executable overrides must be nonblank and valid.
+
+The provider health response intentionally excludes paths, credentials, native IDs, and raw stderr.
+Run the CLI directly as the same operating-system user to repair its local authentication, then
+restart Control Center.
+
+For an OpenAI-compatible model, verify API URL, model, optional key, and local reachability. The
+adapter uses an interruptible two-minute deadline and does not fall back to another provider.
+
+## PR-review sandbox is unavailable
+
+Contained review needs all of the following:
+
+- `CONTROL_CENTER_PR_REVIEW_SBX_ENABLED=true`;
+- the configured `sbx` executable;
+- `git` and the AWS credential helper;
+- one enabled CodeCommit connection matching the review subject;
+- one configured Codex, Claude, or OpenAI-compatible provider;
+- a review budget no greater than the maximum sandbox duration.
+
+Native Codex/Claude authentication belongs to the corresponding `sbx run` connection, not ambient host
+variables. The typed-tool path also needs its configured sandbox template and deliberately has no
+network.
+
+To test sandbox mechanics without provider credentials or remote writes:
+
+```bash
+pnpm --filter @knpkv/control-center test:sbx:real
+```
+
+The smoke creates a private clone, denies network, verifies the exact revision, proves the checkout is
+writable, and cleans up its sandbox.
+
+## Backup command fails
+
+All writers must remain stopped. The archive must not already exist, and source/archive/destination
+must not contain one another. `restore` also rejects an existing or dangling destination.
+
+Run `verify-backup` independently. It reads only the archive and does not use
+`CONTROL_CENTER_DATA_ROOT`. A message about reproducible cache gaps is degraded-but-valid evidence;
+any other nonzero result leaves the archive or destination unpublished.
+
+## Benchmark validation fails
+
+`benchmark:validate-runtime` requires the report produced by `benchmark:runtime`; it does not invent
+missing evidence. Run:
+
+```bash
+pnpm --filter @knpkv/control-center benchmark:runtime
+pnpm --filter @knpkv/control-center benchmark:validate-runtime
+```
+
+Use `CONTROL_CENTER_BENCHMARK_STORAGE_CLASS=local-ssd` only when the documented CPU, memory, Node,
+platform, and storage class are true. Otherwise leave the default `unverified`; correctness and
+resource-lifecycle assertions still run while absolute timing stays informational.
+
+CI uploads `packages/control-center/test-results/control-center/runtime-benchmark.json`. A missing
+artifact is a gate failure, not a warning.
+
+## UI or accessibility regression
+
+Run the production browser matrix:
+
+```bash
+pnpm --filter @knpkv/control-center test:e2e
+```
+
+Every route family is checked in desktop and compact layouts, forced colors, reduced motion, keyboard
+focus, WCAG 2.2 target sizing, and serious/critical Axe rules. Component-level behavior and approved
+states are also published in the [rly Storybook catalog](/rly/catalog/).
+
+The retired CodeCommit prototype is not a runtime fallback. Production cannot import it; use its
+isolated visual fixtures only as historical design reference.
