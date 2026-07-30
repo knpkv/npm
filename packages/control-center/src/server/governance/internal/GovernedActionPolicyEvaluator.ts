@@ -33,6 +33,7 @@ const canonicalRules = Schema.makeFilter(
 const WorkspaceGovernedActionPolicy = Schema.Struct({
   policyRevision: RecordRevision,
   jiraCommentMode: WorkspaceSettingsV1.fields.jira.fields.commentMode,
+  pipelineMaximumAttempts: WorkspaceSettingsV1.fields.pipeline.fields.maximumAttempts,
   pipelineRetryMode: WorkspaceSettingsV1.fields.pipeline.fields.retryMode,
   agent: WorkspaceSettingsV1.fields.agent
 })
@@ -96,10 +97,14 @@ export class GovernedActionPolicyCatalogInvalid extends Schema.TaggedErrorClass<
   GovernedActionPolicyCatalogInvalid
 >()("GovernedActionPolicyCatalogInvalid", {}) {}
 
-type GovernedActionPolicyEvaluationInput = Pick<
-  VerifyGovernedActionDispatchAuthorityInput,
-  "currentEvidence" | "envelope" | "evaluatedAt" | "session"
->
+type GovernedActionPolicyEvaluationInput =
+  & Pick<
+    VerifyGovernedActionDispatchAuthorityInput,
+    "currentEvidence" | "envelope" | "evaluatedAt" | "session"
+  >
+  & {
+    readonly priorTargetAttempts: number
+  }
 
 /** Internal policy boundary evaluated from current policy and session inputs only. */
 export interface GovernedActionPolicyEvaluatorV1 {
@@ -161,7 +166,10 @@ const workspacePolicyAllows = (
   if (policy === null) return true
   if (
     input.envelope.pluginId === "dev.knpkv.jira.read" &&
-    input.envelope.proposal.request.actionKind === "comment"
+    (
+      input.envelope.proposal.request.actionKind === "add-comment" ||
+      input.envelope.proposal.request.actionKind === "reply-comment"
+    )
   ) {
     return policy.jiraCommentMode === "confirm-before-publish"
   }
@@ -169,7 +177,8 @@ const workspacePolicyAllows = (
     input.envelope.pluginId === "dev.knpkv.aws-codepipeline" &&
     input.envelope.proposal.request.actionKind === "pipeline.retry"
   ) {
-    return policy.pipelineRetryMode === "confirm-before-retry"
+    return policy.pipelineRetryMode === "confirm-before-retry" &&
+      input.priorTargetAttempts < policy.pipelineMaximumAttempts
   }
   return true
 }
@@ -223,6 +232,7 @@ export const makeWorkspaceGovernedActionPolicyDefinitions = Effect.fn(
   const workspacePolicy = {
     policyRevision: record.policyRevision,
     jiraCommentMode: record.settings.jira.commentMode,
+    pipelineMaximumAttempts: record.settings.pipeline.maximumAttempts,
     pipelineRetryMode: record.settings.pipeline.retryMode,
     agent: record.settings.agent
   }

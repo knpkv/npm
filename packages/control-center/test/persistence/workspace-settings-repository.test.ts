@@ -2,13 +2,18 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Result, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
+import * as DateTime from "effect/DateTime"
 import * as Encoding from "effect/Encoding"
 
 import { SessionSummary } from "../../src/api/session.js"
 import { WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
 import { PersonId, SessionId, WorkspaceId, WorkspaceSettingsMutationId } from "../../src/domain/identifiers.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
-import { GovernedWorkspaceSettingsSections, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
+import {
+  DEFAULT_WORKSPACE_SETTINGS,
+  GovernedWorkspaceSettingsSections,
+  WorkspaceSettingsV1
+} from "../../src/domain/workspaceSettings.js"
 import { makeWorkspaceSettingsAdministration } from "../../src/server/application/workspaceSettingsAdministration.js"
 import {
   authorizeWorkspaceSettingsGovernanceRequest,
@@ -17,6 +22,7 @@ import {
 } from "../../src/server/governance/GovernedHumanMutationPolicyEvaluator.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
 import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import { RecordRevision } from "../../src/server/persistence/repositories/models.js"
 import { makePersistenceTestConfig } from "./fixtures.js"
 
 const workspaceId = Schema.decodeSync(WorkspaceId)(
@@ -129,6 +135,51 @@ const seedAuthority = Effect.gen(function*() {
 })
 
 describe("WorkspaceSettingsRepository", () => {
+  it.effect("updates a fresh workspace without a settings read preflight", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const { sql } = yield* Database
+        const updated = yield* persistence.workspaceSettings.update(workspaceId, {
+          mutationId: firstMutation,
+          expectedRevision: RecordRevision.make(1),
+          settings: {
+            ...DEFAULT_WORKSPACE_SETTINGS,
+            presentation: {
+              ...DEFAULT_WORKSPACE_SETTINGS.presentation,
+              density: "compact"
+            }
+          },
+          acknowledgedGovernedSections: [],
+          governanceAuthority: null,
+          actorPersonId: ownerOne,
+          sessionId: sessionOne,
+          updatedAt: firstUpdateAt
+        })
+
+        assert.strictEqual(updated.revision, 2)
+        assert.strictEqual(
+          DateTime.formatIso(updated.createdAt),
+          "2026-07-30T09:00:00.000Z"
+        )
+        assert.strictEqual(
+          DateTime.formatIso(updated.updatedAt),
+          "2026-07-30T10:00:00.000Z"
+        )
+        assert.strictEqual(updated.settings.presentation.density, "compact")
+        const versions = yield* sql<{ readonly revision: number }>`SELECT revision
+          FROM workspace_settings_versions
+          WHERE workspace_id = ${workspaceId}
+          ORDER BY revision`
+        assert.deepStrictEqual(versions.map(({ revision }) => revision), [1, 2])
+        const audits = yield* persistence.workspaceSettings.audits(workspaceId)
+        assert.lengthOf(audits, 1)
+        assert.strictEqual(audits[0]?.fromRevision, 1)
+        assert.strictEqual(audits[0]?.toRevision, 2)
+      })
+    ))
+
   it.effect(
     "forces two sessions through explicit conflict recovery without losing either change",
     () =>

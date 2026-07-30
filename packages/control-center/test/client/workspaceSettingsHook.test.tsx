@@ -39,7 +39,7 @@ const saved = WorkspaceSettingsReadModel.make({
 })
 
 let mountedRoot: Root | undefined
-const onSessionExpired = (): void => undefined
+const ignoreSessionExpiration = (): void => undefined
 
 afterEach(async () => {
   if (mountedRoot !== undefined) await act(async () => mountedRoot?.unmount())
@@ -47,7 +47,13 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const Harness = ({ transport }: { readonly transport: WorkspaceSettingsTransport }): ReactElement => {
+const Harness = ({
+  onSessionExpired = ignoreSessionExpiration,
+  transport
+}: {
+  readonly onSessionExpired?: (sessionKey: string) => void
+  readonly transport: WorkspaceSettingsTransport
+}): ReactElement => {
   const controller = useWorkspaceSettings("session-a", onSessionExpired, transport)
   if (controller.state._tag === "conflict-recovery-failed") {
     return (
@@ -60,7 +66,14 @@ const Harness = ({ transport }: { readonly transport: WorkspaceSettingsTransport
     )
   }
   if (controller.state._tag === "conflict") {
-    return <span>{`${controller.state._tag}:${controller.state.candidate.presentation.density}`}</span>
+    return (
+      <div>
+        <span>{`${controller.state._tag}:${controller.state.candidate.presentation.density}`}</span>
+        <button onClick={controller.reapplyConflict} type="button">
+          Reapply
+        </button>
+      </div>
+    )
   }
   if (controller.state._tag !== "ready") {
     return <span>{controller.state._tag}</span>
@@ -164,6 +177,114 @@ describe("useWorkspaceSettings", () => {
     await click(host.querySelector("button")!)
     await act(async () => Promise.resolve())
     expect(host.textContent).toContain("conflict:compact")
+  })
+
+  it("expires the session when the conflict recovery load is unauthorized", async () => {
+    const onExpired = vi.fn()
+    const transport = {
+      load: vi.fn().mockResolvedValueOnce(initial).mockRejectedValueOnce({ _tag: "UnauthorizedApiError" }),
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<Harness onSessionExpired={onExpired} transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+    await act(async () => Promise.resolve())
+
+    expect(onExpired).toHaveBeenCalledOnce()
+    expect(onExpired).toHaveBeenCalledWith("session-a")
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("expires the session when a retried conflict recovery load is unauthorized", async () => {
+    const onExpired = vi.fn()
+    const transport = {
+      load: vi
+        .fn()
+        .mockResolvedValueOnce(initial)
+        .mockRejectedValueOnce(new Error("latest unavailable"))
+        .mockRejectedValueOnce({ _tag: "UnauthorizedApiError" }),
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<Harness onSessionExpired={onExpired} transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+    await act(async () => Promise.resolve())
+    const retry = host.querySelector("button")
+    if (retry === null) throw new Error("expected conflict retry button")
+    await click(retry)
+
+    expect(onExpired).toHaveBeenCalledOnce()
+    expect(onExpired).toHaveBeenCalledWith("session-a")
+    expect(host.textContent).toBe("failed")
+  })
+
+  it("marks an already-converged conflict as saved without another update", async () => {
+    const update = vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    const transport = {
+      load: vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(saved),
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<Harness transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+    await act(async () => Promise.resolve())
+    const reapply = host.querySelector("button")
+    if (reapply === null) throw new Error("expected conflict reapply button")
+    await click(reapply)
+
+    expect(host.textContent).toContain("saved")
+    expect(update).toHaveBeenCalledOnce()
+  })
+
+  it("keeps a genuinely different reapplied conflict draft dirty", async () => {
+    const latest = WorkspaceSettingsReadModel.make({
+      ...saved,
+      settings: {
+        ...saved.settings,
+        presentation: {
+          density: "comfortable",
+          defaultLanding: "active-work"
+        }
+      }
+    })
+    const transport = {
+      load: vi.fn().mockResolvedValueOnce(initial).mockResolvedValueOnce(latest),
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<Harness transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+    await act(async () => Promise.resolve())
+    const reapply = host.querySelector("button")
+    if (reapply === null) throw new Error("expected conflict reapply button")
+    await click(reapply)
+
+    expect(host.textContent).toContain("dirty")
+    expect(host.textContent).toContain("active-work")
   })
 
   it("ignores form edits while a save is in flight", async () => {

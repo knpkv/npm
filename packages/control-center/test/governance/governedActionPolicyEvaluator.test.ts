@@ -43,10 +43,14 @@ const decodePolicyBinding = Schema.decodeUnknownSync(GovernedActionPolicyBinding
 const decodeSession = Schema.decodeUnknownSync(SessionSummary)
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp)
 
-type EvaluationInput = Pick<
-  VerifyGovernedActionDispatchAuthorityInput,
-  "currentEvidence" | "envelope" | "evaluatedAt" | "session"
->
+type EvaluationInput =
+  & Pick<
+    VerifyGovernedActionDispatchAuthorityInput,
+    "currentEvidence" | "envelope" | "evaluatedAt" | "session"
+  >
+  & {
+    readonly priorTargetAttempts: number
+  }
 
 const makeInput = Effect.fn("GovernedActionPolicyEvaluatorTest.makeInput")(function*() {
   const envelope = yield* makeAuthorizedGovernedActionEnvelope()
@@ -68,7 +72,8 @@ const makeInput = Effect.fn("GovernedActionPolicyEvaluatorTest.makeInput")(funct
       envelope,
       currentEvidence: envelope.evidence,
       session,
-      evaluatedAt: decodeTimestamp("2026-07-15T10:02:00.000Z")
+      evaluatedAt: decodeTimestamp("2026-07-15T10:02:00.000Z"),
+      priorTargetAttempts: 0
     } satisfies EvaluationInput
   }
 })
@@ -162,15 +167,26 @@ describe("governed action policy evaluator", () => {
           )._tag,
           "GovernedActionPolicyBindingUnavailable"
         )
-        const manualInput = yield* replacePolicyAction(
+        const manualInputs = yield* Effect.all(
+          ["add-comment", "reply-comment"].map((actionKind) =>
+            replacePolicyAction(input, manualDefinition, actionKind, "dev.knpkv.jira.read")
+          )
+        )
+        for (const manualInput of manualInputs) {
+          assert.strictEqual(
+            (yield* manualEvaluator.evaluate(manualInput)).decision,
+            "denied"
+          )
+        }
+        const unrelatedJiraInput = yield* replacePolicyAction(
           input,
           manualDefinition,
-          "comment",
+          "set-fix-versions",
           "dev.knpkv.jira.read"
         )
         assert.strictEqual(
-          (yield* manualEvaluator.evaluate(manualInput)).decision,
-          "denied"
+          (yield* manualEvaluator.evaluate(unrelatedJiraInput)).decision,
+          "allowed"
         )
 
         const confirmedSettings: WorkspaceSettingsV1 = {
@@ -189,25 +205,29 @@ describe("governed action policy evaluator", () => {
         if (confirmedDefinition === undefined) {
           return yield* Effect.die("expected confirmed settings policy")
         }
-        const confirmedInput = yield* replacePolicyAction(
-          input,
-          confirmedDefinition,
-          "comment",
-          "dev.knpkv.jira.read"
-        )
         const confirmedEvaluator = yield* makeGovernedActionPolicyEvaluator(confirmedDefinitions)
-        assert.strictEqual(
-          (yield* confirmedEvaluator.evaluate(confirmedInput)).decision,
-          "allowed"
-        )
-        assert.strictEqual(
-          (
-            yield* confirmedEvaluator
-              .evaluate(manualInput)
-              .pipe(Effect.flip)
-          )._tag,
-          "GovernedActionPolicyBindingUnavailable"
-        )
+        for (const actionKind of ["add-comment", "reply-comment"]) {
+          const confirmedInput = yield* replacePolicyAction(
+            input,
+            confirmedDefinition,
+            actionKind,
+            "dev.knpkv.jira.read"
+          )
+          assert.strictEqual(
+            (yield* confirmedEvaluator.evaluate(confirmedInput)).decision,
+            "allowed"
+          )
+        }
+        for (const manualInput of manualInputs) {
+          assert.strictEqual(
+            (
+              yield* confirmedEvaluator
+                .evaluate(manualInput)
+                .pipe(Effect.flip)
+            )._tag,
+            "GovernedActionPolicyBindingUnavailable"
+          )
+        }
 
         const presentationOnlyDefinitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
           workspaceSettingsRecord(2, {
@@ -224,6 +244,52 @@ describe("governed action policy evaluator", () => {
         )
       }).pipe(Effect.provide(NodeServices.layer))
   )
+
+  it.effect("enforces the durable pipeline retry attempt ceiling", () =>
+    Effect.gen(function*() {
+      const { input } = yield* makeInput()
+      const settings: WorkspaceSettingsV1 = {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        pipeline: {
+          retryMode: "confirm-before-retry",
+          maximumAttempts: 1
+        }
+      }
+      const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(
+        workspaceSettingsRecord(2, settings)
+      )
+      const definition = definitions.find(
+        ({ binding }) => binding.requiredPermission === "workspace-owner"
+      )
+      if (definition === undefined) {
+        return yield* Effect.die("expected owner settings policy")
+      }
+      const evaluator = yield* makeGovernedActionPolicyEvaluator(definitions)
+      const retryInput = yield* replacePolicyAction(
+        input,
+        definition,
+        "pipeline.retry",
+        "dev.knpkv.aws-codepipeline"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate(retryInput)).decision,
+        "allowed"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate({ ...retryInput, priorTargetAttempts: 1 })).decision,
+        "denied"
+      )
+      const unrelatedInput = yield* replacePolicyAction(
+        { ...input, priorTargetAttempts: 100 },
+        definition,
+        "pipeline.stop",
+        "dev.knpkv.aws-codepipeline"
+      )
+      assert.strictEqual(
+        (yield* evaluator.evaluate(unrelatedInput)).decision,
+        "allowed"
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
 
   it.effect("binds approval actions to a policy granted to approvers and owners", () =>
     Effect.gen(function*() {

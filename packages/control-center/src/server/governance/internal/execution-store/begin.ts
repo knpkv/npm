@@ -34,6 +34,9 @@ import { digestGovernedActionPreparationToken, issueGovernedActionPermitToken } 
 const DISPATCH_WINDOW_SECONDS = 15
 const LEASE_GRACE_SECONDS = 30
 const RECOVERY_SAFETY_SECONDS = 60
+const AttemptCountRow = Schema.Struct({
+  count: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
 
 const inactive = (state: GovernedActionState): GovernedActionBeginResult => ({
   _tag: "inactive",
@@ -203,11 +206,78 @@ export const makeGovernedActionExecutionBegin = Effect.gen(function*() {
             evidence: record.envelope.evidence,
             now
           })
+          const attemptCountRows = yield* sql<Record<string, unknown>>`WITH RECURSIVE
+            retry_edges(source_execution_id, result_execution_id) AS (
+              SELECT source.vendor_immutable_id, retry.provider_operation_id
+              FROM governed_actions AS retry
+              JOIN governed_action_target_dimensions AS retry_dimensions
+                ON retry_dimensions.workspace_id = retry.workspace_id
+                AND retry_dimensions.action_id = retry.action_id
+                AND retry_dimensions.action_kind = 'pipeline.retry'
+              JOIN entities AS source
+                ON source.workspace_id = retry.workspace_id
+                AND source.entity_id = retry.target_entity_id
+                AND source.plugin_connection_id = retry.plugin_connection_id
+                AND source.provider_id = retry.provider_id
+              WHERE retry.workspace_id = ${record.envelope.workspaceId}
+                AND retry.plugin_connection_id = ${record.envelope.pluginConnectionId}
+                AND retry.provider_id = 'codepipeline'
+                AND retry.provider_operation_id IS NOT NULL
+            ),
+            retry_component(execution_id) AS (
+              SELECT target.vendor_immutable_id
+              FROM entities AS target
+              WHERE target.workspace_id = ${record.envelope.workspaceId}
+                AND target.entity_id = ${record.envelope.targetEntityId}
+                AND target.plugin_connection_id = ${record.envelope.pluginConnectionId}
+                AND target.provider_id = 'codepipeline'
+              UNION
+              SELECT edge.result_execution_id
+              FROM retry_edges AS edge
+              JOIN retry_component AS component
+                ON edge.source_execution_id = component.execution_id
+              UNION
+              SELECT edge.source_execution_id
+              FROM retry_edges AS edge
+              JOIN retry_component AS component
+                ON edge.result_execution_id = component.execution_id
+            )
+            SELECT COUNT(DISTINCT attempt.attempt_id) AS count
+            FROM governed_action_attempts AS attempt
+            JOIN governed_actions AS action
+              ON action.workspace_id = attempt.workspace_id
+              AND action.action_id = attempt.action_id
+            JOIN governed_action_target_dimensions AS dimensions
+              ON dimensions.workspace_id = action.workspace_id
+              AND dimensions.action_id = action.action_id
+            JOIN entities AS target
+              ON target.workspace_id = action.workspace_id
+              AND target.entity_id = action.target_entity_id
+              AND target.plugin_connection_id = action.plugin_connection_id
+              AND target.provider_id = action.provider_id
+            WHERE action.workspace_id = ${record.envelope.workspaceId}
+              AND action.plugin_connection_id = ${record.envelope.pluginConnectionId}
+              AND action.provider_id = 'codepipeline'
+              AND dimensions.action_kind = 'pipeline.retry'
+              AND target.vendor_immutable_id IN (
+                SELECT execution_id FROM retry_component
+              )`
+          const decodedAttemptCountRows = yield* Schema.decodeUnknownEffect(
+            Schema.Array(AttemptCountRow)
+          )(attemptCountRows)
+          const attemptCountRow = decodedAttemptCountRows[0]
+          if (decodedAttemptCountRows.length !== 1 || attemptCountRow === undefined) {
+            return yield* new GovernedActionExecutionStoreError({
+              operation: "begin",
+              reason: "persistence-unavailable"
+            })
+          }
           const currentPolicy = yield* policy.evaluate({
             envelope: record.envelope,
             currentEvidence,
             session: currentSession,
-            evaluatedAt: now
+            evaluatedAt: now,
+            priorTargetAttempts: attemptCountRow.count
           })
           if (currentPolicy.decision !== "allowed") {
             const transitionId = GovernedActionTransitionId.make(yield* cryptoService.randomUUIDv7)

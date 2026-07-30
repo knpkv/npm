@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 
 import type { RlyTheme } from "@knpkv/rly/foundations"
-import { type ReactElement, act } from "react"
+import { type ReactElement, act, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 
 import { AppThemeProvider, readStoredAppTheme, useAppTheme } from "../../src/client/AppProviders.js"
 import { SettingsForm } from "../../src/client/settings/WorkspaceSettingsPage.js"
-import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
+import { DEFAULT_WORKSPACE_SETTINGS, type WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -41,6 +41,46 @@ const ThemeHarness = (): ReactElement => {
       ))}
     </div>
   )
+}
+
+const EditableSettingsHarness = (): ReactElement => {
+  const [draft, setDraft] = useState<WorkspaceSettingsV1>(DEFAULT_WORKSPACE_SETTINGS)
+  return (
+    <div>
+      <SettingsForm canEdit draft={draft} onChange={setDraft} />
+      <output>{draft.agent.allowedProviders.join("|")}</output>
+      <button
+        onClick={() =>
+          setDraft({
+            ...draft,
+            agent: {
+              ...draft.agent,
+              allowedProviders: ["anthropic"]
+            }
+          })
+        }
+        type="button"
+      >
+        Replace providers
+      </button>
+    </div>
+  )
+}
+
+const changeInput = async (input: HTMLInputElement, value: string): Promise<void> => {
+  await act(async () => {
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set
+    if (setValue === undefined) throw new Error("expected native input value setter")
+    setValue.call(input, value)
+    input.dispatchEvent(
+      new InputEvent("input", {
+        bubbles: true,
+        data: value,
+        inputType: "insertText"
+      })
+    )
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
 }
 
 describe("workspace settings browser acceptance", () => {
@@ -90,6 +130,59 @@ describe("workspace settings browser acceptance", () => {
     )
     expect(Array.from(host.querySelectorAll("select")).some((select) => select.value === "local-profile")).toBe(true)
     expect(host.textContent).not.toContain("Local profile is unavailable")
+  })
+
+  it("preserves provider delimiters while editing and canonicalizes structured providers", async () => {
+    const host = await mount(<EditableSettingsHarness />)
+    const label = Array.from(host.querySelectorAll("label")).find((candidate) =>
+      candidate.textContent?.includes("Allowed providers")
+    )
+    const input = label?.querySelector("input")
+    if (input === undefined || input === null) {
+      throw new Error("expected allowed providers input")
+    }
+    await act(async () => input.focus())
+
+    for (const length of Array.from({ length: "codex,openai".length }, (_, index) => index + 1)) {
+      const value = "codex,openai".slice(0, length)
+      await changeInput(input, value)
+      expect(input.value).toBe(value)
+    }
+    expect(host.querySelector("output")?.textContent).toBe("codex|openai")
+
+    await act(async () => input.blur())
+    expect(input.value).toBe("codex, openai")
+
+    await changeInput(input, "openai")
+    expect(host.querySelector("output")?.textContent).toBe("openai")
+    await changeInput(input, "openai,anthropic")
+    expect(input.value).toBe("openai,anthropic")
+    expect(host.querySelector("output")?.textContent).toBe("anthropic|openai")
+
+    await changeInput(input, "draft,")
+    const replace = Array.from(host.querySelectorAll("button")).find(
+      (candidate) => candidate.textContent === "Replace providers"
+    )
+    await act(async () => replace?.click())
+    expect(input.value).toBe("anthropic")
+  })
+
+  it("defers provider parsing until input composition completes", async () => {
+    const host = await mount(<EditableSettingsHarness />)
+    const label = Array.from(host.querySelectorAll("label")).find((candidate) =>
+      candidate.textContent?.includes("Allowed providers")
+    )
+    const input = label?.querySelector("input")
+    if (input === undefined || input === null) {
+      throw new Error("expected allowed providers input")
+    }
+
+    await act(async () => input.dispatchEvent(new Event("compositionstart", { bubbles: true })))
+    await changeInput(input, "openai")
+    expect(input.value).toBe("openai")
+    expect(host.querySelector("output")?.textContent).toBe("")
+    await act(async () => input.dispatchEvent(new Event("compositionend", { bubbles: true })))
+    expect(host.querySelector("output")?.textContent).toBe("openai")
   })
 
   it("persists only system, light, and dark at narrow and wide viewport sizes", async () => {

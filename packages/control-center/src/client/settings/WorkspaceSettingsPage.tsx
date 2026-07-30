@@ -1,6 +1,6 @@
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
-import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useState } from "react"
+import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 
 import {
   changedWorkspaceSettingsSections,
@@ -13,6 +13,15 @@ import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
 
 const integerValue = (event: ChangeEvent<HTMLInputElement>): number => Number.parseInt(event.currentTarget.value, 10)
+const parseAllowedProviders = (value: string): ReadonlyArray<string> =>
+  [
+    ...new Set(
+      value
+        .split(",")
+        .map((provider) => provider.trim())
+        .filter((provider) => provider.length > 0)
+    )
+  ].sort()
 
 const SettingsSection = ({
   children,
@@ -175,8 +184,35 @@ export const SettingsForm = ({
   readonly onChange: (draft: WorkspaceSettingsV1) => void
 }): ReactElement => {
   const disabled = !canEdit
+  const canonicalAllowedProvidersText = draft.agent.allowedProviders.join(", ")
+  const [allowedProvidersText, setAllowedProvidersText] = useState(canonicalAllowedProvidersText)
+  const emittedAllowedProvidersText = useRef(canonicalAllowedProvidersText)
+  const composingAllowedProviders = useRef(false)
   const update = <Key extends keyof WorkspaceSettingsV1>(key: Key, value: WorkspaceSettingsV1[Key]): void =>
     onChange({ ...draft, [key]: value })
+  const updateAllowedProviders = (value: string): void => {
+    const allowedProviders = parseAllowedProviders(value)
+    emittedAllowedProvidersText.current = allowedProviders.join(", ")
+    update("agent", {
+      ...draft.agent,
+      allowedProviders,
+      defaultProvider:
+        draft.agent.defaultProvider !== null && allowedProviders.includes(draft.agent.defaultProvider)
+          ? draft.agent.defaultProvider
+          : null,
+      defaultModel:
+        draft.agent.defaultProvider !== null && allowedProviders.includes(draft.agent.defaultProvider)
+          ? draft.agent.defaultModel
+          : null
+    })
+  }
+
+  useEffect(() => {
+    if (canonicalAllowedProvidersText !== emittedAllowedProvidersText.current) {
+      setAllowedProvidersText(canonicalAllowedProvidersText)
+    }
+    emittedAllowedProvidersText.current = canonicalAllowedProvidersText
+  }, [canonicalAllowedProvidersText])
 
   return (
     <div className={styles.sections}>
@@ -365,30 +401,21 @@ export const SettingsForm = ({
           <input
             className={styles.control}
             disabled={disabled}
+            onBlur={() => setAllowedProvidersText(canonicalAllowedProvidersText)}
+            onCompositionEnd={(event) => {
+              composingAllowedProviders.current = false
+              updateAllowedProviders(event.currentTarget.value)
+            }}
+            onCompositionStart={() => {
+              composingAllowedProviders.current = true
+            }}
             onChange={(event) => {
-              const allowedProviders = [
-                ...new Set(
-                  event.currentTarget.value
-                    .split(",")
-                    .map((value) => value.trim())
-                    .filter((value) => value.length > 0)
-                )
-              ].sort()
-              update("agent", {
-                ...draft.agent,
-                allowedProviders,
-                defaultProvider:
-                  draft.agent.defaultProvider !== null && allowedProviders.includes(draft.agent.defaultProvider)
-                    ? draft.agent.defaultProvider
-                    : null,
-                defaultModel:
-                  draft.agent.defaultProvider !== null && allowedProviders.includes(draft.agent.defaultProvider)
-                    ? draft.agent.defaultModel
-                    : null
-              })
+              const value = event.currentTarget.value
+              setAllowedProvidersText(value)
+              if (!composingAllowedProviders.current) updateAllowedProviders(value)
             }}
             type="text"
-            value={draft.agent.allowedProviders.join(", ")}
+            value={allowedProvidersText}
           />
         </Field>
         <Field label="Default provider">

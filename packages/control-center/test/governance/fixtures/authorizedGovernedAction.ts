@@ -39,6 +39,26 @@ const NODE_ID = "01890f6f-6d6a-7cc0-98d2-440000000011"
 export const PROPOSED_AT = "2026-07-15T10:00:00.000Z"
 export const AUTHORIZED_AT = "2026-07-15T10:01:00.000Z"
 
+export interface GovernedActionFixtureIdentity {
+  readonly actionId: string
+  readonly authorizationAuditId: string
+  readonly authorizationId: string
+  readonly authorizationTransitionId: string
+  readonly idempotencyKey: string
+  readonly proposalAuditId: string
+  readonly proposalTransitionId: string
+}
+
+const DEFAULT_FIXTURE_IDENTITY: GovernedActionFixtureIdentity = {
+  actionId: ACTION_ID,
+  authorizationAuditId: AUTHORIZATION_AUDIT_ID,
+  authorizationId: AUTHORIZATION_ID,
+  authorizationTransitionId: AUTHORIZATION_TRANSITION_ID,
+  idempotencyKey: "",
+  proposalAuditId: PROPOSAL_AUDIT_ID,
+  proposalTransitionId: PROPOSAL_TRANSITION_ID
+}
+
 export type GovernedActionFixtureVariant =
   | "jira"
   | "codecommit"
@@ -483,14 +503,22 @@ export const seedGovernedActionCurrentInputs = Effect.fn(
 export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   "AuthorizedGovernedActionFixture.makeEnvelope"
 )(function*(options?: {
+  readonly identity?: GovernedActionFixtureIdentity | undefined
   readonly policy?: GovernedActionPolicyBinding | undefined
   readonly pluginConnectionAuthorityDigest?: string | undefined
+  readonly retryOf?: string | undefined
   readonly targetEntityId?: string | undefined
+  readonly targetVendorImmutableId?: string | undefined
   readonly variant?: GovernedActionFixtureVariant | undefined
 }) {
   const variant = options?.variant ?? "jira"
   const fixture = fixtureVariant(variant)
-  const payload = decodePayload(fixture.payload)
+  const identity = options?.identity ?? DEFAULT_FIXTURE_IDENTITY
+  const payload = decodePayload(
+    variant === "codepipeline" && options?.retryOf !== undefined
+      ? { ...fixture.payload, retryOf: options.retryOf }
+      : fixture.payload
+  )
   const payloadDigest = yield* digestGovernedActionPayload(payload)
   const evidence = decodeEvidence({
     workspaceId: WORKSPACE_ID,
@@ -508,8 +536,8 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
   const policy = options?.policy ?? (yield* makeBuiltInGovernedActionPolicyDefinition()).binding
   const material = decodeEnvelopeMaterial({
     schemaVersion: 1,
-    actionId: ACTION_ID,
-    idempotencyKey: fixture.idempotencyKey,
+    actionId: identity.actionId,
+    idempotencyKey: identity.idempotencyKey === "" ? fixture.idempotencyKey : identity.idempotencyKey,
     workspaceId: WORKSPACE_ID,
     pluginConnectionId: CONNECTION_ID,
     pluginConnectionRevision: 1,
@@ -527,7 +555,7 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
         actionKind: fixture.actionKind,
         target: {
           entityType: fixture.entityType,
-          vendorImmutableId: fixture.vendorImmutableId
+          vendorImmutableId: options?.targetVendorImmutableId ?? fixture.vendorImmutableId
         },
         expectedRevision: fixture.sourceRevision,
         payload,
@@ -560,32 +588,39 @@ export const makeAuthorizedGovernedActionEnvelope = Effect.fn(
 export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.seed")(function*(options?: {
   readonly authorizationExpiresAt?: string
   readonly authorized?: boolean
+  readonly identity?: GovernedActionFixtureIdentity
   readonly policy?: GovernedActionPolicyBinding
   readonly pluginConnectionAuthorityDigest?: string
+  readonly retryOf?: string
   readonly seedAuthorityRoots?: boolean
   readonly targetEntityId?: string
+  readonly targetVendorImmutableId?: string
   readonly variant?: GovernedActionFixtureVariant
 }) {
   if (options?.seedAuthorityRoots !== false) yield* seedGovernedActionAuthorityRoots(options?.variant)
   const repository = yield* GovernedActionRepository
   const envelope = yield* makeAuthorizedGovernedActionEnvelope({
+    identity: options?.identity,
     policy: options?.policy,
     pluginConnectionAuthorityDigest: options?.pluginConnectionAuthorityDigest,
+    retryOf: options?.retryOf,
     targetEntityId: options?.targetEntityId,
+    targetVendorImmutableId: options?.targetVendorImmutableId,
     variant: options?.variant
   })
+  const identity = options?.identity ?? DEFAULT_FIXTURE_IDENTITY
   const proposal = decodeCommit({
     envelope: Schema.encodeSync(GovernedActionEnvelopeV1)(envelope),
     expectedHeadTransitionId: null,
-    transitionId: PROPOSAL_TRANSITION_ID,
-    commandId: "command:PAY-42:propose",
+    transitionId: identity.proposalTransitionId,
+    commandId: `command:${identity.actionId}:propose`,
     command: { _tag: "propose" },
     cause: humanCause,
     occurredAt: PROPOSED_AT,
     causationId: null,
     correlationId: envelope.correlationId,
     companion: { _tag: "none" },
-    auditEventId: PROPOSAL_AUDIT_ID
+    auditEventId: identity.proposalAuditId
   })
   yield* repository.commit(proposal)
 
@@ -593,7 +628,7 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
 
   const authorization = decodeAuthorization({
     schemaVersion: 1,
-    authorizationId: AUTHORIZATION_ID,
+    authorizationId: identity.authorizationId,
     actionId: envelope.actionId,
     workspaceId: envelope.workspaceId,
     pluginConnectionId: envelope.pluginConnectionId,
@@ -616,17 +651,17 @@ export const seedGovernedAction = Effect.fn("AuthorizedGovernedActionFixture.see
   })
   yield* repository.commit(decodeCommit({
     ...Schema.encodeSync(GovernedActionCommitInput)(proposal),
-    expectedHeadTransitionId: PROPOSAL_TRANSITION_ID,
-    transitionId: AUTHORIZATION_TRANSITION_ID,
-    commandId: "command:PAY-42:authorize",
-    command: { _tag: "authorize", authorizationId: AUTHORIZATION_ID },
+    expectedHeadTransitionId: identity.proposalTransitionId,
+    transitionId: identity.authorizationTransitionId,
+    commandId: `command:${identity.actionId}:authorize`,
+    command: { _tag: "authorize", authorizationId: identity.authorizationId },
     cause: humanCause,
     occurredAt: AUTHORIZED_AT,
     companion: {
       _tag: "authorization",
       authorization: Schema.encodeSync(GovernedActionAuthorizationV1)(authorization)
     },
-    auditEventId: AUTHORIZATION_AUDIT_ID
+    auditEventId: identity.authorizationAuditId
   }))
   return { envelope, authorization }
 })

@@ -379,19 +379,19 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
   const ensureDefault = Effect.fn("WorkspaceSettingsRepository.ensureDefault")(function*(
     workspaceId: WorkspaceId
   ) {
-    const createdAt = yield* DateTime.now
     const settingsJson = yield* encodeSettings(DEFAULT_WORKSPACE_SETTINGS).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.encode-default" }))
     )
     const settingsDigest = yield* digestText(settingsJson)
-    const encodedCreatedAt = encodeTimestamp(createdAt)
     yield* sql`INSERT INTO workspace_settings (
       workspace_id, schema_version, revision, settings_json, settings_digest,
       policy_revision, created_at, updated_at, updated_by_person_id
-    ) VALUES (
-      ${workspaceId}, 1, 1, ${settingsJson}, ${settingsDigest},
-      1, ${encodedCreatedAt}, ${encodedCreatedAt}, NULL
-    ) ON CONFLICT(workspace_id) DO NOTHING`
+    )
+    SELECT workspace_id, 1, 1, ${settingsJson}, ${settingsDigest},
+      1, created_at, created_at, NULL
+    FROM workspaces
+    WHERE workspace_id = ${workspaceId}
+    ON CONFLICT(workspace_id) DO NOTHING`
     yield* sql`INSERT INTO workspace_settings_versions (
       workspace_id, schema_version, revision, settings_json, settings_digest,
       policy_revision, created_at, updated_at, updated_by_person_id

@@ -314,10 +314,14 @@ export const useWorkspaceSettings = (
                     setState({ _tag: "conflict", base, candidate, latest })
                   }
                 },
-                () => {
-                  if (!request.signal.aborted) {
-                    setState({ _tag: "conflict-recovery-failed", base, candidate })
+                (failure) => {
+                  if (request.signal.aborted) return
+                  if (isUnauthorized(failure)) {
+                    onSessionExpired(sessionKey)
+                    setState({ _tag: "failed" })
+                    return
                   }
+                  setState({ _tag: "conflict-recovery-failed", base, candidate })
                 }
               )
             }
@@ -354,21 +358,23 @@ export const useWorkspaceSettings = (
   }, [])
 
   const reapplyConflict = useCallback((): void => {
-    setState((current) =>
-      current._tag === "conflict"
-        ? {
-          _tag: "ready",
-          draft: reapplyWorkspaceSettingsCandidate(
-            current.base.settings,
-            current.candidate,
-            current.latest.settings
-          ),
-          pendingMutationId: null,
-          server: current.latest,
-          status: "dirty"
-        }
-        : current
-    )
+    setState((current) => {
+      if (current._tag !== "conflict") return current
+      const draft = reapplyWorkspaceSettingsCandidate(
+        current.base.settings,
+        current.candidate,
+        current.latest.settings
+      )
+      return {
+        _tag: "ready",
+        draft,
+        pendingMutationId: null,
+        server: current.latest,
+        status: changedWorkspaceSettingsSections(current.latest.settings, draft).length === 0
+          ? "saved"
+          : "dirty"
+      }
+    })
   }, [])
 
   const retryConflict = useCallback((): void => {
@@ -384,11 +390,20 @@ export const useWorkspaceSettings = (
             setState({ _tag: "conflict", base, candidate, latest })
           }
         },
-        () => undefined
+        (failure) => {
+          if (
+            !request.signal.aborted &&
+            sessionKey !== null &&
+            isUnauthorized(failure)
+          ) {
+            onSessionExpired(sessionKey)
+            setState({ _tag: "failed" })
+          }
+        }
       )
       return current
     })
-  }, [transport])
+  }, [onSessionExpired, sessionKey, transport])
 
   return {
     discardConflict,
