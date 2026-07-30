@@ -3,7 +3,8 @@ import { describe, expect, it } from "@effect/vitest"
 import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
-  exposedBrowserForbiddenValues
+  exposedBrowserForbiddenValues,
+  serializeBrowserReadableCookies
 } from "../../e2e/browserSecretSurface.js"
 
 const safeSurface: BrowserSecretSurface = {
@@ -11,7 +12,10 @@ const safeSurface: BrowserSecretSurface = {
   liveFormControlValues: JSON.stringify(["ordinary search"]),
   localStorage: JSON.stringify([["theme", "dark"]]),
   openShadowRootContent: JSON.stringify([]),
-  readableCookies: "ordinary_preference=compact; cc_csrf=proof",
+  readableCookies: serializeBrowserReadableCookies([
+    { domain: "127.0.0.1", httpOnly: false, name: "ordinary_preference", path: "/", value: "compact" },
+    { domain: "127.0.0.1", httpOnly: false, name: "cc_csrf", path: "/", value: "proof" }
+  ]),
   sessionStorage: JSON.stringify([["cc_csrf", "proof"]]),
   url: "https://127.0.0.1:4173/w/workspace/overview"
 }
@@ -55,9 +59,15 @@ describe("browser secret surface detection", () => {
 
   it("detects a forbidden readable cookie while permitting ordinary browser-owned cookies", () => {
     const secret = "consumed-pairing-code"
-    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies: `pairing=${secret}` }, secret)).toBe(true)
-    expect(browserSurfaceExposesSecret(safeSurface, "ordinary_preference=compact")).toBe(true)
-    expect(browserSurfaceExposesSecret(safeSurface, "proof")).toBe(true)
+    const readableCookies = serializeBrowserReadableCookies([
+      { domain: "127.0.0.1", httpOnly: true, name: "cc_session", path: "/", value: "session-secret" },
+      { domain: "127.0.0.1", httpOnly: false, name: "pairing", path: "/pair", value: secret },
+      { domain: "127.0.0.1", httpOnly: false, name: "ordinary_preference", path: "/", value: "compact" }
+    ])
+    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies }, secret)).toBe(true)
+    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies }, "session-secret")).toBe(false)
+    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies }, "ordinary_preference")).toBe(true)
+    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies }, "/pair")).toBe(true)
   })
 
   it("detects forbidden text and attributes inside an open shadow root", () => {

@@ -13,7 +13,8 @@ import { DEFAULT_REQUEST_LIMIT_POLICY } from "../src/server/api/RequestLimits.js
 import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
-  exposedBrowserForbiddenValues
+  exposedBrowserForbiddenValues,
+  serializeBrowserReadableCookies
 } from "./browserSecretSurface.js"
 import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
 import {
@@ -88,7 +89,7 @@ test.describe("repository-managed real runtime", () => {
           sameSite: "Strict",
           secure: true
         })
-        const browserSurface = await page.evaluate<BrowserSecretSurface>(`(() => {
+        const currentPageSurface = await page.evaluate<BrowserSecretSurface>(`(() => {
           const liveFormControlValues = [];
           const openShadowRootContent = [];
           const visitRoot = (root) => {
@@ -111,11 +112,15 @@ test.describe("repository-managed real runtime", () => {
             liveFormControlValues: JSON.stringify(liveFormControlValues),
             localStorage: JSON.stringify(Object.entries(localStorage)),
             openShadowRootContent: JSON.stringify(openShadowRootContent),
-            readableCookies: document.cookie,
+            readableCookies: "",
             sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
             url: location.href
           };
         })()`)
+        const browserSurface: BrowserSecretSurface = {
+          ...currentPageSurface,
+          readableCookies: serializeBrowserReadableCookies(await context.cookies())
+        }
         expect(
           exposedBrowserForbiddenValues(browserSurface, [
             { label: "HttpOnly session cookie", value: sessionCookie.value },

@@ -23,7 +23,7 @@ interface AxeBrowserGlobal {
   readonly axe?: AxeRunner
 }
 
-interface FocusVisualSnapshot {
+interface FocusStyleSnapshot {
   readonly backgroundColor: string
   readonly borderBottom: string
   readonly borderBottomColor: string
@@ -49,13 +49,18 @@ interface FocusVisualSnapshot {
   readonly outlineWidth: string
 }
 
+interface FocusVisualSnapshot extends FocusStyleSnapshot {
+  readonly effectiveBackgroundColor: string
+  readonly effectiveBackdropColor: string
+}
+
 interface FocusedVisualSnapshot extends FocusVisualSnapshot {
   readonly focusVisible: boolean
   readonly height: number
   readonly width: number
 }
 
-interface FocusComputedStyle extends FocusVisualSnapshot {
+interface FocusComputedStyle extends FocusStyleSnapshot {
   readonly forcedColorAdjust: string
 }
 
@@ -154,10 +159,31 @@ const transparentShadowPaint = (value: string): boolean => {
 const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator): Promise<void> => {
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
   const unfocused = await primaryAction.evaluate((element): FocusVisualSnapshot => {
-    if (window.getComputedStyle === undefined) {
-      throw new Error("primary action has no computed-style view")
+    const hasPaintContext = (
+      candidate: SVGElement | HTMLElement
+    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
+      "parentElement" in candidate && "ownerDocument" in candidate
+    if (window.getComputedStyle === undefined || !hasPaintContext(element)) {
+      throw new Error("primary action has no computed-style paint context")
     }
     const style = window.getComputedStyle(element)
+    const isTransparent = (value: string): boolean =>
+      value === "transparent" ||
+      /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
+    let effectiveBackdropColor = "transparent"
+    let ancestor = element.parentElement
+    while (isTransparent(effectiveBackdropColor) && ancestor !== null) {
+      effectiveBackdropColor = window.getComputedStyle(ancestor).backgroundColor
+      ancestor = ancestor.parentElement
+    }
+    if (isTransparent(effectiveBackdropColor)) {
+      const canvasProbe = element.ownerDocument.createElement("span")
+      canvasProbe.style.backgroundColor = "Canvas"
+      canvasProbe.style.display = "none"
+      element.ownerDocument.documentElement.append(canvasProbe)
+      effectiveBackdropColor = window.getComputedStyle(canvasProbe).backgroundColor
+      canvasProbe.remove()
+    }
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
@@ -178,6 +204,10 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
       borderTopWidth: style.borderTopWidth,
       boxShadow: style.boxShadow,
       color: style.color,
+      effectiveBackgroundColor: isTransparent(style.backgroundColor)
+        ? effectiveBackdropColor
+        : style.backgroundColor,
+      effectiveBackdropColor,
       outlineColor: style.outlineColor,
       outlineOffset: style.outlineOffset,
       outlineStyle: style.outlineStyle,
@@ -191,8 +221,13 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
   }
   await expect(primaryAction).toBeFocused()
   const focused = await primaryAction.evaluate((element): FocusedVisualSnapshot => {
+    const hasPaintContext = (
+      candidate: SVGElement | HTMLElement
+    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
+      "parentElement" in candidate && "ownerDocument" in candidate
     if (
       window.getComputedStyle === undefined ||
+      !hasPaintContext(element) ||
       !("getBoundingClientRect" in element) ||
       typeof element.getBoundingClientRect !== "function" ||
       !("matches" in element) ||
@@ -202,6 +237,23 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     }
     const bounds = element.getBoundingClientRect()
     const style = window.getComputedStyle(element)
+    const isTransparent = (value: string): boolean =>
+      value === "transparent" ||
+      /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
+    let effectiveBackdropColor = "transparent"
+    let ancestor = element.parentElement
+    while (isTransparent(effectiveBackdropColor) && ancestor !== null) {
+      effectiveBackdropColor = window.getComputedStyle(ancestor).backgroundColor
+      ancestor = ancestor.parentElement
+    }
+    if (isTransparent(effectiveBackdropColor)) {
+      const canvasProbe = element.ownerDocument.createElement("span")
+      canvasProbe.style.backgroundColor = "Canvas"
+      canvasProbe.style.display = "none"
+      element.ownerDocument.documentElement.append(canvasProbe)
+      effectiveBackdropColor = window.getComputedStyle(canvasProbe).backgroundColor
+      canvasProbe.remove()
+    }
     return {
       backgroundColor: style.backgroundColor,
       borderBottom: style.borderBottom,
@@ -222,6 +274,10 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
       borderTopWidth: style.borderTopWidth,
       boxShadow: style.boxShadow,
       color: style.color,
+      effectiveBackgroundColor: isTransparent(style.backgroundColor)
+        ? effectiveBackdropColor
+        : style.backgroundColor,
+      effectiveBackdropColor,
       focusVisible: element.matches(":focus-visible"),
       height: bounds.height,
       outlineColor: style.outlineColor,
@@ -238,9 +294,12 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     focused.outlineStyle !== "none" &&
     focused.outlineStyle !== "hidden" &&
     Number.parseFloat(focused.outlineWidth) > 0 &&
-    !transparentPaint(focused.outlineColor)
+    !transparentPaint(focused.outlineColor) &&
+    focused.outlineColor !== focused.effectiveBackdropColor
+  const shadowColors = focused.boxShadow.match(/rgba?\([^)]*\)|transparent/gu) ?? []
   const shadowChangedAndPainted = focused.boxShadow !== unfocused.boxShadow &&
-    !transparentShadowPaint(focused.boxShadow)
+    !transparentShadowPaint(focused.boxShadow) &&
+    shadowColors.some((color) => !transparentPaint(color) && color !== focused.effectiveBackdropColor)
   const borderChangedAndPainted = [
     {
       changed: focused.borderBottom !== unfocused.borderBottom,
@@ -271,18 +330,29 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
     style !== "none" &&
     style !== "hidden" &&
     Number.parseFloat(width) > 0 &&
-    !transparentPaint(color)
+    !transparentPaint(color) &&
+    (color !== focused.effectiveBackgroundColor || color !== focused.effectiveBackdropColor)
   )
-  const equivalentPaintChanged =
-    (focused.backgroundColor !== unfocused.backgroundColor && !transparentPaint(focused.backgroundColor)) ||
-    (focused.color !== unfocused.color && !transparentPaint(focused.color))
+  const equivalentPaintChanged = focused.effectiveBackgroundColor !== unfocused.effectiveBackgroundColor ||
+    (focused.color !== unfocused.color &&
+      !transparentPaint(focused.color) &&
+      focused.color !== focused.effectiveBackgroundColor)
 
   expect(
     focused.focusVisible &&
       focused.width > 0 &&
       focused.height > 0 &&
       (outlineChangedAndPainted || shadowChangedAndPainted || borderChangedAndPainted || equivalentPaintChanged),
-    "primary action keyboard focus has no focus-specific visual indicator"
+    `primary action keyboard focus has no focus-specific visual indicator: ${
+      JSON.stringify({
+        borderChangedAndPainted,
+        equivalentPaintChanged,
+        focused,
+        outlineChangedAndPainted,
+        shadowChangedAndPainted,
+        unfocused
+      })
+    }`
   ).toBe(true)
 }
 

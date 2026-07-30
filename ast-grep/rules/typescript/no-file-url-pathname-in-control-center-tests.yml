@@ -11,10 +11,12 @@ rule:
 files:
   - "packages/control-center/test/**/*.ts"
   - "packages/control-center/test/**/*.tsx"
+  - "packages/control-center/e2e/**/*.ts"
+  - "packages/control-center/e2e/**/*.tsx"
 
 note: |
   URL.pathname is not a decoded, platform-native filesystem path. Control Center
-  Effect tests already provide NodeServices, so acquire Path.Path and convert
+  Effect tests and E2E helpers already provide NodeServices, so acquire Path.Path and convert
   URLs with `yield* path.fromFileUrl(new URL(..., import.meta.url))`. This rule
   deliberately excludes general HTTP URL inspection and synchronous framework
   configuration.

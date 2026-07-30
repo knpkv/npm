@@ -1,6 +1,13 @@
 id: no-file-url-pathname-in-control-center-tests
 snapshots:
   ? |
+    const e2eFixturePath = new URL("./e2e-fixture.json", import.meta.url).pathname
+  : labels:
+      - source: new URL("./e2e-fixture.json", import.meta.url).pathname
+        style: primary
+        start: 23
+        end: 78
+  ? |
     const filePath = new URL("./fixture.json", import.meta.url).pathname
   : labels:
       - source: new URL("./fixture.json", import.meta.url).pathname

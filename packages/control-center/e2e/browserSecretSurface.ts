@@ -14,6 +14,24 @@ export interface BrowserForbiddenValue {
   readonly value: string
 }
 
+export interface BrowserContextCookie {
+  readonly domain: string
+  readonly httpOnly: boolean
+  readonly name: string
+  readonly path: string
+  readonly value: string
+}
+
+/** Serialize every JavaScript-readable context cookie, retaining its path scope. */
+export const serializeBrowserReadableCookies = (
+  cookies: ReadonlyArray<BrowserContextCookie>
+): string =>
+  JSON.stringify(
+    cookies
+      .filter(({ httpOnly }) => !httpOnly)
+      .map(({ domain, name, path, value }) => ({ domain, name, path, value }))
+  )
+
 /** Detect a value in any browser-readable surface without assuming a storage key. */
 export const browserSurfaceExposesSecret = (surface: BrowserSecretSurface, secret: string): boolean =>
   Object.values(surface).some((value) => value.includes(secret))

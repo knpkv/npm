@@ -4,6 +4,10 @@ valid:
     const filePath = yield* path.fromFileUrl(new URL("./fixture.json", import.meta.url))
   - |
     const routeName = new URL(request.url).pathname
+  - |
+    const e2eFixturePath = yield* path.fromFileUrl(new URL("./fixture.json", import.meta.url))
 invalid:
   - |
     const filePath = new URL("./fixture.json", import.meta.url).pathname
+  - |
+    const e2eFixturePath = new URL("./e2e-fixture.json", import.meta.url).pathname
