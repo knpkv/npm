@@ -46,17 +46,15 @@ const WorkspaceSettingsGovernanceRequestJson = Schema.fromJsonString(
   WorkspaceSettingsGovernanceRequest
 )
 const encodeRequest = Schema.encodeEffect(WorkspaceSettingsGovernanceRequestJson)
+const utf8Encoder = new TextEncoder()
 
 /** Digest one exact attributable settings request using the D03 digest convention. */
 export const digestWorkspaceSettingsGovernanceRequest = Effect.fn(
   "GovernedHumanMutationPolicyEvaluator.digestWorkspaceSettingsRequest"
 )(function*(request: WorkspaceSettingsGovernanceRequest) {
   const encoded = yield* encodeRequest(request)
-  const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(encoded))
-  )
   const cryptoService = yield* Crypto.Crypto
-  const digest = yield* cryptoService.digest("SHA-256", bytes)
+  const digest = yield* cryptoService.digest("SHA-256", utf8Encoder.encode(encoded))
   return ContentBlobDigest.make(Encoding.encodeHex(digest))
 })
 

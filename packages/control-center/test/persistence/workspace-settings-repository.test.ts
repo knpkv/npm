@@ -28,6 +28,9 @@ import { makePersistenceTestConfig } from "./fixtures.js"
 const workspaceId = Schema.decodeSync(WorkspaceId)(
   "01890f6f-6d6a-7cc0-98d2-000000000170"
 )
+const foreignWorkspaceId = Schema.decodeSync(WorkspaceId)(
+  "01890f6f-6d6a-7cc0-98d2-000000000169"
+)
 const ownerOne = Schema.decodeSync(PersonId)(
   "01890f6f-6d6a-7cc0-98d2-000000000171"
 )
@@ -66,19 +69,24 @@ const ownerSession = Schema.decodeSync(SessionSummary)({
   absoluteExpiresAt: "2026-08-30T09:00:00.000Z",
   revokedAt: null
 })
+const contributorSession = Schema.decodeSync(SessionSummary)({
+  ...Schema.encodeSync(SessionSummary)(ownerSession),
+  permission: "contributor"
+})
+const foreignOwnerSession = Schema.decodeSync(SessionSummary)({
+  ...Schema.encodeSync(SessionSummary)(ownerSession),
+  workspaceId: foreignWorkspaceId
+})
+const utf8Encoder = new TextEncoder()
 
 const digestRawRow = Effect.fn(
   "WorkspaceSettingsRepositoryTest.digestRawRow"
 )(function*(row: unknown) {
   const serialized = yield* Effect.sync(() => JSON.stringify(row))
-  if (serialized === undefined) {
-    return yield* Effect.die("expected a serializable persisted row")
-  }
-  const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
-  )
   const cryptoService = yield* Crypto.Crypto
-  return Encoding.encodeHex(yield* cryptoService.digest("SHA-256", bytes))
+  return Encoding.encodeHex(
+    yield* cryptoService.digest("SHA-256", utf8Encoder.encode(serialized))
+  )
 })
 
 const withPersistence = <Success, Failure>(
@@ -177,6 +185,40 @@ describe("WorkspaceSettingsRepository", () => {
         assert.lengthOf(audits, 1)
         assert.strictEqual(audits[0]?.fromRevision, 1)
         assert.strictEqual(audits[0]?.toRevision, 2)
+      })
+    ))
+
+  it.effect("initializes defaults once and keeps repeated reads write-free", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const { sql } = yield* Database
+        const initialized = yield* persistence.workspaceSettings.get(workspaceId)
+        const headRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings
+          WHERE workspace_id = ${workspaceId}`
+        const versionRows = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings_versions
+          WHERE workspace_id = ${workspaceId}`
+        assert.strictEqual(headRows[0]?.count, 1)
+        assert.strictEqual(versionRows[0]?.count, 1)
+
+        yield* sql`CREATE TRIGGER reject_repeat_workspace_settings_head
+          BEFORE INSERT ON workspace_settings
+          WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000170'
+          BEGIN
+            SELECT RAISE(ABORT, 'existing workspace settings reads must not insert');
+          END`
+        yield* sql`CREATE TRIGGER reject_repeat_workspace_settings_version
+          BEFORE INSERT ON workspace_settings_versions
+          WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000170'
+          BEGIN
+            SELECT RAISE(ABORT, 'existing workspace settings reads must not insert versions');
+          END`
+
+        const repeated = yield* persistence.workspaceSettings.get(workspaceId)
+        assert.deepStrictEqual(repeated, initialized)
       })
     ))
 
@@ -422,9 +464,11 @@ describe("WorkspaceSettingsRepository", () => {
         )
         assert.strictEqual(accepted.revision, 2)
         const [governedAudit] = yield* persistence.workspaceSettings.audits(workspaceId)
+        assert.isNotNull(governanceAuthority)
+        assert.isDefined(governedAudit)
         assert.strictEqual(
-          governedAudit?.governanceAuthorityDigest,
-          governanceAuthority?.requestDigest
+          governedAudit.governanceAuthorityDigest,
+          governanceAuthority.requestDigest
         )
       })
     ))
@@ -537,7 +581,8 @@ describe("WorkspaceSettingsRepository", () => {
                 updated_at AS updatedAt,
                 updated_by_person_id AS updatedByPersonId
               FROM workspace_settings
-              WHERE workspace_id = ${workspaceId}`
+              WHERE workspace_id = ${workspaceId}
+                AND revision = ${revision}`
             : sql<Record<string, unknown>>`SELECT
                 workspace_id AS workspaceId,
                 schema_version AS schemaVersion,
@@ -646,6 +691,50 @@ describe("WorkspaceSettingsRepository", () => {
         if (Result.isFailure(result)) {
           assert.strictEqual(result.failure._tag, "ApplicationInvalidRequest")
         }
+        assert.strictEqual(
+          (yield* persistence.workspaceSettings.get(workspaceId)).revision,
+          1
+        )
+        assert.lengthOf(
+          yield* persistence.workspaceSettings.audits(workspaceId),
+          0
+        )
+      })
+    ))
+
+  it.effect("rejects settings updates outside the caller's owned workspace", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const administration = yield* makeWorkspaceSettingsAdministration
+        const original = yield* persistence.workspaceSettings.get(workspaceId)
+        const settings = WorkspaceSettingsV1.make({
+          ...original.settings,
+          presentation: {
+            ...original.settings.presentation,
+            density: "compact"
+          }
+        })
+        const request = {
+          mutationId: firstMutation,
+          expectedRevision: WorkspaceSettingsRevision.make(original.revision),
+          settings,
+          acknowledgedGovernedSections: []
+        }
+
+        for (const session of [contributorSession, foreignOwnerSession]) {
+          const result = yield* administration.update({
+            workspaceId,
+            session,
+            request
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "ApplicationInvalidRequest")
+          }
+        }
+
         assert.strictEqual(
           (yield* persistence.workspaceSettings.get(workspaceId)).revision,
           1

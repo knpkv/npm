@@ -32,6 +32,11 @@ export type WorkspaceSettingsState =
     readonly base: WorkspaceSettingsReadModel
     readonly candidate: WorkspaceSettingsV1
   }
+  | {
+    readonly _tag: "conflict-recovery-loading"
+    readonly base: WorkspaceSettingsReadModel
+    readonly candidate: WorkspaceSettingsV1
+  }
 
 const isConflict = Predicate.isTagged("ConflictApiError")
 const isUnauthorized = Predicate.isTagged("UnauthorizedApiError")
@@ -207,9 +212,14 @@ export const useWorkspaceSettings = (
   readonly save: () => void
   readonly state: WorkspaceSettingsState
 } => {
-  const [state, setState] = useState<WorkspaceSettingsState>({ _tag: "idle" })
+  const [state, setReactState] = useState<WorkspaceSettingsState>({ _tag: "idle" })
+  const stateRef = useRef<WorkspaceSettingsState>(state)
   const [requestRevision, setRequestRevision] = useState(0)
   const activeRequest = useRef<AbortController | null>(null)
+  const setState = useCallback((next: WorkspaceSettingsState): void => {
+    stateRef.current = next
+    setReactState(next)
+  }, [])
 
   useEffect(() => {
     activeRequest.current?.abort()
@@ -239,171 +249,163 @@ export const useWorkspaceSettings = (
       }
     )
     return () => request.abort()
-  }, [onSessionExpired, requestRevision, sessionKey, transport])
+  }, [onSessionExpired, requestRevision, sessionKey, setState, transport])
 
   const edit = useCallback((draft: WorkspaceSettingsV1): void => {
-    setState((current) =>
-      current._tag === "ready" && current.status !== "saving"
-        ? {
-          ...current,
-          draft,
-          pendingMutationId: null,
-          status: changedWorkspaceSettingsSections(current.server.settings, draft).length === 0
-            ? "saved"
-            : "dirty"
-        }
-        : current
-    )
-  }, [])
+    const current = stateRef.current
+    if (current._tag !== "ready" || current.status === "saving") return
+    setState({
+      ...current,
+      draft,
+      pendingMutationId: null,
+      status: changedWorkspaceSettingsSections(current.server.settings, draft).length === 0
+        ? "saved"
+        : "dirty"
+    })
+  }, [setState])
 
   const save = useCallback((): void => {
     if (sessionKey === null) return
-    setState((current) => {
-      if (
-        current._tag !== "ready" ||
-        (current.status !== "dirty" && current.status !== "failed")
-      ) return current
-      const request = new AbortController()
-      activeRequest.current?.abort()
-      activeRequest.current = request
-      const base = current.server
-      const candidate = current.draft
-      const changed = changedWorkspaceSettingsSections(base.settings, candidate)
-      const governed = changed.filter(isGovernedWorkspaceSettingsSection)
-      const mutationIdPromise = current.pendingMutationId === null
-        ? transport.makeMutationId()
-        : Promise.resolve(current.pendingMutationId)
-      mutationIdPromise.then(
-        (mutationId) => {
-          transport.update({
-            mutationId,
-            expectedRevision: base.revision,
-            settings: candidate,
-            acknowledgedGovernedSections: governed
-          }, request.signal).then(
-            (server) => {
-              if (request.signal.aborted) return
-              setState({
-                _tag: "ready",
-                draft: server.settings,
-                pendingMutationId: null,
-                server,
-                status: "saved"
-              })
-            },
-            (failure) => {
-              if (request.signal.aborted) return
-              if (isUnauthorized(failure)) {
-                onSessionExpired(sessionKey)
-                setState({ _tag: "failed" })
-                return
-              }
-              if (!isConflict(failure)) {
-                setState({
-                  _tag: "ready",
-                  draft: candidate,
-                  pendingMutationId: mutationId,
-                  server: base,
-                  status: "failed"
-                })
-                return
-              }
-              transport.load(request.signal).then(
-                (latest) => {
-                  if (!request.signal.aborted) {
-                    setState({ _tag: "conflict", base, candidate, latest })
-                  }
-                },
-                (failure) => {
-                  if (request.signal.aborted) return
-                  if (isUnauthorized(failure)) {
-                    onSessionExpired(sessionKey)
-                    setState({ _tag: "failed" })
-                    return
-                  }
-                  setState({ _tag: "conflict-recovery-failed", base, candidate })
-                }
-              )
-            }
-          )
-        },
-        () => {
-          if (!request.signal.aborted) {
+    const current = stateRef.current
+    if (
+      current._tag !== "ready" ||
+      (current.status !== "dirty" && current.status !== "failed")
+    ) return
+    const request = new AbortController()
+    activeRequest.current?.abort()
+    activeRequest.current = request
+    const base = current.server
+    const candidate = current.draft
+    const changed = changedWorkspaceSettingsSections(base.settings, candidate)
+    const governed = changed.filter(isGovernedWorkspaceSettingsSection)
+    setState({ ...current, status: "saving" })
+    const mutationIdPromise = current.pendingMutationId === null
+      ? transport.makeMutationId()
+      : Promise.resolve(current.pendingMutationId)
+    mutationIdPromise.then(
+      (mutationId) => {
+        transport.update({
+          mutationId,
+          expectedRevision: base.revision,
+          settings: candidate,
+          acknowledgedGovernedSections: governed
+        }, request.signal).then(
+          (server) => {
+            if (request.signal.aborted) return
             setState({
               _tag: "ready",
-              draft: candidate,
+              draft: server.settings,
               pendingMutationId: null,
-              server: base,
-              status: "failed"
+              server,
+              status: "saved"
             })
+          },
+          (failure) => {
+            if (request.signal.aborted) return
+            if (isUnauthorized(failure)) {
+              onSessionExpired(sessionKey)
+              setState({ _tag: "failed" })
+              return
+            }
+            if (!isConflict(failure)) {
+              setState({
+                _tag: "ready",
+                draft: candidate,
+                pendingMutationId: mutationId,
+                server: base,
+                status: "failed"
+              })
+              return
+            }
+            transport.load(request.signal).then(
+              (latest) => {
+                if (!request.signal.aborted) {
+                  setState({ _tag: "conflict", base, candidate, latest })
+                }
+              },
+              (failure) => {
+                if (request.signal.aborted) return
+                if (isUnauthorized(failure)) {
+                  onSessionExpired(sessionKey)
+                  setState({ _tag: "failed" })
+                  return
+                }
+                setState({ _tag: "conflict-recovery-failed", base, candidate })
+              }
+            )
           }
+        )
+      },
+      () => {
+        if (!request.signal.aborted) {
+          setState({
+            _tag: "ready",
+            draft: candidate,
+            pendingMutationId: null,
+            server: base,
+            status: "failed"
+          })
         }
-      )
-      return { ...current, status: "saving" }
-    })
-  }, [onSessionExpired, sessionKey, transport])
+      }
+    )
+  }, [onSessionExpired, sessionKey, setState, transport])
 
   const discardConflict = useCallback((): void => {
-    setState((current) =>
-      current._tag === "conflict"
-        ? {
-          _tag: "ready",
-          draft: current.latest.settings,
-          pendingMutationId: null,
-          server: current.latest,
-          status: "saved"
-        }
-        : current
-    )
-  }, [])
+    const current = stateRef.current
+    if (current._tag !== "conflict") return
+    setState({
+      _tag: "ready",
+      draft: current.latest.settings,
+      pendingMutationId: null,
+      server: current.latest,
+      status: "saved"
+    })
+  }, [setState])
 
   const reapplyConflict = useCallback((): void => {
-    setState((current) => {
-      if (current._tag !== "conflict") return current
-      const draft = reapplyWorkspaceSettingsCandidate(
-        current.base.settings,
-        current.candidate,
-        current.latest.settings
-      )
-      return {
-        _tag: "ready",
-        draft,
-        pendingMutationId: null,
-        server: current.latest,
-        status: changedWorkspaceSettingsSections(current.latest.settings, draft).length === 0
-          ? "saved"
-          : "dirty"
-      }
+    const current = stateRef.current
+    if (current._tag !== "conflict") return
+    const draft = reapplyWorkspaceSettingsCandidate(
+      current.base.settings,
+      current.candidate,
+      current.latest.settings
+    )
+    setState({
+      _tag: "ready",
+      draft,
+      pendingMutationId: null,
+      server: current.latest,
+      status: changedWorkspaceSettingsSections(current.latest.settings, draft).length === 0
+        ? "saved"
+        : "dirty"
     })
-  }, [])
+  }, [setState])
 
   const retryConflict = useCallback((): void => {
-    setState((current) => {
-      if (current._tag !== "conflict-recovery-failed") return current
-      const request = new AbortController()
-      activeRequest.current?.abort()
-      activeRequest.current = request
-      const { base, candidate } = current
-      transport.load(request.signal).then(
-        (latest) => {
-          if (!request.signal.aborted) {
-            setState({ _tag: "conflict", base, candidate, latest })
-          }
-        },
-        (failure) => {
-          if (
-            !request.signal.aborted &&
-            sessionKey !== null &&
-            isUnauthorized(failure)
-          ) {
-            onSessionExpired(sessionKey)
-            setState({ _tag: "failed" })
-          }
+    const current = stateRef.current
+    if (current._tag !== "conflict-recovery-failed") return
+    const request = new AbortController()
+    activeRequest.current?.abort()
+    activeRequest.current = request
+    const { base, candidate } = current
+    setState({ _tag: "conflict-recovery-loading", base, candidate })
+    transport.load(request.signal).then(
+      (latest) => {
+        if (!request.signal.aborted) {
+          setState({ _tag: "conflict", base, candidate, latest })
         }
-      )
-      return current
-    })
-  }, [onSessionExpired, sessionKey, transport])
+      },
+      (failure) => {
+        if (request.signal.aborted) return
+        if (sessionKey !== null && isUnauthorized(failure)) {
+          onSessionExpired(sessionKey)
+          setState({ _tag: "failed" })
+          return
+        }
+        setState({ _tag: "conflict-recovery-failed", base, candidate })
+      }
+    )
+  }, [onSessionExpired, sessionKey, setState, transport])
 
   return {
     discardConflict,

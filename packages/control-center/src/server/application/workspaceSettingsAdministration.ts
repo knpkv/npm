@@ -62,7 +62,11 @@ export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
       return present(record)
     }),
     update: Effect.fn("WorkspaceSettingsAdministration.update")(function*(input) {
-      if (input.session.actor._tag !== "human") {
+      if (
+        input.session.actor._tag !== "human" ||
+        input.session.permission !== "workspace-owner" ||
+        input.session.workspaceId !== input.workspaceId
+      ) {
         return yield* new ApplicationInvalidRequest()
       }
       const updatedAt = yield* DateTime.now

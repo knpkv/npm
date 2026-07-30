@@ -26,6 +26,7 @@ import {
   makeBuiltInGovernedActionPolicyDefinitions,
   makeGovernedActionPolicyDefinition,
   makeGovernedActionPolicyEvaluator,
+  makeWorkspaceGovernedActionPolicyCatalogSource,
   makeWorkspaceGovernedActionPolicyDefinitions
 } from "../../src/server/governance/internal/GovernedActionPolicyEvaluator.js"
 import { ContentBlobDigest, RecordRevision } from "../../src/server/persistence/repositories/models.js"
@@ -42,6 +43,16 @@ const decodeMaterial = Schema.decodeUnknownSync(GovernedActionPolicyMaterialV1)
 const decodePolicyBinding = Schema.decodeUnknownSync(GovernedActionPolicyBinding)
 const decodeSession = Schema.decodeUnknownSync(SessionSummary)
 const decodeTimestamp = Schema.decodeUnknownSync(UtcTimestamp)
+const decodeActionKind = Schema.decodeUnknownSync(
+  GovernedActionEnvelopeMaterialV1.fields.proposal.fields.request.fields.actionKind
+)
+const decodePluginId = Schema.decodeUnknownSync(
+  GovernedActionEnvelopeMaterialV1.fields.pluginId
+)
+type GovernedActionKind = typeof GovernedActionEnvelopeMaterialV1.Type["proposal"]["request"]["actionKind"]
+type GovernedPluginId = typeof GovernedActionEnvelopeMaterialV1.Type["pluginId"]
+const jiraPluginId = decodePluginId("dev.knpkv.jira.read")
+const pipelinePluginId = decodePluginId("dev.knpkv.aws-codepipeline")
 
 type EvaluationInput =
   & Pick<
@@ -122,8 +133,8 @@ const replacePolicyAction = Effect.fn(
 )(function*(
   input: EvaluationInput,
   definition: GovernedActionPolicyDefinition,
-  actionKind: string,
-  pluginId: string
+  actionKind: GovernedActionKind,
+  pluginId: GovernedPluginId
 ) {
   const encoded = Schema.encodeSync(GovernedActionEnvelopeMaterialV1)(
     input.envelope
@@ -169,7 +180,12 @@ describe("governed action policy evaluator", () => {
         )
         const manualInputs = yield* Effect.all(
           ["add-comment", "reply-comment"].map((actionKind) =>
-            replacePolicyAction(input, manualDefinition, actionKind, "dev.knpkv.jira.read")
+            replacePolicyAction(
+              input,
+              manualDefinition,
+              decodeActionKind(actionKind),
+              jiraPluginId
+            )
           )
         )
         for (const manualInput of manualInputs) {
@@ -181,8 +197,8 @@ describe("governed action policy evaluator", () => {
         const unrelatedJiraInput = yield* replacePolicyAction(
           input,
           manualDefinition,
-          "set-fix-versions",
-          "dev.knpkv.jira.read"
+          decodeActionKind("set-fix-versions"),
+          jiraPluginId
         )
         assert.strictEqual(
           (yield* manualEvaluator.evaluate(unrelatedJiraInput)).decision,
@@ -210,8 +226,8 @@ describe("governed action policy evaluator", () => {
           const confirmedInput = yield* replacePolicyAction(
             input,
             confirmedDefinition,
-            actionKind,
-            "dev.knpkv.jira.read"
+            decodeActionKind(actionKind),
+            jiraPluginId
           )
           assert.strictEqual(
             (yield* confirmedEvaluator.evaluate(confirmedInput)).decision,
@@ -245,6 +261,40 @@ describe("governed action policy evaluator", () => {
       }).pipe(Effect.provide(NodeServices.layer))
   )
 
+  it.effect("reuses derived policy catalogs only for the same durable policy revision", () =>
+    Effect.gen(function*() {
+      let current = workspaceSettingsRecord(1, DEFAULT_WORKSPACE_SETTINGS)
+      let readCount = 0
+      const catalogs = yield* makeWorkspaceGovernedActionPolicyCatalogSource(
+        () =>
+          Effect.sync(() => {
+            readCount += 1
+            return current
+          })
+      )
+
+      const workspaceId = WorkspaceId.make(WORKSPACE_ID)
+      const first = yield* catalogs.get(workspaceId)
+      const repeated = yield* catalogs.get(workspaceId)
+      assert.strictEqual(repeated, first)
+      assert.strictEqual(readCount, 3)
+
+      current = workspaceSettingsRecord(2, {
+        ...DEFAULT_WORKSPACE_SETTINGS,
+        jira: {
+          ...DEFAULT_WORKSPACE_SETTINGS.jira,
+          commentMode: "confirm-before-publish"
+        }
+      })
+      const changed = yield* catalogs.get(workspaceId)
+      assert.notStrictEqual(changed, first)
+      assert.strictEqual(readCount, 5)
+      assert.notStrictEqual(
+        changed.definitions[0]?.binding.policyDigest,
+        first.definitions[0]?.binding.policyDigest
+      )
+    }).pipe(Effect.provide(NodeServices.layer)))
+
   it.effect("enforces the durable pipeline retry attempt ceiling", () =>
     Effect.gen(function*() {
       const { input } = yield* makeInput()
@@ -268,8 +318,8 @@ describe("governed action policy evaluator", () => {
       const retryInput = yield* replacePolicyAction(
         input,
         definition,
-        "pipeline.retry",
-        "dev.knpkv.aws-codepipeline"
+        decodeActionKind("pipeline.retry"),
+        pipelinePluginId
       )
       assert.strictEqual(
         (yield* evaluator.evaluate(retryInput)).decision,
@@ -282,8 +332,8 @@ describe("governed action policy evaluator", () => {
       const unrelatedInput = yield* replacePolicyAction(
         { ...input, priorTargetAttempts: 100 },
         definition,
-        "pipeline.stop",
-        "dev.knpkv.aws-codepipeline"
+        decodeActionKind("pipeline.stop"),
+        pipelinePluginId
       )
       assert.strictEqual(
         (yield* evaluator.evaluate(unrelatedInput)).decision,

@@ -1,5 +1,4 @@
 import * as Context from "effect/Context"
-import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
@@ -25,7 +24,7 @@ import {
   type GovernedActionPolicyCatalogInvalid,
   GovernedActionPolicyEvaluator,
   makeBuiltInGovernedActionPolicyDefinitions,
-  makeWorkspaceGovernedActionPolicyDefinitions
+  makeWorkspaceGovernedActionPolicyCatalogSource
 } from "../governance/internal/GovernedActionPolicyEvaluator.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
@@ -147,18 +146,14 @@ export const workspaceGovernedActionPolicyBindingSourceLayer = (
   Layer.effect(
     GovernedActionPolicyBindingSource,
     Effect.gen(function*() {
-      const cryptoService = yield* Crypto.Crypto
       const persistence = yield* Persistence
+      const catalogs = yield* makeWorkspaceGovernedActionPolicyCatalogSource(
+        persistence.workspaceSettings.get
+      )
       const forPermission = (requiredPermission: Role) =>
-        persistence.workspaceSettings.get(workspaceId).pipe(
+        catalogs.get(workspaceId).pipe(
           Effect.mapError(() => submissionUnavailable()),
-          Effect.flatMap((record) =>
-            makeWorkspaceGovernedActionPolicyDefinitions(record).pipe(
-              Effect.provideService(Crypto.Crypto, cryptoService)
-            )
-          ),
-          Effect.mapError(() => submissionUnavailable()),
-          Effect.flatMap((definitions) => {
+          Effect.flatMap(({ definitions }) => {
             const definition = definitions.find(
               ({ binding }) => binding.requiredPermission === requiredPermission
             )

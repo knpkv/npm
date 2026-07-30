@@ -1,7 +1,10 @@
+import * as Cache from "effect/Cache"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
+import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
@@ -10,6 +13,7 @@ import {
   type GovernedActionPolicyBinding as GovernedActionPolicyBindingType,
   GovernedActionPolicyEvaluationV1
 } from "../../../domain/governedAction/index.js"
+import type { WorkspaceId } from "../../../domain/identifiers.js"
 import { WorkspaceSettingsV1 } from "../../../domain/workspaceSettings.js"
 import { RecordRevision } from "../../persistence/repositories/models.js"
 import {
@@ -248,6 +252,74 @@ export const makeWorkspaceGovernedActionPolicyDefinitions = Effect.fn(
   ])
 })
 
+class WorkspacePolicyRevisionKey extends Data.Class<{
+  readonly workspaceId: WorkspaceId
+  readonly policyRevision: RecordRevision
+}> {}
+
+/** One cached policy catalog derived from an exact durable settings revision. */
+export interface WorkspaceGovernedActionPolicyCatalog {
+  readonly definitions: ReadonlyArray<GovernedActionPolicyDefinition>
+  readonly evaluator: GovernedActionPolicyEvaluatorV1
+}
+
+/** Revision-aware source that avoids repeating policy derivation and digest work. */
+export interface WorkspaceGovernedActionPolicyCatalogSource {
+  readonly get: (
+    workspaceId: WorkspaceId
+  ) => Effect.Effect<
+    WorkspaceGovernedActionPolicyCatalog,
+    GovernedActionPolicyBindingUnavailable
+  >
+}
+
+/** Build a bounded cache while retaining a durable current-revision read on every decision. */
+export const makeWorkspaceGovernedActionPolicyCatalogSource = Effect.fn(
+  "GovernedActionPolicyEvaluator.makeWorkspacePolicyCatalogSource"
+)(function*(
+  read: (
+    workspaceId: WorkspaceId
+  ) => Effect.Effect<WorkspaceSettingsRecord, unknown>
+) {
+  const cryptoService = yield* Crypto.Crypto
+  const cache = yield* Cache.makeWith(
+    (key: WorkspacePolicyRevisionKey) =>
+      read(key.workspaceId).pipe(
+        Effect.mapError(() => new GovernedActionPolicyBindingUnavailable()),
+        Effect.flatMap((record) =>
+          record.policyRevision !== key.policyRevision
+            ? Effect.fail(new GovernedActionPolicyBindingUnavailable())
+            : Effect.gen(function*() {
+              const definitions = yield* makeWorkspaceGovernedActionPolicyDefinitions(record)
+              const evaluator = yield* makeGovernedActionPolicyEvaluator(definitions)
+              return { definitions, evaluator } satisfies WorkspaceGovernedActionPolicyCatalog
+            }).pipe(
+              Effect.provideService(Crypto.Crypto, cryptoService),
+              Effect.mapError(() => new GovernedActionPolicyBindingUnavailable())
+            )
+        )
+      ),
+    {
+      capacity: 256,
+      timeToLive: (exit) => Exit.isFailure(exit) ? "0 millis" : "1 hour"
+    }
+  )
+  return {
+    get: Effect.fn("WorkspaceGovernedActionPolicyCatalogSource.get")(function*(workspaceId) {
+      const record = yield* read(workspaceId).pipe(
+        Effect.mapError(() => new GovernedActionPolicyBindingUnavailable())
+      )
+      return yield* Cache.get(
+        cache,
+        new WorkspacePolicyRevisionKey({
+          workspaceId,
+          policyRevision: record.policyRevision
+        })
+      )
+    })
+  } satisfies WorkspaceGovernedActionPolicyCatalogSource
+})
+
 /** Build the policy evaluator from a versioned server-owned catalog. */
 export const makeGovernedActionPolicyEvaluator = Effect.fn(
   "GovernedActionPolicyEvaluator.make"
@@ -304,29 +376,14 @@ const makeLiveEvaluator = Effect.gen(function*() {
 })
 
 const makeWorkspaceSettingsEvaluator = Effect.gen(function*() {
-  const cryptoService = yield* Crypto.Crypto
   const repository = yield* WorkspaceSettingsRepository
+  const catalogs = yield* makeWorkspaceGovernedActionPolicyCatalogSource(
+    repository.get
+  )
   return {
     evaluate: (input: GovernedActionPolicyEvaluationInput) =>
-      repository.get(input.envelope.workspaceId).pipe(
-        Effect.mapError(() => new GovernedActionPolicyBindingUnavailable()),
-        Effect.flatMap((record) =>
-          makeWorkspaceGovernedActionPolicyDefinitions(record).pipe(
-            Effect.provideService(Crypto.Crypto, cryptoService),
-            Effect.mapError(
-              () => new GovernedActionPolicyBindingUnavailable()
-            )
-          )
-        ),
-        Effect.flatMap((definitions) =>
-          makeGovernedActionPolicyEvaluator(definitions).pipe(
-            Effect.provideService(Crypto.Crypto, cryptoService),
-            Effect.mapError(
-              () => new GovernedActionPolicyBindingUnavailable()
-            )
-          )
-        ),
-        Effect.flatMap((evaluator) => evaluator.evaluate(input))
+      catalogs.get(input.envelope.workspaceId).pipe(
+        Effect.flatMap(({ evaluator }) => evaluator.evaluate(input))
       )
   } satisfies GovernedActionPolicyEvaluatorV1
 })
@@ -346,7 +403,11 @@ export class GovernedActionPolicyEvaluator extends Context.Service<
   )
 
   /** Live I12 adapter that binds every policy decision to persisted settings. */
-  static readonly workspaceSettingsLayer = Layer.effect(
+  static readonly workspaceSettingsLayer: Layer.Layer<
+    GovernedActionPolicyEvaluator,
+    never,
+    Crypto.Crypto | WorkspaceSettingsRepository
+  > = Layer.effect(
     GovernedActionPolicyEvaluator,
     makeWorkspaceSettingsEvaluator
   )

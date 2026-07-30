@@ -12,7 +12,10 @@ import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.
 import styles from "./WorkspaceSettingsPage.module.css"
 import { useWorkspaceSettings } from "./useWorkspaceSettings.js"
 
-const integerValue = (event: ChangeEvent<HTMLInputElement>): number => Number.parseInt(event.currentTarget.value, 10)
+const integerValue = (event: ChangeEvent<HTMLInputElement>, fallback: number): number => {
+  const parsed = Number.parseInt(event.currentTarget.value, 10)
+  return Number.isNaN(parsed) ? fallback : parsed
+}
 const parseAllowedProviders = (value: string): ReadonlyArray<string> =>
   [
     ...new Set(
@@ -165,7 +168,7 @@ const NumberField = ({
         id={controlId}
         max={maximum}
         min={minimum}
-        onChange={(event) => onChange(integerValue(event))}
+        onChange={(event) => onChange(integerValue(event, value))}
         type="number"
         value={value}
       />
@@ -559,6 +562,14 @@ export const WorkspaceSettingsPage = (): ReactElement => {
         description="Your unsaved draft is retained, but the latest server revision could not be loaded."
         title="Conflict recovery interrupted"
         tone="critical"
+      />
+    )
+  }
+  if (controller.state._tag === "conflict-recovery-loading") {
+    return (
+      <StatePanel
+        description="Your unsaved draft is retained while the latest server revision is loaded."
+        title="Retrying conflict recovery"
       />
     )
   }

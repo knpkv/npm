@@ -49,6 +49,7 @@ const EditableSettingsHarness = (): ReactElement => {
     <div>
       <SettingsForm canEdit draft={draft} onChange={setDraft} />
       <output>{draft.agent.allowedProviders.join("|")}</output>
+      <output data-testid="maximum-attempts">{draft.pipeline.maximumAttempts}</output>
       <button
         onClick={() =>
           setDraft({
@@ -183,6 +184,24 @@ describe("workspace settings browser acceptance", () => {
     expect(host.querySelector("output")?.textContent).toBe("")
     await act(async () => input.dispatchEvent(new Event("compositionend", { bubbles: true })))
     expect(host.querySelector("output")?.textContent).toBe("openai")
+  })
+
+  it("keeps the previous numeric setting when an input is cleared", async () => {
+    const host = await mount(<EditableSettingsHarness />)
+    const label = Array.from(host.querySelectorAll("label")).find((candidate) =>
+      candidate.textContent?.includes("Maximum attempts")
+    )
+    const input = label?.querySelector("input")
+    if (input === undefined || input === null) {
+      throw new Error("expected maximum attempts input")
+    }
+
+    await changeInput(input, "")
+
+    expect(input.value).toBe(String(DEFAULT_WORKSPACE_SETTINGS.pipeline.maximumAttempts))
+    expect(host.querySelector('[data-testid="maximum-attempts"]')?.textContent).toBe(
+      String(DEFAULT_WORKSPACE_SETTINGS.pipeline.maximumAttempts)
+    )
   })
 
   it("persists only system, light, and dark at narrow and wide viewport sizes", async () => {

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import * as Schema from "effect/Schema"
-import { type ReactElement, act } from "react"
+import { type ReactElement, StrictMode, act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -312,5 +312,75 @@ describe("useWorkspaceSettings", () => {
     expect(host.textContent).toContain("overview")
     await act(async () => resolvePending(saved))
     expect(host.textContent).toContain("saved")
+  })
+
+  it("issues one governed mutation when React replays state transitions", async () => {
+    let resolvePending: (value: WorkspaceSettingsReadModel) => void = () => undefined
+    const pending = new Promise<WorkspaceSettingsReadModel>((resolve) => {
+      resolvePending = resolve
+    })
+    const transport = {
+      load: () => Promise.resolve(initial),
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update: vi.fn(() => pending)
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () =>
+      mountedRoot?.render(
+        <StrictMode>
+          <Harness transport={transport} />
+        </StrictMode>
+      )
+    )
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+
+    expect(transport.makeMutationId).toHaveBeenCalledOnce()
+    expect(transport.update).toHaveBeenCalledOnce()
+    expect(host.textContent).toContain("saving")
+    await act(async () => resolvePending(saved))
+    expect(host.textContent).toContain("saved")
+  })
+
+  it("runs only one latest-revision retry while recovery is in flight", async () => {
+    let resolvePending: (value: WorkspaceSettingsReadModel) => void = () => undefined
+    const pending = new Promise<WorkspaceSettingsReadModel>((resolve) => {
+      resolvePending = resolve
+    })
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(initial)
+      .mockRejectedValueOnce(new Error("latest unavailable"))
+      .mockImplementationOnce(() => pending)
+    const transport = {
+      load,
+      makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
+      update: vi.fn(() => Promise.reject({ _tag: "ConflictApiError" }))
+    } satisfies WorkspaceSettingsTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+    await act(async () => mountedRoot?.render(<Harness transport={transport} />))
+    await act(async () => Promise.resolve())
+
+    await click(host.querySelectorAll("button").item(0))
+    await click(host.querySelectorAll("button").item(1))
+    await act(async () => Promise.resolve())
+    const retry = host.querySelector("button")
+    if (retry === null) throw new Error("expected conflict retry button")
+    await act(async () => {
+      retry.click()
+      retry.click()
+      await Promise.resolve()
+    })
+
+    expect(load).toHaveBeenCalledTimes(3)
+    expect(host.textContent).toBe("conflict-recovery-loading")
+    await act(async () => resolvePending(saved))
+    expect(host.textContent).toContain("conflict:compact")
   })
 })

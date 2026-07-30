@@ -3437,6 +3437,7 @@ describe("first-party plugin runtime", () => {
         )
         const result = results[0]
         assert.strictEqual(results[1]?.actionId, result?.actionId)
+        assert.strictEqual(results[1]?.state, "succeeded")
         if (result === undefined) return yield* Effect.die("expected concurrent submission result")
         const conflictingActor = yield* submissions.submit({
           ...request,

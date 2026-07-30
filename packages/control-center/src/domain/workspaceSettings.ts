@@ -206,16 +206,7 @@ const presentationSettingsEqual = Schema.toEquivalence(WorkspaceSettingsV1.field
 const retentionSettingsEqual = Schema.toEquivalence(WorkspaceSettingsV1.fields.retention)
 const synchronizationSettingsEqual = Schema.toEquivalence(WorkspaceSettingsV1.fields.synchronization)
 
-const orderedSections: ReadonlyArray<WorkspaceSettingsSection> = [
-  "agent",
-  "inference",
-  "investigation",
-  "jira",
-  "pipeline",
-  "presentation",
-  "retention",
-  "synchronization"
-]
+const orderedSections: ReadonlyArray<WorkspaceSettingsSection> = WorkspaceSettingsSection.literals
 
 const workspaceSettingsSectionChanged = (
   section: WorkspaceSettingsSection,
@@ -252,5 +243,4 @@ export const changedWorkspaceSettingsSections = (
 /** Narrow one settings section to the subset that requires governed acknowledgement. */
 export const isGovernedWorkspaceSettingsSection = (
   section: WorkspaceSettingsSection
-): section is GovernedWorkspaceSettingsSection =>
-  section === "agent" || section === "jira" || section === "pipeline" || section === "retention"
+): section is GovernedWorkspaceSettingsSection => Schema.is(GovernedWorkspaceSettingsSection)(section)

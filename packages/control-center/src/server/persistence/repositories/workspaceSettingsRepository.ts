@@ -130,6 +130,7 @@ const encodeChangedSections = Schema.encodeEffect(ChangedSectionsJson)
 const decodeChangedSections = Schema.decodeUnknownResult(ChangedSectionsJson)
 const governedSectionsEqual = Schema.toEquivalence(GovernedWorkspaceSettingsSections)
 const encodeTimestamp = Schema.encodeSync(UtcTimestamp)
+const utf8Encoder = new TextEncoder()
 
 class MalformedWorkspaceSettingsRecord extends Data.TaggedError(
   "MalformedWorkspaceSettingsRecord"
@@ -154,12 +155,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const digestText = Effect.fn("WorkspaceSettingsRepository.digestText")(function*(value: string) {
-    const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(value))
-    ).pipe(
-      Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.encode" }))
-    )
-    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
+    const digest = yield* cryptoService.digest("SHA-256", utf8Encoder.encode(value)).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.digest" }))
     )
     return ContentBlobDigest.make(Encoding.encodeHex(digest))
@@ -420,8 +416,14 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
   })
 
   const get = Effect.fn("WorkspaceSettingsRepository.get")(function*(workspaceId: WorkspaceId) {
-    yield* ensureDefault(workspaceId).pipe(mapPersistenceOperation("workspace-settings.ensure-default"))
-    return yield* readCurrent(workspaceId).pipe(mapPersistenceOperation("workspace-settings.get"))
+    return yield* readCurrent(workspaceId).pipe(
+      Effect.catchTag("RecordNotFoundError", () =>
+        ensureDefault(workspaceId).pipe(
+          mapPersistenceOperation("workspace-settings.ensure-default"),
+          Effect.andThen(readCurrent(workspaceId))
+        )),
+      mapPersistenceOperation("workspace-settings.get")
+    )
   })
 
   const update = Effect.fn("WorkspaceSettingsRepository.update")(function*(
