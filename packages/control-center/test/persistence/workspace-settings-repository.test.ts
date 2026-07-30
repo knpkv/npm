@@ -312,10 +312,10 @@ describe("WorkspaceSettingsRepository", () => {
               updatedAt: firstUpdateAt
             }
           )
-          assert.strictEqual(replayedFirst.revision, 2)
+          assert.strictEqual(replayedFirst.revision, 3)
           assert.strictEqual(
             replayedFirst.settings.presentation.density,
-            "comfortable"
+            "compact"
           )
           const audits = yield* persistence.workspaceSettings.audits(workspaceId)
           assert.deepStrictEqual(

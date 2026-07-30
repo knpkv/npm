@@ -5,7 +5,7 @@ import type { WorkspaceId } from "../../domain/identifiers.js"
 import type { WorkspaceSettingsV1 } from "../../domain/workspaceSettings.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { releaseParentPath, workspaceActiveWorkPath } from "../releases/releaseRoutes.js"
-import { subscribeWorkspaceSettings } from "./workspaceSettingsSignals.js"
+import { publishWorkspaceSettings, subscribeWorkspaceSettings } from "./workspaceSettingsSignals.js"
 import type { WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
 
 const isUnauthorized = Predicate.isTagged("UnauthorizedApiError")
@@ -39,7 +39,14 @@ export const useWorkspaceDefaultLandingPath = (
   transport: Pick<WorkspaceSettingsTransport, "load"> = lazyBrowserWorkspaceSettingsTransport
 ): string | null => {
   const { invalidateSession, state: browserSession } = useBrowserSession()
-  const sessionKey = browserReadableSessionKey(browserSession)
+  const readableSessionKey = browserReadableSessionKey(browserSession)
+  const browserWorkspaceId = browserSession._tag === "authenticated" ||
+      browserSession._tag === "storage-unavailable"
+    ? browserSession.session?.workspaceId ?? null
+    : null
+  const sessionKey = workspaceId !== null && browserWorkspaceId === workspaceId
+    ? readableSessionKey
+    : null
   const [loaded, setLoaded] = useState<LoadedLanding | null>(null)
 
   useEffect(() =>
@@ -76,6 +83,7 @@ export const useWorkspaceDefaultLandingPath = (
     transport.load(request.signal).then(
       (settings) => {
         if (request.signal.aborted || settings.workspaceId !== workspaceId) return
+        publishWorkspaceSettings(settings)
         setLoaded((current) => {
           if (
             current?.sessionKey === sessionKey &&

@@ -77,6 +77,9 @@ export const WorkspaceSettingsV1 = Schema.Struct({
     enabled: Schema.Boolean,
     minimumConfidencePercent: boundedInteger(0, 100)
   }),
+  // The cadence is the shared policy input for the scheduled lifecycle work
+  // tracked separately from this concurrency/settings slice. The existing
+  // owner-triggered synchronization remains manual until that worker exists.
   synchronization: Schema.Struct({
     cadence: Schema.Literals(["manual", "interval"]),
     intervalMinutes: Schema.NullOr(boundedInteger(5, 10_080)),
@@ -89,6 +92,9 @@ export const WorkspaceSettingsV1 = Schema.Struct({
   ),
   retention: Schema.Struct({
     evidenceDays: boundedInteger(1, 3_650),
+    // Final durable-class sweeps are lifecycle operations. These settings
+    // record their governed workspace policy without weakening immutable
+    // audit tables in the settings persistence boundary.
     contentDays: boundedInteger(1, 3_650),
     auditDays: boundedInteger(1, 3_650),
     agentActivityDays: boundedInteger(1, 365),
@@ -104,6 +110,8 @@ export const WorkspaceSettingsV1 = Schema.Struct({
     )
   ),
   investigation: Schema.Struct({
+    // Investigation automation is a separate application subsystem; this
+    // document owns its concurrency-safe policy, not incident creation.
     mode: Schema.Literals(["manual", "automatic"]),
     consecutiveFailureThreshold: boundedInteger(1, 20)
   }),

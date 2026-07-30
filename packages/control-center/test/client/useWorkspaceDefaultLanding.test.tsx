@@ -13,11 +13,12 @@ import {
 } from "../../src/api/workspaceSettings.js"
 import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
-import { AppShell } from "../../src/client/AppShell.js"
+import { AppShell, canInspectWorkspaceSettings } from "../../src/client/AppShell.js"
 import { pairedBrowserDestination } from "../../src/client/PairPage.js"
 import { publishWorkspaceSettings } from "../../src/client/settings/workspaceSettingsSignals.js"
 import { useWorkspaceDefaultLandingPath } from "../../src/client/settings/useWorkspaceDefaultLanding.js"
 import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
+import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -54,8 +55,8 @@ const saved = WorkspaceSettingsReadModel.make({
   settings: {
     ...initial.settings,
     presentation: {
-      ...initial.settings.presentation,
-      defaultLanding: "active-work"
+      defaultLanding: "active-work",
+      density: "compact"
     }
   }
 })
@@ -112,6 +113,25 @@ describe("useWorkspaceDefaultLandingPath", () => {
 
     const brand = host.querySelector<HTMLAnchorElement>("a[aria-label='Control Center home']")
     expect(brand?.getAttribute("href")).toBe("/")
+
+    act(() => publishWorkspaceSettings(saved))
+    expect(host.querySelector("[data-workspace-density]")?.getAttribute("data-workspace-density")).toBe("compact")
+  })
+
+  it("shows settings navigation only to workspace-wide readers in the routed workspace", () => {
+    const approver = SessionSummary.make({
+      ...session,
+      permission: "workspace-approver"
+    })
+    const reviewer = SessionSummary.make({
+      ...session,
+      permission: "reviewer"
+    })
+    const foreignWorkspaceId = Schema.decodeSync(WorkspaceId)("01890f6f-6d6a-7cc0-98d2-000000000099")
+    expect(canInspectWorkspaceSettings({ _tag: "authenticated", session }, session.workspaceId)).toBe(true)
+    expect(canInspectWorkspaceSettings({ _tag: "authenticated", session: approver }, session.workspaceId)).toBe(true)
+    expect(canInspectWorkspaceSettings({ _tag: "authenticated", session: reviewer }, session.workspaceId)).toBe(false)
+    expect(canInspectWorkspaceSettings({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
   })
 
   it("keeps a newer saved landing when an older initial load resolves late", async () => {

@@ -463,6 +463,39 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
+  it.effect("keeps workspace settings reads behind workspace-wide session authority", () =>
+    Effect.gen(function*() {
+      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      })
+      const handler = workspaceSettingsHandlersLayer.pipe(
+        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(
+          Layer.succeed(WorkspaceSettingsAdministration, {
+            read: () => Effect.die("watcher reached workspace settings"),
+            update: () => Effect.die("not used")
+          })
+        ),
+        Layer.provide(ServerLifecycle.layer)
+      )
+      const attempted = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, [
+          "workspaceSettings"
+        ])
+        return yield* client.workspaceSettings.read().pipe(Effect.result)
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          watcherMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assertForbidden(attempted)
+    }))
+
   it.effect("derives workspace-settings mutation attribution from the owner session", () =>
     Effect.gen(function*() {
       const received = yield* Ref.make<unknown>(null)

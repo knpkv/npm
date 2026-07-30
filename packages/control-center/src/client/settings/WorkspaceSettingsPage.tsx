@@ -1,6 +1,7 @@
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
+import { useParams } from "react-router"
 
 import {
   changedWorkspaceSettingsSections,
@@ -240,7 +241,7 @@ export const SettingsForm = ({
       </SettingsSection>
 
       <SettingsSection
-        description="Sets automatic synchronization cadence and the age at which source data is considered stale."
+        description="Records the intended synchronization cadence; Sync now remains the active execution path. Also sets the age at which source data is stale."
         title="Synchronization"
       >
         <SelectField
@@ -280,7 +281,7 @@ export const SettingsForm = ({
       </SettingsSection>
 
       <SettingsSection
-        description="Governed lifecycle limits. Audit retention cannot be shorter than evidence retention."
+        description="Governed lifecycle policy. Evidence expiry applies to new materialization; bounded final-class sweeps run through lifecycle operations."
         title="Retention"
       >
         {retentionFields.map(([key, label, maximum]) => (
@@ -308,7 +309,7 @@ export const SettingsForm = ({
       </SettingsSection>
 
       <SettingsSection
-        description="Controls when repeated failures should open an investigation."
+        description="Records the threshold for investigation automation; investigation creation currently remains manual."
         title="Investigation"
       >
         <SelectField
@@ -528,7 +529,13 @@ export const SettingsForm = ({
 /** Concurrency-safe workspace settings with explicit stale-write recovery. */
 export const WorkspaceSettingsPage = (): ReactElement => {
   const browserSession = useBrowserSession()
-  const sessionKey = browserReadableSessionKey(browserSession.state)
+  const routeWorkspaceId = useParams().workspaceId
+  const session =
+    browserSession.state._tag === "authenticated" || browserSession.state._tag === "storage-unavailable"
+      ? browserSession.state.session
+      : null
+  const routeMatchesSession = session === null || routeWorkspaceId === session.workspaceId
+  const sessionKey = routeMatchesSession ? browserReadableSessionKey(browserSession.state) : null
   const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession)
   const theme = useAppTheme()
   const [governedChangeConfirmed, setGovernedChangeConfirmed] = useState(false)
@@ -536,12 +543,17 @@ export const WorkspaceSettingsPage = (): ReactElement => {
   useEffect(() => {
     setGovernedChangeConfirmed(false)
   }, [confirmationRevision, controller.state._tag])
-  const session =
-    browserSession.state._tag === "authenticated" || browserSession.state._tag === "storage-unavailable"
-      ? browserSession.state.session
-      : null
   const canEdit = browserSession.state._tag === "authenticated" && session?.permission === "workspace-owner"
 
+  if (!routeMatchesSession) {
+    return (
+      <StatePanel
+        description="This route does not match the workspace authorized for the current browser session."
+        title="Workspace not found"
+        tone="critical"
+      />
+    )
+  }
   if (controller.state._tag === "idle" || controller.state._tag === "loading") {
     return <StatePanel title="Loading workspace settings" />
   }

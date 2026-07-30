@@ -107,6 +107,27 @@
   padding-block: clamp(3.5rem, 8vw, 7rem);
 }
 
+.root[data-workspace-density="compact"] .header {
+  min-block-size: 3.75rem;
+}
+
+.root[data-workspace-density="compact"] .brand {
+  gap: 0.5rem;
+}
+
+.root[data-workspace-density="compact"] .navLink {
+  padding: 0.4rem 0.75rem;
+}
+
+.root[data-workspace-density="compact"] .agent {
+  min-block-size: 2.5rem;
+  padding-inline: 0.75rem;
+}
+
+.root[data-workspace-density="compact"] .main {
+  padding-block: clamp(2.5rem, 6vw, 5rem);
+}
+
 :global(::view-transition-group(*)) {
   animation-duration: var(--rly-motion-deliberate-duration);
   animation-timing-function: var(--rly-motion-deliberate-easing);

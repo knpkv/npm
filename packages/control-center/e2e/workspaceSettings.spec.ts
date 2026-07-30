@@ -133,6 +133,10 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByRole("button", { name: "Save settings" }).click()
   await expect(page.getByText("Saved", { exact: true })).toBeVisible()
   expect(savedSettings.presentation.density).toBe("compact")
+  await expect(page.locator("[data-workspace-density]")).toHaveAttribute(
+    "data-workspace-density",
+    "compact"
+  )
 
   await page.getByLabel("Profile policy").selectOption("local-profile")
   const localProfileNotices = page.getByText(/Local profile is unavailable/)
@@ -150,4 +154,41 @@ test("validates, persists, and reflows workspace settings in a real browser", as
       "document.documentElement.scrollWidth <= window.innerWidth"
     )
   ).toBe(true)
+})
+
+test("does not load or mutate settings for a route outside the browser session workspace", async ({ context, page }) => {
+  const otherWorkspaceId = "01890f6f-6d6a-7cc0-98d2-000000000099"
+  await context.addCookies([
+    {
+      name: "cc_session",
+      value: "ab".repeat(32),
+      url: "http://127.0.0.1:4173"
+    }
+  ])
+  await page.addInitScript((token) => {
+    sessionStorage.setItem("cc_csrf", token)
+  }, csrfToken)
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken, session }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/portfolio", async (route) => {
+    await route.fulfill({ status: 503 })
+  })
+  let settingsRequests = 0
+  await context.route("**/api/v1/settings", async (route) => {
+    settingsRequests += 1
+    await route.fulfill({
+      body: JSON.stringify(readModel),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+
+  await page.goto(`/w/${otherWorkspaceId}/settings`)
+  await expect(page.getByText("Workspace not found", { exact: true })).toBeVisible()
+  await expect.poll(() => settingsRequests).toBe(0)
 })

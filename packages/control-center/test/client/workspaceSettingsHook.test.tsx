@@ -125,7 +125,19 @@ const click = async (button: HTMLButtonElement): Promise<void> => {
 
 describe("useWorkspaceSettings", () => {
   it("reuses the same mutation identity after an ambiguous save failure", async () => {
-    const update = vi.fn().mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce(saved)
+    const newerHead = WorkspaceSettingsReadModel.make({
+      ...saved,
+      revision: WorkspaceSettingsRevision.make(3),
+      etag: workspaceSettingsEtag(WorkspaceSettingsRevision.make(3)),
+      settings: {
+        ...saved.settings,
+        presentation: {
+          defaultLanding: "active-work",
+          density: "comfortable"
+        }
+      }
+    })
+    const update = vi.fn().mockRejectedValueOnce(new Error("response lost")).mockResolvedValueOnce(newerHead)
     const transport = {
       load: () => Promise.resolve(initial),
       makeMutationId: vi.fn(() => Promise.resolve(mutationId)),
@@ -150,6 +162,7 @@ describe("useWorkspaceSettings", () => {
     expect(update.mock.calls[0]?.[0].mutationId).toBe(mutationId)
     expect(update.mock.calls[1]?.[0].mutationId).toBe(mutationId)
     expect(host.textContent).toContain("saved")
+    expect(host.textContent).toContain("active-work")
   })
 
   it("retains the losing draft when loading the conflict revision fails", async () => {

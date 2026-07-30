@@ -412,7 +412,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     if (committed.settingsDigest !== audit.afterDigest) {
       return yield* new WorkspaceSettingsMutationConflictError()
     }
-    return committed
+    return yield* readCurrent(workspaceId, "deferred")
   })
 
   const get = Effect.fn("WorkspaceSettingsRepository.get")(function*(workspaceId: WorkspaceId) {
