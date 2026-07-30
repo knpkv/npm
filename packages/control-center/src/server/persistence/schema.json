@@ -384,12 +384,12 @@
     {
       "type": "table",
       "name": "retention_cleanup_claims",
-      "sql": "CREATE TABLE retention_cleanup_claims (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL,\n    retention_class TEXT NOT NULL CHECK(retention_class IN ('evidence', 'agent-content')),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 200),\n    PRIMARY KEY (workspace_id, run_id, retention_class, record_key),\n    FOREIGN KEY (workspace_id, run_id)\n      REFERENCES retention_cleanup_runs(workspace_id, run_id)\n      ON DELETE RESTRICT\n  )"
+      "sql": "CREATE TABLE retention_cleanup_claims (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL,\n    retention_class TEXT NOT NULL CHECK(retention_class IN ('evidence', 'agent-content')),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 200),\n    PRIMARY KEY (workspace_id, run_id, retention_class, record_key),\n    FOREIGN KEY (workspace_id, run_id, retention_class)\n      REFERENCES retention_cleanup_runs(workspace_id, run_id, retention_class)\n      ON DELETE RESTRICT\n  )"
     },
     {
       "type": "table",
       "name": "retention_cleanup_runs",
-      "sql": "CREATE TABLE retention_cleanup_runs (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL CHECK(length(run_id) = 36),\n    retention_class TEXT NOT NULL CHECK(retention_class IN (\n      'audit-replay', 'reproducible-content', 'evidence',\n      'agent-content', 'sandbox-artifact'\n    )),\n    policy_revision INTEGER NOT NULL CHECK(policy_revision >= 1),\n    cutoff_at TEXT NOT NULL,\n    batch_limit INTEGER NOT NULL CHECK(batch_limit BETWEEN 1 AND 512),\n    selected_count INTEGER NOT NULL CHECK(selected_count BETWEEN 0 AND batch_limit),\n    deleted_count INTEGER NOT NULL CHECK(deleted_count BETWEEN 0 AND selected_count),\n    completed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, run_id),\n    FOREIGN KEY (workspace_id, policy_revision)\n      REFERENCES workspace_settings_versions(workspace_id, revision)\n      ON DELETE RESTRICT,\n    CHECK(cutoff_at <= completed_at)\n  )"
+      "sql": "CREATE TABLE retention_cleanup_runs (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL CHECK(length(run_id) = 36),\n    retention_class TEXT NOT NULL CHECK(retention_class IN (\n      'audit-replay', 'reproducible-content', 'evidence',\n      'agent-content', 'sandbox-artifact'\n    )),\n    policy_revision INTEGER NOT NULL CHECK(policy_revision >= 1),\n    cutoff_at TEXT NOT NULL,\n    batch_limit INTEGER NOT NULL CHECK(batch_limit BETWEEN 1 AND 512),\n    selected_count INTEGER NOT NULL CHECK(selected_count BETWEEN 0 AND batch_limit),\n    deleted_count INTEGER NOT NULL CHECK(deleted_count BETWEEN 0 AND selected_count),\n    completed_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, run_id),\n    UNIQUE (workspace_id, run_id, retention_class),\n    FOREIGN KEY (workspace_id, policy_revision)\n      REFERENCES workspace_settings_versions(workspace_id, revision)\n      ON DELETE RESTRICT,\n    CHECK(cutoff_at <= completed_at)\n  )"
     },
     {
       "type": "table",
@@ -735,6 +735,11 @@
       "type": "index",
       "name": "releases_updated_at_idx",
       "sql": "CREATE INDEX releases_updated_at_idx\n    ON releases(workspace_id, updated_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "retention_cleanup_claims_record_idx",
+      "sql": "CREATE INDEX retention_cleanup_claims_record_idx\n    ON retention_cleanup_claims(workspace_id, retention_class, record_key)"
     },
     {
       "type": "index",

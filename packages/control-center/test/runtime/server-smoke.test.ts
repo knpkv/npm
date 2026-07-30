@@ -846,6 +846,20 @@ describe("Control Center closed runtime", () => {
       })
       assert.strictEqual(enqueued.releaseId, RELEASE_ID)
       assert.strictEqual(enqueued.state, "queued")
+      const unownedReleaseChat = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
+        workspaceId: AUTHORIZED_WORKSPACE,
+        releaseId: RELEASE_ID,
+        request: {
+          providerId: DurableAgentProviderId.make("codex"),
+          model: AgentModelId.make("configured-default"),
+          profile: "read-only",
+          prompt: "This workspace is not owned by the supervised release worker."
+        }
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(unownedReleaseChat))
+      if (Result.isFailure(unownedReleaseChat)) {
+        assert.strictEqual(unownedReleaseChat.failure._tag, "ApplicationServiceUnavailable")
+      }
       assert.deepStrictEqual(
         durableThread.events.map(({ eventKind }) => eventKind),
         ["user-message", "job-queued"]
@@ -863,7 +877,10 @@ describe("Control Center closed runtime", () => {
           eventKind === "job-completed" || eventKind === "job-failed"
         )
         return terminal ? page : yield* Effect.fail("release worker has not completed its claim")
-      }).pipe(Effect.eventually)
+      }).pipe(
+        Effect.tapError(() => TestClock.adjust("1 second")),
+        Effect.retry({ times: 50 })
+      )
       assert.include(
         terminalThread.events.map(({ eventKind }) => eventKind),
         "job-started"
@@ -1239,16 +1256,6 @@ describe("Control Center closed runtime", () => {
         }
       }))
       const persistence = Context.get(runtime, Persistence)
-      const unownedReleaseChat = yield* Context.get(runtime, ReleaseAgentJobs).enqueue({
-        workspaceId: WORKSPACE_ID,
-        releaseId: RELEASE_ID,
-        request: {
-          providerId: DurableAgentProviderId.make("openai-compatible"),
-          model: AgentModelId.make("review-model"),
-          profile: "read-only",
-          prompt: "This workspace has no supervised release-chat worker."
-        }
-      }).pipe(Effect.result)
       const latest = yield* persistence.agentJobs.latestReview({
         workspaceId: WORKSPACE_ID,
         pluginConnectionId: PLUGIN_ID,
@@ -1267,10 +1274,6 @@ describe("Control Center closed runtime", () => {
       assert.strictEqual(sourceUses, 0)
       assert.strictEqual(sandboxCalls, 1)
       assert.strictEqual(providerCalls, 4)
-      assert.isTrue(Result.isFailure(unownedReleaseChat))
-      if (Result.isFailure(unownedReleaseChat)) {
-        assert.strictEqual(unownedReleaseChat.failure._tag, "ApplicationServiceUnavailable")
-      }
       assert.deepStrictEqual(
         retentionRuns.map(({ deletedCount, retentionClass, selectedCount }) => ({
           deletedCount,

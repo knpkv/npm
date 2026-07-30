@@ -329,6 +329,18 @@ const makeRetentionRepository: Effect.Effect<
               AND transition_record.cause_job_id = job.job_id
           )
           AND NOT EXISTS (
+            SELECT 1 FROM agent_review_suggestion_revisions revision
+            WHERE revision.workspace_id = job.workspace_id
+              AND revision.source_job_id = job.job_id
+              AND revision.created_at > ${cutoffAt}
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM agent_thread_events event
+            WHERE event.workspace_id = job.workspace_id
+              AND event.job_id = job.job_id
+              AND event.occurred_at > ${cutoffAt}
+          )
+          AND NOT EXISTS (
             SELECT 1 FROM domain_events event
             WHERE event.workspace_id = job.workspace_id
               AND event.job_id = job.job_id

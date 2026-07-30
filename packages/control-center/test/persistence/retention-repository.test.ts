@@ -4,7 +4,11 @@ import { DateTime, Effect, Layer, Result } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
-import { Persistence, persistenceLayerFromDatabase } from "../../src/server/persistence/Persistence.js"
+import {
+  completeDeferredCleanupBestEffort,
+  Persistence,
+  persistenceLayerFromDatabase
+} from "../../src/server/persistence/Persistence.js"
 import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
 import { fixtureWorkspaceIds, makePersistenceTestConfig } from "./fixtures.js"
 
@@ -168,6 +172,14 @@ const seedRetentionFixtures = Effect.gen(function*() {
 })
 
 describe("RetentionRepository", () => {
+  it.effect("does not replace a committed result with a deferred cleanup failure", () =>
+    Effect.gen(function*() {
+      const result = yield* completeDeferredCleanupBestEffort(
+        Effect.fail("injected-deferred-cleanup-failure")
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isSuccess(result))
+    }))
+
   it.effect("bounds cleanup, protects held/current records, and attributes every class", () =>
     withPersistence(
       Effect.gen(function*() {
@@ -236,6 +248,18 @@ describe("RetentionRepository", () => {
         FROM retention_cleanup_claims
         WHERE workspace_id = ${WORKSPACE_ID}`
         assert.lengthOf(residualClaims, 0)
+        const evidenceRun = persistedRuns.find(
+          ({ retentionClass }) => retentionClass === "evidence"
+        )
+        assert.isDefined(evidenceRun)
+        if (evidenceRun !== undefined) {
+          const mismatchedClaim = yield* database.sql`INSERT INTO retention_cleanup_claims (
+            workspace_id, run_id, retention_class, record_key
+          ) VALUES (
+            ${WORKSPACE_ID}, ${evidenceRun.runId}, 'agent-content', 'mismatched-class'
+          )`.pipe(Effect.result)
+          assert.isTrue(Result.isFailure(mismatchedClaim))
+        }
         const mutation = yield* database.sql`UPDATE retention_cleanup_runs
         SET deleted_count = 0
         WHERE workspace_id = ${WORKSPACE_ID}`.pipe(Effect.result)
@@ -257,6 +281,90 @@ describe("RetentionRepository", () => {
         WHERE workspace_id = ${WORKSPACE_ID}
           AND evidence_id = 'evidence-expired-after-run'`.pipe(Effect.result)
         assert.isTrue(Result.isFailure(postRunDelete))
+      })
+    ))
+
+  it.effect("skips mixed-age agent history without starving an eligible job", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedRetentionFixtures
+        const persistence = yield* Persistence
+        const database = yield* Database
+        const protectedJobId = "01890f6f-6d6a-7cc0-98d2-000000000304"
+        const eligibleThreadId = "01890f6f-6d6a-7cc0-98d2-000000000305"
+        const eligibleJobId = "01890f6f-6d6a-7cc0-98d2-000000000306"
+        const currentPayload = "{\"prompt\":\"current edit\"}"
+        yield* database.sql`UPDATE agent_threads
+          SET next_event_sequence = 3
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND thread_id = '01890f6f-6d6a-7cc0-98d2-000000000303'`
+        yield* database.sql`INSERT INTO agent_thread_events (
+          workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        ) VALUES (
+          ${WORKSPACE_ID}, '01890f6f-6d6a-7cc0-98d2-000000000303', 2,
+          ${protectedJobId}, NULL, 'user-message',
+          ${currentPayload}, ${`sha256:${"7".repeat(64)}`},
+          length(CAST(${currentPayload} AS BLOB)), ${CURRENT_EVENT_AT}
+        )`
+        yield* database.sql`INSERT INTO agent_review_suggestion_revisions (
+          workspace_id, source_job_id, suggestion_id, revision_sequence,
+          revision_id, predecessor_revision_id, revision_json, revision_digest,
+          created_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${protectedJobId}, ${`sha256:${"8".repeat(64)}`}, 2,
+          ${`sha256:${"9".repeat(64)}`}, ${`sha256:${"a".repeat(64)}`},
+          '{}', ${`sha256:${"b".repeat(64)}`}, ${CURRENT_EVENT_AT}
+        )`
+        yield* database.sql`INSERT INTO agent_threads (
+          workspace_id, thread_id, thread_kind, subject_key, release_id,
+          next_event_sequence, created_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${eligibleThreadId}, 'release-chat',
+          'release-retention-eligible', 'release-retention', 2, ${OLD_EVENT_AT}
+        )`
+        yield* database.sql`INSERT INTO agent_jobs (
+          workspace_id, job_id, thread_id, release_id, provider_id, model, access,
+          prompt, context_fingerprint, subject_revision, task_context_json,
+          task_context_digest, state, created_at, cancel_requested_at, terminal_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${eligibleJobId}, ${eligibleThreadId}, 'release-retention',
+          'fake', NULL, 'read-only', 'eligible old prompt', ${PREFIXED_DIGEST},
+          'release-revision:1', '{}', ${PREFIXED_DIGEST}, 'failed',
+          ${OLD_EVENT_AT}, NULL, '2025-01-01T00:00:00.000Z'
+        )`
+        const oldPayload = "{\"prompt\":\"eligible old prompt\"}"
+        yield* database.sql`INSERT INTO agent_thread_events (
+          workspace_id, thread_id, event_sequence, job_id, attempt_sequence,
+          event_kind, payload_json, payload_digest, payload_byte_length, occurred_at
+        ) VALUES (
+          ${WORKSPACE_ID}, ${eligibleThreadId}, 1, ${eligibleJobId}, NULL,
+          'user-message', ${oldPayload}, ${`sha256:${"c".repeat(64)}`},
+          length(CAST(${oldPayload} AS BLOB)), ${OLD_EVENT_AT}
+        )`
+        yield* TestClock.setTime(DateTime.toEpochMillis(NOW))
+
+        const runs = yield* persistence.retention.sweepWorkspace(WORKSPACE_ID)
+        const remainingJobs = yield* database.sql<{ readonly jobId: string }>`SELECT
+          job_id AS jobId
+          FROM agent_jobs
+          WHERE workspace_id = ${WORKSPACE_ID}
+          ORDER BY job_id`
+        const remainingRevisions = yield* database.sql`SELECT revision_id
+          FROM agent_review_suggestion_revisions
+          WHERE workspace_id = ${WORKSPACE_ID}
+            AND source_job_id = ${protectedJobId}`
+        const agentRun = runs.find(
+          ({ retentionClass }) => retentionClass === "agent-content"
+        )
+
+        assert.deepStrictEqual(
+          remainingJobs.map(({ jobId }) => jobId),
+          [protectedJobId]
+        )
+        assert.lengthOf(remainingRevisions, 1)
+        assert.strictEqual(agentRun?.selectedCount, 1)
+        assert.strictEqual(agentRun?.deletedCount, 1)
       })
     ))
 

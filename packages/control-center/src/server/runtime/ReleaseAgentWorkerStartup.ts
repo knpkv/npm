@@ -43,25 +43,29 @@ const makeStartup = Effect.fn("ReleaseAgentWorkerStartup.make")(function*(
     options.failurePollInterval ?? DEFAULT_FAILURE_POLL_INTERVAL
   )
   const cycle = worker.runOnce(options.workspaceId).pipe(
-    Effect.flatMap((result) =>
-      result._tag === "idle"
-        ? Effect.sleep(idlePollInterval)
-        : Effect.yieldNow
-    ),
+    Effect.map((result) => result._tag === "idle" ? idlePollInterval : Duration.zero),
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
         ? Effect.failCause(cause)
         : Effect.logError("Release agent worker cycle failed", cause).pipe(
-          Effect.andThen(Effect.sleep(failurePollInterval))
+          Effect.as(failurePollInterval)
         )
     )
   )
-  const supervise = lifecycle.runBackground(
-    Effect.raceFirst(
-      lifecycle.awaitDrain,
-      Effect.forever(cycle)
-    )
-  ).pipe(
+  const supervise = Effect.gen(function*() {
+    while (true) {
+      const nextPollInterval = yield* lifecycle.runBackground(cycle)
+      const drainStarted = yield* Effect.raceFirst(
+        lifecycle.awaitDrain.pipe(Effect.as(true)),
+        (
+          Duration.isZero(nextPollInterval)
+            ? Effect.yieldNow
+            : Effect.sleep(nextPollInterval)
+        ).pipe(Effect.as(false))
+      )
+      if (drainStarted) return
+    }
+  }).pipe(
     Effect.catch(() => Effect.void)
   )
   yield* Effect.forkScoped(supervise)

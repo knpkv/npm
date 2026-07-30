@@ -197,6 +197,21 @@ export const sweepDiffContentCacheCleanup = Effect.fn("Persistence.sweepDiffCont
   }
 )
 
+/** Keep deferred blob reclamation outside the outcome of an already committed write. @internal */
+export const completeDeferredCleanupBestEffort = Effect.fn(
+  "Persistence.completeDeferredCleanupBestEffort"
+)(function*<Requirements>(
+  cleanup: Effect.Effect<void, unknown, Requirements>
+) {
+  yield* cleanup.pipe(
+    Effect.catch(() =>
+      Effect.logWarning(
+        "Deferred diff content cache cleanup remains pending for a later retry"
+      )
+    )
+  )
+})
+
 /** Publish a mapping, persist orphan intent even on failure, then drain one retryable batch. */
 export const putAndSweepDiffContentCache = Effect.fn("Persistence.putAndSweepDiffContentCache")(
   function*(
@@ -305,8 +320,8 @@ const makePersistence = Effect.gen(function*() {
   const workspaces = yield* WorkspaceRepository
   const workspaceSettings = yield* WorkspaceSettingsRepository
 
-  yield* sweepDiffContentCacheCleanup(database, content, diffContentCache).pipe(
-    Effect.catch(() => Effect.logWarning("Deferred diff content cache cleanup will retry on the next cache write"))
+  yield* completeDeferredCleanupBestEffort(
+    sweepDiffContentCacheCleanup(database, content, diffContentCache)
   )
 
   return {
@@ -666,7 +681,11 @@ const makePersistence = Effect.gen(function*() {
         publicOperation(
           "retention.sweep-workspace",
           retention.sweepWorkspace(...args).pipe(
-            Effect.tap(() => sweepDiffContentCacheCleanup(database, content, diffContentCache))
+            Effect.tap(() =>
+              completeDeferredCleanupBestEffort(
+                sweepDiffContentCacheCleanup(database, content, diffContentCache)
+              )
+            )
           )
         )
     },

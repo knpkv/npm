@@ -84,8 +84,12 @@ export const verifyDatabaseIntegrity = Effect.fn("Database.verifyIntegrity")(fun
     if (rows.length !== 1 || rows[0]?.integrityCheck.toLowerCase() !== "ok") {
       return yield* Effect.fail("SQLite integrity check did not return one ok result")
     }
+    const foreignKeyRows = yield* sql`PRAGMA foreign_key_check`
+    if (foreignKeyRows.length !== 0) {
+      return yield* Effect.fail("SQLite foreign key check returned violations")
+    }
   }).pipe(
-    Effect.catchCause(() => new DatabaseInitializationError({ operation: "verify-integrity" }))
+    Effect.mapError(() => new DatabaseInitializationError({ operation: "verify-integrity" }))
   )
 })
 

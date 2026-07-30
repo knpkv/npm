@@ -1017,6 +1017,7 @@ describe("agent job worker", () => {
         const jobs = yield* AgentJobRepository
         const worker = yield* AgentJobWorker
         const lifecycle = yield* ServerLifecycle.make
+        const completed = yield* Deferred.make<void>()
         yield* TestClock.setTime(DateTime.toEpochMillis(STARTED_AT))
         yield* setupFoundation
         yield* enqueue()
@@ -1030,25 +1031,26 @@ describe("agent job worker", () => {
         })
         assert.isTrue(Option.isSome(original))
         yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.addDuration(STARTED_AT, "2 minutes")))
+        const observedWorker = AgentJobWorker.of({
+          runOnce: (workspaceId) =>
+            worker.runOnce(workspaceId).pipe(
+              Effect.tap(() => Deferred.succeed(completed, undefined))
+            )
+        })
         const startup = releaseAgentWorkerStartupLayer({
           workspaceId: WORKSPACE_ID,
           idlePollInterval: "1 hour"
         }).pipe(
           Layer.provide(Layer.mergeAll(
-            Layer.succeed(AgentJobWorker, worker),
+            Layer.succeed(AgentJobWorker, observedWorker),
             Layer.succeed(ServerLifecycle, lifecycle)
           ))
         )
 
         const events = yield* Effect.gen(function*() {
           yield* ReleaseAgentWorkerStartup
-          const recovered = yield* Effect.gen(function*() {
-            yield* Effect.yieldNow
-            const page = yield* replay
-            return page.events.at(-1)?.eventKind === "job-completed"
-              ? page.events
-              : yield* Effect.fail("release worker has not completed the recovered lease")
-          }).pipe(Effect.eventually)
+          yield* Deferred.await(completed)
+          const recovered = (yield* replay).events
           yield* lifecycle.beginDrain
           yield* lifecycle.awaitWorkDrained
           return recovered

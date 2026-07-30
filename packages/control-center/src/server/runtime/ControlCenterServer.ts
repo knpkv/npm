@@ -568,7 +568,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           : { runOnceBeforeSupervision: configured.runOnceBeforeSupervision })
       }).pipe(
         Layer.provide(worker),
-        Layer.provide(sandboxes)
+        Layer.provide(sandboxes),
+        Layer.provide(persistence),
+        Layer.provide(bootstrap)
       )
     })()
   const runtimeServices = Layer.mergeAll(

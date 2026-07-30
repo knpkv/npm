@@ -10,7 +10,8 @@ import * as Option from "effect/Option"
 import type { WorkspaceId } from "../../domain/identifiers.js"
 import { AgentJobWorker } from "../agent/AgentJobWorker.js"
 import { PrReviewSandboxSessions } from "../agent/internal/PrReviewSandboxSession.js"
-import { Persistence } from "../persistence/Persistence.js"
+import { Persistence, type PersistenceOperationFailure } from "../persistence/Persistence.js"
+import { ControlCenterBootstrap } from "./Bootstrap.js"
 import { ServerLifecycle } from "./ServerLifecycle.js"
 
 const DEFAULT_IDLE_POLL_INTERVAL = Duration.seconds(1)
@@ -42,24 +43,17 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
   const lifecycle = yield* ServerLifecycle
   const worker = yield* AgentJobWorker
   const sandboxes = yield* PrReviewSandboxSessions
-  const persistence = yield* Effect.serviceOption(Persistence)
+  const persistence = yield* Persistence
+  yield* ControlCenterBootstrap
   const reconciliation = yield* sandboxes.reconcile().pipe(
     Effect.tapError((failure) => Effect.logError("PR review sandbox reconciliation failed", failure)),
     Effect.option
   )
-  if (Option.isSome(reconciliation) && Option.isSome(persistence)) {
-    yield* persistence.value.retention
+  if (Option.isSome(reconciliation)) {
+    yield* persistence.retention
       .recordSandboxReconciliation(
         options.workspaceId,
         reconciliation.value.removedSandboxes.length
-      )
-      .pipe(
-        Effect.catch((failure) =>
-          Effect.logError(
-            "PR review sandbox reconciliation audit failed",
-            failure
-          )
-        )
       )
   }
   const idlePollInterval = Duration.fromInputUnsafe(
@@ -72,25 +66,29 @@ const makeStartup = Effect.fn("PrReviewWorkerStartup.make")(function*(
     yield* worker.runOnce(options.workspaceId).pipe(Effect.orDie)
   }
   const cycle = worker.runOnce(options.workspaceId).pipe(
-    Effect.flatMap((result) =>
-      result._tag === "idle"
-        ? Effect.sleep(idlePollInterval)
-        : Effect.yieldNow
-    ),
+    Effect.map((result) => result._tag === "idle" ? idlePollInterval : Duration.zero),
     Effect.catchCause((cause) =>
       Cause.hasInterrupts(cause)
         ? Effect.failCause(cause)
         : Effect.logError("PR review worker cycle failed", cause).pipe(
-          Effect.andThen(Effect.sleep(failurePollInterval))
+          Effect.as(failurePollInterval)
         )
     )
   )
-  const supervise = lifecycle.runBackground(
-    Effect.raceFirst(
-      lifecycle.awaitDrain,
-      Effect.forever(cycle)
-    )
-  ).pipe(
+  const supervise = Effect.gen(function*() {
+    while (true) {
+      const nextPollInterval = yield* lifecycle.runBackground(cycle)
+      const drainStarted = yield* Effect.raceFirst(
+        lifecycle.awaitDrain.pipe(Effect.as(true)),
+        (
+          Duration.isZero(nextPollInterval)
+            ? Effect.yieldNow
+            : Effect.sleep(nextPollInterval)
+        ).pipe(Effect.as(false))
+      )
+      if (drainStarted) return
+    }
+  }).pipe(
     Effect.catch(() => Effect.void)
   )
   yield* Effect.forkScoped(supervise)
@@ -102,6 +100,6 @@ export const prReviewWorkerStartupLayer = (
   options: PrReviewWorkerStartupOptions
 ): Layer.Layer<
   PrReviewWorkerStartup,
-  never,
-  AgentJobWorker | PrReviewSandboxSessions | ServerLifecycle
+  PersistenceOperationFailure,
+  AgentJobWorker | ControlCenterBootstrap | Persistence | PrReviewSandboxSessions | ServerLifecycle
 > => Layer.effect(PrReviewWorkerStartup, makeStartup(options))
