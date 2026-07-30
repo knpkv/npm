@@ -1340,3 +1340,33 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-inheritance-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const base = { env: { AWS_PROFILE: profile } }
+    const viaSpread = ChildProcess.make("git", args, { ...base, stderr: "pipe" })
+    const frozenBase = Object.freeze({ env: { AWS_PROFILE: profile } })
+    const viaFrozenSpread = ChildProcess.make("git", args, { ...frozenBase })
+    const nestedBase = { ...base }
+    const viaNestedSpread = ChildProcess.make("git", args, { ...nestedBase, stderr: "pipe" })
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-spread-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: { AWS_PROFILE: profile }, extendEnv: true }
+    const viaSpread = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
+    const splitBase = { env: { AWS_PROFILE: profile } }
+    const viaSplitSpread = ChildProcess.make("git", args, { ...splitBase, extendEnv: false })
+    const opaque = ChildProcess.make("git", args, { ...buildOptions(), stderr: "pipe" })
+    const reassigned = ChildProcess.make("git", args, { ...mutable, stderr: "pipe" })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-spread-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})

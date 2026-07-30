@@ -16,6 +16,19 @@ valid:
       stdout: "inherit",
       stderr: "inherit"
     })
+  - |
+    ChildProcess.make("pbcopy", { stdin })
+  - |
+    ChildProcess.make("open", [url])
+  - |
+    ChildProcess.make("tool", [JSON.stringify({ env: payload })], {
+      stderr: "pipe"
+    })
+  - |
+    ChildProcess.make("tool", [JSON.stringify({ extendEnv: true })], {
+      env: childEnv,
+      extendEnv: true
+    })
 invalid:
   - |
     ChildProcess.make("assume", ["-cd", link, profile], {
@@ -25,4 +38,10 @@ invalid:
   - |
     ChildProcess.make("node", [CLI_PATH, ...args], {
       env: { PATH: path }
+    })
+  - |
+    ChildProcess.make("pbcopy", { env: childEnv, stdin })
+  - |
+    ChildProcess.make("tool", [JSON.stringify({ extendEnv: true })], {
+      env: childEnv
     })

@@ -406,18 +406,21 @@ const directChildProcessMakeCall = (identifier) => {
   return call?.type === "CallExpression" && call.callee === member ? call : undefined
 }
 
+const CHILD_PROCESS_OPTION_DEPTH_LIMIT = 8
+
 /**
  * Resolves the options argument of a `ChildProcess.make` call to the object
- * literal that produced it, following one level of `const` binding and any
- * `Object.freeze` wrapper.
+ * literal that produced it, following `const` bindings and any `Object.freeze`
+ * wrapper.
  *
  * Returns undefined when the shape cannot be established statically — a
- * reassignable binding, a call result, a spread-only construction, or the args
- * array of a two-argument call. Those are left to review rather than guessed at,
- * since interprocedural inference would trade real false positives for coverage.
+ * reassignable binding, a call result, or the args array of a two-argument call.
+ * Those are left to review rather than guessed at, since interprocedural
+ * inference would trade real false positives for coverage.
  */
 const resolvedChildProcessOptions = (context, argument, depth = 0) => {
-  if (argument === undefined || argument.type === "SpreadElement" || depth > 1) return undefined
+  if (argument === undefined || argument.type === "SpreadElement") return undefined
+  if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
   const expression = unwrapTypeExpression(argument)
   const unfrozen = frozenArgument(context, expression) ?? expression
   if (unfrozen.type === "ObjectExpression") return unfrozen
@@ -437,6 +440,35 @@ const resolvedChildProcessOptions = (context, argument, depth = 0) => {
     return undefined
   }
   return resolvedChildProcessOptions(context, definition.node.init, depth + 1)
+}
+
+/**
+ * Collects the option property names a `ChildProcess.make` options object
+ * effectively carries, following statically resolvable spreads.
+ *
+ * A constant spread is resolvable, so `{ ...base, stderr: "pipe" }` where
+ * `const base = { env }` must be treated as setting `env`. Returns undefined if
+ * any spread operand cannot be resolved, because a rule that silently ignored an
+ * opaque spread would report "no env" on an object that may well set one.
+ * Presence is what matters here, so source order does not affect the result.
+ */
+const effectiveChildProcessOptionNames = (context, argument, depth = 0) => {
+  if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
+  const options = resolvedChildProcessOptions(context, argument, depth)
+  if (options === undefined) return undefined
+  const names = new Set()
+  for (const property of options.properties) {
+    if (property.type === "SpreadElement") {
+      const nested = effectiveChildProcessOptionNames(context, property.argument, depth + 1)
+      if (nested === undefined) return undefined
+      for (const name of nested) names.add(name)
+      continue
+    }
+    if (property.type !== "Property" || property.computed) continue
+    const name = staticPropertyName(property.key)
+    if (name !== undefined) names.add(name)
+  }
+  return names
 }
 
 const isEffectModule = (context, expression) => {
@@ -1260,14 +1292,11 @@ module.exports = {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = directChildProcessMakeCall(reference.identifier)
               if (call === undefined) continue
-              const options = resolvedChildProcessOptions(context, call.arguments.at(-1))
+              const argument = call.arguments.at(-1)
+              const options = resolvedChildProcessOptions(context, argument)
               if (options === undefined) continue
-              const named = (name) =>
-                options.properties.filter(
-                  (property) =>
-                    property.type === "Property" && !property.computed && staticPropertyName(property.key) === name
-                )
-              if (named("env").length > 0 && named("extendEnv").length === 0) {
+              const names = effectiveChildProcessOptionNames(context, argument)
+              if (names !== undefined && names.has("env") && !names.has("extendEnv")) {
                 context.report({ node: options, messageId: "implicitInheritance" })
               }
             }

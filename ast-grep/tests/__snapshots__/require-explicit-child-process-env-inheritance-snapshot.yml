@@ -34,3 +34,30 @@ snapshots:
         style: secondary
         start: 51
         end: 70
+  ? |
+    ChildProcess.make("pbcopy", { env: childEnv, stdin })
+  : labels:
+      - source: 'ChildProcess.make("pbcopy", { env: childEnv, stdin })'
+        style: primary
+        start: 0
+        end: 53
+      - source: "env: childEnv"
+        style: secondary
+        start: 30
+        end: 43
+  ? |
+    ChildProcess.make("tool", [JSON.stringify({ extendEnv: true })], {
+      env: childEnv
+    })
+  : labels:
+      - source: |-
+          ChildProcess.make("tool", [JSON.stringify({ extendEnv: true })], {
+            env: childEnv
+          })
+        style: primary
+        start: 0
+        end: 85
+      - source: "env: childEnv"
+        style: secondary
+        start: 69
+        end: 82

@@ -5,22 +5,32 @@ language: tsx
 severity: error
 message: "Declare `extendEnv` explicitly whenever `ChildProcess.make` sets `env`"
 
+# Both supported overloads are matched separately so the checks below apply to
+# the trailing options object only. A single `$$$ARGS` pattern with `stopBy: end`
+# also searched the command and argument expressions, so an unrelated nested
+# object such as `[JSON.stringify({ env: payload })]` was reported.
 rule:
-  all:
-    - pattern: ChildProcess.make($$$ARGS)
-    - has:
-        pattern:
-          context: |
-            const $_ = { env: $ENV }
-          selector: pair
-        stopBy: end
-    - not:
-        has:
+  any:
+    - pattern: ChildProcess.make($COMMAND, $ARGUMENTS, $OPTIONS)
+    - pattern: ChildProcess.make($COMMAND, $OPTIONS)
+
+# `has` defaults to direct children, so these see the options object's own
+# properties rather than anything nested inside a property value.
+constraints:
+  OPTIONS:
+    kind: object
+    all:
+      - has:
           pattern:
             context: |
-              const $_ = { extendEnv: $EXTEND }
+              const $_ = { env: $ENV }
             selector: pair
-          stopBy: end
+      - not:
+          has:
+            pattern:
+              context: |
+                const $_ = { extendEnv: $EXTEND }
+              selector: pair
 
 files:
   - "packages/*/src/**/*.ts"
@@ -31,8 +41,9 @@ note: |
   This is the fast direct-shape check. It only sees an options object written
   inline at the call, so the binding-aware local ESLint rule
   `local-rules/require-explicit-child-process-env-inheritance` owns the complete
-  invariant, including namespace/named import aliases and options extracted into
-  a `const` binding.
+  invariant, including namespace/named import aliases, options extracted into a
+  `const` binding, and properties reaching the options object through a
+  statically resolvable spread.
 
   `extendEnv` defaults to falsy, so passing `env` alone REPLACES the child
   environment instead of augmenting it. The child then loses `PATH` and any
