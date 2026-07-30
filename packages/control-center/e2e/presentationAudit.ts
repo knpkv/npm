@@ -23,6 +23,26 @@ interface AxeBrowserGlobal {
   readonly axe?: AxeRunner
 }
 
+interface FocusVisualSnapshot {
+  readonly backgroundColor: string
+  readonly borderBottom: string
+  readonly borderLeft: string
+  readonly borderRight: string
+  readonly borderTop: string
+  readonly boxShadow: string
+  readonly color: string
+  readonly outlineColor: string
+  readonly outlineOffset: string
+  readonly outlineStyle: string
+  readonly outlineWidth: string
+}
+
+interface FocusedVisualSnapshot extends FocusVisualSnapshot {
+  readonly focusVisible: boolean
+  readonly height: number
+  readonly width: number
+}
+
 declare const document: { readonly activeElement: unknown }
 declare const window: AxeBrowserGlobal
 
@@ -82,28 +102,84 @@ export const seriousAxeViolations = async (page: Page): Promise<ReadonlyArray<Ax
 
 const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator): Promise<void> => {
   await page.evaluate("document.activeElement instanceof HTMLElement && document.activeElement.blur()")
+  await primaryAction.evaluate((element) => {
+    if (!("setAttribute" in element) || typeof element.setAttribute !== "function") {
+      throw new Error("primary action cannot receive an audit marker")
+    }
+    element.setAttribute("data-control-center-focus-audit", "")
+  })
+  const unfocused = await page.evaluate<FocusVisualSnapshot>(`(() => {
+    const element = document.querySelector("[data-control-center-focus-audit]")
+    if (!(element instanceof HTMLElement)) throw new Error("primary action is not an HTML element")
+    const style = getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      borderBottom: style.borderBottom,
+      borderLeft: style.borderLeft,
+      borderRight: style.borderRight,
+      borderTop: style.borderTop,
+      boxShadow: style.boxShadow,
+      color: style.color,
+      outlineColor: style.outlineColor,
+      outlineOffset: style.outlineOffset,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth
+    };
+  })()`)
   for (let attempt = 0; attempt < 200; attempt += 1) {
     await page.keyboard.press("Tab")
     const reachedPrimaryAction = await primaryAction.evaluate((element) => element === document.activeElement)
     if (reachedPrimaryAction) break
   }
   await expect(primaryAction).toBeFocused()
+  const focused = await page.evaluate<FocusedVisualSnapshot>(`(() => {
+    const element = document.querySelector("[data-control-center-focus-audit]")
+    if (!(element instanceof HTMLElement)) throw new Error("primary action is not an HTML element")
+    const bounds = element.getBoundingClientRect()
+    const style = getComputedStyle(element)
+    return {
+      backgroundColor: style.backgroundColor,
+      borderBottom: style.borderBottom,
+      borderLeft: style.borderLeft,
+      borderRight: style.borderRight,
+      borderTop: style.borderTop,
+      boxShadow: style.boxShadow,
+      color: style.color,
+      focusVisible: element.matches(":focus-visible"),
+      height: bounds.height,
+      outlineColor: style.outlineColor,
+      outlineOffset: style.outlineOffset,
+      outlineStyle: style.outlineStyle,
+      outlineWidth: style.outlineWidth,
+      width: bounds.width
+    };
+  })()`)
+  await primaryAction.evaluate((element) => {
+    if (!("removeAttribute" in element) || typeof element.removeAttribute !== "function") {
+      throw new Error("primary action cannot remove its audit marker")
+    }
+    element.removeAttribute("data-control-center-focus-audit")
+  })
+  const outlineChangedAndPainted = (focused.outlineColor !== unfocused.outlineColor ||
+    focused.outlineOffset !== unfocused.outlineOffset ||
+    focused.outlineStyle !== unfocused.outlineStyle ||
+    focused.outlineWidth !== unfocused.outlineWidth) &&
+    focused.outlineStyle !== "none" &&
+    focused.outlineStyle !== "hidden" &&
+    Number.parseFloat(focused.outlineWidth) > 0
+  const shadowChangedAndPainted = focused.boxShadow !== unfocused.boxShadow && focused.boxShadow !== "none"
+  const borderChanged = focused.borderBottom !== unfocused.borderBottom ||
+    focused.borderLeft !== unfocused.borderLeft ||
+    focused.borderRight !== unfocused.borderRight ||
+    focused.borderTop !== unfocused.borderTop
+  const equivalentPaintChanged = focused.backgroundColor !== unfocused.backgroundColor ||
+    focused.color !== unfocused.color
+
   expect(
-    await page.evaluate<boolean>(`(() => {
-      const element = document.activeElement
-      if (!(element instanceof HTMLElement)) return false
-      const bounds = element.getBoundingClientRect()
-      const style = getComputedStyle(element)
-      const outlineIsPainted =
-        style.outlineStyle !== "none" && style.outlineStyle !== "hidden" && Number.parseFloat(style.outlineWidth) > 0
-      const shadowIsPainted = style.boxShadow !== "none"
-      return (
-        element.matches(":focus-visible") &&
-        bounds.width > 0 &&
-        bounds.height > 0 &&
-        (outlineIsPainted || shadowIsPainted)
-      )
-    })()`)
+    focused.focusVisible &&
+      focused.width > 0 &&
+      focused.height > 0 &&
+      (outlineChangedAndPainted || shadowChangedAndPainted || borderChanged || equivalentPaintChanged)
   ).toBe(true)
 }
 
@@ -137,6 +213,7 @@ export const auditProductionRoutePresentation = async (
   expect(
     await page.evaluate<boolean>("document.documentElement.scrollWidth <= document.documentElement.clientWidth")
   ).toBe(true)
+  expect(await seriousAxeViolations(page)).toEqual([])
 
   await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
   await expect(audit.landmark).toBeVisible()

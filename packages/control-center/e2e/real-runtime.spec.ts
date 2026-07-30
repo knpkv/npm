@@ -9,6 +9,7 @@ import {
 import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntimeReport.js"
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
+import { DEFAULT_REQUEST_LIMIT_POLICY } from "../src/server/api/RequestLimits.js"
 import { securityHeaders } from "../src/server/http/security/SecurityHeaders.js"
 import {
   type BrowserSecretSurface,
@@ -25,7 +26,7 @@ import {
 
 test.describe("repository-managed real runtime", () => {
   test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
-    test.setTimeout(30_000)
+    test.setTimeout(60_000)
     const fixture = await startRealRuntimeFixture({ trustedHttpsProxy: true })
     try {
       const context = await browser.newContext({
@@ -59,12 +60,25 @@ test.describe("repository-managed real runtime", () => {
           sameSite: "Strict",
           secure: true
         })
-        const browserSurface = await page.evaluate<BrowserSecretSurface>(`({
-          documentHtml: document.documentElement.outerHTML,
-          localStorage: JSON.stringify(Object.entries(localStorage)),
-          sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
-          url: location.href
-        })`)
+        const browserSurface = await page.evaluate<BrowserSecretSurface>(`(() => {
+          const liveFormControlValues = [];
+          const visitRoot = (root) => {
+            for (const control of root.querySelectorAll("input, textarea, select")) {
+              liveFormControlValues.push(control.value);
+            }
+            for (const element of root.querySelectorAll("*")) {
+              if (element.shadowRoot !== null) visitRoot(element.shadowRoot);
+            }
+          };
+          visitRoot(document);
+          return {
+            documentHtml: document.documentElement.outerHTML,
+            liveFormControlValues: JSON.stringify(liveFormControlValues),
+            localStorage: JSON.stringify(Object.entries(localStorage)),
+            sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
+            url: location.href
+          };
+        })()`)
         expect(
           exposedBrowserForbiddenValues(browserSurface, [
             { label: "HttpOnly session cookie", value: sessionCookie.value },
@@ -74,6 +88,26 @@ test.describe("repository-managed real runtime", () => {
         const csrfProof = await page.evaluate<string | null>(`sessionStorage.getItem("cc_csrf")`)
         if (csrfProof === null) throw new Error("trusted HTTPS pairing did not expose its browser-owned CSRF proof")
         expect(browserSurfaceExposesSecret(browserSurface, csrfProof)).toBe(true)
+
+        const requestAsProxyClient = async (client: "rate-limit-a" | "rate-limit-b"): Promise<number> => {
+          const response = await context.request.get(`${fixture.origin}/api/v1/session/current`, {
+            headers: { "x-control-center-test-proxy-client": client }
+          })
+          const status = response.status()
+          await response.dispose()
+          return status
+        }
+        let firstClientExhausted = false
+        for (let request = 0; request < DEFAULT_REQUEST_LIMIT_POLICY.read.limit * 2; request += 1) {
+          const status = await requestAsProxyClient("rate-limit-a")
+          if (status === 429) {
+            firstClientExhausted = true
+            break
+          }
+          expect(status).toBe(200)
+        }
+        expect(firstClientExhausted).toBe(true)
+        expect(await requestAsProxyClient("rate-limit-b")).toBe(200)
       } finally {
         await context.close()
       }

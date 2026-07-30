@@ -101,28 +101,43 @@ describe("workspace package artifacts", () => {
       assert.strictEqual(yield* fileSystem.exists(sourceMarker), true)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
-  it.effect("changes the dependency fingerprint for source and build configuration, but not tests", () =>
+  it.effect("changes the dependency fingerprint for source and resolved build configuration, but not tests or docs", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const packageRoot = yield* fileSystem.makeTempDirectoryScoped({
+      const workspaceRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "control-center-artifact-fingerprint-"
       })
+      const packageRoot = path.join(workspaceRoot, "packages", "example")
       const sourcePath = path.join(packageRoot, "src", "index.ts")
       const testPath = path.join(packageRoot, "test", "index.test.ts")
+      const readmePath = path.join(packageRoot, "README.md")
+      const sharedConfigPath = path.join(workspaceRoot, "tsconfig.base.jsonc")
       yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
       yield* fileSystem.makeDirectory(path.dirname(testPath), { recursive: true })
       yield* fileSystem.writeFileString(path.join(packageRoot, "package.json"), "{\"name\":\"@example/package\"}")
+      yield* fileSystem.writeFileString(
+        path.join(packageRoot, "tsconfig.json"),
+        "{\"extends\":\"../../tsconfig.base.jsonc\"}"
+      )
+      yield* fileSystem.writeFileString(sharedConfigPath, "{\"compilerOptions\":{\"strict\":true}}")
       yield* fileSystem.writeFileString(sourcePath, "export const value = 1\n")
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(1)\n")
+      yield* fileSystem.writeFileString(readmePath, "Example package\n")
 
       const initial = yield* workspaceArtifactInputFingerprint(packageRoot)
       yield* fileSystem.writeFileString(testPath, "expect(value).toBe(2)\n")
       assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
+      yield* fileSystem.writeFileString(readmePath, "Updated package documentation\n")
+      assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
+
+      yield* fileSystem.writeFileString(sharedConfigPath, "{\"compilerOptions\":{\"strict\":false}}")
+      const sharedConfigChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(sharedConfigChanged, initial)
 
       yield* fileSystem.writeFileString(sourcePath, "export const value = 2\n")
       const sourceChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
-      assert.notStrictEqual(sourceChanged, initial)
+      assert.notStrictEqual(sourceChanged, sharedConfigChanged)
 
       yield* fileSystem.writeFileString(path.join(packageRoot, "tsconfig.build.json"), "{\"compilerOptions\":{}}")
       assert.notStrictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), sourceChanged)

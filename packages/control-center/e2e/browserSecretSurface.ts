@@ -1,6 +1,7 @@
 /** Browser-owned text surfaces that must never reveal an HttpOnly session secret. */
 export interface BrowserSecretSurface {
   readonly documentHtml: string
+  readonly liveFormControlValues: string
   readonly localStorage: string
   readonly sessionStorage: string
   readonly url: string

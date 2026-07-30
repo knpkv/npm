@@ -26,6 +26,7 @@ export interface ProductionRouteAuditRequirement {
   readonly family: ProductionRouteFamily
   readonly owner: ProductionRouteAuditOwner
   readonly presentation: ProductionRoutePresentation
+  readonly routerLiteral: string
   readonly surface: ProductionRouteSurface
 }
 
@@ -37,6 +38,15 @@ export interface ProductionRouteFamilyDescriptor {
   readonly family: ProductionRouteFamily
   readonly ownsIndexRoute?: boolean
   readonly routerLiterals: ReadonlyArray<string>
+}
+
+export interface ProductionRouteLeaf {
+  readonly family: ProductionRouteFamily
+  readonly routerLiteral: string
+}
+
+export interface ProductionRouteLeafExemption extends ProductionRouteLeaf {
+  readonly reason: string
 }
 
 /** Stable identities shared by canonical paths and their browser response fixtures. */
@@ -66,13 +76,23 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/agent",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "agent",
         surface: "boundary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: "/agent",
+        owner: "scaffold",
+        presentation: "authenticated",
+        routerLiteral: "agent",
+        surface: "primary"
       },
       {
         action: { kind: "required" },
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/agent`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "releases/:releaseId/agent",
         surface: "primary"
       }
     ],
@@ -86,6 +106,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/shares/${WORKSPACE_ID}/${SHARE_ID}`,
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "shares/:workspaceId/:shareId",
         surface: "boundary"
       },
       {
@@ -96,6 +117,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/shares/${WORKSPACE_ID}/${SHARE_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "shares/:workspaceId/:shareId",
         surface: "primary"
       }
     ],
@@ -109,6 +131,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/services/oauth/atlassian/callback?code=fixture&state=fixture",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "services/oauth/atlassian/callback",
         surface: "boundary"
       },
       {
@@ -116,6 +139,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/services/oauth/atlassian/callback?code=fixture&state=fixture",
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "services/oauth/atlassian/callback",
         surface: "boundary"
       }
     ],
@@ -129,6 +153,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/items/${ENTITY_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "items/:entityId",
         surface: "primary"
       }
     ],
@@ -142,6 +167,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/items`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "items",
         surface: "primary"
       }
     ],
@@ -155,6 +181,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/not-a-production-route",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "*",
         surface: "boundary"
       },
       {
@@ -162,6 +189,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/not-a-production-route`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "*",
         surface: "boundary"
       }
     ],
@@ -175,6 +203,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "<index>",
         surface: "primary"
       },
       {
@@ -182,6 +211,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/overview`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "overview",
         surface: "primary"
       }
     ],
@@ -196,6 +226,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/pair",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "pair",
         surface: "primary"
       }
     ],
@@ -209,6 +240,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "releases/:releaseId",
         surface: "primary"
       }
     ],
@@ -222,6 +254,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/releases/${RELEASE_ID}/preview`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "releases/:releaseId/preview",
         surface: "primary"
       }
     ],
@@ -235,6 +268,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/services",
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "services",
         surface: "primary"
       },
       {
@@ -242,6 +276,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: "/services",
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "services",
         surface: "primary"
       }
     ],
@@ -258,6 +293,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/settings`,
         owner: "scaffold",
         presentation: "unauthenticated",
+        routerLiteral: "settings",
         surface: "boundary"
       },
       {
@@ -265,6 +301,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/settings`,
         owner: "workspace-settings",
         presentation: "authenticated",
+        routerLiteral: "settings",
         surface: "primary"
       }
     ],
@@ -278,6 +315,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/timeline`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "timeline",
         surface: "primary"
       }
     ],
@@ -291,6 +329,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
         canonicalPath: `/w/${WORKSPACE_ID}/work?release=${RELEASE_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "work",
         surface: "primary"
       }
     ],
@@ -299,11 +338,10 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
   }
 ]
 
-/** Stable key used by browser owners to prove every assigned presentation actually ran. */
+/** Stable leaf-specific key used by browser owners to prove every assigned presentation actually ran. */
 export const productionRouteAuditKey = (
-  family: ProductionRouteFamily,
-  presentation: ProductionRoutePresentation
-): string => `${family}:${presentation}`
+  audit: Pick<ProductionRouteAuditRequirement, "family" | "presentation" | "routerLiteral">
+): string => `${audit.routerLiteral}:${audit.family}:${audit.presentation}`
 
 /** Resolve one declared audit; browser matrices cannot invent cases outside the inventory. */
 export const productionRouteAuditCase = (
@@ -316,7 +354,7 @@ export const productionRouteAuditCase = (
     (candidate) => candidate.owner === owner && candidate.presentation === presentation
   )
   if (audit === undefined) {
-    throw new Error(`Production route audit ${productionRouteAuditKey(family, presentation)} is not owned by ${owner}`)
+    throw new Error(`Production route audit ${family}:${presentation} is not owned by ${owner}`)
   }
   return { ...audit, family }
 }
@@ -342,14 +380,23 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_LITERALS: ReadonlyArray<string> = A
 export const CONTROL_CENTER_PRODUCTION_ROUTE_FAMILIES: ReadonlyArray<ProductionRouteFamily> =
   CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.map(({ family }) => family)
 
-/** Families whose router leaf deliberately exposes distinct paired and unpaired presentations. */
-export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_FAMILIES: ReadonlyArray<ProductionRouteFamily> = [
-  "agent",
-  "authorized-share",
-  "atlassian-oauth-callback",
-  "overview",
-  "services",
-  "settings"
+/** Exact leaves that deliberately expose distinct paired and unpaired presentations. */
+export const CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_LEAVES: ReadonlyArray<ProductionRouteLeaf> = [
+  { family: "agent", routerLiteral: "agent" },
+  { family: "authorized-share", routerLiteral: "shares/:workspaceId/:shareId" },
+  { family: "atlassian-oauth-callback", routerLiteral: "services/oauth/atlassian/callback" },
+  { family: "services", routerLiteral: "services" },
+  { family: "settings", routerLiteral: "settings" }
+]
+
+/** Literal leaves deliberately represented by another identical or redirecting browser presentation. */
+export const CONTROL_CENTER_PRODUCTION_ROUTE_LEAF_EXEMPTIONS: ReadonlyArray<ProductionRouteLeafExemption> = [
+  {
+    family: "overview",
+    routerLiteral: "releases",
+    reason:
+      "The top-level releases alias uses the same PortfolioOverview component as the audited index and redirects paired ready state to the workspace landing route."
+  }
 ]
 
 /** Families whose release acceptance must exercise a ready, route-owned primary surface. */
@@ -371,17 +418,22 @@ export const CONTROL_CENTER_READY_ROUTE_FAMILIES: ReadonlyArray<ProductionRouteF
 /** Report missing session variants and ready surfaces without coupling the invariant to a test runner. */
 export const productionRouteCoverageFailures = (
   descriptors: ReadonlyArray<ProductionRouteFamilyDescriptor>,
-  sessionSensitiveFamilies: ReadonlyArray<ProductionRouteFamily>,
+  sessionSensitiveLeaves: ReadonlyArray<ProductionRouteLeaf>,
   readyFamilies: ReadonlyArray<ProductionRouteFamily>
 ): ReadonlyArray<string> => {
   const failures: Array<string> = []
   const requiredPresentations: ReadonlyArray<ProductionRoutePresentation> = ["authenticated", "unauthenticated"]
-  for (const family of sessionSensitiveFamilies) {
+  for (const { family, routerLiteral } of sessionSensitiveLeaves) {
     const presentations = new Set(
-      descriptors.find((descriptor) => descriptor.family === family)?.audits.map(({ presentation }) => presentation)
+      descriptors
+        .find((descriptor) => descriptor.family === family)
+        ?.audits.filter((audit) => audit.routerLiteral === routerLiteral)
+        .map(({ presentation }) => presentation)
     )
     for (const presentation of requiredPresentations) {
-      if (!presentations.has(presentation)) failures.push(`${family} is missing its ${presentation} presentation`)
+      if (!presentations.has(presentation)) {
+        failures.push(`${family} (${routerLiteral}) is missing its ${presentation} presentation`)
+      }
     }
   }
   for (const family of readyFamilies) {

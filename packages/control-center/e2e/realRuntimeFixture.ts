@@ -66,6 +66,14 @@ const SYNCHRONIZATION_INPUT = {
   streamKey: "releases"
 } satisfies ReleaseSynchronizationInput
 
+const TRUSTED_PROXY_TEST_CLIENT_HEADER = "x-control-center-test-proxy-client"
+
+const trustedProxyForwardedClient = (selector: string | ReadonlyArray<string> | undefined): string => {
+  if (selector === "rate-limit-a") return "192.168.1.26"
+  if (selector === "rate-limit-b") return "192.168.1.27"
+  return "192.168.1.25"
+}
+
 const acquireEphemeralPort = Effect.tryPromise({
   try: () =>
     new Promise<number>((resolve, reject) => {
@@ -225,13 +233,17 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
           },
           (request, response) => {
             let downstreamAborted = false
+            const upstreamHeaders = forwardedProxyHeaders(request.headers)
+            delete upstreamHeaders[TRUSTED_PROXY_TEST_CLIENT_HEADER]
             const proxyRequest = httpRequest(
               {
                 agent,
                 headers: {
-                  ...forwardedProxyHeaders(request.headers),
+                  ...upstreamHeaders,
                   host: publicOrigin.host,
-                  "x-forwarded-for": "192.168.1.25",
+                  "x-forwarded-for": trustedProxyForwardedClient(
+                    request.headers[TRUSTED_PROXY_TEST_CLIENT_HEADER]
+                  ),
                   "x-forwarded-host": publicOrigin.host,
                   "x-forwarded-proto": "https"
                 },

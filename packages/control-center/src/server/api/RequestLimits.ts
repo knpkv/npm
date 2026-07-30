@@ -34,25 +34,28 @@ export interface RequestLimitPolicyValue {
   readonly agentTimeout: Duration.Duration
 }
 
+/** Stable default request policy shared by production composition and browser integration evidence. */
+export const DEFAULT_REQUEST_LIMIT_POLICY: RequestLimitPolicyValue = {
+  maximumBodyBytes: 256 * 1024,
+  pairing: { limit: 10, window: Duration.minutes(5) },
+  read: { limit: 120, window: Duration.minutes(1) },
+  "agent-read": { limit: 120, window: Duration.minutes(1) },
+  mutation: { limit: 30, window: Duration.minutes(1) },
+  synchronization: { limit: 8, window: Duration.minutes(1) },
+  agent: { limit: 8, window: Duration.minutes(1) },
+  media: { limit: 60, window: Duration.minutes(1) },
+  readTimeout: Duration.seconds(15),
+  mutationTimeout: Duration.seconds(30),
+  synchronizationTimeout: Duration.minutes(10),
+  agentTimeout: Duration.seconds(130)
+}
+
 /** API request limits, replaceable in deterministic tests. */
 export class RequestLimitPolicy extends Context.Service<
   RequestLimitPolicy,
   RequestLimitPolicyValue
 >()("@knpkv/control-center/server/api/RequestLimitPolicy") {
-  static readonly defaultLayer = Layer.succeed(RequestLimitPolicy, {
-    maximumBodyBytes: 256 * 1024,
-    pairing: { limit: 10, window: Duration.minutes(5) },
-    read: { limit: 120, window: Duration.minutes(1) },
-    "agent-read": { limit: 120, window: Duration.minutes(1) },
-    mutation: { limit: 30, window: Duration.minutes(1) },
-    synchronization: { limit: 8, window: Duration.minutes(1) },
-    agent: { limit: 8, window: Duration.minutes(1) },
-    media: { limit: 60, window: Duration.minutes(1) },
-    readTimeout: Duration.seconds(15),
-    mutationTimeout: Duration.seconds(30),
-    synchronizationTimeout: Duration.minutes(10),
-    agentTimeout: Duration.seconds(130)
-  })
+  static readonly defaultLayer = Layer.succeed(RequestLimitPolicy, DEFAULT_REQUEST_LIMIT_POLICY)
 }
 
 /** A request exceeded its bounded execution time. */

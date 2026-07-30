@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as TypeScript from "typescript"
 
 export class WorkspaceArtifactError extends Data.TaggedError("WorkspaceArtifactError")<{
   readonly reason: string
@@ -109,7 +110,11 @@ export const packagesRequiringPublishedArtifactBuild = (
 
 const workspaceArtifactInputDirectories = new Set(["scripts", "src"])
 const workspaceArtifactInputRootFiles =
-  /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.json|vite\.config\.[cm]?[jt]s)$/u
+  /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.jsonc?|vite\.config\.[cm]?[jt]s)$/u
+const workspaceArtifactTsconfig = /^tsconfig(?:\.[^.]+)*\.jsonc?$/u
+
+const isExcludedExternalBuildInput = (candidate: string): boolean =>
+  candidate.split(/[\\/]/u).some((segment) => segment === "node_modules" || segment === "repos" || segment === "vendor")
 
 /** Hash package source and build configuration, excluding tests, generated output, and vendor trees. */
 export const workspaceArtifactInputFingerprint = Effect.fn(
@@ -118,7 +123,7 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
   const cryptoService = yield* Crypto.Crypto
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const inputPaths: Array<string> = []
+  const inputPaths = new Set<string>()
   const enumerateFailure = (): WorkspaceArtifactError =>
     new WorkspaceArtifactError({ reason: `could not enumerate build inputs for ${packageRoot}` })
 
@@ -136,16 +141,64 @@ export const workspaceArtifactInputFingerprint = Effect.fn(
           const childPath = path.join(directory, child)
           const childInfo = yield* fileSystem.stat(childPath).pipe(Effect.mapError(enumerateFailure))
           if (childInfo.type === "Directory") directories.push(childPath)
-          else if (childInfo.type === "File") inputPaths.push(childPath)
+          else if (childInfo.type === "File") inputPaths.add(childPath)
         }
       }
     } else if (info.type === "File" && workspaceArtifactInputRootFiles.test(entry)) {
-      inputPaths.push(absolutePath)
+      inputPaths.add(absolutePath)
+    }
+  }
+
+  const configQueue = Array.from(inputPaths).filter((inputPath) =>
+    workspaceArtifactTsconfig.test(path.basename(inputPath))
+  )
+  const visitedConfigs = new Set<string>()
+  while (configQueue.length > 0) {
+    const configPath = configQueue.pop()
+    if (configPath === undefined || visitedConfigs.has(configPath)) continue
+    visitedConfigs.add(configPath)
+    const configSource = yield* fileSystem.readFileString(configPath).pipe(
+      Effect.mapError(
+        () =>
+          new WorkspaceArtifactError({ reason: `could not read build input ${path.relative(packageRoot, configPath)}` })
+      )
+    )
+    const parsed = TypeScript.parseConfigFileTextToJson(configPath, configSource)
+    const parsedConfig: unknown = parsed.config
+    if (parsed.error !== undefined || !Predicate.isObject(parsedConfig)) {
+      return yield* new WorkspaceArtifactError({
+        reason: `could not parse build configuration ${path.relative(packageRoot, configPath)}`
+      })
+    }
+    const extendsValue = parsedConfig["extends"]
+    const extendedConfigs = Predicate.isString(extendsValue)
+      ? [extendsValue]
+      : Array.isArray(extendsValue) && extendsValue.every(Predicate.isString)
+      ? extendsValue
+      : []
+    for (const extendedConfig of extendedConfigs) {
+      if (!extendedConfig.startsWith(".") && !extendedConfig.startsWith("/")) continue
+      const unresolved = path.resolve(path.dirname(configPath), extendedConfig)
+      const candidates = /\.jsonc?$/u.test(unresolved)
+        ? [unresolved]
+        : [unresolved, `${unresolved}.json`, `${unresolved}.jsonc`, path.join(unresolved, "tsconfig.json")]
+      let resolved: string | undefined
+      for (const candidate of candidates) {
+        if (isExcludedExternalBuildInput(candidate) || !(yield* fileSystem.exists(candidate))) continue
+        const info = yield* fileSystem.stat(candidate).pipe(Effect.mapError(enumerateFailure))
+        if (info.type === "File") {
+          resolved = candidate
+          break
+        }
+      }
+      if (resolved === undefined || inputPaths.has(resolved)) continue
+      inputPaths.add(resolved)
+      configQueue.push(resolved)
     }
   }
 
   const encodedInputs: Array<string> = []
-  for (const inputPath of inputPaths.sort()) {
+  for (const inputPath of Array.from(inputPaths).sort()) {
     const relativePath = path.relative(packageRoot, inputPath)
     const source = yield* fileSystem.readFileString(inputPath).pipe(
       Effect.mapError(

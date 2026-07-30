@@ -740,9 +740,9 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       })
     }
   }
-  expect(routes.map(({ audit }) => productionRouteAuditKey(audit.family, audit.presentation)).sort()).toEqual(
+  expect(routes.map(({ audit }) => productionRouteAuditKey(audit)).sort()).toEqual(
     requiredProductionRouteAuditsFor("release-routes")
-      .map(({ family, presentation }) => productionRouteAuditKey(family, presentation))
+      .map(productionRouteAuditKey)
       .sort()
   )
 })

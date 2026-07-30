@@ -43,6 +43,89 @@ test("includes WCAG 2.1 A label-content matching in the serious accessibility ga
   expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("label-content-name-mismatch")
 })
 
+test("requires keyboard focus to add a visible indicator", async ({ page }) => {
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>button { box-shadow: 0 0 0 2px currentColor; outline: none; }</style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow()
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          button { outline: none; }
+          button:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+        </style>
+      </head>
+      <body>
+        <main><h1>Focus fixture</h1><button onclick="this.textContent='Continued'">Continue</button></main>
+      </body>
+    </html>
+  `)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Focus fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("reruns the serious accessibility gate after compact-layout content appears", async ({ page }) => {
+  const content = (mobileAccessibleName: string): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Compact fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          .mobile-only { display: none; }
+          @media (max-width: 400px) { .mobile-only { display: inline-block; } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Compact fixture</h1>
+          <button onclick="this.textContent='Continued'">Continue</button>
+          <button class="mobile-only"${mobileAccessibleName}></button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content(""))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow()
+
+  await page.setContent(content(" aria-label=\"Open mobile navigation\""))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Compact fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
 test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
   test.setTimeout(30_000)
   await context.route("**/api/v1/session/current", async (route) => {
@@ -129,9 +212,41 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       })
     }
   }
-  expect(routes.map(({ audit }) => productionRouteAuditKey(audit.family, audit.presentation)).sort()).toEqual(
+
+  await context.unroute("**/api/v1/session/current")
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: "cd".repeat(32), session: pairedSession }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ providers: [] }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  const authenticatedAgent = {
+    audit: productionRouteAuditCase("scaffold", "agent", "authenticated"),
+    landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
+    primaryAction: page.getByRole("link", { name: "Return to Overview" })
+  }
+  await page.goto(authenticatedAgent.audit.canonicalPath)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => {
+      await expect(page).toHaveURL("/")
+      await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+    },
+    landmark: authenticatedAgent.landmark,
+    primaryAction: authenticatedAgent.primaryAction
+  })
+
+  expect([...routes.map(({ audit }) => audit), authenticatedAgent.audit].map(productionRouteAuditKey).sort()).toEqual(
     requiredProductionRouteAuditsFor("scaffold")
-      .map(({ family, presentation }) => productionRouteAuditKey(family, presentation))
+      .map(productionRouteAuditKey)
       .sort()
   )
 })
