@@ -50,6 +50,9 @@ const childEnvironmentUnder = (runtime: string) => (env: Record<string, string |
 
 const childEnvironment = childEnvironmentUnder("node")
 
+/** Resolved from this module rather than the working directory. */
+const BUN_FIXTURE = new URL("./fixtures/bunChildEnv.ts", import.meta.url).pathname
+
 /**
  * Resolved at collection time so the Bun case can be genuinely skipped rather
  * than degrading into a test that asserts nothing.
@@ -160,35 +163,44 @@ describe("ChildEnv.profileScopedEnv", () => {
       assert.isFalse("AWS_DEFAULT_REGION" in env)
     }).pipe(Effect.provide(NodeServices.layer)))
 
-  // Bun is the runtime behind the TUI's `assume` path. If it treated an
-  // `undefined` env value as the string "undefined" instead of dropping the
-  // variable, every clearing case above would still pass while the shipped
-  // binary leaked ambient credentials.
-  it.effect.skipIf(!bunAvailable)("clears the same variables under Bun", () =>
-    Effect.gen(function*() {
-      vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIAAMBIENTEXAMPLE")
-      vi.stubEnv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
-      vi.stubEnv("AWS_SESSION_TOKEN", "ambient-token")
-      vi.stubEnv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/ambient-web-identity")
-      vi.stubEnv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/ambient-token")
-      vi.stubEnv("AWS_REGION", "us-west-1")
-      vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
+  // Bun is the runtime behind the TUI's `assume` path. Spawning `bun` from this
+  // Node-hosted suite would only prove that Node's spawner clears the variables
+  // before handing them to a Bun child. The fixture runs the spawner under Bun
+  // itself, against Bun's own `node:child_process` reimplementation, and reports
+  // its grandchild's environment. If Bun passed the string "undefined" instead of
+  // dropping the variable, every other case here would still pass while the
+  // shipped binary leaked.
+  it.effect.skipIf(!bunAvailable)(
+    "clears the same variables with the spawner hosted on Bun",
+    () =>
+      Effect.gen(function*() {
+        vi.stubEnv("AWS_ACCESS_KEY_ID", "AKIAAMBIENTEXAMPLE")
+        vi.stubEnv("AWS_SECRET_ACCESS_KEY", "ambient-secret")
+        vi.stubEnv("AWS_SESSION_TOKEN", "ambient-token")
+        vi.stubEnv("AWS_ROLE_ARN", "arn:aws:iam::111122223333:role/ambient-web-identity")
+        vi.stubEnv("AWS_WEB_IDENTITY_TOKEN_FILE", "/var/run/secrets/ambient-token")
+        vi.stubEnv("AWS_REGION", "us-west-1")
+        vi.stubEnv("AWS_DEFAULT_REGION", "us-west-1")
 
-      const env = yield* childEnvironmentUnder("bun")(
-        ChildEnv.profileScopedEnv({ AWS_PROFILE: "target-profile" })
-      )
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const output = yield* spawner.string(
+          ChildProcess.make("bun", [BUN_FIXTURE], { extendEnv: true })
+        )
+        const env = yield* decodeEnvironment(output)
 
-      assert.isFalse("AWS_ACCESS_KEY_ID" in env)
-      assert.isFalse("AWS_SECRET_ACCESS_KEY" in env)
-      assert.isFalse("AWS_SESSION_TOKEN" in env)
-      assert.isFalse("AWS_ROLE_ARN" in env)
-      assert.isFalse("AWS_WEB_IDENTITY_TOKEN_FILE" in env)
-      assert.isFalse("AWS_REGION" in env)
-      assert.isFalse("AWS_DEFAULT_REGION" in env)
+        assert.isFalse("AWS_ACCESS_KEY_ID" in env)
+        assert.isFalse("AWS_SECRET_ACCESS_KEY" in env)
+        assert.isFalse("AWS_SESSION_TOKEN" in env)
+        assert.isFalse("AWS_ROLE_ARN" in env)
+        assert.isFalse("AWS_WEB_IDENTITY_TOKEN_FILE" in env)
+        assert.isFalse("AWS_REGION" in env)
+        assert.isFalse("AWS_DEFAULT_REGION" in env)
 
-      assert.strictEqual(env.AWS_PROFILE, "target-profile")
-      assert.isTrue((env.PATH ?? "").length > 0)
-    }).pipe(Effect.provide(NodeServices.layer)))
+        assert.strictEqual(env.AWS_PROFILE, "target-profile")
+        assert.isTrue((env.PATH ?? "").length > 0)
+        assert.isTrue("HOME" in env)
+      }).pipe(Effect.provide(NodeServices.layer))
+  )
 
   it.effect("preserves the inherited PATH so the executable still resolves", () =>
     Effect.gen(function*() {

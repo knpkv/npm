@@ -1274,7 +1274,22 @@ module.exports = {
       }
     },
     create(context) {
-      const childProcessBindings = []
+      // Namespace or `ChildProcess`-object bindings, used as `ChildProcess.make(...)`.
+      const moduleBindings = []
+      // `make` imported directly from the module, possibly aliased, and called
+      // bare. Resolving the binding is what separates this from every unrelated
+      // function named `make`, which is why ast-grep cannot own this case.
+      const makeBindings = []
+
+      const checkCall = (call) => {
+        const argument = call.arguments.at(-1)
+        const options = resolvedChildProcessOptions(context, argument)
+        if (options === undefined) return
+        const names = effectiveChildProcessOptionNames(context, argument)
+        if (names !== undefined && names.has("env") && !names.has("extendEnv")) {
+          context.report({ node: options, messageId: "implicitInheritance" })
+        }
+      }
 
       return {
         ImportDeclaration(node) {
@@ -1283,22 +1298,31 @@ module.exports = {
           for (const specifier of node.specifiers) {
             if (!isSensitiveChildProcessSpecifier(node, specifier)) continue
             const binding = variables.find((variable) => variable.name === specifier.local.name)
-            if (binding !== undefined) childProcessBindings.push(binding)
+            if (binding === undefined) continue
+            const importsMakeDirectly =
+              node.source.value === CHILD_PROCESS_MODULE &&
+              specifier.type === "ImportSpecifier" &&
+              staticPropertyName(specifier.imported) === "make"
+            if (importsMakeDirectly) {
+              makeBindings.push(binding)
+            } else {
+              moduleBindings.push(binding)
+            }
           }
         },
         "Program:exit"() {
-          for (const binding of childProcessBindings) {
+          for (const binding of moduleBindings) {
             for (const reference of binding.references) {
               if (reference.isTypeReference && !reference.isValueReference) continue
               const call = directChildProcessMakeCall(reference.identifier)
-              if (call === undefined) continue
-              const argument = call.arguments.at(-1)
-              const options = resolvedChildProcessOptions(context, argument)
-              if (options === undefined) continue
-              const names = effectiveChildProcessOptionNames(context, argument)
-              if (names !== undefined && names.has("env") && !names.has("extendEnv")) {
-                context.report({ node: options, messageId: "implicitInheritance" })
-              }
+              if (call !== undefined) checkCall(call)
+            }
+          }
+          for (const binding of makeBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = reference.identifier.parent
+              if (call?.type === "CallExpression" && call.callee === reference.identifier) checkCall(call)
             }
           }
         }

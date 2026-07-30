@@ -1370,3 +1370,38 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-spread-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    const direct = make("git", args, { env: { AWS_PROFILE: profile } })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-direct-make-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make as spawn } from "effect/unstable/process/ChildProcess"
+    const aliasedBase = { env: { AWS_PROFILE: profile } }
+    const aliased = spawn("git", args, { ...aliasedBase, stderr: "pipe" })
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-aliased-make-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { make as unrelatedMake } from "./unrelated.js"
+    const augmented = make("git", args, { env: { AWS_PROFILE: profile }, extendEnv: true })
+    const isolated = make("git", args, { env: gitEnvironment, extendEnv: false })
+    const foreign = unrelatedMake("git", args, { env: { AWS_PROFILE: profile } })
+    const shadowed = ((make) => make("git", args, { env: { AWS_PROFILE: profile } }))(unrelatedMake)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-direct-make-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
