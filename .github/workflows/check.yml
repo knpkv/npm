@@ -114,6 +114,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: control-center-runtime-benchmark
-          path: test-results/control-center/runtime-benchmark.json
-          if-no-files-found: warn
+          path: packages/control-center/test-results/control-center/runtime-benchmark.json
+          if-no-files-found: error
           retention-days: 14

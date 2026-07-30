@@ -295,7 +295,10 @@ describe("control center runtime benchmark report", () => {
       expect(uploadStep).toBeDefined()
       expect(uploadStep).toContain("if: ${{ always() }}")
       expect(uploadStep).toContain("uses: actions/upload-artifact@v7")
-      expect(uploadStep).toContain("path: test-results/control-center/runtime-benchmark.json")
+      expect(uploadStep).toContain(
+        "path: packages/control-center/test-results/control-center/runtime-benchmark.json"
+      )
+      expect(uploadStep).toContain("if-no-files-found: error")
     }))
 
   it("keeps every runtime evidence upload field in the named workflow step", () => {
@@ -305,13 +308,15 @@ describe("control center runtime benchmark report", () => {
       - name: Different upload
         uses: actions/upload-artifact@v7
         with:
-          path: test-results/control-center/runtime-benchmark.json`
+          path: packages/control-center/test-results/control-center/runtime-benchmark.json
+          if-no-files-found: error`
     const completeStep = `
       - name: Upload Control Center runtime benchmark evidence
         if: \${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          path: test-results/control-center/runtime-benchmark.json
+          path: packages/control-center/test-results/control-center/runtime-benchmark.json
+          if-no-files-found: error
       - name: Later step
         run: pnpm test`
 
@@ -319,7 +324,10 @@ describe("control center runtime benchmark report", () => {
       "actions/upload-artifact"
     )
     expect(githubWorkflowStep(completeStep, "Upload Control Center runtime benchmark evidence")).toContain(
-      "path: test-results/control-center/runtime-benchmark.json"
+      "path: packages/control-center/test-results/control-center/runtime-benchmark.json"
+    )
+    expect(githubWorkflowStep(completeStep, "Upload Control Center runtime benchmark evidence")).toContain(
+      "if-no-files-found: error"
     )
   })
 
