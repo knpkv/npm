@@ -14,7 +14,7 @@ export type ProductionRouteFamily =
   | "timeline"
   | "work"
 
-export type ProductionRoutePresentation = "authenticated" | "unauthenticated"
+export type ProductionRoutePresentation = "authenticated" | "authenticated-error" | "unauthenticated"
 export type ProductionRouteAuditOwner = "release-routes" | "scaffold" | "workspace-settings"
 export type ProductionRouteSurface = "boundary" | "primary"
 
@@ -51,6 +51,7 @@ export interface ProductionRouteLeafExemption extends ProductionRouteLeaf {
 
 /** Stable identities shared by canonical paths and their browser response fixtures. */
 export const CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS = Object.freeze({
+  atlassianOAuthGrantId: "a".repeat(43),
   entityId: "01890f6f-6d6a-7cc0-98d3-000000000001",
   releaseId: "01890f6f-6d6a-7cc0-98d2-000000000011",
   shareId: "01890f6f-6d6a-7cc0-98d2-000000000090",
@@ -58,6 +59,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS = Object.freeze({
 })
 
 const {
+  atlassianOAuthGrantId: ATLASSIAN_OAUTH_GRANT_ID,
   entityId: ENTITY_ID,
   releaseId: RELEASE_ID,
   shareId: SHARE_ID,
@@ -144,9 +146,17 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS: ReadonlyArray<Producti
       },
       {
         action: { kind: "required" },
-        canonicalPath: "/services/oauth/atlassian/callback?code=fixture&state=fixture",
+        canonicalPath: `/services/oauth/atlassian/callback?code=auth-code&state=${ATLASSIAN_OAUTH_GRANT_ID}`,
         owner: "release-routes",
         presentation: "authenticated",
+        routerLiteral: "services/oauth/atlassian/callback",
+        surface: "primary"
+      },
+      {
+        action: { kind: "required" },
+        canonicalPath: "/services/oauth/atlassian/callback?code=fixture&state=fixture",
+        owner: "release-routes",
+        presentation: "authenticated-error",
         routerLiteral: "services/oauth/atlassian/callback",
         surface: "boundary"
       }
@@ -484,6 +494,7 @@ export const CONTROL_CENTER_PRODUCTION_ROUTE_LEAF_EXEMPTIONS: ReadonlyArray<Prod
 /** Families whose release acceptance must exercise a ready, route-owned primary surface. */
 export const CONTROL_CENTER_READY_ROUTE_FAMILIES: ReadonlyArray<ProductionRouteFamily> = [
   "agent",
+  "atlassian-oauth-callback",
   "authorized-share",
   "item",
   "items",

@@ -52,6 +52,14 @@ const ReleaseSelector = ({
 export const ActiveWorkPage = (): ReactElement => {
   const context = useOutletContext<WorkspaceReleaseOutletContext>()
   const location = useLocation()
+  if (context.controller.state._tag === "session") {
+    return (
+      <StatePanel
+        description="Pair this browser to read the workspace decision queue. Release facts never load before authentication."
+        title="Release facts stay private"
+      />
+    )
+  }
   if (context.controller.state._tag !== "ready") {
     return (
       <StatePanel

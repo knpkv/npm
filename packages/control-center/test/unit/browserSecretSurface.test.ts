@@ -11,6 +11,7 @@ const safeSurface: BrowserSecretSurface = {
   liveFormControlValues: JSON.stringify(["ordinary search"]),
   localStorage: JSON.stringify([["theme", "dark"]]),
   openShadowRootContent: JSON.stringify([]),
+  readableCookies: "ordinary_preference=compact; cc_csrf=proof",
   sessionStorage: JSON.stringify([["cc_csrf", "proof"]]),
   url: "https://127.0.0.1:4173/w/workspace/overview"
 }
@@ -50,6 +51,13 @@ describe("browser secret surface detection", () => {
       )
     ).toBe(true)
     expect(browserSurfaceExposesSecret(safeSurface, "ordinary search")).toBe(true)
+  })
+
+  it("detects a forbidden readable cookie while permitting ordinary browser-owned cookies", () => {
+    const secret = "consumed-pairing-code"
+    expect(browserSurfaceExposesSecret({ ...safeSurface, readableCookies: `pairing=${secret}` }, secret)).toBe(true)
+    expect(browserSurfaceExposesSecret(safeSurface, "ordinary_preference=compact")).toBe(true)
+    expect(browserSurfaceExposesSecret(safeSurface, "proof")).toBe(true)
   })
 
   it("detects forbidden text and attributes inside an open shadow root", () => {

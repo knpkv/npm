@@ -8,6 +8,7 @@ import {
   ReviewAgentProfile
 } from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
+import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../src/api/plugins.js"
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
@@ -92,6 +93,27 @@ const pairedSession = {
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000002",
   workspaceId: snapshot.workspaceId
 }
+
+const atlassianOAuthExchange = Schema.encodeSync(AtlassianOAuthGrantExchangeResponse)(
+  Schema.decodeUnknownSync(AtlassianOAuthGrantExchangeResponse)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    grantId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.atlassianOAuthGrantId,
+    sites: [{ cloudId: "cloud-1", name: "Acme Europe", siteUrl: "https://acme.atlassian.net/" }]
+  })
+)
+const completedAtlassianProfile = Schema.encodeSync(DiscoveredAtlassianProfile)(
+  Schema.decodeUnknownSync(DiscoveredAtlassianProfile)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    cloudId: "cloud-1",
+    name: "Avery Bell @ acme.atlassian.net",
+    profileId: "account-1@cloud-1",
+    providers: ["jira", "confluence"],
+    siteUrl: "https://acme.atlassian.net/",
+    status: "valid"
+  })
+)
 
 const overviewPath = `/w/${snapshot.workspaceId}/overview`
 const previewPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}/preview`
@@ -421,6 +443,22 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
   })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/exchange", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(atlassianOAuthExchange),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/complete", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(completedAtlassianProfile),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await context.route("**/api/v1/agent/providers", async (route) => {
     await route.fulfill({
       body: JSON.stringify(releaseAgentProviderCatalog),
@@ -722,6 +760,17 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
         "release-routes",
         "atlassian-oauth-callback",
         "authenticated",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Choose your Atlassian site" }),
+      primaryAction: () => page.getByRole("button", { name: "Use this site" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated-error",
         "services/oauth/atlassian/callback"
       ),
       expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),

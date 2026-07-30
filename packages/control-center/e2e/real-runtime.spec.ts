@@ -10,7 +10,6 @@ import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntime
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { DEFAULT_REQUEST_LIMIT_POLICY } from "../src/server/api/RequestLimits.js"
-import { securityHeaders } from "../src/server/http/security/SecurityHeaders.js"
 import {
   type BrowserSecretSurface,
   browserSurfaceExposesSecret,
@@ -23,6 +22,35 @@ import {
   REAL_WORKSPACE_ID,
   UPDATED_RELEASE_VERSION
 } from "./realRuntimeScenario.js"
+
+const EXPECTED_TRUSTED_HTTPS_SECURITY_HEADERS = {
+  "content-security-policy": [
+    "default-src 'none'",
+    "base-uri 'none'",
+    "object-src 'none'",
+    "frame-ancestors 'none'",
+    "frame-src 'none'",
+    "form-action 'self'",
+    "script-src 'self'",
+    "style-src 'self'",
+    "style-src-attr 'unsafe-inline'",
+    "img-src 'self'",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "worker-src 'self'",
+    "manifest-src 'self'",
+    "media-src 'self'",
+    "upgrade-insecure-requests"
+  ].join("; "),
+  "cross-origin-opener-policy": "same-origin-allow-popups",
+  "cross-origin-resource-policy": "same-origin",
+  "permissions-policy":
+    "accelerometer=(), bluetooth=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), serial=(), usb=()",
+  "referrer-policy": "no-referrer",
+  "strict-transport-security": "max-age=31536000",
+  "x-content-type-options": "nosniff",
+  "x-frame-options": "DENY"
+} satisfies Readonly<Record<string, string>>
 
 test.describe("repository-managed real runtime", () => {
   test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
@@ -42,7 +70,7 @@ test.describe("repository-managed real runtime", () => {
         const response = await page.goto(`${fixture.origin}/services`)
         expect(response?.status()).toBe(200)
         const headers = response?.headers() ?? {}
-        for (const [name, expectedValue] of Object.entries(securityHeaders({ isSecureTransport: true }))) {
+        for (const [name, expectedValue] of Object.entries(EXPECTED_TRUSTED_HTTPS_SECURITY_HEADERS)) {
           expect(headers[name]).toBe(expectedValue)
         }
         expect(headers["content-security-policy"]).toContain("upgrade-insecure-requests")
@@ -83,6 +111,7 @@ test.describe("repository-managed real runtime", () => {
             liveFormControlValues: JSON.stringify(liveFormControlValues),
             localStorage: JSON.stringify(Object.entries(localStorage)),
             openShadowRootContent: JSON.stringify(openShadowRootContent),
+            readableCookies: document.cookie,
             sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
             url: location.href
           };

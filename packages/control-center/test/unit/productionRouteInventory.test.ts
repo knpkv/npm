@@ -183,6 +183,30 @@ describe("Control Center production route presentation inventory", () => {
       )
     ).toEqual(["item (items/:entityId) is missing its unauthenticated presentation"])
 
+    const callbackDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(
+      ({ family }) => family === "atlassian-oauth-callback"
+    )
+    if (callbackDescriptor === undefined) throw new Error("expected the Atlassian callback route descriptor")
+    const authenticatedCallbackBoundary = callbackDescriptor.audits.find(
+      ({ presentation }) => presentation === "authenticated-error"
+    )
+    if (authenticatedCallbackBoundary === undefined) throw new Error("expected the authenticated callback boundary")
+    expect(
+      productionRouteCoverageFailures(
+        [{ ...callbackDescriptor, audits: [authenticatedCallbackBoundary] }],
+        [],
+        ["atlassian-oauth-callback"]
+      )
+    ).toEqual(["atlassian-oauth-callback is missing its primary ready surface"])
+    expect(
+      callbackDescriptor.audits.find(({ presentation }) => presentation === "authenticated")
+    ).toEqual(
+      expect.objectContaining({
+        canonicalPath: expect.stringContaining(`state=${"a".repeat(43)}`),
+        surface: "primary"
+      })
+    )
+
     const timelineDescriptor = CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS.find(
       ({ family }) => family === "timeline"
     )

@@ -63,6 +63,24 @@ interface FocusBrowserGlobal {
   readonly getComputedStyle?: (element: unknown) => FocusComputedStyle
 }
 
+interface PaintProbe {
+  readonly remove: () => void
+  readonly style: {
+    backgroundColor: string
+    display: string
+  }
+}
+
+interface PaintDocument {
+  readonly createElement: (tagName: string) => PaintProbe
+  readonly documentElement: { readonly append: (...nodes: ReadonlyArray<unknown>) => void }
+}
+
+interface PaintContextElement {
+  readonly ownerDocument: PaintDocument
+  readonly parentElement: PaintContextElement | null
+}
+
 declare const document: { readonly activeElement: unknown }
 declare const window: AxeBrowserGlobal & FocusBrowserGlobal
 
@@ -268,39 +286,77 @@ const focusPrimaryActionByKeyboard = async (page: Page, primaryAction: Locator):
 const expectDiscernibleForcedColorPaint = async (locator: Locator, label: string): Promise<void> => {
   const snapshot = await locator.evaluate((element) => {
     if (window.getComputedStyle === undefined) throw new Error("forced-color target has no computed-style view")
+    const hasPaintContext = (
+      candidate: SVGElement | HTMLElement
+    ): candidate is (SVGElement | HTMLElement) & PaintContextElement =>
+      "parentElement" in candidate && "ownerDocument" in candidate
+    if (!hasPaintContext(element)) {
+      throw new Error("forced-color target has no HTML paint context")
+    }
     const style = window.getComputedStyle(element)
+    const isTransparent = (value: string): boolean =>
+      value === "transparent" ||
+      /^rgba\([^)]*(?:,\s*0(?:\.0+)?|\/\s*0(?:\.0+)?%?)\s*\)$/u.test(value)
+    let effectiveBackgroundColor = style.backgroundColor
+    let ancestor = element.parentElement
+    while (isTransparent(effectiveBackgroundColor) && ancestor !== null) {
+      effectiveBackgroundColor = window.getComputedStyle(ancestor).backgroundColor
+      ancestor = ancestor.parentElement
+    }
+    if (isTransparent(effectiveBackgroundColor)) {
+      const canvasProbe = element.ownerDocument.createElement("span")
+      canvasProbe.style.backgroundColor = "Canvas"
+      canvasProbe.style.display = "none"
+      element.ownerDocument.documentElement.append(canvasProbe)
+      effectiveBackgroundColor = window.getComputedStyle(canvasProbe).backgroundColor
+      canvasProbe.remove()
+    }
     return {
-      backgroundColor: style.backgroundColor,
-      borderBottom: [style.borderBottomColor, style.borderBottomStyle, style.borderBottomWidth],
-      borderLeft: [style.borderLeftColor, style.borderLeftStyle, style.borderLeftWidth],
-      borderRight: [style.borderRightColor, style.borderRightStyle, style.borderRightWidth],
-      borderTop: [style.borderTopColor, style.borderTopStyle, style.borderTopWidth],
+      borderBottom: {
+        color: style.borderBottomColor,
+        style: style.borderBottomStyle,
+        width: style.borderBottomWidth
+      },
+      borderLeft: {
+        color: style.borderLeftColor,
+        style: style.borderLeftStyle,
+        width: style.borderLeftWidth
+      },
+      borderRight: {
+        color: style.borderRightColor,
+        style: style.borderRightStyle,
+        width: style.borderRightWidth
+      },
+      borderTop: {
+        color: style.borderTopColor,
+        style: style.borderTopStyle,
+        width: style.borderTopWidth
+      },
       color: style.color,
+      effectiveBackgroundColor,
       forcedColorAdjust: style.forcedColorAdjust,
-      outline: [style.outlineColor, style.outlineStyle, style.outlineWidth]
+      outline: { color: style.outlineColor, style: style.outlineStyle, width: style.outlineWidth }
     }
   })
+  const contrastsWithBackground = (value: string): boolean =>
+    !transparentPaint(value) && value !== snapshot.effectiveBackgroundColor
   const paintedBoundary = [
-    ...snapshot.borderBottom,
-    ...snapshot.borderLeft,
-    ...snapshot.borderRight,
-    ...snapshot.borderTop
-  ]
-    .some((value, index, values) => {
-      if (index % 3 !== 0) return false
-      const style = values[index + 1] ?? "none"
-      const width = values[index + 2] ?? "0"
-      return style !== "none" && style !== "hidden" && Number.parseFloat(width) > 0 && !transparentPaint(value)
-    })
-  const paintedOutline = snapshot.outline[1] !== "none" &&
-    snapshot.outline[1] !== "hidden" &&
-    Number.parseFloat(snapshot.outline[2] ?? "0") > 0 &&
-    !transparentPaint(snapshot.outline[0] ?? "transparent")
+    snapshot.borderBottom,
+    snapshot.borderLeft,
+    snapshot.borderRight,
+    snapshot.borderTop
+  ].some(({ color, style, width }) =>
+    style !== "none" &&
+    style !== "hidden" &&
+    Number.parseFloat(width) > 0 &&
+    contrastsWithBackground(color)
+  )
+  const paintedOutline = snapshot.outline.style !== "none" &&
+    snapshot.outline.style !== "hidden" &&
+    Number.parseFloat(snapshot.outline.width) > 0 &&
+    contrastsWithBackground(snapshot.outline.color)
   expect(
-    !transparentPaint(snapshot.color) ||
-      !transparentPaint(snapshot.backgroundColor) ||
-      paintedBoundary ||
-      paintedOutline,
+    contrastsWithBackground(snapshot.color) || paintedBoundary || paintedOutline,
     `${label} has no discernible forced-color paint (${snapshot.forcedColorAdjust})`
   ).toBe(true)
 }

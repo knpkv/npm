@@ -186,6 +186,16 @@ test("requires discernible system paint in forced-colors mode", async ({ page })
     })
   ).rejects.toThrow("primary action has no discernible forced-color paint")
 
+  await page.setContent(content("background: Canvas; border-color: Canvas; color: Canvas; outline-color: Canvas;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
   await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
   await auditProductionRoutePresentation(page, {
     exercise: async (primaryAction) => primaryAction.press("Enter"),
@@ -322,7 +332,7 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
     },
     {
       audit: productionRouteAuditCase("scaffold", "work", "unauthenticated", "work"),
-      landmark: () => page.getByText("Loading active work", { exact: true }),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
       primaryAction: () => null
     }
   ]
