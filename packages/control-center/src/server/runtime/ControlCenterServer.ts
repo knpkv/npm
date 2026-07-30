@@ -387,12 +387,19 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           })
       }
   )
-  const releaseAgentJobs = (options.releaseAgent === undefined ||
+  const releaseAgentWorkerWorkspaceId = options.releaseAgent === undefined ||
       options.releaseAgent === null ||
       options.bootstrap === undefined ||
       options.bootstrap === null
+    ? null
+    : options.bootstrap.workspaceId
+  const agentJobRepository = AgentJobRepository.layer.pipe(Layer.provide(database))
+  const agentJobWorkspacePolicy = AgentJobWorkspacePolicy.live.pipe(
+    Layer.provide(persistence)
+  )
+  const releaseAgentJobs = (releaseAgentWorkerWorkspaceId === null
     ? releaseAgentJobsUnavailableLayer
-    : releaseAgentJobsLayerForWorkerWorkspace(options.bootstrap.workspaceId)).pipe(
+    : releaseAgentJobsLayerForWorkerWorkspace(releaseAgentWorkerWorkspaceId)).pipe(
       Layer.provide(providerRegistry),
       Layer.provide(persistence)
     )
@@ -464,13 +471,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     Layer.provide(persistence),
     Layer.provide(applicationServices)
   )
-  const releaseAgentWorker = options.releaseAgent === undefined ||
-      options.releaseAgent === null ||
-      options.bootstrap === undefined ||
-      options.bootstrap === null
+  const releaseAgentWorker = releaseAgentWorkerWorkspaceId === null
     ? Layer.empty
     : releaseAgentWorkerStartupLayer({
-      workspaceId: options.bootstrap.workspaceId
+      workspaceId: releaseAgentWorkerWorkspaceId
     }).pipe(
       Layer.provide(
         agentJobWorkerLayer({
@@ -478,10 +482,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           leaseDuration: "5 minutes"
         }).pipe(
           Layer.provide(providerRegistry),
-          Layer.provide(AgentJobRepository.layer.pipe(Layer.provide(database))),
-          Layer.provide(
-            AgentJobWorkspacePolicy.live.pipe(Layer.provide(persistence))
-          )
+          Layer.provide(agentJobRepository),
+          Layer.provide(agentJobWorkspacePolicy)
         )
       )
     )
@@ -526,7 +528,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
           Layer.provide(
             prReviewWorkspaceLeaseGuardLayer(configured.workspaceId).pipe(
-              Layer.provide(AgentJobRepository.layer.pipe(Layer.provide(database)))
+              Layer.provide(agentJobRepository)
             )
           )
         )
@@ -540,7 +542,6 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
             : { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
         }).pipe(Layer.provide(sourceWorkspace))
         : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
-      const repository = AgentJobRepository.layer.pipe(Layer.provide(database))
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,
         leaseDuration: configured.leaseDuration ?? "5 minutes"
@@ -548,10 +549,8 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       const worker = prReviewAgentJobWorkerLayer(workerOptions).pipe(
         Layer.provide(providerRegistry),
         Layer.provide(sandboxes),
-        Layer.provide(repository),
-        Layer.provide(
-          AgentJobWorkspacePolicy.live.pipe(Layer.provide(persistence))
-        )
+        Layer.provide(agentJobRepository),
+        Layer.provide(agentJobWorkspacePolicy)
       )
       return prReviewWorkerStartupLayer({
         workspaceId: configured.workspaceId,

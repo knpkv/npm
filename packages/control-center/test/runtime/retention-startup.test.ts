@@ -83,9 +83,12 @@ describe("retention startup", () => {
         Layer.provide(database)
       )
       const lifecycle = yield* ServerLifecycle.make
-      const sweepStarted = yield* Deferred.make<void>()
-      const releaseSweep = yield* Deferred.make<void>()
-      const sweepCompleted = yield* Deferred.make<void>()
+      const secondSweepStarted = yield* Deferred.make<void>()
+      const releaseSecondSweep = yield* Deferred.make<void>()
+      const secondSweepCompleted = yield* Deferred.make<void>()
+      const thirdSweepStarted = yield* Deferred.make<void>()
+      const releaseThirdSweep = yield* Deferred.make<void>()
+      const thirdSweepCompleted = yield* Deferred.make<void>()
       const drainWaiterStarted = yield* Deferred.make<void>()
       const drained = yield* Deferred.make<void>()
       yield* TestClock.setTime(DateTime.toEpochMillis(FIXTURE_TIME))
@@ -108,10 +111,17 @@ describe("retention startup", () => {
                 if (sweepCount === 1) {
                   return persistence.retention.sweepWorkspace(...args)
                 }
-                return Deferred.succeed(sweepStarted, undefined).pipe(
-                  Effect.andThen(Deferred.await(releaseSweep)),
+                if (sweepCount === 2) {
+                  return Deferred.succeed(secondSweepStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseSecondSweep)),
+                    Effect.andThen(persistence.retention.sweepWorkspace(...args)),
+                    Effect.tap(() => Deferred.succeed(secondSweepCompleted, undefined))
+                  )
+                }
+                return Deferred.succeed(thirdSweepStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseThirdSweep)),
                   Effect.andThen(persistence.retention.sweepWorkspace(...args)),
-                  Effect.tap(() => Deferred.succeed(sweepCompleted, undefined))
+                  Effect.tap(() => Deferred.succeed(thirdSweepCompleted, undefined))
                 )
               })
           }
@@ -135,7 +145,14 @@ describe("retention startup", () => {
         yield* Effect.gen(function*() {
           yield* RetentionStartup
           yield* TestClock.adjust("1 hour")
-          yield* Deferred.await(sweepStarted)
+          yield* Deferred.await(secondSweepStarted)
+          yield* TestClock.adjust("1 hour")
+          assert.strictEqual(sweepCount, 2)
+          yield* Deferred.succeed(releaseSecondSweep, undefined)
+          yield* Deferred.await(secondSweepCompleted)
+          yield* TestClock.adjust("1 hour")
+          yield* Deferred.await(thirdSweepStarted)
+          assert.strictEqual(sweepCount, 3)
           yield* lifecycle.beginDrain
           yield* Effect.forkChild(
             Deferred.succeed(drainWaiterStarted, undefined).pipe(
@@ -145,11 +162,11 @@ describe("retention startup", () => {
           )
           yield* Deferred.await(drainWaiterStarted)
           assert.isFalse(yield* Deferred.isDone(drained))
-          assert.isFalse(yield* Deferred.isDone(sweepCompleted))
-          yield* Deferred.succeed(releaseSweep, undefined)
+          assert.isFalse(yield* Deferred.isDone(thirdSweepCompleted))
+          yield* Deferred.succeed(releaseThirdSweep, undefined)
           yield* Deferred.await(drained)
-          yield* Deferred.await(sweepCompleted)
-          assert.strictEqual(sweepCount, 2)
+          yield* Deferred.await(thirdSweepCompleted)
+          assert.strictEqual(sweepCount, 3)
         }).pipe(Effect.provide(startup))
       }).pipe(
         Effect.provide(persistenceLayer),
