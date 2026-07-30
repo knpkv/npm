@@ -46,7 +46,11 @@ import {
   SessionMutationAuth,
   SessionSummary
 } from "../../src/api/session.js"
-import { workspaceSettingsEtag, WorkspaceSettingsRevision } from "../../src/api/workspaceSettings.js"
+import {
+  workspaceSettingsEtag,
+  WorkspaceSettingsReadModel,
+  WorkspaceSettingsRevision
+} from "../../src/api/workspaceSettings.js"
 import { DeliveryEntityProjection, LedgerRevision } from "../../src/domain/deliveryGraph.js"
 import {
   AgentId,
@@ -248,6 +252,7 @@ const workspaceEntityInspection = Schema.decodeSync(WorkspaceEntityInspection)({
 })
 
 const watcherSession = SessionSummary.make({ ...session, permission: "watcher" })
+const reviewerSession = SessionSummary.make({ ...session, permission: "reviewer" })
 const agentOwnerSession = SessionSummary.make({
   ...session,
   actor: {
@@ -464,37 +469,65 @@ const deliveryGraphHandlersTestLayer = deliveryGraphHandlersLayer.pipe(
 )
 
 describe("Control Center API handlers", () => {
-  it.effect("keeps workspace settings reads behind workspace-wide session authority", () =>
+  it.effect("keeps governed settings private while sharing presentation with a reviewer", () =>
     Effect.gen(function*() {
-      const watcherMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
-        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, watcherSession)
+      const reviewerMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, reviewerSession)
+      })
+      const reads = yield* Ref.make(0)
+      const revision = WorkspaceSettingsRevision.make(1)
+      const readModel = WorkspaceSettingsReadModel.make({
+        workspaceId: session.workspaceId,
+        revision,
+        etag: workspaceSettingsEtag(revision),
+        settings: {
+          ...DEFAULT_WORKSPACE_SETTINGS,
+          presentation: {
+            defaultLanding: "active-work",
+            density: "compact"
+          }
+        },
+        createdAt: session.createdAt,
+        updatedAt: session.lastSeenAt,
+        updatedByPersonId: null
       })
       const handler = workspaceSettingsHandlersLayer.pipe(
-        Layer.provide(watcherMiddlewareLayer),
+        Layer.provide(reviewerMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
         Layer.provide(
           Layer.succeed(WorkspaceSettingsAdministration, {
-            read: () => Effect.die("watcher reached workspace settings"),
+            read: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(readModel)),
             update: () => Effect.die("not used")
           })
         ),
         Layer.provide(ServerLifecycle.layer)
       )
-      const attempted = yield* Effect.gen(function*() {
+      const result = yield* Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(ControlCenterApi, [
           "workspaceSettings"
         ])
-        return yield* client.workspaceSettings.read().pipe(Effect.result)
+        const governed = yield* client.workspaceSettings.read().pipe(Effect.result)
+        const presentation = yield* client.workspaceSettings.readPresentation()
+        return { governed, presentation }
       }).pipe(
         Effect.provide([
           NodeHttpServer.layerHttpServices,
           mutationMiddlewareLayer,
-          watcherMiddlewareLayer,
+          reviewerMiddlewareLayer,
           handler
         ])
       )
 
-      assertForbidden(attempted)
+      assertForbidden(result.governed)
+      assert.deepStrictEqual(result.presentation, {
+        workspaceId: session.workspaceId,
+        revision,
+        presentation: {
+          defaultLanding: "active-work",
+          density: "compact"
+        }
+      })
+      assert.strictEqual(yield* Ref.get(reads), 1)
     }))
 
   it.effect("admits lazy settings initialization only before server drain", () =>

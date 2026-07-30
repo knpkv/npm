@@ -5,7 +5,11 @@ import * as Schema from "effect/Schema"
 import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
-import type { UpdateWorkspaceSettingsRequest, WorkspaceSettingsReadModel } from "../../api/workspaceSettings.js"
+import type {
+  UpdateWorkspaceSettingsRequest,
+  WorkspacePresentationReadModel,
+  WorkspaceSettingsReadModel
+} from "../../api/workspaceSettings.js"
 import { WorkspaceSettingsMutationId } from "../../domain/identifiers.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
@@ -17,6 +21,23 @@ export interface WorkspaceSettingsTransport {
     request: UpdateWorkspaceSettingsRequest,
     signal: AbortSignal
   ) => Promise<WorkspaceSettingsReadModel>
+}
+
+/** Browser boundary for collaborator-safe presentation defaults. */
+export interface WorkspacePresentationTransport {
+  readonly load: (signal: AbortSignal) => Promise<WorkspacePresentationReadModel>
+}
+
+/** Generated API transport exposing only shared presentation settings. */
+export const browserWorkspacePresentationTransport: WorkspacePresentationTransport = {
+  load: (signal) =>
+    Effect.runPromise(
+      Effect.gen(function*() {
+        const client = yield* makeControlCenterApiClient()
+        return yield* client.workspaceSettings.readPresentation()
+      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      { signal }
+    )
 }
 
 /** Generated API transport with a retry-stable UUIDv7 mutation identity. */

@@ -7,6 +7,7 @@ import { createMemoryRouter, RouterProvider } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  WorkspacePresentationReadModel,
   WorkspaceSettingsReadModel,
   WorkspaceSettingsRevision,
   workspaceSettingsEtag
@@ -15,9 +16,9 @@ import { CsrfToken, SessionSummary } from "../../src/api/session.js"
 import { BrowserSessionProvider, useBrowserSession } from "../../src/client/BrowserSession.js"
 import { AppShell, canInspectWorkspaceSettings } from "../../src/client/AppShell.js"
 import { pairedBrowserDestination } from "../../src/client/PairPage.js"
-import { publishWorkspaceSettings } from "../../src/client/settings/workspaceSettingsSignals.js"
+import { publishWorkspacePresentation } from "../../src/client/settings/workspaceSettingsSignals.js"
 import { useWorkspaceDefaultLandingPath } from "../../src/client/settings/useWorkspaceDefaultLanding.js"
-import type { WorkspaceSettingsTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
+import type { WorkspacePresentationTransport } from "../../src/client/settings/workspaceSettingsTransport.js"
 import { WorkspaceId } from "../../src/domain/identifiers.js"
 import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
 
@@ -60,6 +61,16 @@ const saved = WorkspaceSettingsReadModel.make({
     }
   }
 })
+const initialPresentation = WorkspacePresentationReadModel.make({
+  workspaceId: initial.workspaceId,
+  revision: initial.revision,
+  presentation: initial.settings.presentation
+})
+const savedPresentation = WorkspacePresentationReadModel.make({
+  workspaceId: saved.workspaceId,
+  revision: saved.revision,
+  presentation: saved.settings.presentation
+})
 
 let mountedRoot: Root | undefined
 let sessionControls: ReturnType<typeof useBrowserSession> | undefined
@@ -72,7 +83,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-const Probe = ({ transport }: { readonly transport: Pick<WorkspaceSettingsTransport, "load"> }): ReactElement => {
+const Probe = ({ transport }: { readonly transport: WorkspacePresentationTransport }): ReactElement => {
   sessionControls = useBrowserSession()
   const path = useWorkspaceDefaultLandingPath(session.workspaceId, transport)
   return <output>{path ?? "loading"}</output>
@@ -114,7 +125,7 @@ describe("useWorkspaceDefaultLandingPath", () => {
     const brand = host.querySelector<HTMLAnchorElement>("a[aria-label='Control Center home']")
     expect(brand?.getAttribute("href")).toBe("/")
 
-    act(() => publishWorkspaceSettings(saved))
+    act(() => publishWorkspacePresentation(savedPresentation))
     expect(host.querySelector("[data-workspace-density]")?.getAttribute("data-workspace-density")).toBe("compact")
   })
 
@@ -134,14 +145,40 @@ describe("useWorkspaceDefaultLandingPath", () => {
     expect(canInspectWorkspaceSettings({ _tag: "authenticated", session }, foreignWorkspaceId)).toBe(false)
   })
 
+  it("loads shared active-work presentation for a reviewer", async () => {
+    const reviewer = SessionSummary.make({
+      ...session,
+      permission: "reviewer"
+    })
+    const transport = {
+      load: vi.fn(() => Promise.resolve(savedPresentation))
+    } satisfies WorkspacePresentationTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <BrowserSessionProvider>
+          <Probe transport={transport} />
+        </BrowserSessionProvider>
+      )
+    )
+    if (sessionControls === undefined) throw new Error("browser session controls are unavailable")
+    act(() => sessionControls?.establishSession(csrfToken, reviewer))
+    await vi.waitFor(() => expect(host.textContent).toBe(`/w/${session.workspaceId}/work`))
+
+    expect(transport.load).toHaveBeenCalledTimes(1)
+  })
+
   it("keeps a newer saved landing when an older initial load resolves late", async () => {
-    let resolveInitial: (settings: WorkspaceSettingsReadModel) => void = () => undefined
-    const pendingInitial = new Promise<WorkspaceSettingsReadModel>((resolve) => {
+    let resolveInitial: (settings: WorkspacePresentationReadModel) => void = () => undefined
+    const pendingInitial = new Promise<WorkspacePresentationReadModel>((resolve) => {
       resolveInitial = resolve
     })
     const transport = {
       load: vi.fn(() => pendingInitial)
-    } satisfies Pick<WorkspaceSettingsTransport, "load">
+    } satisfies WorkspacePresentationTransport
     const host = document.createElement("div")
     document.body.append(host)
     mountedRoot = createRoot(host)
@@ -157,10 +194,10 @@ describe("useWorkspaceDefaultLandingPath", () => {
     act(() => sessionControls?.establishSession(csrfToken, session))
     await act(async () => undefined)
 
-    act(() => publishWorkspaceSettings(saved))
+    act(() => publishWorkspacePresentation(savedPresentation))
     expect(host.textContent).toBe(`/w/${session.workspaceId}/work`)
 
-    await act(async () => resolveInitial(initial))
+    await act(async () => resolveInitial(initialPresentation))
     expect(host.textContent).toBe(`/w/${session.workspaceId}/work`)
   })
 })

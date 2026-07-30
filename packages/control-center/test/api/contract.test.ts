@@ -357,6 +357,7 @@ describe("ControlCenterApi contract", () => {
       ),
       [
         ["read", "GET", "/api/v1/settings"],
+        ["readPresentation", "GET", "/api/v1/settings/presentation"],
         ["update", "PUT", "/api/v1/settings"]
       ]
     )

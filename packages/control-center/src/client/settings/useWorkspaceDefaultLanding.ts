@@ -1,19 +1,19 @@
 import * as Predicate from "effect/Predicate"
 import { useEffect, useState } from "react"
 
+import type { WorkspacePresentationReadModel } from "../../api/workspaceSettings.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
-import type { WorkspaceSettingsV1 } from "../../domain/workspaceSettings.js"
 import { browserReadableSessionKey, useBrowserSession } from "../BrowserSession.js"
 import { releaseParentPath, workspaceActiveWorkPath } from "../releases/releaseRoutes.js"
-import { publishWorkspaceSettings, subscribeWorkspaceSettings } from "./workspaceSettingsSignals.js"
-import type { WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
+import { publishWorkspacePresentation, subscribeWorkspacePresentation } from "./workspaceSettingsSignals.js"
+import type { WorkspacePresentationTransport } from "./workspaceSettingsTransport.js"
 
 const isUnauthorized = Predicate.isTagged("UnauthorizedApiError")
 
 /** Resolve the configured home destination without redirecting deep links. */
 export const workspaceDefaultLandingPath = (
   workspaceId: WorkspaceId,
-  defaultLanding: WorkspaceSettingsV1["presentation"]["defaultLanding"]
+  defaultLanding: WorkspacePresentationReadModel["presentation"]["defaultLanding"]
 ): string =>
   defaultLanding === "active-work"
     ? workspaceActiveWorkPath(workspaceId)
@@ -26,17 +26,19 @@ interface LoadedLanding {
   readonly workspaceId: WorkspaceId
 }
 
-const lazyBrowserWorkspaceSettingsTransport: Pick<WorkspaceSettingsTransport, "load"> = {
+const lazyBrowserWorkspacePresentationTransport: WorkspacePresentationTransport = {
   load: async (signal) => {
-    const { browserWorkspaceSettingsTransport } = await import("./workspaceSettingsTransport.js")
-    return browserWorkspaceSettingsTransport.load(signal)
+    const { browserWorkspacePresentationTransport } = await import(
+      "./workspaceSettingsTransport.js"
+    )
+    return browserWorkspacePresentationTransport.load(signal)
   }
 }
 
 /** Read one workspace's server-owned home destination for brand and root navigation. */
 export const useWorkspaceDefaultLandingPath = (
   workspaceId: WorkspaceId | null,
-  transport: Pick<WorkspaceSettingsTransport, "load"> = lazyBrowserWorkspaceSettingsTransport
+  transport: WorkspacePresentationTransport = lazyBrowserWorkspacePresentationTransport
 ): string | null => {
   const { invalidateSession, state: browserSession } = useBrowserSession()
   const readableSessionKey = browserReadableSessionKey(browserSession)
@@ -50,7 +52,7 @@ export const useWorkspaceDefaultLandingPath = (
   const [loaded, setLoaded] = useState<LoadedLanding | null>(null)
 
   useEffect(() =>
-    subscribeWorkspaceSettings((settings) => {
+    subscribeWorkspacePresentation((settings) => {
       if (
         workspaceId === null ||
         sessionKey === null ||
@@ -65,7 +67,7 @@ export const useWorkspaceDefaultLandingPath = (
         return {
           path: workspaceDefaultLandingPath(
             workspaceId,
-            settings.settings.presentation.defaultLanding
+            settings.presentation.defaultLanding
           ),
           revision: settings.revision,
           sessionKey,
@@ -83,7 +85,7 @@ export const useWorkspaceDefaultLandingPath = (
     transport.load(request.signal).then(
       (settings) => {
         if (request.signal.aborted || settings.workspaceId !== workspaceId) return
-        publishWorkspaceSettings(settings)
+        publishWorkspacePresentation(settings)
         setLoaded((current) => {
           if (
             current?.sessionKey === sessionKey &&
@@ -93,7 +95,7 @@ export const useWorkspaceDefaultLandingPath = (
           return {
             path: workspaceDefaultLandingPath(
               workspaceId,
-              settings.settings.presentation.defaultLanding
+              settings.presentation.defaultLanding
             ),
             revision: settings.revision,
             sessionKey,

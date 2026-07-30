@@ -20,6 +20,7 @@ import type {
 } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
 import { CsrfToken, CurrentSession } from "../../api/session.js"
+import { WorkspacePresentationReadModel } from "../../api/workspaceSettings.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
 import type { UtcTimestamp } from "../../domain/utcTimestamp.js"
@@ -257,6 +258,29 @@ export const workspaceSettingsHandlersLayer = HttpApiBuilder.group(
               )
               yield* appendWorkspaceSettingsHeaders(result.etag)
               return result
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            )
+          ))
+        .handle("readPresentation", () =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (Option.isNone(administration)) {
+                return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+              }
+              const result = yield* administration.value.read(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+              yield* appendWorkspaceSettingsHeaders(result.etag)
+              return WorkspacePresentationReadModel.make({
+                workspaceId: result.workspaceId,
+                revision: result.revision,
+                presentation: result.settings.presentation
+              })
             })
           ).pipe(
             Effect.catchTag(

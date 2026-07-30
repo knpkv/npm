@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
-import { subscribeWorkspaceSettings } from "./settings/workspaceSettingsSignals.js"
+import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
 
@@ -93,10 +93,10 @@ export const AppShell = (): ReactElement => {
   useEffect(() => {
     setDensity("comfortable")
     let latestRevision = 0
-    return subscribeWorkspaceSettings((settings) => {
+    return subscribeWorkspacePresentation((settings) => {
       if (settings.workspaceId !== workspaceId || settings.revision < latestRevision) return
       latestRevision = settings.revision
-      setDensity(settings.settings.presentation.density)
+      setDensity(settings.presentation.density)
     })
   }, [workspaceId])
   const brand = (

@@ -51,6 +51,16 @@ export const WorkspaceSettingsReadModel = Schema.Struct({
 /** Decoded workspace-settings read model. */
 export type WorkspaceSettingsReadModel = typeof WorkspaceSettingsReadModel.Type
 
+/** Safe workspace presentation defaults shared with every authenticated collaborator. */
+export const WorkspacePresentationReadModel = Schema.Struct({
+  workspaceId: WorkspaceId,
+  revision: WorkspaceSettingsRevision,
+  presentation: WorkspaceSettingsV1.fields.presentation
+}).annotate({ identifier: "WorkspacePresentationReadModel" })
+
+/** Decoded collaborator-safe workspace presentation projection. */
+export type WorkspacePresentationReadModel = typeof WorkspacePresentationReadModel.Type
+
 /** Complete compare-and-swap replacement of one workspace settings document. */
 export const UpdateWorkspaceSettingsRequest = Schema.Struct({
   mutationId: WorkspaceSettingsMutationId,
@@ -74,6 +84,11 @@ const read = HttpApiEndpoint.get("read", "/", {
   error: authenticatedErrors
 }).middleware(SessionCookieAuth)
 
+const readPresentation = HttpApiEndpoint.get("readPresentation", "/presentation", {
+  success: WorkspacePresentationReadModel,
+  error: authenticatedErrors
+}).middleware(SessionCookieAuth)
+
 const update = HttpApiEndpoint.put("update", "/", {
   payload: UpdateWorkspaceSettingsRequest,
   success: WorkspaceSettingsReadModel,
@@ -84,6 +99,6 @@ const update = HttpApiEndpoint.put("update", "/", {
 
 /** Authenticated workspace settings read and concurrency-safe mutation contract. */
 export class WorkspaceSettingsApiGroup extends HttpApiGroup.make("workspaceSettings")
-  .add(read, update)
+  .add(read, readPresentation, update)
   .prefix("/api/v1/settings")
 {}
