@@ -1145,7 +1145,7 @@ export const agentHandlersLayer = HttpApiBuilder.group(
             if (session.permission !== "workspace-owner") {
               return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
             }
-            return yield* jobs.providers().pipe(
+            return yield* jobs.providers(session.workspaceId).pipe(
               Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
             )
           }))

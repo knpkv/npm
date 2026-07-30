@@ -8,6 +8,7 @@ import { BrowserSessionStatus } from "../BrowserSessionStatus.js"
 import { useBrowserSession } from "../BrowserSession.js"
 import { releaseParentPath, releaseTransitionNames } from "../releases/releaseRoutes.js"
 import { serviceSetupPath } from "../services/serviceOnboarding.js"
+import { useWorkspaceDefaultLandingPath } from "../settings/useWorkspaceDefaultLanding.js"
 import { presentPortfolio, type PortfolioPresentation, type PortfolioReleasePresentation } from "./presentPortfolio.js"
 import {
   filterPortfolioReleases,
@@ -466,6 +467,10 @@ export const usePortfolioOverviewController = (): PortfolioOverviewController =>
 export const PortfolioOverview = (): ReactElement => {
   const controller = usePortfolioOverviewController()
   const { state } = controller
-  if (state._tag === "ready") return <Navigate replace to={releaseParentPath(state.portfolio.workspaceId)} />
+  const workspaceId = state._tag === "ready" ? state.portfolio.workspaceId : null
+  const defaultLandingPath = useWorkspaceDefaultLandingPath(workspaceId)
+  if (state._tag === "ready" && defaultLandingPath !== null) {
+    return <Navigate replace to={defaultLandingPath} />
+  }
   return <PortfolioOverviewView onPreviewRelease={() => undefined} onRetry={controller.onRetry} state={state} />
 }

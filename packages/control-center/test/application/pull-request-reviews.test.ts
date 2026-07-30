@@ -55,6 +55,7 @@ import {
 import { Release } from "../../src/domain/release.js"
 import { deriveReleaseRelay } from "../../src/domain/releaseRelay.js"
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
+import { DEFAULT_WORKSPACE_SETTINGS, WorkspaceSettingsV1 } from "../../src/domain/workspaceSettings.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
   ApplicationConflict,
@@ -88,7 +89,8 @@ import {
   LatestAgentReviewRecord,
   ReviewSuggestionPublicationReservation
 } from "../../src/server/persistence/repositories/agentJobModels.js"
-import { WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { ContentBlobDigest, RecordRevision, WorkspaceName } from "../../src/server/persistence/repositories/models.js"
+import { WorkspaceSettingsRecord } from "../../src/server/persistence/repositories/workspaceSettingsRepository.js"
 import { makePersistenceTestConfig } from "../persistence/fixtures.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000401")
@@ -146,6 +148,26 @@ const STARTED_TIMESTAMP = Schema.decodeUnknownSync(UtcTimestamp)(STARTED_AT)
 const AUTHORITY_BINDING = ReviewSuggestionPublicationAuthorityBinding.make(
   `sha256:${"a".repeat(64)}`
 )
+type AllowedAgentProvider = typeof WorkspaceSettingsV1.Type["agent"]["allowedProviders"][number]
+const workspaceSettingsRecord = (
+  allowedProviders: ReadonlyArray<AllowedAgentProvider>
+) =>
+  WorkspaceSettingsRecord.make({
+    workspaceId: WORKSPACE_ID,
+    revision: RecordRevision.make(1),
+    policyRevision: RecordRevision.make(1),
+    settings: WorkspaceSettingsV1.make({
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      agent: {
+        ...DEFAULT_WORKSPACE_SETTINGS.agent,
+        allowedProviders
+      }
+    }),
+    settingsDigest: ContentBlobDigest.make("1".repeat(64)),
+    createdAt: STARTED_TIMESTAMP,
+    updatedAt: STARTED_TIMESTAMP,
+    updatedByPersonId: null
+  })
 const HUMAN_SESSION = {
   sessionId: SESSION_ID,
   workspaceId: WORKSPACE_ID,
@@ -466,7 +488,8 @@ const withService = <Success, Failure>(
     publicationCommands: Ref.Ref<ReadonlyArray<PublishReviewSuggestionCommand>>,
     publicationAuthority: Ref.Ref<ReviewSuggestionPublicationAuthorityBinding>,
     publicationFailure: Ref.Ref<null | ReviewSuggestionPublicationGatewayError["reason"]>,
-    revisionInputs: Ref.Ref<ReadonlyArray<unknown>>
+    revisionInputs: Ref.Ref<ReadonlyArray<unknown>>,
+    allowedProviders: Ref.Ref<ReadonlyArray<AllowedAgentProvider>>
   ) => Effect.Effect<Success, Failure>,
   selectedRegistry = registry,
   latestReview: Option.Option<LatestAgentReviewRecord> = Option.none(),
@@ -491,10 +514,22 @@ const withService = <Success, Failure>(
         null | ReviewSuggestionPublicationGatewayError["reason"]
       >(null)
       const revisionInputs = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const transactionActive = yield* Ref.make(false)
+      const allowedProviders = yield* Ref.make<ReadonlyArray<AllowedAgentProvider>>([
+        "claude",
+        "openai-compatible"
+      ])
       const resolveLatestReview = latestReviewOverride ??
         (() => Effect.succeed(latestReview))
       const testPersistence = Persistence.of({
         ...persistence,
+        transact: <Success, Failure, Requirements>(
+          effect: Effect.Effect<Success, Failure, Requirements>
+        ) =>
+          Ref.set(transactionActive, true).pipe(
+            Effect.andThen(persistence.transact(effect)),
+            Effect.ensuring(Ref.set(transactionActive, false))
+          ),
         agentJobs: {
           ...persistence.agentJobs,
           enqueue: (input) => Ref.set(enqueueInput, input).pipe(Effect.as(THREAD_ID)),
@@ -567,6 +602,20 @@ const withService = <Success, Failure>(
           recordReviewSuggestionPublication: recordPublication,
           releaseReviewSuggestionPublication: releasePublication,
           reserveReviewSuggestionPublication: reservePublication
+        },
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () =>
+            Ref.get(transactionActive).pipe(
+              Effect.flatMap((isActive) =>
+                isActive
+                  ? Ref.get(allowedProviders)
+                  : Effect.die(
+                    new Error("workspace settings admission must run inside the enqueue transaction")
+                  )
+              ),
+              Effect.map(workspaceSettingsRecord)
+            )
         }
       })
       const defaultPublish: ReviewSuggestionPublicationGateway["Service"]["publish"] = (command) =>
@@ -640,7 +689,8 @@ const withService = <Success, Failure>(
         publicationCommands,
         publicationAuthority,
         publicationFailure,
-        revisionInputs
+        revisionInputs,
+        allowedProviders
       )
     }).pipe(Effect.provide(persistenceLayer(config)))
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
@@ -661,8 +711,16 @@ const withRealService = <Success, Failure>(
         createdAt: release.createdAt
       })
       yield* persistence.releases.create(WORKSPACE_ID, release)
+      const testPersistence = Persistence.of({
+        ...persistence,
+        workspaceSettings: {
+          ...persistence.workspaceSettings,
+          get: () => Effect.succeed(workspaceSettingsRecord(["claude", "openai-compatible"]))
+        }
+      })
       const service = yield* PullRequestReviews.pipe(
         Effect.provide(pullRequestReviewsLayer),
+        Effect.provideService(Persistence, testPersistence),
         Effect.provideService(DeliveryGraphInspection, selectedInspection),
         Effect.provideService(AgentRuntimeRegistry, registry),
         Effect.provideService(ReviewSuggestionPublicationGateway, unusedPublicationGateway)
@@ -920,6 +978,37 @@ describe("pull request reviews", () => {
         } else {
           return yield* Effect.die("review enqueue input was not captured")
         }
+      })
+    ))
+
+  it.effect("rejects a provider outside the durable workspace allowlist before enqueue", () =>
+    withService((
+      service,
+      enqueueInput,
+      _publicationCommands,
+      _publicationAuthority,
+      _publicationFailure,
+      _revisionInputs,
+      allowedProviders
+    ) =>
+      Effect.gen(function*() {
+        yield* Ref.set(allowedProviders, ["claude"])
+        const rejected = yield* service.enqueue({
+          workspaceId: WORKSPACE_ID,
+          entityId: ENTITY_ID,
+          request: {
+            providerId: PROVIDER_ID,
+            model: MODEL,
+            profile: "read-only",
+            reviewProfileId: REVIEW_PROFILE.profileId
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(rejected))
+        if (Result.isFailure(rejected)) {
+          assert.instanceOf(rejected.failure, ApplicationInvalidRequest)
+        }
+        assert.isNull(yield* Ref.get(enqueueInput))
       })
     ))
 

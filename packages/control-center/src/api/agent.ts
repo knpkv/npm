@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
+import { AgentProviderIdentifier } from "../domain/agentProviderIdentifier.js"
 import {
   EntityId,
   EventCursor,
@@ -78,11 +79,9 @@ export const AgentProvider = Schema.Literals(["codex", "claude"])
 export type AgentProvider = typeof AgentProvider.Type
 
 /** Provider-neutral configured runtime identity accepted by durable jobs. */
-export const DurableAgentProviderId = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(200)
-).pipe(Schema.brand("DurableAgentProviderId"))
+export const DurableAgentProviderId = AgentProviderIdentifier.pipe(
+  Schema.brand("DurableAgentProviderId")
+)
 
 /** Decoded provider-neutral durable runtime identity. */
 export type DurableAgentProviderId = typeof DurableAgentProviderId.Type

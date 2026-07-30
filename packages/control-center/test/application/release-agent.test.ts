@@ -1,11 +1,14 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Sink, Stream } from "effect"
+import * as Schema from "effect/Schema"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
+import { WorkspaceSettingsReadModel } from "../../src/api/workspaceSettings.js"
 import { ReleaseId } from "../../src/domain/identifiers.js"
-import { PortfolioSnapshots } from "../../src/server/api/ApplicationServices.js"
+import { DEFAULT_WORKSPACE_SETTINGS } from "../../src/domain/workspaceSettings.js"
+import { PortfolioSnapshots, WorkspaceSettingsAdministration } from "../../src/server/api/ApplicationServices.js"
 import { makeReleaseAgentTurns } from "../../src/server/application/releaseAgent.js"
 import { makeNodePortfolioSnapshot } from "../fixtures/portfolio.js"
 
@@ -41,6 +44,32 @@ const fakeProcessLayer = (
     })
   )
 
+const workspaceSettingsLayer = (
+  allowedProviders: ReadonlyArray<"claude" | "codex"> = ["codex"]
+): Layer.Layer<WorkspaceSettingsAdministration> => {
+  const snapshot = makeNodePortfolioSnapshot()
+  const readModel = Schema.decodeUnknownSync(WorkspaceSettingsReadModel)({
+    workspaceId: snapshot.workspaceId,
+    revision: 1,
+    etag: "\"workspace-settings-v1-1\"",
+    settings: {
+      ...DEFAULT_WORKSPACE_SETTINGS,
+      agent: {
+        ...DEFAULT_WORKSPACE_SETTINGS.agent,
+        allowedProviders,
+        defaultProvider: allowedProviders[0] ?? null
+      }
+    },
+    createdAt: "2026-07-14T10:16:00.000Z",
+    updatedAt: "2026-07-14T10:16:00.000Z",
+    updatedByPersonId: null
+  })
+  return Layer.succeed(WorkspaceSettingsAdministration, {
+    read: () => Effect.succeed(readModel),
+    update: () => Effect.die("workspace settings updates are outside this test")
+  })
+}
+
 describe("release agent application", () => {
   it.effect("projects the exact release into a read-only ephemeral Codex turn", () => {
     const calls: Array<ChildProcess.Command> = []
@@ -70,6 +99,7 @@ describe("release agent application", () => {
     }).pipe(Effect.provide([
       Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),
       fakeProcessLayer(calls),
+      workspaceSettingsLayer(),
       NodeFileSystem.layer
     ]))
   })
@@ -92,6 +122,7 @@ describe("release agent application", () => {
     }).pipe(Effect.provide([
       Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),
       fakeProcessLayer(calls),
+      workspaceSettingsLayer(),
       NodeFileSystem.layer
     ]))
   })
@@ -117,6 +148,33 @@ describe("release agent application", () => {
     }).pipe(Effect.provide([
       Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),
       fakeProcessLayer(calls),
+      workspaceSettingsLayer(),
+      NodeFileSystem.layer
+    ]))
+  })
+
+  it.effect("does not start a configured provider after workspace policy revokes it", () => {
+    const calls: Array<ChildProcess.Command> = []
+    return Effect.gen(function*() {
+      const snapshot = makeNodePortfolioSnapshot()
+      const release = snapshot.releases[0]
+      if (release === undefined) return yield* Effect.die("release fixture is missing")
+
+      const agent = yield* makeReleaseAgentTurns({ cwd: "/workspace", enabledProviders: ["codex"] })
+      const result = yield* Effect.result(agent.runTurn({
+        history: [],
+        prompt: "Can this ship?",
+        provider: "codex",
+        releaseId: release.releaseId,
+        workspaceId: snapshot.workspaceId
+      }))
+
+      assert.isTrue(result._tag === "Failure" && result.failure._tag === "ApplicationServiceUnavailable")
+      assert.strictEqual(calls.length, 0)
+    }).pipe(Effect.provide([
+      Layer.succeed(PortfolioSnapshots, { snapshot: () => Effect.succeed(makeNodePortfolioSnapshot()) }),
+      fakeProcessLayer(calls),
+      workspaceSettingsLayer(["claude"]),
       NodeFileSystem.layer
     ]))
   })

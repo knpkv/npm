@@ -19,6 +19,7 @@ import type { PersistenceOperationFailure } from "../persistence/Persistence.js"
 import { Persistence } from "../persistence/Persistence.js"
 import { RecordRevision } from "../persistence/repositories/models.js"
 import type { WorkspaceSettingsRecord } from "../persistence/repositories/workspaceSettingsRepository.js"
+import { reconcileRelationshipInferencePolicy } from "./relationshipInferenceMaterialization.js"
 
 const unavailable = (): ApplicationServiceUnavailable => new ApplicationServiceUnavailable({ retryAt: null })
 
@@ -101,11 +102,29 @@ export const makeWorkspaceSettingsAdministration = Effect.gen(function*() {
       ) {
         return yield* new ApplicationInvalidRequest()
       }
-      const record = yield* persistence.workspaceSettings.update(input.workspaceId, {
-        ...repositoryRequest,
-        governanceAuthority,
-        updatedAt
-      }).pipe(Effect.mapError(mapWriteFailure))
+      const record = yield* persistence.transact(Effect.gen(function*() {
+        const before = yield* persistence.workspaceSettings.get(input.workspaceId)
+        const updated = yield* persistence.workspaceSettings.update(input.workspaceId, {
+          ...repositoryRequest,
+          governanceAuthority,
+          updatedAt
+        })
+        const current = yield* persistence.workspaceSettings.get(input.workspaceId)
+        if (
+          before.settings.inference.enabled !== current.settings.inference.enabled ||
+          before.settings.inference.minimumConfidencePercent !==
+            current.settings.inference.minimumConfidencePercent
+        ) {
+          yield* reconcileRelationshipInferencePolicy(
+            persistence,
+            cryptoService,
+            input.workspaceId,
+            updatedAt,
+            current.settings
+          )
+        }
+        return updated
+      })).pipe(Effect.mapError(mapWriteFailure))
       return present(record)
     })
   })

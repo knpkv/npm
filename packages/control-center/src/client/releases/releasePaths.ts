@@ -8,6 +8,9 @@ export const releaseParentPath = (workspaceId: WorkspaceId): string => `/w/${seg
 /** Build the workspace-wide normalized delivery item index path. */
 export const workspaceItemsPath = (workspaceId: WorkspaceId): string => `/w/${segment(workspaceId)}/items`
 
+/** Build the workspace-wide active work queue path. */
+export const workspaceActiveWorkPath = (workspaceId: WorkspaceId): string => `/w/${segment(workspaceId)}/work`
+
 /** Build the workspace review queue with one release selected. */
 export const releaseActiveWorkPath = (workspaceId: WorkspaceId, releaseId: ReleaseId): string =>
   `/w/${segment(workspaceId)}/work?release=${segment(releaseId)}`

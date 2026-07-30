@@ -1,15 +1,8 @@
 import * as Schema from "effect/Schema"
 
-const boundedInteger = (minimum: number, maximum: number) => Schema.Int.check(Schema.isBetween({ minimum, maximum }))
+import { AgentProviderIdentifier } from "./agentProviderIdentifier.js"
 
-const AgentProviderIdentifier = Schema.String.check(
-  Schema.isTrimmed(),
-  Schema.isNonEmpty(),
-  Schema.isMaxLength(200),
-  Schema.isPattern(/^[a-z0-9][a-z0-9._-]*$/u, {
-    expected: "a lowercase agent provider identifier"
-  })
-)
+const boundedInteger = (minimum: number, maximum: number) => Schema.Int.check(Schema.isBetween({ minimum, maximum }))
 
 const AgentModelIdentifier = Schema.String.check(
   Schema.isTrimmed(),

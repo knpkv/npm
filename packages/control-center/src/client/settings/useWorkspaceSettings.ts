@@ -8,6 +8,7 @@ import {
   isGovernedWorkspaceSettingsSection,
   type WorkspaceSettingsV1
 } from "../../domain/workspaceSettings.js"
+import { publishWorkspaceSettings } from "./workspaceSettingsSignals.js"
 import { browserWorkspaceSettingsTransport, type WorkspaceSettingsTransport } from "./workspaceSettingsTransport.js"
 
 export type WorkspaceSettingsState =
@@ -233,6 +234,7 @@ export const useWorkspaceSettings = (
     transport.load(request.signal).then(
       (server) => {
         if (!request.signal.aborted) {
+          publishWorkspaceSettings(server)
           setState({
             _tag: "ready",
             draft: server.settings,
@@ -292,6 +294,7 @@ export const useWorkspaceSettings = (
         }, request.signal).then(
           (server) => {
             if (request.signal.aborted) return
+            publishWorkspaceSettings(server)
             setState({
               _tag: "ready",
               draft: server.settings,

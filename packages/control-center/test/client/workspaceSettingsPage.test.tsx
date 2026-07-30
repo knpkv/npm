@@ -156,9 +156,12 @@ describe("workspace settings browser acceptance", () => {
 
     await changeInput(input, "openai")
     expect(host.querySelector("output")?.textContent).toBe("openai")
-    await changeInput(input, "openai,anthropic")
-    expect(input.value).toBe("openai,anthropic")
+    await act(async () => input.focus())
+    await changeInput(input, "OpenAI,ANTHROPIC")
+    expect(input.value).toBe("OpenAI,ANTHROPIC")
     expect(host.querySelector("output")?.textContent).toBe("anthropic|openai")
+    await act(async () => input.blur())
+    expect(input.value).toBe("anthropic, openai")
 
     await changeInput(input, "draft,")
     const replace = Array.from(host.querySelectorAll("button")).find(

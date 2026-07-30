@@ -55,18 +55,25 @@ const MAXIMUM_INFERENCE_CANDIDATES = 2_000
 
 interface CandidateAccumulator {
   readonly candidates: Array<RelationshipInferenceCandidate>
+  readonly minimumConfidenceScore: number
   truncated: boolean
 }
 
 const addCandidate = (
   accumulator: CandidateAccumulator,
   candidate: RelationshipInferenceCandidate
-): void => {
+): boolean => {
+  if (
+    candidate.lifecycle === "inferred" &&
+    candidate.confidence !== null &&
+    candidate.confidence.score < accumulator.minimumConfidenceScore
+  ) return false
   if (accumulator.candidates.length >= MAXIMUM_INFERENCE_CANDIDATES) {
     accumulator.truncated = true
-    return
+    return false
   }
   accumulator.candidates.push(candidate)
+  return true
 }
 
 const OWNED_RULE_IDS = new Set([
@@ -357,6 +364,7 @@ const addDocumentationCandidates = (
  */
 export const deriveRelationshipInference = (input: {
   readonly entities: ReadonlyArray<RelationshipInferenceEntity>
+  readonly minimumConfidenceScore?: number
   readonly rejectedCandidateIdentityKeys?: ReadonlySet<string>
   readonly releases: ReadonlyArray<RelationshipInferenceRelease>
   readonly relationships: ReadonlyArray<DeliveryRelationship>
@@ -380,7 +388,11 @@ export const deriveRelationshipInference = (input: {
   const issues = entities.filter((entity) => entity.projection.details._tag === "issue")
   const pullRequests = entities.filter((entity) => entity.projection.details._tag === "pull-request")
   const pipelines = entities.filter((entity) => entity.projection.details._tag === "pipeline-execution")
-  const accumulator: CandidateAccumulator = { candidates: [], truncated: false }
+  const accumulator: CandidateAccumulator = {
+    candidates: [],
+    minimumConfidenceScore: input.minimumConfidenceScore ?? 0,
+    truncated: false
+  }
   const obsoleteGaps = new Set<string>()
   const inferredIssueLinks = new Set<string>()
   const pullRequestReleases = new Map<GraphNodeId, Set<ReleaseId>>()
@@ -406,12 +418,7 @@ export const deriveRelationshipInference = (input: {
       if (issueDetails._tag !== "issue" || !containsToken(metadata(pullRequest), issueDetails.key)) continue
       for (const releaseId of issue.releaseIds) {
         const identityKey = candidateIdentity("implements", releaseId, pullRequest.nodeId, issue.nodeId)
-        if (!(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
-          releaseIds.add(releaseId)
-          inferredIssueLinks.add(`${releaseId}:${issue.nodeId}`)
-          obsoleteGaps.add(issueGapIdentity(releaseId, issue.nodeId))
-        }
-        addCandidate(
+        const accepted = addCandidate(
           accumulator,
           inferred({
             confidence: {
@@ -428,6 +435,11 @@ export const deriveRelationshipInference = (input: {
             target: resolved("issue", issue.nodeId)
           })
         )
+        if (accepted && !(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
+          releaseIds.add(releaseId)
+          inferredIssueLinks.add(`${releaseId}:${issue.nodeId}`)
+          obsoleteGaps.add(issueGapIdentity(releaseId, issue.nodeId))
+        }
       }
     }
     for (const relationship of input.relationships) {
@@ -482,11 +494,7 @@ export const deriveRelationshipInference = (input: {
       }
       for (const releaseId of pullRequestReleases.get(pullRequest.nodeId) ?? []) {
         const identityKey = candidateIdentity("delivered-by", releaseId, pullRequest.nodeId, pipeline.nodeId)
-        if (!(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
-          inferredPipelineLinks.add(`${releaseId}:${pullRequest.nodeId}`)
-          obsoleteGaps.add(pipelineGapIdentity(releaseId, pullRequest.nodeId))
-        }
-        addCandidate(
+        const accepted = addCandidate(
           accumulator,
           inferred({
             confidence: {
@@ -504,6 +512,10 @@ export const deriveRelationshipInference = (input: {
             target: resolved("pipeline-execution", pipeline.nodeId)
           })
         )
+        if (accepted && !(input.rejectedCandidateIdentityKeys?.has(identityKey) ?? false)) {
+          inferredPipelineLinks.add(`${releaseId}:${pullRequest.nodeId}`)
+          obsoleteGaps.add(pipelineGapIdentity(releaseId, pullRequest.nodeId))
+        }
       }
     }
   }

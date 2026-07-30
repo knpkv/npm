@@ -7,9 +7,9 @@ import { useNavigate, useSearchParams } from "react-router"
 
 import { makeControlCenterApiClient } from "../api/client.js"
 import { PairingCode } from "../api/session.js"
+import type { ProviderId } from "../domain/sourceRevision.js"
 import { useBrowserSession } from "./BrowserSession.js"
 import { pairingFailureMessage } from "./PairingFailure.js"
-import { releaseParentPath } from "./releases/releaseRoutes.js"
 import { selectedServiceProvider, serviceSetupPath } from "./services/serviceOnboarding.js"
 import styles from "./pages.module.css"
 
@@ -20,6 +20,10 @@ const pairBrowser = Effect.fn("PairPage.pairBrowser")((rawPairingCode: string) =
     return yield* client.session.pair({ payload: { pairingCode } })
   }).pipe(Effect.provide(FetchHttpClient.layer))
 )
+
+/** Preserve explicit service onboarding while ordinary pairing resolves workspace settings. */
+export const pairedBrowserDestination = (selectedProvider: ProviderId | null): string =>
+  selectedProvider === null ? "/" : serviceSetupPath(selectedProvider)
 
 /** Pair the current tab without ever exposing the opaque session cookie to JavaScript. */
 export const PairPage = (): ReactElement => {
@@ -38,12 +42,7 @@ export const PairPage = (): ReactElement => {
       (result) => {
         establishSession(result.csrfToken, result.session)
         const selectedProvider = selectedServiceProvider(searchParams, "service")
-        navigate(
-          selectedProvider === null
-            ? releaseParentPath(result.session.workspaceId)
-            : serviceSetupPath(selectedProvider),
-          { replace: true }
-        )
+        navigate(pairedBrowserDestination(selectedProvider), { replace: true })
       },
       (failure) => {
         setError(pairingFailureMessage(failure))

@@ -839,6 +839,16 @@ const makePullRequestReviews = Effect.gen(function*() {
       )
       const createdAt = yield* DateTime.now
       return yield* persistence.transact(Effect.gen(function*() {
+        const settings = yield* mapPersistenceRead(
+          persistence.workspaceSettings.get(input.workspaceId)
+        )
+        if (
+          !settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
+        ) {
+          return yield* new ApplicationInvalidRequest()
+        }
         const existing = yield* currentFor(input.workspaceId, target)
         if (existing._tag === "pending") return existing
         yield* persistence.agentJobs.enqueue({

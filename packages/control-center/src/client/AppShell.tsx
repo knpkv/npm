@@ -10,6 +10,11 @@ const CommandSearch = lazy(async () => {
   return { default: module.CommandSearch }
 })
 
+const WorkspaceHomeLink = lazy(async () => {
+  const module = await import("./settings/WorkspaceHomeLink.js")
+  return { default: module.WorkspaceHomeLink }
+})
+
 const workspaceOverviewPath = (pathname: string): string => {
   const workspaceId = pathname.split("/")[2]
   return isWorkspaceRouteId(workspaceId) ? `/w/${workspaceId}/overview` : "/"
@@ -65,24 +70,36 @@ export const AppShell = (): ReactElement => {
   const overviewPath = workspaceOverviewPath(location.pathname)
   const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
+  const brand = (
+    <>
+      <span aria-hidden="true" className={styles.brandMark}>
+        C
+      </span>
+      <span className={styles.brandName}>Control Center</span>
+    </>
+  )
 
   return (
     <div className={styles.root}>
       <header className={styles.header}>
         {isAuthorizedShare ? (
-          <span className={styles.brand ?? ""}>
-            <span aria-hidden="true" className={styles.brandMark}>
-              C
-            </span>
-            <span className={styles.brandName}>Control Center</span>
-          </span>
-        ) : (
+          <span className={styles.brand ?? ""}>{brand}</span>
+        ) : workspaceId === null ? (
           <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to={overviewPath}>
-            <span aria-hidden="true" className={styles.brandMark}>
-              C
-            </span>
-            <span className={styles.brandName}>Control Center</span>
+            {brand}
           </NavLink>
+        ) : (
+          <Suspense
+            fallback={
+              <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to="/">
+                {brand}
+              </NavLink>
+            }
+          >
+            <WorkspaceHomeLink className={styles.brand ?? ""} fallbackPath="/" workspaceId={workspaceId}>
+              {brand}
+            </WorkspaceHomeLink>
+          </Suspense>
         )}
         {isAuthorizedShare ? null : (
           <>

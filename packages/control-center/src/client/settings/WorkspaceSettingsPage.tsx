@@ -21,7 +21,7 @@ const parseAllowedProviders = (value: string): ReadonlyArray<string> =>
     ...new Set(
       value
         .split(",")
-        .map((provider) => provider.trim())
+        .map((provider) => provider.trim().toLowerCase())
         .filter((provider) => provider.length > 0)
     )
   ].sort()
@@ -427,7 +427,7 @@ export const SettingsForm = ({
             disabled={disabled}
             list="allowed-agent-providers"
             onChange={(event) => {
-              const defaultProvider = event.currentTarget.value.trim() || null
+              const defaultProvider = event.currentTarget.value.trim().toLowerCase() || null
               update("agent", {
                 ...draft.agent,
                 defaultProvider,

@@ -176,26 +176,52 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         subjectRevision
       })
       const createdAt = yield* DateTime.now
-      yield* persistence.agentJobs.enqueue({
-        workspaceId: input.workspaceId,
-        releaseId: input.releaseId,
-        jobId,
-        providerId,
-        model: input.request.model,
-        access: input.request.profile,
-        userPrompt: input.request.prompt,
-        prompt: providerPrompt,
-        contextFingerprint,
-        subjectRevision,
-        task: { _tag: "release-chat" },
-        createdAt
-      }).pipe(
-        Effect.mapError(mapPersistenceWriteError),
-        Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
+      yield* persistence.transact(Effect.gen(function*() {
+        const settings = yield* mapPersistenceRead(
+          persistence.workspaceSettings.get(input.workspaceId)
+        )
+        if (
+          !settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
+        ) {
+          return yield* unavailable()
+        }
+        yield* persistence.agentJobs.enqueue({
+          workspaceId: input.workspaceId,
+          releaseId: input.releaseId,
+          jobId,
+          providerId,
+          model: input.request.model,
+          access: input.request.profile,
+          userPrompt: input.request.prompt,
+          prompt: providerPrompt,
+          contextFingerprint,
+          subjectRevision,
+          task: { _tag: "release-chat" },
+          createdAt
+        }).pipe(
+          Effect.mapError(mapPersistenceWriteError),
+          Effect.mapError((error) => error._tag === "ApplicationResourceNotFound" ? error : unavailable())
+        )
+      })).pipe(
+        Effect.mapError((error) => error._tag === "PersistenceOperationError" ? unavailable() : error)
       )
       return { releaseId: input.releaseId, jobId, state: "queued" }
     }),
-    providers: () => runtimes.catalog().pipe(Effect.mapError(unavailable)),
+    providers: Effect.fn("ReleaseAgentJobs.providers")(function*(workspaceId) {
+      const settings = yield* persistence.workspaceSettings.get(workspaceId).pipe(
+        Effect.mapError(unavailable)
+      )
+      const catalog = yield* runtimes.catalog().pipe(Effect.mapError(unavailable))
+      return {
+        providers: catalog.providers.filter(({ providerId }) =>
+          settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
+        )
+      }
+    }),
     replay: Effect.fn("ReleaseAgentJobs.replay")(function*(input) {
       yield* mapPersistenceRead(
         persistence.releases.get(input.workspaceId, input.releaseId)

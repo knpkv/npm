@@ -38,7 +38,8 @@ import {
   PluginConnectionId,
   ReleaseId,
   RoleAssignmentId,
-  WorkspaceId
+  WorkspaceId,
+  WorkspaceSettingsMutationId
 } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import type { PrReviewSubject } from "../../src/domain/prReview.js"
@@ -808,6 +809,24 @@ describe("Control Center closed runtime", () => {
             "x-csrf-token": paired.csrfToken
           })
       })
+      const currentSettings = yield* mutationClient.workspaceSettings.read()
+      const configuredSettings = yield* mutationClient.workspaceSettings.update({
+        payload: {
+          mutationId: WorkspaceSettingsMutationId.make(
+            "01890f6f-6d6a-7cc0-98d2-000000000083"
+          ),
+          expectedRevision: currentSettings.revision,
+          settings: {
+            ...currentSettings.settings,
+            agent: {
+              ...currentSettings.settings.agent,
+              allowedProviders: ["codex"]
+            }
+          },
+          acknowledgedGovernedSections: ["agent"]
+        }
+      })
+      assert.deepStrictEqual(configuredSettings.settings.agent.allowedProviders, ["codex"])
       const enqueued = yield* mutationClient.agent.enqueueJob({
         params: { releaseId: RELEASE_ID },
         payload: {

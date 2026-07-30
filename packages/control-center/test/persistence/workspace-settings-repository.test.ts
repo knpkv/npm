@@ -702,6 +702,70 @@ describe("WorkspaceSettingsRepository", () => {
       })
     ))
 
+  it.effect("rolls back an inference policy update when bounded reconciliation is incomplete", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const fakePersistence = Persistence.of({
+          ...persistence,
+          deliveryGraph: {
+            ...persistence.deliveryGraph,
+            read: (selectedWorkspaceId, input) => {
+              if (
+                typeof input === "object" &&
+                input !== null &&
+                "_tag" in input &&
+                input._tag === "workspaceEntityProjections"
+              ) {
+                return persistence.deliveryGraph.read(selectedWorkspaceId, input).pipe(
+                  Effect.map((result) =>
+                    result._tag === "workspaceEntityProjections"
+                      ? {
+                        ...result,
+                        value: { ...result.value, truncated: true }
+                      }
+                      : result
+                  )
+                )
+              }
+              return persistence.deliveryGraph.read(selectedWorkspaceId, input)
+            }
+          }
+        })
+        const administration = yield* makeWorkspaceSettingsAdministration.pipe(
+          Effect.provideService(Persistence, fakePersistence)
+        )
+        const original = yield* persistence.workspaceSettings.get(workspaceId)
+        const result = yield* administration.update({
+          workspaceId,
+          session: ownerSession,
+          request: {
+            mutationId: firstMutation,
+            expectedRevision: WorkspaceSettingsRevision.make(original.revision),
+            settings: {
+              ...original.settings,
+              inference: {
+                ...original.settings.inference,
+                minimumConfidencePercent: 99
+              }
+            },
+            acknowledgedGovernedSections: []
+          }
+        }).pipe(Effect.result)
+
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isFailure(result)) {
+          assert.strictEqual(result.failure._tag, "ApplicationServiceUnavailable")
+        }
+        assert.strictEqual(
+          (yield* persistence.workspaceSettings.get(workspaceId)).revision,
+          original.revision
+        )
+        assert.lengthOf(yield* persistence.workspaceSettings.audits(workspaceId), 0)
+      })
+    ))
+
   it.effect("rejects settings updates outside the caller's owned workspace", () =>
     withPersistence(
       Effect.gen(function*() {

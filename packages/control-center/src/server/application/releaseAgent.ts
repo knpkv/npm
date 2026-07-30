@@ -20,7 +20,8 @@ import {
   ApplicationResourceNotFound,
   ApplicationServiceUnavailable,
   PortfolioSnapshots,
-  ReleaseAgentTurns
+  ReleaseAgentTurns,
+  WorkspaceSettingsAdministration
 } from "../api/ApplicationServices.js"
 
 const MAXIMUM_MODEL_OUTPUT_BYTES = 128 * 1024
@@ -116,6 +117,7 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
   options: ReleaseAgentRuntimeOptions
 ) {
   const portfolio = yield* PortfolioSnapshots
+  const workspaceSettings = yield* WorkspaceSettingsAdministration
   const fileSystem = yield* FileSystem.FileSystem
   const processSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const processAdmission = yield* Semaphore.make(MAXIMUM_CONCURRENT_AGENT_TURNS)
@@ -124,6 +126,10 @@ export const makeReleaseAgentTurns = Effect.fn("ReleaseAgentTurns.make")(functio
     runTurn: Effect.fn("ReleaseAgentTurns.runTurn")(function*(input) {
       const provider = resolveProvider(options, input.provider)
       if (provider === undefined) return yield* unavailable()
+      const settings = yield* workspaceSettings.read(input.workspaceId)
+      if (!settings.settings.agent.allowedProviders.includes(provider)) {
+        return yield* unavailable()
+      }
 
       const snapshot = yield* portfolio.snapshot(input.workspaceId)
       const release = snapshot.releases.find(({ releaseId }) => releaseId === input.releaseId)
@@ -182,7 +188,10 @@ export const releaseAgentTurnsLayer = (
 ): Layer.Layer<
   ReleaseAgentTurns,
   never,
-  PortfolioSnapshots | FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner
+  | PortfolioSnapshots
+  | WorkspaceSettingsAdministration
+  | FileSystem.FileSystem
+  | ChildProcessSpawner.ChildProcessSpawner
 > => Layer.effect(ReleaseAgentTurns, makeReleaseAgentTurns(options))
 
 /** Explicit disabled runtime used when no local provider is configured. */

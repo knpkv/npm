@@ -587,7 +587,7 @@ export class ReleaseAgentJobs extends Context.Service<ReleaseAgentJobs, {
     EnqueueReleaseAgentJobResponse,
     ApplicationResourceNotFound | ApplicationServiceUnavailable
   >
-  readonly providers: () => Effect.Effect<
+  readonly providers: (workspaceId: WorkspaceId) => Effect.Effect<
     AgentProviderCatalog,
     ApplicationServiceUnavailable
   >
