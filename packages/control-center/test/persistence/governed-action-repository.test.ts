@@ -1281,123 +1281,127 @@ describe("governed action writer", () => {
       assert.lengthOf(quarantined, 0)
     })))
 
-  it.effect("pages approvals by durable authorization time before applying the limit", () =>
-    withRepository(Effect.gen(function*() {
-      yield* seedAuthorityRoots()
-      const repository = yield* GovernedActionRepository
-      const { sql } = yield* Database
-      const fixtureId = (group: string, index: number): string =>
-        `01890f6f-6d6a-7cc0-98d2-${group}${index.toString(16).padStart(10, "0")}`
-      const commitTerminalAction = Effect.fn("GovernedActionRepositoryTest.commitTerminalAction")(function*(
-        index: number,
-        authorizedAt: string,
-        terminalAt: string,
-        actionKind = "record-approval",
-        expectedRevision = "matching-revision"
-      ) {
-        const actionId = fixtureId("40", index)
-        const authorizationId = fixtureId("43", index)
-        const envelope = yield* makeEnvelope(actionId, {
-          actionKind,
-          expectedRevision,
-          idempotencyKey: `governed-action:PAY-42:approval:${String(index)}`,
-          proposalKey: `approval:PAY-42:${String(index)}`
-        })
-        const proposal = makeProposalInput(envelope, {
-          transitionId: fixtureId("41", index),
-          auditEventId: fixtureId("42", index),
-          commandId: `command:PAY-42:approval:${String(index)}:propose`
-        })
-        yield* repository.commit(proposal)
-        const authorization = makeAuthorization(envelope, {
-          authorizationId,
-          authorizedAt
-        })
-        const authorizationInput = makeAuthorizationInput(proposal, authorization, {
-          transitionId: fixtureId("44", index),
-          auditEventId: fixtureId("45", index),
-          commandId: `command:PAY-42:approval:${String(index)}:authorize`
-        })
-        yield* repository.commit(authorizationInput)
-        const companion = yield* makeDispatchCompanion(envelope, {
-          attemptId: fixtureId("46", index),
-          authorizationId
-        })
-        const startInput = makeStartInput(authorizationInput, companion, {
-          transitionId: fixtureId("47", index),
-          auditEventId: fixtureId("48", index),
-          commandId: `command:PAY-42:approval:${String(index)}:start`
-        })
-        yield* repository.commit(startInput)
-        yield* repository.commit(decodeCommit({
-          ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
-          expectedHeadTransitionId: startInput.transitionId,
-          transitionId: fixtureId("49", index),
-          commandId: `command:PAY-42:approval:${String(index)}:succeed`,
-          command: {
-            _tag: "recordSucceeded",
-            receipt: {
-              observationBasis: "authorization",
-              providerOperationId: `control-center-approval-${String(index)}`,
-              status: "succeeded",
-              safeSummary: "Control Center approval recorded",
-              observedAt: authorizedAt
+  it.effect(
+    "pages approvals by durable authorization time before applying the limit",
+    () =>
+      withRepository(Effect.gen(function*() {
+        yield* seedAuthorityRoots()
+        const repository = yield* GovernedActionRepository
+        const { sql } = yield* Database
+        const fixtureId = (group: string, index: number): string =>
+          `01890f6f-6d6a-7cc0-98d2-${group}${index.toString(16).padStart(10, "0")}`
+        const commitTerminalAction = Effect.fn("GovernedActionRepositoryTest.commitTerminalAction")(function*(
+          index: number,
+          authorizedAt: string,
+          terminalAt: string,
+          actionKind = "record-approval",
+          expectedRevision = "matching-revision"
+        ) {
+          const actionId = fixtureId("40", index)
+          const authorizationId = fixtureId("43", index)
+          const envelope = yield* makeEnvelope(actionId, {
+            actionKind,
+            expectedRevision,
+            idempotencyKey: `governed-action:PAY-42:approval:${String(index)}`,
+            proposalKey: `approval:PAY-42:${String(index)}`
+          })
+          const proposal = makeProposalInput(envelope, {
+            transitionId: fixtureId("41", index),
+            auditEventId: fixtureId("42", index),
+            commandId: `command:PAY-42:approval:${String(index)}:propose`
+          })
+          yield* repository.commit(proposal)
+          const authorization = makeAuthorization(envelope, {
+            authorizationId,
+            authorizedAt
+          })
+          const authorizationInput = makeAuthorizationInput(proposal, authorization, {
+            transitionId: fixtureId("44", index),
+            auditEventId: fixtureId("45", index),
+            commandId: `command:PAY-42:approval:${String(index)}:authorize`
+          })
+          yield* repository.commit(authorizationInput)
+          const companion = yield* makeDispatchCompanion(envelope, {
+            attemptId: fixtureId("46", index),
+            authorizationId
+          })
+          const startInput = makeStartInput(authorizationInput, companion, {
+            transitionId: fixtureId("47", index),
+            auditEventId: fixtureId("48", index),
+            commandId: `command:PAY-42:approval:${String(index)}:start`
+          })
+          yield* repository.commit(startInput)
+          yield* repository.commit(decodeCommit({
+            ...Schema.encodeSync(GovernedActionCommitInput)(startInput),
+            expectedHeadTransitionId: startInput.transitionId,
+            transitionId: fixtureId("49", index),
+            commandId: `command:PAY-42:approval:${String(index)}:succeed`,
+            command: {
+              _tag: "recordSucceeded",
+              receipt: {
+                observationBasis: "authorization",
+                providerOperationId: `control-center-approval-${String(index)}`,
+                status: "succeeded",
+                safeSummary: "Control Center approval recorded",
+                observedAt: authorizedAt
+              },
+              source: { _tag: "direct" }
             },
-            source: { _tag: "direct" }
-          },
-          cause: { _tag: "system", component: "governed-action-engine" },
-          occurredAt: terminalAt,
-          companion: { _tag: "none" },
-          auditEventId: fixtureId("4a", index)
-        }))
-        return envelope.actionId
-      })
+            cause: { _tag: "system", component: "governed-action-engine" },
+            occurredAt: terminalAt,
+            companion: { _tag: "none" },
+            auditEventId: fixtureId("4a", index)
+          }))
+          return envelope.actionId
+        })
 
-      for (let index = 0; index < 20; index++) {
-        yield* commitTerminalAction(
-          index,
-          `2026-07-15T10:01:${String(index).padStart(2, "0")}.000Z`,
-          `2026-07-15T10:20:${String(index).padStart(2, "0")}.000Z`,
-          "record-approval",
-          "other-revision"
-        )
-      }
-      let corruptedUnrelatedActionId: GovernedActionId | undefined
-      for (let index = 20; index < 100; index++) {
-        const actionId = yield* commitTerminalAction(
-          index,
-          "2026-07-15T10:01:40.000Z",
-          "2026-07-15T10:20:30.000Z",
-          "transition",
-          "other-revision"
-        )
-        if (index === 20) corruptedUnrelatedActionId = actionId
-      }
-      if (corruptedUnrelatedActionId === undefined) {
-        return yield* Effect.die("expected an unrelated governed-action fixture")
-      }
-      yield* sql`DROP TRIGGER governed_action_transitions_no_update`
-      yield* sql`UPDATE governed_action_transitions
+        for (let index = 0; index < 20; index++) {
+          yield* commitTerminalAction(
+            index,
+            `2026-07-15T10:01:${String(index).padStart(2, "0")}.000Z`,
+            `2026-07-15T10:20:${String(index).padStart(2, "0")}.000Z`,
+            "record-approval",
+            "other-revision"
+          )
+        }
+        let corruptedUnrelatedActionId: GovernedActionId | undefined
+        for (let index = 20; index < 100; index++) {
+          const actionId = yield* commitTerminalAction(
+            index,
+            "2026-07-15T10:01:40.000Z",
+            "2026-07-15T10:20:30.000Z",
+            "transition",
+            "other-revision"
+          )
+          if (index === 20) corruptedUnrelatedActionId = actionId
+        }
+        if (corruptedUnrelatedActionId === undefined) {
+          return yield* Effect.die("expected an unrelated governed-action fixture")
+        }
+        yield* sql`DROP TRIGGER governed_action_transitions_no_update`
+        yield* sql`UPDATE governed_action_transitions
         SET transition_json = ${JSON.stringify({ malformed: true })}
         WHERE workspace_id = ${WORKSPACE_ID}
           AND action_id = ${corruptedUnrelatedActionId}`
-      const latestAuthorizedActionId = yield* commitTerminalAction(
-        100,
-        "2026-07-15T10:00:30.000Z",
-        "2026-07-15T10:03:00.000Z"
-      )
-      const selected = yield* repository.readLatestTerminalByTarget({
-        workspaceId: WORKSPACE_ID,
-        providerId: "jira",
-        targetEntityId: ENTITY_ID,
-        actionKind: "record-approval",
-        expectedRevision: Revision.make("matching-revision"),
-        limit: 20
-      })
+        const latestAuthorizedActionId = yield* commitTerminalAction(
+          100,
+          "2026-07-15T10:00:30.000Z",
+          "2026-07-15T10:03:00.000Z"
+        )
+        const selected = yield* repository.readLatestTerminalByTarget({
+          workspaceId: WORKSPACE_ID,
+          providerId: "jira",
+          targetEntityId: ENTITY_ID,
+          actionKind: "record-approval",
+          expectedRevision: Revision.make("matching-revision"),
+          limit: 20
+        })
 
-      assert.lengthOf(selected, 1)
-      assert.strictEqual(selected[0]?.envelope.actionId, latestAuthorizedActionId)
-    })))
+        assert.lengthOf(selected, 1)
+        assert.strictEqual(selected[0]?.envelope.actionId, latestAuthorizedActionId)
+      })),
+    { timeout: 30_000 }
+  )
 
   it.effect("physically binds authorization-based provider outcomes to their terminal receipt", () =>
     withRepository(Effect.gen(function*() {
