@@ -10,7 +10,11 @@ import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntime
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
 import { securityHeaders } from "../src/server/http/security/SecurityHeaders.js"
-import { type BrowserSecretSurface, browserSurfaceExposesSecret } from "./browserSecretSurface.js"
+import {
+  type BrowserSecretSurface,
+  browserSurfaceExposesSecret,
+  exposedBrowserForbiddenValues
+} from "./browserSecretSurface.js"
 import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
 import {
   INITIAL_RELEASE_VERSION,
@@ -44,7 +48,7 @@ test.describe("repository-managed real runtime", () => {
         expect(headers["strict-transport-security"]).toBe("max-age=31536000")
         await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
 
-        await fixture.pairThroughUi(page)
+        const { consumedPairingCode } = await fixture.pairThroughUi(page)
         await expect(page).toHaveURL(`${fixture.origin}/w/${REAL_WORKSPACE_ID}/overview`)
         await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
 
@@ -61,7 +65,15 @@ test.describe("repository-managed real runtime", () => {
           sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
           url: location.href
         })`)
-        expect(browserSurfaceExposesSecret(browserSurface, sessionCookie.value)).toBe(false)
+        expect(
+          exposedBrowserForbiddenValues(browserSurface, [
+            { label: "HttpOnly session cookie", value: sessionCookie.value },
+            { label: "consumed pairing code", value: consumedPairingCode }
+          ])
+        ).toEqual([])
+        const csrfProof = await page.evaluate<string | null>(`sessionStorage.getItem("cc_csrf")`)
+        if (csrfProof === null) throw new Error("trusted HTTPS pairing did not expose its browser-owned CSRF proof")
+        expect(browserSurfaceExposesSecret(browserSurface, csrfProof)).toBe(true)
       } finally {
         await context.close()
       }

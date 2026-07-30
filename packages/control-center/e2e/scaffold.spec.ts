@@ -27,9 +27,9 @@ const pairedSession = {
 interface UnauthenticatedPresentationRoute {
   readonly audit: ProductionRouteAuditRequirement
   readonly exercise?: (primaryAction: Locator) => Promise<void>
-  readonly expectOutcome: () => Promise<void>
+  readonly expectOutcome?: () => Promise<void>
   readonly landmark: () => Locator
-  readonly primaryAction: () => Locator
+  readonly primaryAction: () => Locator | null
 }
 
 test("includes WCAG 2.1 A label-content matching in the serious accessibility gate", async ({ page }) => {
@@ -101,17 +101,33 @@ test("audits every public route family for keyboard, WCAG, reflow, forced colors
       expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
       landmark: () => page.getByText("Page not found", { exact: true }),
       primaryAction: () => page.getByRole("link", { name: "Return to Control Center" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "settings", "unauthenticated"),
+      landmark: () => page.getByText("Authentication required", { exact: true }),
+      primaryAction: () => null
     }
   ]
 
   for (const route of routes) {
     await page.goto(route.audit.canonicalPath)
-    await auditProductionRoutePresentation(page, {
-      exercise: route.exercise ?? (async (primaryAction) => primaryAction.press("Enter")),
-      expectOutcome: route.expectOutcome,
-      landmark: route.landmark(),
-      primaryAction: route.primaryAction()
-    })
+    const primaryAction = route.primaryAction()
+    if (primaryAction === null) {
+      if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
+      await auditProductionRoutePresentation(page, {
+        landmark: route.landmark(),
+        noActionReason: route.audit.action.reason,
+        primaryAction
+      })
+    } else {
+      if (route.expectOutcome === undefined) throw new Error(`${route.audit.family} requires an interaction outcome`)
+      await auditProductionRoutePresentation(page, {
+        exercise: route.exercise ?? (async (action) => action.press("Enter")),
+        expectOutcome: route.expectOutcome,
+        landmark: route.landmark(),
+        primaryAction
+      })
+    }
   }
   expect(routes.map(({ audit }) => productionRouteAuditKey(audit.family, audit.presentation)).sort()).toEqual(
     requiredProductionRouteAuditsFor("scaffold")

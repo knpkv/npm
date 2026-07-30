@@ -585,16 +585,9 @@ interface AuthenticatedPresentationRoute {
 
 test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
   test.setTimeout(60_000)
-  let recoverItems = false
-  let recoverServices = false
-  let recoverTimeline = false
   await page.route("**/api/v1/items**", async (route) => {
     if (new URL(route.request().url()).pathname !== "/api/v1/items") {
       await route.fallback()
-      return
-    }
-    if (!recoverItems) {
-      await route.abort("failed")
       return
     }
     const items = encodedWorkset.entityProjections.map((entry) => ({
@@ -623,10 +616,6 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       await route.fallback()
       return
     }
-    if (!recoverTimeline) {
-      await route.abort("failed")
-      return
-    }
     await route.fulfill({
       body: JSON.stringify({ events: [], nextCursor: null }),
       contentType: "application/json",
@@ -634,10 +623,6 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     })
   })
   await page.route("**/api/v1/plugins/overview", async (route) => {
-    if (!recoverServices) {
-      await route.abort("failed")
-      return
-    }
     await route.fulfill({
       body: JSON.stringify({
         accounts: [],
@@ -664,16 +649,10 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     },
     {
       audit: productionRouteAuditCase("release-routes", "items", "authenticated"),
-      exercise: async (primaryAction) => {
-        recoverItems = true
-        await primaryAction.press("Enter")
-      },
-      expectOutcome: async () => {
-        await expect(page.getByText("Items unavailable", { exact: true })).toHaveCount(0)
-        await expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible()
-      },
-      landmark: () => page.getByText("Items unavailable", { exact: true }),
-      primaryAction: () => page.getByRole("button", { name: "Try again" })
+      exercise: async (primaryAction) => primaryAction.fill("OPS-428"),
+      expectOutcome: async () => expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("OPS-428"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Find release work." }),
+      primaryAction: () => page.getByRole("searchbox", { name: "Search" })
     },
     {
       audit: productionRouteAuditCase("release-routes", "item", "authenticated"),
@@ -685,15 +664,11 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     {
       audit: productionRouteAuditCase("release-routes", "timeline", "authenticated"),
       exercise: async (primaryAction) => {
-        recoverTimeline = true
-        await primaryAction.press("Enter")
+        await primaryAction.selectOption("human")
       },
-      expectOutcome: async () => {
-        await expect(page.getByText("Timeline unavailable", { exact: true })).toHaveCount(0)
-        await expect(page.getByRole("heading", { level: 1, name: "Everything that moved." })).toBeVisible()
-      },
-      landmark: () => page.getByText("Timeline unavailable", { exact: true }),
-      primaryAction: () => page.getByRole("button", { name: "Try again" })
+      expectOutcome: async () => expect(page.getByRole("combobox", { name: "Actor" })).toHaveValue("human"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Everything that moved." }),
+      primaryAction: () => page.getByRole("combobox", { name: "Actor" })
     },
     {
       audit: productionRouteAuditCase("release-routes", "release-preview", "authenticated"),
@@ -728,20 +703,9 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
     },
     {
       audit: productionRouteAuditCase("release-routes", "services", "authenticated"),
-      exercise: async (primaryAction) => {
-        recoverServices = true
-        await primaryAction.press("Enter")
-      },
-      expectOutcome: async () => {
-        await expect(page.getByText("Connections unavailable", { exact: true })).toHaveCount(0)
-        await expect(
-          page.getByText(
-            "Choose a service below. Control Center will enable it and verify the exact account before using it."
-          )
-        ).toBeVisible()
-      },
+      expectOutcome: async () => expect(page.getByLabel("Account name")).toBeVisible(),
       landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
-      primaryAction: () => page.getByRole("button", { name: "Try again" })
+      primaryAction: () => page.getByRole("button", { name: "Configure AWS account" }).first()
     },
     {
       audit: productionRouteAuditCase("release-routes", "atlassian-oauth-callback", "authenticated"),

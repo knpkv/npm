@@ -1,3 +1,4 @@
+import * as Crypto from "effect/Crypto"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -42,6 +43,8 @@ export const publishedArtifactPaths = (manifest: PublishedPackageManifest): Read
 
 export type WorkspaceArtifactContract = {
   readonly artifactPaths: ReadonlyArray<string>
+  readonly fingerprintPath: string
+  readonly inputFingerprint: string
   readonly name: string
   readonly packageRoot: string
 }
@@ -87,6 +90,78 @@ export const packagesMissingPublishedArtifacts = (
     .map(({ name }) => name)
     .sort()
 
+/** Select stale packages even when their old manifest-declared output still exists. */
+export const packagesRequiringPublishedArtifactBuild = (
+  contracts: ReadonlyArray<WorkspaceArtifactContract>,
+  exists: (path: string) => boolean,
+  readFingerprint: (path: string) => string | undefined,
+  join: (root: string, artifact: string) => string
+): ReadonlyArray<string> =>
+  contracts
+    .filter(
+      ({ artifactPaths, fingerprintPath, inputFingerprint, packageRoot }) =>
+        artifactPaths.length > 0 &&
+        (artifactPaths.some((artifact) => !exists(join(packageRoot, artifact))) ||
+          readFingerprint(fingerprintPath) !== inputFingerprint)
+    )
+    .map(({ name }) => name)
+    .sort()
+
+const workspaceArtifactInputDirectories = new Set(["scripts", "src"])
+const workspaceArtifactInputRootFiles =
+  /^(?:component-manifest\.ts|package\.json|tsconfig(?:\.[^.]+)*\.json|vite\.config\.[cm]?[jt]s)$/u
+
+/** Hash package source and build configuration, excluding tests, generated output, and vendor trees. */
+export const workspaceArtifactInputFingerprint = Effect.fn(
+  "controlCenter.workspaceArtifactInputFingerprint"
+)(function*(packageRoot: string) {
+  const cryptoService = yield* Crypto.Crypto
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const inputPaths: Array<string> = []
+  const enumerateFailure = (): WorkspaceArtifactError =>
+    new WorkspaceArtifactError({ reason: `could not enumerate build inputs for ${packageRoot}` })
+
+  for (const entry of (yield* fileSystem.readDirectory(packageRoot).pipe(Effect.mapError(enumerateFailure))).sort()) {
+    const absolutePath = path.join(packageRoot, entry)
+    const info = yield* fileSystem.stat(absolutePath).pipe(Effect.mapError(enumerateFailure))
+    if (info.type === "Directory" && workspaceArtifactInputDirectories.has(entry)) {
+      const directories = [absolutePath]
+      while (directories.length > 0) {
+        const directory = directories.pop()
+        if (directory === undefined) break
+        for (
+          const child of (yield* fileSystem.readDirectory(directory).pipe(Effect.mapError(enumerateFailure))).sort()
+        ) {
+          const childPath = path.join(directory, child)
+          const childInfo = yield* fileSystem.stat(childPath).pipe(Effect.mapError(enumerateFailure))
+          if (childInfo.type === "Directory") directories.push(childPath)
+          else if (childInfo.type === "File") inputPaths.push(childPath)
+        }
+      }
+    } else if (info.type === "File" && workspaceArtifactInputRootFiles.test(entry)) {
+      inputPaths.push(absolutePath)
+    }
+  }
+
+  const encodedInputs: Array<string> = []
+  for (const inputPath of inputPaths.sort()) {
+    const relativePath = path.relative(packageRoot, inputPath)
+    const source = yield* fileSystem.readFileString(inputPath).pipe(
+      Effect.mapError(
+        () => new WorkspaceArtifactError({ reason: `could not read build input ${relativePath}` })
+      )
+    )
+    encodedInputs.push(`${relativePath.length}:${relativePath}${source.length}:${source}`)
+  }
+  const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(encodedInputs.join(""))).pipe(
+    Effect.mapError(
+      () => new WorkspaceArtifactError({ reason: `could not fingerprint build inputs for ${packageRoot}` })
+    )
+  )
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("")
+})
+
 const findPackagesMissingPublishedArtifacts = Effect.fn(
   "controlCenter.findPackagesMissingPublishedArtifacts"
 )(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>) {
@@ -108,14 +183,40 @@ const findPackagesMissingPublishedArtifacts = Effect.fn(
   )
 })
 
+const findPackagesRequiringPublishedArtifactBuild = Effect.fn(
+  "controlCenter.findPackagesRequiringPublishedArtifactBuild"
+)(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const existingPaths = new Set<string>()
+  const fingerprints = new Map<string, string>()
+
+  for (const contract of contracts) {
+    for (const artifact of contract.artifactPaths) {
+      const absolutePath = path.join(contract.packageRoot, artifact)
+      if (yield* fileSystem.exists(absolutePath)) existingPaths.add(absolutePath)
+    }
+    if (yield* fileSystem.exists(contract.fingerprintPath)) {
+      fingerprints.set(contract.fingerprintPath, yield* fileSystem.readFileString(contract.fingerprintPath))
+    }
+  }
+
+  return packagesRequiringPublishedArtifactBuild(
+    contracts,
+    (candidate) => existingPaths.has(candidate),
+    (candidate) => fingerprints.get(candidate),
+    (root, artifact) => path.join(root, artifact)
+  )
+})
+
 /** Build missing package artifacts once, then verify every advertised artifact exists. */
 export const ensureWorkspaceArtifactContracts = Effect.fn(
   "controlCenter.ensureWorkspaceArtifactContracts"
 )(function*(contracts: ReadonlyArray<WorkspaceArtifactContract>, buildMissing: WorkspaceArtifactBuilder) {
-  const missingPackages = yield* findPackagesMissingPublishedArtifacts(contracts)
-  if (missingPackages.length === 0) return missingPackages
+  const packagesToBuild = yield* findPackagesRequiringPublishedArtifactBuild(contracts)
+  if (packagesToBuild.length === 0) return packagesToBuild
 
-  yield* buildMissing(missingPackages)
+  yield* buildMissing(packagesToBuild)
 
   const remainingPackages = yield* findPackagesMissingPublishedArtifacts(contracts)
   if (remainingPackages.length > 0) {
@@ -125,5 +226,14 @@ export const ensureWorkspaceArtifactContracts = Effect.fn(
     })
   }
 
-  return missingPackages
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const builtPackageNames = new Set(packagesToBuild)
+  for (const contract of contracts) {
+    if (!builtPackageNames.has(contract.name)) continue
+    yield* fileSystem.makeDirectory(path.dirname(contract.fingerprintPath), { recursive: true })
+    yield* fileSystem.writeFileString(contract.fingerprintPath, contract.inputFingerprint)
+  }
+
+  return packagesToBuild
 })

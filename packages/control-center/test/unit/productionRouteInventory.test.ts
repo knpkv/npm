@@ -8,7 +8,10 @@ import {
   CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS,
   CONTROL_CENTER_PRODUCTION_ROUTE_FAMILIES,
   CONTROL_CENTER_PRODUCTION_ROUTE_LITERALS,
+  CONTROL_CENTER_READY_ROUTE_FAMILIES,
+  CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_FAMILIES,
   productionRouteAuditCase,
+  productionRouteCoverageFailures,
   requiredProductionRouteAuditsFor
 } from "../../e2e/productionRouteInventory.js"
 
@@ -95,5 +98,45 @@ describe("Control Center production route presentation inventory", () => {
     expect(productionRouteAuditCase("release-routes", "item", "authenticated").canonicalPath).toContain(
       "/items/01890f6f"
     )
+  })
+
+  it("requires both session variants and a primary audit for every ready route family", () => {
+    expect(
+      productionRouteCoverageFailures(
+        CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS,
+        CONTROL_CENTER_SESSION_SENSITIVE_ROUTE_FAMILIES,
+        CONTROL_CENTER_READY_ROUTE_FAMILIES
+      )
+    ).toEqual([])
+
+    expect(
+      productionRouteCoverageFailures(
+        [
+          {
+            audits: [
+              {
+                action: { kind: "required" },
+                canonicalPath: "/w/workspace/settings",
+                owner: "workspace-settings",
+                presentation: "authenticated",
+                surface: "primary"
+              }
+            ],
+            family: "settings",
+            routerLiterals: ["settings"]
+          }
+        ],
+        ["settings"],
+        []
+      )
+    ).toEqual(["settings is missing its unauthenticated presentation"])
+
+    expect(
+      productionRouteCoverageFailures(
+        CONTROL_CENTER_PRODUCTION_ROUTE_DESCRIPTORS,
+        ["services"],
+        ["services"]
+      )
+    ).toEqual([])
   })
 })

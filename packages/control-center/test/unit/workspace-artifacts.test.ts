@@ -8,8 +8,23 @@ import {
   clearWorkspaceIncrementalBuildState,
   ensureWorkspaceArtifactContracts,
   packagesMissingPublishedArtifacts,
-  publishedArtifactPaths
+  packagesRequiringPublishedArtifactBuild,
+  publishedArtifactPaths,
+  WorkspaceArtifactError,
+  workspaceArtifactInputFingerprint
 } from "../../scripts/workspace-artifacts.js"
+
+const contract = (
+  packageRoot: string,
+  name: string,
+  artifactPaths: ReadonlyArray<string> = ["dist/index.js"]
+) => ({
+  artifactPaths,
+  fingerprintPath: `${packageRoot}/node_modules/.cache/control-center-workspace-artifact.sha256`,
+  inputFingerprint: "current-fingerprint",
+  name,
+  packageRoot
+})
 
 describe("workspace package artifacts", () => {
   it("collects concrete package entry files and ignores wildcard templates", () => {
@@ -32,23 +47,34 @@ describe("workspace package artifacts", () => {
     const existing = new Set(["/workspace/ready/dist/index.js", "/workspace/ready/dist/index.d.ts"])
     const missing = packagesMissingPublishedArtifacts(
       [
-        {
-          artifactPaths: ["dist/index.js", "dist/index.d.ts"],
-          name: "@example/ready",
-          packageRoot: "/workspace/ready"
-        },
-        {
-          artifactPaths: ["dist/index.js", "dist/index.d.ts"],
-          name: "@example/missing",
-          packageRoot: "/workspace/missing"
-        },
-        { artifactPaths: [], name: "@example/source", packageRoot: "/workspace/source" }
+        contract("/workspace/ready", "@example/ready", ["dist/index.js", "dist/index.d.ts"]),
+        contract("/workspace/missing", "@example/missing", ["dist/index.js", "dist/index.d.ts"]),
+        contract("/workspace/source", "@example/source", [])
       ],
       (path) => existing.has(path),
       (root, artifact) => `${root}/${artifact}`
     )
 
     expect(missing).toEqual(["@example/missing"])
+  })
+
+  it("rebuilds stale source fingerprints while skipping matching published output", () => {
+    const ready = contract("/workspace/ready", "@example/ready")
+    const stale = contract("/workspace/stale", "@example/stale")
+    const existing = new Set(["/workspace/ready/dist/index.js", "/workspace/stale/dist/index.js"])
+    const fingerprints = new Map([
+      [ready.fingerprintPath, ready.inputFingerprint],
+      [stale.fingerprintPath, "previous-fingerprint"]
+    ])
+
+    expect(
+      packagesRequiringPublishedArtifactBuild(
+        [ready, stale],
+        (candidate) => existing.has(candidate),
+        (candidate) => fingerprints.get(candidate),
+        (root, artifact) => `${root}/${artifact}`
+      )
+    ).toEqual(["@example/stale"])
   })
 
   it.effect("clears stale TypeScript state before repairing missing output", () =>
@@ -75,6 +101,33 @@ describe("workspace package artifacts", () => {
       assert.strictEqual(yield* fileSystem.exists(sourceMarker), true)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
+  it.effect("changes the dependency fingerprint for source and build configuration, but not tests", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const packageRoot = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "control-center-artifact-fingerprint-"
+      })
+      const sourcePath = path.join(packageRoot, "src", "index.ts")
+      const testPath = path.join(packageRoot, "test", "index.test.ts")
+      yield* fileSystem.makeDirectory(path.dirname(sourcePath), { recursive: true })
+      yield* fileSystem.makeDirectory(path.dirname(testPath), { recursive: true })
+      yield* fileSystem.writeFileString(path.join(packageRoot, "package.json"), "{\"name\":\"@example/package\"}")
+      yield* fileSystem.writeFileString(sourcePath, "export const value = 1\n")
+      yield* fileSystem.writeFileString(testPath, "expect(value).toBe(1)\n")
+
+      const initial = yield* workspaceArtifactInputFingerprint(packageRoot)
+      yield* fileSystem.writeFileString(testPath, "expect(value).toBe(2)\n")
+      assert.strictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), initial)
+
+      yield* fileSystem.writeFileString(sourcePath, "export const value = 2\n")
+      const sourceChanged = yield* workspaceArtifactInputFingerprint(packageRoot)
+      assert.notStrictEqual(sourceChanged, initial)
+
+      yield* fileSystem.writeFileString(path.join(packageRoot, "tsconfig.build.json"), "{\"compilerOptions\":{}}")
+      assert.notStrictEqual(yield* workspaceArtifactInputFingerprint(packageRoot), sourceChanged)
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("fails when a successful dependency build leaves an advertised artifact missing", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -82,13 +135,7 @@ describe("workspace package artifacts", () => {
       const packageRoot = yield* fileSystem.makeTempDirectoryScoped({
         prefix: "control-center-missing-artifact-"
       })
-      const contracts = [
-        {
-          artifactPaths: ["dist/index.js"],
-          name: "@example/missing",
-          packageRoot
-        }
-      ]
+      const contracts = [contract(packageRoot, "@example/missing")]
 
       const error = yield* ensureWorkspaceArtifactContracts(contracts, () => Effect.void).pipe(
         Effect.flip
@@ -111,13 +158,9 @@ describe("workspace package artifacts", () => {
       })
       const artifactDirectory = path.join(packageRoot, "dist")
       const artifactPath = path.join(artifactDirectory, "index.js")
-      const contracts = [
-        {
-          artifactPaths: ["dist/index.js"],
-          name: "@example/built",
-          packageRoot
-        }
-      ]
+      const contracts = [contract(packageRoot, "@example/built")]
+      const builtContract = contracts[0]
+      if (builtContract === undefined) throw new Error("expected a built artifact contract")
       const buildMissing = Effect.fn("test.buildMissingWorkspaceArtifacts")(function*(
         missingPackages: ReadonlyArray<string>
       ) {
@@ -130,5 +173,15 @@ describe("workspace package artifacts", () => {
 
       assert.deepStrictEqual(builtPackages, ["@example/built"])
       assert.strictEqual(yield* fileSystem.exists(artifactPath), true)
+      assert.strictEqual(
+        yield* fileSystem.readFileString(builtContract.fingerprintPath),
+        builtContract.inputFingerprint
+      )
+
+      const skippedPackages = yield* ensureWorkspaceArtifactContracts(
+        contracts,
+        () => Effect.fail(new WorkspaceArtifactError({ reason: "matching fingerprints must skip the build" }))
+      )
+      assert.deepStrictEqual(skippedPackages, [])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

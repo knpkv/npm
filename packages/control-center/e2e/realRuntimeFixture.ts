@@ -10,7 +10,7 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { request as httpRequest } from "node:http"
+import { Agent as HttpAgent, request as httpRequest } from "node:http"
 import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https"
 import { createServer } from "node:net"
 
@@ -58,6 +58,7 @@ import {
   realFakeDescriptor,
   realFakeScenario
 } from "./realRuntimeScenario.js"
+import { forwardedProxyHeaders } from "./trustedHttpsProxyHeaders.js"
 
 const SYNCHRONIZATION_INPUT = {
   workspaceId: REAL_WORKSPACE_ID,
@@ -135,6 +136,7 @@ class TrustedHttpsProxyFixtureError extends Schema.TaggedErrorClass<TrustedHttps
 ) {}
 
 interface TrustedHttpsProxy {
+  readonly agent: HttpAgent
   readonly failure: () => TrustedHttpsProxyFixtureError | null
   readonly server: HttpsServer
 }
@@ -143,10 +145,14 @@ const shortFailureDescription = (failure: unknown): string =>
   Predicate.isError(failure) && failure.message.length > 0 ? failure.message : String(failure)
 
 const closeHttpsProxy = async (proxy: TrustedHttpsProxy): Promise<void> => {
-  await new Promise<void>((resolve, reject) => {
-    proxy.server.close((error) => (error === undefined ? resolve() : reject(error)))
-    proxy.server.closeAllConnections()
-  })
+  try {
+    await new Promise<void>((resolve, reject) => {
+      proxy.server.close((error) => (error === undefined ? resolve() : reject(error)))
+      proxy.server.closeAllConnections()
+    })
+  } finally {
+    proxy.agent.destroy()
+  }
   const failure = proxy.failure()
   if (failure !== null) throw failure
 }
@@ -211,18 +217,19 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
       new Promise<TrustedHttpsProxy>((resolve, reject) => {
         let runtimeFailure: TrustedHttpsProxyFixtureError | null = null
         let started = false
+        const agent = new HttpAgent({ keepAlive: true, maxSockets: 32 })
         const server = createHttpsServer(
           {
             cert: Buffer.from(certificate),
             key: Buffer.from(privateKey)
           },
           (request, response) => {
+            let downstreamAborted = false
             const proxyRequest = httpRequest(
               {
-                agent: false,
+                agent,
                 headers: {
-                  ...request.headers,
-                  connection: "close",
+                  ...forwardedProxyHeaders(request.headers),
                   host: publicOrigin.host,
                   "x-forwarded-for": "192.168.1.25",
                   "x-forwarded-host": publicOrigin.host,
@@ -234,16 +241,31 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
                 port: upstreamOrigin.port
               },
               (proxyResponse) => {
-                response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
+                response.writeHead(
+                  proxyResponse.statusCode ?? 502,
+                  forwardedProxyHeaders(proxyResponse.headers)
+                )
                 proxyResponse.pipe(response)
               }
             )
-            proxyRequest.once("error", () => {
+            proxyRequest.once("error", (cause) => {
+              if (!downstreamAborted) {
+                runtimeFailure = new TrustedHttpsProxyFixtureError({
+                  reason: `test HTTPS proxy upstream request failed: ${shortFailureDescription(cause)}`
+                })
+              }
               if (!response.headersSent) response.writeHead(502)
               response.end()
             })
-            request.once("aborted", () => proxyRequest.destroy())
-            response.once("close", () => proxyRequest.destroy())
+            request.once("aborted", () => {
+              downstreamAborted = true
+              proxyRequest.destroy()
+            })
+            response.once("close", () => {
+              if (response.writableEnded) return
+              downstreamAborted = true
+              proxyRequest.destroy()
+            })
             request.pipe(proxyRequest)
           }
         )
@@ -252,6 +274,7 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
             reason: `test HTTPS proxy failed: ${shortFailureDescription(cause)}`
           })
           if (!started) {
+            agent.destroy()
             reject(failure)
             return
           }
@@ -259,7 +282,7 @@ const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")
         })
         server.listen(trustedHttpsProxyPort, "127.0.0.1", () => {
           started = true
-          resolve({ failure: () => runtimeFailure, server })
+          resolve({ agent, failure: () => runtimeFailure, server })
         })
       }),
     catch: (cause) =>
@@ -331,7 +354,7 @@ export interface RealRuntimeFixture {
   readonly dispose: () => Promise<void>
   readonly lifecycleEvidence: () => RealRuntimeLifecycleEvidence
   readonly origin: string
-  readonly pairThroughUi: (page: Page) => Promise<void>
+  readonly pairThroughUi: (page: Page) => Promise<{ readonly consumedPairingCode: string }>
   readonly seedBenchmarkPersistence: () => Promise<RealRuntimePersistenceEvidence>
   readonly synchronizeUpdate: () => Promise<void>
   readonly writeBenchmarkReport: (
@@ -552,9 +575,11 @@ export const startRealRuntimeFixture = async (
             permission: "workspace-owner"
           })
         )
+        const consumedPairingCode = Redacted.value(pairing.pairingCode)
         await page.goto(`${allocated.origin}/pair`)
-        await page.getByLabel("Pairing code").fill(Redacted.value(pairing.pairingCode))
+        await page.getByLabel("Pairing code").fill(consumedPairingCode)
         await page.getByRole("button", { name: "Pair browser" }).click()
+        return { consumedPairingCode }
       },
       synchronizeUpdate: async () => {
         const outcome = await typedServerRuntime.runPromise(

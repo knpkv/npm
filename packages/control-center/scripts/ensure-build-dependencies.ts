@@ -11,7 +11,8 @@ import {
   ensureWorkspaceArtifactContracts,
   publishedArtifactPaths,
   type WorkspaceArtifactContract,
-  WorkspaceArtifactError
+  WorkspaceArtifactError,
+  workspaceArtifactInputFingerprint
 } from "./workspace-artifacts.js"
 
 const PackageManifestSchema = Schema.Struct({
@@ -54,8 +55,19 @@ const program = Effect.gen(function*() {
     if (!(yield* fs.exists(path.join(packageRoot, "package.json")))) continue
     const manifest = yield* readManifest(packageRoot)
     if (!workspaceDependencies.has(manifest.name)) continue
+    const fingerprintPath = path.join(
+      packageRoot,
+      "node_modules",
+      ".cache",
+      "control-center-workspace-artifact.sha256"
+    )
     contracts.push({
       artifactPaths: publishedArtifactPaths(manifest),
+      fingerprintPath,
+      inputFingerprint: yield* workspaceArtifactInputFingerprint(packageRoot).pipe(
+        Effect.provideService(FileSystem.FileSystem, fs),
+        Effect.provideService(Path.Path, path)
+      ),
       name: manifest.name,
       packageRoot
     })
@@ -65,7 +77,7 @@ const program = Effect.gen(function*() {
     missingPackages: ReadonlyArray<string>
   ) {
     yield* Console.log(
-      `[control-center dependencies] building missing artifacts: ${missingPackages.join(", ")}`
+      `[control-center dependencies] building missing or stale artifacts: ${missingPackages.join(", ")}`
     )
     const rootsByName = new Map(contracts.map(({ name, packageRoot }) => [name, packageRoot]))
     const missingRoots = missingPackages.flatMap((name) => {
