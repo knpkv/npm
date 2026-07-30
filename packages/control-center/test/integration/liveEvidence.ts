@@ -24,24 +24,24 @@ interface ProviderBinding {
   }>
 }
 
-/** Reduce provider health output to the opaque identity fields allowed in CI logs. */
+/** Reduce provider health output to provider taxonomy and success state for CI logs. */
 export const opaqueProviderIdentityEvidence = (
   result: HealthyProviderIdentity | FailedProviderIdentity
 ): {
   readonly providerId: string
+  readonly status: "healthy" | "failed"
   readonly kind: string
-  readonly providerImmutableId: string
 } =>
   result._tag === "healthy"
     ? {
       providerId: result.providerId,
-      kind: result.identity.kind,
-      providerImmutableId: result.identity.providerImmutableId
+      status: "healthy",
+      kind: result.identity.kind
     }
     : {
       providerId: result.providerId,
-      kind: "failed",
-      providerImmutableId: result.failureClass
+      status: "failed",
+      kind: "unknown"
     }
 
 /** Reduce account/resource bindings to non-personal provider taxonomy. */

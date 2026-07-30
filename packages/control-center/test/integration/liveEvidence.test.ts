@@ -4,8 +4,9 @@ import { opaqueProviderBindingEvidence, opaqueProviderIdentityEvidence } from ".
 import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
 
 describe("live integration evidence", () => {
-  it("omits provider display names and safe messages from CI identity evidence", () => {
+  it("omits provider identifiers, display names, and safe messages from CI evidence", () => {
     const personalDisplayName = "Provider Person live-display-name-canary"
+    const providerImmutableId = "live-provider-immutable-id-canary"
     const safeMessage = "Live failure live-safe-message-canary"
     const evidence = [
       opaqueProviderIdentityEvidence({
@@ -14,7 +15,7 @@ describe("live integration evidence", () => {
         identity: {
           kind: "human",
           displayName: personalDisplayName,
-          providerImmutableId: "opaque-account-id"
+          providerImmutableId
         }
       }),
       opaqueProviderIdentityEvidence({
@@ -39,6 +40,7 @@ describe("live integration evidence", () => {
     for (
       const canary of [
         personalDisplayName,
+        providerImmutableId,
         safeMessage,
         accountDisplayName,
         resourceDisplayName
@@ -46,7 +48,10 @@ describe("live integration evidence", () => {
     ) {
       assertSensitiveTextAbsent(serialized, canary)
     }
-    assert.deepStrictEqual(evidence.map(({ providerId }) => providerId), ["jira", "confluence"])
+    assert.deepStrictEqual(evidence, [
+      { providerId: "jira", status: "healthy", kind: "human" },
+      { providerId: "confluence", status: "failed", kind: "unknown" }
+    ])
     assert.deepStrictEqual(binding, {
       providerFamily: "atlassian",
       resources: [{ providerId: "jira" }]

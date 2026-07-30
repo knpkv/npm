@@ -443,9 +443,7 @@ describe("Control Center live provider integration", () => {
         "jira"
       ])
       assert.isTrue(
-        evidence.identities.every(
-          ({ kind, providerImmutableId }) => kind !== "failed" && providerImmutableId.length > 0
-        )
+        evidence.identities.every(({ status }) => status === "healthy")
       )
       yield* Effect.logInfo("Control Center live provider identities", {
         bindings: evidence.bindings,
