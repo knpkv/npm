@@ -9,7 +9,8 @@ import {
 import { ControlCenterRuntimeBenchmarkReport } from "../scripts/benchmarkRuntimeReport.js"
 import { ControlCenterLiveEvent } from "../src/api/liveEvents.js"
 import { PortfolioSnapshot } from "../src/api/portfolio.js"
-import { test } from "./realRuntimeFixture.js"
+import { securityHeaders } from "../src/server/http/security/SecurityHeaders.js"
+import { startRealRuntimeFixture, test } from "./realRuntimeFixture.js"
 import {
   INITIAL_RELEASE_VERSION,
   REAL_RELEASE_ID,
@@ -17,7 +18,86 @@ import {
   UPDATED_RELEASE_VERSION
 } from "./realRuntimeScenario.js"
 
+interface BrowserSecretSurface {
+  readonly documentHtml: string
+  readonly localStorage: string
+  readonly sessionStorage: string
+  readonly url: string
+}
+
+const browserSurfaceExposesSecret = (surface: BrowserSecretSurface, secret: string): boolean =>
+  Object.values(surface).some((value) => value.includes(secret))
+
 test.describe("repository-managed real runtime", () => {
+  test("pairs from a second machine through the documented trusted HTTPS proxy", async ({ browser }) => {
+    test.setTimeout(30_000)
+    const fixture = await startRealRuntimeFixture({ trustedHttpsProxy: true })
+    try {
+      const context = await browser.newContext({
+        extraHTTPHeaders: {
+          "x-forwarded-for": "203.0.113.90",
+          "x-forwarded-host": "hostile.example",
+          "x-forwarded-proto": "http"
+        },
+        ignoreHTTPSErrors: true
+      })
+      try {
+        const page = await context.newPage()
+        const response = await page.goto(`${fixture.origin}/services`)
+        expect(response?.status()).toBe(200)
+        const headers = response?.headers() ?? {}
+        for (const [name, expectedValue] of Object.entries(securityHeaders({ isSecureTransport: true }))) {
+          expect(headers[name]).toBe(expectedValue)
+        }
+        expect(headers["content-security-policy"]).toContain("upgrade-insecure-requests")
+        expect(headers["strict-transport-security"]).toBe("max-age=31536000")
+        await expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible()
+
+        await fixture.pairThroughUi(page)
+        await expect(page).toHaveURL(`${fixture.origin}/w/${REAL_WORKSPACE_ID}/overview`)
+        await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+
+        const sessionCookie = (await context.cookies()).find(({ name }) => name === "cc_session")
+        expect(sessionCookie).toMatchObject({
+          httpOnly: true,
+          sameSite: "Strict",
+          secure: true
+        })
+        if (sessionCookie === undefined) throw new Error("trusted HTTPS pairing did not issue its session cookie")
+        const browserSurface = await page.evaluate<BrowserSecretSurface>(`({
+          documentHtml: document.documentElement.outerHTML,
+          localStorage: JSON.stringify(Object.entries(localStorage)),
+          sessionStorage: JSON.stringify(Object.entries(sessionStorage)),
+          url: location.href
+        })`)
+        expect(browserSurfaceExposesSecret(browserSurface, sessionCookie.value)).toBe(false)
+        expect(
+          browserSurfaceExposesSecret(
+            { ...browserSurface, localStorage: JSON.stringify([[`session-${sessionCookie.value}`, "safe"]]) },
+            sessionCookie.value
+          )
+        ).toBe(true)
+        expect(
+          browserSurfaceExposesSecret(
+            {
+              ...browserSurface,
+              sessionStorage: JSON.stringify([["session", { token: sessionCookie.value }]])
+            },
+            sessionCookie.value
+          )
+        ).toBe(true)
+      } finally {
+        await context.close()
+      }
+    } finally {
+      await fixture.dispose()
+    }
+    expect(fixture.lifecycleEvidence()).toEqual({
+      activeManagedServers: 0,
+      disposedManagedServers: 1
+    })
+  })
+
   test("pairs, reconnects its live stream, applies a plugin update, and preserves full release routes", async ({ page, realRuntime }) => {
     test.setTimeout(30_000)
     await page.addInitScript(`
@@ -112,11 +192,7 @@ test.describe("repository-managed real runtime", () => {
       await expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible()
       await expect(page.getByText(UPDATED_RELEASE_VERSION, { exact: true })).toBeVisible()
     }
-    expect(
-      await page.evaluate<ReadonlyArray<string>>(
-        "window.__controlCenterStylePolicyViolations"
-      )
-    ).toEqual([])
+    expect(await page.evaluate<ReadonlyArray<string>>("window.__controlCenterStylePolicyViolations")).toEqual([])
   })
 
   test("measures warmed authenticated portfolio HTTP and a bounded 500-event SSE tail in one owned context", async ({
@@ -252,7 +328,8 @@ test.describe("repository-managed real runtime", () => {
     expect(report.cardinalities.generatedFiles).toBe(500)
     expect(report.measurements.portfolio.timing.samplesMilliseconds).toHaveLength(5)
     expect(report.measurements.sse.timing.samplesMilliseconds).toHaveLength(5)
-    expect(report.timingIsAcceptanceAssertion).toBe(false)
+    expect(report.timingAcceptance.budgetMilliseconds).toBe(2_000)
+    expect(report.timingIsAcceptanceAssertion).toBe(report.timingAcceptance.eligible)
     expect(outputPath).not.toHaveLength(0)
     expect(afterDispose.disposedManagedServers).toBe(1)
     await testInfo.attach("control-center-runtime-benchmark.json", {

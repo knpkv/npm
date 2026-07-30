@@ -322,6 +322,47 @@ Direct TLS is also available when certificate and private-key material has alrea
 
 `CONTROL_CENTER_ALLOW_INSECURE_LAN=true` is a deliberately restricted viewing mode, not remote onboarding. It blocks pairing, session administration, local agent execution, provider configuration, policy changes, and secret inspection. A new browser therefore cannot establish its required `HttpOnly` session in that mode; use trusted HTTPS for normal remote access.
 
+### Release gates
+
+Run the complete package gate with:
+
+```sh
+pnpm --filter @knpkv/control-center test:e2e
+pnpm --filter @knpkv/control-center benchmark:contracts
+pnpm --filter @knpkv/control-center benchmark:validate-runtime
+```
+
+`test:e2e` builds Control Center through its manifest-based workspace artifact
+repair, removes any prior runtime report, and runs the production-route browser
+suite with one Chromium worker. The suite covers public and authenticated route
+families under keyboard navigation, automated WCAG 2.2 AA checks, a 320 CSS-pixel
+viewport, forced colors, and reduced motion. It also exercises pairing from a
+simulated second machine through a test-only HTTPS reverse proxy that overwrites
+the forwarded host, protocol, and client address.
+
+The deterministic fixture contains exactly 100 releases, 2,000 entities, 10,000
+relationships/evidence records, 500 files, 20,000 timeline events, and a bounded
+500-event SSE replay. The browser suite writes
+`test-results/control-center/runtime-benchmark.json`; validation rejects missing,
+pruned, contradictory, or incorrect cardinality, ordering, resource-lifecycle,
+and timing evidence.
+
+Absolute timing is an acceptance assertion only on Linux x64 or arm64 with Node
+24 or newer, at least four logical CPUs, at least 8 GiB RAM, and an explicit
+`CONTROL_CENTER_BENCHMARK_STORAGE_CLASS=local-ssd` declaration. On that class,
+the warmed authenticated portfolio HTTP p95 must be at most 2,000 ms. Other
+machines still execute every fixture, correctness, bound, SSE-ordering, and
+cleanup assertion, but the report must identify timing as informational. The
+storage class defaults to `unverified`; the benchmark never infers one from an
+operating-system or filesystem label.
+
+For a standalone run that builds once, measures the browser runtime, and
+validates its report, use:
+
+```sh
+pnpm --filter @knpkv/control-center benchmark
+```
+
 ## Public entries
 
 - `@knpkv/control-center` — browser-safe API and domain contracts

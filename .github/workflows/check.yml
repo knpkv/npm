@@ -88,6 +88,8 @@ jobs:
   browser:
     name: Browser
     runs-on: ubuntu-latest
+    env:
+      CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:
       contents: read
     timeout-minutes: 15
@@ -101,3 +103,7 @@ jobs:
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Test browser applications and catalogs
         run: pnpm test:browser
+      - name: Validate Control Center large-fixture contracts
+        run: pnpm --filter @knpkv/control-center benchmark:contracts
+      - name: Validate Control Center runtime benchmark evidence
+        run: pnpm --filter @knpkv/control-center benchmark:validate-runtime

@@ -1,4 +1,14 @@
 import { expect, test } from "@playwright/test"
+import {
+  auditProductionRoutePresentation,
+  CONTROL_CENTER_AXE_WCAG_TAGS,
+  seriousAxeViolations
+} from "./presentationAudit.js"
+import {
+  productionRouteAuditCase,
+  productionRouteAuditKey,
+  requiredProductionRouteAuditsFor
+} from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 const pairedSession = {
@@ -12,6 +22,94 @@ const pairedSession = {
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000002",
   workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001"
 }
+
+test("includes WCAG 2.1 A label-content matching in the serious accessibility gate", async ({ page }) => {
+  expect(CONTROL_CENTER_AXE_WCAG_TAGS).toContain("wcag21a")
+  await page.setContent("<button aria-label=\"Remove\">Delete</button>")
+  expect(await seriousAxeViolations(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "label-content-name-mismatch" })])
+  )
+
+  await page.setContent("<button aria-label=\"Delete item\">Delete</button>")
+  expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("label-content-name-mismatch")
+})
+
+test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
+  test.setTimeout(60_000)
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "public-route-presentation-audit",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+  const routes = [
+    {
+      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Every release. One view." }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "services", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Services" }),
+      primaryAction: () => page.getByRole("button", { name: "Pair to enable" }).first()
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "pair", "unauthenticated"),
+      exercise: async () => page.getByRole("textbox", { name: "Pairing code" }).fill("presentation-audit"),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "Pairing code" })).toHaveValue("presentation-audit"),
+      landmark: () => page.getByRole("heading", { name: "Pair this browser" }),
+      primaryAction: () => page.getByRole("textbox", { name: "Pairing code" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Ask in context." }),
+      primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "atlassian-oauth-callback", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Services" })).toBeVisible(),
+      landmark: () => page.getByText("Paired session required", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Return to Services" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "authorized-share", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Authentication required", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByText("Page not found", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Return to Control Center" })
+    }
+  ]
+
+  for (const route of routes) {
+    await page.goto(route.audit.canonicalPath)
+    await auditProductionRoutePresentation(page, {
+      exercise: route.exercise ?? (async (primaryAction) => primaryAction.press("Enter")),
+      expectOutcome: route.expectOutcome,
+      landmark: route.landmark(),
+      primaryAction: route.primaryAction()
+    })
+  }
+  expect(routes.map(({ audit }) => productionRouteAuditKey(audit.family, audit.presentation)).sort()).toEqual(
+    requiredProductionRouteAuditsFor("scaffold")
+      .map(({ family, presentation }) => productionRouteAuditKey(family, presentation))
+      .sort()
+  )
+})
 
 test("renders the private browser application boundary", async ({ page }) => {
   await page.route("**/api/v1/session/current", async (route) => {
@@ -30,7 +128,7 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
+  await expect(page.getByRole("link", { name: "Control Center" })).toBeFocused()
   for (const name of ["Overview", "Releases", "Services", "Ask Relay"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
@@ -50,7 +148,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.goto("/")
 
   const navigationBox = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
-  const brandBox = await page.getByRole("link", { name: "Control Center home" }).boundingBox()
+  const brandBox = await page.getByRole("link", { name: "Control Center" }).boundingBox()
   const agentBox = await page.getByRole("link", { name: "Ask Relay" }).boundingBox()
   if (navigationBox === null || brandBox === null || agentBox === null) {
     throw new Error("mobile application chrome must remain measurable")
@@ -60,7 +158,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   expect(Math.abs(844 - (navigationBox.y + navigationBox.height) - 16)).toBeLessThan(2)
 
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
+  await expect(page.getByRole("link", { name: "Control Center" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Ask Relay" })).toBeFocused()
   await page.keyboard.press("Tab")
@@ -92,9 +190,9 @@ test("explains credential rejection separately from server availability", async 
   await expect(page.getByText("That code is invalid, expired, or already used.")).toBeVisible()
 
   await page.getByRole("button", { name: "Pair browser" }).click()
-  await expect(page.getByText(
-    "Control Center is unavailable right now. Check that the server is running, then try again."
-  )).toBeVisible()
+  await expect(
+    page.getByText("Control Center is unavailable right now. Check that the server is running, then try again.")
+  ).toBeVisible()
 })
 
 test("shows a paired session and recovers its mutation proof in a new tab", async ({ context, page }) => {
@@ -133,11 +231,13 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
 
 test("routes an authenticated releases entry to the live workspace portfolio", async ({ context, page }) => {
   const csrfToken = "cd".repeat(32)
-  await context.addCookies([{
-    name: "cc_session",
-    value: "ab".repeat(32),
-    url: "http://127.0.0.1:4173"
-  }])
+  await context.addCookies([
+    {
+      name: "cc_session",
+      value: "ab".repeat(32),
+      url: "http://127.0.0.1:4173"
+    }
+  ])
   await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
   await context.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
@@ -211,11 +311,13 @@ test("ignores a stale session hydration after replacing the paired session", asy
     releaseCurrentResponse = resolve
   })
 
-  await context.addCookies([{
-    name: "cc_session",
-    value: "ab".repeat(32),
-    url: "http://127.0.0.1:4173"
-  }])
+  await context.addCookies([
+    {
+      name: "cc_session",
+      value: "ab".repeat(32),
+      url: "http://127.0.0.1:4173"
+    }
+  ])
   await context.route("**/api/v1/session/current", async (route) => {
     markCurrentStarted?.()
     await currentResponseGate

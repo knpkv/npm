@@ -74,5 +74,9 @@ pnpm verify:full
 ```
 
 CI continues to run its independent full format, lint, build, check, test, and
-browser jobs. The scoped hook is a feedback optimization, not a replacement for
-the full gate.
+browser jobs. The browser job uses the same manifest-based dependency repair,
+runs the route and trusted-HTTPS journeys, executes the deterministic contract
+benchmark, and validates the runtime report produced by the full browser suite.
+It does not rebuild the complete Control Center dependency graph a second time
+for benchmark validation. The scoped hook is a feedback optimization, not a
+replacement for the full gate.

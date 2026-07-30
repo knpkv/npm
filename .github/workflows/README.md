@@ -57,9 +57,17 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 #### Browser
 
 - Installs the Playwright-managed Chromium runtime and its system dependencies
-- Runs the `rly` Storybook interaction, accessibility, static-catalog, and visual-state checks
+- Runs every package browser suite, including the `rly` catalog and Control Center production routes
 - Serializes browser work to one worker through the package configuration
-- **Command**: `pnpm --filter @knpkv/rly test:browser`
+- Audits Control Center routes for keyboard focus, serious/critical WCAG violations,
+  320-pixel reflow, forced colors, and reduced motion
+- Exercises second-machine pairing through the trusted HTTPS proxy fixture
+- Runs the deterministic large-fixture contract benchmark and validates the
+  browser-runtime cardinality, cleanup, and machine-qualified timing report
+- **Commands**:
+  - `pnpm test:browser`
+  - `pnpm --filter @knpkv/control-center benchmark:contracts`
+  - `pnpm --filter @knpkv/control-center benchmark:validate-runtime`
 - **Timeout**: 15 minutes
 - **Node Version**: 24.10.0
 

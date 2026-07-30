@@ -1,4 +1,4 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test"
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
 import {
@@ -11,6 +11,13 @@ import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../sr
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
+import { auditProductionRoutePresentation } from "./presentationAudit.js"
+import {
+  productionRouteAuditCase,
+  productionRouteAuditKey,
+  type ProductionRouteAuditRequirement,
+  requiredProductionRouteAuditsFor
+} from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 interface ReleaseTransitionGeometry {
@@ -426,6 +433,23 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
       status: 200
     })
   })
+  await context.route("**/api/v1/shares/*/*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: canonicalEntityInspection.entity,
+        share: {
+          createdAt: "2026-07-14T10:00:00.000Z",
+          entityId: canonicalEntityId,
+          expiresAt: "2026-07-21T10:00:00.000Z",
+          granteePersonId: pairedSession.actor.personId,
+          revokedAt: null,
+          shareId: "01890f6f-6d6a-7cc0-98d2-000000000090"
+        }
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await context.route("**/api/v1/relationships/repair-proposals/*/reviews", async (route) => {
     const payload = Schema.decodeUnknownSync(ReviewPayload)(route.request().postDataJSON())
     currentProposal = Schema.decodeUnknownSync(RelationshipRepairProposal)({
@@ -548,6 +572,125 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
 }
 
 test.beforeEach(async ({ context }) => installReleaseMocks(context))
+
+interface AuthenticatedPresentationRoute {
+  readonly audit: ProductionRouteAuditRequirement
+  readonly exercise?: (primaryAction: Locator) => Promise<void>
+  readonly expectOutcome?: () => Promise<void>
+  readonly landmark: () => Locator
+  readonly primaryAction: () => Locator | null
+}
+
+test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
+  test.setTimeout(180_000)
+  const routes: ReadonlyArray<AuthenticatedPresentationRoute> = [
+    {
+      audit: productionRouteAuditCase("release-routes", "overview", "authenticated"),
+      expectOutcome: async () =>
+        expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Every release. One view." }),
+      primaryAction: () => page.getByRole("button", { name: "Preview Solar Grove" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "work", "authenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: /Decisions,\s+not tickets\./u }),
+      primaryAction: () => page.getByRole("link", { name: "Open full release" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "items", "authenticated"),
+      expectOutcome: async () => expect(page.getByText("Items unavailable", { exact: true })).toBeVisible(),
+      landmark: () => page.getByText("Items unavailable", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "item", "authenticated"),
+      expectOutcome: async () => expect(page.getByText("Items unavailable", { exact: true })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Review payment capture safeguards" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to items" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "timeline", "authenticated"),
+      expectOutcome: async () => expect(page.getByText("Timeline unavailable", { exact: true })).toBeVisible(),
+      landmark: () => page.getByText("Timeline unavailable", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "release-preview", "authenticated"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" }),
+      primaryAction: () => page.getByRole("button", { name: /^Close(?: preview| Release preview:)/u })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "release", "authenticated"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "payments-api" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to overview" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "agent", "authenticated"),
+      exercise: async (primaryAction) => primaryAction.press("Enter"),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
+          "Which evidence is still missing?"
+        ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Ask Solar Grove." }),
+      primaryAction: () => page.getByRole("button", { name: "Which evidence is still missing?" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "not-found", "authenticated"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByText("Page not found", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Open workspace overview" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "services", "authenticated"),
+      expectOutcome: async () => expect(page.getByText("Connections unavailable", { exact: true })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "atlassian-oauth-callback", "authenticated"),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByText("Atlassian sign-in did not finish", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "authorized-share", "authenticated"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Exact scope. Nothing adjacent." }),
+      primaryAction: () => null
+    }
+  ]
+
+  for (const route of routes) {
+    await page.goto(route.audit.canonicalPath)
+    const primaryAction = route.primaryAction()
+    if (primaryAction === null) {
+      if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
+      await auditProductionRoutePresentation(page, {
+        landmark: route.landmark(),
+        noActionReason: route.audit.action.reason,
+        primaryAction
+      })
+    } else {
+      if (route.expectOutcome === undefined) throw new Error(`${route.audit.family} requires an interaction outcome`)
+      await auditProductionRoutePresentation(page, {
+        exercise: route.exercise ?? (async (action) => action.press("Enter")),
+        expectOutcome: route.expectOutcome,
+        landmark: route.landmark(),
+        primaryAction
+      })
+    }
+  }
+  expect(routes.map(({ audit }) => productionRouteAuditKey(audit.family, audit.presentation)).sort()).toEqual(
+    requiredProductionRouteAuditsFor("release-routes")
+      .map(({ family, presentation }) => productionRouteAuditKey(family, presentation))
+      .sort()
+  )
+})
 
 const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): void => {
   expect(geometry.clientRectCount).toBeGreaterThan(0)

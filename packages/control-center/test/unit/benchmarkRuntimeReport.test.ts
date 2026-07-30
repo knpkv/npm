@@ -13,8 +13,10 @@ import {
   summarizeBenchmarkTimingSamples
 } from "../../scripts/benchmarkHarness.js"
 import {
+  CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
   CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT,
   CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION,
+  controlCenterBenchmarkMachineIsTimingEligible,
   ControlCenterRuntimeBenchmarkReport,
   decodeControlCenterRuntimeBenchmarkReportJson,
   readControlCenterRuntimeBenchmarkReport
@@ -25,7 +27,7 @@ const machine = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
   logicalCpuCount: 4,
   nodeVersion: "v24.0.0",
   platform: "linux",
-  storageClass: "unverified",
+  storageClass: "local-ssd",
   totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024
 })
 
@@ -67,7 +69,13 @@ const validReportInput = () => ({
       warmupRuns: 1
     }
   },
-  timingIsAcceptanceAssertion: false,
+  timingAcceptance: {
+    budgetMilliseconds: CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
+    eligible: true,
+    passed: true,
+    reason: "eligible-and-within-budget"
+  },
+  timingIsAcceptanceAssertion: true,
   version: CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION
 })
 
@@ -86,7 +94,110 @@ describe("control center runtime benchmark report", () => {
     expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(13)
     expect(report.measurements.sse.timing.medianMilliseconds).toBe(9)
     expect(report.measurements.sse.timing.p95Milliseconds).toBe(13)
-    expect(report.timingIsAcceptanceAssertion).toBe(false)
+    expect(report.timingAcceptance).toEqual({
+      budgetMilliseconds: 2_000,
+      eligible: true,
+      passed: true,
+      reason: "eligible-and-within-budget"
+    })
+    expect(report.timingIsAcceptanceAssertion).toBe(true)
+  })
+
+  it("qualifies only the documented Node 24, CPU, memory, platform, and architecture baseline", () => {
+    expect(controlCenterBenchmarkMachineIsTimingEligible(machine)).toBe(true)
+    const ineligibleMachines = [
+      { ...machine, architecture: "riscv64" },
+      { ...machine, logicalCpuCount: 3 },
+      { ...machine, nodeVersion: "v23.11.0" },
+      { ...machine, platform: "darwin" },
+      { ...machine, storageClass: "unverified" },
+      { ...machine, totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024 - 1 }
+    ].map((input) => Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)(input))
+    for (const ineligible of ineligibleMachines) {
+      expect(controlCenterBenchmarkMachineIsTimingEligible(ineligible)).toBe(false)
+    }
+  })
+
+  it("rejects malformed Node version evidence before timing eligibility is evaluated", () => {
+    for (
+      const nodeVersion of [
+        "v24beta",
+        "x24.invalid",
+        "v24.1",
+        "v024.1.0",
+        "v24.0.0-..",
+        "v24.0.0-a..b",
+        "v24.0.0-01",
+        "v24.0.0+build..1"
+      ]
+    ) {
+      expect(
+        Result.isFailure(
+          Schema.decodeUnknownResult(ControlCenterBenchmarkMachine)({
+            ...machine,
+            nodeVersion
+          })
+        )
+      ).toBe(true)
+    }
+    const supportedPrerelease = Schema.decodeUnknownSync(ControlCenterBenchmarkMachine)({
+      ...machine,
+      nodeVersion: "v24.10.0-rc.1"
+    })
+    expect(controlCenterBenchmarkMachineIsTimingEligible(supportedPrerelease)).toBe(true)
+  })
+
+  it("rejects an over-budget or contradictory eligible timing claim", async () => {
+    const valid = validReportInput()
+    const overBudget = {
+      ...valid,
+      measurements: {
+        ...valid.measurements,
+        portfolio: {
+          ...valid.measurements.portfolio,
+          timing: summarizeBenchmarkTimingSamples([2_001, 2_002, 2_003, 2_004, 2_005])
+        }
+      }
+    }
+    const contradictory = {
+      ...valid,
+      timingAcceptance: {
+        ...valid.timingAcceptance,
+        passed: false
+      }
+    }
+
+    expect(Result.isFailure(await decodeResult(overBudget))).toBe(true)
+    expect(Result.isFailure(await decodeResult(contradictory))).toBe(true)
+  })
+
+  it("keeps over-budget timing informational on an ineligible machine", async () => {
+    const valid = validReportInput()
+    const report = await Effect.runPromise(
+      decodeControlCenterRuntimeBenchmarkReportJson(
+        JSON.stringify({
+          ...valid,
+          machine: { ...machine, logicalCpuCount: 2 },
+          measurements: {
+            ...valid.measurements,
+            portfolio: {
+              ...valid.measurements.portfolio,
+              timing: summarizeBenchmarkTimingSamples([2_001, 2_002, 2_003, 2_004, 2_005])
+            }
+          },
+          timingAcceptance: {
+            budgetMilliseconds: CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
+            eligible: false,
+            passed: false,
+            reason: "ineligible-machine"
+          },
+          timingIsAcceptanceAssertion: false
+        })
+      )
+    )
+
+    expect(report.measurements.portfolio.timing.p95Milliseconds).toBe(2_005)
+    expect(report.timingAcceptance.reason).toBe("ineligible-machine")
   })
 
   it("rejects reports with missing machine or timing aggregates", async () => {
@@ -153,12 +264,17 @@ describe("control center runtime benchmark report", () => {
       Schema.fromJsonString(Schema.Struct({ scripts: Schema.Record(Schema.String, Schema.String) }))
     )(packageJson)
     const command = manifest.scripts["benchmark:runtime"]
+    const preparedCommand = manifest.scripts["benchmark:runtime:prepared"]
+    const validationCommand = manifest.scripts["benchmark:validate-runtime"]
 
-    expect(command).toContain(`rimraf ${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`)
-    expect(command).toContain(
+    expect(command).toContain("pnpm build")
+    expect(command).toContain("pnpm benchmark:runtime:prepared")
+    expect(preparedCommand).toContain(`rimraf ${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`)
+    expect(preparedCommand).toContain(
       `CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=${CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT}`
     )
-    expect(command).toContain("scripts/validateRuntimeBenchmarkReport.ts")
+    expect(preparedCommand).toContain("pnpm benchmark:validate-runtime")
+    expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
   })
 
   it("rejects aggregates that do not match their samples", async () => {

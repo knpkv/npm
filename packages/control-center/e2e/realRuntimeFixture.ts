@@ -8,6 +8,9 @@ import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { request as httpRequest } from "node:http"
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https"
 import { createServer } from "node:net"
 
 import { BenchmarkInvariantError } from "../scripts/benchmarkErrors.js"
@@ -86,33 +89,159 @@ interface AllocatedFixture {
   readonly port: number
   readonly secretRoot: SecretRoot
   readonly staticRoot: string
+  readonly trustedHttpsProxyPort: number | null
+  readonly upstreamOrigin: string
 }
 
-const allocateFixture = Effect.gen(function*() {
+export interface StartRealRuntimeFixtureOptions {
+  readonly trustedHttpsProxy?: boolean
+}
+
+const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
+  Effect.gen(function*() {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const dataRoot = yield* fileSystem.makeTempDirectory({ prefix: "control-center-browser-runtime-" })
+    return yield* protectPartialFixtureAllocation(
+      Effect.gen(function*() {
+        yield* fileSystem.chmod(dataRoot, 0o700)
+        const port = yield* acquireEphemeralPort
+        const trustedHttpsProxyPort = options.trustedHttpsProxy === true ? yield* acquireEphemeralPort : null
+        const upstreamOrigin = `http://127.0.0.1:${port}`
+        return {
+          dataRoot,
+          origin: trustedHttpsProxyPort === null ? upstreamOrigin : `https://127.0.0.1:${trustedHttpsProxyPort}`,
+          persistenceConfig: {
+            blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+            busyTimeoutMilliseconds: 5_000,
+            databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+            maxConnections: 1
+          },
+          port,
+          secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+          staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url)),
+          trustedHttpsProxyPort,
+          upstreamOrigin
+        } satisfies AllocatedFixture
+      }),
+      fileSystem.remove(dataRoot, { force: true, recursive: true })
+    )
+  }).pipe(Effect.provide(NodeServices.layer))
+
+class TrustedHttpsProxyFixtureError extends Schema.TaggedErrorClass<TrustedHttpsProxyFixtureError>()(
+  "TrustedHttpsProxyFixtureError",
+  { reason: Schema.String }
+) {}
+
+const closeHttpsProxy = (server: HttpsServer): Promise<void> =>
+  new Promise((resolve, reject) => {
+    server.close((error) => (error === undefined ? resolve() : reject(error)))
+    server.closeAllConnections()
+  })
+
+const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")(function*(
+  allocated: AllocatedFixture
+) {
+  if (allocated.trustedHttpsProxyPort === null) {
+    return yield* new TrustedHttpsProxyFixtureError({ reason: "trusted HTTPS proxy port was not allocated" })
+  }
+  const trustedHttpsProxyPort = allocated.trustedHttpsProxyPort
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const dataRoot = yield* fileSystem.makeTempDirectory({ prefix: "control-center-browser-runtime-" })
-  return yield* protectPartialFixtureAllocation(
-    Effect.gen(function*() {
-      yield* fileSystem.chmod(dataRoot, 0o700)
-      const port = yield* acquireEphemeralPort
-      return {
-        dataRoot,
-        origin: `http://127.0.0.1:${port}`,
-        persistenceConfig: {
-          blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
-          busyTimeoutMilliseconds: 5_000,
-          databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
-          maxConnections: 1
-        },
-        port,
-        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
-        staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url))
-      } satisfies AllocatedFixture
-    }),
-    fileSystem.remove(dataRoot, { force: true, recursive: true })
-  )
-}).pipe(Effect.provide(NodeServices.layer))
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const certificatePath = path.join(allocated.dataRoot, "trusted-proxy-certificate.pem")
+  const privateKeyPath = path.join(allocated.dataRoot, "trusted-proxy-private-key.pem")
+  const exitCode = yield* spawner
+    .exitCode(
+      ChildProcess.make(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-keyout",
+          privateKeyPath,
+          "-out",
+          certificatePath,
+          "-subj",
+          "/CN=127.0.0.1",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-days",
+          "1"
+        ],
+        { stderr: "ignore", stdout: "ignore" }
+      )
+    )
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not generate the test TLS identity" }))
+    )
+  if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* new TrustedHttpsProxyFixtureError({ reason: "test TLS identity generation failed" })
+  }
+  const certificate = yield* fileSystem
+    .readFile(certificatePath)
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not read the test TLS certificate" }))
+    )
+  const privateKey = yield* fileSystem
+    .readFile(privateKeyPath)
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not read the test TLS private key" }))
+    )
+  const publicOrigin = new URL(allocated.origin)
+  const upstreamOrigin = new URL(allocated.upstreamOrigin)
+
+  return yield* Effect.tryPromise({
+    try: () =>
+      new Promise<HttpsServer>((resolve, reject) => {
+        const server = createHttpsServer(
+          {
+            cert: Buffer.from(certificate),
+            key: Buffer.from(privateKey)
+          },
+          (request, response) => {
+            const proxyRequest = httpRequest(
+              {
+                agent: false,
+                headers: {
+                  ...request.headers,
+                  connection: "close",
+                  host: publicOrigin.host,
+                  "x-forwarded-for": "192.168.1.25",
+                  "x-forwarded-host": publicOrigin.host,
+                  "x-forwarded-proto": "https"
+                },
+                hostname: upstreamOrigin.hostname,
+                method: request.method,
+                path: request.url,
+                port: upstreamOrigin.port
+              },
+              (proxyResponse) => {
+                response.writeHead(proxyResponse.statusCode ?? 502, proxyResponse.headers)
+                proxyResponse.pipe(response)
+              }
+            )
+            proxyRequest.once("error", () => {
+              if (!response.headersSent) response.writeHead(502)
+              response.end()
+            })
+            request.once("aborted", () => proxyRequest.destroy())
+            response.once("close", () => proxyRequest.destroy())
+            request.pipe(proxyRequest)
+          }
+        )
+        server.once("error", reject)
+        server.listen(trustedHttpsProxyPort, "127.0.0.1", () => {
+          server.removeListener("error", reject)
+          resolve(server)
+        })
+      }),
+    catch: () => new TrustedHttpsProxyFixtureError({ reason: "could not start the test HTTPS proxy" })
+  })
+})
 
 const seedFixture = (allocated: AllocatedFixture) =>
   Effect.gen(function*() {
@@ -150,12 +279,14 @@ const removeDataRoot = (dataRoot: string): Promise<void> =>
   )
 
 const disposeAll = async (
+  trustedHttpsProxy: HttpsServer | undefined,
   serverRuntime: { readonly dispose: () => Promise<void> } | undefined,
   dataRoot: string
 ): Promise<void> => {
   const failures: Array<unknown> = []
   for (
     const dispose of [
+      trustedHttpsProxy === undefined ? undefined : () => closeHttpsProxy(trustedHttpsProxy),
       serverRuntime === undefined ? undefined : () => serverRuntime.dispose(),
       () => removeDataRoot(dataRoot)
     ]
@@ -199,9 +330,12 @@ export interface RealRuntimePersistenceEvidence {
 }
 
 /** Start one real Control Center server whose resources remain owned until explicit fixture disposal. */
-export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => {
-  const allocated = await Effect.runPromise(allocateFixture)
+export const startRealRuntimeFixture = async (
+  options: StartRealRuntimeFixtureOptions = {}
+): Promise<RealRuntimeFixture> => {
+  const allocated = await Effect.runPromise(allocateFixture(options))
   let serverRuntime: { readonly dispose: () => Promise<void> } | undefined
+  let trustedHttpsProxy: HttpsServer | undefined
   try {
     await Effect.runPromise(seedFixture(allocated))
     const fakeRuntime = await Effect.runPromise(makeFakePluginRuntime(realFakeScenario))
@@ -212,7 +346,19 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
         ),
       invalidate: () => Effect.void
     }
-    const bindConfig = await Effect.runPromise(decodeBindConfig({ port: allocated.port }))
+    const bindConfig = await Effect.runPromise(
+      decodeBindConfig(
+        allocated.trustedHttpsProxyPort === null
+          ? { port: allocated.port }
+          : {
+            allowedHosts: [new URL(allocated.origin).host],
+            allowedOrigins: [allocated.origin],
+            port: allocated.port,
+            publicOrigin: allocated.origin,
+            trustedProxyAddresses: ["127.0.0.1"]
+          }
+      )
+    )
     const typedServerRuntime = ManagedRuntime.make(
       makeControlCenterServer({
         bindConfig,
@@ -240,9 +386,13 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
     ) {
       throw new Error("real runtime did not finish its startup release synchronization")
     }
-    const ownerSessionToken = (
-      await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode))
-    ).sessionToken
+    const ownerSessionToken = (await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode)))
+      .sessionToken
+    if (allocated.trustedHttpsProxyPort !== null) {
+      trustedHttpsProxy = await Effect.runPromise(
+        startTrustedHttpsProxy(allocated).pipe(Effect.provide(NodeServices.layer))
+      )
+    }
 
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
@@ -363,7 +513,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
       dispose: async () => {
         if (disposed) return
         disposed = true
-        await disposeAll(typedServerRuntime, allocated.dataRoot)
+        await disposeAll(trustedHttpsProxy, typedServerRuntime, allocated.dataRoot)
         lifecycleEvidence.activeManagedServers = 0
         lifecycleEvidence.disposedManagedServers += 1
       },
@@ -401,7 +551,10 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
         )
     }
   } catch (failure) {
-    return await disposeFailedFixtureSetup(failure, () => disposeAll(serverRuntime, allocated.dataRoot))
+    return await disposeFailedFixtureSetup(
+      failure,
+      () => disposeAll(trustedHttpsProxy, serverRuntime, allocated.dataRoot)
+    )
   }
 }
 
