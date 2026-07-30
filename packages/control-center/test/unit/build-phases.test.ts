@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest"
+import packageManifest from "../../package.json" with { type: "json" }
 import { controlCenterBuildPhases } from "../../scripts/build-phases.js"
 
 describe("Control Center build phases", () => {
@@ -26,5 +27,13 @@ describe("Control Center build phases", () => {
     expect(clean?.args).toContain("node_modules/.cache/tsconfig.server.tsbuildinfo")
     expect(declarations).toMatchObject({ args: ["-b", "tsconfig.server.json"], command: "tsc" })
     expect(declarations?.args).not.toContain("--force")
+  })
+
+  it("keeps browser builds on manifest-based repair instead of rebuilding every dependency", () => {
+    const command = packageManifest.scripts["test:e2e"]
+
+    expect(command).toContain("pnpm build")
+    expect(command).toContain("playwright test")
+    expect(command).not.toContain("@knpkv/control-center^...")
   })
 })

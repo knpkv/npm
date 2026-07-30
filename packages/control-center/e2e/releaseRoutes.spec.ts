@@ -1,4 +1,4 @@
-import { type BrowserContext, expect, type Page, test } from "@playwright/test"
+import { type BrowserContext, expect, type Locator, type Page, test } from "@playwright/test"
 import * as Schema from "effect/Schema"
 
 import {
@@ -8,9 +8,19 @@ import {
   ReviewAgentProfile
 } from "../src/api/agent.js"
 import { ReleaseDeliveryGraphInspection, WorkspaceEntityInspection } from "../src/api/deliveryGraph.js"
+import { AtlassianOAuthGrantExchangeResponse, DiscoveredAtlassianProfile } from "../src/api/plugins.js"
 import { PrReviewReport, PrReviewSubject } from "../src/domain/prReview.js"
 import { RelationshipRepairProposal } from "../src/domain/relationshipRepair.js"
+import { firstPartyServiceCatalog } from "../src/server/plugins/catalog/firstPartyServiceCatalog.js"
 import { releaseWorksetFixture } from "../test/fixtures/releaseWorkset.js"
+import { auditProductionRoutePresentation, resetProductionRouteEntryPresentation } from "./presentationAudit.js"
+import {
+  CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
+  productionRouteAuditCase,
+  productionRouteAuditKey,
+  type ProductionRouteAuditRequirement,
+  requiredProductionRouteAuditsFor
+} from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 interface ReleaseTransitionGeometry {
@@ -83,6 +93,27 @@ const pairedSession = {
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000002",
   workspaceId: snapshot.workspaceId
 }
+
+const atlassianOAuthExchange = Schema.encodeSync(AtlassianOAuthGrantExchangeResponse)(
+  Schema.decodeUnknownSync(AtlassianOAuthGrantExchangeResponse)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    grantId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.atlassianOAuthGrantId,
+    sites: [{ cloudId: "cloud-1", name: "Acme Europe", siteUrl: "https://acme.atlassian.net/" }]
+  })
+)
+const completedAtlassianProfile = Schema.encodeSync(DiscoveredAtlassianProfile)(
+  Schema.decodeUnknownSync(DiscoveredAtlassianProfile)({
+    accountEmail: "avery@example.com",
+    accountName: "Avery Bell",
+    cloudId: "cloud-1",
+    name: "Avery Bell @ acme.atlassian.net",
+    profileId: "account-1@cloud-1",
+    providers: ["jira", "confluence"],
+    siteUrl: "https://acme.atlassian.net/",
+    status: "valid"
+  })
+)
 
 const overviewPath = `/w/${snapshot.workspaceId}/overview`
 const previewPath = `/w/${snapshot.workspaceId}/releases/${release.releaseId}/preview`
@@ -412,6 +443,22 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   await context.route("**/api/v1/portfolio/snapshot", async (route) => {
     await route.fulfill({ body: JSON.stringify(snapshot), contentType: "application/json", status: 200 })
   })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/exchange", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(atlassianOAuthExchange),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/plugins/oauth/atlassian/grants/*/complete", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe("cd".repeat(32))
+    await route.fulfill({
+      body: JSON.stringify(completedAtlassianProfile),
+      contentType: "application/json",
+      status: 200
+    })
+  })
   await context.route("**/api/v1/agent/providers", async (route) => {
     await route.fulfill({
       body: JSON.stringify(releaseAgentProviderCatalog),
@@ -422,6 +469,23 @@ const installReleaseMocks = async (context: BrowserContext): Promise<void> => {
   await context.route("**/api/v1/items/*", async (route) => {
     await route.fulfill({
       body: JSON.stringify(canonicalEntityInspection),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/shares/*/*", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        item: canonicalEntityInspection.entity,
+        share: {
+          createdAt: "2026-07-14T10:00:00.000Z",
+          entityId: canonicalEntityId,
+          expiresAt: "2026-07-21T10:00:00.000Z",
+          granteePersonId: pairedSession.actor.personId,
+          revokedAt: null,
+          shareId: CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.shareId
+        }
+      }),
       contentType: "application/json",
       status: 200
     })
@@ -548,6 +612,210 @@ const installTransitionProbe = async (page: Page): Promise<void> => {
 }
 
 test.beforeEach(async ({ context }) => installReleaseMocks(context))
+
+interface AuthenticatedPresentationRoute {
+  readonly audit: ProductionRouteAuditRequirement
+  readonly exercise?: (primaryAction: Locator) => Promise<void>
+  readonly expectOutcome?: () => Promise<void>
+  readonly landmark: () => Locator
+  readonly primaryAction: () => Locator | null
+}
+
+test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
+  test.setTimeout(60_000)
+  await page.route("**/api/v1/items**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/items") {
+      await route.fallback()
+      return
+    }
+    const items = encodedWorkset.entityProjections.map((entry) => ({
+      ...entry,
+      canonicalReleaseId: encodedWorkset.releaseId,
+      owners: [],
+      ownersTruncated: false,
+      releaseIds: [encodedWorkset.releaseId],
+      releaseMembershipsTruncated: false
+    }))
+    await route.fulfill({
+      body: JSON.stringify({
+        items,
+        matchedCount: items.length,
+        ownerOptions: [],
+        ownerOptionsTruncated: false,
+        totalCount: items.length,
+        truncated: false
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/timeline**", async (route) => {
+    if (new URL(route.request().url()).pathname !== "/api/v1/timeline") {
+      await route.fallback()
+      return
+    }
+    await route.fulfill({
+      body: JSON.stringify({ events: [], nextCursor: null }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await page.route("**/api/v1/plugins/overview", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        accounts: [],
+        catalog: firstPartyServiceCatalog.map(({ metadata }) => metadata),
+        connections: []
+      }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  const routes: ReadonlyArray<AuthenticatedPresentationRoute> = [
+    {
+      audit: productionRouteAuditCase("release-routes", "overview", "authenticated", "overview"),
+      expectOutcome: async () =>
+        expect(page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Every release. One view." }),
+      primaryAction: () => page.getByRole("button", { name: "Preview Solar Grove" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "work", "authenticated", "work"),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "payments-api" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: /Decisions,\s+not tickets\./u }),
+      primaryAction: () => page.getByRole("link", { name: "Open full release" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "items", "authenticated", "items"),
+      exercise: async (primaryAction) => primaryAction.fill("OPS-428"),
+      expectOutcome: async () => expect(page.getByRole("searchbox", { name: "Search" })).toHaveValue("OPS-428"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Find release work." }),
+      primaryAction: () => page.getByRole("searchbox", { name: "Search" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Review payment capture safeguards" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to items" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "timeline", "authenticated", "timeline"),
+      exercise: async (primaryAction) => {
+        await primaryAction.selectOption("human")
+      },
+      expectOutcome: async () => expect(page.getByRole("combobox", { name: "Actor" })).toHaveValue("human"),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Everything that moved." }),
+      primaryAction: () => page.getByRole("combobox", { name: "Actor" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "release-preview",
+        "authenticated",
+        "releases/:releaseId/preview"
+      ),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("dialog", { name: "Release preview: 2.18.0-rc.1 Solar Grove" }),
+      primaryAction: () => page.getByRole("button", { name: /^Close(?: preview| Release preview:)/u })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "release", "authenticated", "releases/:releaseId"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "payments-api" }),
+      primaryAction: () => page.getByRole("link", { name: "Back to overview" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "agent",
+        "authenticated",
+        "releases/:releaseId/agent"
+      ),
+      exercise: async (primaryAction) => primaryAction.press("Enter"),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "What do you need?" })).toHaveValue(
+          "Which evidence is still missing?"
+        ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Ask Solar Grove." }),
+      primaryAction: () => page.getByRole("button", { name: "Which evidence is still missing?" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "not-found", "authenticated", "*"),
+      expectOutcome: async () =>
+        expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByText("Page not found", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Open workspace overview" })
+    },
+    {
+      audit: productionRouteAuditCase("release-routes", "services", "authenticated", "services"),
+      expectOutcome: async () => expect(page.getByLabel("Account name")).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Services" }),
+      primaryAction: () => page.getByRole("button", { name: "Configure AWS account" }).first()
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Choose your Atlassian site" }),
+      primaryAction: () => page.getByRole("button", { name: "Use this site" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "atlassian-oauth-callback",
+        "authenticated-error",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { level: 1, name: "Services" })).toBeVisible(),
+      landmark: () => page.getByText("Atlassian sign-in did not finish", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Try again" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "release-routes",
+        "authorized-share",
+        "authenticated",
+        "shares/:workspaceId/:shareId"
+      ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Exact scope. Nothing adjacent." }),
+      primaryAction: () => null
+    }
+  ]
+
+  for (const route of routes) {
+    await resetProductionRouteEntryPresentation(page)
+    await page.goto(route.audit.canonicalPath)
+    const primaryAction = route.primaryAction()
+    if (primaryAction === null) {
+      if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
+      await auditProductionRoutePresentation(page, {
+        landmark: route.landmark(),
+        noActionReason: route.audit.action.reason,
+        primaryAction
+      })
+    } else {
+      if (route.expectOutcome === undefined) throw new Error(`${route.audit.family} requires an interaction outcome`)
+      await auditProductionRoutePresentation(page, {
+        exercise: route.exercise ?? (async (action) => action.press("Enter")),
+        expectOutcome: route.expectOutcome,
+        landmark: route.landmark(),
+        primaryAction
+      })
+    }
+  }
+  expect(routes.map(({ audit }) => productionRouteAuditKey(audit)).sort()).toEqual(
+    requiredProductionRouteAuditsFor("release-routes")
+      .map(productionRouteAuditKey)
+      .sort()
+  )
+})
 
 const expectVisibleTransitionGeometry = (geometry: ReleaseTransitionGeometry): void => {
   expect(geometry.clientRectCount).toBeGreaterThan(0)

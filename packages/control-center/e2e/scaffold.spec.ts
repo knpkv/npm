@@ -1,4 +1,18 @@
-import { expect, test } from "@playwright/test"
+import { expect, type Locator, test } from "@playwright/test"
+import {
+  auditProductionRoutePresentation,
+  CONTROL_CENTER_AXE_WCAG_TAGS,
+  expectProductionRouteEntryPresentation,
+  resetProductionRouteEntryPresentation,
+  seriousAxeViolations
+} from "./presentationAudit.js"
+import {
+  CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS,
+  productionRouteAuditCase,
+  productionRouteAuditKey,
+  type ProductionRouteAuditRequirement,
+  requiredProductionRouteAuditsFor
+} from "./productionRouteInventory.js"
 import { releasePortfolioFixture } from "./releasePortfolioFixture.js"
 
 const pairedSession = {
@@ -12,6 +26,739 @@ const pairedSession = {
   sessionId: "01890f6f-6d6a-7cc0-98d2-000000000002",
   workspaceId: "01890f6f-6d6a-7cc0-98d2-000000000001"
 }
+
+interface UnauthenticatedPresentationRoute {
+  readonly audit: ProductionRouteAuditRequirement
+  readonly exercise?: (primaryAction: Locator) => Promise<void>
+  readonly expectOutcome?: () => Promise<void>
+  readonly landmark: () => Locator
+  readonly prepare?: () => Promise<void>
+  readonly primaryAction: () => Locator | null
+}
+
+test("includes WCAG 2.1 A label-content matching in the serious accessibility gate", async ({ page }) => {
+  expect(CONTROL_CENTER_AXE_WCAG_TAGS).toContain("wcag21a")
+  await page.setContent("<button aria-label=\"Remove\">Delete</button>")
+  expect(await seriousAxeViolations(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "label-content-name-mismatch" })])
+  )
+
+  await page.setContent("<button aria-label=\"Delete item\">Delete</button>")
+  expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("label-content-name-mismatch")
+})
+
+test("explicitly enables the WCAG 2.2 AA target-size rule", async ({ page }) => {
+  expect(CONTROL_CENTER_AXE_WCAG_TAGS).toContain("wcag22aa")
+  await page.setContent(`
+    <main>
+      <button style="box-sizing: border-box; height: 20px; padding: 0; width: 20px;">A</button><button
+        style="box-sizing: border-box; height: 20px; padding: 0; width: 20px;"
+      >B</button>
+    </main>
+  `)
+  expect(await seriousAxeViolations(page)).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "target-size" })])
+  )
+
+  await page.setContent(`
+    <main>
+      <button style="box-sizing: border-box; height: 24px; padding: 0; width: 24px;">A</button><button
+        style="box-sizing: border-box; height: 24px; padding: 0; width: 24px;"
+      >B</button>
+    </main>
+  `)
+  expect((await seriousAxeViolations(page)).map(({ id }) => id)).not.toContain("target-size")
+})
+
+test("requires keyboard focus to add a visible indicator", async ({ page }) => {
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>button { box-shadow: 0 0 0 2px currentColor; outline: none; }</style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: black; border: 0; color: white; outline: none; }
+          button:focus-visible { background: white; color: white; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: black; border: 0; color: white; outline: none; }
+          button:focus-visible { background: white; color: black; }
+          @media (forced-colors: active) {
+            button:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
+          }
+        </style>
+      </head>
+      <body>
+        <main><h1>Focus fixture</h1><button onclick="this.textContent='Continued'">Continue</button></main>
+      </body>
+    </html>
+  `)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Focus fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: transparent; border: 0; color: black; outline: none; }
+          button:focus-visible { background: white; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: white; border: 0; color: black; outline: none; }
+          button:focus-visible { color: white; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          body { background: white; }
+          button { background: transparent; border: 0; color: black; outline: none; }
+          button:focus-visible { background: black; color: white; }
+          @media (forced-colors: active) {
+            button:focus-visible { outline: 3px solid CanvasText; outline-offset: 2px; }
+          }
+        </style>
+      </head>
+      <body>
+        <main><h1>Focus fixture</h1><button onclick="this.textContent='Continued'">Continue</button></main>
+      </body>
+    </html>
+  `)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Focus fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          button { outline: none; }
+          button:focus-visible { outline: 3px solid transparent; }
+        </style>
+      </head>
+      <body><main><h1>Focus fixture</h1><button>Continue</button></main></body>
+    </html>
+  `)
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Focus fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action keyboard focus has no focus-specific visual indicator")
+
+  await page.setContent(`
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Focus fixture</title>
+        <style>
+          button { outline: none; }
+          button:focus-visible { outline: 3px solid currentColor; outline-offset: 2px; }
+        </style>
+      </head>
+      <body>
+        <main><h1>Focus fixture</h1><button onclick="this.textContent='Continued'">Continue</button></main>
+      </body>
+    </html>
+  `)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Focus fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("reruns the serious accessibility gate after compact-layout content appears", async ({ page }) => {
+  const content = (mobileAccessibleName: string): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Compact fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          .mobile-only { display: none; }
+          @media (max-width: 400px) { .mobile-only { display: inline-block; } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Compact fixture</h1>
+          <button onclick="this.textContent='Continued'">Continue</button>
+          <button class="mobile-only"${mobileAccessibleName}></button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content(""))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("compact layout has serious or critical accessibility violations")
+
+  await page.setContent(content(" aria-label=\"Open mobile navigation\""))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Compact fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("requires compact landmarks and primary actions to intersect the viewport", async ({ page }) => {
+  const content = (compactPosition: string): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Compact viewport fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          .clip { block-size: 50px; inline-size: 100%; overflow: hidden; }
+          @media (max-width: 400px) { button { ${compactPosition} } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Compact viewport fixture</h1>
+          <div class="clip"><button onclick="this.textContent='Continued'">Continue</button></div>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content("position: relative; inset-inline-start: 400px;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no viewport intersection")
+
+  await page.setContent(content("position: relative; inset-block-start: 900px;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no viewport intersection")
+
+  await page.setContent(content("position: static;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Compact viewport fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("requires discernible system paint in forced-colors mode", async ({ page }) => {
+  const content = (forcedColorPaint: string, labelPaint = "", forcedColorAncestorOpacity = "1"): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Forced color fixture</title>
+        <style>
+          button:focus-visible { outline: 3px solid currentColor; }
+          @media (forced-colors: active) {
+            main {
+              opacity: ${forcedColorAncestorOpacity};
+            }
+            button {
+              forced-color-adjust: none;
+              ${forcedColorPaint}
+            }
+            button > span {
+              ${labelPaint}
+            }
+          }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Forced color fixture</h1>
+          <button onclick="this.textContent='Continued'"><span>Continue</span></button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(
+    content(
+      "background: transparent; border-color: transparent; color: transparent; outline-color: transparent;"
+    )
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
+  await page.setContent(content("background: Canvas; border-color: Canvas; color: Canvas; outline-color: Canvas;"))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
+  await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(
+    content(
+      "background: Canvas; border-color: CanvasText; color: CanvasText;",
+      "forced-color-adjust: none; background: Canvas; color: Canvas;"
+    )
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("primary action has no discernible forced-color paint")
+
+  await page.setContent(
+    content(
+      "background: Canvas; border-color: CanvasText; color: CanvasText;",
+      "forced-color-adjust: none; background: Canvas; color: CanvasText;"
+    )
+  )
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+
+  await page.setContent(
+    content("background: Canvas; border-color: CanvasText; color: CanvasText;", "", "0")
+  )
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("route landmark has no discernible forced-color paint")
+  await page.setContent(content("background: Canvas; border-color: CanvasText; color: CanvasText;"))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Forced color fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("rejects transparent landmarks and actions in the normal presentation", async ({ page }) => {
+  const content = (opacity: number): string => `
+    <!doctype html>
+    <html lang="en">
+      <head>
+        <title>Opacity fixture</title>
+        <style>
+          main { opacity: ${opacity}; }
+          @media (forced-colors: active) { main { opacity: 1; } }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>Opacity fixture</h1>
+          <button onclick="this.textContent='Continued'">Continue</button>
+        </main>
+      </body>
+    </html>
+  `
+  await page.setContent(content(0))
+  await expect(
+    auditProductionRoutePresentation(page, {
+      exercise: async () => {},
+      expectOutcome: async () => {},
+      landmark: page.getByRole("heading", { name: "Opacity fixture" }),
+      primaryAction: page.getByRole("button", { name: "Continue" })
+    })
+  ).rejects.toThrow("route landmark has no effective opacity")
+
+  await page.setContent(content(1))
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => expect(page.getByRole("button", { name: "Continued" })).toBeVisible(),
+    landmark: page.getByRole("heading", { name: "Opacity fixture" }),
+    primaryAction: page.getByRole("button", { name: "Continue" })
+  })
+})
+
+test("resets persistent browser presentation state before a second route mounts", async ({ page }) => {
+  const mountedPresentation = async (): Promise<{
+    readonly forcedColors: boolean
+    readonly height: number
+    readonly reducedMotion: boolean
+    readonly width: number
+  }> => {
+    await page.setContent(`
+      <main
+        data-forced-colors=""
+        data-height=""
+        data-reduced-motion=""
+        data-width=""
+      >Route fixture</main>
+      <script>
+        (() => {
+          const route = document.querySelector("main");
+          route.dataset.forcedColors = String(matchMedia("(forced-colors: active)").matches);
+          route.dataset.height = String(innerHeight);
+          route.dataset.reducedMotion = String(matchMedia("(prefers-reduced-motion: reduce)").matches);
+          route.dataset.width = String(innerWidth);
+        })();
+      </script>
+    `)
+    return await page.getByRole("main").evaluate((element) => {
+      if (!("getAttribute" in element) || typeof element.getAttribute !== "function") {
+        throw new Error("route fixture has no attribute surface")
+      }
+      return {
+        forcedColors: element.getAttribute("data-forced-colors") === "true",
+        height: Number(element.getAttribute("data-height")),
+        reducedMotion: element.getAttribute("data-reduced-motion") === "true",
+        width: Number(element.getAttribute("data-width"))
+      }
+    })
+  }
+
+  await page.setViewportSize({ height: 800, width: 320 })
+  await page.emulateMedia({ forcedColors: "active", reducedMotion: "reduce" })
+  expect(await mountedPresentation()).toEqual({
+    forcedColors: true,
+    height: 800,
+    reducedMotion: true,
+    width: 320
+  })
+  await expect(expectProductionRouteEntryPresentation(page)).rejects.toThrow(
+    "production route mounted outside its entry presentation"
+  )
+
+  await resetProductionRouteEntryPresentation(page)
+  expect(await mountedPresentation()).toEqual({
+    forcedColors: false,
+    height: 800,
+    reducedMotion: true,
+    width: 1_280
+  })
+})
+
+test("audits every public route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ context, page }) => {
+  test.setTimeout(60_000)
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "public-route-presentation-audit",
+        message: "No active session"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+  await context.route("**/api/v1/session/pair", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({
+        _tag: "UnauthorizedApiError",
+        code: "unauthorized",
+        correlationId: "public-route-pairing-presentation-audit",
+        message: "Pairing credential was rejected"
+      }),
+      contentType: "application/json",
+      status: 401
+    })
+  })
+  const routes: ReadonlyArray<UnauthenticatedPresentationRoute> = [
+    {
+      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated", "<index>"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Every release. One view." }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "overview", "unauthenticated", "overview"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "services", "unauthenticated", "services"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Services" }),
+      primaryAction: () => page.getByRole("button", { name: "Pair to enable" }).first()
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "pair", "unauthenticated", "pair"),
+      expectOutcome: async () =>
+        expect(page.getByText("That code is invalid, expired, or already used.")).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Pair this browser" }),
+      prepare: async () =>
+        page
+          .getByRole("textbox", { name: "Pairing code" })
+          .fill(CONTROL_CENTER_PRODUCTION_ROUTE_FIXTURE_IDS.pairingCode),
+      primaryAction: () => page.getByRole("button", { name: "Pair browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "agent", "unauthenticated", "agent"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByRole("heading", { name: "Ask in context." }),
+      primaryAction: () => page.getByRole("link", { name: "Return to Overview" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "agent",
+        "unauthenticated",
+        "releases/:releaseId/agent"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release context unavailable", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "atlassian-oauth-callback",
+        "unauthenticated",
+        "services/oauth/atlassian/callback"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Services" })).toBeVisible(),
+      landmark: () => page.getByText("Paired session required", { exact: true }),
+      primaryAction: () => page.getByRole("button", { name: "Return to Services" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "authorized-share",
+        "unauthenticated",
+        "shares/:workspaceId/:shareId"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Authentication required", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "items", "unauthenticated", "items"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "item", "unauthenticated", "items/:entityId"),
+      expectOutcome: async () => expect(page.getByText("Release facts stay private", { exact: true })).toBeVisible(),
+      landmark: () => page.getByText("Entity unavailable", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Back to items" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "release", "unauthenticated", "releases/:releaseId"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase(
+        "scaffold",
+        "release-preview",
+        "unauthenticated",
+        "releases/:releaseId/preview"
+      ),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Pair this browser" })).toBeVisible(),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Pair this browser" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "not-found", "unauthenticated", "*"),
+      expectOutcome: async () => expect(page.getByRole("heading", { name: "Every release. One view." })).toBeVisible(),
+      landmark: () => page.getByText("Page not found", { exact: true }),
+      primaryAction: () => page.getByRole("link", { name: "Return to Control Center" })
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "settings", "unauthenticated", "settings"),
+      landmark: () => page.getByText("Authentication required", { exact: true }),
+      primaryAction: () => null
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "timeline", "unauthenticated", "timeline"),
+      landmark: () => page.getByText("Loading Timeline", { exact: true }),
+      primaryAction: () => null
+    },
+    {
+      audit: productionRouteAuditCase("scaffold", "work", "unauthenticated", "work"),
+      landmark: () => page.getByText("Release facts stay private", { exact: true }),
+      primaryAction: () => null
+    }
+  ]
+
+  for (const route of routes) {
+    await resetProductionRouteEntryPresentation(page)
+    await page.goto(route.audit.canonicalPath)
+    await route.prepare?.()
+    const primaryAction = route.primaryAction()
+    if (primaryAction === null) {
+      if (route.audit.action.kind !== "none") throw new Error(`${route.audit.family} requires a primary action`)
+      await auditProductionRoutePresentation(page, {
+        landmark: route.landmark(),
+        noActionReason: route.audit.action.reason,
+        primaryAction
+      })
+    } else {
+      if (route.expectOutcome === undefined) throw new Error(`${route.audit.family} requires an interaction outcome`)
+      await auditProductionRoutePresentation(page, {
+        exercise: route.exercise ?? (async (action) => action.press("Enter")),
+        expectOutcome: route.expectOutcome,
+        landmark: route.landmark(),
+        primaryAction
+      })
+    }
+  }
+
+  await context.unroute("**/api/v1/session/current")
+  await context.route("**/api/v1/session/current", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ csrfToken: "cd".repeat(32), session: pairedSession }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  await context.route("**/api/v1/agent/providers", async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ providers: [] }),
+      contentType: "application/json",
+      status: 200
+    })
+  })
+  const authenticatedAgent = {
+    audit: productionRouteAuditCase("scaffold", "agent", "authenticated", "agent"),
+    landmark: page.getByRole("heading", { level: 1, name: "Ask in context." }),
+    primaryAction: page.getByRole("link", { name: "Return to Overview" })
+  }
+  await resetProductionRouteEntryPresentation(page)
+  await page.goto(authenticatedAgent.audit.canonicalPath)
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => primaryAction.press("Enter"),
+    expectOutcome: async () => {
+      await expect(page).toHaveURL("/")
+      await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
+    },
+    landmark: authenticatedAgent.landmark,
+    primaryAction: authenticatedAgent.primaryAction
+  })
+
+  expect([...routes.map(({ audit }) => audit), authenticatedAgent.audit].map(productionRouteAuditKey).sort()).toEqual(
+    requiredProductionRouteAuditsFor("scaffold")
+      .map(productionRouteAuditKey)
+      .sort()
+  )
+})
 
 test("renders the private browser application boundary", async ({ page }) => {
   await page.route("**/api/v1/session/current", async (route) => {
@@ -30,7 +777,7 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
+  await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
   for (const name of ["Overview", "Releases", "Services", "Ask Relay"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
@@ -50,7 +797,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.goto("/")
 
   const navigationBox = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
-  const brandBox = await page.getByRole("link", { name: "Control Center home" }).boundingBox()
+  const brandBox = await page.getByRole("link", { exact: true, name: "Control Center" }).boundingBox()
   const agentBox = await page.getByRole("link", { name: "Ask Relay" }).boundingBox()
   if (navigationBox === null || brandBox === null || agentBox === null) {
     throw new Error("mobile application chrome must remain measurable")
@@ -60,7 +807,7 @@ test("keeps mobile navigation clear of application identity and content", async 
   expect(Math.abs(844 - (navigationBox.y + navigationBox.height) - 16)).toBeLessThan(2)
 
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Control Center home" })).toBeFocused()
+  await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Ask Relay" })).toBeFocused()
   await page.keyboard.press("Tab")
@@ -92,9 +839,9 @@ test("explains credential rejection separately from server availability", async 
   await expect(page.getByText("That code is invalid, expired, or already used.")).toBeVisible()
 
   await page.getByRole("button", { name: "Pair browser" }).click()
-  await expect(page.getByText(
-    "Control Center is unavailable right now. Check that the server is running, then try again."
-  )).toBeVisible()
+  await expect(
+    page.getByText("Control Center is unavailable right now. Check that the server is running, then try again.")
+  ).toBeVisible()
 })
 
 test("shows a paired session and recovers its mutation proof in a new tab", async ({ context, page }) => {
@@ -133,11 +880,13 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
 
 test("routes an authenticated releases entry to the live workspace portfolio", async ({ context, page }) => {
   const csrfToken = "cd".repeat(32)
-  await context.addCookies([{
-    name: "cc_session",
-    value: "ab".repeat(32),
-    url: "http://127.0.0.1:4173"
-  }])
+  await context.addCookies([
+    {
+      name: "cc_session",
+      value: "ab".repeat(32),
+      url: "http://127.0.0.1:4173"
+    }
+  ])
   await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
   await context.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
@@ -211,11 +960,13 @@ test("ignores a stale session hydration after replacing the paired session", asy
     releaseCurrentResponse = resolve
   })
 
-  await context.addCookies([{
-    name: "cc_session",
-    value: "ab".repeat(32),
-    url: "http://127.0.0.1:4173"
-  }])
+  await context.addCookies([
+    {
+      name: "cc_session",
+      value: "ab".repeat(32),
+      url: "http://127.0.0.1:4173"
+    }
+  ])
   await context.route("**/api/v1/session/current", async (route) => {
     markCurrentStarted?.()
     await currentResponseGate
@@ -351,21 +1102,29 @@ test("reports unavailable storage when an anonymous proof cannot be removed", as
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
 })
 
-test("distinguishes a blocked session read from an unavailable server", async ({ page }) => {
+test("distinguishes blocked and anonymous Active work sessions", async ({ page }) => {
+  let status: 401 | 403 = 403
   await page.route("**/api/v1/session/current", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
-        _tag: "ForbiddenApiError",
-        code: "forbidden",
+        _tag: status === 403 ? "ForbiddenApiError" : "UnauthorizedApiError",
+        code: status === 403 ? "forbidden" : "unauthorized",
         correlationId: "session-e2e",
-        message: "Session reads are blocked on this connection"
+        message: status === 403 ? "Session reads are blocked on this connection" : "No active session"
       }),
       contentType: "application/json",
-      status: 403
+      status
     })
   })
 
-  await page.goto("/")
-  await expect(page.getByText("Session access blocked on this connection")).toBeVisible()
+  await page.goto(`/w/${pairedSession.workspaceId}/work`)
+  await expect(page.getByText("Portfolio access blocked", { exact: true })).toBeVisible()
+  await expect(page.getByText("Release facts stay private", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
+
+  status = 401
+  await page.reload()
+  await expect(page.getByText("Release facts stay private", { exact: true })).toBeVisible()
+  await expect(page.getByRole("link", { name: "Pair this browser" })).toHaveCount(0)
+  await expect(page.getByText("Portfolio access blocked", { exact: true })).toHaveCount(0)
 })

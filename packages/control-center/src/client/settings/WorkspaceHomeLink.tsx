@@ -20,7 +20,7 @@ export const WorkspaceHomeLink = ({
 }: WorkspaceHomeLinkProps): ReactElement => {
   const defaultLandingPath = useWorkspaceDefaultLandingPath(workspaceId)
   return (
-    <NavLink aria-label="Control Center home" className={className} to={defaultLandingPath ?? fallbackPath}>
+    <NavLink className={className} to={defaultLandingPath ?? fallbackPath}>
       {children}
     </NavLink>
   )

@@ -46,7 +46,9 @@
   "scripts": {
     "benchmark": "pnpm benchmark:contracts && pnpm benchmark:runtime",
     "benchmark:contracts": "tsx scripts/runBenchmark.ts",
-    "benchmark:runtime": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json playwright test e2e/real-runtime.spec.ts --grep \"measures warmed\" --config playwright.config.ts && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json tsx scripts/validateRuntimeBenchmarkReport.ts",
+    "benchmark:runtime": "pnpm build && pnpm benchmark:runtime:prepared",
+    "benchmark:runtime:prepared": "rimraf test-results/control-center/runtime-benchmark.json && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json playwright test e2e/real-runtime.spec.ts --grep \"measures warmed\" --config playwright.config.ts && pnpm benchmark:validate-runtime",
+    "benchmark:validate-runtime": "CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json tsx scripts/validateRuntimeBenchmarkReport.ts",
     "build": "tsx scripts/run-build.ts",
     "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo node_modules/.cache",
@@ -57,7 +59,7 @@
     "start": "node ./dist/server/server/cli.js",
     "test": "vitest run",
     "test:browser": "pnpm test:e2e",
-    "test:e2e": "pnpm --filter @knpkv/control-center^... build && pnpm build && playwright test --config playwright.config.ts",
+    "test:e2e": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && playwright test --config playwright.config.ts",
     "test:sbx:real": "vitest run --config vitest.sbx.config.ts",
     "validate:boundaries": "tsx scripts/validate-boundaries.ts",
     "validate:dist": "tsx scripts/validate-dist.ts"
@@ -94,6 +96,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "axe-core": "4.12.1",
     "rimraf": "^6.1.3",
     "tsx": "^4.23.0",
     "typescript": "^6.0.3",

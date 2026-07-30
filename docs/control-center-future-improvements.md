@@ -18,7 +18,6 @@ This file records deliberate follow-up work that is outside the current narrow d
 ## Build performance
 
 - Profile and reduce the forced declaration build and distribution validation stages; these currently dominate the apparent pause after the Vite bundles finish.
-- Cache or avoid unchanged dependency builds in local end-to-end workflows.
 
 ## Relationship inference
 

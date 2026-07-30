@@ -136,60 +136,70 @@ const LoadingPortfolio = (): ReactElement => (
   </div>
 )
 
-const SessionBoundary = ({ reason }: Extract<PortfolioOverviewState, { readonly _tag: "session" }>): ReactElement => {
+type PortfolioSessionReason = Extract<PortfolioOverviewState, { readonly _tag: "session" }>["reason"]
+
+interface PortfolioSessionBoundaryPresentation {
+  readonly announce?: "assertive"
+  readonly description: string
+  readonly title: string
+  readonly tone?: "caution" | "critical"
+}
+
+export const portfolioSessionBoundaryPresentation = (
+  reason: PortfolioSessionReason
+): PortfolioSessionBoundaryPresentation => {
   switch (reason) {
     case "anonymous":
-      return (
-        <StatePanel
-          action={
-            <Link className={styles.pairAction} to="/pair">
-              Pair this browser
-            </Link>
-          }
-          className={styles.statePanel}
-          description="Pair this browser to read the workspace portfolio. Release facts never load before authentication."
-          title="Release facts stay private"
-        />
-      )
+      return {
+        description:
+          "Pair this browser to read the workspace portfolio. Release facts never load before authentication.",
+        title: "Release facts stay private"
+      }
     case "checking":
-      return (
-        <StatePanel
-          className={styles.statePanel}
-          description="Control Center is confirming whether this browser can read the workspace portfolio."
-          title="Checking this browser"
-        />
-      )
+      return {
+        description: "Control Center is confirming whether this browser can read the workspace portfolio.",
+        title: "Checking this browser"
+      }
     case "blocked":
-      return (
-        <StatePanel
-          announce="assertive"
-          className={styles.statePanel}
-          description="This connection cannot read private release facts. Use an allowed Control Center address."
-          title="Portfolio access blocked"
-          tone="critical"
-        />
-      )
+      return {
+        announce: "assertive",
+        description: "This connection cannot read private release facts. Use an allowed Control Center address.",
+        title: "Portfolio access blocked",
+        tone: "critical"
+      }
     case "storage-unavailable":
-      return (
-        <StatePanel
-          announce="assertive"
-          className={styles.statePanel}
-          description="This browser cannot retain the private session proof. Check storage permissions or space, then reload."
-          title="Session storage unavailable"
-          tone="caution"
-        />
-      )
+      return {
+        announce: "assertive",
+        description:
+          "This browser cannot retain the private session proof. Check storage permissions or space, then reload.",
+        title: "Session storage unavailable",
+        tone: "caution"
+      }
     case "unavailable":
-      return (
-        <StatePanel
-          announce="assertive"
-          className={styles.statePanel}
-          description="Control Center could not check this browser session. Check the server, then reload this page."
-          title="Control Center unavailable"
-          tone="critical"
-        />
-      )
+      return {
+        announce: "assertive",
+        description: "Control Center could not check this browser session. Check the server, then reload this page.",
+        title: "Control Center unavailable",
+        tone: "critical"
+      }
   }
+}
+
+const SessionBoundary = ({ reason }: Extract<PortfolioOverviewState, { readonly _tag: "session" }>): ReactElement => {
+  const presentation = portfolioSessionBoundaryPresentation(reason)
+  return (
+    <StatePanel
+      {...presentation}
+      action={
+        reason === "anonymous" ? (
+          <Link className={styles.pairAction} to="/pair">
+            Pair this browser
+          </Link>
+        ) : undefined
+      }
+      className={styles.statePanel}
+    />
+  )
 }
 
 const FailedPortfolio = ({

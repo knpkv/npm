@@ -88,6 +88,10 @@ jobs:
   browser:
     name: Browser
     runs-on: ubuntu-latest
+    # GitHub-hosted storage is declared, not attested. The timing-noise quarantine
+    # and rerun policy is documented in .github/workflows/README.md.
+    env:
+      CONTROL_CENTER_BENCHMARK_STORAGE_CLASS: local-ssd
     permissions:
       contents: read
     timeout-minutes: 15
@@ -101,3 +105,15 @@ jobs:
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Test browser applications and catalogs
         run: pnpm test:browser
+      - name: Validate Control Center large-fixture contracts
+        run: pnpm --filter @knpkv/control-center benchmark:contracts
+      - name: Validate Control Center runtime benchmark evidence
+        run: pnpm --filter @knpkv/control-center benchmark:validate-runtime
+      - name: Upload Control Center runtime benchmark evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: control-center-runtime-benchmark
+          path: packages/control-center/test-results/control-center/runtime-benchmark.json
+          if-no-files-found: error
+          retention-days: 14

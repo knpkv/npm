@@ -107,6 +107,11 @@ it before the test's first navigation. Bare-block string expressions passed to
 and explicit IIFEs remain valid. Browser callbacks must narrow DOM capabilities
 instead of escaping through reflective method calls.
 
+Control Center Effect tests must convert file URLs with `Path.fromFileUrl`;
+reading `URL.pathname` is neither decoded nor platform-native. The scoped
+ast-grep rule leaves HTTP URL inspection and synchronous framework configuration
+outside its matcher.
+
 Raw object-store byte removal is private to `ContentStore`, which verifies the
 persisted reproducible storage class before delegating. Other production modules
 must use the authorized content boundary.

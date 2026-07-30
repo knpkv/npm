@@ -122,7 +122,7 @@ describe("useWorkspaceDefaultLandingPath", () => {
       )
     )
 
-    const brand = host.querySelector<HTMLAnchorElement>("a[aria-label='Control Center home']")
+    const brand = host.querySelector<HTMLAnchorElement>("header a")
     expect(brand?.getAttribute("href")).toBe("/")
 
     act(() => publishWorkspacePresentation(savedPresentation))

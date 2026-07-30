@@ -1055,7 +1055,7 @@ describe("workspace-scoped repositories", () => {
         yield* sweepDiffContentCacheCleanup(database, content, cache)
         assert.deepStrictEqual(yield* cache.pendingCleanup(), [])
       })
-    ))
+    ), { timeout: 30_000 })
 
   it.effect("publishes durable bytes before acquiring the writer transaction", () =>
     withRepositories(

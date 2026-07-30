@@ -114,13 +114,13 @@ export const AppShell = (): ReactElement => {
         {isAuthorizedShare ? (
           <span className={styles.brand ?? ""}>{brand}</span>
         ) : workspaceId === null ? (
-          <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to={overviewPath}>
+          <NavLink className={styles.brand ?? ""} to={overviewPath}>
             {brand}
           </NavLink>
         ) : (
           <Suspense
             fallback={
-              <NavLink aria-label="Control Center home" className={styles.brand ?? ""} to="/">
+              <NavLink className={styles.brand ?? ""} to="/">
                 {brand}
               </NavLink>
             }

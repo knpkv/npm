@@ -3,6 +3,8 @@ import * as Schema from "effect/Schema"
 
 import { UpdateWorkspaceSettingsRequest } from "../src/api/workspaceSettings.js"
 import type { WorkspaceSettingsV1 } from "../src/domain/workspaceSettings.js"
+import { auditProductionRoutePresentation } from "./presentationAudit.js"
+import { productionRouteAuditCase, requiredProductionRouteAuditsFor } from "./productionRouteInventory.js"
 
 const workspaceId = "01890f6f-6d6a-7cc0-98d2-000000000001"
 const personId = "01890f6f-6d6a-7cc0-98d2-000000000003"
@@ -88,9 +90,7 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   let savedSettings: WorkspaceSettingsV1 = settings
   await context.route("**/api/v1/settings", async (route) => {
     if (route.request().method() === "PUT") {
-      const request = Schema.decodeUnknownSync(UpdateWorkspaceSettingsRequest)(
-        route.request().postDataJSON()
-      )
+      const request = Schema.decodeUnknownSync(UpdateWorkspaceSettingsRequest)(route.request().postDataJSON())
       savedSettings = request.settings
       await route.fulfill({
         body: JSON.stringify({
@@ -114,17 +114,13 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   })
 
   await page.goto(`/w/${workspaceId}/settings`)
-  await expect(
-    page.getByRole("heading", { level: 1, name: "Workspace settings" })
-  ).toBeVisible()
+  await expect(page.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible()
   await expect(page.getByLabel("Theme")).toHaveValue("system")
 
   const evidence = page.getByLabel("Evidence (days)")
   await evidence.fill("0")
   await expect(evidence).toHaveAttribute("aria-invalid", "true")
-  await expect(
-    page.getByText("Evidence (days) must be a whole number from 1 to 3650.")
-  ).toBeVisible()
+  await expect(page.getByText("Evidence (days) must be a whole number from 1 to 3650.")).toBeVisible()
   await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled()
   await evidence.fill("365")
 
@@ -133,10 +129,7 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByRole("button", { name: "Save settings" }).click()
   await expect(page.getByText("Saved", { exact: true })).toBeVisible()
   expect(savedSettings.presentation.density).toBe("compact")
-  await expect(page.locator("[data-workspace-density]")).toHaveAttribute(
-    "data-workspace-density",
-    "compact"
-  )
+  await expect(page.locator("[data-workspace-density]")).toHaveAttribute("data-workspace-density", "compact")
 
   await page.getByLabel("Profile policy").selectOption("local-profile")
   const localProfileNotices = page.getByText(/Local profile is unavailable/)
@@ -147,13 +140,21 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")
 
-  await page.setViewportSize({ height: 800, width: 320 })
-  await expect(page.getByRole("heading", { name: "Workspace settings" })).toBeVisible()
-  expect(
-    await page.evaluate<boolean>(
-      "document.documentElement.scrollWidth <= window.innerWidth"
-    )
-  ).toBe(true)
+  const presentationAudit = productionRouteAuditCase(
+    "workspace-settings",
+    "settings",
+    "authenticated",
+    "settings"
+  )
+  await auditProductionRoutePresentation(page, {
+    exercise: async (primaryAction) => {
+      await primaryAction.selectOption("light")
+    },
+    expectOutcome: async () => expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("light"),
+    landmark: page.getByRole("heading", { level: 1, name: "Workspace settings" }),
+    primaryAction: page.getByLabel("Theme")
+  })
+  expect([presentationAudit]).toEqual(requiredProductionRouteAuditsFor("workspace-settings"))
 })
 
 test("does not load or mutate settings for a route outside the browser session workspace", async ({ context, page }) => {

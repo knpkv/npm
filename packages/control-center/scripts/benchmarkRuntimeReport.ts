@@ -15,6 +15,7 @@ import {
   CONTROL_CENTER_BENCHMARK_CAPS,
   CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
   CONTROL_CENTER_BENCHMARK_WARMUP_RUNS,
+  CONTROL_CENTER_NODE_VERSION_PATTERN,
   ControlCenterBenchmarkCaps,
   ControlCenterBenchmarkMachine,
   ControlCenterBenchmarkTimingSummary,
@@ -27,8 +28,21 @@ export const CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT = "test-results/con
 /** Environment variable that can relocate the durable runtime report. */
 export const CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT_ENV = "CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT"
 
+/** Explicit storage declaration required before absolute timing can be accepted. */
+export const CONTROL_CENTER_BENCHMARK_STORAGE_CLASS_ENV = "CONTROL_CENTER_BENCHMARK_STORAGE_CLASS"
+
 /** Version of the browser-backed runtime report contract. */
-export const CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION = 1
+export const CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION = 2
+
+/** NFR2.5 warmed portfolio availability budget on the supported benchmark class. */
+export const CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS = 2_000
+
+/** Minimum hardware facts for comparing absolute browser-runtime timing. */
+export const CONTROL_CENTER_TIMING_ELIGIBILITY = Object.freeze({
+  logicalCpuCount: 4,
+  nodeMajorVersion: 24,
+  totalMemoryBytes: 8 * 1_024 * 1_024 * 1_024
+})
 
 const NonNegativeFinite = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0))
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
@@ -38,6 +52,46 @@ const RuntimeRequestMeasurement = Schema.Struct({
   sampleRuns: Schema.Literal(CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS),
   timing: ControlCenterBenchmarkTimingSummary,
   warmupRuns: Schema.Literal(CONTROL_CENTER_BENCHMARK_WARMUP_RUNS)
+})
+
+const TimingAcceptance = Schema.Union([
+  Schema.Struct({
+    budgetMilliseconds: Schema.Literal(CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS),
+    eligible: Schema.Literal(true),
+    passed: Schema.Literal(true),
+    reason: Schema.Literal("eligible-and-within-budget")
+  }),
+  Schema.Struct({
+    budgetMilliseconds: Schema.Literal(CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS),
+    eligible: Schema.Literal(false),
+    passed: Schema.Literal(false),
+    reason: Schema.Literal("ineligible-machine")
+  })
+])
+
+/** Return whether absolute timing is comparable to the documented CI baseline. */
+export const controlCenterBenchmarkMachineIsTimingEligible = (machine: ControlCenterBenchmarkMachine): boolean => {
+  const nodeVersionMatch = CONTROL_CENTER_NODE_VERSION_PATTERN.exec(machine.nodeVersion)
+  const nodeMajorVersion = Number.parseInt(nodeVersionMatch?.groups?.major ?? "", 10)
+  return (
+    machine.platform === "linux" &&
+    (machine.architecture === "x64" || machine.architecture === "arm64") &&
+    machine.storageClass === "local-ssd" &&
+    nodeMajorVersion >= CONTROL_CENTER_TIMING_ELIGIBILITY.nodeMajorVersion &&
+    machine.logicalCpuCount >= CONTROL_CENTER_TIMING_ELIGIBILITY.logicalCpuCount &&
+    machine.totalMemoryBytes >= CONTROL_CENTER_TIMING_ELIGIBILITY.totalMemoryBytes
+  )
+}
+
+/** Keep an omitted or renamed CI machine declaration from silently disabling the timing gate. */
+export const validateControlCenterRuntimeBenchmarkCiAcceptance = Effect.fn(
+  "ControlCenterBenchmark.validateCiAcceptance"
+)(function*(report: ControlCenterRuntimeBenchmarkReport, isCi: boolean) {
+  if (isCi && !report.timingIsAcceptanceAssertion) {
+    return yield* new BenchmarkReportError({
+      reason: "CI requires an eligible machine and an asserted runtime benchmark timing result."
+    })
+  }
 })
 
 /** Durable proof that authenticated HTTP/SSE paths ran and every owned resource was released. */
@@ -77,9 +131,24 @@ export const ControlCenterRuntimeBenchmarkReport = Schema.Struct({
       )
     )
   }),
-  timingIsAcceptanceAssertion: Schema.Literal(false),
+  timingAcceptance: TimingAcceptance,
+  timingIsAcceptanceAssertion: Schema.Boolean,
   version: Schema.Literal(CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION)
-}).annotate({ identifier: "ControlCenterRuntimeBenchmarkReport" })
+})
+  .check(
+    Schema.makeFilter(
+      ({ machine, measurements, timingAcceptance, timingIsAcceptanceAssertion }) => {
+        const eligible = controlCenterBenchmarkMachineIsTimingEligible(machine)
+        return eligible
+          ? timingAcceptance.eligible &&
+            timingIsAcceptanceAssertion &&
+            measurements.portfolio.timing.p95Milliseconds <= timingAcceptance.budgetMilliseconds
+          : !timingAcceptance.eligible && !timingIsAcceptanceAssertion
+      },
+      { expected: "machine-qualified two-second warmed portfolio timing acceptance" }
+    )
+  )
+  .annotate({ identifier: "ControlCenterRuntimeBenchmarkReport" })
 
 /** Decoded browser-backed runtime report. */
 export type ControlCenterRuntimeBenchmarkReport = typeof ControlCenterRuntimeBenchmarkReport.Type
@@ -106,9 +175,13 @@ export interface MakeControlCenterRuntimeBenchmarkReportInput {
   readonly sseSamplesMilliseconds: ReadonlyArray<number>
 }
 
-/** Collect supported machine facts without claiming an unverified storage class. */
+/** Collect supported machine facts without inferring a storage class. */
 export const collectControlCenterBenchmarkMachine = Effect.fn("ControlCenterBenchmark.collectMachine")(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const storageClass = yield* Config.literals(
+    ["local-ssd", "unverified"],
+    CONTROL_CENTER_BENCHMARK_STORAGE_CLASS_ENV
+  ).pipe(Config.withDefault("unverified"))
   const nodeVersion = yield* spawner.string(ChildProcess.make("node", ["--version"])).pipe(
     Effect.map(String.trim),
     Effect.mapError(() => new BenchmarkReportError({ reason: "Could not read the Node runtime version." }))
@@ -118,7 +191,7 @@ export const collectControlCenterBenchmarkMachine = Effect.fn("ControlCenterBenc
     logicalCpuCount: availableParallelism(),
     nodeVersion,
     platform: platform(),
-    storageClass: "unverified",
+    storageClass,
     totalMemoryBytes: totalmem()
   }).pipe(Effect.mapError(() => new BenchmarkReportError({ reason: "Machine metadata failed its result schema." })))
 })
@@ -129,6 +202,8 @@ export const makeControlCenterRuntimeBenchmarkReport = Effect.fn("ControlCenterB
 ) {
   const machine = yield* collectControlCenterBenchmarkMachine()
   const generatedAt = yield* DateTime.now
+  const portfolioTiming = summarizeBenchmarkTimingSamples(input.portfolioSamplesMilliseconds)
+  const timingEligible = controlCenterBenchmarkMachineIsTimingEligible(machine)
   return yield* Schema.decodeUnknownEffect(ControlCenterRuntimeBenchmarkReport)({
     caps: CONTROL_CENTER_BENCHMARK_CAPS,
     cardinalities: {
@@ -151,7 +226,7 @@ export const makeControlCenterRuntimeBenchmarkReport = Effect.fn("ControlCenterB
       portfolio: {
         requests: input.portfolioHttpRequests,
         sampleRuns: CONTROL_CENTER_BENCHMARK_SAMPLE_RUNS,
-        timing: summarizeBenchmarkTimingSamples(input.portfolioSamplesMilliseconds),
+        timing: portfolioTiming,
         warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
       },
       sse: {
@@ -165,7 +240,20 @@ export const makeControlCenterRuntimeBenchmarkReport = Effect.fn("ControlCenterB
         warmupRuns: CONTROL_CENTER_BENCHMARK_WARMUP_RUNS
       }
     },
-    timingIsAcceptanceAssertion: false,
+    timingAcceptance: timingEligible
+      ? {
+        budgetMilliseconds: CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
+        eligible: true,
+        passed: true,
+        reason: "eligible-and-within-budget"
+      }
+      : {
+        budgetMilliseconds: CONTROL_CENTER_PORTFOLIO_P95_BUDGET_MILLISECONDS,
+        eligible: false,
+        passed: false,
+        reason: "ineligible-machine"
+      },
+    timingIsAcceptanceAssertion: timingEligible,
     version: CONTROL_CENTER_RUNTIME_BENCHMARK_REPORT_VERSION
   }).pipe(
     Effect.mapError(() => new BenchmarkReportError({ reason: "Runtime benchmark evidence failed its report schema." }))

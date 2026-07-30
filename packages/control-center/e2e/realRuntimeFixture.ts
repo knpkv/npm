@@ -4,10 +4,15 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Agent as HttpAgent, request as httpRequest } from "node:http"
+import { createServer as createHttpsServer, type Server as HttpsServer } from "node:https"
 import { createServer } from "node:net"
 
 import { BenchmarkInvariantError } from "../scripts/benchmarkErrors.js"
@@ -54,12 +59,21 @@ import {
   realFakeDescriptor,
   realFakeScenario
 } from "./realRuntimeScenario.js"
+import { forwardedProxyHeaders } from "./trustedHttpsProxyHeaders.js"
 
 const SYNCHRONIZATION_INPUT = {
   workspaceId: REAL_WORKSPACE_ID,
   pluginConnectionId: REAL_PLUGIN_ID,
   streamKey: "releases"
 } satisfies ReleaseSynchronizationInput
+
+const TRUSTED_PROXY_TEST_CLIENT_HEADER = "x-control-center-test-proxy-client"
+
+const trustedProxyForwardedClient = (selector: string | ReadonlyArray<string> | undefined): string => {
+  if (selector === "rate-limit-a") return "192.168.1.26"
+  if (selector === "rate-limit-b") return "192.168.1.27"
+  return "192.168.1.25"
+}
 
 const acquireEphemeralPort = Effect.tryPromise({
   try: () =>
@@ -86,33 +100,210 @@ interface AllocatedFixture {
   readonly port: number
   readonly secretRoot: SecretRoot
   readonly staticRoot: string
+  readonly trustedHttpsProxyPort: number | null
+  readonly upstreamOrigin: string
 }
 
-const allocateFixture = Effect.gen(function*() {
+export interface StartRealRuntimeFixtureOptions {
+  readonly trustedHttpsProxy?: boolean
+}
+
+const allocateFixture = (options: StartRealRuntimeFixtureOptions) =>
+  Effect.gen(function*() {
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const dataRoot = yield* fileSystem.makeTempDirectory({ prefix: "control-center-browser-runtime-" })
+    return yield* protectPartialFixtureAllocation(
+      Effect.gen(function*() {
+        yield* fileSystem.chmod(dataRoot, 0o700)
+        const port = yield* acquireEphemeralPort
+        const trustedHttpsProxyPort = options.trustedHttpsProxy === true ? yield* acquireEphemeralPort : null
+        const upstreamOrigin = `http://127.0.0.1:${port}`
+        return {
+          dataRoot,
+          origin: trustedHttpsProxyPort === null ? upstreamOrigin : `https://127.0.0.1:${trustedHttpsProxyPort}`,
+          persistenceConfig: {
+            blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
+            busyTimeoutMilliseconds: 5_000,
+            databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
+            maxConnections: 1
+          },
+          port,
+          secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
+          staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url)),
+          trustedHttpsProxyPort,
+          upstreamOrigin
+        } satisfies AllocatedFixture
+      }),
+      fileSystem.remove(dataRoot, { force: true, recursive: true })
+    )
+  }).pipe(Effect.provide(NodeServices.layer))
+
+class TrustedHttpsProxyFixtureError extends Schema.TaggedErrorClass<TrustedHttpsProxyFixtureError>()(
+  "TrustedHttpsProxyFixtureError",
+  { reason: Schema.String }
+) {}
+
+interface TrustedHttpsProxy {
+  readonly agent: HttpAgent
+  readonly failure: () => TrustedHttpsProxyFixtureError | null
+  readonly server: HttpsServer
+}
+
+const shortFailureDescription = (failure: unknown): string =>
+  Predicate.isError(failure) && failure.message.length > 0 ? failure.message : String(failure)
+
+const closeHttpsProxy = async (proxy: TrustedHttpsProxy): Promise<void> => {
+  try {
+    await new Promise<void>((resolve, reject) => {
+      proxy.server.close((error) => (error === undefined ? resolve() : reject(error)))
+      proxy.server.closeAllConnections()
+    })
+  } finally {
+    proxy.agent.destroy()
+  }
+  const failure = proxy.failure()
+  if (failure !== null) throw failure
+}
+
+const startTrustedHttpsProxy = Effect.fn("controlCenter.startTrustedHttpsProxy")(function*(
+  allocated: AllocatedFixture
+) {
+  if (allocated.trustedHttpsProxyPort === null) {
+    return yield* new TrustedHttpsProxyFixtureError({ reason: "trusted HTTPS proxy port was not allocated" })
+  }
+  const trustedHttpsProxyPort = allocated.trustedHttpsProxyPort
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const dataRoot = yield* fileSystem.makeTempDirectory({ prefix: "control-center-browser-runtime-" })
-  return yield* protectPartialFixtureAllocation(
-    Effect.gen(function*() {
-      yield* fileSystem.chmod(dataRoot, 0o700)
-      const port = yield* acquireEphemeralPort
-      return {
-        dataRoot,
-        origin: `http://127.0.0.1:${port}`,
-        persistenceConfig: {
-          blobRoot: BlobRoot.make(path.join(dataRoot, "blobs")),
-          busyTimeoutMilliseconds: 5_000,
-          databaseUrl: LocalDatabaseUrl.make(`file:${path.join(dataRoot, "control-center.db")}`),
-          maxConnections: 1
-        },
-        port,
-        secretRoot: SecretRoot.make(path.join(dataRoot, "secrets")),
-        staticRoot: yield* path.fromFileUrl(new URL("../dist/client/", import.meta.url))
-      } satisfies AllocatedFixture
-    }),
-    fileSystem.remove(dataRoot, { force: true, recursive: true })
-  )
-}).pipe(Effect.provide(NodeServices.layer))
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const certificatePath = path.join(allocated.dataRoot, "trusted-proxy-certificate.pem")
+  const privateKeyPath = path.join(allocated.dataRoot, "trusted-proxy-private-key.pem")
+  const exitCode = yield* spawner
+    .exitCode(
+      ChildProcess.make(
+        "openssl",
+        [
+          "req",
+          "-x509",
+          "-newkey",
+          "rsa:2048",
+          "-nodes",
+          "-keyout",
+          privateKeyPath,
+          "-out",
+          certificatePath,
+          "-subj",
+          "/CN=127.0.0.1",
+          "-addext",
+          "subjectAltName=IP:127.0.0.1",
+          "-days",
+          "1"
+        ],
+        { stderr: "ignore", stdout: "ignore" }
+      )
+    )
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not generate the test TLS identity" }))
+    )
+  if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
+    return yield* new TrustedHttpsProxyFixtureError({ reason: "test TLS identity generation failed" })
+  }
+  const certificate = yield* fileSystem
+    .readFile(certificatePath)
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not read the test TLS certificate" }))
+    )
+  const privateKey = yield* fileSystem
+    .readFile(privateKeyPath)
+    .pipe(
+      Effect.mapError(() => new TrustedHttpsProxyFixtureError({ reason: "could not read the test TLS private key" }))
+    )
+  const publicOrigin = new URL(allocated.origin)
+  const upstreamOrigin = new URL(allocated.upstreamOrigin)
+
+  return yield* Effect.tryPromise({
+    try: () =>
+      new Promise<TrustedHttpsProxy>((resolve, reject) => {
+        let runtimeFailure: TrustedHttpsProxyFixtureError | null = null
+        let started = false
+        const agent = new HttpAgent({ keepAlive: true, maxSockets: 32 })
+        const server = createHttpsServer(
+          {
+            cert: Buffer.from(certificate),
+            key: Buffer.from(privateKey)
+          },
+          (request, response) => {
+            let downstreamAborted = false
+            const upstreamHeaders = forwardedProxyHeaders(request.headers)
+            delete upstreamHeaders[TRUSTED_PROXY_TEST_CLIENT_HEADER]
+            const proxyRequest = httpRequest(
+              {
+                agent,
+                headers: {
+                  ...upstreamHeaders,
+                  host: publicOrigin.host,
+                  "x-forwarded-for": trustedProxyForwardedClient(
+                    request.headers[TRUSTED_PROXY_TEST_CLIENT_HEADER]
+                  ),
+                  "x-forwarded-host": publicOrigin.host,
+                  "x-forwarded-proto": "https"
+                },
+                hostname: upstreamOrigin.hostname,
+                method: request.method,
+                path: request.url,
+                port: upstreamOrigin.port
+              },
+              (proxyResponse) => {
+                response.writeHead(
+                  proxyResponse.statusCode ?? 502,
+                  forwardedProxyHeaders(proxyResponse.headers)
+                )
+                proxyResponse.pipe(response)
+              }
+            )
+            proxyRequest.once("error", (cause) => {
+              if (!downstreamAborted) {
+                runtimeFailure = new TrustedHttpsProxyFixtureError({
+                  reason: `test HTTPS proxy upstream request failed: ${shortFailureDescription(cause)}`
+                })
+              }
+              if (!response.headersSent) response.writeHead(502)
+              response.end()
+            })
+            request.once("aborted", () => {
+              downstreamAborted = true
+              proxyRequest.destroy()
+            })
+            response.once("close", () => {
+              if (response.writableEnded) return
+              downstreamAborted = true
+              proxyRequest.destroy()
+            })
+            request.pipe(proxyRequest)
+          }
+        )
+        server.on("error", (cause) => {
+          const failure = new TrustedHttpsProxyFixtureError({
+            reason: `test HTTPS proxy failed: ${shortFailureDescription(cause)}`
+          })
+          if (!started) {
+            agent.destroy()
+            reject(failure)
+            return
+          }
+          runtimeFailure = failure
+        })
+        server.listen(trustedHttpsProxyPort, "127.0.0.1", () => {
+          started = true
+          resolve({ agent, failure: () => runtimeFailure, server })
+        })
+      }),
+    catch: (cause) =>
+      new TrustedHttpsProxyFixtureError({
+        reason: `could not start the test HTTPS proxy: ${shortFailureDescription(cause)}`
+      })
+  })
+})
 
 const seedFixture = (allocated: AllocatedFixture) =>
   Effect.gen(function*() {
@@ -150,12 +341,14 @@ const removeDataRoot = (dataRoot: string): Promise<void> =>
   )
 
 const disposeAll = async (
+  trustedHttpsProxy: TrustedHttpsProxy | undefined,
   serverRuntime: { readonly dispose: () => Promise<void> } | undefined,
   dataRoot: string
 ): Promise<void> => {
   const failures: Array<unknown> = []
   for (
     const dispose of [
+      trustedHttpsProxy === undefined ? undefined : () => closeHttpsProxy(trustedHttpsProxy),
       serverRuntime === undefined ? undefined : () => serverRuntime.dispose(),
       () => removeDataRoot(dataRoot)
     ]
@@ -171,10 +364,16 @@ const disposeAll = async (
 }
 
 export interface RealRuntimeFixture {
+  readonly applicationLogForbiddenValues: () => ReadonlyArray<{
+    readonly label: string
+    readonly value: string
+  }>
+  readonly applicationLogEntries: () => ReadonlyArray<string>
   readonly dispose: () => Promise<void>
+  readonly emitApplicationLogFixture: (message: string) => Promise<void>
   readonly lifecycleEvidence: () => RealRuntimeLifecycleEvidence
   readonly origin: string
-  readonly pairThroughUi: (page: Page) => Promise<void>
+  readonly pairThroughUi: (page: Page) => Promise<{ readonly consumedPairingCode: string }>
   readonly seedBenchmarkPersistence: () => Promise<RealRuntimePersistenceEvidence>
   readonly synchronizeUpdate: () => Promise<void>
   readonly writeBenchmarkReport: (
@@ -198,12 +397,31 @@ export interface RealRuntimePersistenceEvidence {
   readonly persistedReleases: number
 }
 
+/** Fail closed when the bounded release read observes either missing or surplus durable heads. */
+export const validateBenchmarkReleaseCardinality = Effect.fn(
+  "controlCenter.validateBenchmarkReleaseCardinality"
+)(function*(persistedReleases: number) {
+  if (persistedReleases !== CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases) {
+    return yield* new BenchmarkInvariantError({
+      reason: "Benchmark releases do not match the exact target cardinality."
+    })
+  }
+  return persistedReleases
+})
+
 /** Start one real Control Center server whose resources remain owned until explicit fixture disposal. */
-export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => {
-  const allocated = await Effect.runPromise(allocateFixture)
+export const startRealRuntimeFixture = async (
+  options: StartRealRuntimeFixtureOptions = {}
+): Promise<RealRuntimeFixture> => {
+  const allocated = await Effect.runPromise(allocateFixture(options))
   let serverRuntime: { readonly dispose: () => Promise<void> } | undefined
+  let trustedHttpsProxy: TrustedHttpsProxy | undefined
   try {
     await Effect.runPromise(seedFixture(allocated))
+    const applicationLogEntries: Array<string> = []
+    const applicationLogCapture = Logger.make<unknown, void>((options) => {
+      applicationLogEntries.push(Logger.formatJson.log(options))
+    })
     const fakeRuntime = await Effect.runPromise(makeFakePluginRuntime(realFakeScenario))
     const pluginConnections: PluginConnectionMapV1 = {
       contextEffect: () =>
@@ -212,7 +430,19 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
         ),
       invalidate: () => Effect.void
     }
-    const bindConfig = await Effect.runPromise(decodeBindConfig({ port: allocated.port }))
+    const bindConfig = await Effect.runPromise(
+      decodeBindConfig(
+        allocated.trustedHttpsProxyPort === null
+          ? { port: allocated.port }
+          : {
+            allowedHosts: [new URL(allocated.origin).host],
+            allowedOrigins: [allocated.origin],
+            port: allocated.port,
+            publicOrigin: allocated.origin,
+            trustedProxyAddresses: ["127.0.0.1"]
+          }
+      )
+    )
     const typedServerRuntime = ManagedRuntime.make(
       makeControlCenterServer({
         bindConfig,
@@ -225,7 +455,10 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
           owner: { _tag: "human", personId: REAL_OWNER_ID }
         },
         releaseSynchronization: { input: SYNCHRONIZATION_INPUT, pluginConnections }
-      }).pipe(Layer.provideMerge(NodeServices.layer))
+      }).pipe(
+        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Logger.layer([applicationLogCapture]))
+      )
     )
     serverRuntime = typedServerRuntime
     const context = await typedServerRuntime.context()
@@ -240,13 +473,26 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
     ) {
       throw new Error("real runtime did not finish its startup release synchronization")
     }
-    const ownerSessionToken = (
-      await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode))
-    ).sessionToken
+    const ownerSessionToken = (await typedServerRuntime.runPromise(auth.consumePairingCode(bootstrap.pairingCode)))
+      .sessionToken
+    const applicationLogForbiddenValues = [
+      { label: "bootstrap pairing code", value: Redacted.value(bootstrap.pairingCode) },
+      { label: "bootstrap owner session token", value: Redacted.value(ownerSessionToken) }
+    ]
+    if (allocated.trustedHttpsProxyPort !== null) {
+      trustedHttpsProxy = await Effect.runPromise(
+        startTrustedHttpsProxy(allocated).pipe(Effect.provide(NodeServices.layer))
+      )
+    }
 
     let disposed = false
     const lifecycleEvidence = { activeManagedServers: 1, disposedManagedServers: 0 }
     return {
+      applicationLogForbiddenValues: () => [...applicationLogForbiddenValues],
+      applicationLogEntries: () => [...applicationLogEntries],
+      emitApplicationLogFixture: async (message) => {
+        await typedServerRuntime.runPromise(Effect.logInfo(message))
+      },
       seedBenchmarkPersistence: async () => {
         const fixture = generateControlCenterBenchmarkFixture()
         const persistence = Context.get(context, Persistence)
@@ -344,7 +590,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
             )
             const releases = yield* persistence.releases.list(
               REAL_WORKSPACE_ID,
-              CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases
+              CONTROL_CENTER_BENCHMARK_FIXTURE_COUNTS.releases + 1
             )
             const entities = yield* persistence.entities.list(REAL_WORKSPACE_ID)
             const events = yield* persistence.events.streamState(REAL_WORKSPACE_ID)
@@ -355,7 +601,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
               generatedFiles: fixture.files.length,
               persistedEntities: entities.length,
               persistedEvents: events.headCursor,
-              persistedReleases: releases.length
+              persistedReleases: yield* validateBenchmarkReleaseCardinality(releases.length)
             }
           })
         )
@@ -363,7 +609,7 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
       dispose: async () => {
         if (disposed) return
         disposed = true
-        await disposeAll(typedServerRuntime, allocated.dataRoot)
+        await disposeAll(trustedHttpsProxy, typedServerRuntime, allocated.dataRoot)
         lifecycleEvidence.activeManagedServers = 0
         lifecycleEvidence.disposedManagedServers += 1
       },
@@ -376,9 +622,11 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
             permission: "workspace-owner"
           })
         )
+        const consumedPairingCode = Redacted.value(pairing.pairingCode)
         await page.goto(`${allocated.origin}/pair`)
-        await page.getByLabel("Pairing code").fill(Redacted.value(pairing.pairingCode))
+        await page.getByLabel("Pairing code").fill(consumedPairingCode)
         await page.getByRole("button", { name: "Pair browser" }).click()
+        return { consumedPairingCode }
       },
       synchronizeUpdate: async () => {
         const outcome = await typedServerRuntime.runPromise(
@@ -401,7 +649,10 @@ export const startRealRuntimeFixture = async (): Promise<RealRuntimeFixture> => 
         )
     }
   } catch (failure) {
-    return await disposeFailedFixtureSetup(failure, () => disposeAll(serverRuntime, allocated.dataRoot))
+    return await disposeFailedFixtureSetup(
+      failure,
+      () => disposeAll(trustedHttpsProxy, serverRuntime, allocated.dataRoot)
+    )
   }
 }
 

@@ -125,12 +125,17 @@
 }
 
 .preset:hover,
+.suggestion:hover {
+  border-color: var(--rly-color-agent);
+  background: var(--rly-color-surface-2);
+}
+
 .preset:focus-visible,
-.suggestion:hover,
 .suggestion:focus-visible {
   border-color: var(--rly-color-agent);
   background: var(--rly-color-surface-2);
-  outline: none;
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
 
 .preset:disabled,
