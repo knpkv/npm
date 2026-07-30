@@ -209,11 +209,21 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         Effect.mapError(unavailable)
       )
       const catalog = yield* runtimes.catalog().pipe(Effect.mapError(unavailable))
-      const providers = catalog.providers.filter(({ providerId }) =>
-        settings.settings.agent.allowedProviders.some(
-          (allowedProvider) => allowedProvider === String(providerId)
+      const providers = catalog.providers
+        .filter(({ providerId }) =>
+          settings.settings.agent.allowedProviders.some(
+            (allowedProvider) => allowedProvider === String(providerId)
+          )
         )
-      )
+        .map((provider) => {
+          if (settings.settings.agent.toolPolicy === "review-sandbox") return provider
+          const { reviewProfile: _, ...withoutReviewProfile } = provider
+          return {
+            ...withoutReviewProfile,
+            capabilities: provider.capabilities.filter((capability) => capability !== "pr-review")
+          }
+        })
+        .filter(({ capabilities }) => capabilities.length > 0)
       const defaultProvider = settings.settings.agent.defaultProvider
       const orderedProviders = defaultProvider === null
         ? providers

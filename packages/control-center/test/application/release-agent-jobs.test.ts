@@ -9,6 +9,7 @@ import {
   AgentModelId,
   DurableAgentProviderId,
   ReleaseAgentThreadCursor,
+  type ReviewAgentProfile,
   ReviewAgentProfileId
 } from "../../src/api/agent.js"
 import {
@@ -63,6 +64,7 @@ const workspaceSettingsRecord = (
   defaults: {
     readonly defaultModel?: string | null
     readonly defaultProvider?: string | null
+    readonly toolPolicy?: "read-only" | "review-sandbox"
   } = {}
 ) =>
   WorkspaceSettingsRecord.make({
@@ -75,7 +77,8 @@ const workspaceSettingsRecord = (
         ...DEFAULT_WORKSPACE_SETTINGS.agent,
         allowedProviders,
         defaultModel: defaults.defaultModel ?? null,
-        defaultProvider: defaults.defaultProvider ?? null
+        defaultProvider: defaults.defaultProvider ?? null,
+        toolPolicy: defaults.toolPolicy ?? "read-only"
       }
     }),
     settingsDigest: ContentBlobDigest.make("1".repeat(64)),
@@ -274,6 +277,65 @@ describe("release agent jobs", () => {
         (yield* service.providers(WORKSPACE_ID)).providers.map(({ providerId }) => providerId),
         ["codex"]
       )
+    })))
+
+  it.effect("hides review capabilities unless the durable tool policy enables the review sandbox", () =>
+    withPersistence(Effect.gen(function*() {
+      const persistence = yield* Persistence
+      const reviewProfile = {
+        profileId: ReviewAgentProfileId.make("codex:review-model:sbx"),
+        label: "Full-project review",
+        budgetMillis: 1_200_000,
+        networkAccess: "blocked",
+        sandbox: "sbx"
+      } satisfies ReviewAgentProfile
+      const catalogRegistry = AgentRuntimeRegistry.of({
+        ...configuredRegistry,
+        catalog: () =>
+          Effect.succeed({
+            providers: [{
+              providerId: DurableAgentProviderId.make("codex"),
+              displayName: "Codex",
+              models: [AgentModelId.make("review-model")],
+              capabilities: ["release-chat", "pr-review"],
+              health: "available",
+              reviewProfile
+            }]
+          })
+      })
+      const serviceFor = (toolPolicy: "read-only" | "review-sandbox") =>
+        makeReleaseAgentJobs.pipe(
+          Effect.provideService(
+            Persistence,
+            Persistence.of({
+              ...persistence,
+              workspaceSettings: {
+                ...persistence.workspaceSettings,
+                get: () => Effect.succeed(workspaceSettingsRecord(["codex"], { toolPolicy }))
+              }
+            })
+          ),
+          Effect.provideService(AgentRuntimeRegistry, catalogRegistry)
+        )
+
+      const readOnly = yield* serviceFor("read-only")
+      assert.deepStrictEqual((yield* readOnly.providers(WORKSPACE_ID)).providers, [{
+        providerId: DurableAgentProviderId.make("codex"),
+        displayName: "Codex",
+        models: [AgentModelId.make("review-model")],
+        capabilities: ["release-chat"],
+        health: "available"
+      }])
+
+      const reviewSandbox = yield* serviceFor("review-sandbox")
+      assert.deepStrictEqual((yield* reviewSandbox.providers(WORKSPACE_ID)).providers, [{
+        providerId: DurableAgentProviderId.make("codex"),
+        displayName: "Codex",
+        models: [AgentModelId.make("review-model")],
+        capabilities: ["release-chat", "pr-review"],
+        health: "available",
+        reviewProfile
+      }])
     })))
 
   it.effect("orders the configured default provider and model first in the filtered catalog", () =>

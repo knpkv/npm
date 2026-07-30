@@ -8,6 +8,7 @@ import { HttpApiTest } from "effect/unstable/httpapi"
 
 import {
   AgentModelId,
+  type AgentProviderCatalog,
   DurableAgentProviderId,
   PublishedReviewComment,
   PullRequestReviewNotStarted,
@@ -2355,6 +2356,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: (input) =>
@@ -2404,6 +2406,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2437,6 +2440,55 @@ describe("Control Center API handlers", () => {
           profile: "read-only"
         }
       })
+    }))
+
+  it.effect("admits lazy provider catalog initialization only before server drain", () =>
+    Effect.gen(function*() {
+      const lifecycle = yield* ServerLifecycle.make
+      const providerCalls = yield* Ref.make(0)
+      const catalog = {
+        providers: [{
+          providerId: DurableAgentProviderId.make("openai-compatible"),
+          models: [AgentModelId.make("review-model")],
+          capabilities: ["release-chat"],
+          health: "available"
+        }]
+      } satisfies AgentProviderCatalog
+      const jobs = Layer.succeed(ReleaseAgentJobs, {
+        enqueue: () => Effect.die("not used"),
+        providers: () => Ref.update(providerCalls, (count) => count + 1).pipe(Effect.as(catalog)),
+        replay: () => Effect.die("not used")
+      })
+      const handler = agentHandlersLayer.pipe(
+        Layer.provide(pullRequestReviewsLayer),
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle)),
+        Layer.provide(jobs),
+        Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
+      )
+
+      const result = yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["agent"])
+        const accepted = yield* client.agent.providers()
+        yield* lifecycle.beginDrain
+        const rejected = yield* client.agent.providers().pipe(Effect.result)
+        return { accepted, rejected }
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          handler
+        ])
+      )
+
+      assert.deepStrictEqual(result.accepted, catalog)
+      assert.strictEqual(yield* Ref.get(providerCalls), 1)
+      assert.isTrue(Result.isFailure(result.rejected))
+      if (Result.isFailure(result.rejected)) {
+        assert.strictEqual(result.rejected.failure._tag, "ServiceUnavailableApiError")
+      }
     }))
 
   it.effect("reads and enqueues immutable pull-request reviews in the authenticated workspace", () =>
@@ -2595,6 +2647,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2868,6 +2921,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -2902,6 +2956,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(reviews),
         Layer.provide(approverMiddleware),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("not used")
@@ -2975,6 +3030,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -3029,6 +3085,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -3071,6 +3128,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(sessionMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )
@@ -3109,6 +3167,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(releaseAgentJobsLayer),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, {
           runTurn: () => Effect.die("watcher reached the local agent runtime")
@@ -3149,6 +3208,7 @@ describe("Control Center API handlers", () => {
         Layer.provide(pullRequestReviewsLayer),
         Layer.provide(watcherMiddlewareLayer),
         Layer.provide(mutationMiddlewareLayer),
+        Layer.provide(ServerLifecycle.layer),
         Layer.provide(jobs),
         Layer.provide(Layer.succeed(ReleaseAgentTurns, { runTurn: () => Effect.die("not used") }))
       )

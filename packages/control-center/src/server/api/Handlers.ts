@@ -1145,17 +1145,25 @@ export const agentHandlersLayer = HttpApiBuilder.group(
       const agent = yield* ReleaseAgentTurns
       const jobs = yield* ReleaseAgentJobs
       const reviews = yield* PullRequestReviews
+      const lifecycle = yield* ServerLifecycle
       return handlers
         .handle("providers", () =>
-          Effect.gen(function*() {
-            const session = yield* CurrentSession
-            if (session.permission !== "workspace-owner") {
-              return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
-            }
-            return yield* jobs.providers(session.workspaceId).pipe(
-              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* jobs.providers(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+            })
+          ).pipe(
+            Effect.catchTag(
+              "ServerDraining",
+              () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
-          }))
+          ))
         .handle("turn", ({ params, payload }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession

@@ -222,6 +222,48 @@ describe("WorkspaceSettingsRepository", () => {
       })
     ))
 
+  it.effect("rolls back an interrupted default initialization and repairs it on retry", () =>
+    withPersistence(
+      Effect.gen(function*() {
+        yield* seedAuthority
+        const persistence = yield* Persistence
+        const { sql } = yield* Database
+        yield* sql`CREATE TRIGGER reject_initial_workspace_settings_version
+          BEFORE INSERT ON workspace_settings_versions
+          WHEN NEW.workspace_id = '01890f6f-6d6a-7cc0-98d2-000000000170'
+          BEGIN
+            SELECT RAISE(ABORT, 'injected initial settings version failure');
+          END`
+
+        const interrupted = yield* persistence.workspaceSettings.get(workspaceId).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(interrupted))
+
+        const interruptedHeads = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings
+          WHERE workspace_id = ${workspaceId}`
+        const interruptedVersions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings_versions
+          WHERE workspace_id = ${workspaceId}`
+        assert.strictEqual(interruptedHeads[0]?.count, 0)
+        assert.strictEqual(interruptedVersions[0]?.count, 0)
+
+        yield* sql`DROP TRIGGER reject_initial_workspace_settings_version`
+        const repaired = yield* persistence.workspaceSettings.get(workspaceId)
+        const repeated = yield* persistence.workspaceSettings.get(workspaceId)
+        assert.strictEqual(repaired.revision, 1)
+        assert.deepStrictEqual(repeated, repaired)
+
+        const repairedHeads = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings
+          WHERE workspace_id = ${workspaceId}`
+        const repairedVersions = yield* sql<{ readonly count: number }>`SELECT COUNT(*) AS count
+          FROM workspace_settings_versions
+          WHERE workspace_id = ${workspaceId}`
+        assert.strictEqual(repairedHeads[0]?.count, 1)
+        assert.strictEqual(repairedVersions[0]?.count, 1)
+      })
+    ))
+
   it.effect(
     "forces two sessions through explicit conflict recovery without losing either change",
     () =>

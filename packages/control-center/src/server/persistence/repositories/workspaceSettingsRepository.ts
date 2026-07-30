@@ -379,25 +379,29 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
       Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.encode-default" }))
     )
     const settingsDigest = yield* digestText(settingsJson)
-    yield* sql`INSERT INTO workspace_settings (
-      workspace_id, schema_version, revision, settings_json, settings_digest,
-      policy_revision, created_at, updated_at, updated_by_person_id
+    yield* database.transaction(
+      Effect.gen(function*() {
+        yield* sql`INSERT INTO workspace_settings (
+          workspace_id, schema_version, revision, settings_json, settings_digest,
+          policy_revision, created_at, updated_at, updated_by_person_id
+        )
+        SELECT workspace_id, 1, 1, ${settingsJson}, ${settingsDigest},
+          1, created_at, created_at, NULL
+        FROM workspaces
+        WHERE workspace_id = ${workspaceId}
+        ON CONFLICT(workspace_id) DO NOTHING`
+        yield* sql`INSERT INTO workspace_settings_versions (
+          workspace_id, schema_version, revision, settings_json, settings_digest,
+          policy_revision, created_at, updated_at, updated_by_person_id
+        )
+        SELECT workspace_id, schema_version, revision, settings_json, settings_digest,
+          policy_revision, created_at, updated_at, updated_by_person_id
+        FROM workspace_settings
+        WHERE workspace_id = ${workspaceId}
+          AND revision = 1
+        ON CONFLICT(workspace_id, revision) DO NOTHING`
+      })
     )
-    SELECT workspace_id, 1, 1, ${settingsJson}, ${settingsDigest},
-      1, created_at, created_at, NULL
-    FROM workspaces
-    WHERE workspace_id = ${workspaceId}
-    ON CONFLICT(workspace_id) DO NOTHING`
-    yield* sql`INSERT INTO workspace_settings_versions (
-      workspace_id, schema_version, revision, settings_json, settings_digest,
-      policy_revision, created_at, updated_at, updated_by_person_id
-    )
-    SELECT workspace_id, schema_version, revision, settings_json, settings_digest,
-      policy_revision, created_at, updated_at, updated_by_person_id
-    FROM workspace_settings
-    WHERE workspace_id = ${workspaceId}
-      AND revision = 1
-    ON CONFLICT(workspace_id, revision) DO NOTHING`
   })
 
   const replayCommittedMutation = Effect.fn("WorkspaceSettingsRepository.replayCommittedMutation")(function*(
