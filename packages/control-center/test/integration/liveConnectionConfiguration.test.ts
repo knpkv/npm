@@ -16,7 +16,8 @@ import {
   LiveIntegrationRequestError,
   makeSecretSafeLiveHttpClient,
   redactAuthenticatedLiveResponse,
-  redactLiveRequestFailure
+  redactLiveRequestFailure,
+  withSecretSafePairingCode
 } from "./liveSecretAssertions.js"
 
 const completeEnvironment = {
@@ -221,5 +222,29 @@ describe("live connection configuration", () => {
         assertSensitiveTextAbsent(JSON.stringify(result.failure), tokenCanary)
         assertSensitiveTextAbsent(String(result.failure), tokenCanary)
       }
+    }))
+
+  it.effect("redacts pairing-code validation before invoking the credential-bearing client", () =>
+    Effect.gen(function*() {
+      const pairingCodeCanary = "live-invalid-pairing-code-canary"
+      let clientCalls = 0
+      const invokeClient = () => {
+        clientCalls += 1
+        return Effect.succeed("client-reached")
+      }
+
+      const invalid = yield* withSecretSafePairingCode(pairingCodeCanary, invokeClient).pipe(Effect.result)
+      assert.strictEqual(clientCalls, 0)
+      assert.isTrue(Result.isFailure(invalid))
+      if (Result.isFailure(invalid)) {
+        assert.instanceOf(invalid.failure, LiveIntegrationRequestError)
+        assert.strictEqual(invalid.failure.operation, "pair-owner")
+        assertSensitiveTextAbsent(JSON.stringify(invalid.failure), pairingCodeCanary)
+        assertSensitiveTextAbsent(String(invalid.failure), pairingCodeCanary)
+      }
+
+      const valid = yield* withSecretSafePairingCode("ab".repeat(32), invokeClient)
+      assert.strictEqual(valid, "client-reached")
+      assert.strictEqual(clientCalls, 1)
     }))
 })

@@ -4,6 +4,8 @@ import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
+import { PairingCode } from "../../src/api/session.js"
+
 const LiveIntegrationRequestOperation = Schema.Literals(["authenticated-api", "create-connection", "pair-owner"])
 
 type LiveIntegrationRequestOperation = typeof LiveIntegrationRequestOperation.Type
@@ -24,6 +26,16 @@ export const redactLiveRequestFailure =
 
 /** Decode boundary for every cookie/CSRF-bearing generated-client operation. */
 export const redactAuthenticatedLiveResponse = redactLiveRequestFailure("authenticated-api")
+
+/** Validate and consume a one-time pairing credential inside one redacted boundary. */
+export const withSecretSafePairingCode = <A, E, R>(
+  pairingCode: string,
+  operation: (pairingCode: PairingCode) => Effect.Effect<A, E, R>
+): Effect.Effect<A, LiveIntegrationRequestError, R> =>
+  Effect.try({
+    try: () => PairingCode.make(pairingCode),
+    catch: () => new LiveIntegrationRequestError({ operation: "pair-owner" })
+  }).pipe(Effect.flatMap(operation), redactLiveRequestFailure("pair-owner"))
 
 /**
  * Attach credential-bearing headers and replace failures at the underlying

@@ -1526,6 +1526,15 @@ module.exports = {
         "strictEqual"
       ])
       const isStringLiteral = (node) => node?.type === "Literal" && typeof node.value === "string"
+      const booleanComparisonOperators = new Set(["!=", "!==", "<", "<=", "==", "===", ">", ">="])
+      const booleanCallMethods = new Set(["every", "includes", "some", "test"])
+      const isProvenBooleanOperand = (node) =>
+        (node.type === "BinaryExpression" && booleanComparisonOperators.has(node.operator)) ||
+        (node.type === "UnaryExpression" && node.operator === "!") ||
+        (node.type === "CallExpression" &&
+          ((node.callee.type === "MemberExpression" &&
+            booleanCallMethods.has(staticPropertyName(node.callee.property))) ||
+            (node.callee.type === "Identifier" && node.callee.name === "Boolean")))
 
       return {
         CallExpression(node) {
@@ -1546,7 +1555,7 @@ module.exports = {
             argumentsWithStableIds.length > 0 &&
             (firstArgument === undefined ||
               firstArgument.type === "SpreadElement" ||
-              isDirectProviderImmutableId(firstArgument) ||
+              !isProvenBooleanOperand(firstArgument) ||
               (node.arguments[1] !== undefined && !isStringLiteral(node.arguments[1])))
           const awsIdentityArrayLengthIsUnsafe =
             method === "lengthOf" && firstArgument?.type === "Identifier" && firstArgument.name === "awsIdentities"

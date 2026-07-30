@@ -16,7 +16,6 @@ import {
   type CreatePluginConnectionValue,
   PluginConfigurationKey
 } from "../../src/api/plugins.js"
-import { PairingCode } from "../../src/api/session.js"
 import { PersonId, PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import type { ProviderId } from "../../src/domain/sourceRevision.js"
 import { Database, databaseLayer } from "../../src/server/persistence/Database.js"
@@ -33,7 +32,8 @@ import {
   assertSensitiveTextAbsent,
   makeSecretSafeLiveHttpClient,
   redactAuthenticatedLiveResponse,
-  redactLiveRequestFailure
+  redactLiveRequestFailure,
+  withSecretSafePairingCode
 } from "./liveSecretAssertions.js"
 import { startWithRetriedEphemeralPort } from "./liveServerPort.js"
 
@@ -190,10 +190,14 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     httpClient: httpClient.pipe(makeSecretSafeLiveHttpClient("pair-owner", { origin })),
     transformResponse: redactLiveRequestFailure("pair-owner")
   })
-  const [paired, pairResponse] = yield* pairClient.session.pair({
-    payload: { pairingCode: PairingCode.make(Redacted.value(bootstrap.pairingCode)) },
-    responseMode: "decoded-and-response"
-  }).pipe(redactLiveRequestFailure("pair-owner"))
+  const [paired, pairResponse] = yield* withSecretSafePairingCode(
+    Redacted.value(bootstrap.pairingCode),
+    (pairingCode) =>
+      pairClient.session.pair({
+        payload: { pairingCode },
+        responseMode: "decoded-and-response"
+      })
+  )
   const sessionCookie = pairResponse.cookies.cookies.cc_session
   if (sessionCookie === undefined) {
     return yield* Effect.die("live integration pairing did not issue a session cookie")

@@ -153,9 +153,10 @@ await assertRuleDiagnostics({
     assert.equal(left.identity.providerImmutableId, right.identity.providerImmutableId)
     assert.lengthOf(awsIdentities, 2)
     assert.isTrue(identity.providerImmutableId, "constant message")
+    assert.isTrue(String(identity.providerImmutableId), "constant message")
     assert.isTrue(pattern.test(identity.providerImmutableId), dynamicMessage)
   `,
-  expected: 6,
+  expected: 7,
   filePath: "packages/control-center/test/integration/live-provider-id-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
