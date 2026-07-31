@@ -24,6 +24,7 @@ import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcess } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
+import * as ChildEnv from "../ChildEnv.js"
 import { ConfigService, defaultSandboxConfig, type SandboxConfig } from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
@@ -188,7 +189,15 @@ const makeSandboxService = Effect.gen(function*() {
                   workspacePath
                 ],
                 {
-                  env: { AWS_PROFILE: params.profile, AWS_DEFAULT_REGION: params.region },
+                  // `git` and the `aws` credential helper both resolve from PATH, so the
+                  // profile overrides must extend the inherited environment. Ambient AWS
+                  // credentials would outrank them, so profileScopedEnv drops those.
+                  env: ChildEnv.profileScopedEnv({
+                    AWS_PROFILE: params.profile,
+                    AWS_DEFAULT_REGION: params.region,
+                    AWS_REGION: params.region
+                  }),
+                  extendEnv: true,
                   stderr: "pipe"
                 }
               )

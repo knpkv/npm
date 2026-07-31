@@ -415,6 +415,283 @@ const directChildProcessMakeCall = (identifier) => {
   return call?.type === "CallExpression" && call.callee === member ? call : undefined
 }
 
+const CHILD_PROCESS_OPTION_DEPTH_LIMIT = 8
+
+/**
+ * True when the binding is reassigned or has a property written to it.
+ *
+ * ESLint counts `options.extendEnv = true` as a *read* of `options`, so a
+ * write-reference check alone concludes the initializer is the whole story and
+ * reports a missing `extendEnv` that the next statement supplies. Reporting
+ * valid configuration is worse than missing an invalid one, so any mutation makes
+ * the shape unresolvable rather than assumed-complete.
+ */
+const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedReference, knownOptionArguments) =>
+  variable.references.some((reference) => {
+    const identifier = reference.identifier
+    // The reference being resolved is the options argument itself, not a mutation.
+    if (identifier === resolvedReference || identifier === definition.name) return false
+    // Nor is a sibling `ChildProcess.make` that consumes the same object: a
+    // recognised consumer cannot mutate it, so sharing one options binding across
+    // calls must keep reporting rather than silence every call.
+    if (knownOptionArguments?.has(identifier) === true) return false
+    // A mutation after the command was created cannot retroactively change it, so
+    // later references do not matter — but only when both sit in the same
+    // immediately-executing scope. Across a function boundary textual order is not
+    // execution order: `const run = () => make(..., options); configure(options);
+    // run()` configures before the command is ever built, so the cutoff is skipped
+    // and the mutation counts, leaving the call unresolved rather than reported.
+    if (
+      enclosingFunction(identifier) === enclosingFunction(resolvedReference) &&
+      identifier.range[0] > resolvedReference.range[0]
+    ) {
+      return false
+    }
+    if (reference.isWrite()) return true
+    const parent = identifier.parent
+    if (parent === undefined || parent === null) return false
+    // A property write, increment, or delete through the binding.
+    if (parent.type === "MemberExpression" && parent.object === identifier) {
+      const target = parent.parent
+      return (
+        (target?.type === "AssignmentExpression" && target.left === parent) ||
+        (target?.type === "UpdateExpression" && target.argument === parent) ||
+        (target?.type === "UnaryExpression" && target.operator === "delete" && target.argument === parent)
+      )
+    }
+    // Anywhere the binding escapes, something out of view may complete it —
+    // `configure(options)` adding `extendEnv` is indistinguishable from a pure
+    // read without interprocedural analysis, so treat escape as unresolvable.
+    if (
+      (parent.type === "CallExpression" || parent.type === "NewExpression") &&
+      parent.arguments.includes(identifier)
+    ) {
+      return true
+    }
+    if (parent.type === "ReturnStatement" && parent.argument === identifier) return true
+    if (parent.type === "AssignmentExpression" && parent.right === identifier) return true
+    if (parent.type === "VariableDeclarator" && parent.init === identifier) return true
+    if (parent.type === "Property" && parent.value === identifier) return true
+    if (parent.type === "ArrayExpression") return true
+    return false
+  })
+
+/** Whether an expression is unambiguously `undefined`. */
+const isDefinitelyUndefined = (expression) => {
+  const value = unwrapTypeExpression(expression)
+  if (value.type === "Identifier") return value.name === "undefined"
+  return value.type === "UnaryExpression" && value.operator === "void"
+}
+
+/** Bound on alias-chain following; chains this long do not occur in practice. */
+const CHILD_PROCESS_ALIAS_ROUNDS = 4
+
+/**
+ * The static name of a computed property key, when it has one.
+ *
+ * `{ ["env"]: v }` and `` { [`env`]: v } `` name `env` as definitely as `{ env: v }`
+ * does. An identifier or interpolated key returns undefined — deliberately not
+ * treating a variable *named* `env` as the key `"env"`, since its runtime value
+ * is what decides.
+ */
+const staticComputedKeyName = (key) => {
+  if (key.type === "Literal" && typeof key.value === "string") return key.value
+  if (key.type === "TemplateLiteral" && key.expressions.length === 0) {
+    return key.quasis[0]?.value.cooked
+  }
+  return undefined
+}
+
+/**
+ * Given a reference to a known ChildProcess binding, returns any `const` aliases
+ * declared from it.
+ *
+ * Handles `const Local = ChildProcess`, `const Local = Process.ChildProcess`, and
+ * `const { make } = ChildProcess` including a renamed key. Anything else — `let`,
+ * a call result, a computed key, a nested pattern — yields nothing, leaving the
+ * call unchecked rather than guessed at.
+ */
+const aliasedChildProcessBindings = (context, identifier, isBarrel) => {
+  const empty = { moduleBindings: [], makeBindings: [] }
+  // For a barrel binding the module object is `Process.ChildProcess`, one hop out.
+  let initializer = identifier
+  if (isBarrel) {
+    const member = identifier.parent
+    if (
+      member?.type !== "MemberExpression" ||
+      member.object !== identifier ||
+      staticPropertyName(member.property) !== "ChildProcess"
+    ) {
+      return empty
+    }
+    initializer = member
+  }
+  // `const spawn = ChildProcess.make` extracts the method rather than the module.
+  const asMember = initializer.parent
+  if (
+    asMember?.type === "MemberExpression" &&
+    asMember.object === initializer &&
+    staticPropertyName(asMember.property) === "make" &&
+    asMember.parent?.type === "VariableDeclarator" &&
+    asMember.parent.init === asMember &&
+    asMember.parent.parent?.kind === "const" &&
+    asMember.parent.id.type === "Identifier"
+  ) {
+    const extracted = context.sourceCode
+      .getDeclaredVariables(asMember.parent)
+      .find((variable) => variable.name === asMember.parent.id.name)
+    return extracted === undefined ? empty : { moduleBindings: [], makeBindings: [extracted] }
+  }
+  const declarator = initializer.parent
+  if (
+    declarator?.type !== "VariableDeclarator" ||
+    declarator.init !== initializer ||
+    declarator.parent?.kind !== "const"
+  ) {
+    return empty
+  }
+  const declared = context.sourceCode.getDeclaredVariables(declarator)
+  if (declarator.id.type === "Identifier") {
+    const binding = declared.find((variable) => variable.name === declarator.id.name)
+    return binding === undefined ? empty : { moduleBindings: [binding], makeBindings: [] }
+  }
+  if (declarator.id.type !== "ObjectPattern") return empty
+  const makeBindings = []
+  for (const property of declarator.id.properties) {
+    if (
+      property.type !== "Property" ||
+      property.computed ||
+      staticPropertyName(property.key) !== "make" ||
+      property.value.type !== "Identifier"
+    ) {
+      continue
+    }
+    const binding = declared.find((variable) => variable.name === property.value.name)
+    if (binding !== undefined) makeBindings.push(binding)
+  }
+  return { moduleBindings: [], makeBindings }
+}
+
+/**
+ * Given a reference to a known `make` binding, returns the `const` alias declared
+ * from it, so `const spawn = make` is tracked as another `make` binding.
+ *
+ * Only the plain immutable form is followed; `let`, destructuring, `.bind`, and
+ * call results stay unresolved.
+ */
+const aliasedMakeBinding = (context, identifier) => {
+  const declarator = identifier.parent
+  if (
+    declarator?.type !== "VariableDeclarator" ||
+    declarator.init !== identifier ||
+    declarator.parent?.kind !== "const" ||
+    declarator.id.type !== "Identifier"
+  ) {
+    return undefined
+  }
+  return context.sourceCode.getDeclaredVariables(declarator).find((variable) => variable.name === declarator.id.name)
+}
+
+/**
+ * Resolves `Process.ChildProcess.make(...)`, the barrel namespace form, to its
+ * call expression. The plain `ChildProcess.make(...)` shape is handled by
+ * `directChildProcessMakeCall`; here the binding is one member hop further out.
+ */
+const barrelChildProcessMakeCall = (identifier) => {
+  const namespaced = identifier.parent
+  if (
+    namespaced?.type !== "MemberExpression" ||
+    namespaced.object !== identifier ||
+    staticPropertyName(namespaced.property) !== "ChildProcess"
+  ) {
+    return undefined
+  }
+  const member = namespaced.parent
+  if (
+    member?.type !== "MemberExpression" ||
+    member.object !== namespaced ||
+    staticPropertyName(member.property) !== "make"
+  ) {
+    return undefined
+  }
+  const call = member.parent
+  return call?.type === "CallExpression" && call.callee === member ? call : undefined
+}
+
+/**
+ * Resolves the options argument of a `ChildProcess.make` call to the object
+ * literal that produced it, following `const` bindings and any `Object.freeze`
+ * wrapper.
+ *
+ * Returns undefined when the shape cannot be established statically — a
+ * reassignable binding, a call result, or the args array of a two-argument call.
+ * Those are left to review rather than guessed at, since interprocedural
+ * inference would trade real false positives for coverage.
+ */
+const resolvedChildProcessOptions = (context, argument, depth = 0, knownOptionArguments = undefined) => {
+  if (argument === undefined || argument.type === "SpreadElement") return undefined
+  if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
+  const expression = unwrapTypeExpression(argument)
+  const unfrozen = frozenArgument(context, expression) ?? expression
+  if (unfrozen.type === "ObjectExpression") return unfrozen
+  if (unfrozen.type !== "Identifier") return undefined
+  const variable = resolvedVariable(context, unfrozen)
+  if (variable === undefined || variable.defs.length !== 1) return undefined
+  const [definition] = variable.defs
+  if (
+    definition.type !== "Variable" ||
+    definition.parent.kind !== "const" ||
+    definition.node.type !== "VariableDeclarator" ||
+    definition.node.init === null
+  ) {
+    return undefined
+  }
+  if (isMutatedChildProcessOptionsBinding(variable, definition, unfrozen, knownOptionArguments)) return undefined
+  return resolvedChildProcessOptions(context, definition.node.init, depth + 1, knownOptionArguments)
+}
+
+/**
+ * Resolves the option properties a `ChildProcess.make` options object effectively
+ * carries, following statically resolvable spreads in source order.
+ *
+ * Returns a map of name to "is definitely undefined", or undefined when any
+ * spread operand cannot be resolved — silently ignoring an opaque spread would
+ * report "no env" on an object that may well set one.
+ *
+ * Source order matters. An earlier comment here claimed it did not, which held
+ * only while the rule tracked bare presence; once `extendEnv: undefined` began to
+ * count as unstated, a later property overriding a spread-supplied value changed
+ * the outcome, and `{ ...safeBase, extendEnv: undefined }` slipped through. Last
+ * write wins, exactly as it does at runtime.
+ */
+const effectiveChildProcessOptions = (context, argument, depth = 0, knownOptionArguments = undefined) => {
+  if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
+  const options = resolvedChildProcessOptions(context, argument, depth, knownOptionArguments)
+  if (options === undefined) return undefined
+  const resolved = new Map()
+  for (const property of options.properties) {
+    if (property.type === "SpreadElement") {
+      const nested = effectiveChildProcessOptions(context, property.argument, depth + 1, knownOptionArguments)
+      if (nested === undefined) return undefined
+      for (const [name, isUndefined] of nested) resolved.set(name, isUndefined)
+      continue
+    }
+    if (property.type !== "Property") continue
+    let name
+    if (property.computed) {
+      // A key whose value is only known at runtime could be `extendEnv`, so the
+      // object's shape is unknowable and reporting would risk a false positive.
+      name = staticComputedKeyName(property.key)
+      if (name === undefined) return undefined
+    } else {
+      name = staticPropertyName(property.key)
+      if (name === undefined) continue
+    }
+    resolved.set(name, isDefinitelyUndefined(property.value))
+  }
+  return resolved
+}
+
 const isEffectModule = (context, expression) => {
   if (expression.type === "Identifier") {
     return (
@@ -1199,6 +1476,147 @@ module.exports = {
               report(reference.identifier, "rawProcessForbidden")
             }
           }
+        }
+      }
+    }
+  },
+  "require-explicit-child-process-env-inheritance": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require ChildProcess.make options that set env to also declare extendEnv explicitly",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        implicitInheritance:
+          "Declare extendEnv explicitly next to env. It defaults to falsy, so env alone replaces the child environment and drops PATH; use extendEnv: true to augment, or extendEnv: false with an env that carries PATH itself."
+      }
+    },
+    create(context) {
+      // Namespace or `ChildProcess`-object bindings, used as `ChildProcess.make(...)`.
+      const moduleBindings = []
+      // Barrel namespace bindings, used as `Process.ChildProcess.make(...)`.
+      const barrelBindings = []
+      // `make` imported directly from the module, possibly aliased, and called
+      // bare. Resolving the binding is what separates this from every unrelated
+      // function named `make`, which is why ast-grep cannot own this case.
+      const makeBindings = []
+
+      const checkCall = (call, knownOptionArguments) => {
+        const argument = call.arguments.at(-1)
+        const options = resolvedChildProcessOptions(context, argument, 0, knownOptionArguments)
+        if (options === undefined) return
+        const resolved = effectiveChildProcessOptions(context, argument, 0, knownOptionArguments)
+        if (resolved === undefined) return
+        // `env: undefined` leaves `options.env` unset, so Effect inherits normally
+        // and nothing is dropped; only a really-set `env` needs `extendEnv` stated.
+        const setsEnv = resolved.get("env") === false
+        const statesExtendEnv = resolved.get("extendEnv") === false
+        if (setsEnv && !statesExtendEnv) {
+          context.report({ node: options, messageId: "implicitInheritance" })
+        }
+      }
+
+      /**
+       * Follows `const` aliases of an already-known binding, so
+       * `const Local = ChildProcess` and `const { make } = ChildProcess` are
+       * tracked as the module object and as `make` respectively.
+       *
+       * Only immutable `const` declarations are followed, and only in this
+       * declarative form. A reassignable alias, a call result, or a computed
+       * destructuring key stays unresolved — the same conservative direction as
+       * the options resolver, since a false report is worse than a missed one.
+       */
+      const followAliases = () => {
+        for (let round = 0; round < CHILD_PROCESS_ALIAS_ROUNDS; round += 1) {
+          let discovered = false
+          for (const binding of [...moduleBindings, ...barrelBindings]) {
+            const isBarrel = barrelBindings.includes(binding)
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const aliased = aliasedChildProcessBindings(context, reference.identifier, isBarrel)
+              for (const found of aliased.moduleBindings) {
+                if (!moduleBindings.includes(found)) {
+                  moduleBindings.push(found)
+                  discovered = true
+                }
+              }
+              for (const found of aliased.makeBindings) {
+                if (!makeBindings.includes(found)) {
+                  makeBindings.push(found)
+                  discovered = true
+                }
+              }
+            }
+          }
+          for (const binding of [...makeBindings]) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const alias = aliasedMakeBinding(context, reference.identifier)
+              if (alias !== undefined && !makeBindings.includes(alias)) {
+                makeBindings.push(alias)
+                discovered = true
+              }
+            }
+          }
+          if (!discovered) return
+        }
+      }
+
+      return {
+        ImportDeclaration(node) {
+          if (node.source.value !== CHILD_PROCESS_MODULE && node.source.value !== CHILD_PROCESS_BARREL) return
+          const variables = context.sourceCode.getDeclaredVariables(node)
+          for (const specifier of node.specifiers) {
+            if (!isSensitiveChildProcessSpecifier(node, specifier)) continue
+            const binding = variables.find((variable) => variable.name === specifier.local.name)
+            if (binding === undefined) continue
+            const importsMakeDirectly =
+              node.source.value === CHILD_PROCESS_MODULE &&
+              specifier.type === "ImportSpecifier" &&
+              staticPropertyName(specifier.imported) === "make"
+            const importsBarrelNamespace =
+              node.source.value === CHILD_PROCESS_BARREL && specifier.type === "ImportNamespaceSpecifier"
+            if (importsMakeDirectly) {
+              makeBindings.push(binding)
+            } else if (importsBarrelNamespace) {
+              barrelBindings.push(binding)
+            } else {
+              moduleBindings.push(binding)
+            }
+          }
+        },
+        "Program:exit"() {
+          followAliases()
+          const calls = []
+          for (const binding of moduleBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = directChildProcessMakeCall(reference.identifier)
+              if (call !== undefined) calls.push(call)
+            }
+          }
+          for (const binding of barrelBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = barrelChildProcessMakeCall(reference.identifier)
+              if (call !== undefined) calls.push(call)
+            }
+          }
+          for (const binding of makeBindings) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const call = reference.identifier.parent
+              if (call?.type === "CallExpression" && call.callee === reference.identifier) calls.push(call)
+            }
+          }
+          // Collected before checking so that one options binding shared by several
+          // recognised calls stays resolvable: each call would otherwise read the
+          // others' arguments as unknown escapes and all of them would fall silent.
+          const knownOptionArguments = new Set(calls.map((call) => call.arguments.at(-1)))
+          for (const call of calls) checkCall(call, knownOptionArguments)
         }
       }
     }

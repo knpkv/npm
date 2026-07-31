@@ -216,6 +216,25 @@ When writing Effect code:
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
   `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
+- `ChildProcess.make` options that set `env` must also state `extendEnv`; it
+  defaults to falsy, so `env` alone replaces the child environment and drops
+  `PATH`. `local-rules/require-explicit-child-process-env-inheritance` is the
+  single enforcement layer, deliberately: deciding whether a receiver named
+  `ChildProcess` is really Effect's module needs binding resolution, so a
+  syntactic ast-grep companion reported foreign APIs of the same shape and was
+  removed rather than narrowed. The rule enforces that the choice is stated, not
+  that it is correct — two things still need judgment. With `extendEnv: false`, `env` must
+  itself carry everything the child needs, including `PATH`. With
+  `extendEnv: true`, inherited variables that outrank the ones you pass must be
+  cleared: a spawn scoped to an explicit AWS profile has to drop every ambient
+  environment credential provider, which means the static keys _and_ the
+  web-identity variables, plus both `AWS_REGION` and `AWS_DEFAULT_REGION`, since
+  the AWS credential chain resolves environment variables above profile
+  configuration. Clear each family completely — clearing one variable of a pair
+  is worse than clearing neither, because which one leaks then depends on the
+  caller's shell. Use `ChildEnv.profileScopedEnv` in the `codecommit` packages
+  rather than rebuilding the exclusion list; it documents which variables are
+  deliberately left alone and why.
 
 Before enabling a production lazy authority-bearing runtime registry, a missing-record assertion is
 not provider coverage. The composition suite must also seed an authorized action, cross the runtime

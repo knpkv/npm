@@ -1,4 +1,4 @@
-import { AwsClient, CacheService, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, type Domain, type Errors, PRService } from "@knpkv/codecommit-core"
 import { Effect, Predicate, Stream } from "effect"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { runtimeAtom } from "./runtime.js"
@@ -129,7 +129,11 @@ export const openPrAtom = runtimeAtom.fn((pr: Domain.PullRequest) =>
       exitCode(ChildProcess.make("assume", ["-cd", pr.link, profile], {
         stdout: "inherit",
         stderr: "inherit",
-        env: { GRANTED_ALIAS_CONFIGURED: "true" }
+        // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
+        // flag must be merged into the inherited environment. The profile argument
+        // stays authoritative only if ambient AWS credentials are dropped.
+        env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+        extendEnv: true
       })).pipe(
         Effect.tap(() =>
           notificationRepo.addSystem({

@@ -10,7 +10,7 @@
  *
  * @module
  */
-import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, PRService } from "@knpkv/codecommit-core"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
 import { Chunk, Effect, Predicate, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
@@ -120,7 +120,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           const cmd = ChildProcess.make("assume", ["-cd", payload.link, payload.profile], {
             stdout: "inherit",
             stderr: "inherit",
-            env: { GRANTED_ALIAS_CONFIGURED: "true" }
+            // `assume` is resolved from PATH and needs the caller's AWS/SSO env, so the
+            // flag must be merged into the inherited environment. The profile argument
+            // stays authoritative only if ambient AWS credentials are dropped.
+            env: ChildEnv.profileScopedEnv({ GRANTED_ALIAS_CONFIGURED: "true" }),
+            extendEnv: true
           })
           yield* Effect.forkDetach(
             Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd)).pipe(
