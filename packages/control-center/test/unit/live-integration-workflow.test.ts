@@ -4,6 +4,73 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 
+interface WorkflowSource {
+  readonly location: string
+  readonly source: string
+}
+
+const usesReferences = (source: string): ReadonlyArray<string> =>
+  Array.from(
+    source.matchAll(/^\s*(?:-\s*)?uses:\s*([^\s#]+)/gmu),
+    (match) => match[1] ?? ""
+  )
+
+const loadWorkflowClosure = (
+  workspaceRoot: string,
+  workflowPath: string,
+  workflow: string,
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path
+): Effect.Effect<ReadonlyArray<WorkflowSource>, Error> =>
+  Effect.gen(function*() {
+    const sources: Array<WorkflowSource> = [{ location: workflowPath, source: workflow }]
+    const pending = [...usesReferences(workflow)]
+      .filter((reference) => reference.startsWith("./"))
+      .map((reference) => reference.slice(2))
+    const visited = new Set<string>()
+
+    while (pending.length > 0) {
+      const reference = pending.shift()
+      if (reference === undefined || visited.has(reference)) continue
+      visited.add(reference)
+
+      const actionDirectory = path.join(workspaceRoot, reference)
+      const yamlPath = path.join(actionDirectory, "action.yaml")
+      const ymlPath = path.join(actionDirectory, "action.yml")
+      const actionPath = (yield* fileSystem.exists(yamlPath))
+        ? yamlPath
+        : ymlPath
+      const source = yield* fileSystem.readFileString(actionPath)
+      sources.push({ location: actionPath, source })
+      for (const nestedReference of usesReferences(source)) {
+        if (nestedReference.startsWith("./")) pending.push(nestedReference.slice(2))
+      }
+    }
+
+    return sources
+  })
+
+const unpinnedExternalActions = (
+  sources: ReadonlyArray<WorkflowSource>
+): ReadonlyArray<string> =>
+  sources.flatMap(({ location, source }) =>
+    usesReferences(source)
+      .filter(
+        (reference) =>
+          !reference.startsWith("./") &&
+          !/@[0-9a-f]{40}$/u.test(reference)
+      )
+      .map((reference) => `${location}: ${reference}`)
+  )
+
+const liveIntegrationScript = (manifest: string): string =>
+  manifest.match(/"test:integration:live"\s*:\s*"([^"]+)"/u)?.[1] ?? ""
+
+const buildScript = (manifest: string): string => manifest.match(/"build"\s*:\s*"([^"]+)"/u)?.[1] ?? ""
+
+const buildsBeforeLiveVitest = (script: string): boolean =>
+  script.trim() === "pnpm build && vitest run --config vitest.live.config.ts"
+
 const loadContracts = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
@@ -15,11 +82,20 @@ const loadContracts = Effect.gen(function*() {
   )
   const packagePath = yield* path.fromFileUrl(new URL("../../package.json", import.meta.url))
   const vitestPath = yield* path.fromFileUrl(new URL("../../vitest.config.ts", import.meta.url))
+  const workflow = yield* fileSystem.readFileString(workflowPath)
+  const workspaceRoot = path.dirname(path.dirname(path.dirname(workflowPath)))
   return {
     journey: yield* fileSystem.readFileString(journeyPath),
     manifest: yield* fileSystem.readFileString(packagePath),
+    sealedRunnerSources: yield* loadWorkflowClosure(
+      workspaceRoot,
+      workflowPath,
+      workflow,
+      fileSystem,
+      path
+    ),
     vitest: yield* fileSystem.readFileString(vitestPath),
-    workflow: yield* fileSystem.readFileString(workflowPath)
+    workflow
   }
 }).pipe(Effect.provide(NodeServices.layer))
 
@@ -57,14 +133,59 @@ describe("Control Center live integration workflow", () => {
     Effect.gen(function*() {
       const contracts = yield* loadContracts
 
-      expect(contracts.manifest).toContain(
-        "\"test:integration:live\": \"vitest run --config vitest.live.config.ts\""
-      )
+      expect(buildsBeforeLiveVitest(liveIntegrationScript(contracts.manifest))).toBe(true)
+      expect(buildsBeforeLiveVitest("vitest run --config vitest.live.config.ts")).toBe(false)
+      expect(
+        buildsBeforeLiveVitest("echo pnpm build && vitest run --config vitest.live.config.ts")
+      ).toBe(false)
+      expect(
+        buildsBeforeLiveVitest("pnpm build || vitest run --config vitest.live.config.ts")
+      ).toBe(false)
+      expect(
+        buildsBeforeLiveVitest("pnpm build && vitest run --config vitest.live.config.ts")
+      ).toBe(true)
+      expect(buildScript(contracts.manifest)).toBe("tsx scripts/run-build.ts")
       expect(contracts.vitest).toContain("\"test/integration/live-connections.test.ts\"")
       expect(contracts.workflow).toContain("node_modules/vitest/vitest.mjs")
       expect(contracts.workflow).toContain("vitest.live.config.ts")
       expect(contracts.workflow).toContain("CONTROL_CENTER_LIVE_INTEGRATION: \"1\"")
       expect(contracts.journey).toContain("Control Center live provider identities")
+    }))
+
+  it.effect("pins external actions across the sealed runner's composite-action closure", () =>
+    Effect.gen(function*() {
+      const contracts = yield* loadContracts
+      const invalidFixture = [
+        {
+          location: ".github/actions/setup/action.yaml",
+          source: "runs:\n  steps:\n    - uses: pnpm/action-setup@v6\n"
+        }
+      ]
+      const validFixture = [
+        {
+          location: ".github/actions/setup/action.yaml",
+          source: "runs:\n  steps:\n    - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271\n"
+        },
+        {
+          location: ".github/actions/local/action.yaml",
+          source: "runs:\n  steps:\n    - uses: ./.github/actions/nested\n"
+        }
+      ]
+      const dockerFixture = [
+        {
+          location: ".github/actions/setup/action.yaml",
+          source: "runs:\n  steps:\n    - uses: docker://ghcr.io/example/action:latest\n"
+        }
+      ]
+
+      expect(unpinnedExternalActions(contracts.sealedRunnerSources)).toEqual([])
+      expect(unpinnedExternalActions(invalidFixture)).toEqual([
+        ".github/actions/setup/action.yaml: pnpm/action-setup@v6"
+      ])
+      expect(unpinnedExternalActions(dockerFixture)).toEqual([
+        ".github/actions/setup/action.yaml: docker://ghcr.io/example/action:latest"
+      ])
+      expect(unpinnedExternalActions(validFixture)).toEqual([])
     }))
 
   it.effect("keeps OIDC authority job-local, bounded, and free of long-lived AWS keys", () =>

@@ -60,7 +60,7 @@
     "test": "vitest run",
     "test:browser": "pnpm test:e2e",
     "test:e2e": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && playwright test --config playwright.config.ts",
-    "test:integration:live": "vitest run --config vitest.live.config.ts",
+    "test:integration:live": "pnpm build && vitest run --config vitest.live.config.ts",
     "test:sbx:real": "vitest run --config vitest.sbx.config.ts",
     "validate:boundaries": "tsx scripts/validate-boundaries.ts",
     "validate:dist": "tsx scripts/validate-dist.ts"
