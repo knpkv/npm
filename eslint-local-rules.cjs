@@ -427,10 +427,17 @@ const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedRefer
     // calls must keep reporting rather than silence every call.
     if (knownOptionArguments?.has(identifier) === true) return false
     // A mutation after the command was created cannot retroactively change it, so
-    // only earlier references matter. Textual order is a sound proxy only for
-    // straight-line code; a conditional or callback reference is still treated as
-    // preceding, keeping those judgment cases silent rather than guessed.
-    if (identifier.range[0] > resolvedReference.range[0]) return false
+    // later references do not matter — but only when both sit in the same
+    // immediately-executing scope. Across a function boundary textual order is not
+    // execution order: `const run = () => make(..., options); configure(options);
+    // run()` configures before the command is ever built, so the cutoff is skipped
+    // and the mutation counts, leaving the call unresolved rather than reported.
+    if (
+      enclosingFunction(identifier) === enclosingFunction(resolvedReference) &&
+      identifier.range[0] > resolvedReference.range[0]
+    ) {
+      return false
+    }
     if (reference.isWrite()) return true
     const parent = identifier.parent
     if (parent === undefined || parent === null) return false
@@ -554,6 +561,26 @@ const aliasedChildProcessBindings = (context, identifier, isBarrel) => {
     if (binding !== undefined) makeBindings.push(binding)
   }
   return { moduleBindings: [], makeBindings }
+}
+
+/**
+ * Given a reference to a known `make` binding, returns the `const` alias declared
+ * from it, so `const spawn = make` is tracked as another `make` binding.
+ *
+ * Only the plain immutable form is followed; `let`, destructuring, `.bind`, and
+ * call results stay unresolved.
+ */
+const aliasedMakeBinding = (context, identifier) => {
+  const declarator = identifier.parent
+  if (
+    declarator?.type !== "VariableDeclarator" ||
+    declarator.init !== identifier ||
+    declarator.parent?.kind !== "const" ||
+    declarator.id.type !== "Identifier"
+  ) {
+    return undefined
+  }
+  return context.sourceCode.getDeclaredVariables(declarator).find((variable) => variable.name === declarator.id.name)
 }
 
 /**
@@ -1512,6 +1539,16 @@ module.exports = {
                   makeBindings.push(found)
                   discovered = true
                 }
+              }
+            }
+          }
+          for (const binding of [...makeBindings]) {
+            for (const reference of binding.references) {
+              if (reference.isTypeReference && !reference.isValueReference) continue
+              const alias = aliasedMakeBinding(context, reference.identifier)
+              if (alias !== undefined && !makeBindings.includes(alias)) {
+                makeBindings.push(alias)
+                discovered = true
               }
             }
           }

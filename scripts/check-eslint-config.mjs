@@ -1641,3 +1641,40 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-lastwrite-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { ChildProcess } from "effect/unstable/process"
+    const spawn = make
+    const viaImportAlias = spawn("git", args, { env: gitEnvironment })
+    const extracted = ChildProcess.make
+    const secondLevel = extracted
+    const viaSecondAlias = secondLevel("git", args, { env: gitEnvironment })
+    const straight = { env: gitEnvironment }
+    const afterCall = ChildProcess.make("git", args, straight)
+    configure(straight)
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-makealias-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { make } from "effect/unstable/process/ChildProcess"
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Foreign from "./foreign-api.js"
+    const spawn = make
+    const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreignMake = Foreign.make
+    const foreign = foreignMake("git", args, { env: gitEnvironment })
+    const deferredOptions = { env: gitEnvironment }
+    const run = () => ChildProcess.make("git", args, deferredOptions)
+    configure(deferredOptions)
+    run()
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-makealias-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
