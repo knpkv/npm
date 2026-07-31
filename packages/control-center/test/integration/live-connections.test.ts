@@ -246,8 +246,10 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     repeatedTests.push(yield* mutationClient.plugins.testConnection({ params: { pluginConnectionId } }))
   }
   assert.isTrue(
-    repeatedTests.every(
-      (result) => result._tag === "healthy" && result.identity.providerImmutableId.length > 0
+    Boolean(
+      repeatedTests.every(
+        (result) => result._tag === "healthy" && result.identity.providerImmutableId.length > 0
+      )
     )
   )
   const awsIdentities = repeatedTests.filter(
@@ -257,7 +259,7 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
   assert.isTrue(awsIdentities.length === 2, "Live integration must resolve exactly two AWS provider identities")
   if (awsIdentities[0]?._tag === "healthy" && awsIdentities[1]?._tag === "healthy") {
     assert.isTrue(
-      /^[0-9]{12}$/u.test(awsIdentities[0].identity.providerImmutableId),
+      Boolean(/^[0-9]{12}$/u.test(awsIdentities[0].identity.providerImmutableId)),
       "AWS live provider identity must be a twelve-digit account identifier"
     )
     assert.isTrue(
@@ -313,10 +315,12 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     return yield* Effect.die("live Jira synchronization produced no canonical issue")
   }
   assert.isTrue(
-    jiraIssues.every(
-      ({ entity }) =>
-        entity.projection.details._tag === "issue" &&
-        entity.projection.details.project?.sourceId === configuration.jiraProjectId
+    Boolean(
+      jiraIssues.every(
+        ({ entity }) =>
+          entity.projection.details._tag === "issue" &&
+          entity.projection.details.project?.sourceId === configuration.jiraProjectId
+      )
     )
   )
   assert.isTrue(
@@ -335,10 +339,12 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
     return yield* Effect.die("live Confluence synchronization produced no canonical page")
   }
   assert.isTrue(
-    confluencePages.every(
-      ({ entity }) =>
-        entity.projection.details._tag === "page" &&
-        entity.projection.details.sourceSpaceId === configuration.confluenceSpaceId
+    Boolean(
+      confluencePages.every(
+        ({ entity }) =>
+          entity.projection.details._tag === "page" &&
+          entity.projection.details.sourceSpaceId === configuration.confluenceSpaceId
+      )
     )
   )
   assert.isTrue(

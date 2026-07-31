@@ -125,6 +125,7 @@ await assertRuleDiagnostics({
   code: `
     import { assert } from "@effect/vitest"
     import * as Redacted from "effect/Redacted"
+    import { value as revealRedacted } from "effect/Redacted"
     import type {
       LiveConnectionConfiguration as LiveConfig
     } from "./liveConnectionConfiguration.js"
@@ -199,8 +200,774 @@ await assertRuleDiagnostics({
     assert[method](...(inlineTuple as readonly [string, string]))
     assert[method](...(inlineTuple satisfies readonly [string, string]))
     assert[method](...inlineTuple!)
+    const sharedSensitiveTuple = [serialized, configuration.jiraEmail]
+    const assertedSensitiveTuple = sharedSensitiveTuple
+    const mutatedSensitiveTuple = sharedSensitiveTuple
+    mutatedSensitiveTuple[1] = "sanitized"
+    assert[method](...assertedSensitiveTuple)
+    assert[method](...sharedSensitiveTuple)
+    const partiallyMutatedTuple = [serialized, configuration.jiraEmail]
+    partiallyMutatedTuple[0] = partiallyMutatedTuple[0]
+    assert[method](...partiallyMutatedTuple)
+    assert.notEqual(configuration.jiraEmail, expectedEmail)
+    assert.notStrictEqual(configuration.jiraEmail, expectedEmail)
+    assert.notDeepEqual(configuration.jiraEmail, expectedEmail)
+    assert.notDeepStrictEqual(configuration.jiraEmail, expectedEmail)
+    assert.deepInclude(serialized, configuration.jiraEmail)
+    assert.notDeepInclude(serialized, configuration.jiraEmail)
+    assert.notMatch(configuration.jiraEmail, /public/u)
+    assert.isOk(configuration.jiraEmail)
+    assert.ok(configuration.jiraEmail)
+    assert.isNotOk(configuration.jiraEmail)
+    assert.notOk(configuration.jiraEmail)
+    assert.isNotTrue(configuration.jiraEmail)
+    assert.isNotFalse(configuration.jiraEmail)
+    assert.isNotEmpty(configuration.jiraEmail)
+    assert.notEmpty(configuration.jiraEmail)
+    const decoratedEmail = \`owner:\${configuration.jiraEmail}\`
+    assert.notEqual(decoratedEmail, expectedEmail)
+    const locatorMessage = \`region \${configuration.awsRegion}\`
+    assert.ok(Boolean(false), locatorMessage)
+    const directlyTaintedTuple = [serialized, "public"]
+    directlyTaintedTuple[1] = configuration.jiraEmail
+    assert.include(...directlyTaintedTuple)
+    const aliasedTaintedTuple = [serialized, "public"]
+    const taintedTupleAlias = aliasedTaintedTuple
+    taintedTupleAlias[1] = configuration.jiraEmail
+    assert.include(...aliasedTaintedTuple)
+    const pushedTuple = [serialized, "public"]
+    pushedTuple.push(configuration.jiraEmail)
+    assert.include(...pushedTuple)
+    const predicate = {
+      test: (value: string) => value,
+      includes: (value: string) => value
+    }
+    assert.notOk(predicate.test(configuration.jiraEmail), "credential must be absent")
+    assert.ok(predicate.includes(configuration.jiraEmail), "credential must exist")
+    ;(assert as typeof assert).strictEqual(actualEmail, configuration.jiraEmail)
+    assert!.notEqual(actualEmail, configuration.jiraEmail)
+    ;(assert.strictEqual as typeof assert.strictEqual)(actualEmail, configuration.jiraEmail)
+    ;(assert[method] as typeof assert.strictEqual)(actualEmail, configuration.jiraEmail)
+    ;(assert[method] satisfies typeof assert.strictEqual)(actualEmail, configuration.jiraEmail)
+    ;(<typeof assert.strictEqual>assert[method])(actualEmail, configuration.jiraEmail)
+    assert[method]!(actualRegion, configuration.awsRegion)
+    const decoratedReceiver = \`owner:\${configuration.jiraEmail}\`
+    assert.notEqual(decoratedReceiver.trim(), expectedEmail)
+    const rawReceiver = Redacted.value(configuration.jiraApiKey)
+    assert.strictEqual(rawReceiver.trim(), expectedToken)
+    const decoratedReceiverTuple = [serialized, "public"]
+    decoratedReceiverTuple.push(decoratedReceiver.trim())
+    assert.include(...decoratedReceiverTuple)
+    const rawReceiverTuple = [serialized, "public"]
+    rawReceiverTuple.push(rawReceiver.trim())
+    assert.include(...rawReceiverTuple)
+    const sensitiveResult = { email: configuration.jiraEmail, status: "ok" }
+    assert.equal(sensitiveResult.email, expectedEmail)
+    assert.equal((sensitiveResult as typeof sensitiveResult).email, expectedEmail)
+    const spreadSpliceTuple = [serialized, "public"]
+    const spliceArguments = [0, 0, configuration.jiraEmail] as const
+    spreadSpliceTuple.splice(...spliceArguments)
+    assert.include(...spreadSpliceTuple)
+    const filledTuple = [serialized, "public"]
+    filledTuple.fill(configuration.jiraEmail)
+    assert.include(...filledTuple)
+    const unshiftedTuple = [serialized, "public"]
+    unshiftedTuple.unshift(configuration.jiraEmail)
+    assert.include(...unshiftedTuple)
+    const pushedSpreadTuple = [serialized, "public"]
+    const pushedValues = [configuration.jiraEmail] as const
+    pushedSpreadTuple.push(...pushedValues)
+    assert.include(...pushedSpreadTuple)
+    const objectEmailKey = "email"
+    const computedSensitiveResult = { [objectEmailKey]: configuration.jiraEmail }
+    assert.equal(computedSensitiveResult.email, expectedEmail)
+    const sensitiveSpreadSource = { email: configuration.jiraEmail }
+    const sensitiveSpreadResult = { status: "ok", ...sensitiveSpreadSource }
+    assert.equal(sensitiveSpreadResult.email, expectedEmail)
+    assert.equal({ status: "ok", ...sensitiveSpreadSource }.email, expectedEmail)
+    const nestedSensitiveResult = {
+      nested: { email: configuration.jiraEmail, status: "ok" }
+    }
+    assert.equal(nestedSensitiveResult.nested.email, expectedEmail)
+    assert.equal(sensitiveResult["email" as const], expectedEmail)
+    assert["strictEqual" as const](configuration.jiraEmail, expectedEmail)
+    const wrappedPushTuple = [serialized, "public"]
+    ;(wrappedPushTuple.push as typeof wrappedPushTuple.push)(configuration.jiraEmail)
+    assert.include(...wrappedPushTuple)
+    const wrappedUnshiftTuple = [serialized, "public"]
+    wrappedUnshiftTuple.unshift!(configuration.jiraEmail)
+    assert.include(...wrappedUnshiftTuple)
+    const wrappedSpliceTuple = [serialized, "public"]
+    ;(wrappedSpliceTuple.splice satisfies typeof wrappedSpliceTuple.splice)(...spliceArguments)
+    assert.include(...wrappedSpliceTuple)
+    const wrappedFillTuple = [serialized, "public"]
+    ;(<typeof wrappedFillTuple.fill>wrappedFillTuple.fill)(configuration.jiraEmail)
+    assert.include(...wrappedFillTuple)
+    const wrappedKeyPushTuple = [serialized, "public"]
+    wrappedKeyPushTuple["push" as const](configuration.jiraEmail)
+    assert.include(...wrappedKeyPushTuple)
+    const trimmedCredentialEmail = configuration.jiraEmail.trim()
+    assert.equal(trimmedCredentialEmail.toLowerCase(), expectedEmail)
+    const trimmedRawToken = Redacted.value(configuration.jiraApiKey).trim()
+    assert.equal(trimmedRawToken.toLowerCase(), expectedToken)
+    const projectedRawResult = { token: Redacted.value(configuration.jiraApiKey) }
+    assert.equal(projectedRawResult.token.trim(), expectedToken)
+    const projectedTemplateResult = { email: \`owner:\${configuration.jiraEmail}\` }
+    assert.equal(projectedTemplateResult.email.trim(), expectedEmail)
+    const dynamicObjectKey = getDynamicKey()
+    const sensitiveDynamicOverride = {
+      email: configuration.jiraEmail,
+      [dynamicObjectKey]: "public"
+    }
+    assert.equal(sensitiveDynamicOverride.email, expectedEmail)
+    const opaquePublicOverrides = getPublicOverrides()
+    const sensitiveOpaqueSpread = {
+      email: configuration.jiraEmail,
+      ...opaquePublicOverrides
+    }
+    assert.equal(sensitiveOpaqueSpread.email, expectedEmail)
+    assert.equal(revealRedacted(configuration.jiraApiKey), expectedToken)
+    const revealRedactedAlias = revealRedacted
+    assert.equal(revealRedactedAlias(configuration.confluenceApiKey), expectedToken)
+    const indexedSensitiveValues = ["public", configuration.jiraEmail] as const
+    assert.equal(indexedSensitiveValues[1], expectedEmail)
+    const nestedIndexedSensitiveValues = { values: indexedSensitiveValues }
+    assert.equal(nestedIndexedSensitiveValues.values[1], expectedEmail)
+    const directlyMutatedSensitiveResult = { email: "public", status: "ok" }
+    directlyMutatedSensitiveResult.email = configuration.jiraEmail
+    assert.equal(directlyMutatedSensitiveResult.email, expectedEmail)
+    const aliasedMutatedSensitiveResult = { email: "public", status: "ok" }
+    const sensitiveMutationAlias = aliasedMutatedSensitiveResult
+    sensitiveMutationAlias.email = configuration.confluenceEmail
+    assert.equal(aliasedMutatedSensitiveResult.email, expectedEmail)
+    const sensitiveUnknownKeyResult = {
+      email: "public",
+      [dynamicObjectKey]: configuration.jiraEmail
+    }
+    assert.equal(sensitiveUnknownKeyResult.email, expectedEmail)
+    const cyclicSensitiveResult = {
+      email: false ? cyclicSensitiveResult.email : configuration.jiraEmail
+    }
+    assert.equal(cyclicSensitiveResult.email, expectedEmail)
+    const destructuredSensitiveSource = { email: configuration.jiraEmail, status: "ok" }
+    const { email: destructuredDerivedEmail } = destructuredSensitiveSource
+    assert.equal(destructuredDerivedEmail, expectedEmail)
+    const nestedDestructuredSensitiveSource = {
+      nested: { email: configuration.confluenceEmail }
+    }
+    const {
+      nested: { email: nestedDestructuredDerivedEmail }
+    } = nestedDestructuredSensitiveSource
+    assert.equal(nestedDestructuredDerivedEmail, expectedEmail)
+    const arrayDestructuredSensitiveSource = ["public", configuration.jiraEmail] as const
+    const [, arrayDestructuredDerivedEmail] = arrayDestructuredSensitiveSource
+    assert.equal(arrayDestructuredDerivedEmail, expectedEmail)
+    const { missing: defaultedSensitiveEmail = configuration.jiraEmail } = {}
+    assert.equal(defaultedSensitiveEmail, expectedEmail)
+    const publicNestedSpreadSource = { nested: { status: "ok" } }
+    const sensitiveNestedSpreadSource = {
+      nested: { email: configuration.jiraEmail }
+    }
+    const nestedSpreadSensitiveResult = {
+      ...publicNestedSpreadSource,
+      ...sensitiveNestedSpreadSource
+    }
+    assert.equal(nestedSpreadSensitiveResult.nested.email, expectedEmail)
+    const loopMutatedSensitiveValues = ["public"]
+    for (let index = 0; index < 2; index += 1) {
+      assert.include(...loopMutatedSensitiveValues)
+      loopMutatedSensitiveValues.push(configuration.jiraEmail)
+    }
+    const compoundSensitiveResult = { email: configuration.jiraEmail }
+    compoundSensitiveResult.email += ":suffix"
+    assert.equal(compoundSensitiveResult.email, expectedEmail)
+    const logicalSensitiveResult = { email: configuration.jiraEmail }
+    logicalSensitiveResult.email ||= "public"
+    assert.equal(logicalSensitiveResult.email, expectedEmail)
+    const destructuredMutationSource = { nested: { email: "public" } }
+    const { nested: destructuredMutationAlias } = destructuredMutationSource
+    destructuredMutationAlias.email = configuration.jiraEmail
+    assert.equal(destructuredMutationSource.nested.email, expectedEmail)
+    const spreadIndexedSensitiveSource = ["public", configuration.jiraEmail] as const
+    const spreadIndexedSensitiveValues = [...spreadIndexedSensitiveSource]
+    assert.equal(spreadIndexedSensitiveValues[1], expectedEmail)
+    const pushedIndexedSensitiveValues = ["public"]
+    pushedIndexedSensitiveValues.push(configuration.jiraEmail)
+    assert.equal(pushedIndexedSensitiveValues[1], expectedEmail)
+    const unshiftedIndexedSensitiveValues = ["public"]
+    unshiftedIndexedSensitiveValues.unshift(configuration.jiraEmail)
+    assert.equal(unshiftedIndexedSensitiveValues[0], expectedEmail)
+    const compoundIndexedSensitiveValues = ["public"]
+    compoundIndexedSensitiveValues[0] += configuration.jiraEmail
+    assert.equal(compoundIndexedSensitiveValues[0], expectedEmail)
+    const unknownSensitiveReadSource = {
+      email: configuration.jiraEmail,
+      status: "ok"
+    }
+    assert.equal(unknownSensitiveReadSource[getDynamicKey()], expectedEmail)
+    const computedDestructuringKey = getDynamicKey()
+    const { [computedDestructuringKey]: computedDestructuredEmail } =
+      destructuredSensitiveSource
+    assert.equal(computedDestructuredEmail, expectedEmail)
+    const {
+      status: excludedSensitiveRestStatus,
+      ...sensitiveDestructuredRest
+    } = destructuredSensitiveSource
+    assert.equal(sensitiveDestructuredRest.email, expectedEmail)
+    const callbackReentryValues = ["public"]
+    ;[0, 1].forEach(() => {
+      assert.include(...callbackReentryValues)
+      callbackReentryValues.push(configuration.jiraEmail)
+    })
+    const reversedSensitiveValues = [configuration.jiraEmail, "public"]
+    reversedSensitiveValues.reverse()
+    assert.equal(reversedSensitiveValues[1], expectedEmail)
+    const copiedWithinSensitiveValues = [configuration.jiraEmail, "public"]
+    copiedWithinSensitiveValues.copyWithin(1, 0, 1)
+    assert.equal(copiedWithinSensitiveValues[1], expectedEmail)
+    const [, ...arraySensitiveRest] = ["public", configuration.jiraEmail]
+    assert.equal(arraySensitiveRest[0], expectedEmail)
+    const {
+      status: objectSensitiveRestStatus,
+      ...objectSensitiveRest
+    } = { status: "ok", email: "public" }
+    objectSensitiveRest.email = configuration.jiraEmail
+    assert.equal(objectSensitiveRest.email, expectedEmail)
+    const nestedBeforeAssertionValues = ["public"]
+    if (shouldMutate) {
+      nestedBeforeAssertionValues.push(configuration.jiraEmail)
+    }
+    assert.include(...nestedBeforeAssertionValues)
+    const conditionallySanitizedResult = { email: configuration.jiraEmail }
+    if (shouldMutate) {
+      conditionallySanitizedResult.email = "public"
+    }
+    assert.equal(conditionallySanitizedResult.email, expectedEmail)
+    const conditionallySanitizedValues = [configuration.jiraEmail]
+    if (shouldMutate) {
+      conditionallySanitizedValues[0] = "public"
+    }
+    assert.equal(conditionallySanitizedValues[0], expectedEmail)
+    const aliasedSpliceStart = 1
+    const aliasedSpliceDeleteCount = 0
+    const aliasedSpliceSensitiveValues = ["public"]
+    aliasedSpliceSensitiveValues.splice(
+      aliasedSpliceStart,
+      aliasedSpliceDeleteCount,
+      configuration.jiraEmail
+    )
+    assert.equal(aliasedSpliceSensitiveValues[1], expectedEmail)
+    const [, ...mutatedArraySensitiveRest] = ["ignored", "public"]
+    mutatedArraySensitiveRest.push(configuration.jiraEmail)
+    assert.equal(mutatedArraySensitiveRest[1], expectedEmail)
+    const negativeFillSensitiveValues = ["public", "public"]
+    negativeFillSensitiveValues.fill(configuration.jiraEmail, -1)
+    assert.equal(negativeFillSensitiveValues[1], expectedEmail)
+    const recursiveIifeValues = ["public"]
+    ;(function validateRecursively(remaining: number) {
+      assert.include(...recursiveIifeValues)
+      recursiveIifeValues.push(configuration.jiraEmail)
+      if (remaining > 0) validateRecursively(remaining - 1)
+    })(1)
+    const conditionallyReversedSensitiveValues = [
+      configuration.jiraEmail,
+      "public"
+    ]
+    if (shouldMutate) {
+      conditionallyReversedSensitiveValues.reverse()
+    }
+    assert.equal(conditionallyReversedSensitiveValues[0], expectedEmail)
+    const [, ...filledArraySensitiveRest] = ["ignored", "public"]
+    filledArraySensitiveRest.fill(configuration.jiraEmail)
+    assert.equal(filledArraySensitiveRest[0], expectedEmail)
+    const noOpSpliceSensitiveValues = [configuration.jiraEmail]
+    noOpSpliceSensitiveValues.splice()
+    assert.equal(noOpSpliceSensitiveValues[0], expectedEmail)
+    const infiniteFillSensitiveValues = [configuration.jiraEmail]
+    infiniteFillSensitiveValues.fill("public", 1e400)
+    assert.equal(infiniteFillSensitiveValues[0], expectedEmail)
+    const unbracedSanitizedResult = { email: configuration.jiraEmail }
+    if (shouldMutate) unbracedSanitizedResult.email = "public"
+    assert.equal(unbracedSanitizedResult.email, expectedEmail)
+    const shortCircuitSanitizedResult = { email: configuration.jiraEmail }
+    shouldMutate && (shortCircuitSanitizedResult.email = "public")
+    assert.equal(shortCircuitSanitizedResult.email, expectedEmail)
+    const negativePartialFillSensitiveValues = [
+      configuration.jiraEmail,
+      "public"
+    ]
+    negativePartialFillSensitiveValues.fill("public", -1)
+    assert.equal(negativePartialFillSensitiveValues[0], expectedEmail)
+    const [, ...boundedFillSensitiveRest] = [
+      "ignored",
+      configuration.jiraEmail,
+      "public"
+    ]
+    boundedFillSensitiveRest.fill("public", 1)
+    assert.equal(boundedFillSensitiveRest[0], expectedEmail)
+    const nestedRestMutationSource = { nested: { email: "public" } }
+    const { ...nestedRestMutationCopy } = nestedRestMutationSource
+    nestedRestMutationSource.nested.email = configuration.jiraEmail
+    assert.equal(nestedRestMutationCopy.nested.email, expectedEmail)
+    const revealNamespaceAlias = Redacted.value
+    assert.equal(revealNamespaceAlias(configuration.jiraApiKey), expectedToken)
+    assert.equal((configuration as LiveConfig).jiraEmail, expectedEmail)
+    assert.equal((configuration satisfies LiveConfig).confluenceEmail, expectedEmail)
+    const repeatedBranchResult = { email: "public" }
+    const validateRepeatedBranch = (mutate: boolean) => {
+      if (mutate) {
+        repeatedBranchResult.email = configuration.jiraEmail
+      } else {
+        assert.equal(repeatedBranchResult.email, expectedEmail)
+      }
+    }
+    validateRepeatedBranch(true)
+    validateRepeatedBranch(false)
+    const [, ...dynamicFillSensitiveRest] = [
+      "ignored",
+      configuration.jiraEmail,
+      "public"
+    ]
+    dynamicFillSensitiveRest.fill("public", getStart())
+    assert.equal(dynamicFillSensitiveRest[0], expectedEmail)
+    const objectSharedDescendantSource = { nested: { email: "public" } }
+    const objectSharedDescendantCopy = { ...objectSharedDescendantSource }
+    objectSharedDescendantSource.nested.email = configuration.jiraEmail
+    assert.equal(objectSharedDescendantCopy.nested.email, expectedEmail)
+    const arraySharedDescendantSource = [{ email: "public" }]
+    const arraySharedDescendantCopy = [...arraySharedDescendantSource]
+    arraySharedDescendantSource[0].email = configuration.jiraEmail
+    assert.equal(arraySharedDescendantCopy[0].email, expectedEmail)
+    const arrayRestSharedDescendantSource = [{ email: "public" }]
+    const [...arrayRestSharedDescendantCopy] = arrayRestSharedDescendantSource
+    arrayRestSharedDescendantSource[0].email = configuration.jiraEmail
+    assert.equal(arrayRestSharedDescendantCopy[0].email, expectedEmail)
+    const sequenceSensitiveResult = {
+      email: (recordAccess(), configuration.jiraEmail)
+    }
+    assert.equal(sequenceSensitiveResult.email, expectedEmail)
+    const sequenceSensitiveValues = [
+      (recordAccess(), configuration.confluenceEmail)
+    ]
+    assert.equal(sequenceSensitiveValues[0], expectedEmail)
+    const RedactedNamespaceAlias = Redacted
+    const revealNamespaceAliasChain = RedactedNamespaceAlias.value
+    assert.equal(revealNamespaceAliasChain(configuration.jiraApiKey), expectedToken)
+    const memberAliasSource = { nested: { email: "public" } }
+    const memberAliasCopy = { ...memberAliasSource }
+    const memberAliasNested = memberAliasSource.nested
+    memberAliasNested.email = configuration.jiraEmail
+    assert.equal(memberAliasCopy.nested.email, expectedEmail)
+    const unresolvedInsertedValues = ["public"]
+    unresolvedInsertedValues.splice(getStart(), 0, configuration.jiraEmail)
+    assert.equal(unresolvedInsertedValues[1], expectedEmail)
+    const unresolvedShiftedValues = ["public", configuration.jiraEmail]
+    unresolvedShiftedValues.splice(getStart(), 1)
+    assert.equal(unresolvedShiftedValues[0], expectedEmail)
+    const stringSerializedEmail = String(configuration.jiraEmail)
+    assert.equal(stringSerializedEmail, expectedEmail)
+    const jsonSerializedEmail = JSON.stringify({
+      email: configuration.confluenceEmail
+    })
+    assert.equal(jsonSerializedEmail, expectedEmail)
+    assert.equal(encodeURIComponent(configuration.jiraEmail), expectedEmail)
+    assert.equal("owner:".concat(configuration.jiraEmail), expectedEmail)
+    assert.equal("owner".padEnd(50, configuration.jiraEmail), expectedEmail)
+    assert.equal("owner".replace("owner", configuration.jiraEmail), expectedEmail)
+    let assignedSensitiveEmail = "public"
+    const assignmentSensitiveResult = {
+      email: (assignedSensitiveEmail = configuration.jiraEmail)
+    }
+    assert.equal(assignmentSensitiveResult.email, expectedEmail)
+    const { value: destructuredRevealRedacted } = Redacted
+    assert.equal(destructuredRevealRedacted(configuration.jiraApiKey), expectedToken)
+    const sensitiveGetterResult = {
+      get email() {
+        return configuration.confluenceEmail
+      }
+    }
+    assert.equal(sensitiveGetterResult.email, expectedEmail)
+    const assignedSensitiveResult = { email: "public" }
+    Object.assign(assignedSensitiveResult, {
+      email: configuration.jiraEmail
+    })
+    assert.equal(assignedSensitiveResult.email, expectedEmail)
+    const constructedSensitiveResult = Object.assign(
+      {},
+      { email: configuration.jiraEmail }
+    )
+    assert.equal(constructedSensitiveResult.email, expectedEmail)
+    const { ...RedactedCopy } = Redacted
+    assert.equal(RedactedCopy.value(configuration.jiraApiKey), expectedToken)
+    const redactedValueKey = "value"
+    const { [redactedValueKey]: computedRevealRedacted } = Redacted
+    assert.equal(computedRevealRedacted(configuration.jiraApiKey), expectedToken)
+    const spreadStringValues = [configuration.jiraEmail] as const
+    assert.equal(String(...spreadStringValues), expectedEmail)
+    assert.equal("owner:".concat(...spreadStringValues), expectedEmail)
+    assert.equal(
+      "owner".replace("owner", () => configuration.confluenceEmail),
+      expectedEmail
+    )
+    const preservedSensitiveAssign = { email: configuration.jiraEmail }
+    Object.assign(preservedSensitiveAssign, { status: "ok" })
+    assert.equal(preservedSensitiveAssign.email, expectedEmail)
+    const nestedSensitiveAssign = { result: { email: "public" } }
+    Object.assign(nestedSensitiveAssign.result, {
+      email: configuration.jiraEmail
+    })
+    assert.equal(nestedSensitiveAssign.result.email, expectedEmail)
+    let compoundSensitiveEmail = configuration.jiraEmail
+    const scalarCompoundSensitiveResult = {
+      email: (compoundSensitiveEmail += "-suffix")
+    }
+    assert.equal(scalarCompoundSensitiveResult.email, expectedEmail)
+    let logicalSensitiveEmail = configuration.confluenceEmail
+    const scalarLogicalSensitiveResult = {
+      email: (logicalSensitiveEmail ||= "public")
+    }
+    assert.equal(scalarLogicalSensitiveResult.email, expectedEmail)
+    const preCallSensitiveSource = { email: "public" }
+    preCallSensitiveSource.email = configuration.jiraEmail
+    const preCallSensitiveCopy = Object.assign({}, preCallSensitiveSource)
+    assert.equal(preCallSensitiveCopy.email, expectedEmail)
+    const assignedSharedDescendantSource = { nested: { email: "public" } }
+    const assignedSharedDescendantCopy = Object.assign(
+      {},
+      assignedSharedDescendantSource
+    )
+    assignedSharedDescendantSource.nested.email = configuration.jiraEmail
+    assert.equal(assignedSharedDescendantCopy.nested.email, expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        ["email"]
+      ),
+      expectedEmail
+    )
+    const { value: defaultedRevealRedacted = identity } = Redacted
+    assert.equal(defaultedRevealRedacted(configuration.jiraApiKey), expectedToken)
+    const spreadRedactedArguments = [configuration.jiraApiKey] as const
+    assert.equal(Redacted.value(...spreadRedactedArguments), expectedToken)
+    let mutableSensitiveReceiver = configuration.jiraEmail
+    assert.equal(mutableSensitiveReceiver.trim(), expectedEmail)
+    let appendedSensitiveReceiver = "owner:"
+    appendedSensitiveReceiver += configuration.confluenceEmail
+    assert.equal(appendedSensitiveReceiver.trim(), expectedEmail)
+    let destructuredWrittenEmail = "public"
+    ;[destructuredWrittenEmail] = [configuration.jiraEmail]
+    assert.equal(destructuredWrittenEmail, expectedEmail)
+    let capturedSensitiveEmail = "public"
+    const assertCapturedSensitiveEmail = () => {
+      assert.equal(capturedSensitiveEmail, expectedEmail)
+      capturedSensitiveEmail = configuration.jiraEmail
+    }
+    assertCapturedSensitiveEmail()
+    assertCapturedSensitiveEmail()
+    const spreadAssignSources = [{ email: configuration.jiraEmail }] as const
+    const spreadAssignedTarget = { email: "public" }
+    Object.assign(spreadAssignedTarget, ...spreadAssignSources)
+    assert.equal(spreadAssignedTarget.email, expectedEmail)
+    const spreadConstructedResult = Object.assign({}, ...spreadAssignSources)
+    assert.equal(spreadConstructedResult.email, expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        { status: "ok" },
+        () => configuration.jiraEmail
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (_key, value) => value
+      ),
+      expectedEmail
+    )
+    const assignIdentityTarget = { email: "public" }
+    const assignIdentityResult = Object.assign(assignIdentityTarget, {
+      status: "ok"
+    })
+    assignIdentityTarget.email = configuration.jiraEmail
+    assert.equal(assignIdentityResult.email, expectedEmail)
+    const dynamicAssignKey = getDynamicKey()
+    const dynamicAssignResult = Object.assign(
+      {},
+      { email: configuration.jiraEmail },
+      { [dynamicAssignKey]: "public" }
+    )
+    assert.equal(dynamicAssignResult.email, expectedEmail)
+    const spreadRedactedNamespace = { ...Redacted }
+    assert.equal(spreadRedactedNamespace.value(configuration.jiraApiKey), expectedToken)
+    const assignedRedactedNamespace = Object.assign({}, Redacted)
+    assert.equal(assignedRedactedNamespace.value(configuration.jiraApiKey), expectedToken)
+    const secretToJson = {
+      email: "public",
+      toJSON() {
+        return configuration.jiraEmail
+      }
+    }
+    assert.equal(JSON.stringify(secretToJson), expectedEmail)
+    let iteratedSensitiveEmail = "public"
+    for (iteratedSensitiveEmail of [configuration.confluenceEmail]) {
+      assert.equal(iteratedSensitiveEmail, expectedEmail)
+    }
+    let iifeWrittenSensitiveEmail = "public"
+    ;(() => {
+      iifeWrittenSensitiveEmail = configuration.jiraEmail
+    })()
+    assert.equal(iifeWrittenSensitiveEmail, expectedEmail)
+    let outerWrittenSensitiveEmail = "public"
+    const assertOuterWrittenSensitiveEmail = () =>
+      assert.equal(outerWrittenSensitiveEmail, expectedEmail)
+    outerWrittenSensitiveEmail = configuration.confluenceEmail
+    assertOuterWrittenSensitiveEmail()
+    const spreadStringifyArguments = [
+      { status: "ok" },
+      () => configuration.jiraEmail
+    ] as const
+    assert.equal(JSON.stringify(...spreadStringifyArguments), expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (_key, value) => {
+          const kept = value
+          return kept
+        }
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (_key, value = "public") => value
+      ),
+      expectedEmail
+    )
+    const fullySpreadAssignArguments = [
+      {},
+      { email: configuration.jiraEmail }
+    ] as const
+    const fullySpreadAssignResult = Object.assign(...fullySpreadAssignArguments)
+    assert.equal(fullySpreadAssignResult.email, expectedEmail)
+    const explicitRedactedValueCopy = { value: Redacted.value }
+    assert.equal(explicitRedactedValueCopy.value(configuration.jiraApiKey), expectedToken)
+    const thisSecretToJson = {
+      email: configuration.jiraEmail,
+      toJSON() {
+        return this.email
+      }
+    }
+    assert.equal(JSON.stringify(thisSecretToJson), expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        configuration.jiraEmail,
+        (_key, value) => String(value)
+      ),
+      expectedEmail
+    )
+    let aliasedInvocationEmail = "public"
+    const assertAliasedInvocationEmail = () =>
+      assert.equal(aliasedInvocationEmail, expectedEmail)
+    const runAliasedInvocation = assertAliasedInvocationEmail
+    aliasedInvocationEmail = configuration.confluenceEmail
+    runAliasedInvocation()
+    const spreadMutationTarget = { email: "public" }
+    Object.assign(
+      ...[
+        spreadMutationTarget,
+        { email: configuration.jiraEmail }
+      ] as const
+    )
+    assert.equal(spreadMutationTarget.email, expectedEmail)
+    for (const declaredIterationEmail of [configuration.jiraEmail]) {
+      assert.equal(declaredIterationEmail, expectedEmail)
+    }
+    let emptyIterationEmail = configuration.confluenceEmail
+    for (emptyIterationEmail of []) {
+      recordAccess()
+    }
+    assert.equal(emptyIterationEmail, expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        {
+          0: configuration.jiraEmail,
+          status: "ok"
+        },
+        [0]
+      ),
+      expectedEmail
+    )
+    const selfReturningToJson = {
+      email: configuration.jiraEmail,
+      toJSON() {
+        return this
+      }
+    }
+    assert.equal(JSON.stringify(selfReturningToJson), expectedEmail)
+    const spreadToJsonHook = {
+      toJSON() {
+        return this.email
+      }
+    }
+    const spreadToJsonSecret = {
+      email: configuration.confluenceEmail,
+      ...spreadToJsonHook
+    }
+    assert.equal(JSON.stringify(spreadToJsonSecret), expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        configuration.jiraEmail,
+        (_key, value) => value.trim()
+      ),
+      expectedEmail
+    )
+    let callbackSensitiveEmail = "public"
+    const assertCallbackSensitiveEmail = () =>
+      assert.equal(callbackSensitiveEmail, expectedEmail)
+    callbackSensitiveEmail = configuration.jiraEmail
+    ;[0].forEach(assertCallbackSensitiveEmail)
+    const nestedSpreadMutationTarget = { result: { email: "public" } }
+    Object.assign(
+      ...[
+        nestedSpreadMutationTarget.result,
+        { email: configuration.confluenceEmail }
+      ] as const
+    )
+    assert.equal(nestedSpreadMutationTarget.result.email, expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        { Infinity: configuration.jiraEmail },
+        [Infinity]
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        { NaN: configuration.confluenceEmail },
+        [NaN]
+      ),
+      expectedEmail
+    )
+    const frozenRedactedValueCopy = Object.freeze({ value: Redacted.value })
+    assert.equal(frozenRedactedValueCopy.value(configuration.jiraApiKey), expectedToken)
+    const frozenSensitiveObject = Object.freeze({
+      email: configuration.jiraEmail
+    })
+    assert.equal(frozenSensitiveObject.email, expectedEmail)
+    let inlineCallbackSensitiveEmail = "public"
+    ;[0].forEach(() => {
+      inlineCallbackSensitiveEmail = configuration.confluenceEmail
+    })
+    assert.equal(inlineCallbackSensitiveEmail, expectedEmail)
+    let calledSensitiveEmail = "public"
+    const writeCalledSensitiveEmail = () => {
+      calledSensitiveEmail = configuration.jiraEmail
+    }
+    const aliasedCalledWriter = writeCalledSensitiveEmail
+    aliasedCalledWriter.call(undefined)
+    assert.equal(calledSensitiveEmail, expectedEmail)
+    let appliedSensitiveEmail = "public"
+    const writeAppliedSensitiveEmail = () => {
+      appliedSensitiveEmail = configuration.confluenceEmail
+    }
+    writeAppliedSensitiveEmail.apply(undefined, [])
+    assert.equal(appliedSensitiveEmail, expectedEmail)
+    let firstBreakSensitiveEmail = "public"
+    for (firstBreakSensitiveEmail of [
+      configuration.jiraEmail,
+      "public"
+    ]) {
+      break
+    }
+    assert.equal(firstBreakSensitiveEmail, expectedEmail)
+    const destructuringToJson = {
+      email: configuration.confluenceEmail,
+      toJSON() {
+        const { email } = this
+        return email
+      }
+    }
+    assert.equal(JSON.stringify(destructuringToJson), expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        configuration.jiraEmail,
+        function () {
+          return arguments[1]
+        }
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail, status: "ok" },
+        (_key, { email }) => email
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        [configuration.confluenceEmail, "ok"],
+        (_key, [email]) => email
+      ),
+      expectedEmail
+    )
+    assert.equal(
+      JSON.stringify(
+        { secret: configuration.jiraEmail },
+        function () {
+          return this.secret
+        }
+      ),
+      expectedEmail
+    )
+    const unresolvedWhitelistKey = getPropertyName()
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        [unresolvedWhitelistKey]
+      ),
+      expectedEmail
+    )
+    const numericExpressionWhitelistKey = 1 - 1
+    assert.equal(
+      JSON.stringify(
+        { 0: configuration.confluenceEmail },
+        [numericExpressionWhitelistKey]
+      ),
+      expectedEmail
+    )
+    const frozenToJsonReturn = {
+      toJSON() {
+        return Object.freeze({ email: configuration.jiraEmail })
+      }
+    }
+    assert.equal(JSON.stringify(frozenToJsonReturn), expectedEmail)
+    const aliasedThisToJson = {
+      email: configuration.confluenceEmail,
+      status: "ok",
+      toJSON() {
+        const self = this
+        return self.email
+      }
+    }
+    assert.equal(JSON.stringify(aliasedThisToJson), expectedEmail)
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (...args) => args[1]
+      ),
+      expectedEmail
+    )
+    const frozenToJsonOwner = Object.freeze({
+      email: configuration.jiraEmail,
+      toJSON() {
+        return this.email
+      }
+    })
+    assert.equal(JSON.stringify(frozenToJsonOwner), expectedEmail)
   `,
-  expected: 36,
+  expected: 228,
   filePath: "packages/control-center/test/integration/live-secret-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
@@ -261,12 +1028,686 @@ await assertRuleDiagnostics({
     const typedPublicTupleAlias = publicTuple as readonly [string, string]
     assert.strictEqual(...typedPublicTupleAlias)
     assert.strictEqual(...(publicTuple as readonly [string, string]))
-    const sharedSensitiveTuple = [serialized, configuration.jiraEmail]
-    const assertedSensitiveTuple = sharedSensitiveTuple
-    const mutatedSensitiveTuple = sharedSensitiveTuple
-    mutatedSensitiveTuple[1] = "sanitized"
-    assert[method](...assertedSensitiveTuple)
-    assert[method](...sharedSensitiveTuple)
+    assert.notEqual(publicSummary.status, "private")
+    assert.notStrictEqual(publicSummary.status, "private")
+    assert.notDeepEqual(publicSummary.status, "private")
+    assert.notDeepStrictEqual(publicSummary.status, "private")
+    assert.deepInclude(publicSummary.status, "public")
+    assert.notDeepInclude(publicSummary.status, "private")
+    assert.notMatch(publicSummary.status, /private/u)
+    assert.isOk(publicSummary.status)
+    assert.ok(publicSummary.status)
+    assert.isNotOk(publicSummary.status)
+    assert.notOk(publicSummary.status)
+    assert.isNotTrue(publicSummary.status)
+    assert.isNotFalse(publicSummary.status)
+    assert.isNotEmpty(publicSummary.status)
+    assert.notEmpty(publicSummary.status)
+    assert.ok(configuration.awsRegion === "eu-west-1", "region must match")
+    assert.isOk(configuration.awsRegion === "eu-west-1", "region must match")
+    assert.notOk(configuration.awsRegion !== "eu-west-1", "region must match")
+    assert.isNotOk(configuration.awsRegion !== "eu-west-1", "region must match")
+    assert.isNotTrue(configuration.awsRegion !== "eu-west-1", "region must match")
+    assert.isNotFalse(configuration.awsRegion === "eu-west-1", "region must match")
+    const derivedMatches = configuration.awsRegion === "eu-west-1"
+    assert.ok(derivedMatches, "region must match")
+    const locatorConjunction =
+      configuration.awsRegion === "eu-west-1" &&
+      configuration.jiraProjectId === expectedProjectId
+    assert.isTrue(locatorConjunction, "fixture locators must match")
+    assert.notOk(Boolean(pattern.test(configuration.jiraEmail)), "credential must not match")
+    assert.isTrue(configuration.awsRegion in publicRegionMap, "region must exist")
+    assert.isTrue(publicSummary instanceof PublicSummary, "summary must have the public type")
+    const publicDescription = \`status:\${publicSummary.status}\`
+    assert.notEqual(publicDescription, "private")
+    const publiclyMutatedTuple = [serialized, "public"]
+    publiclyMutatedTuple[1] = "sanitized"
+    const publicMutationAlias = publiclyMutatedTuple
+    publicMutationAlias.push("public")
+    assert.include(...publiclyMutatedTuple)
+    ;(assert as typeof assert).strictEqual(actualStatus, publicSummary.status)
+    assert!.notEqual(actualStatus, "private")
+    ;(assert.strictEqual as typeof assert.strictEqual)(actualStatus, publicSummary.status)
+    const shadowAssert = { strictEqual: (_actual: unknown, _expected: unknown) => undefined }
+    ;(shadowAssert as typeof shadowAssert).strictEqual(actualEmail, configuration.jiraEmail)
+    const publicResult = { email: configuration.jiraEmail, status: "ok" }
+    assert.equal(publicResult.status, "ok")
+    assert.equal((publicResult as typeof publicResult).status, "ok")
+    const response = makeRequest(configuration.jiraEmail)
+    assert.equal((response as Response).status, 200)
+    const publicSpliceTuple = [serialized, "public"]
+    publicSpliceTuple.splice(...([0, 0, "public"] as const))
+    assert.include(...publicSpliceTuple)
+    const publicFillTuple = [serialized, "public"]
+    publicFillTuple.fill("public")
+    assert.include(...publicFillTuple)
+    const publicUnshiftTuple = [serialized, "public"]
+    publicUnshiftTuple.unshift("public")
+    assert.include(...publicUnshiftTuple)
+    const publicPushSpreadTuple = [serialized, "public"]
+    publicPushSpreadTuple.push(...(["public"] as const))
+    assert.include(...publicPushSpreadTuple)
+    const publicEmailKey = "email"
+    const publicComputedResult = { [publicEmailKey]: "public" }
+    assert.equal(publicComputedResult.email, "public")
+    const publicSpreadSource = { email: "public" }
+    const publicSpreadResult = { status: "ok", ...publicSpreadSource }
+    assert.equal(publicSpreadResult.email, "public")
+    const publicOverrideResult = { ...publicResult, email: "public" }
+    assert.equal(publicOverrideResult.email, "public")
+    const nestedPublicResult = {
+      nested: { email: configuration.jiraEmail, status: "ok" }
+    }
+    assert.equal(nestedPublicResult.nested.status, "ok")
+    assert["ok" as const](Boolean(configuration.jiraEmail), "credential must exist")
+    const wrappedPublicPushTuple = [serialized, "public"]
+    ;(wrappedPublicPushTuple.push as typeof wrappedPublicPushTuple.push)("public")
+    assert.include(...wrappedPublicPushTuple)
+    const wrappedPublicUnshiftTuple = [serialized, "public"]
+    wrappedPublicUnshiftTuple.unshift!("public")
+    assert.include(...wrappedPublicUnshiftTuple)
+    const wrappedPublicSpliceTuple = [serialized, "public"]
+    ;(wrappedPublicSpliceTuple.splice satisfies typeof wrappedPublicSpliceTuple.splice)(
+      ...([0, 0, "public"] as const)
+    )
+    assert.include(...wrappedPublicSpliceTuple)
+    const wrappedPublicFillTuple = [serialized, "public"]
+    ;(<typeof wrappedPublicFillTuple.fill>wrappedPublicFillTuple.fill)("public")
+    assert.include(...wrappedPublicFillTuple)
+    const wrappedPublicKeyPushTuple = [serialized, "public"]
+    wrappedPublicKeyPushTuple["push" as const]("public")
+    assert.include(...wrappedPublicKeyPushTuple)
+    const opaqueStatus = fetchStatus(configuration.jiraEmail)
+    assert.equal(opaqueStatus.trim(), "ok")
+    const opaqueCallResult = { status: fetchStatus(configuration.jiraEmail) }
+    assert.equal(opaqueCallResult.status.trim(), "ok")
+    const opaqueNestedResult = {
+      response: { status: fetchStatus(configuration.jiraEmail) }
+    }
+    assert.equal(opaqueNestedResult.response.status.trim(), "ok")
+    const opaqueCallAlias = opaqueCallResult as typeof opaqueCallResult
+    assert.equal(opaqueCallAlias.status.trim(), "ok")
+    const opaqueRequestStatus = makeRequest(configuration.jiraEmail).getStatus()
+    assert.equal(opaqueRequestStatus.trim(), "ok")
+    const publicMethodResult = publicSummary.status.trim()
+    assert.equal(publicMethodResult.toLowerCase(), "ok")
+    const definitePublicOverride = {
+      email: configuration.jiraEmail,
+      ...getPublicOverrides(),
+      email: "public"
+    }
+    assert.equal(definitePublicOverride.email, "public")
+    function* validateOpaqueYield() {
+      const yieldedStatus = yield fetchStatus(configuration.jiraEmail)
+      assert.equal(yieldedStatus.trim(), "ok")
+      const yieldedResult = { status: yield fetchStatus(configuration.jiraEmail) }
+      assert.equal(yieldedResult.status.trim(), "ok")
+    }
+    validateOpaqueYield()
+    const localValue = <Value>(value: Value): Value => value
+    assert.equal(localValue(configuration.jiraApiKey).toString(), "<redacted>")
+    const indexedPublicValues = ["public", configuration.jiraEmail] as const
+    assert.equal(indexedPublicValues[0], "public")
+    const nestedIndexedPublicValues = { values: indexedPublicValues }
+    assert.equal(nestedIndexedPublicValues.values[0], "public")
+    const otherPropertyMutation = { email: "public", status: "pending" }
+    otherPropertyMutation.status = configuration.jiraEmail
+    assert.equal(otherPropertyMutation.email, "public")
+    const definitelyPublicMutation = { email: configuration.jiraEmail }
+    definitelyPublicMutation.email = "public"
+    assert.equal(definitelyPublicMutation.email, "public")
+    const dynamicSensitiveBeforePublic = {
+      [getDynamicKey()]: configuration.jiraEmail,
+      email: "public"
+    }
+    assert.equal(dynamicSensitiveBeforePublic.email, "public")
+    const dynamicPublicAfterPublic = {
+      email: "public",
+      [getDynamicKey()]: "public"
+    }
+    assert.equal(dynamicPublicAfterPublic.email, "public")
+    const cyclicPublicResult = {
+      email: false ? cyclicPublicResult.email : "public"
+    }
+    assert.equal(cyclicPublicResult.email, "public")
+    const destructuredPublicSource = {
+      email: configuration.jiraEmail,
+      status: "ok"
+    }
+    const { status: destructuredDerivedStatus } = destructuredPublicSource
+    assert.equal(destructuredDerivedStatus, "ok")
+    const arrayDestructuredPublicSource = ["public", configuration.jiraEmail] as const
+    const [arrayDestructuredPublicStatus] = arrayDestructuredPublicSource
+    assert.equal(arrayDestructuredPublicStatus, "public")
+    const { missing: defaultedPublicStatus = "public" } = {}
+    assert.equal(defaultedPublicStatus, "public")
+    const shallowSensitiveNestedSource = {
+      nested: { email: configuration.jiraEmail }
+    }
+    const shallowPublicNestedReplacement = { nested: { status: "ok" } }
+    const shallowNestedOverrideResult = {
+      ...shallowSensitiveNestedSource,
+      ...shallowPublicNestedReplacement
+    }
+    assert.equal(shallowNestedOverrideResult.nested.email, undefined)
+    const mutatedAfterAssertion = [serialized, "public"]
+    assert.include(...mutatedAfterAssertion)
+    mutatedAfterAssertion.push(configuration.jiraEmail)
+    const aliasedMutationAfterAssertion = [serialized, "public"]
+    const mutationAfterAssertionAlias = aliasedMutationAfterAssertion
+    assert.include(...aliasedMutationAfterAssertion)
+    mutationAfterAssertionAlias.push(configuration.jiraEmail)
+    const compoundPublicResult = { email: "public" }
+    compoundPublicResult.email += ":suffix"
+    assert.equal(compoundPublicResult.email, "public:suffix")
+    const destructuredPublicMutationSource = { nested: { email: "public" } }
+    const { nested: destructuredPublicMutationAlias } = destructuredPublicMutationSource
+    destructuredPublicMutationAlias.email = "still-public"
+    assert.equal(destructuredPublicMutationSource.nested.email, "still-public")
+    const spreadIndexedPublicSource = ["public", configuration.jiraEmail] as const
+    const spreadIndexedPublicValues = [...spreadIndexedPublicSource]
+    assert.equal(spreadIndexedPublicValues[0], "public")
+    const pushedIndexedPublicValues = ["public"]
+    pushedIndexedPublicValues.push(configuration.jiraEmail)
+    assert.equal(pushedIndexedPublicValues[0], "public")
+    const unshiftedIndexedPublicValues = ["public"]
+    unshiftedIndexedPublicValues.unshift(configuration.jiraEmail)
+    assert.equal(unshiftedIndexedPublicValues[1], "public")
+    const unknownPublicReadSource = { status: "ok", summary: "public" }
+    assert.equal(unknownPublicReadSource[getDynamicKey()], "public")
+    const computedPublicDestructuringKey = getDynamicKey()
+    const {
+      [computedPublicDestructuringKey]: computedDestructuredPublicValue
+    } = unknownPublicReadSource
+    assert.equal(computedDestructuredPublicValue, "public")
+    const {
+      email: excludedPublicRestEmail,
+      ...publicDestructuredRest
+    } = destructuredPublicSource
+    assert.equal(publicDestructuredRest.status, "ok")
+    const definitelyPresentDefaultSource = { email: "public" }
+    const {
+      email: definitelyPresentDefaultEmail = configuration.jiraEmail
+    } = definitelyPresentDefaultSource
+    assert.equal(definitelyPresentDefaultEmail, "public")
+    const reversedAfterAssertionValues = [configuration.jiraEmail, "public"]
+    assert.equal(reversedAfterAssertionValues[1], "public")
+    reversedAfterAssertionValues.reverse()
+    const nestedArrayMutationAfterAssertion = ["public"]
+    assert.include(...nestedArrayMutationAfterAssertion)
+    if (shouldMutate) {
+      nestedArrayMutationAfterAssertion.push(configuration.jiraEmail)
+    }
+    const nestedObjectMutationAfterAssertion = { email: "public" }
+    assert.equal(nestedObjectMutationAfterAssertion.email, "public")
+    if (shouldMutate) {
+      nestedObjectMutationAfterAssertion.email = configuration.jiraEmail
+    }
+    const definitelyPublicAlias = "public"
+    const {
+      value: definitelyAliasedDefaultValue = configuration.jiraEmail
+    } = { value: definitelyPublicAlias }
+    assert.equal(definitelyAliasedDefaultValue, "public")
+    const unknownReadSensitiveBase = { email: configuration.jiraEmail }
+    const unknownReadPublicOverride = {
+      ...unknownReadSensitiveBase,
+      email: "public",
+      status: "ok"
+    }
+    assert.equal(unknownReadPublicOverride[getDynamicKey()], "public")
+    const [, ...arrayPublicRest] = ["ignored", "public"]
+    assert.equal(arrayPublicRest[0], "public")
+    const {
+      status: objectPublicRestStatus,
+      ...objectPublicRest
+    } = { status: "ok", email: "public" }
+    objectPublicRest.email = "still-public"
+    assert.equal(objectPublicRest.email, "still-public")
+    function validateInvocationLocalValues() {
+      const invocationLocalValues = ["public"]
+      assert.include(...invocationLocalValues)
+      invocationLocalValues.push(configuration.jiraEmail)
+    }
+    validateInvocationLocalValues()
+    const aliasedEqualFillBound = 1
+    const aliasedNoOpFillValues = ["public"]
+    aliasedNoOpFillValues.fill(
+      configuration.jiraEmail,
+      aliasedEqualFillBound,
+      aliasedEqualFillBound
+    )
+    assert.equal(aliasedNoOpFillValues[0], "public")
+    const [, ...mutatedArrayRestAfterAssertion] = ["ignored", "public"]
+    assert.equal(mutatedArrayRestAfterAssertion[0], "public")
+    mutatedArrayRestAfterAssertion.push(configuration.jiraEmail)
+    ;(() => {
+      const anonymousIifeValues = ["public"]
+      assert.include(...anonymousIifeValues)
+      anonymousIifeValues.push(configuration.jiraEmail)
+    })()
+    const objectRestSnapshotSource = { email: "public" }
+    const { ...objectRestSnapshot } = objectRestSnapshotSource
+    objectRestSnapshotSource.email = configuration.jiraEmail
+    assert.equal(objectRestSnapshot.email, "public")
+    const mutuallyExclusiveResult = { email: "public" }
+    if (shouldMutate) {
+      assert.equal(mutuallyExclusiveResult.email, "public")
+    } else {
+      mutuallyExclusiveResult.email = configuration.jiraEmail
+    }
+    const conditionallyPublicValues = ["public", "public"]
+    if (shouldMutate) {
+      conditionallyPublicValues.reverse()
+    }
+    assert.equal(conditionallyPublicValues[0], "public")
+    const switchExclusiveResult = { email: "public" }
+    switch (selectedCase) {
+      case "assert":
+        assert.equal(switchExclusiveResult.email, "public")
+        break
+      case "mutate":
+        switchExclusiveResult.email = configuration.jiraEmail
+        break
+    }
+    const conditionalExclusiveResult = { email: "public" }
+    shouldMutate
+      ? (conditionalExclusiveResult.email = configuration.jiraEmail)
+      : assert.equal(conditionalExclusiveResult.email, "public")
+    const fullySanitizedNegativeFillValues = [
+      configuration.jiraEmail,
+      "public"
+    ]
+    fullySanitizedNegativeFillValues.fill("public", -2)
+    assert.equal(fullySanitizedNegativeFillValues[0], "public")
+    const [, ...fullySanitizedBoundedRest] = [
+      "ignored",
+      configuration.jiraEmail,
+      "public"
+    ]
+    fullySanitizedBoundedRest.fill("public", 0, 1)
+    assert.equal(fullySanitizedBoundedRest[0], "public")
+    const objectSpreadSnapshotSource = { email: "public" }
+    const objectSpreadSnapshot = { ...objectSpreadSnapshotSource }
+    objectSpreadSnapshotSource.email = configuration.jiraEmail
+    assert.equal(objectSpreadSnapshot.email, "public")
+    const arraySpreadSnapshotSource = ["public"]
+    const arraySpreadSnapshot = [...arraySpreadSnapshotSource]
+    arraySpreadSnapshotSource[0] = configuration.jiraEmail
+    assert.equal(arraySpreadSnapshot[0], "public")
+    const arrayRestSnapshotSource = ["public"]
+    const [...arrayRestSnapshotCopy] = arrayRestSnapshotSource
+    arrayRestSnapshotSource[0] = configuration.jiraEmail
+    assert.equal(arrayRestSnapshotCopy[0], "public")
+    const unrelatedValueNamespace = {
+      value: (value: unknown) => value
+    }
+    const unrelatedValueAlias = unrelatedValueNamespace.value
+    assert.equal(unrelatedValueAlias(configuration.jiraApiKey).toString(), "<redacted>")
+    const wrappedSyntheticConfiguration = {
+      configuration: { jiraEmail: "public", status: "ok" }
+    }
+    assert.equal(wrappedSyntheticConfiguration.configuration.jiraEmail, "public")
+    const sequencePublicResult = {
+      email: (configuration.jiraEmail, "public")
+    }
+    assert.equal(sequencePublicResult.email, "public")
+    assert.equal(fetchStatus(configuration.jiraEmail), "ok")
+    const directOpaqueAlias = fetchStatus(configuration.jiraEmail)
+    assert.equal(directOpaqueAlias, "ok")
+    let assignedPublicEmail = configuration.jiraEmail
+    const assignmentPublicResult = {
+      email: (assignedPublicEmail = "public")
+    }
+    assert.equal(assignmentPublicResult.email, "public")
+    const unrelatedDestructuringNamespace = {
+      value: (value: unknown) => value
+    }
+    const { value: unrelatedDestructuredValue } = unrelatedDestructuringNamespace
+    assert.equal(unrelatedDestructuredValue(configuration.jiraApiKey).toString(), "<redacted>")
+    const publicGetterResult = {
+      get email() {
+        return "public"
+      }
+    }
+    assert.equal(publicGetterResult.email, "public")
+    const assignedPublicResult = { email: configuration.jiraEmail }
+    Object.assign(
+      assignedPublicResult,
+      { email: configuration.jiraEmail },
+      { email: "public" }
+    )
+    assert.equal(assignedPublicResult.email, "public")
+    const constructedPublicResult = Object.assign(
+      {},
+      { email: configuration.jiraEmail },
+      { email: "public" }
+    )
+    assert.equal(constructedPublicResult.email, "public")
+    const customFormatter = {
+      concat: (_value: string) => "public",
+      replace: (_pattern: string, _value: string) => "public"
+    }
+    assert.equal(customFormatter.concat(configuration.jiraEmail), "public")
+    assert.equal(
+      customFormatter.replace("owner", configuration.confluenceEmail),
+      "public"
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        () => "<redacted>"
+      ),
+      '"<redacted>"'
+    )
+    const assignedSnapshotSource = { email: "public" }
+    const assignedSnapshot = Object.assign({}, assignedSnapshotSource)
+    assignedSnapshotSource.email = configuration.jiraEmail
+    assert.equal(assignedSnapshot.email, "public")
+    const nestedSanitizedAssign = {
+      result: { email: configuration.jiraEmail }
+    }
+    Object.assign(nestedSanitizedAssign.result, { email: "public" })
+    assert.equal(nestedSanitizedAssign.result.email, "public")
+    let compoundPublicEmail = configuration.jiraEmail
+    compoundPublicEmail = "public"
+    const compoundPublicResult = { email: (compoundPublicEmail += "-suffix") }
+    assert.equal(compoundPublicResult.email, "public-suffix")
+    const unrelatedRedactedNamespace = {
+      value: (value: unknown) => value
+    }
+    const { ...unrelatedRedactedCopy } = unrelatedRedactedNamespace
+    assert.equal(
+      unrelatedRedactedCopy.value(configuration.jiraApiKey).toString(),
+      "<redacted>"
+    )
+    const unrelatedValueKey = "value"
+    const {
+      [unrelatedValueKey]: unrelatedComputedReveal
+    } = unrelatedRedactedNamespace
+    assert.equal(
+      unrelatedComputedReveal(configuration.jiraApiKey).toString(),
+      "<redacted>"
+    )
+    const { value: unrelatedDefaultedReveal = identity } =
+      unrelatedRedactedNamespace
+    assert.equal(
+      unrelatedDefaultedReveal(configuration.jiraApiKey).toString(),
+      "<redacted>"
+    )
+    const multipleRedactedArguments = [
+      configuration.jiraApiKey,
+      configuration.confluenceApiKey
+    ] as const
+    assert.equal(
+      Redacted.value(...multipleRedactedArguments).toString(),
+      "<redacted>"
+    )
+    let overwrittenMutableReceiver = configuration.jiraEmail
+    overwrittenMutableReceiver = "public"
+    assert.equal(overwrittenMutableReceiver.trim(), "public")
+    let laterSensitiveEmail = "public"
+    assert.equal(laterSensitiveEmail, "public")
+    laterSensitiveEmail = configuration.jiraEmail
+    assert.equal(
+      JSON.stringify(
+        {
+          email: configuration.jiraEmail,
+          status: "ok"
+        },
+        ["status"]
+      ),
+      '{"status":"ok"}'
+    )
+    const spreadOverrideSources = [
+      { email: configuration.jiraEmail },
+      { email: "public" }
+    ] as const
+    const spreadOverrideResult = Object.assign({}, ...spreadOverrideSources)
+    assert.equal(spreadOverrideResult.email, "public")
+    const overriddenRedactedNamespace = {
+      ...Redacted,
+      value: (_value: unknown) => "public"
+    }
+    assert.equal(overriddenRedactedNamespace.value(configuration.jiraApiKey), "public")
+    const locallyAssignedNamespace = Object.assign(
+      {},
+      unrelatedRedactedNamespace
+    )
+    assert.equal(
+      locallyAssignedNamespace.value(configuration.jiraApiKey).toString(),
+      "<redacted>"
+    )
+    const publicToJson = {
+      email: configuration.jiraEmail,
+      toJSON() {
+        return "<redacted>"
+      }
+    }
+    assert.equal(JSON.stringify(publicToJson), '"<redacted>"')
+    let iteratedPublicEmail = "public"
+    for (iteratedPublicEmail of ["first", "second"]) {
+      assert.equal(iteratedPublicEmail, "public")
+    }
+    let afterInvocationEmail = "public"
+    const assertBeforeLaterWrite = () =>
+      assert.equal(afterInvocationEmail, "public")
+    assertBeforeLaterWrite()
+    ;(() => {
+      afterInvocationEmail = configuration.jiraEmail
+    })()
+    assert.equal(
+      JSON.stringify(
+        {
+          outer: {
+            email: configuration.jiraEmail,
+            status: "ok"
+          }
+        },
+        ["outer", "status"]
+      ),
+      '{"outer":{"status":"ok"}}'
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (_key, value) => Boolean(value)
+      ),
+      "true"
+    )
+    assert.equal(
+      JSON.stringify(
+        configuration.jiraEmail,
+        (_key, value) => value === null
+      ),
+      "false"
+    )
+    let overwrittenIterationEmail = configuration.jiraEmail
+    for (overwrittenIterationEmail of ["public"]) {
+      assert.equal(overwrittenIterationEmail, "public")
+    }
+    const numericWhitelistPublic = {
+      0: configuration.jiraEmail,
+      1: "public"
+    }
+    assert.equal(JSON.stringify(numericWhitelistPublic, [1]), '{"1":"public"}')
+    let aliasAfterInvocationEmail = "public"
+    const assertAliasBeforeWrite = () =>
+      assert.equal(aliasAfterInvocationEmail, "public")
+    const runAliasBeforeWrite = assertAliasBeforeWrite
+    runAliasBeforeWrite()
+    aliasAfterInvocationEmail = configuration.jiraEmail
+    const spreadMutationOverrideTarget = { email: "public" }
+    Object.assign(
+      ...[
+        spreadMutationOverrideTarget,
+        { email: configuration.jiraEmail },
+        { email: "public" }
+      ] as const
+    )
+    assert.equal(spreadMutationOverrideTarget.email, "public")
+    let emptyBodyPublicEmail = "public"
+    for (emptyBodyPublicEmail of []) {
+      emptyBodyPublicEmail = configuration.jiraEmail
+    }
+    assert.equal(emptyBodyPublicEmail, "public")
+    let emptyDestructuredPublicEmail = "public"
+    for ([emptyDestructuredPublicEmail] of []) {
+      emptyDestructuredPublicEmail = configuration.confluenceEmail
+    }
+    assert.equal(emptyDestructuredPublicEmail, "public")
+    let postLoopPublicEmail = configuration.jiraEmail
+    for (postLoopPublicEmail of ["public"]) {
+      recordAccess()
+    }
+    assert.equal(postLoopPublicEmail, "public")
+    const publicSpreadToJsonHook = {
+      toJSON() {
+        return this.email
+      }
+    }
+    const publicSpreadToJsonValue = {
+      email: configuration.jiraEmail,
+      ...publicSpreadToJsonHook,
+      email: "public"
+    }
+    assert.equal(JSON.stringify(publicSpreadToJsonValue), '"public"')
+    let opaqueCallbackEmail = "public"
+    const opaqueCallback = () =>
+      assert.equal(opaqueCallbackEmail, "public")
+    opaqueCallbackEmail = configuration.jiraEmail
+    opaqueApi(opaqueCallback)
+    const nestedSpreadOverrideTarget = {
+      result: { email: configuration.jiraEmail }
+    }
+    Object.assign(
+      ...[
+        nestedSpreadOverrideTarget.result,
+        { email: configuration.jiraEmail },
+        { email: "public" }
+      ] as const
+    )
+    assert.equal(nestedSpreadOverrideTarget.result.email, "public")
+    assert.equal(
+      JSON.stringify(
+        {
+          Infinity: configuration.jiraEmail,
+          NaN: "ok"
+        },
+        [NaN]
+      ),
+      '{"NaN":"ok"}'
+    )
+    const frozenUnrelatedValue = Object.freeze({
+      value: (_value: unknown) => "public"
+    })
+    assert.equal(frozenUnrelatedValue.value(configuration.jiraApiKey), "public")
+    let emptyForEachEmail = "public"
+    ;[].forEach(() => {
+      emptyForEachEmail = configuration.jiraEmail
+    })
+    assert.equal(emptyForEachEmail, "public")
+    let thisArgEmail = "public"
+    const untouchedForEachCallback = () => undefined
+    ;[0].forEach(untouchedForEachCallback, () => {
+      thisArgEmail = configuration.jiraEmail
+    })
+    assert.equal(thisArgEmail, "public")
+    let calledAfterAssertionEmail = "public"
+    const writeAfterAssertionEmail = () => {
+      calledAfterAssertionEmail = configuration.jiraEmail
+    }
+    assert.equal(calledAfterAssertionEmail, "public")
+    writeAfterAssertionEmail.call(undefined)
+    let firstBreakPublicEmail = configuration.jiraEmail
+    for (firstBreakPublicEmail of [
+      "public",
+      configuration.confluenceEmail
+    ]) {
+      break
+    }
+    assert.equal(firstBreakPublicEmail, "public")
+    const publicDestructuringToJson = {
+      email: configuration.jiraEmail,
+      status: "ok",
+      toJSON() {
+        const { status } = this
+        return status
+      }
+    }
+    assert.equal(JSON.stringify(publicDestructuringToJson), '"ok"')
+    assert.equal(
+      JSON.stringify(
+        configuration.jiraEmail,
+        function () {
+          return arguments[0]
+        }
+      ),
+      '""'
+    )
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail, status: "ok" },
+        (_key, { status }) => status
+      ),
+      '"ok"'
+    )
+    assert.equal(
+      JSON.stringify(
+        { secret: configuration.jiraEmail, status: "ok" },
+        function () {
+          return this.status
+        }
+      ),
+      expectedEmail
+    )
+    const publicNumericExpressionKey = 2 - 1
+    assert.equal(
+      JSON.stringify(
+        { 0: configuration.jiraEmail, 1: "public" },
+        [publicNumericExpressionKey]
+      ),
+      '{"1":"public"}'
+    )
+    const frozenPublicToJsonReturn = {
+      toJSON() {
+        return Object.freeze({ email: "public" })
+      }
+    }
+    assert.equal(JSON.stringify(frozenPublicToJsonReturn), '{"email":"public"}')
+    const aliasedThisPublicToJson = {
+      email: configuration.jiraEmail,
+      status: "ok",
+      toJSON() {
+        const self = this
+        return self.status
+      }
+    }
+    assert.equal(JSON.stringify(aliasedThisPublicToJson), '"ok"')
+    assert.equal(
+      JSON.stringify(
+        { email: configuration.jiraEmail },
+        (...args) => args[0]
+      ),
+      '""'
+    )
+    let nestedBreakFinalPublicEmail = "public"
+    for (nestedBreakFinalPublicEmail of [
+      configuration.jiraEmail,
+      "public"
+    ]) {
+      switch (selectedCase) {
+        case "stop":
+          break
+      }
+    }
+    assert.equal(nestedBreakFinalPublicEmail, "public")
+    const frozenPublicToJsonOwner = Object.freeze({
+      email: configuration.jiraEmail,
+      toJSON() {
+        return "<redacted>"
+      }
+    })
+    assert.equal(JSON.stringify(frozenPublicToJsonOwner), '"<redacted>"')
     const suffix = "Include"
     assert[\`not\${suffix}\`](publicSummary, "non-sensitive")
   `,
@@ -296,7 +1737,7 @@ await assertRuleDiagnostics({
     const sensitiveKey = sensitiveKeyBase
     assert.strictEqual(result[sensitiveKey], expectedProviderId)
   `,
-  expected: 12,
+  expected: 11,
   filePath: "packages/control-center/test/integration/live-provider-id-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
@@ -305,7 +1746,7 @@ await assertRuleDiagnostics({
   code: `
     import { assert } from "@effect/vitest"
     const pattern = /^[0-9]{12}$/u
-    assert.isTrue(pattern.test(identity.providerImmutableId), "constant message")
+    assert.isTrue(Boolean(pattern.test(identity.providerImmutableId)), "constant message")
     assert.isTrue(
       left.providerImmutableId === right.providerImmutableId,
       "constant message"
