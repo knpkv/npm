@@ -426,6 +426,11 @@ const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedRefer
     // recognised consumer cannot mutate it, so sharing one options binding across
     // calls must keep reporting rather than silence every call.
     if (knownOptionArguments?.has(identifier) === true) return false
+    // A mutation after the command was created cannot retroactively change it, so
+    // only earlier references matter. Textual order is a sound proxy only for
+    // straight-line code; a conditional or callback reference is still treated as
+    // preceding, keeping those judgment cases silent rather than guessed.
+    if (identifier.range[0] > resolvedReference.range[0]) return false
     if (reference.isWrite()) return true
     const parent = identifier.parent
     if (parent === undefined || parent === null) return false
@@ -454,6 +459,13 @@ const isMutatedChildProcessOptionsBinding = (variable, definition, resolvedRefer
     if (parent.type === "ArrayExpression") return true
     return false
   })
+
+/** Whether an expression is unambiguously `undefined`. */
+const isDefinitelyUndefined = (expression) => {
+  const value = unwrapTypeExpression(expression)
+  if (value.type === "Identifier") return value.name === "undefined"
+  return value.type === "UnaryExpression" && value.operator === "void"
+}
 
 /** Bound on alias-chain following; chains this long do not occur in practice. */
 const CHILD_PROCESS_ALIAS_ROUNDS = 4
@@ -497,6 +509,22 @@ const aliasedChildProcessBindings = (context, identifier, isBarrel) => {
       return empty
     }
     initializer = member
+  }
+  // `const spawn = ChildProcess.make` extracts the method rather than the module.
+  const asMember = initializer.parent
+  if (
+    asMember?.type === "MemberExpression" &&
+    asMember.object === initializer &&
+    staticPropertyName(asMember.property) === "make" &&
+    asMember.parent?.type === "VariableDeclarator" &&
+    asMember.parent.init === asMember &&
+    asMember.parent.parent?.kind === "const" &&
+    asMember.parent.id.type === "Identifier"
+  ) {
+    const extracted = context.sourceCode
+      .getDeclaredVariables(asMember.parent)
+      .find((variable) => variable.name === asMember.parent.id.name)
+    return extracted === undefined ? empty : { moduleBindings: [], makeBindings: [extracted] }
   }
   const declarator = initializer.parent
   if (
@@ -618,6 +646,10 @@ const effectiveChildProcessOptionNames = (context, argument, depth = 0, knownOpt
       continue
     }
     const name = staticPropertyName(property.key)
+    // `extendEnv: undefined` and `extendEnv: void 0` are falsy, so Effect replaces
+    // the environment exactly as if the property were absent. TypeScript accepts
+    // them because the field is declared `boolean | undefined`.
+    if (name === "extendEnv" && isDefinitelyUndefined(property.value)) continue
     if (name !== undefined) names.add(name)
   }
   return names

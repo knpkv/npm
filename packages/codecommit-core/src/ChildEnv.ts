@@ -42,6 +42,19 @@
  *   profile is read from. The parent resolved the profile name against those
  *   same paths, so clearing them would point the child at a different file and
  *   break legitimate custom config locations.
+ *
+ * KNOWN LIMITATION — Windows casing. Clearing works by mapping each name to
+ * `undefined` in an object merged over the inherited environment, which matches
+ * keys exactly. Windows environment names are case-insensitive, so a host
+ * exporting `Aws_Access_Key_Id` keeps that entry alongside the `AWS_ACCESS_KEY_ID`
+ * tombstone and the AWS CLI can still read it. Closing this means filtering the
+ * inherited keys case-insensitively, which requires enumerating the parent
+ * environment; no Effect service exposes that here, and `globalThis.process` is
+ * not available to this code. The two `assume` call sites are POSIX-only in
+ * practice — their clipboard step has only `pbcopy` and `xclip` — so the exposed
+ * path is the SandboxService clone on a Windows host. Tracked rather than
+ * silently accepted; the exact-case behaviour these tests cover is correct on
+ * POSIX.
  */
 const OVERRIDING_AWS_VARIABLES: ReadonlyArray<string> = [
   "AWS_ACCESS_KEY_ID",

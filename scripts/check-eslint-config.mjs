@@ -1575,3 +1575,37 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-shared-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const spawn = ChildProcess.make
+    const extracted = spawn("git", args, { env: gitEnvironment })
+    const explicitUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: undefined })
+    const voidUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: void 0 })
+    const late = { env: gitEnvironment }
+    const afterCall = ChildProcess.make("git", args, late)
+    configure(late)
+  `,
+  expected: 4,
+  filePath: "packages/codecommit-core/src/eslint-child-env-round13-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    import * as Foreign from "./foreign-api.js"
+    const spawn = ChildProcess.make
+    const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
+    const foreignSpawn = Foreign.ChildProcess.make
+    const foreign = foreignSpawn("git", args, { env: gitEnvironment })
+    const isolated = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: false })
+    const early = { env: gitEnvironment }
+    configure(early)
+    const beforeCall = ChildProcess.make("git", args, early)
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-round13-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
