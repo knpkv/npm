@@ -36,14 +36,19 @@ const isNamespaceImportFrom = (context, identifier, sources) => {
   )
 }
 
-const isNamedImportFrom = (context, identifier, sources, importedNames) => {
+const isNamedImportBindingFrom = (context, identifier, sources, importedNames) => {
   const definition = importedBinding(context, identifier)
   return (
-    isValueImport(definition) &&
+    definition !== undefined &&
     definition.node.type === "ImportSpecifier" &&
     sources.includes(importSource(definition)) &&
     importedNames.includes(staticPropertyName(definition.node.imported))
   )
+}
+
+const isNamedImportFrom = (context, identifier, sources, importedNames) => {
+  const definition = importedBinding(context, identifier)
+  return isValueImport(definition) && isNamedImportBindingFrom(context, identifier, sources, importedNames)
 }
 
 const resolvedVariable = (context, identifier) => {
@@ -1551,47 +1556,237 @@ module.exports = {
         node?.type === "MemberExpression" && memberPropertyName(node) === "providerImmutableId"
       const credentialEmailFields = new Set(["confluenceEmail", "jiraEmail"])
       const credentialApiKeyFields = new Set(["confluenceApiKey", "jiraApiKey"])
+      const fixtureLocatorFields = new Set([
+        "atlassianSiteId",
+        "atlassianSiteUrl",
+        "awsRegion",
+        "codeCommitRepository",
+        "codePipelinePipeline",
+        "confluenceProbePageId",
+        "confluenceSpaceId",
+        "jiraProjectId"
+      ])
+      const hasLiveConfigurationType = (identifier) => {
+        const annotation = identifier.typeAnnotation?.typeAnnotation
+        return (
+          annotation?.type === "TSTypeReference" &&
+          annotation.typeName.type === "Identifier" &&
+          isNamedImportBindingFrom(
+            context,
+            annotation.typeName,
+            ["./liveConnectionConfiguration.js"],
+            ["LiveConnectionConfiguration"]
+          )
+        )
+      }
+      const isLiveConfigurationBinding = (identifier) => {
+        const variable = resolvedVariable(context, identifier)
+        if (variable === undefined) return identifier.name === "configuration"
+        if (variable.defs.length !== 1) return false
+        const definition = variable.defs[0]
+        if (definition.name?.type === "Identifier" && hasLiveConfigurationType(definition.name)) return true
+        if (
+          definition.type !== "Variable" ||
+          definition.node.type !== "VariableDeclarator" ||
+          definition.node.init === null
+        ) {
+          return false
+        }
+        const initializer = unwrapTypeExpression(definition.node.init)
+        return (
+          initializer.type === "YieldExpression" &&
+          initializer.delegate &&
+          initializer.argument?.type === "Identifier" &&
+          isNamedImportFrom(
+            context,
+            initializer.argument,
+            ["./liveConnectionConfiguration.js"],
+            ["loadLiveConnectionConfiguration"]
+          )
+        )
+      }
+      const isConfigurationObject = (node, visitedVariables = new Set()) => {
+        if (node.type !== "Identifier") return false
+        if (isLiveConfigurationBinding(node)) return true
+        const binding = immutableConstInitializer(node)
+        if (
+          binding === undefined ||
+          binding.initializer.type !== "Identifier" ||
+          visitedVariables.has(binding.variable)
+        ) {
+          return false
+        }
+        visitedVariables.add(binding.variable)
+        const isConfiguration = isConfigurationObject(binding.initializer, visitedVariables)
+        visitedVariables.delete(binding.variable)
+        return isConfiguration
+      }
       const isConfigurationField = (node, fields) =>
-        node?.type === "MemberExpression" &&
-        node.object.type === "Identifier" &&
-        node.object.name === "configuration" &&
-        fields.has(memberPropertyName(node))
-      const isCredentialEmail = (node) => isConfigurationField(node, credentialEmailFields)
+        node?.type === "MemberExpression" && isConfigurationObject(node.object) && fields.has(memberPropertyName(node))
+      const destructuredConfigurationField = (identifier) => {
+        const variable = resolvedVariable(context, identifier)
+        if (variable === undefined || variable.defs.length !== 1) return undefined
+        const definition = variable.defs[0]
+        if (
+          definition.type !== "Variable" ||
+          definition.node.type !== "VariableDeclarator" ||
+          definition.node.id.type !== "ObjectPattern" ||
+          definition.node.init === null ||
+          definition.parent?.type !== "VariableDeclaration" ||
+          definition.parent.kind !== "const" ||
+          !isConfigurationObject(unwrapTypeExpression(definition.node.init))
+        ) {
+          return undefined
+        }
+        const property = definition.node.id.properties.find(
+          (candidate) =>
+            candidate.type === "Property" &&
+            !candidate.computed &&
+            candidate.value.type === "Identifier" &&
+            candidate.value === definition.name
+        )
+        return property === undefined ? undefined : staticPropertyName(property.key)
+      }
+      const isConfigurationValue = (node, fields, visitedVariables = new Set()) => {
+        if (isConfigurationField(node, fields)) return true
+        if (node?.type !== "Identifier") return false
+        const destructuredField = destructuredConfigurationField(node)
+        if (destructuredField !== undefined) return fields.has(destructuredField)
+        const binding = immutableConstInitializer(node)
+        if (binding === undefined || visitedVariables.has(binding.variable)) return false
+        visitedVariables.add(binding.variable)
+        const isValue = isConfigurationValue(binding.initializer, fields, visitedVariables)
+        visitedVariables.delete(binding.variable)
+        return isValue
+      }
+      const isCredentialEmail = (node) => isConfigurationValue(node, credentialEmailFields)
+      const isFixtureLocator = (node) => isConfigurationValue(node, fixtureLocatorFields)
       const isRawCredentialApiKey = (node) =>
         node?.type === "CallExpression" &&
         node.arguments.length === 1 &&
         node.arguments[0].type !== "SpreadElement" &&
-        isConfigurationField(node.arguments[0], credentialApiKeyFields) &&
+        isConfigurationValue(node.arguments[0], credentialApiKeyFields) &&
         node.callee.type === "MemberExpression" &&
         memberPropertyName(node.callee) === "value" &&
         node.callee.object.type === "Identifier" &&
         isNamespaceImportFrom(context, node.callee.object, ["effect/Redacted"])
-      const immutableConstArray = (identifier) => {
+      const immutableArrayRoot = (identifier, visitedVariables = new Set()) => {
         const binding = immutableConstInitializer(identifier)
-        if (binding?.initializer.type !== "ArrayExpression") return undefined
-        const hasUnsafeReference = binding.variable.references.some((reference) => {
-          if (isPureTypeReference(reference)) return false
-          const referenceIdentifier = reference.identifier
-          if (
-            referenceIdentifier.parent === binding.definition.node &&
-            binding.definition.node.id === referenceIdentifier
-          ) {
-            return false
+        if (binding === undefined || visitedVariables.has(binding.variable)) return undefined
+        if (binding.initializer.type === "ArrayExpression") return binding
+        if (binding.initializer.type !== "Identifier") return undefined
+        visitedVariables.add(binding.variable)
+        const arrayBinding = immutableArrayRoot(binding.initializer, visitedVariables)
+        visitedVariables.delete(binding.variable)
+        return arrayBinding
+      }
+      const outerIdentityExpression = (identifier) => {
+        let expression = identifier
+        let parent = expression.parent
+        while (
+          (parent?.type === "TSAsExpression" ||
+            parent?.type === "TSTypeAssertion" ||
+            parent?.type === "TSSatisfiesExpression" ||
+            parent?.type === "TSNonNullExpression") &&
+          parent.expression === expression
+        ) {
+          expression = parent
+          parent = expression.parent
+        }
+        return expression
+      }
+      const identityExpressionIdentifier = (expression) => {
+        let current = expression
+        while (
+          current.type === "TSAsExpression" ||
+          current.type === "TSTypeAssertion" ||
+          current.type === "TSSatisfiesExpression" ||
+          current.type === "TSNonNullExpression"
+        ) {
+          current = current.expression
+        }
+        return current.type === "Identifier" ? current : undefined
+      }
+      const immutableIdentityAliasIdentifier = (referenceIdentifier) => {
+        const expression = outerIdentityExpression(referenceIdentifier)
+        const parent = expression.parent
+        return parent?.type === "VariableDeclarator" &&
+          parent.init === expression &&
+          parent.id.type === "Identifier" &&
+          parent.parent?.type === "VariableDeclaration" &&
+          parent.parent.kind === "const"
+          ? parent.id
+          : undefined
+      }
+      const isAssertionSpreadReference = (identifier) => {
+        const expression = outerIdentityExpression(identifier)
+        const spread = expression.parent
+        const call = spread?.parent
+        return (
+          spread?.type === "SpreadElement" &&
+          spread.argument === expression &&
+          call?.type === "CallExpression" &&
+          call.arguments.includes(spread) &&
+          call.callee.type === "MemberExpression" &&
+          call.callee.object.type === "Identifier" &&
+          isNamedImportFrom(context, call.callee.object, ["@effect/vitest"], ["assert"])
+        )
+      }
+      const immutableConstArray = (identifier) => {
+        const root = immutableArrayRoot(identifier)
+        if (root === undefined) return undefined
+        const pending = [root]
+        const graphVariables = new Set()
+        while (pending.length > 0) {
+          const binding = pending.pop()
+          if (binding === undefined || graphVariables.has(binding.variable)) continue
+          graphVariables.add(binding.variable)
+          for (const reference of binding.variable.references) {
+            if (isPureTypeReference(reference)) continue
+            const referenceIdentifier = reference.identifier
+            if (
+              referenceIdentifier.parent === binding.definition.node &&
+              binding.definition.node.id === referenceIdentifier
+            ) {
+              continue
+            }
+            if (!reference.isWrite() && isAssertionSpreadReference(referenceIdentifier)) continue
+            if (reference.isWrite()) return undefined
+            const aliasIdentifier = immutableIdentityAliasIdentifier(referenceIdentifier)
+            if (aliasIdentifier === undefined) return undefined
+            const alias = immutableConstInitializer(aliasIdentifier)
+            if (
+              alias === undefined ||
+              alias.initializer.type !== "Identifier" ||
+              resolvedVariable(context, alias.initializer) !== binding.variable
+            ) {
+              return undefined
+            }
+            pending.push(alias)
           }
-          return (
-            reference.isWrite() ||
-            referenceIdentifier.parent?.type !== "SpreadElement" ||
-            referenceIdentifier.parent.argument !== referenceIdentifier
-          )
-        })
-        return hasUnsafeReference ? undefined : binding
+        }
+        const assertedBinding = immutableConstInitializer(identifier)
+        return assertedBinding !== undefined && graphVariables.has(assertedBinding.variable) ? root : undefined
       }
       const containsMatchingOperand = (node, directMatch, visitedVariables = new Set()) => {
         if (directMatch(node)) {
           return true
         }
-        if (node.type === "SpreadElement" && node.argument.type === "Identifier") {
-          const binding = immutableConstArray(node.argument)
+        if (node.type === "Identifier") {
+          const binding = immutableConstInitializer(node)
+          if (binding !== undefined && !visitedVariables.has(binding.variable)) {
+            visitedVariables.add(binding.variable)
+            const containsMatch =
+              directMatch(binding.initializer) ||
+              (binding.initializer.type === "Identifier" &&
+                containsMatchingOperand(binding.initializer, directMatch, visitedVariables))
+            visitedVariables.delete(binding.variable)
+            if (containsMatch) return true
+          }
+        }
+        if (node.type === "SpreadElement") {
+          const arrayIdentifier = identityExpressionIdentifier(node.argument)
+          const binding = arrayIdentifier === undefined ? undefined : immutableConstArray(arrayIdentifier)
           if (binding !== undefined && !visitedVariables.has(binding.variable)) {
             visitedVariables.add(binding.variable)
             const containsMatch = containsMatchingOperand(binding.initializer, directMatch, visitedVariables)
@@ -1608,8 +1803,11 @@ module.exports = {
         })
       }
       const containsProviderImmutableId = (node) => containsMatchingOperand(node, isDirectProviderImmutableId)
-      const containsCredential = (node) =>
-        containsMatchingOperand(node, (candidate) => isCredentialEmail(candidate) || isRawCredentialApiKey(candidate))
+      const containsSensitiveConfiguration = (node) =>
+        containsMatchingOperand(
+          node,
+          (candidate) => isCredentialEmail(candidate) || isRawCredentialApiKey(candidate) || isFixtureLocator(candidate)
+        )
       const echoingIdentityMethods = new Set([
         "deepEqual",
         "deepStrictEqual",
@@ -1618,7 +1816,10 @@ module.exports = {
         "match",
         "strictEqual"
       ])
-      const isStringLiteral = (node) => node?.type === "Literal" && typeof node.value === "string"
+      const isStaticAssertionMessage = (node) =>
+        node !== undefined &&
+        (((node.type === "Literal" || node.type === "TemplateLiteral") && staticPropertyName(node) !== undefined) ||
+          (node.type === "Identifier" && immutableConstString(node) !== undefined))
       const booleanComparisonOperators = new Set(["!=", "!==", "<", "<=", "==", "===", ">", ">="])
       const booleanCallMethods = new Set(["every", "includes", "some", "test"])
       const isProvenBooleanOperand = (node) =>
@@ -1627,7 +1828,9 @@ module.exports = {
         (node.type === "CallExpression" &&
           ((node.callee.type === "MemberExpression" &&
             booleanCallMethods.has(staticPropertyName(node.callee.property))) ||
-            (node.callee.type === "Identifier" && node.callee.name === "Boolean")))
+            (node.callee.type === "Identifier" &&
+              node.callee.name === "Boolean" &&
+              (resolvedVariable(context, node.callee)?.defs.length ?? 0) === 0)))
 
       return {
         CallExpression(node) {
@@ -1643,24 +1846,26 @@ module.exports = {
               ? undefined
               : staticPropertyName(node.callee.property)
           const argumentsWithStableIds = node.arguments.filter(containsProviderImmutableId)
-          const argumentsWithCredentials = node.arguments.filter(containsCredential)
+          const argumentsWithSensitiveConfiguration = node.arguments.filter(containsSensitiveConfiguration)
           const firstArgument = node.arguments[0]
           const booleanAssertionIsUnsafe =
             (method === "isTrue" || method === "isFalse") &&
-            argumentsWithStableIds.length > 0 &&
+            (argumentsWithStableIds.length > 0 || argumentsWithSensitiveConfiguration.length > 0) &&
             (firstArgument === undefined ||
               firstArgument.type === "SpreadElement" ||
               !isProvenBooleanOperand(firstArgument) ||
-              (node.arguments[1] !== undefined && !isStringLiteral(node.arguments[1])))
+              (node.arguments[1] !== undefined && !isStaticAssertionMessage(node.arguments[1])))
           const awsIdentityArrayLengthIsUnsafe =
             method === "lengthOf" && firstArgument?.type === "Identifier" && firstArgument.name === "awsIdentities"
           const dynamicAssertionWithStableIdsIsUnsafe =
             method === undefined &&
             node.callee.computed &&
-            (argumentsWithStableIds.length > 0 || argumentsWithCredentials.length > 0)
+            (argumentsWithStableIds.length > 0 || argumentsWithSensitiveConfiguration.length > 0)
           const echoesSensitiveOperand =
             method === "notInclude" ||
-            (method !== undefined && echoingIdentityMethods.has(method) && argumentsWithStableIds.length > 0) ||
+            (method !== undefined &&
+              echoingIdentityMethods.has(method) &&
+              (argumentsWithStableIds.length > 0 || argumentsWithSensitiveConfiguration.length > 0)) ||
             booleanAssertionIsUnsafe ||
             awsIdentityArrayLengthIsUnsafe ||
             dynamicAssertionWithStableIdsIsUnsafe

@@ -44,11 +44,14 @@ describe("live connection configuration", () => {
     Effect.gen(function*() {
       const configuration = yield* loadLiveConnectionConfiguration
 
-      assert.strictEqual(configuration.awsRegion, "eu-west-1")
-      assert.strictEqual(configuration.atlassianSiteUrl, "https://knpkv.atlassian.net/")
+      assert.isTrue(configuration.awsRegion === "eu-west-1", "AWS region must decode")
+      assert.isTrue(
+        configuration.atlassianSiteUrl === "https://knpkv.atlassian.net/",
+        "Atlassian site URL must decode"
+      )
       assert.strictEqual(configuration.jiraApiKey.toString(), "<redacted>")
       assert.strictEqual(configuration.confluenceApiKey.toString(), "<redacted>")
-      assert.strictEqual(Redacted.value(configuration.jiraApiKey), "jira-token")
+      assert.isTrue(Redacted.value(configuration.jiraApiKey) === "jira-token", "Jira API token must decode")
     }).pipe(Effect.provide(provideEnvironment(completeEnvironment))))
 
   it.effect("fails before allocation when an enabled run omits required configuration", () =>

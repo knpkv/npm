@@ -357,7 +357,10 @@ const executeLiveJourney = Effect.fn("controlCenter.executeLiveConnectionJourney
   if (pipelineExecution?.entity.projection.details._tag !== "pipeline-execution") {
     return yield* Effect.die("live CodePipeline synchronization produced no canonical execution")
   }
-  assert.strictEqual(pipelineExecution.entity.projection.details.pipelineName, configuration.codePipelinePipeline)
+  assert.isTrue(
+    pipelineExecution.entity.projection.details.pipelineName === configuration.codePipelinePipeline,
+    "Live CodePipeline synchronization must remain inside the configured pipeline"
+  )
   assert.isAbove(pipelineExecution.entity.projection.details.actionCount ?? 0, 0)
   assert.isAbove(pipelineExecution.entity.projection.details.actions?.length ?? 0, 0)
   assert.isAbove(pipelineExecution.entity.projection.details.actionPagesRead ?? 0, 0)

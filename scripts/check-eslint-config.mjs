@@ -125,6 +125,9 @@ await assertRuleDiagnostics({
   code: `
     import { assert } from "@effect/vitest"
     import * as Redacted from "effect/Redacted"
+    import type {
+      LiveConnectionConfiguration as LiveConfig
+    } from "./liveConnectionConfiguration.js"
     assert.notInclude(serialized, Redacted.value(configuration.jiraApiKey))
     assert["notInclude"](serialized, configuration.jiraEmail)
     assert[\`notInclude\`](serialized, configuration.confluenceEmail)
@@ -137,14 +140,76 @@ await assertRuleDiagnostics({
     const apiKeyField = "jiraApiKey"
     const apiKey = apiKeyField
     assert[method](serialized, Redacted.value(configuration[apiKey]))
+    assert.strictEqual(configuration.jiraEmail, expectedEmail)
+    assert.include(serialized, Redacted.value(configuration.jiraApiKey))
+    assert.strictEqual(details.pipelineName, configuration.codePipelinePipeline)
+    assert.isTrue(configuration.jiraEmail, "credential must exist")
+    assert.isFalse(Redacted.value(configuration.jiraApiKey), "token should differ")
+    const token = Redacted.value(configuration.confluenceApiKey)
+    assert.include(serialized, token)
+    const pipeline = configuration.codePipelinePipeline
+    assert[method](details.pipelineName, pipeline)
+    const config = configuration
+    assert.strictEqual(actualRegion, config.awsRegion)
+    const aliasedConfig = configuration
+    const aliasedApiKey = aliasedConfig.jiraApiKey
+    assert.isFalse(Redacted.value(aliasedApiKey), "token should differ")
+    assert.include(serialized, Redacted.value(aliasedApiKey))
+    assert[method](serialized, Redacted.value(aliasedApiKey))
+    const closureEmail = configuration.jiraEmail
+    const validateClosure = () => assert.strictEqual(actualEmail, closureEmail)
+    validateClosure()
+    const moduleEmailKey = "jiraEmail"
+    const validateModuleKey = () =>
+      assert[method](serialized, configuration[moduleEmailKey])
+    validateModuleKey()
+    const closureOperands = [serialized, configuration.jiraEmail] as const
+    const validateClosureOperands = () => assert[method](...closureOperands)
+    validateClosureOperands()
+    const validateTypedConfiguration = (settings: LiveConfig) =>
+      assert.strictEqual(settings.awsRegion, expectedRegion)
+    validateTypedConfiguration(configuration)
+    const {
+      jiraApiKey: destructuredApiKey,
+      jiraEmail: destructuredEmail,
+      awsRegion: destructuredRegion
+    } = configuration
+    assert.isFalse(Redacted.value(destructuredApiKey), "token should differ")
+    assert.include(serialized, Redacted.value(destructuredApiKey))
+    assert[method](serialized, Redacted.value(destructuredApiKey))
+    assert.strictEqual(actualEmail, destructuredEmail)
+    assert[method](actualRegion, destructuredRegion)
+    const tupleOperands = [serialized, configuration.jiraEmail] as const
+    const tupleAlias = tupleOperands
+    const validateTupleAlias = () => assert[method](...tupleAlias)
+    validateTupleAlias()
+    const Boolean = (value: string) => value
+    assert.isFalse(Boolean(configuration.jiraEmail), "credential must be absent")
+    let mutableMessage = "region must match"
+    assert.isTrue(configuration.awsRegion === expectedRegion, mutableMessage)
+    const interpolatedMessage = \`region must match \${expectedRegion}\`
+    assert.isTrue(configuration.awsRegion === expectedRegion, interpolatedMessage)
+    const typedTuple = [serialized, configuration.jiraEmail] as const
+    const typedTupleAlias = typedTuple as readonly [string, string]
+    assert[method](...typedTupleAlias)
+    const satisfiedTuple = [serialized, configuration.jiraEmail] as const
+    const satisfiedTupleAlias = satisfiedTuple satisfies readonly [string, string]
+    assert[method](...satisfiedTupleAlias)
+    const inlineTuple = [serialized, configuration.jiraEmail] as const
+    assert[method](...(inlineTuple as readonly [string, string]))
+    assert[method](...(inlineTuple satisfies readonly [string, string]))
+    assert[method](...inlineTuple!)
   `,
-  expected: 7,
+  expected: 36,
   filePath: "packages/control-center/test/integration/live-secret-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
 
 await assertRuleDiagnostics({
   code: `
+    import type {
+      LiveConnectionConfiguration as LiveConfig
+    } from "./liveConnectionConfiguration.js"
     import { assertSensitiveTextAbsent } from "./liveSecretAssertions.js"
     assertSensitiveTextAbsent(serialized, Redacted.value(configuration.jiraApiKey))
     import { assert } from "@effect/vitest"
@@ -156,6 +221,52 @@ await assertRuleDiagnostics({
     const publicCredentialField = "siteUrl"
     const publicCredentialKey = publicCredentialField
     assert[method](serialized, configuration[publicCredentialKey])
+    assert.isTrue(
+      details.pipelineName === configuration.codePipelinePipeline,
+      "pipeline must match"
+    )
+    const matches = details.pipelineName === configuration.codePipelinePipeline
+    assert.isTrue(matches, "pipeline must match")
+    const publicValue = publicSummary.status
+    assert.strictEqual(actualStatus, publicValue)
+    const validateSynthetic = (configuration: { readonly awsRegion: string }) =>
+      assert.strictEqual(configuration.awsRegion, "synthetic")
+    type LiveConnectionConfiguration = { readonly awsRegion: string }
+    const validateSameName = (configuration: LiveConnectionConfiguration) =>
+      assert.strictEqual(configuration.awsRegion, "synthetic")
+    const validateImported = (settings: LiveConfig) =>
+      assert.isTrue(settings.awsRegion === "eu-west-1", "region must match")
+    const protectedApiKey = configuration.jiraApiKey
+    assert.isTrue(protectedApiKey.toString() === "<redacted>", "token wrapper must remain redacted")
+    const moduleProviderId = publicSummary.providerId
+    const validateProviderId = () => assert.strictEqual(actualProviderId, moduleProviderId)
+    validateProviderId()
+    assert.isTrue(Boolean(configuration.jiraEmail), "credential must exist")
+    const constantMessage = "region must match"
+    const templateMessage = \`region must match\`
+    const { awsRegion: safeRegion, jiraApiKey: protectedDestructuredApiKey } = configuration
+    assert.isTrue(safeRegion === "eu-west-1", constantMessage)
+    assert.isTrue(configuration.awsRegion === "eu-west-1", templateMessage)
+    assert.isTrue(configuration.awsRegion === "eu-west-1", \`region must match\`)
+    assert.isTrue(
+      protectedDestructuredApiKey.toString() === "<redacted>",
+      "token wrapper must remain redacted"
+    )
+    const syntheticConfiguration = { awsRegion: "synthetic" }
+    const { awsRegion: syntheticRegion } = syntheticConfiguration
+    assert.strictEqual(syntheticRegion, "synthetic")
+    const publicTuple = [actualStatus, publicSummary.status] as const
+    const publicTupleAlias = publicTuple
+    assert.strictEqual(...publicTupleAlias)
+    const typedPublicTupleAlias = publicTuple as readonly [string, string]
+    assert.strictEqual(...typedPublicTupleAlias)
+    assert.strictEqual(...(publicTuple as readonly [string, string]))
+    const sharedSensitiveTuple = [serialized, configuration.jiraEmail]
+    const assertedSensitiveTuple = sharedSensitiveTuple
+    const mutatedSensitiveTuple = sharedSensitiveTuple
+    mutatedSensitiveTuple[1] = "sanitized"
+    assert[method](...assertedSensitiveTuple)
+    assert[method](...sharedSensitiveTuple)
     const suffix = "Include"
     assert[\`not\${suffix}\`](publicSummary, "non-sensitive")
   `,
