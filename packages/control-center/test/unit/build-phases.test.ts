@@ -36,4 +36,16 @@ describe("Control Center build phases", () => {
     expect(command).toContain("playwright test")
     expect(command).not.toContain("@knpkv/control-center^...")
   })
+
+  it("routes the live suite through dependency-artifact repair before Vitest", () => {
+    expect(packageManifest.scripts.build).toBe("tsx scripts/run-build.ts")
+    expect(packageManifest.scripts["test:integration:live"]).toBe(
+      "pnpm build && vitest run --config vitest.live.config.ts"
+    )
+    expect(controlCenterBuildPhases[0]).toMatchObject({
+      args: ["scripts/ensure-build-dependencies.ts"],
+      command: "tsx",
+      label: "ensure dependency artifacts"
+    })
+  })
 })

@@ -30,19 +30,19 @@ runs:
         chmod +x "${binary_path}"
         echo "${install_directory}" >> "${GITHUB_PATH}"
     - name: Install pnpm
-      uses: pnpm/action-setup@v6
+      uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
     - name: Install node
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
       if: ${{ inputs.node-version != '' }}
       with:
         node-version: ${{ inputs.node-version }}
     - name: Install deno
-      uses: denoland/setup-deno@v2
+      uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2
       if: ${{ inputs.deno-version != '' }}
       with:
         deno-version: ${{ inputs.deno-version }}
     - name: Install bun
-      uses: oven-sh/setup-bun@v2
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       if: ${{ inputs.bun-version != '' }}
       with:
         bun-version: ${{ inputs.bun-version }}
