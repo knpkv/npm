@@ -637,20 +637,23 @@ const effectiveChildProcessOptionNames = (context, argument, depth = 0, knownOpt
       continue
     }
     if (property.type !== "Property") continue
+    let name
     if (property.computed) {
-      const computed = staticComputedKeyName(property.key)
       // A key whose value is only known at runtime could be `extendEnv`, so the
       // object's shape is unknowable and reporting would risk a false positive.
-      if (computed === undefined) return undefined
-      names.add(computed)
-      continue
+      name = staticComputedKeyName(property.key)
+      if (name === undefined) return undefined
+    } else {
+      name = staticPropertyName(property.key)
+      if (name === undefined) continue
     }
-    const name = staticPropertyName(property.key)
-    // `extendEnv: undefined` and `extendEnv: void 0` are falsy, so Effect replaces
-    // the environment exactly as if the property were absent. TypeScript accepts
-    // them because the field is declared `boolean | undefined`.
+    // Checked once for both spellings. `extendEnv: undefined` and
+    // `extendEnv: void 0` are falsy, so Effect replaces the environment exactly as
+    // if the property were absent, and TypeScript accepts them because the field
+    // is declared `boolean | undefined`. Applying this only to the plain-key
+    // branch left `{ ["extendEnv"]: undefined }` counting as stated.
     if (name === "extendEnv" && isDefinitelyUndefined(property.value)) continue
-    if (name !== undefined) names.add(name)
+    names.add(name)
   }
   return names
 }
