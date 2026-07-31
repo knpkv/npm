@@ -1507,20 +1507,109 @@ module.exports = {
       }
     },
     create(context) {
+      const immutableConstInitializer = (identifier) => {
+        const variable = resolvedVariable(context, identifier)
+        if (variable === undefined || variable.defs.length !== 1) return undefined
+        const definition = variable.defs[0]
+        if (
+          definition.type !== "Variable" ||
+          definition.node.type !== "VariableDeclarator" ||
+          definition.node.id.type !== "Identifier" ||
+          definition.node.init === null ||
+          definition.parent?.type !== "VariableDeclaration" ||
+          definition.parent.kind !== "const"
+        ) {
+          return undefined
+        }
+        return {
+          definition,
+          initializer: unwrapTypeExpression(definition.node.init),
+          variable
+        }
+      }
+      const immutableConstString = (identifier, visitedVariables = new Set()) => {
+        const binding = immutableConstInitializer(identifier)
+        if (binding === undefined || visitedVariables.has(binding.variable)) return undefined
+        visitedVariables.add(binding.variable)
+        const initializer = binding.initializer
+        const value =
+          initializer.type === "Identifier"
+            ? immutableConstString(initializer, visitedVariables)
+            : initializer.type === "Literal" || initializer.type === "TemplateLiteral"
+              ? staticPropertyName(initializer)
+              : undefined
+        visitedVariables.delete(binding.variable)
+        return value
+      }
+      const memberPropertyName = (node) => {
+        if (!node.computed) return staticPropertyName(node.property)
+        return node.property.type === "Identifier"
+          ? immutableConstString(node.property)
+          : staticPropertyName(node.property)
+      }
       const isDirectProviderImmutableId = (node) =>
-        node?.type === "MemberExpression" && staticPropertyName(node.property) === "providerImmutableId"
-      const containsProviderImmutableId = (node) => {
-        if (isDirectProviderImmutableId(node)) {
+        node?.type === "MemberExpression" && memberPropertyName(node) === "providerImmutableId"
+      const credentialEmailFields = new Set(["confluenceEmail", "jiraEmail"])
+      const credentialApiKeyFields = new Set(["confluenceApiKey", "jiraApiKey"])
+      const isConfigurationField = (node, fields) =>
+        node?.type === "MemberExpression" &&
+        node.object.type === "Identifier" &&
+        node.object.name === "configuration" &&
+        fields.has(memberPropertyName(node))
+      const isCredentialEmail = (node) => isConfigurationField(node, credentialEmailFields)
+      const isRawCredentialApiKey = (node) =>
+        node?.type === "CallExpression" &&
+        node.arguments.length === 1 &&
+        node.arguments[0].type !== "SpreadElement" &&
+        isConfigurationField(node.arguments[0], credentialApiKeyFields) &&
+        node.callee.type === "MemberExpression" &&
+        memberPropertyName(node.callee) === "value" &&
+        node.callee.object.type === "Identifier" &&
+        isNamespaceImportFrom(context, node.callee.object, ["effect/Redacted"])
+      const immutableConstArray = (identifier) => {
+        const binding = immutableConstInitializer(identifier)
+        if (binding?.initializer.type !== "ArrayExpression") return undefined
+        const hasUnsafeReference = binding.variable.references.some((reference) => {
+          if (isPureTypeReference(reference)) return false
+          const referenceIdentifier = reference.identifier
+          if (
+            referenceIdentifier.parent === binding.definition.node &&
+            binding.definition.node.id === referenceIdentifier
+          ) {
+            return false
+          }
+          return (
+            reference.isWrite() ||
+            referenceIdentifier.parent?.type !== "SpreadElement" ||
+            referenceIdentifier.parent.argument !== referenceIdentifier
+          )
+        })
+        return hasUnsafeReference ? undefined : binding
+      }
+      const containsMatchingOperand = (node, directMatch, visitedVariables = new Set()) => {
+        if (directMatch(node)) {
           return true
+        }
+        if (node.type === "SpreadElement" && node.argument.type === "Identifier") {
+          const binding = immutableConstArray(node.argument)
+          if (binding !== undefined && !visitedVariables.has(binding.variable)) {
+            visitedVariables.add(binding.variable)
+            const containsMatch = containsMatchingOperand(binding.initializer, directMatch, visitedVariables)
+            visitedVariables.delete(binding.variable)
+            if (containsMatch) return true
+          }
         }
         const visitorKeys = context.sourceCode.visitorKeys[node.type] ?? []
         return visitorKeys.some((key) => {
           const child = node[key]
           return Array.isArray(child)
-            ? child.some((entry) => entry !== null && containsProviderImmutableId(entry))
-            : child !== null && child !== undefined && containsProviderImmutableId(child)
+            ? child.some((entry) => entry !== null && containsMatchingOperand(entry, directMatch, visitedVariables))
+            : child !== null && child !== undefined && containsMatchingOperand(child, directMatch, visitedVariables)
         })
       }
+      const containsProviderImmutableId = (node) => containsMatchingOperand(node, isDirectProviderImmutableId)
+      const containsCredential = (node) =>
+        containsMatchingOperand(node, (candidate) => isCredentialEmail(candidate) || isRawCredentialApiKey(candidate))
       const echoingIdentityMethods = new Set([
         "deepEqual",
         "deepStrictEqual",
@@ -1554,6 +1643,7 @@ module.exports = {
               ? undefined
               : staticPropertyName(node.callee.property)
           const argumentsWithStableIds = node.arguments.filter(containsProviderImmutableId)
+          const argumentsWithCredentials = node.arguments.filter(containsCredential)
           const firstArgument = node.arguments[0]
           const booleanAssertionIsUnsafe =
             (method === "isTrue" || method === "isFalse") &&
@@ -1565,7 +1655,9 @@ module.exports = {
           const awsIdentityArrayLengthIsUnsafe =
             method === "lengthOf" && firstArgument?.type === "Identifier" && firstArgument.name === "awsIdentities"
           const dynamicAssertionWithStableIdsIsUnsafe =
-            method === undefined && node.callee.computed && argumentsWithStableIds.length > 0
+            method === undefined &&
+            node.callee.computed &&
+            (argumentsWithStableIds.length > 0 || argumentsWithCredentials.length > 0)
           const echoesSensitiveOperand =
             method === "notInclude" ||
             (method !== undefined && echoingIdentityMethods.has(method) && argumentsWithStableIds.length > 0) ||

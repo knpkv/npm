@@ -119,6 +119,7 @@ Public motion-ownership props must document their default, affected surfaces and
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
 
 Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
+Every provider fixture-locator list must classify each coordinate as server-private or name its safe normalized/authenticated boundary, persisted representation, and prohibited emission surfaces.
 
 ### Versioning and Publishing
 

@@ -124,11 +124,21 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { assert } from "@effect/vitest"
+    import * as Redacted from "effect/Redacted"
     assert.notInclude(serialized, Redacted.value(configuration.jiraApiKey))
     assert["notInclude"](serialized, configuration.jiraEmail)
     assert[\`notInclude\`](serialized, configuration.confluenceEmail)
+    const method = "notInclude"
+    assert[method](serialized, Redacted.value(configuration.confluenceApiKey))
+    assert[method](...[serialized, configuration.jiraEmail])
+    const emailField = "confluenceEmail"
+    const emailKey = emailField
+    assert[method](serialized, configuration[emailKey])
+    const apiKeyField = "jiraApiKey"
+    const apiKey = apiKeyField
+    assert[method](serialized, Redacted.value(configuration[apiKey]))
   `,
-  expected: 3,
+  expected: 7,
   filePath: "packages/control-center/test/integration/live-secret-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
@@ -141,6 +151,11 @@ await assertRuleDiagnostics({
     const method = "notInclude"
     assert[method](publicSummary, "non-sensitive")
     assert[method](...[publicSummary, "non-sensitive"])
+    const operands = [publicSummary, "non-sensitive"] as const
+    assert[method](...operands)
+    const publicCredentialField = "siteUrl"
+    const publicCredentialKey = publicCredentialField
+    assert[method](serialized, configuration[publicCredentialKey])
     const suffix = "Include"
     assert[\`not\${suffix}\`](publicSummary, "non-sensitive")
   `,
@@ -162,8 +177,15 @@ await assertRuleDiagnostics({
     const method = "notInclude"
     assert[method](serialized, identity.providerImmutableId)
     assert[method](...[serialized, identity.providerImmutableId])
+    const operands = [left.providerImmutableId, right.providerImmutableId] as const
+    assert.strictEqual(...operands)
+    const computedOperands = [serialized, identity.providerImmutableId] as const
+    assert[method](...computedOperands)
+    const sensitiveKeyBase = "providerImmutableId"
+    const sensitiveKey = sensitiveKeyBase
+    assert.strictEqual(result[sensitiveKey], expectedProviderId)
   `,
-  expected: 9,
+  expected: 12,
   filePath: "packages/control-center/test/integration/live-provider-id-assertion-invalid.test.ts",
   ruleId: "local-rules/no-echoing-secret-assertions"
 })
@@ -178,6 +200,13 @@ await assertRuleDiagnostics({
       "constant message"
     )
     assert.isTrue(awsIdentities.length === 2, "two AWS identities")
+    const publicKey = "providerId"
+    const safeKey = publicKey
+    assert.strictEqual(result[safeKey], "jira")
+    const operands = [publicSummary, "non-sensitive"] as const
+    assert.strictEqual(...operands)
+    const method = "strictEqual"
+    assert[method](...operands)
   `,
   expected: 0,
   filePath: "packages/control-center/test/integration/live-provider-id-assertion-valid.test.ts",

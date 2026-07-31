@@ -477,7 +477,11 @@ It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixt
 
 - AWS: `CONTROL_CENTER_TEST_AWS_REGION`, `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
   `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
-  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC.
+  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. Region,
+  repository name, and pipeline name are non-secret owner-visible discovery/configuration fields.
+  The selected coordinates are persisted as safe adapter settings and may cross the authenticated
+  owner configuration boundary. They never enter public health responses or CI evidence, which
+  retains only provider taxonomy.
 - Atlassian locators: `CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL`,
   `CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID`, `CONTROL_CENTER_TEST_JIRA_PROJECT_ID`,
   `CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID`, and `CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID`.
