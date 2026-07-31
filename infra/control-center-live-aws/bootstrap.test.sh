@@ -449,6 +449,26 @@ fi
 
 aws() {
   if [[ "$*" == *"codecommit list-pull-requests"* ]]; then
+    printf 'pr-unrelated\tpr-stable\n'
+    return
+  fi
+  if [[ "$*" == *"codecommit get-pull-request --pull-request-id pr-unrelated"* ]]; then
+    printf 'refs/heads/unrelated\trefs/heads/main\n'
+    return
+  fi
+  if [[ "$*" == *"codecommit get-pull-request --pull-request-id pr-stable"* ]]; then
+    [[ "$*" == *"[sourceReference,destinationReference]"* ]] ||
+      fail "pull request discovery must query the provider destinationReference field"
+    printf 'refs/heads/fixture-change\trefs/heads/main\n'
+    return
+  fi
+  fail "unexpected stable-pull-request command: $*"
+}
+[[ "$(find_stable_pull_request fixture-repository)" == "pr-stable" ]] ||
+  fail "pull request discovery must reuse the stable fixture pull request"
+
+aws() {
+  if [[ "$*" == *"codecommit list-pull-requests"* ]]; then
     return 1
   fi
   fail "unexpected failed-pull-request-list command: $*"

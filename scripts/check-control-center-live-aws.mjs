@@ -271,7 +271,7 @@ const validateProbeWorkflow = (workflow) => {
     ],
     ["Package sealed AWS probe runner", "4234a86218c975e5f1e9c42632b72926d1127e119f5c6591b2af283095450102"],
     ["Verify sealed AWS probe runner", "5a84a92f8adb4b83c4820fcab6a3b7c39db11cc9ef33d8bc7d0c8d184a386744"],
-    ["Probe stable read-only fixtures", "9930a5201edfd51a1a3b28f62d919fb3fbfa8b16efb51c32b7683179a0d7b7ef"],
+    ["Probe stable read-only fixtures", "32baf1272ba5e5497ebb5d0121a043a16a54fef371d7b9a8706512da1d3342fe"],
     [
       "Probe through the Control Center default credential chain",
       "f8503e3fae81a4c057fdc8298eaed75def97635d7916bf2bb3302a787ce3db6e"

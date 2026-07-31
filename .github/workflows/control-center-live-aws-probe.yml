@@ -140,7 +140,7 @@ jobs:
               aws_safe codecommit-get-pull-request codecommit get-pull-request \
                 --pull-request-id "${candidate_id}" \
                 --query \
-                'pullRequest.pullRequestTargets[0].[sourceReference,targetReference,sourceCommit,destinationCommit]' \
+                'pullRequest.pullRequestTargets[0].[sourceReference,destinationReference,sourceCommit,destinationCommit]' \
                 --output text
             )
             if [[ "${source_reference}" == "refs/heads/fixture-change" &&

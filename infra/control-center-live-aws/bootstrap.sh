@@ -642,7 +642,7 @@ find_stable_pull_request() {
     if ! target="$(
       "${aws_region_command[@]}" codecommit get-pull-request \
         --pull-request-id "${candidate_id}" \
-        --query 'pullRequest.pullRequestTargets[0].[sourceReference,targetReference]' \
+        --query 'pullRequest.pullRequestTargets[0].[sourceReference,destinationReference]' \
         --output text
     )"; then
       printf '%s\n' "Unable to inspect fixture pull request" >&2
