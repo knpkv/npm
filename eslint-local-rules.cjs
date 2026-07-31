@@ -615,25 +615,29 @@ const resolvedChildProcessOptions = (context, argument, depth = 0, knownOptionAr
 }
 
 /**
- * Collects the option property names a `ChildProcess.make` options object
- * effectively carries, following statically resolvable spreads.
+ * Resolves the option properties a `ChildProcess.make` options object effectively
+ * carries, following statically resolvable spreads in source order.
  *
- * A constant spread is resolvable, so `{ ...base, stderr: "pipe" }` where
- * `const base = { env }` must be treated as setting `env`. Returns undefined if
- * any spread operand cannot be resolved, because a rule that silently ignored an
- * opaque spread would report "no env" on an object that may well set one.
- * Presence is what matters here, so source order does not affect the result.
+ * Returns a map of name to "is definitely undefined", or undefined when any
+ * spread operand cannot be resolved — silently ignoring an opaque spread would
+ * report "no env" on an object that may well set one.
+ *
+ * Source order matters. An earlier comment here claimed it did not, which held
+ * only while the rule tracked bare presence; once `extendEnv: undefined` began to
+ * count as unstated, a later property overriding a spread-supplied value changed
+ * the outcome, and `{ ...safeBase, extendEnv: undefined }` slipped through. Last
+ * write wins, exactly as it does at runtime.
  */
-const effectiveChildProcessOptionNames = (context, argument, depth = 0, knownOptionArguments = undefined) => {
+const effectiveChildProcessOptions = (context, argument, depth = 0, knownOptionArguments = undefined) => {
   if (depth > CHILD_PROCESS_OPTION_DEPTH_LIMIT) return undefined
   const options = resolvedChildProcessOptions(context, argument, depth, knownOptionArguments)
   if (options === undefined) return undefined
-  const names = new Set()
+  const resolved = new Map()
   for (const property of options.properties) {
     if (property.type === "SpreadElement") {
-      const nested = effectiveChildProcessOptionNames(context, property.argument, depth + 1, knownOptionArguments)
+      const nested = effectiveChildProcessOptions(context, property.argument, depth + 1, knownOptionArguments)
       if (nested === undefined) return undefined
-      for (const name of nested) names.add(name)
+      for (const [name, isUndefined] of nested) resolved.set(name, isUndefined)
       continue
     }
     if (property.type !== "Property") continue
@@ -647,15 +651,9 @@ const effectiveChildProcessOptionNames = (context, argument, depth = 0, knownOpt
       name = staticPropertyName(property.key)
       if (name === undefined) continue
     }
-    // Checked once for both spellings. `extendEnv: undefined` and
-    // `extendEnv: void 0` are falsy, so Effect replaces the environment exactly as
-    // if the property were absent, and TypeScript accepts them because the field
-    // is declared `boolean | undefined`. Applying this only to the plain-key
-    // branch left `{ ["extendEnv"]: undefined }` counting as stated.
-    if (name === "extendEnv" && isDefinitelyUndefined(property.value)) continue
-    names.add(name)
+    resolved.set(name, isDefinitelyUndefined(property.value))
   }
-  return names
+  return resolved
 }
 
 const isEffectModule = (context, expression) => {
@@ -1474,8 +1472,13 @@ module.exports = {
         const argument = call.arguments.at(-1)
         const options = resolvedChildProcessOptions(context, argument, 0, knownOptionArguments)
         if (options === undefined) return
-        const names = effectiveChildProcessOptionNames(context, argument, 0, knownOptionArguments)
-        if (names !== undefined && names.has("env") && !names.has("extendEnv")) {
+        const resolved = effectiveChildProcessOptions(context, argument, 0, knownOptionArguments)
+        if (resolved === undefined) return
+        // `env: undefined` leaves `options.env` unset, so Effect inherits normally
+        // and nothing is dropped; only a really-set `env` needs `extendEnv` stated.
+        const setsEnv = resolved.get("env") === false
+        const statesExtendEnv = resolved.get("extendEnv") === false
+        if (setsEnv && !statesExtendEnv) {
           context.report({ node: options, messageId: "implicitInheritance" })
         }
       }

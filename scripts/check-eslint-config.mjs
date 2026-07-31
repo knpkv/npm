@@ -1612,3 +1612,32 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-round13-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: gitEnvironment, extendEnv: true }
+    const overridden = ChildProcess.make("git", args, { ...safeBase, extendEnv: undefined })
+    const bare = { env: gitEnvironment }
+    const stillMissing = ChildProcess.make("git", args, { ...bare, stderr: "pipe" })
+    const envArrivesLast = ChildProcess.make("git", args, { env: undefined, ...bare })
+  `,
+  expected: 3,
+  filePath: "packages/codecommit-core/src/eslint-child-env-lastwrite-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const safeBase = { env: gitEnvironment, extendEnv: true }
+    const overriddenFalse = ChildProcess.make("git", args, { ...safeBase, extendEnv: false })
+    const inherited = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
+    const bare = { env: gitEnvironment }
+    const restored = ChildProcess.make("git", args, { ...bare, extendEnv: true })
+    const noEnvAtAll = ChildProcess.make("git", args, { env: undefined })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-lastwrite-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
