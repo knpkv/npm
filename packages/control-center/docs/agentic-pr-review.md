@@ -213,7 +213,9 @@ It does not own:
 
 Codex and Claude are real adapters at the LanguageModel seam. The package does not depend on their native tool behavior.
 
-Each tool result returned to the model is limited to 64 KiB with useful head and tail sections plus an artifact ID. Full output remains locally pageable and searchable under the retention policy.
+Each tool result returned to the model is limited to a 64 KiB UTF-8 prefix plus
+an artifact handle when more output exists. Full output remains locally
+pageable and searchable under the retention policy.
 
 ### Review application module
 
@@ -308,12 +310,16 @@ The AI provider process remains outside sbx. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
-output receives a session-local opaque artifact ID. A session retains at most
-64 artifacts and 64 MiB, evicting the oldest artifacts first, while any one
-pathological stream above 16 MiB is rejected. Provider CLIs never receive direct
-host or sbx control access. File reads and listings preserve missing-path failures,
-and temporary diffs include tracked, staged, unstaged, and non-ignored untracked
-changes.
+output receives a durable opaque artifact ID. SQLite binds each artifact to the
+exact workspace, thread, job attempt, command sequence, and output stream before
+the handle is returned. A bounded metadata operation rediscovers secret-free
+handles for the owning review job after recovery; page and search operations
+must then present the handle's original attempt, command, and stream identity.
+Both retained streams for one command commit atomically. An attempt retains at
+most 64 artifacts and 64 MiB, while any one pathological stream above 16 MiB is rejected.
+Provider CLIs never receive direct host or sbx control access. File reads and
+listings preserve missing-path failures, and temporary diffs include tracked,
+staged, unstaged, and non-ignored untracked changes.
 
 The merged provider-neutral toolkit also exposes the durable history reader.
 Its handler is bound to the claimed workspace, thread, and job on the host and
@@ -354,6 +360,14 @@ Malformed tool arguments or final output receive one schema-guided repair attemp
 - Raw command output: retained for 7 days.
 - Host staging checkout and sbx sandbox filesystem: deleted immediately after the run.
 
+Raw artifact rows are immutable and carry their expiry and owning review
+identity at creation. A bounded `sandbox-artifact` retention transaction claims
+and deletes expired rows without deleting their semantic thread, job, or
+attempt records. Raw reads fail at the recorded expiry even when physical
+cleanup has not run yet. Browser-visible metadata contains only opaque identities,
+stream, byte length, and lifecycle timestamps; command text and output remain
+behind the scoped page/search boundary.
+
 No migration or backward compatibility is required for the previous pre-stable review model.
 
 ## Telemetry
@@ -369,6 +383,10 @@ OpenTelemetry contains metadata only:
 - Error types.
 
 Prompts, source, command output, model output, replacement patches, and credentials never enter traces.
+The sandbox session, typed-tool loop, raw artifact reads, provider-output
+normalization, and final report construction run with generic Effect tracing
+disabled because successful span exits retain returned values. Observability for
+this path must use explicit metadata-only spans outside that sensitive boundary.
 
 The same safe runtime identity is durable Review Thread data. For local
 providers, Control Center invokes the trusted CLI with `--version` through

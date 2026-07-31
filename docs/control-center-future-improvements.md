@@ -27,11 +27,11 @@ This file records deliberate follow-up work that is outside the current narrow d
 
 ## Pull-request review threads
 
-- Persist large command artifacts under the documented retention policy and expose explicit page/search tools across recovered runs. Current sbx command artifacts are deliberately session-local and disappear with the sandbox.
 - Virtualize very long browser review threads after several explicitly loaded backward pages. The current browser keeps prior history visible across pull-request heads and temporary launch ineligibility, but intentionally renders the expanded in-memory history without virtualization.
 
 ## Review-suggestion revisions
 
+- Sequence the remaining agentic review work as durable task identities and one private lifecycle fold first, then targeted edit/revalidation execution, recovery and retention convergence, and only then the broader agentic review release gate. Do not duplicate lifecycle transitions across dispatch and reconciliation adapters.
 - Add a browser-backed edit/conflict/history/publication journey and Storybook state matrix, including keyboard focus and reduced-motion coverage. The MVP has focused component coverage, but not a Playwright journey for this surface.
 - Add explicit durable `suggestion-edit` and `suggestion-revalidation` task intents beneath the existing `pr-review` worker route. The task—not prompt text—must bind the source job, stable suggestion, selected revision, and exact immutable head.
 - Give targeted `sbx` runs the selected revision plus its complete bounded immutable history. Split structured output into edit, validated revalidation, and unable-to-conclude protocols; decode and re-anchor all output on the host.

@@ -990,7 +990,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     }
   })
 
-  const readReviewResult = Effect.fn("AgentJobRepository.readReviewResult")(function*(
+  const readReviewResult = Effect.fnUntraced(function*(
     input: typeof AgentReviewResultInput.Type
   ) {
     const request = yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultInput))(input)
@@ -1162,7 +1162,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       report: projectedReport,
       completedAt: row.success.occurredAt
     })
-  })
+  }, Effect.withTracerEnabled(false))
 
   const readOriginalReviewResult = Effect.fn(
     "AgentJobRepository.readOriginalReviewResult"
@@ -1850,7 +1850,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .pipe(mapPersistenceOperation("agent-job.append-event"))
     }),
 
-    completeReview: Effect.fn("AgentJobRepository.completeReview")(function*(
+    completeReview: Effect.fnUntraced(function*(
       input: typeof CompleteAgentReviewInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(CompleteAgentReviewInput))(input)
@@ -1944,7 +1944,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
           })
         )
         .pipe(mapPersistenceOperation("agent-job.complete-review"))
-    }),
+    }, Effect.withTracerEnabled(false)),
 
     reserveReviewSuggestionPublication: Effect.fn(
       "AgentJobRepository.reserveReviewSuggestionPublication"
@@ -2318,7 +2318,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         .pipe(mapPersistenceOperation("agent-job.request-cancellation"))
     }),
 
-    latestReview: Effect.fn("AgentJobRepository.latestReview")(function*(input) {
+    latestReview: Effect.fnUntraced(function*(input) {
       const request = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewInput))(input)
       const subjectJson = yield* Schema.encodeUnknownEffect(
         Schema.fromJsonString(PrReviewSubject)
@@ -2429,7 +2429,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         }
       })
       return Option.some(record)
-    }),
+    }, Effect.withTracerEnabled(false)),
 
     reviewResult: readReviewResult,
 
@@ -2465,7 +2465,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       )
     }),
 
-    reviewThreadAfter: Effect.fn("AgentJobRepository.reviewThreadAfter")(function*(
+    reviewThreadAfter: Effect.fnUntraced(function*(
       input: typeof AgentReviewThreadAfterInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(
@@ -2495,9 +2495,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
         request.after,
         request.limit
       )
-    }),
+    }, Effect.withTracerEnabled(false)),
 
-    reviewThreadBefore: Effect.fn("AgentJobRepository.reviewThreadBefore")(function*(
+    reviewThreadBefore: Effect.fnUntraced(function*(
       input: typeof AgentReviewThreadBeforeInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(
@@ -2527,9 +2527,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
         request.before,
         request.limit
       )
-    }),
+    }, Effect.withTracerEnabled(false)),
 
-    reviewThreadHistory: Effect.fn("AgentJobRepository.reviewThreadHistory")(function*(
+    reviewThreadHistory: Effect.fnUntraced(function*(
       input: typeof AgentReviewThreadHistoryInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(
@@ -2554,9 +2554,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
         events,
         nextCursor: events.at(-1)?.eventSequence ?? request.after
       } satisfies AgentThreadEventPage
-    }),
+    }, Effect.withTracerEnabled(false)),
 
-    reviewThreadTail: Effect.fn("AgentJobRepository.reviewThreadTail")(function*(
+    reviewThreadTail: Effect.fnUntraced(function*(
       input: typeof AgentReviewThreadTailInput.Type
     ) {
       const request = yield* Schema.decodeUnknownEffect(
@@ -2585,7 +2585,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         thread.value.threadId,
         request.limit
       )
-    })
+    }, Effect.withTracerEnabled(false))
   }
 })
 

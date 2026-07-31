@@ -8,7 +8,7 @@ import {
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
-import { Config, Effect, FileSystem, Layer, Path, Result, Schema, Stream } from "effect"
+import { Config, Effect, FileSystem, Layer, Path, Result, Schema, Stream, Tracer } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
@@ -29,6 +29,7 @@ import {
 import { UtcTimestamp } from "../../src/domain/utcTimestamp.js"
 import { AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"
 import {
+  PrReviewCommandArtifactHandle,
   PrReviewCommandArtifactId,
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
@@ -51,6 +52,7 @@ import {
   EMPTY_PR_REVIEW_THREAD_CONTEXT,
   PrReviewThreadContextSnapshot
 } from "../../src/server/persistence/repositories/agentJobModels.js"
+import { pageReviewCommandArtifactBytes } from "../../src/server/persistence/repositories/reviewCommandArtifactRepository.js"
 
 const WORKSPACE_ID = WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000021")
 const RELEASE_ID = ReleaseId.make("01890f6f-6d6a-7cc0-98d2-000000000031")
@@ -94,6 +96,9 @@ const LEASE_TOKEN = AgentLeaseToken.make("b".repeat(64))
 const LEASE_EXPIRES_AT = Schema.decodeSync(UtcTimestamp)("2026-07-24T10:05:00.000Z")
 const EVIDENCE_PATH = "packages/control-center/src/review.ts"
 const EVIDENCE_EXCERPT = "const unsafe = true"
+const EXECUTOR_PROMPT_CANARY = "executor-prompt-canary-e06f278f"
+const TOOL_QUERY_CANARY = "tool-query-canary-4a78db98"
+const REPLACEMENT_PATCH_CANARY = "replacement-patch-canary-116ce036"
 
 const subject = {
   providerId: "codecommit",
@@ -248,13 +253,13 @@ const output = (
 ): PrReviewSandboxCommandResult => ({
   exitCode,
   stderr: {
-    artifactId: null,
+    artifact: null,
     byteLength: 0,
     text: "",
     truncated: false
   },
   stdout: {
-    artifactId: null,
+    artifact: null,
     byteLength: new TextEncoder().encode(stdout).byteLength,
     text: stdout,
     truncated: false
@@ -291,13 +296,13 @@ const runShellCommand = (
       return {
         exitCode: Number(exitCode),
         stderr: {
-          artifactId: null,
+          artifact: null,
           byteLength: new TextEncoder().encode(stderr).byteLength,
           text: stderr,
           truncated: false
         },
         stdout: {
-          artifactId: null,
+          artifact: null,
           byteLength: new TextEncoder().encode(stdout).byteLength,
           text: stdout,
           truncated: false
@@ -348,7 +353,8 @@ const makeRealGitSessionLayer = (
       }).pipe(Effect.andThen(runShellCommand(cwd, command))),
     applyPatch: () => Effect.succeed(output()),
     readDiff: () => runShellCommand(cwd, `git diff '${baseRevision}' '${headRevision}'`),
-    pageArtifact: () => Effect.succeed(""),
+    listArtifacts: () => Effect.succeed([]),
+    pageArtifact: () => Effect.succeed({ complete: true, nextOffset: 0, text: "" }),
     searchArtifact: () => Effect.succeed([]),
     close: Effect.void
   }
@@ -375,7 +381,15 @@ const makeSessionLayer = (
   nativeReviewOutput?: string,
   nativeReviewRunner: "claude" | "codex" = "codex"
 ) => {
-  const retainedArtifactId = PrReviewCommandArtifactId.make("review-artifact-1")
+  const retainedArtifactId = PrReviewCommandArtifactId.make(
+    "01890f6f-6d6a-7cc0-98d2-000000000454"
+  )
+  const retainedArtifact = PrReviewCommandArtifactHandle.make({
+    artifactId: retainedArtifactId,
+    attemptSequence: AgentAttemptSequence.make(1),
+    commandSequence: 1,
+    stream: "stdout"
+  })
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
     if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
       if (
@@ -386,7 +400,7 @@ const makeSessionLayer = (
           exitCode: 0,
           stderr: output().stderr,
           stdout: {
-            artifactId: retainedArtifactId,
+            artifact: retainedArtifact,
             byteLength: new TextEncoder().encode(retainedDiff).byteLength,
             text: retainedDiff.slice(0, 16),
             truncated: true
@@ -446,9 +460,19 @@ const makeSessionLayer = (
       ),
     applyPatch: () => Effect.succeed(output()),
     readDiff: () => Effect.succeed(output(diff)),
-    pageArtifact: (_artifactId, offset, limit) =>
+    listArtifacts: () => Effect.succeed([]),
+    pageArtifact: (_artifact, offset, limit) =>
       artifactPagingFailure === undefined
-        ? Effect.succeed(retainedDiff?.slice(offset, offset + limit) ?? "")
+        ? Effect.gen(function*() {
+          const page = pageReviewCommandArtifactBytes(
+            new TextEncoder().encode(retainedDiff ?? ""),
+            offset,
+            limit
+          )
+          return page === null
+            ? yield* new PrReviewSandboxSessionError({ reason: "invalid-request" })
+            : page
+        })
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
     ...(nativeReviewOutput === undefined || nativeReviewRunner !== "codex"
@@ -551,6 +575,95 @@ const runExecutor = <Success, Failure>(
 }
 
 describe("PR review task executor", () => {
+  it.effect("keeps tool parameters and final review content out of spans", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const spans = new Array<Tracer.NativeSpan>()
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options)
+        spans.push(span)
+        return span
+      }
+    })
+    const replacement = {
+      reviewedHead: HEAD_REVISION,
+      unifiedDiff: [
+        `--- a/${EVIDENCE_PATH}`,
+        `+++ b/${EVIDENCE_PATH}`,
+        "@@ -42,1 +42,1 @@",
+        `-${EVIDENCE_EXCERPT}`,
+        `+const safe = "${REPLACEMENT_PATCH_CANARY}"`
+      ].join("\n"),
+      explanation: "Replace the unsafe value with the validated state."
+    }
+    const script: ReadonlyArray<DeterministicLanguageModelTurn> = [
+      {
+        _tag: "response",
+        parts: response({
+          id: "search-retained-output",
+          name: "ReviewSearchArtifact",
+          params: {
+            artifact: {
+              artifactId: "01890f6f-6d6a-7cc0-98d2-000000000454",
+              attemptSequence: 1,
+              commandSequence: 1,
+              stream: "stdout"
+            },
+            query: TOOL_QUERY_CANARY
+          },
+          type: "tool-call"
+        })
+      },
+      ...completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [{ ...suggestion, replacement }],
+        notes: []
+      })
+    ]
+
+    return Effect.gen(function*() {
+      const executed = yield* runExecutor(
+        script,
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute({
+            ...claim,
+            prompt: EXECUTOR_PROMPT_CANARY
+          })
+        })
+      )
+      assert.include(
+        executed.result.suggestions[0]?.replacement?.unifiedDiff ?? "",
+        REPLACEMENT_PATCH_CANARY
+      )
+
+      const telemetry = JSON.stringify(
+        spans.map((span) => ({
+          attributes: Array.from(span.attributes),
+          events: span.events,
+          name: span.name,
+          status: span.status
+        })),
+        (_key, value) => typeof value === "bigint" ? value.toString() : value
+      )
+      for (
+        const canary of [
+          EXECUTOR_PROMPT_CANARY,
+          TOOL_QUERY_CANARY,
+          REPLACEMENT_PATCH_CANARY
+        ]
+      ) {
+        assert.notInclude(telemetry, canary)
+      }
+    }).pipe(Effect.provideService(Tracer.Tracer, tracer))
+  })
+
   it.effect("executes Codex-only review through the native sbx runner", () => {
     const observation: SessionObservation = {
       commands: [],
@@ -1742,7 +1855,7 @@ describe("PR review task executor", () => {
       operations: [],
       requests: []
     }
-    const retainedDiff = `${"x".repeat(32 * 1_024)}\n@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
+    const retainedDiff = `${"x".repeat(65_535)}🙂\n@@ -0,0 +42 @@\n+${EVIDENCE_EXCERPT}\n`
     return runExecutor(
       completeScript({
         schemaVersion: 3,

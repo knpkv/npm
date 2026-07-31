@@ -6,12 +6,14 @@ import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { createServer, type Server } from "node:net"
 
-import { JobId, WorkspaceId } from "../../src/domain/identifiers.js"
+import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   PrReviewSandboxSessions,
   prReviewSandboxSessionsLayer
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import { PrReviewSourceWorkspace } from "../../src/server/agent/internal/PrReviewSourceWorkspace.js"
+import { AgentAttemptSequence } from "../../src/server/persistence/repositories/agentJobModels.js"
+import { reviewCommandArtifactTestLayer } from "./reviewCommandArtifactTestLayer.js"
 
 const gitEnvironment = (path: string): Readonly<Record<string, string>> => ({
   GIT_AUTHOR_EMAIL: "review-sbx-smoke@example.invalid",
@@ -249,7 +251,9 @@ it.effect("runs the review session through the installed sbx runtime", () =>
         const sessions = yield* PrReviewSandboxSessions
         return yield* sessions.withSession({
           workspaceId: WorkspaceId.make("01890f6f-6d6a-7cc0-98d2-000000000082"),
+          threadId: AgentThreadId.make("01890f6f-6d6a-7cc0-98d2-000000000080"),
           jobId: JobId.make("01890f6f-6d6a-7cc0-98d2-000000000081"),
+          attemptSequence: AgentAttemptSequence.make(1),
           repository: "control-center-sbx-smoke",
           attemptId: "abcdef012345",
           baseRevision: headRevision,
@@ -273,6 +277,7 @@ it.effect("runs the review session through the installed sbx runtime", () =>
           maximumCommandDurationMillis: 30_000,
           maximumSessionDurationMillis: 120_000
         })),
+        Effect.provide(reviewCommandArtifactTestLayer()),
         Effect.provide(sourceLayer)
       )
 

@@ -71,6 +71,9 @@ const EvidenceCandidateRow = Schema.Struct({
 const AgentCandidateRow = Schema.Struct({
   jobId: Schema.String
 })
+const SandboxArtifactCandidateRow = Schema.Struct({
+  artifactId: Schema.String
+})
 
 const decodeRows = <Row extends Schema.Top>(schema: Row, rows: unknown) =>
   Schema.decodeUnknownEffect(Schema.Array(schema))(rows).pipe(
@@ -314,6 +317,11 @@ const makeRetentionRepository: Effect.Effect<
           AND job.terminal_at IS NOT NULL
           AND job.terminal_at <= ${cutoffAt}
           AND NOT EXISTS (
+            SELECT 1 FROM agent_review_command_artifacts artifact
+            WHERE artifact.workspace_id = job.workspace_id
+              AND artifact.job_id = job.job_id
+          )
+          AND NOT EXISTS (
             SELECT 1 FROM agent_review_suggestion_publications publication
             WHERE publication.workspace_id = job.workspace_id
               AND publication.job_id = job.job_id
@@ -397,6 +405,65 @@ const makeRetentionRepository: Effect.Effect<
         })
       )
       .pipe(mapPersistenceOperation("retention.agent-content"))
+  })
+
+  const sweepSandboxArtifacts = Effect.fn("RetentionRepository.sweepSandboxArtifacts")(function*(
+    workspaceId: WorkspaceId,
+    policyRevision: RecordRevision,
+    completedAt: EncodedUtcTimestamp
+  ) {
+    const cutoffAt = completedAt
+    return yield* database
+      .transaction(
+        Effect.gen(function*() {
+          const selected = yield* sql`SELECT artifact_id AS artifactId
+            FROM agent_review_command_artifacts
+            WHERE workspace_id = ${workspaceId}
+              AND expires_at <= ${cutoffAt}
+            ORDER BY expires_at, artifact_id
+            LIMIT ${SANDBOX_ARTIFACT_BATCH_LIMIT}`.pipe(
+            Effect.flatMap((rows) => decodeRows(SandboxArtifactCandidateRow, rows))
+          )
+          const run = yield* recordRun(
+            workspaceId,
+            "sandbox-artifact",
+            policyRevision,
+            cutoffAt,
+            SANDBOX_ARTIFACT_BATCH_LIMIT,
+            selected.length,
+            selected.length,
+            completedAt
+          )
+          if (selected.length === 0) return run
+          yield* Effect.forEach(
+            selected,
+            ({ artifactId }) =>
+              sql`INSERT INTO retention_cleanup_claims (
+                workspace_id, run_id, retention_class, record_key
+              ) VALUES (
+                ${workspaceId}, ${run.runId}, 'sandbox-artifact', ${artifactId}
+              )`,
+            { discard: true }
+          )
+          const artifactIds = selected.map(({ artifactId }) => artifactId)
+          const deleted = yield* sql`DELETE FROM agent_review_command_artifacts
+            WHERE workspace_id = ${workspaceId}
+              AND artifact_id IN ${sql.in(artifactIds)}
+            RETURNING artifact_id AS artifactId`.pipe(
+            Effect.flatMap((rows) => decodeRows(SandboxArtifactCandidateRow, rows))
+          )
+          if (deleted.length !== selected.length) {
+            return yield* new PersistenceOperationError({
+              operation: "retention.sandbox-artifact-count"
+            })
+          }
+          yield* sql`DELETE FROM retention_cleanup_claims
+            WHERE workspace_id = ${workspaceId}
+              AND run_id = ${run.runId}`
+          return run
+        })
+      )
+      .pipe(mapPersistenceOperation("retention.sandbox-artifact"))
   })
 
   return {
@@ -484,6 +551,7 @@ const makeRetentionRepository: Effect.Effect<
       runs.push(yield* sweepAuditReplay(workspaceId, settings.policyRevision, auditCutoff, completedAt))
       runs.push(yield* sweepReproducibleContent(workspaceId, settings.policyRevision, contentCutoff, completedAt))
       runs.push(yield* sweepEvidence(workspaceId, settings.policyRevision, completedAt))
+      runs.push(yield* sweepSandboxArtifacts(workspaceId, settings.policyRevision, completedAt))
       runs.push(yield* sweepAgentContent(workspaceId, settings.policyRevision, agentCutoff, completedAt))
       return runs
     })

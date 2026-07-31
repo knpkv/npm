@@ -1340,13 +1340,13 @@ describe("Control Center closed runtime", () => {
       ): PrReviewSandboxCommandResult => ({
         exitCode: 0,
         stderr: {
-          artifactId: null,
+          artifact: null,
           byteLength: 0,
           text: "",
           truncated: false
         },
         stdout: {
-          artifactId: null,
+          artifact: null,
           byteLength: new TextEncoder().encode(stdout).byteLength,
           text: stdout,
           truncated: false
@@ -1387,7 +1387,8 @@ describe("Control Center closed runtime", () => {
           }),
         applyPatch: () => Effect.succeed(sandboxOutput()),
         readDiff: () => Effect.succeed(sandboxOutput()),
-        pageArtifact: () => Effect.succeed(""),
+        listArtifacts: () => Effect.succeed([]),
+        pageArtifact: () => Effect.succeed({ complete: true, nextOffset: 0, text: "" }),
         searchArtifact: () => Effect.succeed([]),
         close: Effect.void
       }

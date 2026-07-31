@@ -62,7 +62,8 @@ describe("retention startup", () => {
             "agent-content",
             "audit-replay",
             "evidence",
-            "reproducible-content"
+            "reproducible-content",
+            "sandbox-artifact"
           ]
         )
         yield* lifecycle.beginDrain
@@ -250,7 +251,8 @@ describe("retention startup", () => {
               "agent-content",
               "audit-replay",
               "evidence",
-              "reproducible-content"
+              "reproducible-content",
+              "sandbox-artifact"
             ]
           )
           yield* TestClock.adjust("59 minutes")
