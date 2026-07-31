@@ -1027,6 +1027,7 @@ describe("first-party plugin runtime", () => {
                 version: "1"
               },
               allowS3ObjectKeyOverride: false,
+              codeCommitSource: null,
               runOrder: 1,
               region: "eu-west-1",
               roleArn: null,
@@ -1269,6 +1270,7 @@ describe("first-party plugin runtime", () => {
               version: "1"
             },
             allowS3ObjectKeyOverride: false,
+            codeCommitSource: null,
             runOrder: 1,
             region: "eu-west-1",
             roleArn: null,

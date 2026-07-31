@@ -1,0 +1,277 @@
+name: Control Center Live AWS Probe
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: control-center-live-aws-probe
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  prepare-live-runner:
+    name: Build sealed AWS probe runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      runner-sha256: ${{ steps.package-runner.outputs.sha256 }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: "24.10.0"
+
+      - name: Build Control Center and workspace dependencies
+        run: pnpm --filter @knpkv/control-center... build
+
+      - name: Package sealed AWS probe runner
+        id: package-runner
+        shell: bash
+        run: |
+          runner_root="${RUNNER_TEMP}/control-center-live-aws-runner"
+          mkdir -p "${runner_root}"
+          cp -R node_modules packages "${runner_root}/"
+          cp package.json tsconfig.base.jsonc "${runner_root}/"
+          node_root="$(dirname "$(dirname "$(command -v node)")")"
+          cp -R "${node_root}" "${runner_root}/node-runtime"
+          tar --create --gzip \
+            --file "${RUNNER_TEMP}/control-center-live-aws-runner.tgz" \
+            --directory "${runner_root}" .
+          runner_sha256="$(sha256sum "${RUNNER_TEMP}/control-center-live-aws-runner.tgz" | cut -d ' ' -f 1)"
+          echo "sha256=${runner_sha256}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload sealed AWS probe runner
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: control-center-live-aws-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-aws-runner.tgz
+          if-no-files-found: error
+          retention-days: 1
+
+  read-only-probe:
+    name: Assume OIDC role through Control Center
+    needs: prepare-live-runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: control-center-live-integration
+    permissions:
+      id-token: write
+    steps:
+      - name: Download sealed AWS probe runner
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: control-center-live-aws-runner-${{ github.sha }}
+          path: ${{ runner.temp }}/control-center-live-aws-artifact
+
+      - name: Verify sealed AWS probe runner
+        shell: bash
+        env:
+          EXPECTED_RUNNER_SHA256: ${{ needs.prepare-live-runner.outputs.runner-sha256 }}
+        run: |
+          artifact_root="${RUNNER_TEMP}/control-center-live-aws-artifact"
+          runner_root="${RUNNER_TEMP}/control-center-live-aws-runner"
+          printf '%s  %s\n' \
+            "${EXPECTED_RUNNER_SHA256}" \
+            "${artifact_root}/control-center-live-aws-runner.tgz" \
+            | sha256sum --check --strict
+          mkdir -p "${runner_root}"
+          tar --extract --gzip \
+            --file "${artifact_root}/control-center-live-aws-runner.tgz" \
+            --directory "${runner_root}"
+          echo "CONTROL_CENTER_LIVE_AWS_RUNNER=${runner_root}" >> "${GITHUB_ENV}"
+
+      - name: Assume read-only live-test role
+        uses: aws-actions/configure-aws-credentials@d979d5b3a71173a29b74b5b88418bfda9437d885 # v6.1.1
+        with:
+          aws-region: ${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}
+          role-to-assume: ${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}
+          role-session-name: control-center-live-aws-probe
+          mask-aws-account-id: true
+          output-credentials: false
+          unset-current-credentials: true
+
+      - name: Probe stable read-only fixtures
+        shell: bash
+        env:
+          FIXTURE_ROLE_ARN: ${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}
+          FIXTURE_REPOSITORY: ${{ vars.CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY }}
+          FIXTURE_PIPELINE: ${{ vars.CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE }}
+        run: |
+          set -euo pipefail
+
+          aws_safe() {
+            local diagnostic_code="$1"
+            shift
+            if ! aws "$@" 2>/dev/null; then
+              printf '%s\n' "Control Center live AWS probe failed (${diagnostic_code})" >&2
+              return 1
+            fi
+          }
+
+          if [[ ! "${FIXTURE_ROLE_ARN}" =~ ^arn:(aws|aws-us-gov):iam::([0-9]{12}):role/.+$ ]]; then
+            printf '%s\n' "Configured live-test role ARN is invalid" >&2
+            exit 1
+          fi
+          expected_account="${BASH_REMATCH[2]}"
+          observed_account="$(aws_safe sts-identity sts get-caller-identity --query Account --output text)"
+          if [[ "${observed_account}" != "${expected_account}" ]]; then
+            printf '%s\n' "OIDC identity does not match the configured live-test role" >&2
+            exit 1
+          fi
+          aws_safe codecommit-get-repository codecommit get-repository \
+            --repository-name "${FIXTURE_REPOSITORY}" >/dev/null
+
+          pull_request_id=""
+          while IFS= read -r candidate_id; do
+            [[ -n "${candidate_id}" ]] || continue
+            read -r \
+              source_reference \
+              target_reference \
+              source_commit \
+              destination_commit < <(
+              aws_safe codecommit-get-pull-request codecommit get-pull-request \
+                --pull-request-id "${candidate_id}" \
+                --query \
+                'pullRequest.pullRequestTargets[0].[sourceReference,targetReference,sourceCommit,destinationCommit]' \
+                --output text
+            )
+            if [[ "${source_reference}" == "refs/heads/fixture-change" &&
+              "${target_reference}" == "refs/heads/main" ]]; then
+              pull_request_id="${candidate_id}"
+              break
+            fi
+          done < <(
+            aws_safe codecommit-list-pull-requests codecommit list-pull-requests \
+              --repository-name "${FIXTURE_REPOSITORY}" \
+              --pull-request-status OPEN \
+              --query pullRequestIds \
+              --output text |
+              tr '\t' '\n'
+          )
+          if [[ -z "${pull_request_id}" ]]; then
+            printf '%s\n' "Stable fixture pull request is missing" >&2
+            exit 1
+          fi
+
+          difference_count="$(
+            aws_safe codecommit-get-differences-count codecommit get-differences \
+              --repository-name "${FIXTURE_REPOSITORY}" \
+              --before-commit-specifier "${destination_commit}" \
+              --after-commit-specifier "${source_commit}" \
+              --query 'length(differences)' \
+              --output text
+          )"
+          difference_path="$(
+            aws_safe codecommit-get-differences-path codecommit get-differences \
+              --repository-name "${FIXTURE_REPOSITORY}" \
+              --before-commit-specifier "${destination_commit}" \
+              --after-commit-specifier "${source_commit}" \
+              --query 'differences[0].afterBlob.path' \
+              --output text
+          )"
+          if [[ "${difference_count}" -ne 1 ||
+            "${difference_path}" != "fixture.txt" ]]; then
+            printf '%s\n' "Stable fixture pull request has unexpected differences" >&2
+            exit 1
+          fi
+
+          pipeline_definition="$(
+            aws_safe codepipeline-get-pipeline codepipeline get-pipeline \
+              --name "${FIXTURE_PIPELINE}" \
+              --output json
+          )"
+          if ! jq -e --arg repository_name "${FIXTURE_REPOSITORY}" '
+            (.pipeline.stages | map(.name)) == ["Source", "Approval"] and
+            (.pipeline.stages[0].actions | map(.name)) == ["ReadFixture"] and
+            (.pipeline.stages[1].actions | map(.name)) == ["ConfirmFixture"] and
+            (
+              .pipeline.stages[0].actions[0] |
+              .actionTypeId == {
+                category: "Source",
+                owner: "AWS",
+                provider: "CodeCommit",
+                version: "1"
+              } and
+              .configuration.RepositoryName == $repository_name and
+              .configuration.BranchName == "main" and
+              .configuration.PollForSourceChanges == "false" and
+              .runOrder == 1
+            ) and
+            (
+              .pipeline.stages[1].actions[0] |
+              .actionTypeId == {
+                category: "Approval",
+                owner: "AWS",
+                provider: "Manual",
+                version: "1"
+              } and
+              .runOrder == 1
+            )
+          ' <<<"${pipeline_definition}" >/dev/null; then
+            printf '%s\n' "Stable fixture pipeline definition is unexpected" >&2
+            exit 1
+          fi
+          aws_safe codepipeline-get-state codepipeline get-pipeline-state \
+            --name "${FIXTURE_PIPELINE}" >/dev/null
+          succeeded_execution="$(
+            aws_safe codepipeline-list-executions codepipeline list-pipeline-executions \
+              --pipeline-name "${FIXTURE_PIPELINE}" \
+              --query \
+              "pipelineExecutionSummaries[?status=='Succeeded'].pipelineExecutionId | [0]" \
+              --output text
+          )"
+          if [[ -z "${succeeded_execution}" || "${succeeded_execution}" == "None" ]]; then
+            printf '%s\n' "Stable fixture pipeline has no successful execution" >&2
+            exit 1
+          fi
+          aws_safe codepipeline-get-execution codepipeline get-pipeline-execution \
+            --pipeline-name "${FIXTURE_PIPELINE}" \
+            --pipeline-execution-id "${succeeded_execution}" >/dev/null
+
+          source_action_count="$(
+            aws_safe codepipeline-list-source-actions codepipeline list-action-executions \
+              --pipeline-name "${FIXTURE_PIPELINE}" \
+              --filter "pipelineExecutionId=${succeeded_execution}" \
+              --query \
+              "length(actionExecutionDetails[?actionName=='ReadFixture' && status=='Succeeded'])" \
+              --output text
+          )"
+          approval_action_count="$(
+            aws_safe codepipeline-list-approval-actions codepipeline list-action-executions \
+              --pipeline-name "${FIXTURE_PIPELINE}" \
+              --filter "pipelineExecutionId=${succeeded_execution}" \
+              --query \
+              "length(actionExecutionDetails[?actionName=='ConfirmFixture' && status=='Succeeded'])" \
+              --output text
+          )"
+          if [[ "${source_action_count}" -ne 1 ||
+            "${approval_action_count}" -ne 1 ]]; then
+            printf '%s\n' "Stable fixture pipeline action history is incomplete" >&2
+            exit 1
+          fi
+
+          printf '%s\n' "Control Center live AWS fixtures are readable"
+
+      - name: Probe through the Control Center default credential chain
+        shell: bash
+        env:
+          CONTROL_CENTER_LIVE_AWS_PROBE: "1"
+          CONTROL_CENTER_TEST_AWS_ROLE_ARN: ${{ vars.CONTROL_CENTER_TEST_AWS_ROLE_ARN }}
+          CONTROL_CENTER_TEST_AWS_REGION: ${{ vars.CONTROL_CENTER_TEST_AWS_REGION }}
+          CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY: ${{ vars.CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY }}
+          CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE: ${{ vars.CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE }}
+        run: |
+          control_center_root="${CONTROL_CENTER_LIVE_AWS_RUNNER}/packages/control-center"
+          "${CONTROL_CENTER_LIVE_AWS_RUNNER}/node-runtime/bin/node" \
+            "${CONTROL_CENTER_LIVE_AWS_RUNNER}/node_modules/vitest/vitest.mjs" \
+            run \
+            --root "${control_center_root}" \
+            --config "${control_center_root}/vitest.live-aws.config.ts"

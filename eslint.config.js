@@ -231,7 +231,7 @@ export default tseslint.config(
   {
     // Prettier formats root JavaScript utilities; ESLint still enforces their
     // semantic and safety rules.
-    files: ["scripts/check-security-doc-examples.mjs"],
+    files: ["scripts/check-{control-center-live-aws,security-doc-examples}.mjs"],
     rules: {
       "@effect/dprint": "off"
     }

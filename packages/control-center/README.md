@@ -475,13 +475,20 @@ An owner can run a live connection test from the Services page. The CSRF-protect
 The opt-in four-provider acceptance command is `pnpm --filter @knpkv/control-center test:integration:live`.
 It requires `CONTROL_CENTER_LIVE_INTEGRATION=1` plus the complete protected fixture configuration:
 
-- AWS: `CONTROL_CENTER_TEST_AWS_REGION`, `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
+- AWS: `CONTROL_CENTER_TEST_AWS_ROLE_ARN`, `CONTROL_CENTER_TEST_AWS_REGION`,
+  `CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY`, and
   `CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE`. The `default` standard credential chain must already
-  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. Region,
-  repository name, and pipeline name are non-secret owner-visible discovery/configuration fields.
-  The selected coordinates are persisted as safe adapter settings and may cross the authenticated
-  owner configuration boundary. They never enter public health responses or CI evidence, which
-  retains only provider taxonomy.
+  resolve temporary read-only credentials; the GitHub workflow obtains them through OIDC. The role
+  ARN is persisted as an owner-visible GitHub environment variable that repository and environment
+  administrators may read. At workflow runtime its security boundary is server-private, and its
+  permitted authenticated exposure is limited to GitHub environment configuration, protected role
+  assumption, and server-side account comparison. Region, repository name, and pipeline name are owner-visible fixture
+  coordinates; their persistence is allowed as safe adapter settings, and their permitted
+  authenticated exposure is owner configuration and discovery. Forbidden surfaces for all four
+  are logs, workflow artifacts, and public responses; the role ARN is also forbidden from Control
+  Center authenticated API responses and every client-facing or normalized payload.
+  Supported role partitions are `aws` and `aws-us-gov`; aws-cn is intentionally rejected until
+  the workflow, provider client ID, and trust policy support the China STS audience.
 - Atlassian locators: `CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL`,
   `CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID`, `CONTROL_CENTER_TEST_JIRA_PROJECT_ID`,
   `CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID`, and `CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID`.
@@ -505,8 +512,17 @@ interruption. The scheduled/manual workflow builds a checksum-sealed runner in a
 then verifies it in the protected `control-center-live-integration` execution job before assuming the
 AWS role. The short-lived runner artifact contains code and dependencies only; provider credentials,
 results, logs, and runtime evidence are never uploaded. Ordinary pull-request tests never select
-this entry. External read-only AWS role and fixture provisioning remains tracked by issue #241,
-while interactive Atlassian OAuth consent remains tracked by #242.
+this entry. The external read-only AWS role and stable provider fixtures are defined in
+`infra/control-center-live-aws`; interactive Atlassian OAuth consent remains tracked by #242.
+
+The smaller AWS-only acceptance command is
+`pnpm --filter @knpkv/control-center test:integration:live-aws`. It requires
+`CONTROL_CENTER_LIVE_AWS_PROBE=1`, the four AWS fixture variables above including
+`CONTROL_CENTER_TEST_AWS_ROLE_ARN`, and temporary credentials resolvable through profile
+`default`. It uses the production Schema-decoded clients to compare both discovered STS accounts
+with the configured role ARN, then reads the stable pull request and exact diff plus the pipeline,
+successful execution, action history, and current state. The protected AWS probe workflow runs
+this command from a checksum-sealed runner after its independent CLI probe.
 
 Fresh workspaces also see the fixed CodeCommit, CodePipeline, Jira, Confluence, and Clockify catalog. The safe provider identities are visible before pairing; choosing one carries that selection through pairing and opens its setup form immediately. `GET /api/v1/plugins` retains its original connection-summary array for existing v1 clients; after pairing, the Services page reads the additive `{ catalog, connections }` response from `GET /api/v1/plugins/overview`. A workspace owner can submit one bounded CSRF-protected setup request whose browser-generated connection ID, typed adapter settings, and transport-only credential strings are validated before writes. Secret strings are converted to opaque `SecretStore` references; the canonical SQL configuration contains references only. The application creates disabled metadata, inserts configuration with expected revision zero, accepts the catalog descriptor, enables with metadata CAS, invalidates the scoped connection map, and then runs the live identity test. Provider authentication or health failure is returned as the usable test result and does not roll back the enabled connection. Failure before configuration removes newly created secrets; later setup failure retains a visible disabled draft.
 

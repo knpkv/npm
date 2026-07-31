@@ -88,7 +88,10 @@ const RawActionDeclaration = Schema.Struct({
   configuration: Schema.optionalKey(Schema.Struct({
     AllowOverrideForS3ObjectKey: Schema.optionalKey(
       Schema.String.check(Schema.isTrimmed(), Schema.isMaxLength(5))
-    )
+    ),
+    RepositoryName: Schema.optionalKey(Identifier),
+    BranchName: Schema.optionalKey(Identifier),
+    PollForSourceChanges: Schema.optionalKey(Schema.Literals(["true", "false"]))
   })),
   region: Schema.optionalKey(Identifier),
   roleArn: Schema.optionalKey(Identifier),
@@ -305,10 +308,17 @@ const CodePipelineActionType = Schema.Struct({
   version: Identifier
 })
 
+const CodePipelineCodeCommitSource = Schema.Struct({
+  repositoryName: Identifier,
+  branchName: Identifier,
+  pollForSourceChanges: Schema.Boolean
+})
+
 const CodePipelineActionDeclaration = Schema.Struct({
   name: Identifier,
   actionType: CodePipelineActionType,
   allowS3ObjectKeyOverride: Schema.Boolean,
+  codeCommitSource: Schema.NullOr(CodePipelineCodeCommitSource),
   runOrder: Schema.NullOr(Schema.Int.check(Schema.isGreaterThan(0))),
   region: Schema.NullOr(Identifier),
   roleArn: Schema.NullOr(Identifier),
@@ -687,6 +697,16 @@ export class CodePipelineReadClient extends Context.Service<
               name: action.name,
               actionType: action.actionTypeId,
               allowS3ObjectKeyOverride: action.configuration?.AllowOverrideForS3ObjectKey === "true",
+              codeCommitSource: action.actionTypeId.provider === "CodeCommit" &&
+                  action.configuration?.RepositoryName !== undefined &&
+                  action.configuration.BranchName !== undefined &&
+                  action.configuration.PollForSourceChanges !== undefined
+                ? {
+                  repositoryName: action.configuration.RepositoryName,
+                  branchName: action.configuration.BranchName,
+                  pollForSourceChanges: action.configuration.PollForSourceChanges === "true"
+                }
+                : null,
               runOrder: action.runOrder ?? null,
               region: action.region ?? null,
               roleArn: action.roleArn ?? null,

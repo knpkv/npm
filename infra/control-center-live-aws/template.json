@@ -1,0 +1,412 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Least-privilege AWS fixtures for Control Center live integration tests",
+  "Parameters": {
+    "ExistingGitHubOidcProviderArn": {
+      "Type": "String",
+      "Default": ""
+    }
+  },
+  "Conditions": {
+    "CreateGitHubOidcProvider": {
+      "Fn::Equals": [
+        {
+          "Ref": "ExistingGitHubOidcProviderArn"
+        },
+        ""
+      ]
+    }
+  },
+  "Resources": {
+    "GitHubOidcProvider": {
+      "Type": "AWS::IAM::OIDCProvider",
+      "Condition": "CreateGitHubOidcProvider",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Url": "https://token.actions.githubusercontent.com",
+        "ClientIdList": ["sts.amazonaws.com"],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    },
+    "LiveIntegrationRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Read-only provider access for Control Center live integration",
+        "MaxSessionDuration": 3600,
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Federated": {
+                  "Fn::If": [
+                    "CreateGitHubOidcProvider",
+                    {
+                      "Ref": "GitHubOidcProvider"
+                    },
+                    {
+                      "Ref": "ExistingGitHubOidcProviderArn"
+                    }
+                  ]
+                }
+              },
+              "Action": "sts:AssumeRoleWithWebIdentity",
+              "Condition": {
+                "StringEquals": {
+                  "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                  "token.actions.githubusercontent.com:sub": "repo:knpkv/npm:environment:control-center-live-integration"
+                }
+              }
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "ControlCenterLiveReadOnly",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "Identity",
+                  "Effect": "Allow",
+                  "Action": "sts:GetCallerIdentity",
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "ListProviderResources",
+                  "Effect": "Allow",
+                  "Action": ["codecommit:ListRepositories", "codepipeline:ListPipelines"],
+                  "Resource": "*"
+                },
+                {
+                  "Sid": "ReadFixtureRepository",
+                  "Effect": "Allow",
+                  "Action": [
+                    "codecommit:GetBlob",
+                    "codecommit:GetDifferences",
+                    "codecommit:GetPullRequest",
+                    "codecommit:GetRepository",
+                    "codecommit:ListPullRequests"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": ["FixtureRepository", "Arn"]
+                  }
+                },
+                {
+                  "Sid": "ReadFixturePipeline",
+                  "Effect": "Allow",
+                  "Action": [
+                    "codepipeline:GetPipeline",
+                    "codepipeline:GetPipelineExecution",
+                    "codepipeline:GetPipelineState",
+                    "codepipeline:ListActionExecutions",
+                    "codepipeline:ListPipelineExecutions"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${FixturePipeline}"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    },
+    "FixtureRepository": {
+      "Type": "AWS::CodeCommit::Repository",
+      "Properties": {
+        "RepositoryName": "control-center-live-fixture",
+        "RepositoryDescription": "Stable read-only fixture for Control Center live integration",
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    },
+    "ArtifactBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "LifecycleConfiguration": {
+          "Rules": [
+            {
+              "Id": "ExpireFixtureArtifacts",
+              "Status": "Enabled",
+              "ExpirationInDays": 1,
+              "NoncurrentVersionExpiration": {
+                "NoncurrentDays": 6
+              }
+            }
+          ]
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "BlockPublicPolicy": true,
+          "IgnorePublicAcls": true,
+          "RestrictPublicBuckets": true
+        },
+        "VersioningConfiguration": {
+          "Status": "Enabled"
+        },
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    },
+    "ArtifactBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "Bucket": {
+          "Ref": "ArtifactBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "DenyInsecureTransport",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": ["ArtifactBucket", "Arn"]
+                },
+                {
+                  "Fn::Sub": "${ArtifactBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "PipelineRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "Description": "Service role for the Control Center live fixture pipeline",
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "codepipeline.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "Policies": [
+          {
+            "PolicyName": "FixturePipelineAccess",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Sid": "ReadFixtureSource",
+                  "Effect": "Allow",
+                  "Action": [
+                    "codecommit:CancelUploadArchive",
+                    "codecommit:GetBranch",
+                    "codecommit:GetCommit",
+                    "codecommit:GetRepository",
+                    "codecommit:GetUploadArchiveStatus",
+                    "codecommit:UploadArchive"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": ["FixtureRepository", "Arn"]
+                  }
+                },
+                {
+                  "Sid": "ReadArtifactBucketMetadata",
+                  "Effect": "Allow",
+                  "Action": ["s3:GetBucketAcl", "s3:GetBucketLocation", "s3:GetBucketVersioning"],
+                  "Resource": {
+                    "Fn::GetAtt": ["ArtifactBucket", "Arn"]
+                  }
+                },
+                {
+                  "Sid": "UseArtifactObjects",
+                  "Effect": "Allow",
+                  "Action": ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"],
+                  "Resource": {
+                    "Fn::Sub": "${ArtifactBucket.Arn}/*"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    },
+    "FixturePipeline": {
+      "Type": "AWS::CodePipeline::Pipeline",
+      "DependsOn": "ArtifactBucketPolicy",
+      "Properties": {
+        "Name": "control-center-live-fixture",
+        "PipelineType": "V1",
+        "RestartExecutionOnUpdate": false,
+        "RoleArn": {
+          "Fn::GetAtt": ["PipelineRole", "Arn"]
+        },
+        "ArtifactStore": {
+          "Type": "S3",
+          "Location": {
+            "Ref": "ArtifactBucket"
+          }
+        },
+        "Stages": [
+          {
+            "Name": "Source",
+            "Actions": [
+              {
+                "Name": "ReadFixture",
+                "ActionTypeId": {
+                  "Category": "Source",
+                  "Owner": "AWS",
+                  "Provider": "CodeCommit",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "BranchName": "main",
+                  "PollForSourceChanges": "false",
+                  "RepositoryName": {
+                    "Fn::GetAtt": ["FixtureRepository", "Name"]
+                  }
+                },
+                "OutputArtifacts": [
+                  {
+                    "Name": "FixtureSource"
+                  }
+                ],
+                "RunOrder": 1
+              }
+            ]
+          },
+          {
+            "Name": "Approval",
+            "Actions": [
+              {
+                "Name": "ConfirmFixture",
+                "ActionTypeId": {
+                  "Category": "Approval",
+                  "Owner": "AWS",
+                  "Provider": "Manual",
+                  "Version": "1"
+                },
+                "Configuration": {
+                  "CustomData": "Stable Control Center live integration fixture"
+                },
+                "RunOrder": 1
+              }
+            ]
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "project",
+            "Value": "control-center"
+          },
+          {
+            "Key": "purpose",
+            "Value": "live-integration"
+          }
+        ]
+      }
+    }
+  },
+  "Outputs": {
+    "AwsRoleArn": {
+      "Description": "CONTROL_CENTER_TEST_AWS_ROLE_ARN",
+      "Value": {
+        "Fn::GetAtt": ["LiveIntegrationRole", "Arn"]
+      }
+    },
+    "AwsRegion": {
+      "Description": "CONTROL_CENTER_TEST_AWS_REGION",
+      "Value": {
+        "Ref": "AWS::Region"
+      }
+    },
+    "CodeCommitRepository": {
+      "Description": "CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY",
+      "Value": {
+        "Fn::GetAtt": ["FixtureRepository", "Name"]
+      }
+    },
+    "CodePipelinePipeline": {
+      "Description": "CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE",
+      "Value": {
+        "Ref": "FixturePipeline"
+      }
+    }
+  }
+}
