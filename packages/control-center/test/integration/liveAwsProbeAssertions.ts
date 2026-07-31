@@ -1,6 +1,7 @@
 import { assert } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
 const LiveAwsProbeDiagnosticCode = Schema.Literals([
@@ -21,11 +22,93 @@ const LiveAwsProbeDiagnosticCode = Schema.Literals([
 
 type LiveAwsProbeDiagnosticCode = typeof LiveAwsProbeDiagnosticCode.Type
 
+const LiveAwsProbeProviderStage = Schema.Literals([
+  "codecommit-discover-account",
+  "codecommit-list-repositories",
+  "codecommit-list-pull-requests",
+  "codecommit-get-differences",
+  "codepipeline-discover-account",
+  "codepipeline-list-pipelines",
+  "codepipeline-get-pipeline",
+  "codepipeline-list-executions",
+  "codepipeline-get-execution-snapshot",
+  "codepipeline-get-state"
+])
+
+export type LiveAwsProbeProviderStage = typeof LiveAwsProbeProviderStage.Type
+
+const LiveAwsProbeProviderFailureKind = Schema.Literals([
+  "PluginAuthenticationFailure",
+  "PluginAuthorizationFailure",
+  "PluginConflictFailure",
+  "PluginMalformedResponseFailure",
+  "PluginOutageFailure",
+  "PluginRateLimitFailure",
+  "PluginTimeoutFailure",
+  "defect",
+  "unknown"
+])
+
+type LiveAwsProbeProviderFailureKind = typeof LiveAwsProbeProviderFailureKind.Type
+
+const LiveAwsProbeProviderDiagnosticCode = Schema.Literals([
+  "codepipeline-distilled-response-invalid",
+  "codepipeline-provider-response-invalid",
+  "codepipeline-normalized-model-invalid",
+  "codepipeline-state-identity-mismatch",
+  "not-applicable",
+  "redacted"
+])
+
+type LiveAwsProbeProviderDiagnosticCode = typeof LiveAwsProbeProviderDiagnosticCode.Type
+
+const providerFailureKind = <E>(
+  cause: Cause.Cause<E>
+): LiveAwsProbeProviderFailureKind => {
+  const failed = cause.reasons.find(Cause.isFailReason)
+  if (failed === undefined) return cause.reasons.some(Cause.isDieReason) ? "defect" : "unknown"
+  const error = failed.error
+  if (Predicate.isTagged(error, "PluginAuthenticationFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginAuthorizationFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginConflictFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginMalformedResponseFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginOutageFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginRateLimitFailure")) return error._tag
+  if (Predicate.isTagged(error, "PluginTimeoutFailure")) return error._tag
+  return "unknown"
+}
+
+const providerDiagnosticCode = <E>(
+  cause: Cause.Cause<E>
+): LiveAwsProbeProviderDiagnosticCode => {
+  const failed = cause.reasons.find(Cause.isFailReason)
+  if (
+    failed === undefined ||
+    !Predicate.isTagged(failed.error, "PluginMalformedResponseFailure") ||
+    !Predicate.hasProperty(failed.error, "diagnosticCode") ||
+    typeof failed.error.diagnosticCode !== "string"
+  ) {
+    return "not-applicable"
+  }
+  switch (failed.error.diagnosticCode) {
+    case "codepipeline-distilled-response-invalid":
+    case "codepipeline-provider-response-invalid":
+    case "codepipeline-normalized-model-invalid":
+    case "codepipeline-state-identity-mismatch":
+      return failed.error.diagnosticCode
+    default:
+      return "redacted"
+  }
+}
+
 /** Provider-independent failure exposed to the live test runner. */
 export class LiveAwsProbeFailure extends Schema.TaggedErrorClass<LiveAwsProbeFailure>()(
   "LiveAwsProbeFailure",
   {
-    diagnosticCode: Schema.Literal("live-aws-provider-probe-failed")
+    diagnosticCode: Schema.Literal("live-aws-provider-probe-failed"),
+    providerStage: LiveAwsProbeProviderStage,
+    providerFailureKind: LiveAwsProbeProviderFailureKind,
+    providerDiagnosticCode: LiveAwsProbeProviderDiagnosticCode
   }
 ) {}
 
@@ -168,7 +251,8 @@ export const resourceExistsInBoundedPages = <E, R>(options: {
 
 /** Discard provider failures and defects while preserving interruption. */
 export const sanitizeLiveAwsProbe = <A, E, R>(
-  effect: Effect.Effect<A, E, R>
+  effect: Effect.Effect<A, E, R>,
+  providerStage: LiveAwsProbeProviderStage
 ): Effect.Effect<A, LiveAwsProbeFailure, R> =>
   effect.pipe(
     Effect.catchCause((cause) => {
@@ -177,7 +261,10 @@ export const sanitizeLiveAwsProbe = <A, E, R>(
         ? Effect.failCause(Cause.fromReasons(interruptions))
         : Effect.fail(
           new LiveAwsProbeFailure({
-            diagnosticCode: "live-aws-provider-probe-failed"
+            diagnosticCode: "live-aws-provider-probe-failed",
+            providerStage,
+            providerFailureKind: providerFailureKind(cause),
+            providerDiagnosticCode: providerDiagnosticCode(cause)
           })
         )
     })

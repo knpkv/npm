@@ -44,6 +44,7 @@ import {
   planCodePipelineArtifactObjectIdentity,
   planCodePipelineArtifactRange
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
+import { decodeCodePipelineStateProviderOutput } from "../../src/server/plugins/codepipeline/CodePipelineStateDecoder.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -256,6 +257,42 @@ const runWithProvider = <Value, Error>(
   )
 
 describe("CodePipelinePlugin", () => {
+  it.effect("accepts live action revisions that omit optional revision metadata", () =>
+    Effect.gen(function*() {
+      const decoded = yield* decodeCodePipelineStateProviderOutput({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionId: "fixture-commit"
+            }
+          }]
+        }]
+      })
+      assert.strictEqual(
+        decoded.stageStates?.[0]?.actionStates?.[0]?.currentRevision?.revisionId,
+        "fixture-commit"
+      )
+
+      const invalid = yield* decodeCodePipelineStateProviderOutput({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionChangeId: "fixture-change"
+            }
+          }]
+        }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+    }))
+
   it.effect("stops consuming an artifact body as soon as the authorized byte bound is exceeded", () =>
     Effect.gen(function*() {
       const consumed = yield* Ref.make(0)
