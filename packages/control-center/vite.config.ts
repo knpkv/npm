@@ -17,6 +17,7 @@ export default defineConfig(({ mode }) => {
             "domain/index": "src/domain/index.ts",
             index: "src/index.ts",
             "server/cli": "src/server/cli.ts",
+            "server/internal/codepipeline-state-probe": "src/server/plugins/codepipeline/CodePipelineStateProbe.ts",
             "server/index": "src/server/index.ts"
           },
           output: {

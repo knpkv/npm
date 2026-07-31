@@ -1,4 +1,3 @@
-import * as DistilledCodePipeline from "@distilled.cloud/aws/codepipeline"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
@@ -45,6 +44,7 @@ import {
   planCodePipelineArtifactObjectIdentity,
   planCodePipelineArtifactRange
 } from "../../src/server/plugins/codepipeline/CodePipelineReadProvider.js"
+import { decodeCodePipelineStateProviderOutput } from "../../src/server/plugins/codepipeline/CodePipelineStateDecoder.js"
 import {
   PluginAuthenticationFailure,
   PluginAuthorizationFailure,
@@ -259,9 +259,7 @@ const runWithProvider = <Value, Error>(
 describe("CodePipelinePlugin", () => {
   it.effect("accepts live action revisions that omit optional revision metadata", () =>
     Effect.gen(function*() {
-      const decoded = yield* Schema.decodeUnknownEffect(
-        Schema.toType(DistilledCodePipeline.GetPipelineStateOutput)
-      )({
+      const decoded = yield* decodeCodePipelineStateProviderOutput({
         pipelineName: "release",
         pipelineVersion: 7,
         stageStates: [{
@@ -279,9 +277,7 @@ describe("CodePipelinePlugin", () => {
         "fixture-commit"
       )
 
-      const invalid = yield* Schema.decodeUnknownEffect(
-        Schema.toType(DistilledCodePipeline.GetPipelineStateOutput)
-      )({
+      const invalid = yield* decodeCodePipelineStateProviderOutput({
         pipelineName: "release",
         pipelineVersion: 7,
         stageStates: [{

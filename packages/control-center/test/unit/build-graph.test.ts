@@ -12,6 +12,32 @@ const graph = (target: "client" | "server", ids: ReadonlyArray<string>): Control
   version: CONTROL_CENTER_BUILD_GRAPH_VERSION
 })
 
+const serverGraph = (
+  ids: ReadonlyArray<string>,
+  providerImports: ReadonlyArray<string> = [
+    "@aws-sdk/client-codepipeline",
+    "src/server/plugins/codepipeline/CodePipelineStateDecoder.ts"
+  ]
+): ControlCenterBuildGraph => ({
+  modules: [
+    ...ids.map((id) => ({ dynamicImports: [], id, imports: [], isEntry: true })),
+    {
+      dynamicImports: [],
+      id: "src/server/plugins/codepipeline/CodePipelineReadProvider.ts",
+      imports: providerImports,
+      isEntry: false
+    },
+    {
+      dynamicImports: [],
+      id: "src/server/plugins/codepipeline/CodePipelineStateProbe.ts",
+      imports: ["src/server/plugins/codepipeline/CodePipelineStateDecoder.ts"],
+      isEntry: true
+    }
+  ],
+  target: "server",
+  version: CONTROL_CENTER_BUILD_GRAPH_VERSION
+})
+
 describe("resolved build graph contract", () => {
   it("accepts the two intended entry graphs", () => {
     const clientGraph: ControlCenterBuildGraph = {
@@ -25,9 +51,19 @@ describe("resolved build graph contract", () => {
     expect(inspectBuildGraph(clientGraph)).toEqual([])
     expect(
       inspectBuildGraph(
-        graph("server", ["src/index.ts", "src/api/index.ts", "src/domain/index.ts", "src/server/index.ts"])
+        serverGraph(["src/index.ts", "src/api/index.ts", "src/domain/index.ts", "src/server/index.ts"])
       )
     ).toEqual([])
+  })
+
+  it("binds the shipped CodePipeline decoder to the production provider", () => {
+    const entries = ["src/index.ts", "src/api/index.ts", "src/domain/index.ts", "src/server/index.ts"]
+    const disconnected = inspectBuildGraph(
+      serverGraph(entries, ["@distilled.cloud/aws/codepipeline"])
+    )
+    expect(disconnected).toContain("server CodePipeline provider is missing the official AWS SDK")
+    expect(disconnected).toContain("server CodePipeline provider is missing the shipped state decoder")
+    expect(inspectBuildGraph(serverGraph(entries))).toEqual([])
   })
 
   it("rejects cross-runtime and prototype modules", () => {
@@ -36,7 +72,7 @@ describe("resolved build graph contract", () => {
     )
     expect(
       inspectBuildGraph(
-        graph("server", [
+        serverGraph([
           "src/index.ts",
           "src/api/index.ts",
           "src/domain/index.ts",
