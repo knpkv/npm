@@ -11,8 +11,10 @@ interface WorkflowSource {
 
 const usesReferences = (source: string): ReadonlyArray<string> =>
   Array.from(
-    source.matchAll(/^\s*(?:-\s*)?uses:\s*([^\s#]+)/gmu),
-    (match) => match[1] ?? ""
+    source.matchAll(
+      /^\s*(?:-\s*)?uses\s*:\s*(?:"([^"]+)"|'([^']+)'|([^\s#]+))/gmu
+    ),
+    (match) => match[1] ?? match[2] ?? match[3] ?? ""
   )
 
 const loadWorkflowClosure = (
@@ -167,14 +169,22 @@ describe("Control Center live integration workflow", () => {
           source: "runs:\n  steps:\n    - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271\n"
         },
         {
+          location: ".github/actions/quoted/action.yaml",
+          source: "runs:\n  steps:\n    - uses: \"pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271\"\n"
+        },
+        {
           location: ".github/actions/local/action.yaml",
-          source: "runs:\n  steps:\n    - uses: ./.github/actions/nested\n"
+          source: "runs:\n  steps:\n    - uses: './.github/actions/nested'\n"
         }
       ]
-      const dockerFixture = [
+      const quotedInvalidFixture = [
         {
           location: ".github/actions/setup/action.yaml",
-          source: "runs:\n  steps:\n    - uses: docker://ghcr.io/example/action:latest\n"
+          source: "runs:\n  steps:\n    - uses: \"pnpm/action-setup@v6\"\n"
+        },
+        {
+          location: ".github/actions/setup/action.yaml",
+          source: "runs:\n  steps:\n    - uses: 'docker://ghcr.io/example/action:latest'\n"
         }
       ]
 
@@ -182,7 +192,8 @@ describe("Control Center live integration workflow", () => {
       expect(unpinnedExternalActions(invalidFixture)).toEqual([
         ".github/actions/setup/action.yaml: pnpm/action-setup@v6"
       ])
-      expect(unpinnedExternalActions(dockerFixture)).toEqual([
+      expect(unpinnedExternalActions(quotedInvalidFixture)).toEqual([
+        ".github/actions/setup/action.yaml: pnpm/action-setup@v6",
         ".github/actions/setup/action.yaml: docker://ghcr.io/example/action:latest"
       ])
       expect(unpinnedExternalActions(validFixture)).toEqual([])
