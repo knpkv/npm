@@ -1584,14 +1584,9 @@ await assertRuleDiagnostics({
     import { ChildProcess } from "effect/unstable/process"
     const spawn = ChildProcess.make
     const extracted = spawn("git", args, { env: gitEnvironment })
-    const explicitUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: undefined })
-    const voidUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: void 0 })
-    const late = { env: gitEnvironment }
-    const afterCall = ChildProcess.make("git", args, late)
-    configure(late)
   `,
-  expected: 4,
-  filePath: "packages/codecommit-core/src/eslint-child-env-round13-invalid.ts",
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-extracted-make-invalid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
 
@@ -1603,13 +1598,54 @@ await assertRuleDiagnostics({
     const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
     const foreignSpawn = Foreign.ChildProcess.make
     const foreign = foreignSpawn("git", args, { env: gitEnvironment })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-extracted-make-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const explicitUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: undefined })
+    const voidUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: void 0 })
+  `,
+  expected: 2,
+  filePath: "packages/codecommit-core/src/eslint-child-env-undefined-extendenv-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
     const isolated = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: false })
+  `,
+  expected: 0,
+  filePath: "packages/codecommit-core/src/eslint-child-env-undefined-extendenv-valid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
+    const late = { env: gitEnvironment }
+    const afterCall = ChildProcess.make("git", args, late)
+    configure(late)
+  `,
+  expected: 1,
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutation-order-invalid.ts",
+  ruleId: "local-rules/require-explicit-child-process-env-inheritance"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { ChildProcess } from "effect/unstable/process"
     const early = { env: gitEnvironment }
     configure(early)
     const beforeCall = ChildProcess.make("git", args, early)
   `,
   expected: 0,
-  filePath: "packages/codecommit-core/src/eslint-child-env-round13-valid.ts",
+  filePath: "packages/codecommit-core/src/eslint-child-env-mutation-order-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
 
