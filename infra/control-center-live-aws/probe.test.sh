@@ -39,6 +39,16 @@ if [[ ! -s "${probe_script}" ]]; then
   printf '%s\n' "AWS probe shell block could not be extracted" >&2
   exit 1
 fi
+if ! grep -Fq \
+  '[sourceReference,destinationReference,sourceCommit,destinationCommit]' \
+  "${probe_script}"; then
+  printf '%s\n' "AWS probe must query the CodeCommit destinationReference field" >&2
+  exit 1
+fi
+if grep -Fq "targetReference" "${probe_script}"; then
+  printf '%s\n' "AWS probe must not query the nonexistent CodeCommit targetReference field" >&2
+  exit 1
+fi
 
 mock_pipeline_definition() {
   jq -n '{
