@@ -94,13 +94,35 @@ describe("live AWS probe assertions", () => {
           }
         ]
       ) {
+        const cases = [
+          {
+            providerEffect: Effect.fail(providerFailure),
+            expectedFailureKind: providerFailure._tag === "AwsApiError"
+              ? "unknown"
+              : "PluginOutageFailure",
+            expectedDiagnosticCode: "not-applicable"
+          },
+          {
+            providerEffect: Effect.die(providerFailure),
+            expectedFailureKind: "defect",
+            expectedDiagnosticCode: "not-applicable"
+          }
+        ] satisfies ReadonlyArray<{
+          readonly providerEffect: Effect.Effect<never, unknown>
+          readonly expectedFailureKind: "PluginOutageFailure" | "defect" | "unknown"
+          readonly expectedDiagnosticCode: "not-applicable"
+        }>
         for (
-          const providerEffect of [
-            Effect.fail(providerFailure),
-            Effect.die(providerFailure)
-          ]
+          const {
+            expectedDiagnosticCode,
+            expectedFailureKind,
+            providerEffect
+          } of cases
         ) {
-          const result = yield* sanitizeLiveAwsProbe(providerEffect).pipe(
+          const result = yield* sanitizeLiveAwsProbe(
+            providerEffect,
+            "codecommit-list-repositories"
+          ).pipe(
             Effect.result
           )
           assert.isTrue(Result.isFailure(result))
@@ -112,6 +134,9 @@ describe("live AWS probe assertions", () => {
             Predicate.isError(result.failure) ? String(result.failure.cause) : ""
           ].join("\n")
           assert.include(rendered, "live-aws-provider-probe-failed")
+          assert.include(rendered, "codecommit-list-repositories")
+          assert.include(rendered, expectedFailureKind)
+          assert.include(rendered, expectedDiagnosticCode)
           for (const sentinel of sentinels) assert.notInclude(rendered, sentinel)
         }
       }
@@ -119,14 +144,53 @@ describe("live AWS probe assertions", () => {
 
   it.effect("preserves interruption instead of converting it to a provider failure", () =>
     Effect.gen(function*() {
-      const exit = yield* sanitizeLiveAwsProbe(Effect.interrupt).pipe(Effect.exit)
+      const exit = yield* sanitizeLiveAwsProbe(
+        Effect.interrupt,
+        "codepipeline-get-state"
+      ).pipe(Effect.exit)
       assert.isTrue(Exit.hasInterrupts(exit))
+    }))
+
+  it.effect("reports only allowlisted provider diagnostic codes", () =>
+    Effect.gen(function*() {
+      const privateDiagnostic = "customer-pipeline-schema-failure"
+      const cases = [
+        {
+          diagnosticCode: "codepipeline-distilled-response-invalid",
+          expected: "codepipeline-distilled-response-invalid"
+        },
+        {
+          diagnosticCode: privateDiagnostic,
+          expected: "redacted"
+        }
+      ] satisfies ReadonlyArray<{
+        readonly diagnosticCode: string
+        readonly expected: "codepipeline-distilled-response-invalid" | "redacted"
+      }>
+      for (const testCase of cases) {
+        const result = yield* sanitizeLiveAwsProbe(
+          Effect.fail({
+            _tag: "PluginMalformedResponseFailure",
+            operation: "codepipeline-get-state",
+            diagnosticCode: testCase.diagnosticCode
+          }),
+          "codepipeline-get-state"
+        ).pipe(Effect.result)
+        assert.isTrue(Result.isFailure(result))
+        if (Result.isSuccess(result)) continue
+        assert.strictEqual(result.failure.providerFailureKind, "PluginMalformedResponseFailure")
+        assert.strictEqual(result.failure.providerDiagnosticCode, testCase.expected)
+        assert.notInclude(JSON.stringify(result.failure), privateDiagnostic)
+      }
     }))
 
   it("preserves first-party assertion diagnostics outside provider sanitization", () => {
     const rendered = renderFailure(() =>
       Effect.runSync(
-        sanitizeLiveAwsProbe(Effect.succeed(false)).pipe(
+        sanitizeLiveAwsProbe(
+          Effect.succeed(false),
+          "codepipeline-get-pipeline"
+        ).pipe(
           Effect.map((matches) => assertLiveAwsProbe(matches, "codepipeline-definition-mismatch"))
         )
       )

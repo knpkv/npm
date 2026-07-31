@@ -5,6 +5,7 @@ packages:
 
 patchedDependencies:
   "@changesets/assemble-release-plan": patches/@changesets__assemble-release-plan.patch
+  "@distilled.cloud/aws@0.29.1": patches/@distilled.cloud__aws@0.29.1.patch
 
 catalog:
   vitest: ^4.1.10

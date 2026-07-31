@@ -1,3 +1,4 @@
+import * as DistilledCodePipeline from "@distilled.cloud/aws/codepipeline"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"
 import { assert, describe, it } from "@effect/vitest"
@@ -256,6 +257,46 @@ const runWithProvider = <Value, Error>(
   )
 
 describe("CodePipelinePlugin", () => {
+  it.effect("accepts live action revisions that omit optional revision metadata", () =>
+    Effect.gen(function*() {
+      const decoded = yield* Schema.decodeUnknownEffect(
+        Schema.toType(DistilledCodePipeline.GetPipelineStateOutput)
+      )({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionId: "fixture-commit"
+            }
+          }]
+        }]
+      })
+      assert.strictEqual(
+        decoded.stageStates?.[0]?.actionStates?.[0]?.currentRevision?.revisionId,
+        "fixture-commit"
+      )
+
+      const invalid = yield* Schema.decodeUnknownEffect(
+        Schema.toType(DistilledCodePipeline.GetPipelineStateOutput)
+      )({
+        pipelineName: "release",
+        pipelineVersion: 7,
+        stageStates: [{
+          stageName: "Source",
+          actionStates: [{
+            actionName: "Checkout",
+            currentRevision: {
+              revisionChangeId: "fixture-change"
+            }
+          }]
+        }]
+      }).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(invalid))
+    }))
+
   it.effect("stops consuming an artifact body as soon as the authorized byte bound is exceeded", () =>
     Effect.gen(function*() {
       const consumed = yield* Ref.make(0)

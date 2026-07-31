@@ -109,7 +109,8 @@ describe("Control Center live AWS default credential chain", () => {
       }
       const codeCommit = yield* CodeCommit.CodeCommitReadClient
       const codeCommitIdentity = yield* sanitizeLiveAwsProbe(
-        codeCommit.discoverAccount(codeCommitAccount)
+        codeCommit.discoverAccount(codeCommitAccount),
+        "codecommit-discover-account"
       )
       assertLiveAwsProbe(
         codeCommitIdentity.accountId === expectedAccountId,
@@ -132,7 +133,8 @@ describe("Control Center live AWS default credential chain", () => {
                   nextToken: pageToken
                 }))
               )
-        })
+        }),
+        "codecommit-list-repositories"
       )
       assertLiveAwsProbe(
         repositoryExists,
@@ -159,7 +161,8 @@ describe("Control Center live AWS default credential chain", () => {
           matches: ({ destinationReference, sourceReference }) =>
             sourceReference === "refs/heads/fixture-change" &&
             destinationReference === "refs/heads/main"
-        })
+        }),
+        "codecommit-list-pull-requests"
       )
       assertLiveAwsProbe(
         stablePullRequest !== undefined,
@@ -173,7 +176,8 @@ describe("Control Center live AWS default credential chain", () => {
           beforeCommitSpecifier: stablePullRequest.destinationCommit,
           afterCommitSpecifier: stablePullRequest.sourceCommit,
           nextToken: null
-        })
+        }),
+        "codecommit-get-differences"
       )
       assertLiveAwsProbe(
         isExactLiveAwsFixtureDiff(changedFiles),
@@ -187,7 +191,8 @@ describe("Control Center live AWS default credential chain", () => {
       }
       const codePipeline = yield* CodePipelineReadClient
       const codePipelineIdentity = yield* sanitizeLiveAwsProbe(
-        codePipeline.discoverAccount(pipelineAccount)
+        codePipeline.discoverAccount(pipelineAccount),
+        "codepipeline-discover-account"
       )
       assertLiveAwsProbe(
         codePipelineIdentity.accountId === expectedAccountId,
@@ -210,7 +215,8 @@ describe("Control Center live AWS default credential chain", () => {
                   nextToken: pageToken
                 }))
               )
-        })
+        }),
+        "codepipeline-list-pipelines"
       )
       assertLiveAwsProbe(
         pipelineExists,
@@ -220,7 +226,8 @@ describe("Control Center live AWS default credential chain", () => {
         codePipeline.getPipeline({
           account: pipelineAccount,
           pipelineName: configuration.codePipelinePipeline
-        })
+        }),
+        "codepipeline-get-pipeline"
       )
       assertLiveAwsProbe(
         pipeline.name === configuration.codePipelinePipeline &&
@@ -236,7 +243,8 @@ describe("Control Center live AWS default credential chain", () => {
             account: pipelineAccount,
             pipelineName: configuration.codePipelinePipeline,
             nextToken
-          })
+          }),
+          "codepipeline-list-executions"
         )
         execution = page.executions.find(({ status }) => status === "Succeeded")
         nextToken = page.nextToken
@@ -258,7 +266,8 @@ describe("Control Center live AWS default credential chain", () => {
             maximumActions: 100
           },
           summary: execution
-        })
+        }),
+        "codepipeline-get-execution-snapshot"
       )
       assertLiveAwsProbe(
         isSuccessfulExecutionForPipelineVersion(snapshot.execution, pipeline.version),
@@ -285,7 +294,8 @@ describe("Control Center live AWS default credential chain", () => {
         codePipeline.getPipelineState({
           account: pipelineAccount,
           pipelineName: configuration.codePipelinePipeline
-        })
+        }),
+        "codepipeline-get-state"
       )
       assertLiveAwsProbe(
         pipelineState.pipelineName === configuration.codePipelinePipeline,
