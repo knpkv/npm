@@ -213,9 +213,10 @@ It does not own:
 
 Codex and Claude are real adapters at the LanguageModel seam. The package does not depend on their native tool behavior.
 
-Each tool result returned to the model is limited to a 64 KiB UTF-8 prefix plus
-an artifact handle when more output exists. Full output remains locally
-pageable and searchable under the retention policy.
+Each command stream returned to the model is limited to a 32 KiB UTF-8 prefix
+plus an artifact handle when more output exists, for at most 64 KiB of immediate
+stdout and stderr context combined. Full output remains locally pageable and
+searchable under the retention policy.
 
 ### Review application module
 

@@ -1,8 +1,11 @@
-import { DateTime, Effect, Layer, Option } from "effect"
+import { DateTime, Effect, Layer, Option, Schema } from "effect"
 
 import { ReviewCommandArtifactId } from "../../src/domain/identifiers.js"
 import { PersistenceOperationError, RecordNotFoundError } from "../../src/server/persistence/errors.js"
 import {
+  CreateReviewCommandArtifactsInput,
+  MAXIMUM_REVIEW_COMMAND_ARTIFACT_ATTEMPT_BYTES,
+  MAXIMUM_REVIEW_COMMAND_ARTIFACTS_PER_ATTEMPT,
   pageReviewCommandArtifactBytes,
   type ReviewCommandArtifactMetadata,
   ReviewCommandArtifactRepository,
@@ -15,8 +18,7 @@ interface StoredArtifact {
   readonly metadata: ReviewCommandArtifactMetadata
 }
 
-const CREATED_AT = DateTime.makeUnsafe("2026-07-31T10:00:00.000Z")
-const EXPIRES_AT = DateTime.makeUnsafe("2026-08-07T10:00:00.000Z")
+const RETENTION_DAYS = 7
 
 export const reviewCommandArtifactTestLayer = (): Layer.Layer<ReviewCommandArtifactRepository> => {
   const artifacts = new Map<ReviewCommandArtifactId, StoredArtifact>()
@@ -53,26 +55,51 @@ export const reviewCommandArtifactTestLayer = (): Layer.Layer<ReviewCommandArtif
     })
   const service = ReviewCommandArtifactRepository.of({
     createCommand: (input) =>
-      Effect.sync(() => {
-        return input.artifacts.map(({ content, stream }) => {
+      Effect.gen(function*() {
+        const decoded = yield* Schema.decodeUnknownEffect(CreateReviewCommandArtifactsInput)(input).pipe(
+          Effect.mapError(() => new PersistenceOperationError({ operation: "review-artifact.input" }))
+        )
+        const createdAt = yield* DateTime.now
+        const expiresAt = DateTime.add(createdAt, { days: RETENTION_DAYS })
+        const existing = Array.from(artifacts.values()).filter(({ metadata }) =>
+          metadata.workspaceId === decoded.workspaceId &&
+          metadata.jobId === decoded.jobId &&
+          metadata.attemptSequence === decoded.attemptSequence
+        )
+        const drafts = decoded.artifacts.map(({ content, stream }) => ({
+          content: new TextEncoder().encode(content),
+          stream
+        }))
+        const byteLength = existing.reduce(
+          (total, artifact) => total + artifact.metadata.byteLength,
+          drafts.reduce((total, draft) => total + draft.content.byteLength, 0)
+        )
+        if (
+          existing.length + drafts.length > MAXIMUM_REVIEW_COMMAND_ARTIFACTS_PER_ATTEMPT ||
+          byteLength > MAXIMUM_REVIEW_COMMAND_ARTIFACT_ATTEMPT_BYTES
+        ) {
+          return yield* new PersistenceOperationError({
+            operation: "review-artifact.attempt-capacity"
+          })
+        }
+        return drafts.map(({ content, stream }) => {
           sequence += 1
           const artifactId = ReviewCommandArtifactId.make(
             `01890f6f-6d6a-7cc0-98d2-${String(sequence).padStart(12, "0")}`
           )
-          const bytes = new TextEncoder().encode(content)
           const metadata = {
-            workspaceId: input.workspaceId,
-            threadId: input.threadId,
-            jobId: input.jobId,
-            attemptSequence: input.attemptSequence,
-            commandSequence: input.commandSequence,
+            workspaceId: decoded.workspaceId,
+            threadId: decoded.threadId,
+            jobId: decoded.jobId,
+            attemptSequence: decoded.attemptSequence,
+            commandSequence: decoded.commandSequence,
             artifactId,
             stream,
-            byteLength: bytes.byteLength,
-            createdAt: CREATED_AT,
-            expiresAt: EXPIRES_AT
+            byteLength: content.byteLength,
+            createdAt,
+            expiresAt
           } satisfies ReviewCommandArtifactMetadata
-          artifacts.set(artifactId, { content: bytes, metadata })
+          artifacts.set(artifactId, { content, metadata })
           return metadata
         })
       }),

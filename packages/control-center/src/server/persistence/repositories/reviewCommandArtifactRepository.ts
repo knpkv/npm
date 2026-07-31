@@ -149,11 +149,8 @@ export const pageReviewCommandArtifactBytes = (
   offset: number,
   limit: number
 ): ReviewCommandArtifactPage | null => {
-  let start = Math.min(offset, bytes.byteLength)
+  const start = Math.min(offset, bytes.byteLength)
   if (start < bytes.byteLength && isContinuationByte(bytes[start] ?? 0)) return null
-  while (start < bytes.byteLength && isContinuationByte(bytes[start] ?? 0)) {
-    start += 1
-  }
   let end = Math.min(start + limit, bytes.byteLength)
   while (end > start && end < bytes.byteLength && isContinuationByte(bytes[end] ?? 0)) {
     end -= 1

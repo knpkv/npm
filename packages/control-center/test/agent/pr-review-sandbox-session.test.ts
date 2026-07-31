@@ -400,6 +400,7 @@ describe("PrReviewSandboxSessions", () => {
   it.effect("creates one cloned sbx sandbox, blocks its network, and exposes only contained commands", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const largeOutput = "🙂".repeat(10_000)
+    const largeError = "e".repeat(40_000)
     return Effect.gen(function*() {
       const sessions = yield* PrReviewSandboxSessions
       const observed = yield* sessions.withSession(request, (session) =>
@@ -419,6 +420,9 @@ describe("PrReviewSandboxSessions", () => {
       assert.strictEqual(observed.tested.stdout.text, "tests passed\n")
       assert.strictEqual(observed.read.stdout.text, "bounded\n")
       assert.isTrue(observed.large.stdout.truncated)
+      assert.isTrue(observed.large.stderr.truncated)
+      assert.strictEqual(encoder.encode(observed.large.stdout.text).byteLength, 32_768)
+      assert.strictEqual(encoder.encode(observed.large.stderr.text).byteLength, 32_768)
       assert.deepStrictEqual(observed.page, {
         complete: false,
         nextOffset: 8,
@@ -475,7 +479,7 @@ describe("PrReviewSandboxSessions", () => {
         },
         {
           matches: ({ args }) => args.at(-1) === "emit-large",
-          response: { stdout: largeOutput }
+          response: { stderr: largeError, stdout: largeOutput }
         },
         {
           matches: ({ args }) => args.at(-1) === "test -f 'README.md' && tail -c +5 -- 'README.md' | head -c 10",
@@ -552,6 +556,9 @@ describe("PrReviewSandboxSessions", () => {
     const calls: Array<ChildProcess.StandardCommand> = []
     const largeOutput = "a".repeat(32_768) + "🙂recovered"
     return Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(
+        DateTime.makeUnsafe("2026-07-31T10:00:00.000Z")
+      ))
       const sessions = yield* PrReviewSandboxSessions
       yield* sessions.withSession(request, (session) =>
         session.runCommand("emit-recoverable").pipe(
