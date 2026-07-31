@@ -199,6 +199,7 @@ describe("RetentionRepository", () => {
             { deletedCount: 1, retentionClass: "audit-replay", selectedCount: 1 },
             { deletedCount: 2, retentionClass: "reproducible-content", selectedCount: 2 },
             { deletedCount: 1, retentionClass: "evidence", selectedCount: 1 },
+            { deletedCount: 0, retentionClass: "sandbox-artifact", selectedCount: 0 },
             { deletedCount: 1, retentionClass: "agent-content", selectedCount: 1 }
           ]
         )
@@ -242,7 +243,7 @@ describe("RetentionRepository", () => {
         assert.lengthOf(agentEvents, 0)
 
         const persistedRuns = yield* persistence.retention.listRuns(WORKSPACE_ID)
-        assert.lengthOf(persistedRuns, 4)
+        assert.lengthOf(persistedRuns, 5)
         assert.isTrue(persistedRuns.every(({ policyRevision }) => policyRevision === 1))
         const residualClaims = yield* database.sql`SELECT record_key
         FROM retention_cleanup_claims

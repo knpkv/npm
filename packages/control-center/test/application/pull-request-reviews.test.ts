@@ -7,7 +7,7 @@ import {
   makeAgentRuntime,
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
-import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream } from "effect"
+import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream, Tracer } from "effect"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 
 import {
@@ -2159,6 +2159,40 @@ describe("pull request reviews", () => {
           report: reviewReport,
           completedAt: yield* DateTime.now
         })
+        const spans = new Array<Tracer.NativeSpan>()
+        const tracer = Tracer.make({
+          span: (options) => {
+            const span = new Tracer.NativeSpan(options)
+            spans.push(span)
+            return span
+          }
+        })
+        const [browserCurrent, browserThread] = yield* Effect.all([
+          service.current({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID
+          }),
+          service.thread({
+            workspaceId: WORKSPACE_ID,
+            entityId: ENTITY_ID,
+            after: ReleaseAgentThreadCursor.make(0),
+            limit: 128
+          })
+        ]).pipe(Effect.provideService(Tracer.Tracer, tracer))
+        const browserResponses = JSON.stringify({ browserCurrent, browserThread })
+        assert.include(browserResponses, "yield* mutate()")
+        assert.include(browserResponses, "Authorize before mutating.")
+        const telemetry = JSON.stringify(
+          spans.map((span) => ({
+            attributes: Array.from(span.attributes),
+            events: span.events,
+            name: span.name,
+            status: span.status
+          })),
+          (_key, value) => typeof value === "bigint" ? value.toString() : value
+        )
+        assert.notInclude(telemetry, "yield* mutate()")
+        assert.notInclude(telemetry, "Authorize before mutating.")
 
         const originalPage = yield* service.revisions({
           workspaceId: WORKSPACE_ID,
@@ -2378,6 +2412,20 @@ describe("pull request reviews", () => {
         })
         assert.isFalse(completeTail.hasEarlier)
         assert.isFalse(completeTail.hasMore)
+        const browserVisibleThread = JSON.stringify(completeTail)
+        for (
+          const privateArtifactField of [
+            "artifactId",
+            "attemptSequence",
+            "byteLength",
+            "commandSequence",
+            "contentBlob",
+            "expiresAt",
+            "stream"
+          ]
+        ) {
+          assert.notInclude(browserVisibleThread, privateArtifactField)
+        }
         const earlierPresented = yield* service.thread({
           workspaceId: WORKSPACE_ID,
           entityId: ENTITY_ID,

@@ -226,7 +226,7 @@ const utf8Bytes = (
 
 const shellQuote = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`
 const textEncoder = new TextEncoder()
-const ARTIFACT_PAGE_CHARACTERS = 64 * 1_024
+const ARTIFACT_PAGE_BYTES = 64 * 1_024
 const MAXIMUM_ARTIFACT_PAGES = 1_025
 
 const diffLineIntervals = (
@@ -252,27 +252,28 @@ const rangeIsChanged = (
   endLine: number
 ): boolean => intervals.some((interval) => startLine >= interval.startLine && endLine <= interval.endLine)
 
-const completeOutputText = Effect.fn("PrReviewTaskExecutor.completeOutputText")(function*(
+const completeOutputText = Effect.fnUntraced(function*(
   session: PrReviewSandboxSession,
   output: PrReviewSandboxOutput
 ) {
-  if (!output.truncated) return output.artifactId === null ? output.text : null
-  if (output.artifactId === null) return null
+  if (!output.truncated) return output.artifact === null ? output.text : null
+  if (output.artifact === null) return null
   const pages = new Array<string>()
   let offset = 0
   for (let pageNumber = 0; pageNumber < MAXIMUM_ARTIFACT_PAGES; pageNumber += 1) {
     const page = yield* session.pageArtifact(
-      output.artifactId,
+      output.artifact,
       offset,
-      ARTIFACT_PAGE_CHARACTERS
+      ARTIFACT_PAGE_BYTES
     ).pipe(Effect.result)
     if (Result.isFailure(page)) return null
-    pages.push(page.success)
-    if (page.success.length < ARTIFACT_PAGE_CHARACTERS) return pages.join("")
-    offset += page.success.length
+    pages.push(page.success.text)
+    if (page.success.complete) return pages.join("")
+    if (page.success.nextOffset <= offset) return null
+    offset = page.success.nextOffset
   }
   return null
-})
+}, Effect.withTracerEnabled(false))
 
 const fileExistsInHead = Effect.fn("PrReviewTaskExecutor.fileExistsInHead")(function*(
   providerId: ClaimedAgentJob["providerId"],
@@ -331,7 +332,7 @@ const exactEvidence = Effect.fn("PrReviewTaskExecutor.exactEvidence")(function*(
     `git show ${shellQuote(`${evidenceRevision}:${path}`)} | ` +
       `sed -n '${String(suggestion.evidence.startLine)},${String(suggestion.evidence.endLine)}p'`
   ).pipe(Effect.mapError((failure) => sandboxFailure(providerId, failure)))
-  if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifactId !== null) {
+  if (source.exitCode !== 0 || source.stdout.truncated || source.stdout.artifact !== null) {
     return yield* providerFailure(providerId, "protocol", "Suggestion source evidence was unavailable.", false)
   }
   const excerpt = source.stdout.text.endsWith("\n")
@@ -820,7 +821,7 @@ const makeExecutor = Effect.gen(function*() {
   const history = yield* PrReviewThreadHistory
 
   return PrReviewTaskExecutor.of({
-    execute: Effect.fn("PrReviewTaskExecutor.execute")(function*(
+    execute: Effect.fnUntraced(function*(
       claim,
       onActivity = () => Effect.void
     ) {
@@ -899,7 +900,9 @@ const makeExecutor = Effect.gen(function*() {
       return yield* sessions.withSession(
         {
           workspaceId: claim.workspaceId,
+          threadId: claim.threadId,
           jobId: claim.jobId,
+          attemptSequence: claim.attemptSequence,
           repository: subject.repository,
           attemptId,
           baseRevision: subject.baseRevision,
@@ -1044,7 +1047,7 @@ const makeExecutor = Effect.gen(function*() {
             : failure
         )
       )
-    })
+    }, Effect.withTracerEnabled(false))
   })
 })
 

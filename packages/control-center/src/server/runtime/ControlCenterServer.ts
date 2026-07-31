@@ -86,6 +86,9 @@ import {
 import type { PersistenceConfig } from "../persistence/PersistenceConfig.js"
 import { AgentLeaseOwner } from "../persistence/repositories/agentJobModels.js"
 import { AgentJobRepository } from "../persistence/repositories/agentJobRepository.js"
+import { QuarantineRepository } from "../persistence/repositories/quarantineRepository.js"
+import { ReviewCommandArtifactRepository } from "../persistence/repositories/reviewCommandArtifactRepository.js"
+import { WorkspaceSettingsRepository } from "../persistence/repositories/workspaceSettingsRepository.js"
 import { PluginConnectionMap, type PluginConnectionMapV1 } from "../plugins/PluginConnectionMap.js"
 import { type SecretRoot, SecretStore } from "../secrets/SecretStore.js"
 import type { SecretStoreError } from "../secrets/SecretStoreError.js"
@@ -394,6 +397,14 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
       options.bootstrap?.workspaceId ??
       null
   const agentJobRepository = AgentJobRepository.layer.pipe(Layer.provide(database))
+  const workspaceSettingsRepository = WorkspaceSettingsRepository.layer.pipe(
+    Layer.provide(QuarantineRepository.layer.pipe(Layer.provide(database))),
+    Layer.provide(database)
+  )
+  const reviewCommandArtifactRepository = ReviewCommandArtifactRepository.layer.pipe(
+    Layer.provide(workspaceSettingsRepository),
+    Layer.provide(database)
+  )
   const agentJobWorkspacePolicy = AgentJobWorkspacePolicy.live.pipe(
     Layer.provide(persistence)
   )
@@ -541,6 +552,7 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
             ? {}
             : { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
         }).pipe(Layer.provide(sourceWorkspace))
+          .pipe(Layer.provide(reviewCommandArtifactRepository))
         : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,

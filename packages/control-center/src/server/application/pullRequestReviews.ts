@@ -138,7 +138,7 @@ const decodeThreadPayload = <SchemaType, Encoded, Requirements>(
 ): Effect.Effect<SchemaType, ApplicationServiceUnavailable, Requirements> =>
   Schema.decodeUnknownEffect(schema)(payload).pipe(Effect.mapError(unavailable))
 
-const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(function*(
+const mapReviewThreadEvent = Effect.fnUntraced(function*(
   event: AgentThreadEvent
 ): Effect.fn.Return<PullRequestReviewThreadEvent, ApplicationServiceUnavailable> {
   if (event.task?._tag !== "pr-review") return yield* unavailable()
@@ -264,7 +264,7 @@ const mapReviewThreadEvent = Effect.fn("PullRequestReviews.mapThreadEvent")(func
     case "assistant-output":
       return yield* unavailable()
   }
-})
+}, Effect.withTracerEnabled(false))
 
 const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   inspection: WorkspaceEntityInspection
@@ -331,7 +331,7 @@ const decodeJobIdentity = Effect.fn("PullRequestReviews.decodeJobIdentity")(func
   return { providerId, model }
 })
 
-const presentLatest = Effect.fn("PullRequestReviews.presentLatest")(function*(
+const presentLatest = Effect.fnUntraced(function*(
   target: AvailableReviewTarget,
   latest: Option.Option<LatestAgentReviewRecord>
 ): Effect.fn.Return<PullRequestReviewState, ApplicationServiceUnavailable> {
@@ -370,7 +370,7 @@ const presentLatest = Effect.fn("PullRequestReviews.presentLatest")(function*(
         state: record.state
       })
   }
-})
+}, Effect.withTracerEnabled(false))
 
 const makePullRequestReviews = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
@@ -387,7 +387,7 @@ const makePullRequestReviews = Effect.gen(function*() {
     return yield* deriveTarget(entity)
   })
 
-  const currentFor = Effect.fn("PullRequestReviews.currentFor")(function*(
+  const currentFor = Effect.fnUntraced(function*(
     workspaceId: WorkspaceId,
     target: AvailableReviewTarget
   ) {
@@ -399,7 +399,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       })
     )
     return yield* presentLatest(target, latest)
-  })
+  }, Effect.withTracerEnabled(false))
 
   const makeContextFingerprint = Effect.fn("PullRequestReviews.makeContextFingerprint")(function*(
     workspaceId: WorkspaceId,
@@ -641,7 +641,7 @@ const makePullRequestReviews = Effect.gen(function*() {
   ): boolean => failure.reason !== "publication-unavailable"
 
   return PullRequestReviews.of({
-    thread: Effect.fn("PullRequestReviews.thread")(function*(input) {
+    thread: Effect.fnUntraced(function*(input) {
       const target = yield* inspection.workspaceEntity(input).pipe(
         Effect.flatMap(deriveThreadTarget)
       )
@@ -785,13 +785,13 @@ const makePullRequestReviews = Effect.gen(function*() {
         hasMore,
         nextCursor: page.nextCursor
       }).pipe(Effect.mapError(unavailable))
-    }),
-    current: Effect.fn("PullRequestReviews.current")(function*(input) {
+    }, Effect.withTracerEnabled(false)),
+    current: Effect.fnUntraced(function*(input) {
       const derived = yield* inspectTarget(input)
       return derived._tag === "available"
         ? yield* currentFor(input.workspaceId, derived)
         : derived
-    }),
+    }, Effect.withTracerEnabled(false)),
     enqueue: Effect.fn("PullRequestReviews.enqueue")(function*(input) {
       const derived = yield* inspectTarget(input)
       if (derived._tag !== "available") {

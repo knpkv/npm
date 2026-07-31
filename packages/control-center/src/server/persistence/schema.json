@@ -14,7 +14,12 @@
     {
       "type": "table",
       "name": "agent_jobs",
-      "sql": "CREATE TABLE agent_jobs (\n    workspace_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    release_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 200),\n    model TEXT CHECK(model IS NULL OR length(model) BETWEEN 1 AND 500),\n    access TEXT NOT NULL CHECK(access IN ('read-only', 'workspace-write')),\n    prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 5000),\n    context_fingerprint TEXT NOT NULL CHECK(\n      length(context_fingerprint) = 71 AND context_fingerprint GLOB 'sha256:*'\n        AND substr(context_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    subject_revision TEXT NOT NULL CHECK(length(subject_revision) BETWEEN 1 AND 500),\n    task_context_json TEXT NOT NULL CHECK(length(task_context_json) BETWEEN 2 AND 32768),\n    task_context_digest TEXT NOT NULL CHECK(\n      length(task_context_digest) = 71 AND task_context_digest GLOB 'sha256:*'\n        AND substr(task_context_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    state TEXT NOT NULL CHECK(state IN (\n      'queued', 'running', 'cancel-requested', 'succeeded', 'failed', 'cancelled'\n    )),\n    created_at TEXT NOT NULL,\n    cancel_requested_at TEXT,\n    terminal_at TEXT,\n    PRIMARY KEY (workspace_id, job_id),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id)\n      ON DELETE RESTRICT,\n    CHECK(cancel_requested_at IS NULL OR created_at <= cancel_requested_at),\n    CHECK(terminal_at IS NULL OR created_at <= terminal_at),\n    CHECK(\n      (state IN ('queued', 'running') AND cancel_requested_at IS NULL AND terminal_at IS NULL) OR\n      (state = 'cancel-requested' AND cancel_requested_at IS NOT NULL AND terminal_at IS NULL) OR\n      (state IN ('succeeded', 'failed') AND terminal_at IS NOT NULL) OR\n      (state = 'cancelled' AND terminal_at IS NOT NULL)\n    )\n  )"
+      "sql": "CREATE TABLE agent_jobs (\n    workspace_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    release_id TEXT NOT NULL,\n    provider_id TEXT NOT NULL CHECK(length(provider_id) BETWEEN 1 AND 200),\n    model TEXT CHECK(model IS NULL OR length(model) BETWEEN 1 AND 500),\n    access TEXT NOT NULL CHECK(access IN ('read-only', 'workspace-write')),\n    prompt TEXT NOT NULL CHECK(length(prompt) BETWEEN 1 AND 5000),\n    context_fingerprint TEXT NOT NULL CHECK(\n      length(context_fingerprint) = 71 AND context_fingerprint GLOB 'sha256:*'\n        AND substr(context_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    subject_revision TEXT NOT NULL CHECK(length(subject_revision) BETWEEN 1 AND 500),\n    task_context_json TEXT NOT NULL CHECK(length(task_context_json) BETWEEN 2 AND 32768),\n    task_context_digest TEXT NOT NULL CHECK(\n      length(task_context_digest) = 71 AND task_context_digest GLOB 'sha256:*'\n        AND substr(task_context_digest, 8) NOT GLOB '*[^0-9a-f]*'\n    ),\n    state TEXT NOT NULL CHECK(state IN (\n      'queued', 'running', 'cancel-requested', 'succeeded', 'failed', 'cancelled'\n    )),\n    created_at TEXT NOT NULL,\n    cancel_requested_at TEXT,\n    terminal_at TEXT,\n    PRIMARY KEY (workspace_id, job_id),\n    UNIQUE (workspace_id, job_id, thread_id),\n    FOREIGN KEY (workspace_id, thread_id)\n      REFERENCES agent_threads(workspace_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, release_id)\n      REFERENCES releases(workspace_id, release_id)\n      ON DELETE RESTRICT,\n    CHECK(cancel_requested_at IS NULL OR created_at <= cancel_requested_at),\n    CHECK(terminal_at IS NULL OR created_at <= terminal_at),\n    CHECK(\n      (state IN ('queued', 'running') AND cancel_requested_at IS NULL AND terminal_at IS NULL) OR\n      (state = 'cancel-requested' AND cancel_requested_at IS NOT NULL AND terminal_at IS NULL) OR\n      (state IN ('succeeded', 'failed') AND terminal_at IS NOT NULL) OR\n      (state = 'cancelled' AND terminal_at IS NOT NULL)\n    )\n  )"
+    },
+    {
+      "type": "table",
+      "name": "agent_review_command_artifacts",
+      "sql": "CREATE TABLE agent_review_command_artifacts (\n    workspace_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    job_id TEXT NOT NULL,\n    attempt_sequence INTEGER NOT NULL CHECK(attempt_sequence BETWEEN 1 AND 9007199254740991),\n    command_sequence INTEGER NOT NULL CHECK(command_sequence BETWEEN 1 AND 9007199254740991),\n    artifact_id TEXT NOT NULL CHECK(length(artifact_id) = 36),\n    stream TEXT NOT NULL CHECK(stream IN ('stderr', 'stdout')),\n    byte_length INTEGER NOT NULL CHECK(byte_length BETWEEN 1 AND 16777216),\n    content_blob BLOB NOT NULL CHECK(typeof(content_blob) = 'blob'),\n    created_at TEXT NOT NULL,\n    expires_at TEXT NOT NULL,\n    PRIMARY KEY (workspace_id, artifact_id),\n    UNIQUE (workspace_id, job_id, attempt_sequence, command_sequence, stream),\n    FOREIGN KEY (workspace_id, job_id, thread_id)\n      REFERENCES agent_jobs(workspace_id, job_id, thread_id)\n      ON DELETE RESTRICT,\n    FOREIGN KEY (workspace_id, job_id, attempt_sequence)\n      REFERENCES agent_job_attempts(workspace_id, job_id, attempt_sequence)\n      ON DELETE RESTRICT,\n    CHECK(byte_length = length(content_blob)),\n    CHECK(created_at < expires_at)\n  )"
     },
     {
       "type": "table",
@@ -384,7 +389,7 @@
     {
       "type": "table",
       "name": "retention_cleanup_claims",
-      "sql": "CREATE TABLE retention_cleanup_claims (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL,\n    retention_class TEXT NOT NULL CHECK(retention_class IN ('evidence', 'agent-content')),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 200),\n    PRIMARY KEY (workspace_id, run_id, retention_class, record_key),\n    FOREIGN KEY (workspace_id, run_id, retention_class)\n      REFERENCES retention_cleanup_runs(workspace_id, run_id, retention_class)\n      ON DELETE RESTRICT\n  )"
+      "sql": "CREATE TABLE retention_cleanup_claims (\n    workspace_id TEXT NOT NULL,\n    run_id TEXT NOT NULL,\n    retention_class TEXT NOT NULL CHECK(retention_class IN (\n      'evidence', 'agent-content', 'sandbox-artifact'\n    )),\n    record_key TEXT NOT NULL CHECK(length(record_key) BETWEEN 1 AND 200),\n    PRIMARY KEY (workspace_id, run_id, retention_class, record_key),\n    FOREIGN KEY (workspace_id, run_id, retention_class)\n      REFERENCES retention_cleanup_runs(workspace_id, run_id, retention_class)\n      ON DELETE RESTRICT\n  )"
     },
     {
       "type": "table",
@@ -435,6 +440,11 @@
       "type": "index",
       "name": "agent_jobs_state_idx",
       "sql": "CREATE INDEX agent_jobs_state_idx\n    ON agent_jobs(workspace_id, state, created_at, job_id)"
+    },
+    {
+      "type": "index",
+      "name": "agent_review_command_artifacts_expiry_idx",
+      "sql": "CREATE INDEX agent_review_command_artifacts_expiry_idx\n    ON agent_review_command_artifacts(workspace_id, expires_at, artifact_id)"
     },
     {
       "type": "index",
@@ -775,6 +785,26 @@
       "type": "view",
       "name": "readiness_release_child_integrity",
       "sql": "CREATE VIEW readiness_release_child_integrity AS\n    SELECT assessment.workspace_id, assessment.assessment_id\n    FROM readiness_assessments assessment\n    WHERE assessment.scope_kind = 'release'\n      AND json_type(assessment.assessment_json, '$.environments') = 'array'\n      AND json_array_length(assessment.assessment_json, '$.environments') > 0\n      AND NOT EXISTS (\n        SELECT 1 FROM json_each(assessment.assessment_json, '$.environments') expected\n        WHERE NOT EXISTS (\n          SELECT 1 FROM readiness_release_children child\n          WHERE child.workspace_id = assessment.workspace_id\n            AND child.release_assessment_id = assessment.assessment_id\n            AND child.environment_id = json_extract(expected.value, '$.environmentId')\n            AND child.environment_assessment_id = json_extract(expected.value, '$.assessmentId')\n            AND child.environment_candidate_digest = json_extract(expected.value, '$.candidateDigest')\n        )\n      )\n      AND NOT EXISTS (\n        SELECT 1 FROM readiness_release_children child\n        WHERE child.workspace_id = assessment.workspace_id\n          AND child.release_assessment_id = assessment.assessment_id\n          AND NOT EXISTS (\n            SELECT 1 FROM json_each(assessment.assessment_json, '$.environments') expected\n            WHERE json_extract(expected.value, '$.environmentId') = child.environment_id\n              AND json_extract(expected.value, '$.assessmentId') = child.environment_assessment_id\n              AND json_extract(expected.value, '$.candidateDigest') = child.environment_candidate_digest\n          )\n      )"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_command_artifacts_bounded_insert",
+      "sql": "CREATE TRIGGER agent_review_command_artifacts_bounded_insert\n    BEFORE INSERT ON agent_review_command_artifacts\n    WHEN (\n      SELECT COUNT(*) >= 64 OR COALESCE(SUM(byte_length), 0) + NEW.byte_length > 67108864\n      FROM agent_review_command_artifacts\n      WHERE workspace_id = NEW.workspace_id\n        AND job_id = NEW.job_id\n        AND attempt_sequence = NEW.attempt_sequence\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'review command artifact attempt capacity exceeded');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_command_artifacts_no_delete",
+      "sql": "CREATE TRIGGER agent_review_command_artifacts_no_delete\n    BEFORE DELETE ON agent_review_command_artifacts\n    WHEN NOT EXISTS (\n      SELECT 1 FROM retention_cleanup_claims claim\n      JOIN retention_cleanup_runs run\n        ON run.workspace_id = claim.workspace_id\n        AND run.run_id = claim.run_id\n        AND run.retention_class = claim.retention_class\n      WHERE claim.workspace_id = OLD.workspace_id\n        AND claim.retention_class = 'sandbox-artifact'\n        AND claim.record_key = OLD.artifact_id\n        AND OLD.expires_at <= run.cutoff_at\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review command artifacts are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_command_artifacts_no_replace",
+      "sql": "CREATE TRIGGER agent_review_command_artifacts_no_replace\n    BEFORE INSERT ON agent_review_command_artifacts\n    WHEN EXISTS (\n      SELECT 1 FROM agent_review_command_artifacts artifact\n      WHERE artifact.workspace_id = NEW.workspace_id\n        AND (\n          artifact.artifact_id = NEW.artifact_id OR\n          (\n            artifact.job_id = NEW.job_id\n            AND artifact.attempt_sequence = NEW.attempt_sequence\n            AND artifact.command_sequence = NEW.command_sequence\n            AND artifact.stream = NEW.stream\n          )\n        )\n    )\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review command artifacts are immutable');\n    END"
+    },
+    {
+      "type": "trigger",
+      "name": "agent_review_command_artifacts_no_update",
+      "sql": "CREATE TRIGGER agent_review_command_artifacts_no_update\n    BEFORE UPDATE ON agent_review_command_artifacts\n    BEGIN\n      SELECT RAISE(ABORT, 'agent review command artifacts are immutable');\n    END"
     },
     {
       "type": "trigger",
