@@ -107,6 +107,12 @@ Make every **Prevention** note implementation-ready:
 - name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
 - call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
 
+Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
+row may cover several flows only when each is named, and a checklist cannot pass while any item is
+`PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
+owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
+an alternate authorization path must not contradict a provider-enforced prerequisite.
+
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 External-resource tests must register scope cleanup immediately after successful creation, before validating or transforming the returned resource identity.

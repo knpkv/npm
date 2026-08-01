@@ -30,6 +30,8 @@ never turns an unrun live journey into a green claim.
 | SC7.24      | PENDING | cdx/cld fake-executable and packed-consumer suites; result: PENDING                                                                                                                                                                                                                           | Codex smoke `pnpm --filter @knpkv/ai-codex test:smoke:real`: operator-owned, PENDING                                                                               |
 | SC7.25      | PENDING | `packages/docs` source validation, production build, package-index and route/link checks; result: PENDING                                                                                                                                                                                     | Docs cleanup: PENDING                                                                                                                                              |
 
+| Product completion journey | PENDING | Fresh install → real cross-provider data → governed action → durable agent review → restart/failure recovery → presentation checks → second-machine HTTPS; reviewed head, result, artifact, and date: PENDING | Operator cleanup, process/container state, and owner: PENDING |
+
 ## Required external journeys
 
 Run these only with the operator's local credentials and explicit opt-in configuration; never add
@@ -37,7 +39,9 @@ their secrets or rotating refresh tokens to the repository:
 
 ```bash
 pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth
+pnpm --filter @knpkv/control-center test:integration:live
 pnpm --filter @knpkv/control-center test:integration:live-aws
+pnpm --filter @knpkv/control-center test:sbx:real
 pnpm --filter @knpkv/control-center benchmark:runtime
 pnpm --filter @knpkv/ai-codex test:smoke:real
 ```
