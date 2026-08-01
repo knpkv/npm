@@ -1,0 +1,48 @@
+# Control Center release-gate evidence map
+
+This is the evidence index for M5.6. It separates repository-owned deterministic evidence from
+operator-owned external journeys. Every release record must replace `PENDING` with the exact reviewed
+head, command result, retained artifact or CI link, execution date, and cleanup result. The map itself
+never turns an unrun live journey into a green claim.
+
+| Criterion   | Status  | Reviewed head / command / retained artifact                                                                                                                                                                                            | Cleanup / owner evidence                                                             |
+| ----------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| SC7.1       | PENDING | `packages/control-center/e2e/releaseRoutes.spec.ts`; `packages/control-center/test/runtime/server-smoke.test.ts`; browser gate result: PENDING                                                                                         | Fresh-install authenticated journey: operator-owned, PENDING                         |
+| SC7.2–SC7.5 | PENDING | `packages/control-center/e2e/releaseRoutes.spec.ts`; `packages/control-center/e2e/releasePortfolioFixture.ts`; browser gate result: PENDING                                                                                            | Browser gate cleanup: PENDING                                                        |
+| SC7.6       | PENDING | `packages/control-center/test/application/relationship-inference.test.ts`; `packages/control-center/test/persistence/delivery-graph-repository.test.ts`; governed-action tests; result: PENDING                                        | Test cleanup: PENDING                                                                |
+| SC7.7       | PENDING | `packages/control-center/test/application/codepipeline-reads.test.ts`; `packages/control-center/test/plugins/codepipeline-plugin.test.ts`; reconciliation tests; result: PENDING                                                       | Live CodePipeline journey: operator-owned, PENDING                                   |
+| SC7.8       | PENDING | `packages/control-center/test/application/release-agent.test.ts`; `packages/control-center/test/client/releaseAgentThreadStorage.test.ts`; E2E result: PENDING                                                                         | Browser/restart cleanup: PENDING                                                     |
+| SC7.9       | PENDING | `packages/control-center/test/plugins/jira-read-plugin.test.ts`; `packages/control-center/test/plugins/jira-read-provider.test.ts`; proposal/conflict coverage; result: PENDING                                                        | No Jira vendor-write evidence is permitted until atomic capability exists            |
+| SC7.10      | PENDING | `packages/control-center/test/application/complete-diff-reads.test.ts`; `packages/control-center/test/agent/pr-review-task-executor.test.ts`; `packages/control-center/test/agent/pr-review-sandbox-real.test.ts`; E2E result: PENDING | Sandbox/browser cleanup: PENDING                                                     |
+| SC7.11      | PENDING | `packages/control-center/test/application/release-agent-jobs.test.ts`; `packages/control-center/test/runtime/release-agent-worker-startup.test.ts`; isolation tests; result: PENDING                                                   | Restart/browser cleanup: PENDING                                                     |
+| SC7.12      | PENDING | `packages/control-center/test/domain/governedActionLifecycle.test.ts`; `packages/control-center/test/governance/governedActionExecution*.test.ts`; result: PENDING                                                                     | Live provider evidence only for advertised atomic capability                         |
+| SC7.13      | PENDING | `packages/control-center/e2e/releaseRoutes.spec.ts`; `packages/control-center/test/client/workspaceEntityRoutes.test.ts`; result: PENDING                                                                                              | Browser cleanup: PENDING                                                             |
+| SC7.14      | PENDING | `packages/control-center/test/plugins/retry-policy.test.ts`; adapter contracts; `packages/control-center/test/application/adapters.test.ts`; result: PENDING                                                                           | Optional live recovery: operator-owned, PENDING                                      |
+| SC7.15      | PENDING | `packages/control-center/test/application/live-events.test.ts`; `packages/control-center/test/server-api/live-stream-admission.test.ts`; recovery tests; result: PENDING                                                               | Browser/live cleanup: PENDING                                                        |
+| SC7.16      | PENDING | `packages/control-center/test/runtime/*recovery*.test.ts`; `packages/control-center/test/persistence/quarantine.test.ts`; backup/restore tests; result: PENDING                                                                        | Runtime cleanup: PENDING                                                             |
+| SC7.17      | PENDING | `packages/control-center/test/security/request-security.test.ts`; `packages/control-center/test/unit/trustedHttpsProxyHeaders.test.ts`; `packages/control-center/test/integration/liveServerPort.test.ts`; result: PENDING             | Second-machine HTTPS: operator-owned, PENDING                                        |
+| SC7.18      | PENDING | `packages/control-center/test/agent/pr-review-sandbox-session.test.ts`; `packages/control-center/test/agent/pr-review-sandbox-real.test.ts`; result: PENDING                                                                           | Real `sbx` evidence: operator-owned, PENDING                                         |
+| SC7.19      | PENDING | `packages/control-center/test/http/security/*`; `packages/control-center/test/unit/browserSecretSurface.test.ts`; `packages/control-center/e2e/atlassian-oauth.spec.ts`; result: PENDING                                               | Real OAuth surface: operator-owned, PENDING                                          |
+| SC7.20      | PENDING | Browser accessibility tests plus `packages/control-center/docs/screen-reader-checklist.md`; result: PENDING                                                                                                                            | Manual screen-reader sign-off: operator-owned, PENDING                               |
+| SC7.21      | PENDING | `packages/control-center/scripts/runBenchmark.ts`; `packages/control-center/scripts/validateRuntimeBenchmarkReport.ts`; benchmark scripts; result: PENDING                                                                             | Eligible-machine report: operator-owned, PENDING                                     |
+| SC7.22      | PENDING | rly registry/packed-consumer tests, Storybook, boundary tests, and docs validation; result: PENDING                                                                                                                                    | Browser/Storybook cleanup: PENDING                                                   |
+| SC7.23      | PENDING | `pnpm format`, `pnpm lint`, `pnpm check`, `pnpm test`, changeset/docs checks, audit; result: PENDING                                                                                                                                   | None                                                                                 |
+| SC7.24      | PENDING | cdx/cld fake-executable and packed-consumer suites; result: PENDING                                                                                                                                                                    | Codex smoke `pnpm --filter @knpkv/ai-codex test:smoke:real`: operator-owned, PENDING |
+| SC7.25      | PENDING | `packages/docs` source validation, production build, package-index and route/link checks; result: PENDING                                                                                                                              | Docs cleanup: PENDING                                                                |
+
+## Required external journeys
+
+Run these only with the operator's local credentials and explicit opt-in configuration; never add
+their secrets or rotating refresh tokens to the repository:
+
+```bash
+pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth
+pnpm --filter @knpkv/control-center test:integration:live-aws
+pnpm --filter @knpkv/control-center benchmark:runtime
+pnpm --filter @knpkv/ai-codex test:smoke:real
+```
+
+The Atlassian journey uses a temporary data, profile, and home root and documents its callback URL in
+the Control Center README. The AWS and Codex journeys are likewise local-only and must record their
+redacted identity, exact revision, cleanup result, and credential-surface assertions without
+retaining provider secrets.

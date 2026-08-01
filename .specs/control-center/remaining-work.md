@@ -288,7 +288,10 @@ From a fresh local installation, an owner pairs a browser, connects one AWS acco
 site, follows multiple repositories/pipelines/projects/spaces, synchronizes real data, and sees a
 release composed from six Jira items, PRs, pipeline execution, runbook, collaborators, evidence, and
 gaps. Every object opens a canonical full page. A human can repair a relationship and perform at least
-one governed action per provider with durable receipt/reconciliation. A release-scoped agent survives
+one governed action for each provider that advertises a provider-enforced atomic revision capability,
+with durable receipt/reconciliation. Jira Cloud is the explicit capability-truthful exception: its
+description, comment, transition, and link surfaces remain proposal-only until Atlassian documents such
+a precondition. A release-scoped agent survives
 browser closure, reviews an immutable PR in a contained sandbox, reports anchored findings, proposes
 prevention, and remains separate from the final human decision. Restart, partial provider failure,
 dark/light/narrow/keyboard use, and a second-machine HTTPS session preserve truthful state without
