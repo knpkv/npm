@@ -60,7 +60,7 @@
     "test": "vitest run",
     "test:browser": "pnpm test:e2e",
     "test:e2e": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && playwright test --config playwright.config.ts",
-    "test:e2e:atlassian-oauth": "pnpm build && playwright test e2e/atlassian-oauth.spec.ts --config playwright.atlassian-oauth.config.ts",
+    "test:e2e:atlassian-oauth": "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 pnpm build && CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 playwright test e2e/atlassian-oauth.spec.ts --config playwright.atlassian-oauth.config.ts",
     "test:integration:live-aws": "pnpm build && vitest run --config vitest.live-aws.config.ts",
     "test:integration:live": "pnpm build && vitest run --config vitest.live.config.ts",
     "test:pack": "tsx scripts/test-packed-package.ts",

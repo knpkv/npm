@@ -72,6 +72,7 @@ export {
   CONFLUENCE_REQUIRED_SCOPES,
   inspectAllToolProfiles,
   inspectToolProfiles,
+  JIRA_PROPOSAL_REQUIRED_SCOPES,
   JIRA_REQUIRED_SCOPES,
   migrateLegacyProfiles,
   MissingOAuthConfigError,

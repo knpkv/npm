@@ -9,7 +9,7 @@ import {
   generateCodeVerifier,
   getAccessibleResources,
   getUserInfo,
-  JIRA_SCOPES,
+  JIRA_PROPOSAL_SCOPES,
   type TokenResponse,
   type UserInfo
 } from "@knpkv/atlassian-common/auth"
@@ -19,7 +19,7 @@ import {
   getOAuthConfigPath,
   getProfilesPath,
   HomeDirectoryLive,
-  JIRA_REQUIRED_SCOPES,
+  JIRA_PROPOSAL_REQUIRED_SCOPES,
   loadOAuthConfig,
   loadProfiles,
   type OAuthConfig,
@@ -354,17 +354,17 @@ const validateProfileMetadata = Effect.fn("AtlassianOAuthGrants.validateProfileM
 type AtlassianOAuthProvider = AtlassianOAuthProviderIntent[number]
 
 const oauthScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_SCOPES,
+  jira: JIRA_PROPOSAL_SCOPES,
   confluence: CONFLUENCE_SCOPES
 }
 
 const requiredSiteScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
+  jira: JIRA_PROPOSAL_REQUIRED_SCOPES.filter((scope) => scope.includes(":jira")),
   confluence: CONFLUENCE_REQUIRED_SCOPES.filter((scope) => scope.includes(":confluence"))
 }
 
 const requiredTokenScopes: Readonly<Record<AtlassianOAuthProvider, ReadonlyArray<string>>> = {
-  jira: JIRA_REQUIRED_SCOPES,
+  jira: JIRA_PROPOSAL_REQUIRED_SCOPES,
   confluence: CONFLUENCE_REQUIRED_SCOPES
 }
 
