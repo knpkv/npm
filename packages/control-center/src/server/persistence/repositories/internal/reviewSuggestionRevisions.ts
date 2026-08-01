@@ -555,7 +555,11 @@ export const makeReviewSuggestionRevisionOperations = <
         )(request.edit).pipe(
           Effect.mapError(() => operationFailure("agent-job.encode-requested-review-edit"))
         )
-        if (currentEditJson === requestedEditJson && request.state === undefined) return current
+        if (
+          currentEditJson === requestedEditJson &&
+          request.state === undefined &&
+          request.validation === undefined
+        ) return current
         const activePublication = yield* sql`SELECT 1
           FROM agent_review_suggestion_publications
           WHERE workspace_id = ${request.workspaceId}
@@ -596,7 +600,13 @@ export const makeReviewSuggestionRevisionOperations = <
             currentEdit,
             request.edit
           )
-          ? current.validation
+          ? request.validation === "validated" && request.author._tag === "agent"
+            ? PrReviewSuggestionValidated.make({
+              reviewedHead: current.subject.headRevision,
+              validatingJobId: request.author.jobId,
+              sourceRevisionId: current.revisionId
+            })
+            : current.validation
           : PrReviewSuggestionRequiresRevalidation.make({
             reviewedHead: current.subject.headRevision,
             sourceRevisionId: current.revisionId,

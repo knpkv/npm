@@ -898,6 +898,122 @@ const makePullRequestReviews = Effect.gen(function*() {
         })
       )
     }),
+    targetSuggestion: Effect.fn("PullRequestReviews.targetSuggestion")(function*(input) {
+      const derived = yield* inspectTarget({
+        workspaceId: input.workspaceId,
+        entityId: input.entityId
+      })
+      if (derived._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const target = derived
+      const page = yield* revisionHistory(
+        input.workspaceId,
+        target,
+        input.jobId,
+        input.suggestionId,
+        null,
+        PrReviewSuggestionRevisionPageSize.make(1)
+      )
+      if (
+        page.current.revisionId !== input.request.expectedRevisionId ||
+        page.current.sequence !== input.request.expectedSequence ||
+        page.current.suggestion.state !== "draft" ||
+        (input.request.intent === "suggestion-revalidation" && page.current.validation._tag !== "requires-revalidation")
+      ) return yield* new ApplicationInvalidRequest()
+      const providerId = yield* Schema.decodeUnknownEffect(AgentProviderId)(input.request.providerId).pipe(
+        Effect.mapError(unavailable)
+      )
+      const selected = yield* runtimes.select({
+        providerId,
+        model: input.request.model,
+        access: input.request.profile,
+        capability: "pr-review"
+      }).pipe(Effect.mapError(unavailable))
+      const catalog = yield* runtimes.catalog()
+      const reviewProfile = catalog.providers.find(
+        (provider) =>
+          String(provider.providerId) === String(providerId) &&
+          provider.reviewProfile?.profileId === input.request.reviewProfileId
+      )?.reviewProfile
+      if (reviewProfile === undefined) return yield* new ApplicationInvalidRequest()
+      const supportedReviewRunner = (selected.reviewExecution === "effect-ai" &&
+        selected.filesystemAccess === "none" && selected.languageModel !== undefined &&
+        reviewProfile.networkAccess === "blocked") ||
+        ((selected.reviewExecution === "native-codex" || selected.reviewExecution === "native-claude") &&
+          selected.reviewExecutable !== undefined && reviewProfile.networkAccess === "provider-enabled")
+      if (!supportedReviewRunner) return yield* unavailable()
+      const jobId = yield* cryptoService.randomUUIDv7.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(JobId)),
+        Effect.mapError(unavailable)
+      )
+      const userPrompt = input.request.prompt ??
+        (input.request.intent === "suggestion-edit" ? "Update this draft suggestion." : "Revalidate this suggestion.")
+      const prompt = yield* Schema.decodeUnknownEffect(AgentJobPrompt)(
+        `${
+          input.request.intent === "suggestion-edit" ? "Edit" : "Revalidate"
+        } the selected review suggestion.\n\nOperator request:\n${userPrompt}`
+      ).pipe(Effect.mapError(unavailable))
+      const createdAt = yield* DateTime.now
+      return yield* persistence.workspaceSettings.readAtomically(
+        input.workspaceId,
+        (settings) =>
+          Effect.gen(function*() {
+            yield* assertAgentProviderAllowed(settings.settings.agent, String(providerId))
+            yield* assertPullRequestReviewAllowed(settings.settings.agent)
+            yield* persistence.agentJobs.enqueue({
+              workspaceId: input.workspaceId,
+              releaseId: target.releaseId,
+              jobId,
+              providerId,
+              model: input.request.model,
+              access: input.request.profile,
+              userPrompt,
+              prompt,
+              contextFingerprint: yield* makeContextFingerprint(input.workspaceId, target),
+              subjectRevision: target.subject.headRevision,
+              task: {
+                _tag: "pr-review",
+                pluginConnectionId: target.pluginConnectionId,
+                subject: target.subject,
+                reviewProfile,
+                intent: input.request.intent,
+                target: {
+                  sourceJobId: input.jobId,
+                  suggestionId: input.suggestionId,
+                  selectedRevisionId: page.current.revisionId,
+                  history: page
+                }
+              },
+              createdAt
+            }).pipe(
+              Effect.mapError(mapPersistenceWriteError),
+              Effect.mapError((error) =>
+                error._tag === "ApplicationInvalidRequest" || error._tag === "ApplicationResourceNotFound"
+                  ? error
+                  : unavailable()
+              )
+            )
+            return new PullRequestReviewPending({
+              subject: target.subject,
+              jobId,
+              providerId: input.request.providerId,
+              model: input.request.model,
+              reviewProfile,
+              activity: { events: [], truncated: false },
+              requestedAt: createdAt,
+              state: "queued"
+            })
+          })
+      ).pipe(Effect.mapError((error) => {
+        switch (error._tag) {
+          case "ApplicationInvalidRequest":
+          case "ApplicationResourceNotFound":
+          case "ApplicationServiceUnavailable":
+            return error
+          default:
+            return unavailable()
+        }
+      }))
+    }),
     revisions: Effect.fn("PullRequestReviews.revisions")(function*(input) {
       const target = yield* inspectTarget(input)
       if (target._tag !== "available") {

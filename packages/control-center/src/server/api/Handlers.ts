@@ -1350,6 +1350,29 @@ export const agentHandlersLayer = HttpApiBuilder.group(
               () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
             )
           ))
+        .handle("targetReviewSuggestion", ({ params, payload }) =>
+          lifecycle.runMutation(
+            Effect.gen(function*() {
+              const session = yield* CurrentSession
+              if (session.actor._tag !== "human" || session.permission !== "workspace-owner") {
+                return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
+              }
+              return yield* reviews.targetSuggestion({
+                workspaceId: session.workspaceId,
+                entityId: params.entityId,
+                jobId: params.jobId,
+                suggestionId: params.suggestionId,
+                request: payload
+              }).pipe(Effect.catchTags({
+                ApplicationConflict: mapApplicationConflict,
+                ApplicationInvalidRequest: mapApplicationInvalidRequest,
+                ApplicationResourceNotFound: mapApplicationNotFound,
+                ApplicationServiceUnavailable: mapApplicationUnavailable
+              }))
+            })
+          ).pipe(
+            Effect.catchTag("ServerDraining", () => Effect.flatMap(serviceUnavailableApiError(), Effect.fail))
+          ))
         .handle("dismissReviewSuggestion", ({ params, payload }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {

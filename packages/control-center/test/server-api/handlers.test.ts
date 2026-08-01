@@ -408,6 +408,7 @@ const pullRequestReviewsLayer = Layer.succeed(PullRequestReviews, {
   enqueue: () => Effect.die("not used"),
   revisions: () => Effect.die("not used"),
   editSuggestion: () => Effect.die("not used"),
+  targetSuggestion: () => Effect.die("not used"),
   dismissSuggestion: () => Effect.die("not used"),
   previewPublication: () => Effect.die("not used"),
   publishSuggestion: () => Effect.die("not used")
@@ -2727,6 +2728,7 @@ describe("Control Center API handlers", () => {
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(editedRevision)
           ),
+        targetSuggestion: () => Effect.die("not used"),
         dismissSuggestion: (input) =>
           Ref.update(received, (items) => [...items, input]).pipe(
             Effect.as(dismissedRevision)
@@ -3004,6 +3006,7 @@ describe("Control Center API handlers", () => {
         enqueue: () => Effect.die("not used"),
         revisions: () => Effect.die("not used"),
         editSuggestion: () => Effect.die("not used"),
+        targetSuggestion: () => Effect.die("not used"),
         dismissSuggestion: () => Effect.die("not used"),
         previewPublication: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(preview)),
         publishSuggestion: (input) => Ref.update(received, (items) => [...items, input]).pipe(Effect.as(published))
@@ -3144,6 +3147,7 @@ describe("Control Center API handlers", () => {
         enqueue: () => Effect.die("not used"),
         revisions: () => Effect.die("not used"),
         editSuggestion: () => blockedMutation,
+        targetSuggestion: () => blockedMutation,
         dismissSuggestion: () => blockedMutation,
         previewPublication: () => blockedMutation,
         publishSuggestion: () => blockedMutation

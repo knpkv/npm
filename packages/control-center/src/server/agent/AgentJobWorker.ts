@@ -20,6 +20,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
+import { PrReviewSuggestionAgentAuthor, PrReviewSuggestionEdit } from "../../domain/prReviewRevision.js"
 import {
   AgentJobInputError,
   type AgentLeaseOwner,
@@ -203,6 +204,11 @@ const makeAgentJobWorker = Effect.gen(function*() {
     const providerAllowed = policy.allowedProviders.some(
       (providerId) => providerId === String(claim.providerId)
     )
+
+    const TargetedSuggestionResult = Schema.Struct({
+      schemaVersion: Schema.Literal(1),
+      edit: PrReviewSuggestionEdit
+    })
     const toolsAllowed = claim.context.task._tag !== "pr-review" ||
       policy.toolPolicy === "review-sandbox"
     if (!providerAllowed || !toolsAllowed) {
@@ -263,6 +269,74 @@ const makeAgentJobWorker = Effect.gen(function*() {
       )
     }
     if (selected.success._tag === "pr-review") {
+      const targetedIntent = claim.context.task._tag === "pr-review" &&
+        (claim.context.task.intent === "suggestion-edit" ||
+          claim.context.task.intent === "suggestion-revalidation")
+      if (targetedIntent) {
+        const target = claim.context.task.target
+        if (target === undefined || typeof selected.success.report !== "string") {
+          return yield* failClaim(
+            claim,
+            new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "protocol",
+              message: "Targeted review returned no immutable suggestion result.",
+              retryable: false
+            })
+          )
+        }
+        const result = yield* Schema.decodeUnknownEffect(
+          Schema.fromJsonString(TargetedSuggestionResult),
+          { onExcessProperty: "error" }
+        )(selected.success.report).pipe(
+          Effect.mapError(() =>
+            new AgentProviderError({
+              providerId: claim.providerId,
+              phase: "protocol",
+              message: "Targeted review returned invalid suggestion output.",
+              retryable: false
+            })
+          )
+        )
+        const source = yield* jobs.reviewResult({
+          workspaceId: claim.workspaceId,
+          jobId: target.sourceJobId
+        }).pipe(Effect.result)
+        if (Result.isFailure(source)) return yield* Effect.fail(source.failure)
+        const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
+        const revised = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: claim.workspaceId,
+          jobId: target.sourceJobId,
+          suggestionId: target.suggestionId,
+          expectedRevisionId: target.selectedRevisionId,
+          expectedSequence: target.history.current.sequence,
+          edit: result.edit,
+          ...(validation === undefined ? {} : { validation }),
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: claim.jobId,
+            providerId: claim.providerId,
+            model: claim.model === null ? null : String(claim.model),
+            runtimeMetadata: null
+          }),
+          createdAt: yield* DateTime.now
+        }).pipe(Effect.result)
+        if (Result.isFailure(revised)) return yield* Effect.fail(revised.failure)
+        const completedAt = yield* DateTime.now
+        const completion = yield* jobs.completeReview({
+          workspaceId: claim.workspaceId,
+          jobId: claim.jobId,
+          attemptSequence: claim.attemptSequence,
+          leaseToken: claim.leaseToken,
+          report: source.success.report,
+          completedAt
+        }).pipe(Effect.result)
+        if (Result.isFailure(completion)) return yield* Effect.fail(completion.failure)
+        return {
+          _tag: "completed",
+          jobId: claim.jobId,
+          outcome: "success"
+        } satisfies AgentJobWorkerRunResult
+      }
       const completedAt = yield* DateTime.now
       const completion = yield* jobs.completeReview({
         workspaceId: claim.workspaceId,

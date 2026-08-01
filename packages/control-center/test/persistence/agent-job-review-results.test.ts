@@ -23,6 +23,7 @@ import {
 import { MAXIMUM_PR_REVIEW_REPORT_BYTES, PrReviewReport, PrReviewSubject } from "../../src/domain/prReview.js"
 import {
   MAXIMUM_PR_REVIEW_SUGGESTION_REVISION_BYTES,
+  PrReviewSuggestionAgentAuthor,
   PrReviewSuggestionEdit,
   PrReviewSuggestionOperatorAuthor,
   PrReviewSuggestionRevisionPageSize
@@ -484,6 +485,25 @@ describe("agent job review results", () => {
           "requires-revalidation"
         )
 
+        const revalidated = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: technical.revisionId,
+          expectedSequence: technical.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(revalidated.sequence, 4)
+        assert.strictEqual(revalidated.validation._tag, "validated")
+
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
@@ -491,13 +511,13 @@ describe("agent job review results", () => {
           beforeSequence: null,
           limit: PrReviewSuggestionRevisionPageSize.make(1)
         })
-        assert.strictEqual(firstPage.current.revisionId, technical.revisionId)
+        assert.strictEqual(firstPage.current.revisionId, revalidated.revisionId)
         assert.deepStrictEqual(
           firstPage.revisions.map(({ sequence }) => sequence),
-          [2]
+          [3]
         )
         assert.isTrue(firstPage.hasMore)
-        assert.strictEqual(firstPage.nextBeforeSequence, 2)
+        assert.strictEqual(firstPage.nextBeforeSequence, 3)
 
         const secondPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -508,9 +528,19 @@ describe("agent job review results", () => {
         })
         assert.deepStrictEqual(
           secondPage.revisions.map(({ sequence }) => sequence),
-          [1]
+          [2]
         )
-        assert.isFalse(secondPage.hasMore)
+        assert.isTrue(secondPage.hasMore)
+
+        const thirdPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: secondPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(thirdPage.revisions.map(({ sequence }) => sequence), [1])
+        assert.isFalse(thirdPage.hasMore)
 
         const thread = yield* jobs.reviewThreadTail({
           workspaceId: WORKSPACE_ID,
@@ -522,7 +552,7 @@ describe("agent job review results", () => {
           thread.events.filter(
             ({ eventKind }) => eventKind === "review-suggestion-revised"
           ).length,
-          2
+          3
         )
 
         const update = yield* database.sql`UPDATE agent_review_suggestion_revisions

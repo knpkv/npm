@@ -25,7 +25,9 @@ import type {
   ReleaseAgentThreadPage,
   ReleaseAgentTurnResponse,
   ReviewSuggestionPublicationPreview,
-  ReviewSuggestionRevisionPage
+  ReviewSuggestionRevisionPage,
+  TargetReviewSuggestionRequest,
+  TargetReviewSuggestionResponse
 } from "../../api/agent.js"
 import type {
   ApplyRelationshipRepairProposalResponse,
@@ -649,6 +651,19 @@ export class PullRequestReviews extends Context.Service<PullRequestReviews, {
     readonly session: SessionSummary
   }) => Effect.Effect<
     EditReviewSuggestionResponse,
+    | ApplicationConflict
+    | ApplicationInvalidRequest
+    | ApplicationResourceNotFound
+    | ApplicationServiceUnavailable
+  >
+  readonly targetSuggestion: (input: {
+    readonly workspaceId: WorkspaceId
+    readonly entityId: EntityId
+    readonly jobId: JobId
+    readonly suggestionId: PrReviewSuggestionId
+    readonly request: TargetReviewSuggestionRequest
+  }) => Effect.Effect<
+    TargetReviewSuggestionResponse,
     | ApplicationConflict
     | ApplicationInvalidRequest
     | ApplicationResourceNotFound

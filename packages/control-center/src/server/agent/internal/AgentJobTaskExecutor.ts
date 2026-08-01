@@ -65,7 +65,12 @@ const executeReview = Effect.fnUntraced(
     }
     return {
       _tag: "pr-review",
-      report: yield* reviews.execute(claim, onActivity)
+      report: yield* (
+        claim.context.task.intent === "suggestion-edit" ||
+          claim.context.task.intent === "suggestion-revalidation"
+          ? reviews.executeTargeted?.(claim, onActivity) ?? reviews.execute(claim, onActivity)
+          : reviews.execute(claim, onActivity)
+      )
     }
   },
   Effect.withTracerEnabled(false)

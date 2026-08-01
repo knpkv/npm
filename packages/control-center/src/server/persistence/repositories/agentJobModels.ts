@@ -17,6 +17,7 @@ import { PrReviewReport, PrReviewSubject, PrReviewSuggestionId } from "../../../
 import {
   PrReviewSuggestionEdit,
   PrReviewSuggestionRevisionAuthor,
+  PrReviewSuggestionRevisionPage,
   PrReviewSuggestionRevisionPageSize,
   PrReviewSuggestionRevisionSequence
 } from "../../../domain/prReviewRevision.js"
@@ -95,7 +96,14 @@ const ReleaseChatAgentJobTask = Schema.TaggedStruct("release-chat", {})
 const PrReviewAgentJobTaskFields = {
   pluginConnectionId: PluginConnectionId,
   subject: PrReviewSubject,
-  reviewProfile: ReviewAgentProfile
+  reviewProfile: ReviewAgentProfile,
+  intent: Schema.optionalKey(Schema.Literals(["full-review", "suggestion-edit", "suggestion-revalidation"])),
+  target: Schema.optionalKey(Schema.Struct({
+    sourceJobId: JobId,
+    suggestionId: PrReviewSuggestionId,
+    selectedRevisionId: PrReviewSuggestionRevisionId,
+    history: PrReviewSuggestionRevisionPage
+  }))
 }
 
 /** Read-only review request bound to one immutable pull request head. */
@@ -360,6 +368,7 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   expectedSequence: PrReviewSuggestionRevisionSequence,
   edit: PrReviewSuggestionEdit,
   state: Schema.optionalKey(Schema.Literal("dismissed")),
+  validation: Schema.optionalKey(Schema.Literal("validated")),
   author: PrReviewSuggestionRevisionAuthor,
   createdAt: UtcTimestamp
 })

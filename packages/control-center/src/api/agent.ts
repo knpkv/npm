@@ -576,6 +576,29 @@ export const EditReviewSuggestionRequest = Schema.Struct({
 /** Decoded manual suggestion edit. */
 export type EditReviewSuggestionRequest = typeof EditReviewSuggestionRequest.Type
 
+/** Durable targeted agent operation over one optimistic suggestion revision. */
+export const TargetReviewSuggestionRequest = Schema.Struct({
+  providerId: DurableAgentProviderId,
+  model: AgentModelId,
+  profile: AgentSafeProfile,
+  reviewProfileId: ReviewAgentProfileId,
+  intent: Schema.Literals(["suggestion-edit", "suggestion-revalidation"]),
+  expectedRevisionId: PrReviewSuggestionRevisionId,
+  expectedSequence: PrReviewSuggestionRevisionSequence,
+  prompt: Schema.optionalKey(
+    DurableAgentPrompt.check(Schema.isTrimmed(), Schema.isMaxLength(MAXIMUM_REVIEW_THREAD_PROMPT_LENGTH))
+  )
+})
+
+/** Decoded targeted agent operation request. */
+export type TargetReviewSuggestionRequest = typeof TargetReviewSuggestionRequest.Type
+
+/** Accepted targeted review job. */
+export const TargetReviewSuggestionResponse = PullRequestReviewPending
+
+/** Decoded targeted review job response. */
+export type TargetReviewSuggestionResponse = typeof TargetReviewSuggestionResponse.Type
+
 /** Browser-safe immutable suggestion revision returned after an edit. */
 export const EditReviewSuggestionResponse = PrReviewSuggestionRevision
 
@@ -906,6 +929,33 @@ const editReviewSuggestion = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const targetReviewSuggestion = HttpApiEndpoint.post(
+  "targetReviewSuggestion",
+  "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/agent",
+  {
+    params: Schema.Struct({
+      entityId: EntityId,
+      jobId: JobId,
+      suggestionId: PrReviewSuggestionId
+    }),
+    payload: TargetReviewSuggestionRequest,
+    success: TargetReviewSuggestionResponse.pipe(HttpApiSchema.status(202)),
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      ConflictApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      PayloadTooLargeApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const dismissReviewSuggestion = HttpApiEndpoint.post(
   "dismissReviewSuggestion",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/dismissal",
@@ -990,6 +1040,7 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(enqueuePullRequestReview)
   .add(reviewSuggestionRevisions)
   .add(editReviewSuggestion)
+  .add(targetReviewSuggestion)
   .add(dismissReviewSuggestion)
   .add(previewReviewSuggestionPublication)
   .add(publishReviewSuggestion)
