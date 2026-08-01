@@ -106,7 +106,14 @@ const NativeModelReviewReport = Schema.Struct({
   notes: Schema.Array(Schema.Struct(nativeNoteDraftFields))
 })
 
-const NativeModelTargetedSuggestion = TargetedSuggestionResult
+const NativeModelTargetedSuggestion = Schema.Struct({
+  schemaVersion: Schema.Literal(1),
+  edit: Schema.Struct({
+    ...PrReviewSuggestionEdit.fields,
+    prevention: Schema.NullOr(PrReviewPrevention),
+    replacement: Schema.NullOr(PrReviewReplacement)
+  })
+})
 
 const isJsonSchemaObject = (
   value: unknown
@@ -566,6 +573,28 @@ const validatedRelatedLocations = Effect.fn("PrReviewTaskExecutor.validatedRelat
     if (yield* locationIsChangedInHead(providerId, session, location)) validated.push(location)
   }
   return validated.sort((left, right) => relatedLocationKey(left).localeCompare(relatedLocationKey(right)))
+})
+
+const validateTargetedEdit = Effect.fn("PrReviewTaskExecutor.validateTargetedEdit")(function*(
+  providerId: ClaimedAgentJob["providerId"],
+  session: PrReviewSandboxSession,
+  edit: typeof PrReviewSuggestionEdit.Type
+) {
+  yield* exactEvidence(providerId, session, edit)
+  const relatedLocations = yield* validatedRelatedLocations(providerId, session, edit)
+  const anchor = yield* resolveAnchor(providerId, session, {
+    ...edit,
+    relatedLocations
+  })
+  return yield* Schema.decodeUnknownEffect(PrReviewSuggestionEdit)({
+    ...edit,
+    anchor,
+    relatedLocations
+  }).pipe(
+    Effect.mapError(() =>
+      providerFailure(providerId, "protocol", "Targeted review suggestion edit was invalid.", false)
+    )
+  )
 })
 
 const validatedNoteLocation = Effect.fn("PrReviewTaskExecutor.validatedNoteLocation")(function*(
@@ -1085,7 +1114,14 @@ const makeExecutor = Effect.gen(function*() {
                 Effect.mapError(() =>
                   providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
                 ),
-                Effect.map((result) => targetedExecution(result.edit))
+                Effect.flatMap((result) => {
+                  const { prevention, replacement, ...edit } = result.edit
+                  return validateTargetedEdit(claim.providerId, session, {
+                    ...edit,
+                    ...(prevention === null ? {} : { prevention }),
+                    ...(replacement === null ? {} : { replacement })
+                  }).pipe(Effect.map(targetedExecution))
+                })
               )
             }
             const normalizedOutput = yield* normalizeNativeReviewOutput(claim.providerId, output)
@@ -1122,7 +1158,7 @@ const makeExecutor = Effect.gen(function*() {
               },
               instructions: targeted ? TARGETED_REVIEW_INSTRUCTIONS : REVIEW_INSTRUCTIONS,
               model: languageModel,
-              outputSchema: Schema.Json,
+              outputSchema: targeted ? Schema.Json : ModelReviewReport,
               toolkit
             })
           )
@@ -1145,7 +1181,9 @@ const makeExecutor = Effect.gen(function*() {
                 providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
               )
             )
-            return targetedExecution(result.edit)
+            return targetedExecution(
+              yield* validateTargetedEdit(claim.providerId, session, result.edit)
+            )
           }
           return reportExecution(
             yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)

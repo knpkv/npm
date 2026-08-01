@@ -21,6 +21,7 @@ import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
 import { PrReviewSuggestionAgentAuthor } from "../../domain/prReviewRevision.js"
+import { RevisionConflictError } from "../persistence/errors.js"
 import {
   AgentJobInputError,
   type AgentLeaseOwner,
@@ -285,7 +286,10 @@ const makeAgentJobWorker = Effect.gen(function*() {
           workspaceId: claim.workspaceId,
           jobId: target.sourceJobId
         }).pipe(Effect.result)
-        if (Result.isFailure(source)) return yield* Effect.fail(source.failure)
+        if (Result.isFailure(source)) {
+          if (isCancellationRequested(source.failure)) return yield* cancelClaim(claim)
+          return yield* Effect.fail(source.failure)
+        }
         const validation = claim.context.task.intent === "suggestion-revalidation" ? "validated" : undefined
         const revised = yield* jobs.appendReviewSuggestionRevision({
           workspaceId: claim.workspaceId,
@@ -305,6 +309,17 @@ const makeAgentJobWorker = Effect.gen(function*() {
         }).pipe(Effect.result)
         if (Result.isFailure(revised)) {
           if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)
+          if (Schema.is(RevisionConflictError)(revised.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review revision became stale before it could be applied.",
+                retryable: false
+              })
+            )
+          }
           if (isAgentJobInputError(revised.failure)) {
             return yield* failClaim(
               claim,

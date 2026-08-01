@@ -76,6 +76,7 @@ export interface AgentReviewContextEventsQueryInput {
 
 /** Exact immutable review subject used to recover its newest durable job. */
 export interface LatestAgentReviewQueryInput {
+  readonly excludeTargeted?: boolean
   readonly jobId?: string
   readonly subjectRevision: string
   readonly taskContextPrefix: string
@@ -477,6 +478,16 @@ export const renderLatestAgentReviewQuery = (
       Query.and(
         Query.eq(agentJobs.workspaceId, input.workspaceId),
         subjectAndOptionalJob,
+        ...(input.excludeTargeted === true
+          ? [
+            Query.not(
+              Query.or(
+                Query.like(agentJobs.taskContextJson, "%\"intent\":\"suggestion-edit\"%"),
+                Query.like(agentJobs.taskContextJson, "%\"intent\":\"suggestion-revalidation\"%")
+              )
+            )
+          ]
+          : []),
         Query.eq(
           Query.cast(
             Fn.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),

@@ -2335,6 +2335,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         workspaceId: request.workspaceId,
         subjectRevision: request.subject.headRevision,
         taskContextPrefix,
+        excludeTargeted: request.jobId === undefined,
         ...(request.jobId === undefined ? {} : { jobId: request.jobId })
       })
       const rows = yield* sql
