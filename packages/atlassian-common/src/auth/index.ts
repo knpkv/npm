@@ -12,6 +12,7 @@ export {
   computeCodeChallenge,
   CONFLUENCE_SCOPES,
   generateCodeVerifier,
+  JIRA_PROPOSAL_SCOPES,
   JIRA_SCOPES,
   ME_URL,
   RESOURCES_URL,

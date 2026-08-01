@@ -24,7 +24,6 @@ import {
   AuthorizedPluginActionV1,
   MaximumPluginSyncPageBytes,
   NormalizedPluginEventV1,
-  PluginActionReconciliationKey,
   PluginSyncPageV1,
   PluginSyncRequestV1,
   ProposePluginActionRequestV1,
@@ -45,11 +44,9 @@ import {
 import type { PluginFailure } from "../../src/server/plugins/failures.js"
 import {
   PluginAuthenticationFailure,
-  PluginConfigurationFailure,
-  PluginMalformedResponseFailure,
   PluginOutageFailure,
   PluginTimeoutFailure,
-  PluginUnknownOutcomeFailure
+  PluginUnsupportedCapabilityFailure
 } from "../../src/server/plugins/failures.js"
 import { AuthorizedPluginExecutor } from "../../src/server/plugins/internal/AuthorizedPluginExecutor.js"
 import { PluginConnection } from "../../src/server/plugins/PluginConnection.js"
@@ -1037,7 +1034,7 @@ describe("ClockifyReadPlugin", () => {
       }
     }))
 
-  it.effect("corrects one association and makes an identical replay mutation-free", () =>
+  it.effect("keeps non-atomic Clockify corrections proposal-only", () =>
     Effect.gen(function*() {
       const state = yield* Ref.make<
         ReturnType<typeof timeEntry> & {
@@ -1117,55 +1114,24 @@ describe("ClockifyReadPlugin", () => {
             actionRequest("correct-association", current.event.revision, { jiraIssueKey: "OPS-42" })
           )
           const authorized = authorize(proposal, proposal.payloadDigest, "correct")
-          const preflight = yield* executor.preflight(authorized)
-          assert.strictEqual(preflight._tag, "ready")
-          const first = yield* executor.executeAuthorizedAction(authorized)
-          const replayPreflight = yield* executor.preflight(authorized)
-          const replay = yield* executor.executeAuthorizedAction(authorized)
-          assert.strictEqual(first._tag, "confirmed")
-          assert.strictEqual(replayPreflight._tag, "blocked")
-          assert.strictEqual(replay._tag, "confirmed")
-          if (first._tag === "confirmed" && replay._tag === "confirmed") {
-            assert.strictEqual(first.receipt.status, "succeeded")
-            assert.strictEqual(first.receipt.providerOperationId, replay.receipt.providerOperationId)
-          }
+          const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
+          const dispatch = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(preflight))
+          assert.isTrue(Result.isFailure(dispatch))
+          if (Result.isFailure(preflight)) assert.instanceOf(preflight.failure, PluginUnsupportedCapabilityFailure)
+          if (Result.isFailure(dispatch)) assert.instanceOf(dispatch.failure, PluginUnsupportedCapabilityFailure)
         })
       )
 
       const readRequests = yield* Ref.get(actionReadRequests)
-      assert.isTrue(readRequests.length > 1)
+      assert.lengthOf(readRequests, 2)
       assert.isTrue(readRequests.every((request) => request?.hydrated === true))
       const calls = yield* Ref.get(updates)
-      assert.lengthOf(calls, 1)
-      assert.deepStrictEqual(calls[0], {
-        billable: true,
-        customFields: [{
-          customFieldId: "customer-field",
-          value: "Acme"
-        }],
-        description: "[OPS-42] Investigate timeout",
-        end: "2026-07-17T09:00:00.000Z",
-        projectId: "project-1",
-        start: "2026-07-17T08:00:00.000Z",
-        tagIds: ["delivery", "review"],
-        taskId: "task-1",
-        type: "BREAK"
-      })
-      assert.deepInclude(yield* Ref.get(state), {
-        billable: true,
-        customFieldValues: [{
-          customFieldId: "customer-field",
-          value: "Acme"
-        }],
-        description: "[OPS-42] Investigate timeout",
-        projectId: "project-1",
-        tagIds: ["delivery", "review"],
-        taskId: "task-1",
-        type: "BREAK"
-      })
+      assert.lengthOf(calls, 0)
+      assert.deepInclude(yield* Ref.get(state), { description: "[OLD-1] Investigate timeout" })
     }))
 
-  it.effect("blocks authorized identity drift without hiding malformed provider data", () =>
+  it.effect("keeps non-atomic corrections disabled before provider identity reads", () =>
     Effect.gen(function*() {
       const cases: ReadonlyArray<{
         readonly name: string
@@ -1217,16 +1183,9 @@ describe("ClockifyReadPlugin", () => {
             const authorized = authorize(proposal, proposal.payloadDigest, fixture.name)
             yield* Ref.set(state, fixture.changed)
             const preflight = yield* executor.preflight(authorized).pipe(Effect.result)
-            if (fixture.expected === "blocked") {
-              assert.isTrue(Result.isSuccess(preflight), fixture.name)
-              if (Result.isSuccess(preflight)) {
-                assert.strictEqual(preflight.success._tag, "blocked", fixture.name)
-              }
-            } else {
-              assert.isTrue(Result.isFailure(preflight), fixture.name)
-              if (Result.isFailure(preflight)) {
-                assert.instanceOf(preflight.failure, PluginMalformedResponseFailure)
-              }
+            assert.isTrue(Result.isFailure(preflight), fixture.name)
+            if (Result.isFailure(preflight)) {
+              assert.instanceOf(preflight.failure, PluginUnsupportedCapabilityFailure, fixture.name)
             }
           })
         )
@@ -1348,7 +1307,7 @@ describe("ClockifyReadPlugin", () => {
       assert.strictEqual(yield* Ref.get(updateCalls), 0)
     }))
 
-  it.effect("reconciles an ambiguous correction from provider state without replay", () =>
+  it.effect("keeps correction reconciliation disabled without a provider atomic contract", () =>
     Effect.gen(function*() {
       const state = yield* Ref.make(timeEntry("entry-1", "user-1", {
         description: "[OLD-1] Investigate timeout"
@@ -1385,47 +1344,26 @@ describe("ClockifyReadPlugin", () => {
           const authorized = authorize(proposal, proposal.payloadDigest, "ambiguous")
           const dispatch = yield* executor.executeAuthorizedAction(authorized).pipe(Effect.result)
           assert.isTrue(Result.isFailure(dispatch))
-          if (!Result.isFailure(dispatch)) return yield* Effect.die("expected unknown outcome")
-          assert.instanceOf(dispatch.failure, PluginUnknownOutcomeFailure)
-          if (dispatch.failure._tag !== "PluginUnknownOutcomeFailure") {
-            return yield* Effect.die("expected reconcilable failure")
+          if (Result.isFailure(dispatch)) {
+            assert.instanceOf(dispatch.failure, PluginUnsupportedCapabilityFailure)
           }
           const reconciled = yield* executor.reconcile({
-            reconciliationKey: dispatch.failure.reconciliationKey,
-            idempotencyKey: authorized.idempotencyKey,
-            payloadDigest: authorized.payloadDigest,
-            authorizedAction: authorized
-          })
-          assert.strictEqual(reconciled._tag, "succeeded")
-          const readsAfterExactLocator = yield* Ref.get(readCalls)
-          const recoveredByAuthorizedIdentity = yield* executor.reconcile({
             reconciliationKey: null,
             idempotencyKey: authorized.idempotencyKey,
             payloadDigest: authorized.payloadDigest,
             authorizedAction: authorized
-          })
-          assert.strictEqual(recoveredByAuthorizedIdentity._tag, "succeeded")
-          assert.strictEqual(yield* Ref.get(readCalls), readsAfterExactLocator + 1)
-          const readsAfterNullLocator = yield* Ref.get(readCalls)
-          const malformedLocator = yield* executor.reconcile({
-            reconciliationKey: PluginActionReconciliationKey.make(
-              "clockify-correction:v1:not-a-digest"
-            ),
-            idempotencyKey: authorized.idempotencyKey,
-            payloadDigest: authorized.payloadDigest,
-            authorizedAction: authorized
           }).pipe(Effect.result)
-          assert.isTrue(Result.isFailure(malformedLocator))
-          if (Result.isFailure(malformedLocator)) {
-            assert.instanceOf(malformedLocator.failure, PluginConfigurationFailure)
+          assert.isTrue(Result.isFailure(reconciled))
+          if (Result.isFailure(reconciled)) {
+            assert.instanceOf(reconciled.failure, PluginUnsupportedCapabilityFailure)
           }
-          assert.strictEqual(yield* Ref.get(readCalls), readsAfterNullLocator)
+          assert.strictEqual(yield* Ref.get(readCalls), 2)
         })
       )
-      assert.strictEqual(yield* Ref.get(updateCalls), 1)
+      assert.strictEqual(yield* Ref.get(updateCalls), 0)
     }))
 
-  it.effect("terminates reconciliation when the provider entry identity drifts", () =>
+  it.effect("keeps correction reconciliation disabled when provider identity drifts", () =>
     Effect.gen(function*() {
       const state = yield* Ref.make<unknown>(timeEntry("entry-1", "user-1", {
         description: "[OLD-1] Investigate timeout"
@@ -1449,11 +1387,10 @@ describe("ClockifyReadPlugin", () => {
             idempotencyKey: authorized.idempotencyKey,
             payloadDigest: authorized.payloadDigest,
             authorizedAction: authorized
-          })
-          assert.strictEqual(reconciled._tag, "failed")
-          if (reconciled._tag === "failed") {
-            assert.strictEqual(reconciled.receipt.status, "failed")
-            assert.include(reconciled.receipt.safeSummary, "changed independently")
+          }).pipe(Effect.result)
+          assert.isTrue(Result.isFailure(reconciled))
+          if (Result.isFailure(reconciled)) {
+            assert.instanceOf(reconciled.failure, PluginUnsupportedCapabilityFailure)
           }
         })
       )

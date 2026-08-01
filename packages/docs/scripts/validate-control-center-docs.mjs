@@ -26,7 +26,7 @@ const releaseGateEvidence = await readFile(
   "utf8"
 )
 const requiredReleaseJourneys = [
-  "pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
+  "CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
   "pnpm --filter @knpkv/control-center test:integration:live",
   "pnpm --filter @knpkv/control-center test:integration:live-aws",
   "pnpm --filter @knpkv/control-center test:sbx:real",
@@ -52,13 +52,25 @@ for (const [manifestPath, scriptNames] of releaseScriptSpecs) {
     if (!manifest.scripts?.[scriptName]) failures.push(`${manifestPath} is missing release script ${scriptName}`)
   }
 }
+const journeySection = releaseGateEvidence.match(/## Required external journeys\n([\s\S]*?)(?=\n## |$)/u)
+const journeyCommands = journeySection?.[1]?.match(/```(?:bash|sh)\n([\s\S]*?)\n```/u)?.[1] ?? ""
 for (const command of requiredReleaseJourneys) {
-  if (!releaseGateEvidence.includes(command)) {
+  if (!journeyCommands.includes(command)) {
     failures.push(`release-gate evidence is missing required journey ${command}`)
   }
 }
 if (!releaseGateEvidence.includes("Product completion journey")) {
   failures.push("release-gate evidence is missing the product completion journey")
+}
+const sc723Row = releaseGateEvidence.match(/^\| SC7\.23\s+\|[^\n]*$/mu)?.[0] ?? ""
+if (!sc723Row.includes("pnpm test --run")) {
+  failures.push("SC7.23 must record the one-shot test command pnpm test --run")
+}
+if (!releaseGateEvidence.includes("safe client-visible configuration")) {
+  failures.push("release-gate evidence must distinguish safe callback configuration from callback secrets")
+}
+if (!releaseGateEvidence.includes("raw callback query data")) {
+  failures.push("release-gate evidence must prohibit raw callback query data")
 }
 
 const controlCenterPackage = await readJson(resolve(workspaceRoot, "packages/control-center/package.json"))

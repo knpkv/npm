@@ -291,7 +291,9 @@ gaps. Every object opens a canonical full page. A human can repair a relationshi
 one governed action per provider that advertises an atomic provider precondition, with durable
 receipt/reconciliation. Jira Cloud is the explicit capability-truthful exception in this plan: its
 current adapter remains proposal-only because the provider does not expose an atomic expected-revision
-write; it must not claim a stale-safe mutation. A release-scoped agent survives
+write; it must not claim a stale-safe mutation. Clockify correction is proposal-only because its
+provider exposes no such precondition; the Clockify approval action is Control Center-owned and makes
+no provider call. A release-scoped agent survives
 browser closure, reviews an immutable PR in a contained sandbox, reports anchored findings, proposes
 prevention, and remains separate from the final human decision. Restart, partial provider failure,
 dark/light/narrow/keyboard use, and a second-machine HTTPS session preserve truthful state without
