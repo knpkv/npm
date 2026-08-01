@@ -12,10 +12,11 @@ A final read immediately before a write is not atomic and cannot satisfy that in
 ## Decision
 
 Jira lifecycle drafts remain validated, persisted, and reviewable proposal state. Description,
-comment/reply, transition, and link/version association proposals must fail closed before provider
-execution while Jira lacks an atomic revision capability. The release journey may claim one governed
-action for providers that advertise such a capability, but Jira is an explicit capability-truthful
-proposal-only exception.
+acceptance-criteria, comment/reply, transition, link/version association, and approval proposals
+must all fail closed before provider execution while Jira lacks a documented, verified atomic
+revision precondition for the exact target revision. The release journey may claim one governed
+action for providers whose enabled operation enforces that capability, but Jira is an explicit
+capability-truthful proposal-only exception.
 
 This does not weaken the generic governed-action contract, authorization checks, stale-evidence
 handling, or zero-provider-call guarantees. If Jira later documents an atomic revision condition,
