@@ -373,7 +373,9 @@ describe("agent job worker", () => {
             inputTokens: 12,
             outputTokens: 4
           })),
-          Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+          Effect.as(
+            { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+          )
         )
       }
     }
@@ -433,7 +435,8 @@ describe("agent job worker", () => {
     const reviews = Layer.succeed(
       PrReviewTaskExecutor,
       PrReviewTaskExecutor.of({
-        execute: () => Effect.succeed(telemetryReviewReport)
+        execute: () => Effect.succeed(telemetryReviewReport),
+        executeTargeted: () => Effect.die("targeted review must not run")
       })
     )
     const registry = Layer.succeed(
@@ -499,7 +502,7 @@ describe("agent job worker", () => {
           return Effect.succeed(
             {
               _tag: "pr-review",
-              report: reviewReport
+              report: { _tag: "report", report: reviewReport }
             } satisfies AgentJobTaskExecution
           )
         }
@@ -593,7 +596,9 @@ describe("agent job worker", () => {
         execute: () =>
           Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Deferred.await(finish)),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
       }
       return yield* withTaskExecutor(
@@ -644,7 +649,9 @@ describe("agent job worker", () => {
               outcome: "success",
               sessionRef: null
             })),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
       }
       return yield* withTaskExecutor(
@@ -688,7 +695,9 @@ describe("agent job worker", () => {
           executionCount += 1
           return Deferred.succeed(started, undefined).pipe(
             Effect.andThen(Effect.sleep("6 minutes")),
-            Effect.as({ _tag: "pr-review", report: reviewReport } satisfies AgentJobTaskExecution)
+            Effect.as(
+              { _tag: "pr-review", report: { _tag: "report", report: reviewReport } } satisfies AgentJobTaskExecution
+            )
           )
         }
       }
@@ -726,6 +735,8 @@ describe("agent job worker", () => {
 
   it.effect("terminally rejects malformed review output without persisting its raw canary", () => {
     const rawCanary = "RAW_MODEL_CANARY_MUST_NOT_PERSIST"
+    const malformedReport = Schema.decodeUnknownSync(PrReviewReport)(reviewReport)
+    Object.assign(malformedReport.suggestions[0]!.evidence, { path: `../${rawCanary}` })
     const executor: AgentJobTaskExecutorService = {
       taskTags: ["pr-review"],
       execute: () =>
@@ -733,16 +744,8 @@ describe("agent job worker", () => {
           {
             _tag: "pr-review",
             report: {
-              ...reviewReport,
-              suggestions: [
-                {
-                  ...reviewReport.suggestions[0]!,
-                  evidence: {
-                    ...reviewReport.suggestions[0]!.evidence,
-                    path: `../${rawCanary}`
-                  }
-                }
-              ]
+              _tag: "report",
+              report: malformedReport
             }
           } satisfies AgentJobTaskExecution
         )

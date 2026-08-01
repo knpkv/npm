@@ -20,7 +20,7 @@ import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
 import type { JobId, WorkspaceId } from "../../domain/identifiers.js"
-import { PrReviewSuggestionAgentAuthor, PrReviewSuggestionEdit } from "../../domain/prReviewRevision.js"
+import { PrReviewSuggestionAgentAuthor } from "../../domain/prReviewRevision.js"
 import {
   AgentJobInputError,
   type AgentLeaseOwner,
@@ -205,10 +205,6 @@ const makeAgentJobWorker = Effect.gen(function*() {
       (providerId) => providerId === String(claim.providerId)
     )
 
-    const TargetedSuggestionResult = Schema.Struct({
-      schemaVersion: Schema.Literal(1),
-      edit: PrReviewSuggestionEdit
-    })
     const toolsAllowed = claim.context.task._tag !== "pr-review" ||
       policy.toolPolicy === "review-sandbox"
     if (!providerAllowed || !toolsAllowed) {
@@ -274,7 +270,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
           claim.context.task.intent === "suggestion-revalidation")
       if (targetedIntent) {
         const target = claim.context.task.target
-        if (target === undefined || typeof selected.success.report !== "string") {
+        if (target === undefined || selected.success.report._tag !== "targeted") {
           return yield* failClaim(
             claim,
             new AgentProviderError({
@@ -285,19 +281,6 @@ const makeAgentJobWorker = Effect.gen(function*() {
             })
           )
         }
-        const result = yield* Schema.decodeUnknownEffect(
-          Schema.fromJsonString(TargetedSuggestionResult),
-          { onExcessProperty: "error" }
-        )(selected.success.report).pipe(
-          Effect.mapError(() =>
-            new AgentProviderError({
-              providerId: claim.providerId,
-              phase: "protocol",
-              message: "Targeted review returned invalid suggestion output.",
-              retryable: false
-            })
-          )
-        )
         const source = yield* jobs.reviewResult({
           workspaceId: claim.workspaceId,
           jobId: target.sourceJobId
@@ -310,7 +293,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
           suggestionId: target.suggestionId,
           expectedRevisionId: target.selectedRevisionId,
           expectedSequence: target.history.current.sequence,
-          edit: result.edit,
+          edit: selected.success.report.edit,
           ...(validation === undefined ? {} : { validation }),
           author: PrReviewSuggestionAgentAuthor.make({
             jobId: claim.jobId,
@@ -320,7 +303,21 @@ const makeAgentJobWorker = Effect.gen(function*() {
           }),
           createdAt: yield* DateTime.now
         }).pipe(Effect.result)
-        if (Result.isFailure(revised)) return yield* Effect.fail(revised.failure)
+        if (Result.isFailure(revised)) {
+          if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)
+          if (isAgentJobInputError(revised.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review result could not be applied to the selected revision.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(revised.failure)
+        }
         const completedAt = yield* DateTime.now
         const completion = yield* jobs.completeReview({
           workspaceId: claim.workspaceId,
@@ -330,7 +327,21 @@ const makeAgentJobWorker = Effect.gen(function*() {
           report: source.success.report,
           completedAt
         }).pipe(Effect.result)
-        if (Result.isFailure(completion)) return yield* Effect.fail(completion.failure)
+        if (Result.isFailure(completion)) {
+          if (isCancellationRequested(completion.failure)) return yield* cancelClaim(claim)
+          if (isInvalidReviewResult(completion.failure)) {
+            return yield* failClaim(
+              claim,
+              new AgentProviderError({
+                providerId: claim.providerId,
+                phase: "protocol",
+                message: "Targeted review completion was invalid.",
+                retryable: false
+              })
+            )
+          }
+          return yield* Effect.fail(completion.failure)
+        }
         return {
           _tag: "completed",
           jobId: claim.jobId,
@@ -338,12 +349,23 @@ const makeAgentJobWorker = Effect.gen(function*() {
         } satisfies AgentJobWorkerRunResult
       }
       const completedAt = yield* DateTime.now
+      if (selected.success.report._tag !== "report") {
+        return yield* failClaim(
+          claim,
+          new AgentProviderError({
+            providerId: claim.providerId,
+            phase: "protocol",
+            message: "Agent task executor returned a targeted result for a full PR review.",
+            retryable: false
+          })
+        )
+      }
       const completion = yield* jobs.completeReview({
         workspaceId: claim.workspaceId,
         jobId: claim.jobId,
         attemptSequence: claim.attemptSequence,
         leaseToken: claim.leaseToken,
-        report: selected.success.report,
+        report: selected.success.report.report,
         completedAt
       }).pipe(Effect.result)
       if (Result.isFailure(completion)) {

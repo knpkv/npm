@@ -485,12 +485,26 @@ describe("agent job review results", () => {
           "requires-revalidation"
         )
 
-        const revalidated = yield* jobs.appendReviewSuggestionRevision({
+        const humanValidationAttempt = yield* jobs.appendReviewSuggestionRevision({
           workspaceId: WORKSPACE_ID,
           jobId: JOB_ID,
           suggestionId: suggestion.suggestionId,
           expectedRevisionId: technical.revisionId,
           expectedSequence: technical.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author,
+          createdAt: T4
+        })
+        assert.strictEqual(humanValidationAttempt.sequence, 4)
+        assert.strictEqual(humanValidationAttempt.validation._tag, "requires-revalidation")
+
+        const revalidated = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidationAttempt.revisionId,
+          expectedSequence: humanValidationAttempt.sequence,
           edit: technicalEdit,
           validation: "validated",
           author: PrReviewSuggestionAgentAuthor.make({
@@ -501,8 +515,14 @@ describe("agent job review results", () => {
           }),
           createdAt: T4
         })
-        assert.strictEqual(revalidated.sequence, 4)
+        assert.strictEqual(revalidated.sequence, 5)
         assert.strictEqual(revalidated.validation._tag, "validated")
+        if (revalidated.validation._tag !== "validated") {
+          return yield* Effect.die("expected agent revalidation metadata")
+        }
+        assert.strictEqual(revalidated.validation.validatingJobId, JOB_ID)
+        assert.strictEqual(revalidated.validation.sourceRevisionId, humanValidationAttempt.revisionId)
+        assert.strictEqual(revalidated.validation.reviewedHead, technical.subject.headRevision)
 
         const firstPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -514,10 +534,10 @@ describe("agent job review results", () => {
         assert.strictEqual(firstPage.current.revisionId, revalidated.revisionId)
         assert.deepStrictEqual(
           firstPage.revisions.map(({ sequence }) => sequence),
-          [3]
+          [4]
         )
         assert.isTrue(firstPage.hasMore)
-        assert.strictEqual(firstPage.nextBeforeSequence, 3)
+        assert.strictEqual(firstPage.nextBeforeSequence, 4)
 
         const secondPage = yield* jobs.reviewSuggestionRevisions({
           workspaceId: WORKSPACE_ID,
@@ -528,7 +548,7 @@ describe("agent job review results", () => {
         })
         assert.deepStrictEqual(
           secondPage.revisions.map(({ sequence }) => sequence),
-          [2]
+          [3]
         )
         assert.isTrue(secondPage.hasMore)
 
@@ -539,8 +559,18 @@ describe("agent job review results", () => {
           beforeSequence: secondPage.nextBeforeSequence,
           limit: PrReviewSuggestionRevisionPageSize.make(1)
         })
-        assert.deepStrictEqual(thirdPage.revisions.map(({ sequence }) => sequence), [1])
-        assert.isFalse(thirdPage.hasMore)
+        assert.deepStrictEqual(thirdPage.revisions.map(({ sequence }) => sequence), [2])
+        assert.isTrue(thirdPage.hasMore)
+
+        const fourthPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: thirdPage.nextBeforeSequence,
+          limit: PrReviewSuggestionRevisionPageSize.make(1)
+        })
+        assert.deepStrictEqual(fourthPage.revisions.map(({ sequence }) => sequence), [1])
+        assert.isFalse(fourthPage.hasMore)
 
         const thread = yield* jobs.reviewThreadTail({
           workspaceId: WORKSPACE_ID,
@@ -552,7 +582,7 @@ describe("agent job review results", () => {
           thread.events.filter(
             ({ eventKind }) => eventKind === "review-suggestion-revised"
           ).length,
-          3
+          4
         )
 
         const update = yield* database.sql`UPDATE agent_review_suggestion_revisions

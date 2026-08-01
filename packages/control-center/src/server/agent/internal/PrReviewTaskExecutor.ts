@@ -42,7 +42,7 @@ import {
   type PrReviewSuggestionDraft as PrReviewSuggestionDraftType,
   PrReviewSuggestionId
 } from "../../../domain/prReview.js"
-import { PrReviewSuggestionEdit } from "../../../domain/prReviewRevision.js"
+import { PrReviewSuggestionEdit, PrReviewSuggestionRevisionPage } from "../../../domain/prReviewRevision.js"
 import {
   type AgentJobInputError,
   type ClaimedAgentJob,
@@ -69,9 +69,28 @@ const ModelReviewReport = Schema.Struct({
   notes: Schema.Array(PrReviewNoteDraft)
 })
 
-const ModelTargetedSuggestion = Schema.Struct({
+export const TargetedSuggestionResult = Schema.Struct({
   schemaVersion: Schema.Literal(1),
   edit: PrReviewSuggestionEdit
+})
+export type TargetedSuggestionResult = typeof TargetedSuggestionResult.Type
+
+export type PrReviewTaskExecution =
+  | { readonly _tag: "report"; readonly report: typeof PrReviewReport.Type }
+  | { readonly _tag: "targeted"; readonly edit: typeof PrReviewSuggestionEdit.Type }
+
+const reportExecution = (
+  report: typeof PrReviewReport.Type
+): Extract<PrReviewTaskExecution, { readonly _tag: "report" }> => ({
+  _tag: "report",
+  report
+})
+
+const targetedExecution = (
+  edit: typeof PrReviewSuggestionEdit.Type
+): Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }> => ({
+  _tag: "targeted",
+  edit
 })
 
 const { location: _nativeNoteLocation, ...nativeNoteDraftFields } = PrReviewNoteDraft.fields
@@ -87,7 +106,7 @@ const NativeModelReviewReport = Schema.Struct({
   notes: Schema.Array(Schema.Struct(nativeNoteDraftFields))
 })
 
-const NativeModelTargetedSuggestion = ModelTargetedSuggestion
+const NativeModelTargetedSuggestion = TargetedSuggestionResult
 
 const isJsonSchemaObject = (
   value: unknown
@@ -869,7 +888,7 @@ const makeExecutor = Effect.gen(function*() {
     onActivity: (
       event: AgentRuntimeEvent
     ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError> = () => Effect.void
-  ): Effect.fn.Return<typeof PrReviewReport.Type | string, AgentProviderError | AgentJobInputError> {
+  ): Effect.fn.Return<PrReviewTaskExecution, AgentProviderError | AgentJobInputError> {
     if (claim.context.task._tag !== "pr-review" || claim.access !== "read-only") {
       return yield* providerFailure(
         claim.providerId,
@@ -928,6 +947,16 @@ const makeExecutor = Effect.gen(function*() {
         false
       )
     }
+    const encodedTarget = targeted && reviewTask.target !== undefined
+      ? {
+        ...reviewTask.target,
+        history: yield* Schema.encodeUnknownEffect(PrReviewSuggestionRevisionPage)(reviewTask.target.history).pipe(
+          Effect.mapError(() =>
+            providerFailure(claim.providerId, "protocol", "Targeted review history could not be encoded.", false)
+          )
+        )
+      }
+      : undefined
     const threadContext = yield* Schema.encodeUnknownEffect(
       PrReviewThreadContextSnapshot
     )(claim.context.task.context).pipe(
@@ -1017,7 +1046,7 @@ const makeExecutor = Effect.gen(function*() {
               JSON.stringify({
                 operatorRequest: claim.prompt,
                 subject,
-                ...(targeted ? { target: JSON.stringify(reviewTask.target) } : {}),
+                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
                 threadContext
               }),
               "</review-context-json>"
@@ -1050,17 +1079,19 @@ const makeExecutor = Effect.gen(function*() {
             }
             if (targeted) {
               return yield* Schema.decodeUnknownEffect(
-                Schema.fromJsonString(ModelTargetedSuggestion),
+                Schema.fromJsonString(TargetedSuggestionResult),
                 { onExcessProperty: "error" }
               )(output).pipe(
                 Effect.mapError(() =>
                   providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
                 ),
-                Effect.map((result) => JSON.stringify(result))
+                Effect.map((result) => targetedExecution(result.edit))
               )
             }
             const normalizedOutput = yield* normalizeNativeReviewOutput(claim.providerId, output)
-            return yield* anchorReport(cryptoService, claim, session, normalizedOutput, onRuntimeActivity)
+            return reportExecution(
+              yield* anchorReport(cryptoService, claim, session, normalizedOutput, onRuntimeActivity)
+            )
           }
           if (languageModel === undefined) {
             return yield* providerFailure(
@@ -1084,7 +1115,7 @@ const makeExecutor = Effect.gen(function*() {
               context: {
                 operatorRequest: request.prompt,
                 subject,
-                ...(targeted ? { target: JSON.stringify(reviewTask.target) } : {}),
+                ...(encodedTarget === undefined ? {} : { target: encodedTarget }),
                 threadContext,
                 sandbox: "sbx",
                 networkAccess: "blocked"
@@ -1105,8 +1136,20 @@ const makeExecutor = Effect.gen(function*() {
             continuation: { _tag: "fresh" }
           }
           const output = yield* collectReviewOutput(claim, adapter.run(request), onRuntimeActivity)
-          if (targeted) return output
-          return yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
+          if (targeted) {
+            const result = yield* Schema.decodeUnknownEffect(
+              Schema.fromJsonString(TargetedSuggestionResult),
+              { onExcessProperty: "error" }
+            )(output).pipe(
+              Effect.mapError(() =>
+                providerFailure(claim.providerId, "protocol", "Targeted review output was invalid.", false)
+              )
+            )
+            return targetedExecution(result.edit)
+          }
+          return reportExecution(
+            yield* anchorReport(cryptoService, claim, session, output, onRuntimeActivity)
+          )
         })
     ).pipe(
       Effect.mapError((failure) =>
@@ -1120,14 +1163,33 @@ const makeExecutor = Effect.gen(function*() {
     execute: (claim, onActivity) =>
       executeInternal(claim, onActivity).pipe(
         Effect.flatMap((result) =>
-          Schema.decodeUnknownEffect(PrReviewReport)(result).pipe(
-            Effect.mapError(() =>
-              providerFailure(claim.providerId, "protocol", "PR review provider returned an invalid report.", false)
+          result._tag === "report"
+            ? Effect.succeed(result.report)
+            : Effect.fail(
+              providerFailure(
+                claim.providerId,
+                "protocol",
+                "PR review provider returned a targeted result for a full review.",
+                false
+              )
             )
-          )
         )
       ),
-    executeTargeted: executeInternal
+    executeTargeted: (claim, onActivity) =>
+      executeInternal(claim, onActivity).pipe(
+        Effect.flatMap((result) =>
+          result._tag === "targeted"
+            ? Effect.succeed(result)
+            : Effect.fail(
+              providerFailure(
+                claim.providerId,
+                "protocol",
+                "PR review provider returned a full report for a targeted task.",
+                false
+              )
+            )
+        )
+      )
   })
 })
 
@@ -1141,12 +1203,15 @@ export class PrReviewTaskExecutor extends Context.Service<
         event: AgentRuntimeEvent
       ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
     ) => Effect.Effect<typeof PrReviewReport.Type, AgentProviderError | AgentJobInputError>
-    readonly executeTargeted?: (
+    readonly executeTargeted: (
       claim: ClaimedAgentJob,
       onActivity?: (
         event: AgentRuntimeEvent
       ) => Effect.Effect<void, AgentRuntimeError | AgentJobInputError>
-    ) => Effect.Effect<unknown, AgentProviderError | AgentJobInputError>
+    ) => Effect.Effect<
+      Extract<PrReviewTaskExecution, { readonly _tag: "targeted" }>,
+      AgentProviderError | AgentJobInputError
+    >
   }
 >()("@knpkv/control-center/server/agent/internal/PrReviewTaskExecutor") {}
 
