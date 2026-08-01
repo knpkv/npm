@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { enforceBoundedRunner } from "../../e2e/enforce-bounded-runner.js"
+import atlassianOAuthConfig from "../../playwright.atlassian-oauth.config.js"
 import playwrightConfig from "../../playwright.config.js"
 
 describe("bounded browser configuration", () => {
@@ -11,6 +12,12 @@ describe("bounded browser configuration", () => {
 
   it("does not retain credentials in automatic browser artifacts", () => {
     expect(playwrightConfig.use).toMatchObject({ screenshot: "off", trace: "off" })
+  })
+
+  it("keeps the real Atlassian journey behind the bounded runner", () => {
+    expect(atlassianOAuthConfig.fullyParallel).toBe(false)
+    expect(atlassianOAuthConfig.workers).toBe(1)
+    expect(atlassianOAuthConfig.globalSetup).toBe("./e2e/enforce-bounded-runner.ts")
   })
 
   it("rejects resolved CLI overrides", () => {
