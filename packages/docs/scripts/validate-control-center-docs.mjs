@@ -21,6 +21,27 @@ const allDocs = Array.from(docsSources.values()).join("\n")
 const failures = []
 const readJson = async (path) => JSON.parse(await readFile(path, "utf8"))
 
+const releaseGateEvidence = await readFile(
+  resolve(workspaceRoot, ".specs/control-center/release-gate-evidence.md"),
+  "utf8"
+)
+const requiredReleaseJourneys = [
+  "pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth",
+  "pnpm --filter @knpkv/control-center test:integration:live",
+  "pnpm --filter @knpkv/control-center test:integration:live-aws",
+  "pnpm --filter @knpkv/control-center test:sbx:real",
+  "pnpm --filter @knpkv/control-center benchmark:runtime",
+  "pnpm --filter @knpkv/ai-codex test:smoke:real"
+]
+for (const command of requiredReleaseJourneys) {
+  if (!releaseGateEvidence.includes(command)) {
+    failures.push(`release-gate evidence is missing required journey ${command}`)
+  }
+}
+if (!releaseGateEvidence.includes("Product completion journey")) {
+  failures.push("release-gate evidence is missing the product completion journey")
+}
+
 const controlCenterPackage = await readJson(resolve(workspaceRoot, "packages/control-center/package.json"))
 const expectedEntries = Object.keys(controlCenterPackage.exports ?? {}).map((subpath) =>
   subpath === "." ? "@knpkv/control-center" : `@knpkv/control-center/${subpath.slice(2)}`
