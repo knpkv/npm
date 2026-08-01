@@ -49,6 +49,34 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
+### Real Atlassian OAuth acceptance journey
+
+The full interactive Jira + Confluence OAuth journey is opt-in because it requires a human Atlassian
+consent and access to a real site. Register the callback URL
+`http://127.0.0.1:<temporary-port>/services/oauth/atlassian/callback` in the OAuth app, then run:
+
+```sh
+CONTROL_CENTER_TEST_ATLASSIAN_OAUTH=1 \
+CONTROL_CENTER_TEST_ATLASSIAN_PORT=4173 \
+CONTROL_CENTER_TEST_ATLASSIAN_CLIENT_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_CLIENT_SECRET=... \
+CONTROL_CENTER_TEST_ATLASSIAN_PROJECT_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_SPACE_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_PAGE_ID=... \
+CONTROL_CENTER_TEST_ATLASSIAN_EXPECTED_ACCOUNT_EMAIL=... \
+CONTROL_CENTER_TEST_ATLASSIAN_EXPECTED_SITE_URL=https://example.atlassian.net/ \
+pnpm --filter @knpkv/control-center test:e2e:atlassian-oauth
+```
+
+The command starts a fresh temporary server and data root on the configured fixed port, pairs through
+the browser, waits for the operator to complete Atlassian sign-in and consent, selects one site, creates
+both provider connections, and runs both connection checks. Register the callback using the same port
+before starting the command. The client secret is used only as masked form input; the test disables
+screenshots and traces, verifies the canonical profile contains credentials, and checks browser
+storage, SQL/WAL/journal files, Playwright artifacts, and server output for the client/provider
+credentials. It removes the temporary data, auth, and configuration roots on success or failure.
+Provider tokens remain server-private and are never returned to browser storage or SQL.
+
 ### Local OpenTelemetry
 
 Control Center can export Effect traces and structured logs to an OTLP/HTTP collector. Export is opt-in and disabled unless the corresponding OpenTelemetry exporters are enabled. Metrics are not exported in this initial slice.

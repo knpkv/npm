@@ -12,6 +12,7 @@
   },
   "include": [
     "e2e",
+    "playwright.atlassian-oauth.config.ts",
     "playwright.config.ts",
     "scripts",
     "src/api",
