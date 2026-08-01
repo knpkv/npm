@@ -33,6 +33,25 @@ const requiredReleaseJourneys = [
   "pnpm --filter @knpkv/control-center benchmark:runtime",
   "pnpm --filter @knpkv/ai-codex test:smoke:real"
 ]
+const releaseScriptSpecs = [
+  [
+    "packages/control-center/package.json",
+    [
+      "test:e2e:atlassian-oauth",
+      "test:integration:live",
+      "test:integration:live-aws",
+      "test:sbx:real",
+      "benchmark:runtime"
+    ]
+  ],
+  ["packages/ai-codex/package.json", ["test:smoke:real"]]
+]
+for (const [manifestPath, scriptNames] of releaseScriptSpecs) {
+  const manifest = await readJson(resolve(workspaceRoot, manifestPath))
+  for (const scriptName of scriptNames) {
+    if (!manifest.scripts?.[scriptName]) failures.push(`${manifestPath} is missing release script ${scriptName}`)
+  }
+}
 for (const command of requiredReleaseJourneys) {
   if (!releaseGateEvidence.includes(command)) {
     failures.push(`release-gate evidence is missing required journey ${command}`)
