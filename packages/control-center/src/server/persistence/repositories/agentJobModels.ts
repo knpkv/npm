@@ -360,6 +360,13 @@ export const ReadReviewSuggestionRevisionsInput = Schema.Struct({
 export type ReadReviewSuggestionRevisionsInput = typeof ReadReviewSuggestionRevisionsInput.Type
 
 /** Complete compare-and-append command for one immutable suggestion edit. */
+export const ReviewSuggestionRevisionLeaseFence = Schema.Struct({
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken
+})
+export type ReviewSuggestionRevisionLeaseFence = typeof ReviewSuggestionRevisionLeaseFence.Type
+
 export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
@@ -370,7 +377,8 @@ export const AppendReviewSuggestionRevisionInput = Schema.Struct({
   state: Schema.optionalKey(Schema.Literal("dismissed")),
   validation: Schema.optionalKey(Schema.Literal("validated")),
   author: PrReviewSuggestionRevisionAuthor,
-  createdAt: UtcTimestamp
+  createdAt: UtcTimestamp,
+  leaseFence: Schema.optionalKey(ReviewSuggestionRevisionLeaseFence)
 })
 export type AppendReviewSuggestionRevisionInput = typeof AppendReviewSuggestionRevisionInput.Type
 

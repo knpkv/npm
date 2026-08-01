@@ -305,7 +305,12 @@ const makeAgentJobWorker = Effect.gen(function*() {
             model: claim.model === null ? null : String(claim.model),
             runtimeMetadata: null
           }),
-          createdAt: yield* DateTime.now
+          createdAt: yield* DateTime.now,
+          leaseFence: {
+            jobId: claim.jobId,
+            attemptSequence: claim.attemptSequence,
+            leaseToken: claim.leaseToken
+          }
         }).pipe(Effect.result)
         if (Result.isFailure(revised)) {
           if (isCancellationRequested(revised.failure)) return yield* cancelClaim(claim)

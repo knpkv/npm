@@ -85,6 +85,10 @@ import {
 
 const DEFAULT_REVIEW_REQUEST = "Review this pull request."
 const REVIEW_PROMPT = "Review the exact immutable pull request using only the full-project Review Sandbox tools."
+// Target history is copied into the queued task and into the attempt snapshot.
+// Leave room for the task envelope and the bounded request context so every
+// accepted targeted task fits the repository's 32 KiB event limit.
+const MAXIMUM_TARGET_HISTORY_BYTES = 24_000
 const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
@@ -616,6 +620,20 @@ const makePullRequestReviews = Effect.gen(function*() {
     }).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
   })
 
+  const assertTargetHistoryFitsJobPayload = Effect.fn(
+    "PullRequestReviews.assertTargetHistoryFitsJobPayload"
+  )(function*(page: ReviewSuggestionRevisionPage) {
+    const json = yield* Schema.encodeUnknownEffect(
+      Schema.fromJsonString(ReviewSuggestionRevisionPage)
+    )(page).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    const bytes = yield* Effect.fromResult(
+      Encoding.decodeBase64(Encoding.encodeBase64(json))
+    ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
+    if (bytes.length > MAXIMUM_TARGET_HISTORY_BYTES) {
+      return yield* new ApplicationInvalidRequest()
+    }
+  })
+
   const publicationTarget = (
     workspaceId: WorkspaceId,
     target: AvailableReviewTarget
@@ -954,6 +972,7 @@ const makePullRequestReviews = Effect.gen(function*() {
         input.jobId,
         input.suggestionId
       )
+      yield* assertTargetHistoryFitsJobPayload(page)
       if (
         page.current.revisionId !== input.request.expectedRevisionId ||
         page.current.sequence !== input.request.expectedSequence

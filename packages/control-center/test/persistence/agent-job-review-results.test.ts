@@ -597,6 +597,76 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("allows an agent validation to correct the technical claim", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const operator = PrReviewSuggestionOperatorAuthor.make({ personId: PERSON_ID })
+        const technicalEdit = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...suggestion,
+          problem: "The first technical claim was incomplete."
+        })
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: technicalEdit,
+          author: operator,
+          createdAt: T3
+        })
+        const humanValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: edited.revisionId,
+          expectedSequence: edited.sequence,
+          edit: technicalEdit,
+          validation: "validated",
+          author: operator,
+          createdAt: T4
+        })
+        const corrected = Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+          ...technicalEdit,
+          problem: "The corrected technical claim is now complete."
+        })
+        const agentValidation = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: humanValidation.revisionId,
+          expectedSequence: humanValidation.sequence,
+          edit: corrected,
+          validation: "validated",
+          author: PrReviewSuggestionAgentAuthor.make({
+            jobId: JOB_ID,
+            providerId: PROVIDER_ID,
+            model: "test-model",
+            runtimeMetadata: null
+          }),
+          createdAt: T4
+        })
+        assert.strictEqual(agentValidation.validation._tag, "validated")
+        assert.strictEqual(agentValidation.suggestion.problem, corrected.problem)
+        if (agentValidation.validation._tag !== "validated") {
+          return yield* Effect.die("expected corrected agent validation metadata")
+        }
+        assert.strictEqual(agentValidation.validation.sourceRevisionId, humanValidation.revisionId)
+      })
+    ))
+
   it.effect("rejects a mismatched expected revision identity without appending", () =>
     withRepository(
       Effect.gen(function*() {

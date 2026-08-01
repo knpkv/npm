@@ -501,6 +501,32 @@ export const makeReviewSuggestionRevisionOperations = <
     )(input)
     return yield* database.transaction(
       Effect.gen(function*() {
+        if (request.leaseFence !== undefined) {
+          const activeFence = yield* sql`SELECT 1
+            FROM agent_jobs job
+            JOIN agent_job_leases lease
+              ON lease.workspace_id = job.workspace_id
+              AND lease.job_id = job.job_id
+              AND lease.attempt_sequence = ${request.leaseFence.attemptSequence}
+              AND lease.lease_token = ${request.leaseFence.leaseToken}
+            WHERE job.workspace_id = ${request.workspaceId}
+              AND job.job_id = ${request.leaseFence.jobId}
+              AND job.state = 'running'
+              AND job.cancel_requested_at IS NULL
+              AND lease.lease_expires_at > ${
+            Schema.encodeSync(
+              PrReviewSuggestionRevision.fields.createdAt
+            )(request.createdAt)
+          }
+            LIMIT 1`
+          if (activeFence.length !== 1) {
+            return yield* new AgentJobInputError({
+              workspaceId: request.workspaceId,
+              jobId: request.leaseFence.jobId,
+              reason: "cancellation-requested"
+            })
+          }
+        }
         const current = yield* currentRevision(
           request.workspaceId,
           request.jobId,
@@ -596,17 +622,16 @@ export const makeReviewSuggestionRevisionOperations = <
           request.suggestionId,
           sequence
         )
-        const validation = hasSamePrReviewTechnicalClaim(
-            currentEdit,
-            request.edit
-          )
-          ? request.validation === "validated" && request.author._tag === "agent"
-            ? PrReviewSuggestionValidated.make({
-              reviewedHead: current.subject.headRevision,
-              validatingJobId: request.author.jobId,
-              sourceRevisionId: current.revisionId
-            })
-            : current.validation
+        const isAgentValidation = request.validation === "validated" &&
+          request.author._tag === "agent"
+        const validation = isAgentValidation
+          ? PrReviewSuggestionValidated.make({
+            reviewedHead: current.subject.headRevision,
+            validatingJobId: request.author.jobId,
+            sourceRevisionId: current.revisionId
+          })
+          : hasSamePrReviewTechnicalClaim(currentEdit, request.edit)
+          ? current.validation
           : PrReviewSuggestionRequiresRevalidation.make({
             reviewedHead: current.subject.headRevision,
             sourceRevisionId: current.revisionId,
