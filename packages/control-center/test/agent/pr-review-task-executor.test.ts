@@ -332,6 +332,20 @@ const NativeReviewRequestObservation = Schema.Struct({
   prompt: Schema.optionalKey(Schema.String)
 })
 
+const assertSharedNativeReviewContract = (
+  request: Schema.Schema.Type<typeof NativeReviewRequestObservation>
+): void => {
+  assert.include(request.prompt ?? "", "control-center-review-base")
+  assert.isAbove(request.maximumDurationMillis ?? 0, 0)
+  assert.include(request.outputSchema ?? "", "\"schemaVersion\"")
+  assert.notInclude(request.outputSchema ?? "", "\"allOf\"")
+  assert.notInclude(request.outputSchema ?? "", "\"uniqueItems\"")
+  assert.include(request.outputSchema ?? "", "\"minLength\":1")
+  assert.include(request.outputSchema ?? "", "\"prevention\":{\"anyOf\"")
+  assert.include(request.outputSchema ?? "", "\"replacement\":{\"anyOf\"")
+  assert.include(request.outputSchema ?? "", "\"prevention\",\"replacement\",\"anchor\"")
+}
+
 const makeRealGitSessionLayer = (
   observation: SessionObservation,
   cwd: string,
@@ -746,18 +760,8 @@ describe("PR review task executor", () => {
       const setupRequest = Schema.decodeUnknownSync(SessionSetupRequestObservation)(observation.requests[0])
       assert.strictEqual(setupRequest.reviewExecution, "native-codex")
       const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
-      assert.include(nativeRequest.prompt ?? "", "control-center-review-base")
+      assertSharedNativeReviewContract(nativeRequest)
       assert.strictEqual(nativeRequest.maximumDurationMillis, 3_570_000)
-      assert.include(nativeRequest.outputSchema ?? "", "\"schemaVersion\"")
-      assert.notInclude(nativeRequest.outputSchema ?? "", "\"allOf\"")
-      assert.notInclude(nativeRequest.outputSchema ?? "", "\"uniqueItems\"")
-      assert.include(nativeRequest.outputSchema ?? "", "\"minLength\":1")
-      assert.include(nativeRequest.outputSchema ?? "", "\"prevention\":{\"anyOf\"")
-      assert.include(nativeRequest.outputSchema ?? "", "\"replacement\":{\"anyOf\"")
-      assert.include(
-        nativeRequest.outputSchema ?? "",
-        "\"prevention\",\"replacement\",\"anchor\""
-      )
       assert.strictEqual(nativeRequest.executable, "codex")
       assert.deepStrictEqual(
         activity.map(({ _tag }) => _tag),
@@ -942,6 +946,7 @@ describe("PR review task executor", () => {
       const setupRequest = Schema.decodeUnknownSync(SessionSetupRequestObservation)(observation.requests[0])
       assert.strictEqual(setupRequest.reviewExecution, "native-claude")
       const nativeRequest = Schema.decodeUnknownSync(NativeReviewRequestObservation)(observation.requests[1])
+      assertSharedNativeReviewContract(nativeRequest)
       assert.strictEqual(nativeRequest.executable, "claude")
       assert.notProperty(nativeRequest, "model")
     }).pipe(

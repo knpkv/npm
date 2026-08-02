@@ -228,6 +228,15 @@ one running review once by one profile budget; the extension is durable and visi
 restart. Cancellation and budget expiry retain the last validated partial report, mark the run unable to
 conclude, and leave any retained suggestions as advice-only because unexplored project areas remain.
 
+Provider parity is enforced at the Review Sandbox boundary: native Codex and Claude receive the same
+immutable checkout, bounded review prompt, structured report schema, exact diff anchoring, activity,
+and cleanup contract. The deterministic executor tests exercise that shared request shape for both
+providers; the installed-runtime fixture additionally runs full-project discovery, a command, a write,
+diff generation, and a structured JSON result without credentials. Run that fixture deliberately with
+`pnpm --filter @knpkv/control-center test:sbx:real`; it requires Docker and `sbx`, but does not require
+AWS, Codex, Claude, or provider API credentials. The real authenticated Codex CLI smoke remains an
+explicit separate opt-in in `@knpkv/ai-codex`.
+
 The launch dialog shows the exact head, selected Review Agent Profile, budget, network policy, and sbx
 runtime before enqueue. The selected model explores the complete project inside the Review Sandbox.
 Release-chat CLI selection first reads a bounded, credential-free `--version` response and fails closed
