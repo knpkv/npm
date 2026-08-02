@@ -69,7 +69,7 @@ Commits must not leave dead routes, temporarily export vendor shapes, bypass typ
 | SC7.6 relationship repair                                 | D01–D04                                                             |
 | SC7.7 pipeline retry                                      | D03, I10, S05                                                       |
 | SC7.8 Active work                                         | D06                                                                 |
-| SC7.9 Jira lifecycle                                      | I04–I05, S02                                                        |
+| SC7.9 Jira lifecycle (proposal-only until atomic provider precondition) | I04–I05, S02; Jira capability contract tests |
 | SC7.10 complete diff and agent review                     | I01–I03, R15, A01–A12                                               |
 | SC7.11 agent isolation                                    | A03–A05, A09–A12                                                    |
 | SC7.12 governed mutation                                  | T05, D03–D04 and every adapter action execution/reconciliation test |
