@@ -20,7 +20,7 @@ import {
 } from "../../domain/prReviewRevision.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"
 
-type PrReviewDismissalReasonType = typeof PrReviewDismissalReason.Type
+type PrReviewDismissalReasonType = PrReviewDismissalReason
 
 const REVISION_PAGE_SIZE = PrReviewSuggestionRevisionPageSize.make(24)
 
