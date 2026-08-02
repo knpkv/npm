@@ -675,6 +675,131 @@ describe("agent job review results", () => {
       })
     ))
 
+  it.effect("rolls back targeted completion when the source revision is stale", () =>
+    withRepository(
+      Effect.gen(function*() {
+        const database = yield* Database
+        const jobs = yield* AgentJobRepository
+        yield* setupFoundation
+        yield* enqueueReview
+        yield* completeReview
+        const suggestion = report.suggestions[0]!
+        const original = (yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })).current
+        const targetPage = yield* jobs.reviewSuggestionRevisions({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          beforeSequence: null,
+          limit: PrReviewSuggestionRevisionPageSize.make(10)
+        })
+        const operator = PrReviewSuggestionOperatorAuthor.make({ personId: PERSON_ID })
+        const edited = yield* jobs.appendReviewSuggestionRevision({
+          workspaceId: WORKSPACE_ID,
+          jobId: JOB_ID,
+          suggestionId: suggestion.suggestionId,
+          expectedRevisionId: original.revisionId,
+          expectedSequence: original.sequence,
+          edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)({
+            ...suggestion,
+            title: "The source changed while the agent was running"
+          }),
+          author: operator,
+          createdAt: T3
+        })
+        const targetJobId = SWAP_JOB_ID
+        yield* jobs.enqueue({
+          workspaceId: WORKSPACE_ID,
+          releaseId: RELEASE_ID,
+          jobId: targetJobId,
+          providerId: PROVIDER_ID,
+          model: "deterministic-review-model",
+          access: "read-only",
+          userPrompt: "Revalidate the selected suggestion.",
+          prompt: "Revalidate the selected suggestion.",
+          contextFingerprint: FINGERPRINT,
+          subjectRevision: subject.headRevision,
+          task: {
+            _tag: "pr-review",
+            pluginConnectionId: PLUGIN_CONNECTION_ID,
+            subject,
+            reviewProfile,
+            intent: "suggestion-revalidation",
+            target: {
+              sourceJobId: JOB_ID,
+              suggestionId: suggestion.suggestionId,
+              selectedRevisionId: original.revisionId,
+              history: targetPage
+            }
+          },
+          createdAt: T3
+        })
+        yield* TestClock.setTime(DateTime.toEpochMillis(T4))
+        const claimed = yield* jobs.claimNext({
+          workspaceId: WORKSPACE_ID,
+          taskTags: ["pr-review"],
+          leaseOwner: LEASE_OWNER,
+          leaseToken: SECOND_LEASE_TOKEN,
+          claimedAt: T4,
+          leaseExpiresAt: T5
+        })
+        if (Option.isNone(claimed)) return yield* Effect.die("targeted claim missing")
+        const result = yield* jobs.completeTargetedReview({
+          source: {
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            expectedRevisionId: original.revisionId,
+            expectedSequence: original.sequence,
+            edit: Schema.decodeUnknownSync(PrReviewSuggestionEdit)(edited.suggestion),
+            validation: "validated",
+            author: PrReviewSuggestionAgentAuthor.make({
+              jobId: targetJobId,
+              providerId: PROVIDER_ID,
+              model: "deterministic-review-model",
+              runtimeMetadata: null
+            }),
+            createdAt: T4,
+            leaseFence: {
+              jobId: targetJobId,
+              attemptSequence: claimed.value.attemptSequence,
+              leaseToken: SECOND_LEASE_TOKEN
+            }
+          },
+          target: {
+            workspaceId: WORKSPACE_ID,
+            jobId: targetJobId,
+            attemptSequence: claimed.value.attemptSequence,
+            leaseToken: SECOND_LEASE_TOKEN,
+            report,
+            completedAt: T4
+          }
+        }).pipe(Effect.result)
+        if (Result.isSuccess(result)) return yield* Effect.die("expected stale targeted completion")
+        if (!Schema.is(RevisionConflictError)(result.failure)) {
+          return yield* Effect.die("expected stale targeted completion")
+        }
+        assert.strictEqual(
+          (yield* jobs.reviewSuggestionRevisions({
+            workspaceId: WORKSPACE_ID,
+            jobId: JOB_ID,
+            suggestionId: suggestion.suggestionId,
+            beforeSequence: null,
+            limit: PrReviewSuggestionRevisionPageSize.make(1)
+          })).current.sequence,
+          edited.sequence
+        )
+        const targetState = yield* database.sql`SELECT state, terminal_at AS terminalAt
+          FROM agent_jobs WHERE workspace_id = ${WORKSPACE_ID} AND job_id = ${targetJobId}`
+        assert.deepStrictEqual(targetState, [{ state: "running", terminalAt: null }])
+      })
+    ))
+
   it.effect("allows an agent validation to correct the technical claim", () =>
     withRepository(
       Effect.gen(function*() {
