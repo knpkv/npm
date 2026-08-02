@@ -493,7 +493,7 @@ const ReleaseAgentRoom = ({
 
     const originPath = safeOriginPath(
       searchParams.get("from"),
-      `${location.pathname}${location.search}${location.hash}`
+      `${location.pathname}${location.hash}`
     )
     runTurn(
       { history, originPath, prompt: submittedPrompt, provider, releaseId: release.id, workspaceId },
@@ -954,7 +954,7 @@ export const ConnectedAgentPage = ({
   }, [catalogRequest, loadPresets])
   const availableProviders = catalog._tag === "ready" ? catalog.providers : undefined
   const isCanonicalRoute = params.workspaceId !== undefined || params.releaseId !== undefined
-  const originPath = safeOriginPath(searchParams.get("from"), `${location.pathname}${location.search}${location.hash}`)
+  const originPath = safeOriginPath(searchParams.get("from"), `${location.pathname}${location.hash}`)
   return (
     <>
       {catalog._tag === "failed" ? (
