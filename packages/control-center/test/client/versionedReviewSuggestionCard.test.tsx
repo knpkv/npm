@@ -108,7 +108,8 @@ afterEach(async () => {
 
 const renderCard = async (
   transport: ReviewSuggestionRevisionTransport,
-  onPreviewPublication = () => undefined
+  onPreviewPublication = () => undefined,
+  onTargetSuggestion = () => undefined
 ): Promise<HTMLDivElement> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -122,6 +123,7 @@ const renderCard = async (
           isPreviewing={false}
           jobId={JOB_ID}
           onPreviewPublication={onPreviewPublication}
+          onTargetSuggestion={onTargetSuggestion}
           revisionTransport={transport}
           sessionKey="session-a"
           suggestion={SUGGESTION}
@@ -202,6 +204,60 @@ describe("VersionedReviewSuggestionCard", () => {
     })
   })
 
+  it("targets the exact durable revision for agent edit and revalidation", async () => {
+    const editRevision = revisionPage(1, SUGGESTION.title)
+    const revalidationRevision = revisionPage(1, SUGGESTION.title, "requires-revalidation")
+    const onTargetSuggestion = vi.fn()
+    const host = await renderCard(
+      {
+        load: () => Promise.resolve(editRevision),
+        edit: () => Promise.reject(new Error("Unexpected edit"))
+      },
+      () => undefined,
+      onTargetSuggestion
+    )
+
+    await click("Ask agent to edit")
+    expect(onTargetSuggestion).toHaveBeenCalledWith({
+      expectedRevisionId: editRevision.current.revisionId,
+      expectedSequence: editRevision.current.sequence,
+      intent: "suggestion-edit",
+      jobId: JOB_ID,
+      suggestionId: SUGGESTION_ID
+    })
+
+    await act(async () =>
+      root?.render(
+        <PortalProvider>
+          <VersionedReviewSuggestionCard
+            canEdit
+            entityId={ENTITY_ID}
+            isPreviewing={false}
+            jobId={JOB_ID}
+            onPreviewPublication={() => undefined}
+            onTargetSuggestion={onTargetSuggestion}
+            revisionTransport={{
+              load: () => Promise.resolve(revalidationRevision),
+              edit: () => Promise.reject(new Error("Unexpected edit"))
+            }}
+            sessionKey="session-a"
+            suggestion={SUGGESTION}
+          />
+        </PortalProvider>
+      )
+    )
+    await click("Revalidate")
+
+    expect(onTargetSuggestion).toHaveBeenLastCalledWith({
+      expectedRevisionId: revalidationRevision.current.revisionId,
+      expectedSequence: revalidationRevision.current.sequence,
+      intent: "suggestion-revalidation",
+      jobId: JOB_ID,
+      suggestionId: SUGGESTION_ID
+    })
+    expect(host.textContent).toContain("Revalidate")
+  })
+
   it("requires explicit confirmation, then keeps a dismissed finding local", async () => {
     const original = revisionPage(1, SUGGESTION.title)
     const dismissedSuggestion = PrReviewSuggestion.make({
@@ -262,6 +318,7 @@ describe("VersionedReviewSuggestionCard", () => {
             isPreviewing={false}
             jobId={JOB_ID}
             onPreviewPublication={() => undefined}
+            onTargetSuggestion={() => undefined}
             revisionTransport={transport}
             sessionKey="session-a"
             suggestion={PrReviewSuggestion.make({

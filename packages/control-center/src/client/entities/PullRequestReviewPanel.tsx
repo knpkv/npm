@@ -15,7 +15,8 @@ import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRev
 import type {
   PullRequestReviewControllerState,
   PullRequestReviewPublicationState,
-  ReviewSuggestionPublicationTarget
+  ReviewSuggestionPublicationTarget,
+  ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
 
@@ -130,6 +131,7 @@ export const PullRequestReviewPanel = ({
   onRetry,
   onStart,
   onSuggestionRevisionAccepted,
+  onTargetSuggestion = () => undefined,
   publication,
   revisionTransport,
   state,
@@ -142,6 +144,7 @@ export const PullRequestReviewPanel = ({
   readonly onLoadEarlier?: () => void
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onPublishSuggestion: (finalContent: string) => void
+  readonly onTargetSuggestion?: (target: ReviewSuggestionTarget) => void
   readonly onRetry: () => void
   readonly onStart: (prompt?: DurableAgentPrompt, providerId?: DurableAgentProviderId) => void
   readonly onSuggestionRevisionAccepted?: (suggestion: PrReviewSuggestion) => void
@@ -520,6 +523,7 @@ export const PullRequestReviewPanel = ({
                       }
                       jobId={review.jobId}
                       onPreviewPublication={onPreviewPublication}
+                      onTargetSuggestion={onTargetSuggestion}
                       {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
                       {...(revisionTransport === undefined ? {} : { revisionTransport })}
                       sessionKey={state.sessionKey}
@@ -568,6 +572,7 @@ export const PullRequestReviewPanel = ({
                   }
                   jobId={review.jobId}
                   onPreviewPublication={onPreviewPublication}
+                  onTargetSuggestion={onTargetSuggestion}
                   {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
                   {...(revisionTransport === undefined ? {} : { revisionTransport })}
                   sessionKey={state.sessionKey}
@@ -613,6 +618,7 @@ export const PullRequestReviewPanel = ({
                   }
                   jobId={review.jobId}
                   onPreviewPublication={onPreviewPublication}
+                  onTargetSuggestion={onTargetSuggestion}
                   {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
                   {...(revisionTransport === undefined ? {} : { revisionTransport })}
                   sessionKey={state.sessionKey}
