@@ -527,6 +527,16 @@ describe("ControlCenterApi contract", () => {
         ],
         ["enqueuePullRequestReview", "POST", "/api/v1/agent/pull-requests/:entityId/reviews"],
         [
+          "cancelPullRequestReview",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/cancellation"
+        ],
+        [
+          "extendPullRequestReviewBudget",
+          "POST",
+          "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/budget-extension"
+        ],
+        [
           "reviewSuggestionRevisions",
           "GET",
           "/api/v1/agent/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions"
@@ -670,6 +680,8 @@ describe("ControlCenterApi contract", () => {
       pullRequestReview: [SessionCookieAuth.key],
       pullRequestReviewThread: [SessionCookieAuth.key],
       enqueuePullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      cancelPullRequestReview: [SessionCookieAuth.key, SessionMutationAuth.key],
+      extendPullRequestReviewBudget: [SessionCookieAuth.key, SessionMutationAuth.key],
       reviewSuggestionRevisions: [SessionCookieAuth.key],
       editReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],
       dismissReviewSuggestion: [SessionCookieAuth.key, SessionMutationAuth.key],

@@ -68,6 +68,8 @@ const People = ({ empty, people }: { readonly empty: string; readonly people: Re
 /** Render the exact CodeCommit revision as a compact review document. */
 export const WorkspacePullRequestDetails = ({
   approvers,
+  onReviewCancel,
+  onReviewExtendBudget,
   onReviewLoadEarlier,
   onReviewPublicationCancel,
   onReviewPublicationPreview,
@@ -86,6 +88,8 @@ export const WorkspacePullRequestDetails = ({
   readonly approvers: ReadonlyArray<RlyPerson>
   readonly onSessionExpired: (sessionKey: string) => void
   readonly onReviewPublicationCancel: () => void
+  readonly onReviewCancel: () => void
+  readonly onReviewExtendBudget: () => void
   readonly onReviewLoadEarlier: () => void
   readonly onReviewPublicationPreview: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onReviewRetry: () => void
@@ -230,7 +234,9 @@ export const WorkspacePullRequestDetails = ({
             <Suspense fallback={<span>Loading review tools…</span>}>
               <PullRequestReviewPanel
                 canEnqueue={reviewCanEnqueue}
+                onCancelReview={onReviewCancel}
                 onCancelPublication={onReviewPublicationCancel}
+                onExtendReviewBudget={onReviewExtendBudget}
                 onLoadEarlier={onReviewLoadEarlier}
                 onPreviewPublication={onReviewPublicationPreview}
                 onPublishSuggestion={onReviewSuggestionPublish}

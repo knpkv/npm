@@ -387,6 +387,18 @@ const pullRequestReviewJob = {
     ).check(Schema.isMaxLength(MAXIMUM_THREAD_EVENT_PAGE_SIZE)),
     truncated: Schema.Boolean
   }),
+  budgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(1_200_000)),
+    Schema.withConstructorDefault(Effect.succeed(1_200_000))
+  ),
+  budgetExtensionCount: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: 1 }))).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(0)),
+    Schema.withConstructorDefault(Effect.succeed(0))
+  ),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  ),
   requestedAt: UtcTimestamp
 }
 
@@ -424,7 +436,11 @@ export class PullRequestReviewCompleted extends Schema.TaggedClass<PullRequestRe
 export class PullRequestReviewFailed extends Schema.TaggedClass<PullRequestReviewFailed>()("failed", {
   ...pullRequestReviewJob,
   completedAt: UtcTimestamp,
-  state: Schema.Literals(["failed", "cancelled"])
+  state: Schema.Literals(["failed", "cancelled"]),
+  report: Schema.optionalKey(Schema.NullOr(PrReviewReport)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(null))
+  )
 }) {}
 
 /** Browser-safe current review state for one canonical pull-request entity. */
@@ -853,6 +869,48 @@ const enqueuePullRequestReview = HttpApiEndpoint.post(
   .middleware(SessionCookieAuth)
   .middleware(SessionMutationAuth)
 
+const cancelPullRequestReview = HttpApiEndpoint.post(
+  "cancelPullRequestReview",
+  "/pull-requests/:entityId/reviews/:jobId/cancellation",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
+const extendPullRequestReviewBudget = HttpApiEndpoint.post(
+  "extendPullRequestReviewBudget",
+  "/pull-requests/:entityId/reviews/:jobId/budget-extension",
+  {
+    params: Schema.Struct({ entityId: EntityId, jobId: JobId }),
+    payload: Schema.Struct({}),
+    success: PullRequestReviewState,
+    error: [
+      InvalidRequestApiError,
+      UnauthorizedApiError,
+      ForbiddenApiError,
+      NotFoundApiError,
+      RequestTimedOutApiError,
+      RateLimitedApiError,
+      ServiceUnavailableApiError
+    ]
+  }
+)
+  .middleware(SessionCookieAuth)
+  .middleware(SessionMutationAuth)
+
 const reviewSuggestionRevisions = HttpApiEndpoint.get(
   "reviewSuggestionRevisions",
   "/pull-requests/:entityId/reviews/:jobId/suggestions/:suggestionId/revisions",
@@ -988,6 +1046,8 @@ export class AgentApiGroup extends HttpApiGroup.make("agent")
   .add(pullRequestReview)
   .add(pullRequestReviewThread)
   .add(enqueuePullRequestReview)
+  .add(cancelPullRequestReview)
+  .add(extendPullRequestReviewBudget)
   .add(reviewSuggestionRevisions)
   .add(editReviewSuggestion)
   .add(dismissReviewSuggestion)

@@ -341,6 +341,8 @@ const makePersistence = Effect.gen(function*() {
         publicOperation("agent-job.claim-next", agentJobs.claimNext(...args)),
       completeReview: (...args: Parameters<AgentJobRepositoryService["completeReview"]>) =>
         publicOperation("agent-job.complete-review", agentJobs.completeReview(...args)),
+      recordReviewProgress: (...args: Parameters<AgentJobRepositoryService["recordReviewProgress"]>) =>
+        publicOperation("agent-job.record-review-progress", agentJobs.recordReviewProgress(...args)),
       enqueue: (...args: Parameters<AgentJobRepositoryService["enqueue"]>) =>
         publicOperation("agent-job.enqueue", agentJobs.enqueue(...args)),
       failAttempt: (...args: Parameters<AgentJobRepositoryService["failAttempt"]>) =>
@@ -368,8 +370,12 @@ const makePersistence = Effect.gen(function*() {
           "agent-job.record-review-suggestion-publication",
           agentJobs.recordReviewSuggestionPublication(...args)
         ),
+      reviewBudget: (...args: Parameters<AgentJobRepositoryService["reviewBudget"]>) =>
+        publicOperation("agent-job.review-budget", agentJobs.reviewBudget(...args)),
       requestCancellation: (...args: Parameters<AgentJobRepositoryService["requestCancellation"]>) =>
         publicOperation("agent-job.request-cancellation", agentJobs.requestCancellation(...args)),
+      extendReviewBudget: (...args: Parameters<AgentJobRepositoryService["extendReviewBudget"]>) =>
+        publicOperation("agent-job.extend-review-budget", agentJobs.extendReviewBudget(...args)),
       reviewThreadAfter: (...args: Parameters<AgentJobRepositoryService["reviewThreadAfter"]>) =>
         publicOperation("agent-job.review-thread-after", agentJobs.reviewThreadAfter(...args)),
       reviewThreadBefore: (...args: Parameters<AgentJobRepositoryService["reviewThreadBefore"]>) =>

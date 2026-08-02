@@ -1,4 +1,5 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
+import * as DateTime from "effect/DateTime"
 import { type KeyboardEvent, type ReactElement, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react"
 
 import {
@@ -119,6 +120,8 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
 export const PullRequestReviewPanel = ({
   canEnqueue,
   onCancelPublication,
+  onCancelReview = () => undefined,
+  onExtendReviewBudget = () => undefined,
   onLoadEarlier = () => undefined,
   onPreviewPublication,
   onPublishSuggestion,
@@ -131,7 +134,9 @@ export const PullRequestReviewPanel = ({
   suggestions
 }: {
   readonly canEnqueue: boolean
+  readonly onCancelReview?: () => void
   readonly onCancelPublication: () => void
+  readonly onExtendReviewBudget?: () => void
   readonly onLoadEarlier?: () => void
   readonly onPreviewPublication: (selection: ReviewSuggestionPublicationTarget) => void
   readonly onPublishSuggestion: (finalContent: string) => void
@@ -413,6 +418,8 @@ export const PullRequestReviewPanel = ({
     )
   }
   if (review._tag === "pending") {
+    const startedAt = review.startedAt ?? null
+    const budgetMillis = review.budgetMillis ?? review.reviewProfile.budgetMillis
     const label =
       review.state === "queued"
         ? "Review queued"
@@ -431,6 +438,35 @@ export const PullRequestReviewPanel = ({
             ? "network blocked · sbx"
             : "provider connection enabled · sbx"}
         </span>
+        <dl>
+          <div>
+            <dt>Elapsed</dt>
+            <dd>
+              {startedAt === null
+                ? "Waiting for worker"
+                : formatBudget(
+                    Math.max(0, DateTime.toEpochMillis(DateTime.nowUnsafe()) - DateTime.toEpochMillis(startedAt))
+                  )}
+            </dd>
+          </div>
+          <div>
+            <dt>Remaining budget</dt>
+            <dd>
+              {startedAt === null
+                ? formatBudget(budgetMillis)
+                : formatBudget(
+                    Math.max(
+                      0,
+                      budgetMillis - (DateTime.toEpochMillis(DateTime.nowUnsafe()) - DateTime.toEpochMillis(startedAt))
+                    )
+                  )}
+            </dd>
+          </div>
+          <div>
+            <dt>Current command</dt>
+            <dd>{review.activity.events.at(-1) ?? "Preparing review sandbox…"}</dd>
+          </div>
+        </dl>
         {review.activity.events.length === 0 ? null : (
           <ol aria-label="Live review activity">
             {review.activity.events.map((event, index) => (
@@ -439,16 +475,62 @@ export const PullRequestReviewPanel = ({
           </ol>
         )}
         {review.activity.truncated ? <span>Earlier review activity is not shown.</span> : null}
+        {canEnqueue ? (
+          <div>
+            {review.budgetExtensionCount === 0 ? (
+              <Button onClick={onExtendReviewBudget}>Extend review once</Button>
+            ) : (
+              <span>One budget extension used.</span>
+            )}
+            <Button onClick={onCancelReview}>Cancel review</Button>
+          </div>
+        ) : null}
         <code className={styles.reviewHead}>{review.subject.headRevision}</code>
         <span aria-hidden="true" className={styles.reviewRunway} />
       </div>
     )
   }
   if (review._tag === "failed") {
+    const report = review.report
     return withThread(
       <>
         <strong>{review.state === "cancelled" ? "Review cancelled" : "Review did not finish"}</strong>
-        <span>The failed run did not change approval or publish a recommendation.</span>
+        {report == null ? (
+          <span>The failed run did not change approval or publish a recommendation.</span>
+        ) : (
+          <>
+            <Text>
+              This review is incomplete. The retained findings were validated before the run stopped; unreviewed areas
+              remain.
+            </Text>
+            {report.suggestions.length === 0 ? (
+              <span>No validated suggestions were retained before the run stopped.</span>
+            ) : (
+              <ol className={styles.reviewFindings}>
+                {report.suggestions.map((suggestion) => (
+                  <li key={suggestion.suggestionId}>
+                    <VersionedReviewSuggestionCard
+                      canEdit={canEnqueue}
+                      entityId={state.entityId}
+                      isPreviewing={
+                        publication._tag === "previewing" &&
+                        publication.selection.suggestionId === suggestion.suggestionId
+                      }
+                      jobId={review.jobId}
+                      onPreviewPublication={onPreviewPublication}
+                      {...(onSuggestionRevisionAccepted === undefined ? {} : { onSuggestionRevisionAccepted })}
+                      {...(revisionTransport === undefined ? {} : { revisionTransport })}
+                      sessionKey={state.sessionKey}
+                      suggestion={suggestion}
+                    />
+                  </li>
+                ))}
+              </ol>
+            )}
+            <ReviewNotes notes={report.notes} />
+            <span>Retained findings remain advice only and may be published after confirmation.</span>
+          </>
+        )}
         {canEnqueue && state.provider !== null ? (
           <>
             {state.action === "failed" && submittedRequest === null ? (

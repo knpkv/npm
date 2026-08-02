@@ -221,6 +221,10 @@ interrupts the scoped checkout, sandbox, and model work before durably completin
 `CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS` and
 `CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS` both default to 1,200,000 milliseconds. The maximum
 session duration should be at least the selected Review Agent Profile budget.
+The worker enforces the selected budget independently of provider process limits. An operator may extend
+one running review once by one profile budget; the extension is durable and visible to the worker after
+restart. Cancellation and budget expiry retain the last validated partial report, mark the run unable to
+conclude, and leave any retained suggestions as advice-only because unexplored project areas remain.
 
 The launch dialog shows the exact head, selected Review Agent Profile, budget, network policy, and sbx
 runtime before enqueue. The selected model explores the complete project inside the Review Sandbox.

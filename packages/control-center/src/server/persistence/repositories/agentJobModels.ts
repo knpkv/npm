@@ -36,6 +36,12 @@ export const MAXIMUM_AGENT_JOB_PROMPT_LENGTH = 5_000
 /** Maximum thread events returned by one replay page. */
 export const MAXIMUM_AGENT_THREAD_EVENT_PAGE_SIZE = 128
 
+/** One explicit extension is bounded to the selected profile's original budget. */
+export const MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT = 1
+
+/** Hard upper bound for one immutable review, including its single extension. */
+export const MAXIMUM_REVIEW_BUDGET_MILLIS = 3_600_000
+
 /** Positive sequence assigned to attempts within one durable job. */
 export const AgentAttemptSequence = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
@@ -218,6 +224,10 @@ export const ClaimedAgentJob = Schema.Struct({
   access: Schema.Literals(["read-only", "workspace-write"]),
   prompt: AgentJobPrompt,
   context: AgentContextSnapshotRecord,
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
   sessionRef: Schema.NullOr(AgentSessionRef),
   cancellationRequested: Schema.Boolean
 })
@@ -264,6 +274,25 @@ export const CompleteAgentReviewInput = Schema.Struct({
   completedAt: UtcTimestamp
 })
 export type CompleteAgentReviewInput = typeof CompleteAgentReviewInput.Type
+
+/** Persist the latest validated report while an immutable review is still running. */
+export const RecordAgentReviewProgressInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  attemptSequence: AgentAttemptSequence,
+  leaseToken: AgentLeaseToken,
+  report: Schema.Unknown,
+  occurredAt: UtcTimestamp
+})
+export type RecordAgentReviewProgressInput = typeof RecordAgentReviewProgressInput.Type
+
+/** Read the effective budget of one claimed immutable review. */
+export const ReadReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  task: AgentJobTask
+})
+export type ReadReviewBudgetInput = typeof ReadReviewBudgetInput.Type
 
 /** Digest binding one durable publication reservation to the exact confirmed body. */
 export const ReviewSuggestionPublicationDigest = Schema.String.check(
@@ -330,6 +359,14 @@ export const AgentReviewResultInput = Schema.Struct({
   jobId: JobId
 })
 export type AgentReviewResultInput = typeof AgentReviewResultInput.Type
+
+/** Request one operator-authorized extension of a running review's budget. */
+export const ExtendReviewBudgetInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  extendedAt: UtcTimestamp
+})
+export type ExtendReviewBudgetInput = typeof ExtendReviewBudgetInput.Type
 
 /** Sanitized durable review result attributable to one terminal attempt. */
 export const AgentReviewResultRecord = Schema.Struct({
@@ -427,6 +464,11 @@ export const LatestAgentReviewRecord = Schema.Struct({
   state: AgentJobState,
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
+  startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
+  reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
+  reviewBudgetExtensionCount: Schema.optionalKey(
+    Schema.Int.check(Schema.isBetween({ minimum: 0, maximum: MAXIMUM_REVIEW_BUDGET_EXTENSION_COUNT }))
+  ),
   report: Schema.NullOr(PrReviewReport),
   reviewProfile: ReviewAgentProfile,
   activity: Schema.Struct({
@@ -437,8 +479,8 @@ export const LatestAgentReviewRecord = Schema.Struct({
   })
 }).check(
   Schema.makeFilter(
-    ({ report, state }) => (state === "succeeded") === (report !== null),
-    { expected: "only succeeded review jobs to carry a report" }
+    ({ report, state }) => report === null || state === "succeeded" || state === "failed" || state === "cancelled",
+    { expected: "only terminal review jobs to carry a report" }
   )
 )
 export type LatestAgentReviewRecord = typeof LatestAgentReviewRecord.Type

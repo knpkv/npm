@@ -345,6 +345,9 @@ const presentLatest = Effect.fnUntraced(function*(
     ...identity,
     reviewProfile: record.reviewProfile,
     activity: record.activity,
+    budgetMillis: record.reviewBudgetMillis ?? record.reviewProfile.budgetMillis,
+    budgetExtensionCount: record.reviewBudgetExtensionCount ?? 0,
+    startedAt: record.startedAt ?? null,
     jobId: record.jobId,
     requestedAt: record.createdAt
   }
@@ -367,7 +370,8 @@ const presentLatest = Effect.fnUntraced(function*(
       return new PullRequestReviewFailed({
         ...common,
         completedAt: record.terminalAt,
-        state: record.state
+        state: record.state,
+        report: record.report
       })
   }
 }, Effect.withTracerEnabled(false))
@@ -396,6 +400,22 @@ const makePullRequestReviews = Effect.gen(function*() {
         workspaceId,
         pluginConnectionId: target.pluginConnectionId,
         subject: target.subject
+      })
+    )
+    return yield* presentLatest(target, latest)
+  }, Effect.withTracerEnabled(false))
+
+  const currentJobFor = Effect.fnUntraced(function*(
+    workspaceId: WorkspaceId,
+    target: AvailableReviewTarget,
+    jobId: JobId
+  ) {
+    const latest = yield* mapPersistenceRead(
+      persistence.agentJobs.latestReview({
+        workspaceId,
+        pluginConnectionId: target.pluginConnectionId,
+        subject: target.subject,
+        jobId
       })
     )
     return yield* presentLatest(target, latest)
@@ -897,6 +917,42 @@ const makePullRequestReviews = Effect.gen(function*() {
           }
         })
       )
+    }),
+    cancel: Effect.fn("PullRequestReviews.cancel")(function*(input) {
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const current = yield* currentJobFor(input.workspaceId, target, input.jobId)
+      if (current._tag !== "pending") return yield* new ApplicationInvalidRequest()
+      yield* persistence.agentJobs.requestCancellation({
+        workspaceId: input.workspaceId,
+        jobId: input.jobId,
+        requestedAt: yield* DateTime.now
+      }).pipe(
+        Effect.mapError(mapPersistenceWriteError),
+        Effect.catchTag("ApplicationConflict", () => Effect.fail(new ApplicationInvalidRequest()))
+      )
+      return yield* currentJobFor(input.workspaceId, target, input.jobId)
+    }),
+    extendBudget: Effect.fn("PullRequestReviews.extendBudget")(function*(input) {
+      const target = yield* inspectTarget(input)
+      if (target._tag !== "available") return yield* new ApplicationInvalidRequest()
+      const current = yield* currentJobFor(input.workspaceId, target, input.jobId)
+      if (
+        current._tag !== "pending" ||
+        current.state !== "running" ||
+        (current.budgetExtensionCount ?? 0) >= 1
+      ) {
+        return yield* new ApplicationInvalidRequest()
+      }
+      yield* persistence.agentJobs.extendReviewBudget({
+        workspaceId: input.workspaceId,
+        jobId: input.jobId,
+        extendedAt: yield* DateTime.now
+      }).pipe(
+        Effect.mapError(mapPersistenceWriteError),
+        Effect.catchTag("ApplicationConflict", () => Effect.fail(new ApplicationInvalidRequest()))
+      )
+      return yield* currentJobFor(input.workspaceId, target, input.jobId)
     }),
     revisions: Effect.fn("PullRequestReviews.revisions")(function*(input) {
       const target = yield* inspectTarget(input)
