@@ -19,6 +19,7 @@ const ReviewFilePath = NonEmptyString.check(Schema.isMaxLength(1_024))
 const ReviewFilePosition = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })
 )
+const ReviewCommentId = NonEmptyString.check(Schema.isMaxLength(512))
 
 /** Exact provider revision against which a review action was authorized. */
 export const CodeCommitReviewTarget = Schema.Struct({
@@ -49,6 +50,13 @@ const CommentActionFields = {
   clientRequestToken: ClientRequestToken
 }
 
+const ExistingCommentActionFields = {
+  target: CodeCommitReviewTarget,
+  commentId: ReviewCommentId,
+  content: BoundedText,
+  clientRequestToken: ClientRequestToken
+}
+
 /** Closed set of CodeCommit review mutations supported by the owning package. */
 export const CodeCommitReviewAction = Schema.Union([
   Schema.TaggedStruct("request-review", CommentActionFields),
@@ -56,6 +64,8 @@ export const CodeCommitReviewAction = Schema.Union([
     ...CommentActionFields,
     location: Schema.optionalKey(CodeCommitReviewLocation)
   }),
+  Schema.TaggedStruct("update-comment", ExistingCommentActionFields),
+  Schema.TaggedStruct("reply-comment", ExistingCommentActionFields),
   Schema.TaggedStruct("request-changes", CommentActionFields),
   Schema.TaggedStruct("approve", { target: CodeCommitReviewTarget }),
   Schema.TaggedStruct("revoke-approval", { target: CodeCommitReviewTarget })

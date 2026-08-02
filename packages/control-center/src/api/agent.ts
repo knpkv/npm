@@ -687,6 +687,12 @@ export const ReviewSuggestionPublicationContent = Schema.String.check(
 /** Decoded final review-comment content. */
 export type ReviewSuggestionPublicationContent = typeof ReviewSuggestionPublicationContent.Type
 
+/** Provider comment mutation selected by an explicit local publication preview. */
+export const ReviewSuggestionPublicationOperation = Schema.Literals(["create", "update", "reply"])
+
+/** Decoded provider comment mutation. */
+export type ReviewSuggestionPublicationOperation = typeof ReviewSuggestionPublicationOperation.Type
+
 /** Exact completed review suggestion selected for publication. */
 export const ReviewSuggestionPublicationSelection = Schema.Struct({
   jobId: JobId,
@@ -720,6 +726,10 @@ export type ReviewSuggestionPublicationAuthorityBinding = typeof ReviewSuggestio
 export class ReviewSuggestionPublicationPreview
   extends Schema.Class<ReviewSuggestionPublicationPreview>("ReviewSuggestionPublicationPreview")({
     ...ReviewSuggestionPublicationSelection.fields,
+    operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+    commentId: Schema.optionalKey(
+      Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+    ),
     subject: PrReviewSubject,
     suggestionRevision: Schema.Struct({
       jobId: JobId,
@@ -750,6 +760,8 @@ export class ReviewSuggestionPublicationPreview
 /** Explicit operator confirmation containing the final editable snapshot. */
 export const PublishReviewSuggestionRequest = Schema.Struct({
   ...ReviewSuggestionPublicationSelection.fields,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))),
   finalContent: ReviewSuggestionPublicationContent,
   authorityBinding: ReviewSuggestionPublicationAuthorityBinding
 })
@@ -760,6 +772,10 @@ export type PublishReviewSuggestionRequest = typeof PublishReviewSuggestionReque
 /** Durable local snapshot of one successfully published CodeCommit comment. */
 export class PublishedReviewComment extends Schema.Class<PublishedReviewComment>("PublishedReviewComment")({
   publicationId: GovernedActionId,
+  /** Provider comment targeted by a lifecycle operation, when available. */
+  commentId: Schema.optionalKey(
+    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+  ),
   ...ReviewSuggestionPublicationSelection.fields,
   subject: PrReviewSubject,
   suggestionRevision: ReviewSuggestionPublicationPreview.fields.suggestionRevision,
@@ -1073,7 +1089,11 @@ const previewReviewSuggestionPublication = HttpApiEndpoint.get(
       suggestionId: PrReviewSuggestionId
     }),
     query: Schema.Struct({
-      revisionId: PrReviewSuggestionRevisionId
+      revisionId: PrReviewSuggestionRevisionId,
+      operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+      commentId: Schema.optionalKey(
+        Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+      )
     }),
     success: ReviewSuggestionPublicationPreview,
     error: [

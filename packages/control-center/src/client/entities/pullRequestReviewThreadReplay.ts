@@ -202,7 +202,7 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  previewPublication: (entityId, selection, signal) =>
+  previewPublication: (entityId, selection, signal, operation, commentId) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeControlCenterApiClient()
@@ -212,7 +212,11 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
             jobId: selection.jobId,
             suggestionId: selection.suggestionId
           },
-          query: { revisionId: selection.revisionId }
+          query: {
+            revisionId: selection.revisionId,
+            ...(operation === undefined ? {} : { operation }),
+            ...(commentId === undefined ? {} : { commentId })
+          }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
@@ -225,13 +229,19 @@ export const generatedClientPullRequestReviewTransport: PullRequestReviewTranspo
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }
     ),
-  publishSuggestion: (entityId, selection, finalContent, authorityBinding, signal) =>
+  publishSuggestion: (entityId, selection, finalContent, authorityBinding, signal, operation, commentId) =>
     Effect.runPromise(
       Effect.gen(function*() {
         const client = yield* makeAuthenticatedMutationClient
         return yield* client.agent.publishReviewSuggestion({
           params: { entityId },
-          payload: { ...selection, finalContent, authorityBinding }
+          payload: {
+            ...selection,
+            finalContent,
+            authorityBinding,
+            ...(operation === undefined ? {} : { operation }),
+            ...(commentId === undefined ? {} : { commentId })
+          }
         })
       }).pipe(Effect.provide(FetchHttpClient.layer)),
       { signal }

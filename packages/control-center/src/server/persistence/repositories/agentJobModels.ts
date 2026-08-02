@@ -1,8 +1,9 @@
 /** Durable release-thread and local-agent job contracts. @module */
 import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
+import * as SchemaGetter from "effect/SchemaGetter"
 
-import { ReviewAgentProfile } from "../../../api/agent.js"
+import { ReviewAgentProfile, ReviewSuggestionPublicationOperation } from "../../../api/agent.js"
 import {
   AgentThreadId,
   GovernedActionId,
@@ -315,6 +316,27 @@ export const ReviewSuggestionPublicationDigest = Schema.String.check(
 ).pipe(Schema.brand("ReviewSuggestionPublicationDigest"))
 export type ReviewSuggestionPublicationDigest = typeof ReviewSuggestionPublicationDigest.Type
 
+/** Provider comment identity retained for governed lifecycle operations. */
+export const ReviewSuggestionPublicationCommentId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512)
+).pipe(Schema.brand("ReviewSuggestionPublicationCommentId"))
+export type ReviewSuggestionPublicationCommentId = typeof ReviewSuggestionPublicationCommentId.Type
+
+const ReviewSuggestionPublicationCommentLocatorEncoded = Schema.TemplateLiteral([
+  Schema.Literal("comment:"),
+  ReviewSuggestionPublicationCommentId
+])
+
+/** Provider receipt coordinate decoded to the persisted comment identity. */
+export const ReviewSuggestionPublicationCommentLocator = ReviewSuggestionPublicationCommentLocatorEncoded.pipe(
+  Schema.decodeTo(ReviewSuggestionPublicationCommentId, {
+    decode: SchemaGetter.transform((locator) => locator.slice("comment:".length)),
+    encode: SchemaGetter.transform((commentId): `comment:${string}` => `comment:${commentId}`)
+  })
+)
+
 /** Atomic pre-provider reservation for one suggestion and exact confirmed body. */
 export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
   workspaceId: WorkspaceId,
@@ -322,6 +344,8 @@ export const ReserveReviewSuggestionPublicationInput = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
   reservationId: ReviewSuggestionPublicationReservationId,
   reservedAt: UtcTimestamp
 })
@@ -329,16 +353,22 @@ export type ReserveReviewSuggestionPublicationInput = typeof ReserveReviewSugges
 
 /** Durable result of reserving an exact publication body. */
 export const ReviewSuggestionPublicationReservation = Schema.Union([
-  Schema.TaggedStruct("acquired", {}),
-  Schema.TaggedStruct("in-progress", {}),
+  Schema.TaggedStruct("acquired", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
+  Schema.TaggedStruct("in-progress", {
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
+  }),
   Schema.TaggedStruct("recoverable", {
     publicationId: GovernedActionId,
     publishedAt: UtcTimestamp,
-    reservationId: ReviewSuggestionPublicationReservationId
+    reservationId: ReviewSuggestionPublicationReservationId,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
   }),
   Schema.TaggedStruct("published", {
     publicationId: GovernedActionId,
-    publishedAt: UtcTimestamp
+    publishedAt: UtcTimestamp,
+    commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId)
   })
 ])
 export type ReviewSuggestionPublicationReservation = typeof ReviewSuggestionPublicationReservation.Type
@@ -361,12 +391,30 @@ export const RecordReviewSuggestionPublicationInput = Schema.Struct({
   suggestionId: PrReviewSuggestionId,
   revisionId: PrReviewSuggestionRevisionId,
   contentDigest: ReviewSuggestionPublicationDigest,
+  operation: Schema.optionalKey(ReviewSuggestionPublicationOperation),
   reservationId: ReviewSuggestionPublicationReservationId,
   publicationId: GovernedActionId,
+  commentId: Schema.optionalKey(ReviewSuggestionPublicationCommentId),
   publishedAt: UtcTimestamp,
   finalize: Schema.optionalKey(Schema.Boolean)
 })
 export type RecordReviewSuggestionPublicationInput = typeof RecordReviewSuggestionPublicationInput.Type
+
+/** Lookup for the latest durable publication target of one exact suggestion. */
+export const ReadReviewSuggestionPublicationInput = Schema.Struct({
+  workspaceId: WorkspaceId,
+  jobId: JobId,
+  suggestionId: PrReviewSuggestionId,
+  revisionId: PrReviewSuggestionRevisionId
+})
+export type ReadReviewSuggestionPublicationInput = typeof ReadReviewSuggestionPublicationInput.Type
+
+export const ReadReviewSuggestionPublication = Schema.Struct({
+  state: Schema.Literal("published"),
+  publicationId: GovernedActionId,
+  commentId: ReviewSuggestionPublicationCommentId
+})
+export type ReadReviewSuggestionPublication = typeof ReadReviewSuggestionPublication.Type
 
 /** Workspace-scoped lookup for one durable review result. */
 export const AgentReviewResultInput = Schema.Struct({
