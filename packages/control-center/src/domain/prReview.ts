@@ -344,6 +344,28 @@ export const PrReviewSuggestion = Schema.Struct({
 /** Decoded PR-review suggestion. */
 export type PrReviewSuggestion = typeof PrReviewSuggestion.Type
 
+/**
+ * Canonical identity material for one suggestion across immutable review heads.
+ *
+ * Coordinates that move when a patch is edited (head revision, anchors, and
+ * line numbers) deliberately stay out of this material. The pull-request
+ * identity and the technical claim are the stable seam used by reconciliation.
+ */
+export const prReviewSuggestionIdentityMaterial = (
+  subject: PrReviewSubject,
+  suggestion: Pick<PrReviewSuggestionDraft, "title" | "problem" | "recommendation" | "evidence">
+): string =>
+  JSON.stringify([
+    subject.providerId,
+    subject.repository,
+    subject.pullRequestId,
+    suggestion.title,
+    suggestion.evidence.path,
+    suggestion.evidence.excerpt,
+    suggestion.problem,
+    suggestion.recommendation
+  ])
+
 /** Stable host-derived identity for a non-publishable review note. */
 export const PrReviewNoteId = Schema.String.check(
   Schema.isPattern(/^sha256:[a-f0-9]{64}$/u, {
